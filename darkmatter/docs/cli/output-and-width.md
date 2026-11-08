@@ -308,13 +308,28 @@ the width, depending on the value.
 In `html`, `--width N` adds a `max-width: Nch` rule to prose elements and leaves
 code blocks and tables alone. Markdown tables and code blocks are never reflowed.
 
-`--width` is the room available. On `md render` and `md FILE`, the style key
-`max-width` (`style.max-width=N`, or `max-width` in the document's `style:`)
-caps the content inside it, and whichever is smaller wins:
+### Available width and a content cap
+
+Two settings limit how wide rendered content runs, and they are not the same
+thing:
+
+| | `--width` | `page.max-width` style key |
+|---|---|---|
+| What it is | the **available output width**: the room the output may use | a **page content cap**: how wide the page's content may run inside that room |
+| Where it applies | every command | `md render` and `md FILE`, in formatted outputs that build a page |
+| How to set it | `--width N`, `OUTPUT_COLUMNS`, or the terminal | `style.max-width=N` (or `style.page.max-width=N`), a `--style` file, or `max-width` in the document's `style:` |
+| Margins and padding | the page's margins and padding are taken out of it | sit outside the cap |
+
+The narrower one wins, and a cap never stretches short content to fill it:
 
 ```sh
 md render notes.md --output plain --width 100 style.max-width=60   # wraps at 60
+md render notes.md --output plain --width 40 style.max-width=60    # wraps at 40: the room is narrower
 ```
+
+A document can pin its own cap (`style: { page: { max-width: 72 } }`), so
+it reads the same in any terminal; `--width` describes where the output is
+going and is never stored in a document.
 
 ### Width in data outputs and on stderr
 
@@ -382,13 +397,15 @@ what happened from the status and never from stderr.
 
 Status 1 covers every failure a run reaches, including one found by a check:
 a broken reference, a `--deny` that made a warning blocking, `md hash --diff`
-finding a difference, `md schema validate` finding an invalid document, and
-`--save` given stdin.
+finding a difference, `md schema validate` finding an invalid document,
+`--save` given stdin, and a [rejected style](./render.md#when-a-style-is-rejected)
+(a bad setter or `--style` file).
 
 Status 2 means the arguments could not be accepted: an unknown or removed flag, a
 misspelled subcommand, a conflicting pair, a value out of range, or an argument
-combination a command rejects, such as `md hash docs/ --save` or
-`md code-block x --highlight abc`. No value is written, because no command ran.
+combination a command rejects, such as `md hash docs/ --save`,
+`md code-block x --highlight abc`, two input files on `md render`, or a render
+option before a subcommand (`md --output json toc doc.md`). No value is written, because no command ran.
 
 In a formatted output the statuses mean the same; only the streams differ.
 
@@ -445,3 +462,6 @@ These are usage errors (exit 2).
 | `md get --raw` | `md get --output plain` |
 | `md clean --fixed-width N` | `md clean --width N` |
 | `md clean --ignore-incidental-newlines` | `md clean --width source` |
+| `md render --max-width N`, `md FILE --max-width N` | `style.max-width=N`; see [Available width and a content cap](#available-width-and-a-content-cap) |
+| `md FILE --save` | `md clean FILE --save`; `md` with no subcommand only renders |
+| the other page, layout, and theme flags of `md` and `md render` | style setters and `--style` files; see the [migration table](./render.md#presentation-flags) |

@@ -44,7 +44,14 @@ assembly. It cannot inspect component kinds or rewrite their content.
 
 Precedence is decided once, by `prepare_style_layers`, field by field, in
 layer order: defaults < the document's `style:` < each `--style` file in
-order < the setters. The `apply_*_style` functions take no override masks and
+order < the setters (one layer, wherever they sit on the line). The CLI path
+is `render_style::prepare_cli_style_inputs` (schema selection, file and
+setter layers) → `prepare_render_style` (adds `document_style_layer`) →
+`PreparedStyle` → `apply_prepared_style`. Each layer is admitted against the
+effective schema and normalized (shorthands by specificity, alignment
+broadcast) before the merge, so specificity is per layer and order wins
+across layers; schema-admitted keys the descriptor does not know land in
+`PreparedStyle::retained`, never in rendering. The `apply_*_style` functions take no override masks and
 apply every field of the effective style they receive; do not reintroduce a
 claim or mask type to protect one source from another. Test "override beats
 document" with two layers, never by pre-setting page state.

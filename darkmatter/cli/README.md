@@ -6,10 +6,11 @@ Binary: `md`
 documents together, tidy and validate them, and read or change their frontmatter.
 Every command can print for a person or as data for a script, through the same
 `--output` and `--width` options, with the same [exit statuses](../docs/cli/output-and-width.md#exit-status).
+With no subcommand, `md` renders: `md FILE …` is `md render FILE …`.
 
 ## Installation
 
-```bash
+```sh
 # From source
 cargo install --path .
 
@@ -21,9 +22,16 @@ To enable tab completion, see [Shell Completions](../docs/cli/index.md#shell-com
 
 ## Examples
 
-```bash
+```sh
 # Read a document in the terminal; `md FILE` is `md render FILE`
 md README.md
+
+# Style it for this run only, without editing the file
+md README.md style.max-width=72 style.page.theme=github
+md README.md --style ./print.yaml
+
+# The theme names `style.page.theme` accepts
+md list-themes
 
 # Compose a document, then render the result as HTML
 md compose doc.md | md render --output html > doc.html
@@ -48,6 +56,7 @@ md compose doc.md --output json
 - [Output and Width](../docs/cli/output-and-width.md): `--output`, `--width`, streams, and exit statuses
 - [Data Contracts](../docs/cli/data-contracts.md): what each command prints as data
 - [Policy Flags](../docs/cli/policy.md): `--allow`, `--deny`, and `--disable`
+- [Styling from the command line](../docs/cli/render.md#styling-from-the-command-line): style setters, `--style` files, and the [migration table](../docs/cli/render.md#presentation-flags) for the removed layout and theme flags
 - [Developing the CLI](../docs/cli/developing.md): the source layout and how tests launch `md`
 
 | Command | What it does |

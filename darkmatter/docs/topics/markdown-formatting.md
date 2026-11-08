@@ -1,7 +1,7 @@
 # Markdown Formatting Rules (`style.markdown`)
 
-`md clean`, `md FILE --save`, and the DMLS language server's "Format
-Document" all run the same cleanup. Cleanup tidies how a document's Markdown
+`md clean`, with or without `--save`, and the DMLS language server's
+"Format Document" all run the same cleanup. Cleanup tidies how a document's Markdown
 is spelled: it pads tables, labels unlabeled code fences, fixes misnumbered
 lists, and repairs broken frontmatter YAML. It never changes what the
 document means.
@@ -283,8 +283,8 @@ to a title. No setting controls it.
 [Docs](https://example.com/docs '{ class: "docs-link", target: "_blank", "data-section": "help" }')
 ```
 
-It covers inline links and reference definitions, in `md clean`, `md FILE --save`,
-and DMLS formatting. Composition's cleaning step and rendering do not migrate.
+It covers inline links and reference definitions, in `md clean` (with or
+without `--save`) and DMLS formatting. Composition's cleaning step and rendering do not migrate.
 Some titles need a closer look:
 
 | Title | Result |
@@ -507,7 +507,7 @@ frontmatter keys do not affect `style.markdown`.
 
 ### Rendering ignores these settings
 
-`style.markdown` is read only by `md clean`, `md FILE --save`, and DMLS
+`style.markdown` is read only by `md clean` (with or without `--save`) and DMLS
 formatting. `md FILE` rendering accepts the keys as valid style (including
 under `--deny style`), but it tidies the body with the built-in defaults
 and `--indent`, not with the document's settings. Compose's own cleanup step

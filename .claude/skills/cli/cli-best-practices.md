@@ -128,6 +128,12 @@ A monolithic `main.rs` quickly becomes a maintenance and testing bottleneck. Use
 | `output.rs` | Output formatting — JSON serialization structs, table generation, terminal styling. |
 | `main.rs` | Thin wrapper: `color_eyre` setup, tracing init, dynamic completions registration, arg parsing, route to `commands.rs`. |
 
+### Root Alias and Shared Controls
+
+- A CLI with subcommands has no separate root command; a root alias, if any, is an exact alias of one named subcommand (one shared `Args` struct, flattened at the root and held by the subcommand)
+- Shared controls (width, verbosity, debug, launch configuration, completion generation) are not part of the alias and keep their documented placement rules; a root-only control stays root-only rather than becoming a clap global
+- Enforce placement with tests generated from the clap definition, as `md` does: `darkmatter/cli/tests/l1/render_alias_parity.rs` (`every_root_argument_is_classified`) and `darkmatter/cli/src/args/cli.rs::the_root_declares_only_shared_controls_besides_render_options`
+
 ### Library Interaction
 
 The CLI crate (`./cli`) is a frontend for the library crate (`./lib`).

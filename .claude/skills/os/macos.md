@@ -419,6 +419,13 @@ no longer watches files, so its user docs no longer describe fseventsd.
     graph tests from 7.8-15 s each to 1.0-2.5 s, all running together. A
     package with font-measuring tests that overrun on macOS adds its tests
     to that script's filter.
+  - The script leaves out `browser_` tests because they launch Chrome, so a
+    browser test that measures fonts in-process still pays the full scan.
+    At 1,220,311 `deps` entries (2026-11-07),
+    `darkmatter`'s `browser_embedded_mermaid_font_draws_every_label` spent
+    35 s in its Rust render alone and timed out at nextest's 30 s. Run
+    outside nextest it passes in about 42 s. A timeout there says how big
+    `target/debug/deps` is, not that the code regressed.
 - **L1 timeouts when heavy jobs run at the same time.** Sniff's CoreAudio and
   network-interface probes, and tree-hugger's corpus tests, can exceed the
   30 s L1 budget when they run beside Clippy, other compiles, or other suites

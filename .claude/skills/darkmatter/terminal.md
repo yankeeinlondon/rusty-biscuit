@@ -53,7 +53,10 @@ print!("{output}");
 
 For page-framed terminal output (margins, padding, page background, `style:`
 frontmatter), use `DarkmatterPage::render(&md)` instead — see the darkmatter
-skill's *Common Entry Points*.
+skill's *Common Entry Points*. `md` builds that page from the merged
+`PreparedStyle` (document, `--style` files, setters) through
+`style::apply_prepared_style`; command-line style never reaches the page any
+other way (see [rendering.md](rendering.md#style-authority)).
 
 The generic terminal fold now owns the link and image fallbacks: without OSC 8
 a link prints its text (`text <url>` at `-v`, through

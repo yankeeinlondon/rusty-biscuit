@@ -451,9 +451,9 @@ which Darkmatter reads as the same value.
 
 - `--save` with stdin (`-`) fails with exit status 1 and the message
   `--save requires an input file path (stdin is not supported)`.
-- `--save` can be used either:
-    - On the subcommand: `md clean FILE.md --save`
-    - As top-level shorthand: `md FILE.md --save`
+- `--save` belongs to `md clean`: `md clean FILE.md --save`. `md` with no
+  subcommand only renders, so `md FILE.md --save` is a usage error (exit
+  status 2).
 
 ## Transformations Applied
 
@@ -598,4 +598,3 @@ These are usage errors (exit status 2).
 
 - Cleanup is formatting-oriented and never changes document meaning; when it cannot show that a result keeps the meaning, it declines and leaves the document unchanged.
 - `clean --save` is built to support in-place workflows while still surfacing exactly what changed.
-- Using `md FILE.md --save` provides a fast top-level shorthand for the same behavior.

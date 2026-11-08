@@ -4,7 +4,7 @@
 
 Darkmatter reserves the Frontmatter property `style` for defining stylistic preferences. This is used by the following page elements:
 
-1. `page` — **wired (sub-spec #2)**
+1. `page` - the page frame (margins, padding, width cap, background, themes, HTML head)
 1. `table`
 1. `hyperlinks`
 1. `images`
@@ -14,29 +14,39 @@ Darkmatter reserves the Frontmatter property `style` for defining stylistic pref
 1. `li` - List Item
 1. `block-quote` (canonical) / `block_quote` (snake-case alias, emits `Deprecated`)
 1. `disclosure` - Disclosure blocks
-1. `code-block` (canonical) / `code_block` (snake-case alias, emits `Deprecated`) — **wired (sub-spec #9)**
+1. `code-block` (canonical) / `code_block` (snake-case alias, emits `Deprecated`)
 
-When performing a composition argument the caller can send in a style object to modify the default style of the full page graph (`style` property is passed down to child properties).
+A twelfth key, `markdown`, holds `md clean`'s formatting rules; it is validated
+with the rest of `style` but has no rendering effect (see
+[Markdown Formatting Rules](../topics/markdown-formatting.md)).
 
-### Wiring Status
+The same `style` value can also come from the command line, as `--style`
+files and `style.KEY=VALUE` setters, which `md` merges over the document's
+value field by field; see
+[Precedence: Later Style Layers Win, Field by Field](#precedence-later-style-layers-win-field-by-field).
+For a task-oriented introduction, read
+[Layouts and Style](../topics/layouts-and-style.md) first; this page is the
+implementation reference.
 
-| Sub-Spec | Scope                             | Status          |
-|----------|-----------------------------------|-----------------|
-| #1       | Parser + schema + warnings        | Live            |
-| #2       | `style.page.*` → `DarkmatterPage` | **Live**        |
-| #3       | `style.table.*` / `style.images.*` / `style.block-quote.*` (`width`, `max-width`, `alignment`) | **Live** |
-| #4       | `style.ul.*` / `style.ol.*` / `style.li.*` (`width`, `max-width`, `alignment`, `ul.left-margin`) | **Live** |
-| #5       | `color` / `bg-color` application  | **Live**        |
-| #6       | `style.hr.*` HR migration          | **Live**        |
-| #7       | Bespoke knobs (stylesheet, meta, code-theme, hyperlinks, local-style) | **Live** |
-| #8       | `style.disclosure.*` disclosure blocks | **Live**    |
-| #9       | Style Everywhere: per-component `margin`, `padding`, `border`, `emphasis`, `word-wrap`, and `width` mode (`auto`/`fit-content`/length) | **Live** |
+### Rendering Support
 
-The library exposes `ACTIVE_STYLE_WIRING_SUB_SPEC` (currently `8`) so `KnownButInactive` warnings only fire for keys whose wiring sub-spec has not yet landed. Sub-spec #9 keys are schema-valid and lowered by the applicator; they follow the same `KnownButInactive` discipline if the active constant has not yet advanced to `9`. After sub-spec #9, every valid v1 schema key is either visually honored or rejected with a documented `StyleApplyError`. No valid v1 key emits `KnownButInactive` from a fully wired phase.
+Every bucket above renders on both the terminal and HTML targets. Each key
+either takes visible effect where its target supports it or fails with a
+documented `StyleApplyError`; target applicability is described per bucket
+below. A key that is valid only for HTML (such as `page.meta`) is accepted for
+terminal output and ignored there.
 
-The later render-surface keys (`page.theme`, `page.code.mode`, `code-block.line-numbers`, every `padding-left`/`padding-right`, and `hr.padding`) are lowered and carry the active sub-spec `8` in the descriptor, so they emit no `KnownButInactive`; the rest of the sub-spec #9 surface still reports it.
+The parser can also mark a valid key as not yet rendered: such a key produces
+an informational `KnownButInactive` notice, which only the debug log shows and
+which `--deny style` never promotes. The marker lives in the built-in
+descriptor (`descriptor::SCHEMA`), which records for each key whether it is
+active (`parse::ACTIVE_STYLE_WIRING_SUB_SPEC` is the threshold). Today the
+descriptor still marks the component `margin`, `padding`, `border`,
+`emphasis`, and `word-wrap` keys, and the `code-block` layout and color keys
+other than `line-numbers`, `padding-left`, and `padding-right`, so they emit
+the notice even though the applicator lowers them.
 
-## Schema & Parser Architecture (Sub-Spec #1)
+## Schema & Parser Architecture
 
 The `style:` frontmatter is parsed by the `darkmatter::style` module into a typed, sparse tree of Rust structs anchored to `renderable` primitives. No darkmatter-local layout, style, or color runtime types are introduced — every length is `renderable::layout::Length`, every alignment is `renderable::layout::Alignment`, and every color is `renderable::color::Color` (wrapped only by `StyleColor` for opacity).
 
@@ -45,17 +55,27 @@ The `style:` frontmatter is parsed by the `darkmatter::style` module into a type
 ```text
 darkmatter/lib/src/style/
 ├── mod.rs              # Re-exports
-├── schema.rs           # StyleFrontmatter + per-bucket structs
+├── schema/             # StyleFrontmatter + per-bucket structs (page, components, lists, inline, hr, common)
+├── descriptor.rs       # Static catalog of every leaf path the runtime parser knows
+├── walker.rs           # Pass 1: canonical-path walk, unknown and deprecated keys
 ├── length.rs           # Custom deserializers producing renderable::layout::Length
 ├── color.rs            # StyleColor wrapper + deserializers producing renderable::color::Color
+├── alignment.rs        # Alignment deserializer (adds the `centered` alias)
 ├── parse.rs            # from_frontmatter / from_json_value / into_strict
-├── warning.rs          # StyleWarning + StyleWarningKind
-└── tests/              # Parser tests + roundtrip tests
+├── normalize.rs        # One canonical spelling per field inside one layer (shorthands, broadcasts)
+├── layer.rs            # StyleLayer, prepare_style_layers, PreparedStyle
+├── presentation.rs     # Theme, code-block mode, and line-number defaults
+├── apply.rs            # apply_*_style and apply_prepared_style
+├── bespoke.rs          # stylesheet, meta, local-style, StyleAssetResolver
+├── error.rs            # StyleParseError
+└── warning.rs          # StyleWarning + StyleWarningKind
 ```
 
 ### Entry Points
 
-Three public functions form the parse API:
+Three public functions form the parse API for one `style:` value. `md` itself
+goes through `prepare_style_layers` (see [Prepared styles](#prepared-styles)),
+which uses the same normalization and validators.
 
 - **`from_frontmatter(fm: &Frontmatter)`** — reads `frontmatter.as_map().get("style")` and delegates to `from_json_value`. Returns `(StyleFrontmatter::default(), vec![])` when no `style:` key is present.
 - **`from_json_value(value: &serde_json::Value)`** — the canonical entry point. `Frontmatter` stores its map as `IndexMap<String, serde_json::Value>`, so callers that already hold the raw value go here directly. Unknown keys are collected into warnings; structural or type errors short-circuit via `StyleParseError`.
@@ -67,9 +87,10 @@ Every parse produces zero or more `StyleWarning` values alongside the parsed `St
 
 ```rust
 struct StyleWarning {
-    path: String,           // Fully-qualified YAML path, e.g. "style.page.lft-margin"
-    kind: StyleWarningKind, // Discriminated diagnostic category
-    source_span: Option<StyleSpan>, // Always None in v1; reserved for future spans
+    path: String,                   // Fully-qualified YAML path, e.g. "style.page.lft-margin"
+    kind: StyleWarningKind,         // Discriminated diagnostic category
+    suggestion: Option<String>,     // Replacement key for a removed spelling, e.g. "page.margin-left"
+    source_span: Option<StyleSpan>, // Set when the caller had the raw source text
 }
 ```
 
@@ -77,9 +98,9 @@ The `StyleWarningKind` enum distinguishes three categories:
 
 | Variant | Meaning | Behavior under `--deny style` |
 |---|---|---|
-| `UnknownKey` | Path does not appear anywhere in the schema (likely a typo). | Upgraded to error |
+| `UnknownKey` | Path does not appear anywhere in the schema (likely a typo, or a removed spelling such as `page.left-margin`, whose `suggestion` names the replacement). | Upgraded to error |
 | `Deprecated { replacement }` | Path matched a snake-case alias for a canonicalized kebab-case key. | Upgraded to error |
-| `KnownButInactive { sub_spec }` | Key is schema-valid but no rendering wiring exists for it yet. Carries the sub-spec number that will wire it. | **Never** blocks |
+| `KnownButInactive { .. }` | The key is valid, but nothing renders it yet (see [Rendering Support](#rendering-support)). Its field is an internal descriptor marker, not user-facing. | **Never** blocks |
 
 ### Error Type
 
@@ -91,12 +112,24 @@ Structural and type errors short-circuit the parse via `StyleParseError`:
 | `InvalidLength { path, raw, reason }` | Malformed length value (negative, unsupported unit, empty). |
 | `InvalidPercent { path, value }` | Percent outside `0.0..=100.0` range. |
 | `InvalidColor { path, raw, reason }` | Unrecognized color syntax. |
+| `InvalidValue { path, raw, reason }` | A value outside its key's accepted set, such as an unknown theme name. |
+| `Conflict { .. }` | Two spellings of one field in one `style` value (`ml` beside `page.margin-left`). |
+| `InvalidRule { path, reason }` | A `style.markdown` cleanup rule with an invalid value. |
 | `Strict { warnings }` | `into_strict` found one or more `UnknownKey`/`Deprecated` warnings. |
 | `Serde(..)` | Underlying serde deserialization failure. |
 
 ### Schema Shape
 
-The schema is a sparse tree of `Option` fields keyed by component. All buckets are `Option` so a sparse user input (e.g. only `page.left-margin`) does not materialize default values across the tree.
+The schema is a sparse tree of `Option` fields keyed by component. All buckets are `Option` so a sparse user input (e.g. only `page.margin-left`) does not materialize default values across the tree.
+
+Two definitions describe the same surface: the embedded schema
+[`schemas/partials/style.yaml`](../../schemas/partials/style.yaml), which
+decides which keys a document, `--style` file, or setter may hold (and drives
+completion and DMLS), and the runtime descriptor plus the typed structs below,
+which decide what renders. A test
+(`base_style_schema_agrees_with_the_runtime_style_parser`) keeps them in
+agreement. Where they differ, a key must pass both: the schema admits it, and
+the runtime accepts its value.
 
 #### Root: `StyleFrontmatter`
 
@@ -113,10 +146,12 @@ struct StyleFrontmatter {
     ol:           Option<OlStyle>,
     li:           Option<LiStyle>,
     block_quote:  Option<BlockQuoteStyle>,  // alias: "block_quote"
+    disclosure:   Option<DisclosureStyle>,
+    code_block:   Option<CodeBlockStyle>,   // alias: "code_block"
 }
 ```
 
-`#[serde(rename_all = "kebab-case")]` rewrites the field `block_quote` to the wire key `block-quote`; the `alias` accepts the legacy `block_quote` spelling and triggers a `Deprecated` warning.
+`#[serde(rename_all = "kebab-case")]` rewrites the field `block_quote` to the wire key `block-quote`; the `alias` accepts the legacy `block_quote` spelling and triggers a `Deprecated` warning. `style.markdown` has no field here: its cleanup rules are validated separately and kept with the prepared style's retained values.
 
 #### Common Mutations: `CommonStyle`
 
@@ -137,23 +172,29 @@ Most component buckets embed a flattened `CommonStyle` providing the shared muta
 | `emphasis` | `Option<ComponentEmphasis>` | `emphasis` | — |
 | `word_wrap` | `Option<ComponentWordWrap>` | `word-wrap` | `word_wrap` |
 
-`width` accepts either a length (`40`, `50%`) or a keyword (`auto`, `fit-content`) and lowers to `renderable::layout::Width` with the correct mode (Decision D3). `margin` and `padding` accept the same length forms as `width` and apply to all four sides; `padding-left` and `padding-right` then set one side each over `padding` (always in that order within a bucket, and a side alone keeps the other edges' inherited padding). `border`, `emphasis`, and `word-wrap` are compound values validated during typed deserialization; see [Sub-Spec #9](#sub-spec-9-style-everywhere) for details.
+`width` accepts either a length (`40`, `50%`) or a keyword (`auto`, `fit-content`) and lowers to `renderable::layout::Width` with the matching mode. `margin` and `padding` accept the same length forms as `width` and apply to all four sides; `padding-left` and `padding-right` then set one side each over `padding` (always in that order within a bucket, and a side alone keeps the other edges' inherited padding). `border`, `emphasis`, and `word-wrap` are compound values validated during typed deserialization; see [Margin, Padding, Border, Emphasis, and Word Wrap](#margin-padding-border-emphasis-and-word-wrap) for details.
+
+The typed struct is the same for every bucket that flattens it, but the
+embedded schema admits only part of it on some buckets: `hyperlinks` takes
+`width`, `max-width`, `alignment`, `color`, `bg-color`, and `local-style`;
+`images` takes those plus `padding`, `padding-left`, and `padding-right`; any
+other row is an unknown key on those two buckets.
 
 #### Per-Component Buckets
 
 | Bucket | Struct | Common? | Extra fields |
 |---|---|---|---|
-| `page` | `PageStyle` | inline (not flattened) | 4 margins, 4 paddings, `background`, `stylesheet`, `meta`, `code` |
+| `page` | `PageStyle` | inline (not flattened) | 4 margins, 4 paddings, `background`, `theme`, `stylesheet`, `meta`, `code` (`theme`, `mode`); shorthands are normalized onto these fields |
 | `table` | `TableStyle` | `#[serde(flatten)]` | — |
 | `block-quote` | `BlockQuoteStyle` | `#[serde(flatten)]` | — |
 | `ul` | `UlStyle` | `#[serde(flatten)]` | `left_margin: Option<Length>` (indent for list content) |
 | `ol` | `OlStyle` | `#[serde(flatten)]` | — |
 | `li` | `LiStyle` | `#[serde(flatten)]` | — |
-| `hyperlinks` | `HyperlinkStyle` | `#[serde(flatten)]` | `local_style: Option<Box<CommonStyle>>` (local-link overrides; wired sub-spec #7) |
-| `images` | `ImageStyle` | `#[serde(flatten)]` | `local_style: Option<Box<CommonStyle>>` (local-image overrides; wired sub-spec #7) |
-| `hr` | `HrStyle` | specialized (see Sub-Spec #6) | `kind` (HrKind), `weight` (HrWeight), `alignment` (HrAlignment) |
+| `hyperlinks` | `HyperlinkStyle` | `#[serde(flatten)]` | `local_style: Option<Box<CommonStyle>>` (local-link overrides) |
+| `images` | `ImageStyle` | `#[serde(flatten)]` | `local_style: Option<Box<CommonStyle>>` (local-image overrides) |
+| `hr` | `HrStyle` | specialized (see [HR Style](#hr-style)) | `kind` (HrKind), `weight` (HrWeight), `alignment` (HrAlignment), `padding`, `padding-left`, `padding-right` |
 | `disclosure` | `DisclosureStyle` | `#[serde(flatten)]` | — |
-| `code-block` | `CodeBlockStyle` | `#[serde(flatten)]` | — |
+| `code-block` | `CodeBlockStyle` | `#[serde(flatten)]` | `line_numbers: Option<bool>` (`line-numbers`) |
 
 `PageStyle` is special: it does not flatten `CommonStyle` because its margins and paddings use a mix of horizontal `Length` and vertical `u16` fields, while `CommonStyle` is purely horizontal. It inlines `alignment`, `color`, `bg_color`, and `max_width` directly.
 
@@ -161,7 +202,7 @@ Most component buckets embed a flattened `CommonStyle` providing the shared muta
 
 #### Length
 
-Horizontal fields (`left-margin`, `right-margin`, `left-padding`, `right-padding`, `width`, `max-width`) accept `renderable::layout::Length` via a custom string deserializer:
+Horizontal fields (`margin-left`, `margin-right`, `padding-left`, `padding-right`, `width`, `max-width`) accept `renderable::layout::Length` via a custom string deserializer:
 
 | Input form | Result |
 |---|---|
@@ -171,7 +212,7 @@ Horizontal fields (`left-margin`, `right-margin`, `left-padding`, `right-padding
 
 Rejected forms: negative values (`"-2"`), unsupported units (`"2px"`, `"2em"`, `"2rem"`), empty string, malformed (`"50%%"`), percent out of range (`"101%"`).
 
-Vertical fields (`top-margin`, `bottom-margin`, `top-padding`, `bottom-padding`) accept `u16` row counts only. A `row_count` helper explicitly rejects strings (e.g. `top-margin: "2ch"` fails with a `Structure` error rather than serde's default "invalid type" message).
+Vertical page fields (`margin-top`, `margin-bottom`, `padding-top`, `padding-bottom`, and the `margin`, `padding`, `my`, `py`, `mt`, `mb`, `pt`, `pb` shorthands that set them) accept `u16` row counts only. A `row_count` helper explicitly rejects strings (e.g. `margin-top: "2ch"` fails with a `Structure` error rather than serde's default "invalid type" message).
 
 #### Alignment
 
@@ -208,34 +249,47 @@ Because `#[serde(deny_unknown_fields)]` aborts on the first typo and `serde_igno
 
 2. **Pass 2 — Typed deserialization.** Deserialize the value into `StyleFrontmatter` via standard serde. Structural errors short-circuit via `StyleParseError`.
 
-3. **Pass 3 — `KnownButInactive` annotation.** Walk the parsed `StyleFrontmatter` and emit a `KnownButInactive` warning for every `Some` field whose wiring sub-spec exceeds `ACTIVE_STYLE_WIRING_SUB_SPEC`.
+3. **Pass 3 — `KnownButInactive` annotation.** Walk the value and emit a `KnownButInactive` notice for every present key the descriptor marks as not yet rendered (see [Rendering Support](#rendering-support)).
+
+Before pass 2, `normalize.rs` rewrites the value onto canonical fields: top-level page keys move under `page`, page shorthands expand by specificity, `alignment` broadcasts to every component, and two spellings of one field fail with `StyleParseError::Conflict`.
 
 This gives full control over alias detection and unknown-key reporting without depending on `serde_ignored`'s behavior under `flatten`.
 
 ### Key Spelling: Kebab-Case Canonical
 
-All multi-word frontmatter keys use hyphens: `max-width`, `bg-color`, `local-style`, `block-quote`, `left-margin`, etc. Snake-case spellings (`max_width`, `bg_color`, `local_style`, `block_quote`) are accepted via serde `alias` for backward compatibility and emit a `Deprecated { replacement }` warning. The pass-1 walker compares raw map keys against the canonical set to detect alias hits (since serde does not surface which alias matched).
+All multi-word frontmatter keys use hyphens: `max-width`, `bg-color`, `local-style`, `block-quote`, `margin-left`, etc. Snake-case spellings (`max_width`, `bg_color`, `local_style`, `block_quote`) are accepted via serde `alias` for backward compatibility and emit a `Deprecated { replacement }` warning. The pass-1 walker compares raw map keys against the canonical set to detect alias hits (since serde does not surface which alias matched).
 
-## Page-Level Style (Sub-Spec #2)
+## Page-Level Style
 
-The `style.page.*` subset is fully wired through `DarkmatterPage` for both terminal (`md`) and HTML (`md --output html`) rendering. Use canonical kebab-case keys; snake-case aliases are still accepted but produce a `Deprecated` warning.
+`style.page.*` applies through `DarkmatterPage` to both terminal (`md`) and HTML (`md --output html`) rendering. Use canonical kebab-case keys; snake-case aliases are still accepted but produce a `Deprecated` warning.
 
 ### Supported Keys
 
 | Key                  | Value Shape                                     | Notes                                                       |
 |----------------------|-------------------------------------------------|-------------------------------------------------------------|
-| `left-margin`        | `Nch`, `N%`, or `0`                             | Percent base = captured terminal width                      |
-| `right-margin`       | `Nch`, `N%`, or `0`                             | Percent base = captured terminal width                      |
-| `top-margin`         | non-negative integer (row count)                | Bare number; `2ch` is rejected for vertical fields          |
-| `bottom-margin`      | non-negative integer                            |                                                             |
-| `left-padding`       | `Nch`, `N%`, or `0`                             |                                                             |
-| `right-padding`      | `Nch`, `N%`, or `0`                             |                                                             |
-| `top-padding`        | non-negative integer                            |                                                             |
-| `bottom-padding`     | non-negative integer                            |                                                             |
-| `max-width`          | `Nch`, `N%`, or `0` (`0` rejected at apply-time) | Percent resolves against post-margin / post-padding content width |
-| `alignment`          | `left` \| `center` \| `right`                    | Broadcasts to every `PageComponent` via `ComponentPolicy` (table/image/list/code/block-quote) |
+| `margin-left`        | `Nch`, `N%`, or `0`                             | Percent base = captured terminal width                      |
+| `margin-right`       | `Nch`, `N%`, or `0`                             | Percent base = captured terminal width                      |
+| `margin-top`         | non-negative integer (row count)                | Bare number; `2ch` is rejected for vertical fields          |
+| `margin-bottom`      | non-negative integer                            |                                                             |
+| `padding-left`       | `Nch`, `N%`, or `0`                             |                                                             |
+| `padding-right`      | `Nch`, `N%`, or `0`                             |                                                             |
+| `padding-top`        | non-negative integer                            |                                                             |
+| `padding-bottom`     | non-negative integer                            |                                                             |
+| `max-width`          | positive `Nch`, `N%`, or `N`                    | Percent resolves against post-margin / post-padding content width; a value that resolves to `0` cells is rejected at apply time |
+| `alignment`          | `left` \| `center` \| `right`                    | Also broadcasts to every component bucket (see [Precedence: Page Broadcast, Then Component Style](#precedence-page-broadcast-then-component-style)) |
 | `background`         | `transparent` \| `subtle` \| `pronounced`        | Maps to `PageBackground` enum                               |
-| `stylesheet`, `meta`, `code` | See [Bespoke Knobs (Sub-Spec #7)](#bespoke-knobs-sub-spec-7) | `stylesheet` and `meta` are HTML-only; `code.theme` applies to both targets |
+| `color`, `bg-color`  | color                                           | See [Color & Background-Color](#color--background-color)    |
+| `theme`, `code.theme`, `code.mode` | theme name; `inverse` \| `dark` \| `light` \| `same` | See [Presentation](#presentation-themes-code-block-mode-line-numbers) |
+| `stylesheet`, `meta` | See [Bespoke Knobs](#bespoke-knobs)             | HTML-only                                                   |
+
+Shorthands normalize onto these fields within each layer, most specific
+first: `margin`/`padding` (all four sides, row counts), then `mx`/`my`/`px`/`py`
+(one axis), then `ml`/`mr`/`mt`/`mb`/`pl`/`pr`/`pt`/`pb` and the long names (one
+side). Every page key and shorthand is also accepted at the top level of
+`style` (`style.max-width` is `style.page.max-width`). Two spellings of one
+field at the same specificity in one layer are a `Conflict`. See
+[Layouts and Style](../topics/layouts-and-style.md#shorthands-and-top-level-page-keys)
+for examples.
 
 `Length::Css(_)` (e.g. `10px`) is **not** valid for page-level terminal layout; it raises `StyleApplyError::InvalidCssLength`.
 
@@ -252,7 +306,7 @@ pre-resolve percentages to cells. Each target then resolves the same `Length`:
 | `Length::Percent(p)` | `round(base * p / 100)` cells | `{p}%` (resolves against the viewport) |
 | `Length::Css(_)` | rejected at apply time (`InvalidCssLength`) | — |
 
-So `style.page.left-margin: 10%` becomes `8` cells on an 80-col terminal but
+So `style.page.margin-left: 10%` becomes `8` cells on an 80-col terminal but
 `margin-left: 10%` in the browser. The terminal percent base depends on the
 field:
 
@@ -269,10 +323,10 @@ field:
 ---
 style:
     page:
-        left-margin: 2ch
-        right-margin: 4ch
-        top-margin: 1
-        bottom-margin: 0
+        margin-left: 2ch
+        margin-right: 4ch
+        margin-top: 1
+        margin-bottom: 0
         max-width: 80%
         alignment: center
         background: subtle
@@ -283,32 +337,73 @@ style:
 
 `md` has no page-layout flags. A command line changes the style by adding
 _layers_ on top of the document's `style:` frontmatter: each `--style FILE`
-is one layer, and every `style.KEY=VALUE` setter on the command line forms
-one more. `prepare_style_layers` merges them in this order, lowest first:
+is one layer, and all the `style.KEY=VALUE` setter words on the command line
+form one more. `prepare_style_layers` merges them in this order, lowest first:
 
 1. built-in defaults (no layer; what an unset field renders as)
 2. the document's `style:` frontmatter
 3. each `--style` file, in command-line order
-4. the setters
+4. the setters, as one layer, wherever they appear among the arguments
 
 The merge is field by field. A later layer replaces only the leaves it sets,
 so a setter for `page.margin-left` changes the left margin and leaves the
 document's `margin-right` in place:
 
-```bash
+```sh
 # style-prop.md sets margin-left: 2ch and margin-right: 4ch
 md render style-prop.md style.page.margin-left=7ch   # left 7, right 4
 ```
 
+Each layer is checked and normalized on its own before it meets another:
+
 ```mermaid
-flowchart LR
-    D[document style:] --> M[prepare_style_layers<br/>field-by-field merge]
-    F1[--style a.yaml] --> M
-    F2[--style b.toml] --> M
-    S[style.KEY=VALUE setters] --> M
-    M --> P[PreparedStyle]
-    P --> A[apply_prepared_style] --> Page[DarkmatterPage]
+flowchart TD
+    subgraph each["for each layer: document, --style files in order, setters"]
+        R["read<br/>document frontmatter, style file, or setter words"]
+        R --> N["strip nulls (CLI layers)<br/>repeated setter path: last value"]
+        N --> A["admit against the effective schema<br/>unknown key: warn and drop, or error for a setter"]
+        A --> X["normalize<br/>top-level page keys, shorthands by specificity,<br/>alignment broadcast; spelling conflicts fail"]
+        X --> V["validate values<br/>runtime types, width vs max-width"]
+    end
+    V --> M["merge in layer order<br/>mappings by key, other values replace"]
+    M --> Q["check required fields on the merged value"]
+    Q --> P["PreparedStyle<br/>style, retained values, per-field origin"]
+    P --> AP["apply_prepared_style"] --> Page["DarkmatterPage"]
 ```
+
+The rules each step applies:
+
+- **Read.** Setters with the same exact path keep the last occurrence, so a
+  repeated `style='{…}'` replaces the whole earlier assignment. A style file
+  keeps its reader's duplicate-key rule: JSON and JSON5 keep the last value,
+  YAML and TOML fail to load (`parse_local_document`, the `load_data`
+  readers).
+- **Nulls.** In a file or setter layer `null` is absence, never a reset.
+- **Admission.** The document's effective schema (selected once from the
+  original frontmatter) decides which keys a layer may hold; a key it does not
+  admit is a warning in the document or a file and `dm.schema.unknown_key` for
+  a setter. An undeclared member of a compound value's object form
+  (`table.border.glow`) is an unknown key in the same way. Admitted keys the
+  renderer does not know (a custom schema field, `style.markdown`) go to
+  `PreparedStyle::retained` with no warning and no rendering effect.
+- **Normalization** resolves shorthand specificity _inside_ the layer:
+  `{ ml: 6, margin: 2 }` is left 6. Across layers, order decides, so a later
+  layer's `margin: 2` beats an earlier layer's `ml: 6`.
+- **Validation** checks every supplied file and setter, including values a
+  later layer replaces. A problem's message is prefixed with
+  `` `style.<path>`: `` unless it already names the path, and ends with its
+  origin (the style file and line, or the setter argument).
+- **Merge.** Mappings merge key by key; scalars and arrays replace; a value
+  that switches between a scalar and an object (a border going from `thin`
+  to `{ left: false }`) replaces the whole value. A later `width` removes an
+  inherited `max-width` (and the reverse), and a later component `padding`
+  removes inherited `padding-left`/`padding-right`. Typed values with
+  defaults (such as `ComponentBorder`) are built only after the merge, so a
+  sparse `table.border.left=false` keeps an earlier border's color and weight.
+- **Origins.** Each merged field keeps the `StyleOrigin` of the layer that
+  supplied it. Its `context` is the document's for a document value, the style
+  file's own for a file value, and the launch context for a setter, so a
+  relative `page.stylesheet` resolves from where it was written.
 
 The `apply_*_style` functions run after the merge, so they apply every field
 present in the effective style; none of them takes an override argument.
@@ -346,9 +441,9 @@ Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax such a
 - `InvalidCssLength { field }` — `Length::Css(_)` was supplied to a page-level length field.
 - `InvalidMaxWidth` — `style.page.max-width` resolved to `0` cells (e.g. `50%` of a `0`-cell content width after margins consumed everything).
 
-## Component-Level Style (Sub-Spec #3)
+## Component-Level Style
 
-`style.table.*`, `style.images.*`, and `style.block-quote.*` lower directly into per-component [`ComponentPolicy`](crate::layout::ComponentPolicy) via `apply_component_style`. `ComponentPolicy` is the **single source of truth** for a component's `style:` layout and colors: a `renderable::layout::Layout` plus optional `color` / `bg_color` carried as alpha-bearing [`PaintColor`](renderable::style::PaintColor) (so opacity survives to HTML — see [Color & Background-Color](#color--background-color-sub-spec-5)). The parsed `StyleColor` is lowered to `PaintColor` at the parser/apply boundary; no `StyleColor` survives on `ComponentPolicy`. There is no parallel per-component color map. Each bucket maps to a dedicated `PageComponent` variant:
+`style.table.*`, `style.images.*`, and `style.block-quote.*` lower directly into per-component [`ComponentPolicy`](crate::layout::ComponentPolicy) via `apply_component_style`. `ComponentPolicy` is the **single source of truth** for a component's `style:` layout and colors: a `renderable::layout::Layout` plus optional `color` / `bg_color` carried as alpha-bearing [`PaintColor`](renderable::style::PaintColor) (so opacity survives to HTML — see [Color & Background-Color](#color--background-color)). The parsed `StyleColor` is lowered to `PaintColor` at the parser/apply boundary; no `StyleColor` survives on `ComponentPolicy`. There is no parallel per-component color map. Each bucket maps to a dedicated `PageComponent` variant:
 
 | Bucket | `PageComponent` variant |
 |---|---|
@@ -377,7 +472,7 @@ Three knobs are live on each of the three buckets:
 
 ### Width vs. Max-Width Exclusivity
 
-`width` and `max-width` are mutually exclusive **within the same bucket** in the v1 schema to keep CLI precedence predictable. Setting both raises:
+`width` and `max-width` are mutually exclusive **within the same bucket**, so terminal and HTML output agree on one width strategy. Setting both raises:
 
 ```text
 `style.{bucket}.width` and `style.{bucket}.max-width` are mutually exclusive
@@ -441,13 +536,13 @@ pub fn apply_component_style(
 - `ComponentWidthConflict { bucket }` — `width` and `max-width` set together inside the same bucket.
 - `ComponentInvalidCssLength { bucket, field }` — `width` or `max-width` is a `Length::Css(_)` value.
 
-### Inactive Keys
+### Other Keys
 
-The `color` and `bg-color` knobs on `style.table`, `style.images`, and `style.block-quote` are now wired (sub-spec #5). The `images.local_style` knob is now wired (sub-spec #7). No keys in these buckets remain inactive.
+`color` and `bg-color` on `style.table`, `style.images`, and `style.block-quote` render through [Color & Background-Color](#color--background-color), and `images.local-style` through [Bespoke Knobs](#bespoke-knobs). `images` also takes `padding`, `padding-left`, and `padding-right`, which move a lone image (or its terminal fallback text) inside the content width.
 
-## List-Level Style (Sub-Spec #4)
+## List-Level Style
 
-`style.ul.*`, `style.ol.*`, and `style.li.*` map onto three `PageComponent` variants — `Ul`, `Ol`, `Li`. Each bucket supports `width`, `max-width`, and `alignment` via the same direct lowering as sub-spec #3, plus a bespoke `ul.left-margin` indent channel.
+`style.ul.*`, `style.ol.*`, and `style.li.*` map onto three `PageComponent` variants — `Ul`, `Ol`, `Li`. Each bucket supports `width`, `max-width`, and `alignment` via the same direct lowering as the component buckets, plus a bespoke `ul.left-margin` indent channel.
 
 ### PageComponent Split
 
@@ -471,7 +566,7 @@ The pulldown-cmark event stream distinguishes list kinds at render time:
 
 ### Live Knobs
 
-Three knobs are live on each of the three list buckets, using the same direct lowering as sub-spec #3:
+Three knobs apply on each of the three list buckets, using the same direct lowering as the component buckets:
 
 - `width` — fixed width as `Nch`, `N%`, or `0`. Maps to `Layout.width = Width::Fixed`.
 - `max-width` — upper bound as `Nch`, `N%`, or `0`. Maps to `Layout.max_width`.
@@ -483,7 +578,7 @@ Plus the bespoke `ul.left-margin` indent channel (see below).
 
 ### Width vs. Max-Width Exclusivity
 
-`width` and `max-width` remain mutually exclusive **per bucket** — the same exclusivity check from sub-spec #3 applies. Setting both `style.ul.width` and `style.ul.max-width` (or the equivalent for `ol`/`li`) returns `ComponentWidthConflict { bucket }` before rendering.
+`width` and `max-width` remain mutually exclusive **per bucket** — the same exclusivity check as the component buckets. Setting both `style.ul.width` and `style.ul.max-width` (or the equivalent for `ol`/`li`) returns `ComponentWidthConflict { bucket }` before rendering.
 
 ### ul.left-margin: Independent Indent Channel
 
@@ -504,7 +599,7 @@ This means `left-margin: 4ch` plus `max-width: 40` produces a 4-cell offset and 
 | Field | Resolution base |
 |---|---|
 | `ul.left-margin: N%` | Page content width (after page margin/padding and page max-width are known) |
-| `ul`/`ol`/`li` `width`, `max-width` | Same helper as sub-spec #3: `Length` values are cloned directly into `Layout.width` / `Layout.max_width`; the renderer fold resolves them at render time. |
+| `ul`/`ol`/`li` `width`, `max-width` | Same helper as the component buckets: `Length` values are cloned directly into `Layout.width` / `Layout.max_width`; the renderer fold resolves them at render time. |
 
 `Length::Css(_)` fails with `StyleApplyError` for all list length fields.
 
@@ -525,9 +620,10 @@ Per-component browser CSS comes from the renderable browser fold lowering each n
 ### Setting Lists from the Command Line
 
 There are no list flags. A setter or `--style` file names each list
-component it changes; to set all three, name all three:
+component it changes; to set all three, name all three (or use
+`style.alignment=center`, which reaches every component, lists included):
 
-```bash
+```sh
 md render doc.md style.ul.alignment=center style.ol.alignment=center style.li.alignment=center
 ```
 
@@ -572,24 +668,24 @@ style:
 - `ComponentInvalidCssLength { bucket, field }` — `width` or `max-width` is a `Length::Css(_)` value.
 - List-indent apply error — `with_list_left_margin` called with a non-`Ul` component returns a clear error.
 
-### Inactive Keys
+### Colors
 
-Color and background-color knobs on list buckets (`style.ul.color`, `style.ul.bg-color`, `style.ol.color`, `style.ol.bg-color`, `style.li.color`, `style.li.bg-color`) are now wired (sub-spec #5). No list-specific keys remain inactive.
+Color and background-color on list buckets (`style.ul.color`, `style.ul.bg-color`, `style.ol.color`, `style.ol.bg-color`, `style.li.color`, `style.li.bg-color`) render through [Color & Background-Color](#color--background-color).
 
-## Color & Background-Color (Sub-Spec #5)
+## Color & Background-Color
 
-Sub-spec #5 activates the already-parsed `color` and `bg-color` fields for every `PageComponent` that exists after sub-spec #4, including `PageComponent::Hyperlinks`. The design stores `StyleColor` directly on `DarkmatterPage` and lowers to target-specific representations at render time.
+The `color` and `bg-color` fields apply to the page and to every `PageComponent`, including `PageComponent::Hyperlinks`. Page colors are stored on `DarkmatterPage` and component colors on each component's `ComponentPolicy`, and both lower to target-specific representations at render time.
 
 ### PageComponent::Hyperlinks
 
-The schema already reserved `style.hyperlinks.color` and `style.hyperlinks.bg-color` as sub-spec #5 fields. `PageComponent::Hyperlinks` was added in this phase for color storage and rendering on both terminal and browser targets:
+`style.hyperlinks.color` and `style.hyperlinks.bg-color` are stored on `PageComponent::Hyperlinks` and rendered on both terminal and browser targets:
 
 | Routing | Detail |
 |---|---|
-| Color storage | `ComponentPolicy.color` / `bg_color` on `DarkmatterPage` (wired sub-spec #5) |
-| Browser selector | `a` (wired sub-spec #5) |
-| Terminal rendering | Wraps link label text with foreground/background SGR while preserving existing OSC8 hyperlink sequences (wired sub-spec #5) |
-| Full layout and `local-style` | Wired in sub-spec #7 (see [Bespoke Knobs](#bespoke-knobs-sub-spec-7)) |
+| Color storage | `ComponentPolicy.color` / `bg_color` on `DarkmatterPage` |
+| Browser selector | `a` |
+| Terminal rendering | Wraps link label text with foreground/background SGR while preserving existing OSC8 hyperlink sequences |
+| Full layout and `local-style` | See [Bespoke Knobs](#bespoke-knobs) |
 
 ### Color Storage and Inheritance
 
@@ -617,7 +713,7 @@ browser fold lowers the pair straight to `rgb(...)` (opaque) / `rgba(...)`
 
 Page **foreground** is **inheritance**: `style.page.color` is baked onto the document root node during the context-aware fold so it inherits to all descendants via `renderable`'s `InheritedStyle` (in the browser the styled root renders as a wrapping `<div>` whose `color` cascades). `style.page.bg-color` is **not** baked onto the root — background deliberately does not inherit — so it is painted by the page frame instead: the browser page wrapper and the terminal row decoration. A component-level value overrides the page-level value for that component (page color is never copied onto component nodes). If neither exists, no color rule or SGR is emitted.
 
-There is no explicit inheritance clearing in v1 — the parser does not accept `"reset"`, so a component cannot opt out of page-level color. This keeps the implementation aligned with the accepted schema. A future parser extension may add a dedicated clear/reset value if documents need it.
+There is no explicit inheritance clearing: the parser does not accept `"reset"`, so a component cannot opt out of page-level color.
 
 ### Terminal Lowering
 
@@ -666,7 +762,7 @@ Code-block inherited color is deliberately asymmetric:
 - **Background-color**: Page-inherited `bg-color` may apply to the code-block panel/container. It changes the containing panel/background fill rather than rewriting per-token background spans. Token-level backgrounds emitted by the syntax highlighter remain intact.
 - **Foreground color**: Page-inherited foreground is a fallback/default only and must **not** override syntax token foreground colors selected by `code_theme`. If the renderer has no safe hook for non-highlighted fallback text, inherited foreground is skipped for highlighted code blocks.
 
-Code blocks have no component-specific frontmatter color in this sub-spec (`style.code-blocks.*` is not a valid bucket).
+`style.code-block.color` and `bg-color` are component colors of the code-block panel, set through `apply_color_style` like any other bucket's (the plural `code-blocks` is not a bucket).
 
 ### Public API
 
@@ -699,7 +795,7 @@ impl DarkmatterPage {
 
 /// Apply parsed color and background-color style onto a DarkmatterPage builder.
 ///
-/// No CLI color override exists in this sub-spec; frontmatter is the only color source.
+/// Every color in `style` is applied; precedence between sources was decided by the merge.
 pub fn apply_color_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
@@ -732,9 +828,9 @@ style:
 
 In this example, tables render with red foreground and semi-transparent red background (opacity preserved in browser, dropped in terminal). All other components (images, block-quotes, hyperlinks, lists) inherit blue-500 foreground and slate-900 background from the page level.
 
-## HR Style (Sub-Spec #6)
+## HR Style
 
-Sub-spec #6 makes `style.hr.*` the canonical and only supported page-frontmatter surface for horizontal rule styling. `HrStyle` uses a **specialized schema** rather than flattening `CommonStyle` because HR `alignment` supports an extra `full` value that `renderable::layout::Alignment` cannot represent.
+`style.hr.*` is the only page-frontmatter surface for horizontal-rule styling. `HrStyle` uses a **specialized schema** rather than flattening `CommonStyle` because HR `alignment` supports an extra `full` value that `renderable::layout::Alignment` cannot represent.
 
 ### Migration: Deprecated Aliases
 
@@ -800,19 +896,19 @@ pub enum HrAlignment {
 |---|---|---|---|
 | `width` | `Option<Length>` | `width` | Fixed width; mutually exclusive with `max-width` |
 | `max_width` | `Option<Length>` | `max-width` (alias: `max_width`) | Upper bound; mutually exclusive with `width` |
-| `color` | `Option<StyleColor>` | `color` | Foreground (stroke/fill) color; uses sub-spec #5 color storage |
-| `bg_color` | `Option<StyleColor>` | `bg-color` (alias: `bg_color`) | Background color; uses sub-spec #5 color storage |
+| `color` | `Option<StyleColor>` | `color` | Foreground (stroke/fill) color; uses the component color storage |
+| `bg_color` | `Option<StyleColor>` | `bg-color` (alias: `bg_color`) | Background color; uses the component color storage |
 | `alignment` | `Option<HrAlignment>` | `alignment` | `full` \| `left` \| `center` \| `right`; `centered` is deprecated alias for `center` |
 | `kind` | `Option<HrKind>` | `kind` | Visual style of the rule |
 | `weight` | `Option<HrWeight>` | `weight` | Stroke weight |
 | `padding` | `Option<ComponentEdges>` | `padding` | All four sides of the `Hr` component policy's `Layout.padding` |
 | `padding_left`, `padding_right` | `Option<Length>` | `padding-left`, `padding-right` | One side each, after `padding`; moves the rule inside the content width (`padding-left: 4` at width 50 draws 46 cells, 4 in). |
 
-`width` and `max-width` conflict: setting both in the same `style.hr` bucket returns `StyleApplyError` before rendering, matching the exclusivity rule from sub-specs #3 and #4.
+`width` and `max-width` conflict: setting both in the same `style.hr` bucket returns `StyleApplyError` before rendering, as in the component and list buckets.
 
 ### PageComponent::Hr
 
-Sub-spec #6 adds `PageComponent::Hr` to the `PageComponent` enum. This enables the sub-spec #5 color/bg-color mechanism to honor `style.hr.color` and `style.hr.bg-color` through the `Hr` component's `ComponentPolicy.color` / `bg_color`.
+`PageComponent::Hr` carries the rule's `ComponentPolicy`, so `style.hr.color` and `style.hr.bg-color` use the same color mechanism as other components (`ComponentPolicy.color` / `bg_color`), and `style.hr.padding*` its `Layout.padding`.
 
 HR foreground color maps to the rule stroke/fill color. Background color applies to the HR component's bounding line/box through the same wrapper mechanism used for other `PageComponent` variants.
 
@@ -884,11 +980,9 @@ Every `---` horizontal rule in the document renders as a thick, centered, wave-p
 - `ComponentWidthConflict { bucket: "hr" }` — `style.hr.width` and `style.hr.max-width` set simultaneously.
 - `ComponentInvalidCssLength { bucket: "hr", field }` — `width` or `max-width` is a `Length::Css(_)` value.
 
-## Bespoke Knobs (Sub-Spec #7)
+## Bespoke Knobs
 
-Sub-spec #7 wires the remaining v1 schema keys that do not simply lower a `CommonStyle` bucket onto a component's `ComponentPolicy` (layout + colors). These are the "bespoke knobs": page stylesheet, page meta, code-block theme, hyperlink styling (including local-link overrides), and local image style overrides.
-
-After this sub-spec ships, `ACTIVE_STYLE_WIRING_SUB_SPEC` advances to `7` and no valid v1 schema key emits `KnownButInactive`.
+The bespoke knobs are the keys that do not simply lower a `CommonStyle` bucket onto a component's `ComponentPolicy` (layout + colors). These are the "bespoke knobs": page stylesheet, page meta, code-block theme, hyperlink styling (including local-link overrides), and local image style overrides.
 
 ### `style.page.stylesheet`
 
@@ -902,7 +996,7 @@ Adds page-level CSS to HTML output. Every target checks the value without readin
 **Remote URLs:**
 
 - HTTP(S) values are emitted as `<link rel="stylesheet" href="...">`. The renderer **never** fetches remote CSS — it only emits the tag.
-- `file://` URLs are rejected in v1 (ambiguous across platforms; use normal local paths instead).
+- `file://` URLs are rejected (ambiguous across platforms; use normal local paths instead).
 
 ```yaml
 ---
@@ -952,7 +1046,7 @@ style:
 
 ### `style.page.code.theme`
 
-Overrides the page-level default code-block theme. The string value parses via `ThemePair::try_from`, using the same accepted names as `style.page.theme`; `md list-themes` lists them. Unknown theme names return `StyleApplyError::InvalidCodeTheme { value }`.
+Overrides the page-level default code-block theme. The string value parses via `ThemePair::try_from`, using the same accepted names as `style.page.theme`, in any case; `md list-themes` lists them. An unknown theme name fails while the style is prepared (`StyleParseError::InvalidValue`, reported as `dm.style.invalid_value` by `md`), before anything is applied.
 
 A command-line setter (`style.page.code.theme=NAME`) or `--style` file wins over the document's value, like any later style layer.
 
@@ -982,7 +1076,7 @@ style:
 
 ### `style.hyperlinks.*`
 
-Sub-spec #5 added `PageComponent::Hyperlinks` for color storage on `DarkmatterPage`. Sub-spec #7 activates the full `CommonStyle` surface — including visual rendering of `color` and `bg-color` through the same `StyleColor` lowering helpers used by sub-spec #5, plus `width`, `max-width`, and `alignment` — and adds `local-style` for local-link overrides. The full `CommonStyle` surface is now live for hyperlinks:
+Hyperlinks take `color`, `bg-color`, `width`, `max-width`, and `alignment`, plus `local-style` for local-link overrides. Colors use the same lowering helpers as other components:
 
 - `color` and `bg-color` lower to terminal SGR around the link display text and to inline CSS on the HTML `<a>` element.
 - Terminal: SGR wraps the display text while preserving OSC 8 hyperlink sequences. SGR reset closes before the OSC 8 end sequence so color does not leak.
@@ -1006,7 +1100,7 @@ Provides overrides for local image references only. A local image has a primary 
 
 ### Width vs. Max-Width Exclusivity
 
-The single-fill-slot rule from sub-specs #3, #4, and #6 also applies to `style.hyperlinks`, `style.hyperlinks.local-style`, and `style.images.local-style`. Setting both `width` and `max-width` in the same bucket returns `StyleApplyError` before rendering. HTML may be able to represent both, but accepting a document for one target and rejecting it for another would make `md` behavior unpredictable.
+The single-fill-slot rule of the component, list, and HR buckets also applies to `style.hyperlinks`, `style.hyperlinks.local-style`, and `style.images.local-style`. Setting both `width` and `max-width` in the same bucket returns `StyleApplyError` before rendering. HTML may be able to represent both, but accepting a document for one target and rejecting it for another would make `md` behavior unpredictable.
 
 ### CSS Length Support
 
@@ -1095,7 +1189,7 @@ The full integration order in `md` is:
     4. `apply_list_style` — ul/ol/li
     5. `apply_hr_style` — HR
     6. `apply_disclosure_style` — disclosure
-    7. `apply_color_style` — color and bg-color for all wired components
+    7. `apply_color_style` — color and bg-color for the page and every component
     8. the bespoke knobs (meta, code theme, hyperlink/image local-style), then `page.stylesheet` in the context of the layer that set it
 4. `render / render_to_browser`
 
@@ -1117,7 +1211,6 @@ supplies.
 | `EmptyStylesheet` | The stylesheet value is empty after trimming. |
 | `UnsupportedStylesheetScheme` | A `file://` URL was provided instead of a local path or HTTP(S) URL. |
 | `InvalidMetaShape` | `style.page.meta` is not an object (e.g. a string or number). |
-| `InvalidCodeTheme { value }` | The theme string does not match any known `ThemePair`. |
 
 ### Example
 
@@ -1147,9 +1240,9 @@ style:
 
 In this example, all hyperlinks render with cyan-400 text on a slate-900 background, except local links (anchors, relative file paths) which use blue-300 text. Local images receive green-400 fallback alt text at 80% width. The page includes an inlined CSS file, meta tags, and the Dracula code theme.
 
-## Disclosure Style (Sub-Spec #8)
+## Disclosure Style
 
-`style.disclosure.*` controls the layout and color of render-time [`::disclosure` blocks](./disclosure.md). The bucket uses `CommonStyle`, so it supports the same five knobs as `style.table.*` and `style.block-quote.*`.
+`style.disclosure.*` controls the layout and color of render-time [`::disclosure` blocks](./disclosure.md). The bucket uses `CommonStyle`, so it supports the same keys as `style.table.*` and `style.block-quote.*`; the five below are the common ones, and the rest are in [Margin, Padding, Border, Emphasis, and Word Wrap](#margin-padding-border-emphasis-and-word-wrap).
 
 ### Supported Keys
 
@@ -1208,35 +1301,36 @@ Each of the component buckets embeds a `CommonStyle` providing the shared layout
 
 | Mutation | Wire key | Value shape | Notes |
 |---|---|---|---|
-| `width` | `width` | `Nch`, `N%`, `auto`, or `fit-content` | Width mode; `auto`/`fit-content` are keywords (sub-spec #9); mutually exclusive with `max-width` within the same bucket |
+| `width` | `width` | `Nch`, `N%`, `auto`, or `fit-content` | Width mode; `auto`/`fit-content` are keywords; mutually exclusive with `max-width` within the same bucket |
 | `max-width` | `max-width` | `Nch` or `N%` | Upper bound; mutually exclusive with `width` within the same bucket |
 | `alignment` | `alignment` | `left` \| `center` \| `right` | Overrides page-level broadcast for this component |
-| `margin` | `margin` | `Nch` or `N%` | Sub-spec #9; applies to all four sides |
-| `padding` | `padding` | `Nch` or `N%` | Sub-spec #9; applies to all four sides |
+| `margin` | `margin` | `Nch` or `N%` | Applies to all four sides |
+| `padding` | `padding` | `Nch` or `N%` | Applies to all four sides |
 | `padding-left`, `padding-right` | `padding-left`, `padding-right` | `Nch` or `N%` | One side each, applied after `padding` |
-| `color` | `color` | Tailwind, hex, or web named | Sub-spec #5 wired; inheritance from page-level, component override |
-| `bg-color` | `bg-color` | Tailwind, hex, or web named | Sub-spec #5 wired; inheritance from page-level, component override |
-| `border` | `border` | bool, string, or object | Sub-spec #9; see [Sub-Spec #9](#sub-spec-9-style-everywhere) |
-| `emphasis` | `emphasis` | object | Sub-spec #9; see [Sub-Spec #9](#sub-spec-9-style-everywhere) |
-| `word-wrap` | `word-wrap` | `none` \| `wrap` \| `truncate` \| `wrap-prose` | Sub-spec #9; see [Sub-Spec #9](#sub-spec-9-style-everywhere) |
+| `color` | `color` | Tailwind, hex, or web named | Inherits from page-level; component value overrides |
+| `bg-color` | `bg-color` | Tailwind, hex, or web named | Component value overrides page-level |
+| `border` | `border` | bool, string, or object | See [Border Object](#border-object) |
+| `emphasis` | `emphasis` | object | See [Emphasis Object](#emphasis-object) |
+| `word-wrap` | `word-wrap` | `none` \| `wrap` \| `truncate` \| `wrap-prose` | See [Margin, Padding, Border, Emphasis, and Word Wrap](#margin-padding-border-emphasis-and-word-wrap) |
 
 ### Bespoke Style
 
 While every component provides the common mutations, several components offer additional bespoke properties:
 
-- **`page`** — `stylesheet` (CSS file path or URL for HTML output), `meta` (HTML `<meta>` tags), `code.theme` (code-block theme override), `background` (`transparent` \| `subtle` \| `pronounced`). Wired in sub-spec #7.
-- **`hr`** — `kind` (HrKind), `weight` (HrWeight), `alignment` (HrAlignment, includes `full`). Wired in sub-spec #6. Inline `kind` replaces the legacy per-block `style:` attribute; page-wide defaults are only read from `style.hr`.
-- **`hyperlinks`** — `local-style` provides a `CommonStyle` override for local hyperlinks. Wired in sub-spec #7.
-- **`images`** — `local-style` provides a `CommonStyle` override for local image references. Wired in sub-spec #7.
-- **`ul`** — `left-margin` controls list indent (e.g. `style.ul.left-margin: 4ch`). Wired in sub-spec #4.
+- **`page`** — `stylesheet` (CSS file path or URL for HTML output), `meta` (HTML `<meta>` tags), `theme` and `code.theme` (prose and code-block themes), `code.mode` (code-block variant), `background` (`transparent` \| `subtle` \| `pronounced`).
+- **`hr`** — `kind` (HrKind), `weight` (HrWeight), `alignment` (HrAlignment, includes `full`), `padding`. Inline `kind` replaces the legacy per-block `style:` attribute; page-wide defaults are only read from `style.hr`.
+- **`hyperlinks`** — `local-style` provides a `CommonStyle` override for local hyperlinks.
+- **`images`** — `local-style` provides a `CommonStyle` override for local image references; `padding`, `padding-left`, `padding-right`.
+- **`ul`** — `left-margin` controls list indent (e.g. `style.ul.left-margin: 4ch`).
+- **`code-block`** — `line-numbers` (`true`/`false`) turns the line-number gutter on or off.
 
-## Sub-Spec #9 — Style Everywhere
+## Margin, Padding, Border, Emphasis, and Word Wrap
 
-Sub-spec #9 exposes the full applicable `Layout`/`Style` surface for every
-`PageComponent` bucket. It adds `margin`, `padding`, `border`, `emphasis`, and
-`word-wrap` to the existing `width`/`max-width`/`alignment`/`color`/`bg-color`
-knobs, and it teaches `width` to accept the keywords `auto` and `fit-content`
-so the correct `renderable::layout::Width` mode is set (Decision D3).
+Beyond `width`/`max-width`/`alignment`/`color`/`bg-color`, most component
+buckets expose the rest of the applicable `Layout`/`Style` surface: `margin`,
+`padding`, `border`, `emphasis`, and `word-wrap`. `width` also accepts the
+keywords `auto` and `fit-content`, which set the matching
+`renderable::layout::Width` mode.
 
 ### Width Mode
 
@@ -1248,14 +1342,15 @@ so the correct `renderable::layout::Width` mode is set (Decision D3).
 | `auto` | `Width::Auto` |
 | `fit-content` | `Width::FitContent` |
 
-Omitting `width` preserves the component's existing default (Decision D3).
+Omitting `width` preserves the component's existing default.
 
 ### Expanded Surface Per Bucket
 
-The following keys are recognized in every component bucket that flattens
-`CommonStyle` (`table`, `block-quote`, `ul`, `ol`, `li`, `hyperlinks`,
-`images`, `hr`, `disclosure`, `code-block`) and in the `local-style` override
-blocks for hyperlinks and images:
+The schema admits all of these keys in `table`, `block-quote`, `ul`, `ol`,
+`li`, `disclosure`, and `code-block`, and in the `local-style` override blocks
+of `hyperlinks` and `images`. `images` and `hr` admit only `padding`,
+`padding-left`, and `padding-right` from this table, and `hyperlinks` none of
+them; elsewhere they are unknown keys:
 
 | Key | Value shape | Lowered to |
 |---|---|---|
@@ -1296,20 +1391,21 @@ style:
 
 ### Hyperlinks and Images
 
-`hyperlinks` and `images` still receive their `width`/`max-width`/`alignment`
+`hyperlinks` and `images` receive their `width`/`max-width`/`alignment`
 as `TextLayoutHints` or lone-image block layout rather than generic block
-`Layout` on every inline node. The expanded surface is available on the bucket
-itself and on the `local-style` override block.
+`Layout` on every inline node. The full table above is available on their
+`local-style` override blocks; on the buckets themselves only the keys named
+above are admitted.
 
 ### Code Blocks
 
-`style.code-block.*` (snake-case alias `code_block`) is a new bucket for fenced
-code-block layout/appearance. Code-block theme selection remains under
-`page.code.theme` for compatibility.
+`style.code-block.*` (snake-case alias `code_block`) is the bucket for fenced
+code-block layout and appearance, plus `line-numbers`. Code-block theme and
+variant are page settings: `page.code.theme` and `page.code.mode`.
 
 ### Errors
 
-Sub-spec #9 reuses the same error variants as earlier component buckets:
+These keys use the same error variants as the other component keys:
 
 - `ComponentWidthConflict { bucket }` — `width` and `max-width` set together.
 - `ComponentInvalidCssLength { bucket, field }` — a length field is `Length::Css(_)`.
@@ -1317,9 +1413,10 @@ Sub-spec #9 reuses the same error variants as earlier component buckets:
 ### Per-Component Support Contract
 
 The terminal/browser/markdown behavior for each property is governed by the
-component's render-tree contract. The authoritative per-component,
-per-target matrix is the
-[Style Everywhere matrix](../../../renderable/features/2026-06-30-style-everywhere/matrix.md).
+component's render-tree contract. renderable's
+[Layout and Style](../../../renderable/docs/layout-and-style.md) describes how
+each target consumes `Layout` and `Style`, and which combinations are proven
+on which target.
 
 ## Tailwind Colors
 

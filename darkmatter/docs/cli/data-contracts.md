@@ -212,7 +212,9 @@ record this output prints.
 Severity describes the problem, and `outcome` describes the run. A problem an
 `--allow` recovered keeps its severity while the run succeeds, so `severity: "error"`
 can appear with `outcome: "success"`. A warning a `--deny` made blocking stays
-`"warning"` while the run fails.
+`"warning"` while the run fails, with one exception: a `style` key that
+`--deny` made blocking on `md render` (`dm.style.unknown_key`,
+`dm.style.deprecated`) is reported as `"error"`.
 
 `source` locates the problem in the document that was written, not in the composed
 result, so transclusion cannot shift it:
@@ -347,6 +349,7 @@ classified by what failed:
 | `dm.schema.baseline` | `md schema validate --schema` could not load the baseline schema |
 | `dm.output.serialization_failed` | the value cannot be written in the requested format; see [TOML](#toml) |
 | `dm.output.open_failed` | `--show` could not open the file |
+| `dm.style.*`, and `dm.schema.*` for a style | `md render` could not use a style setter, a `--style` file, or the merged style; see [Style input errors](#style-input-errors) |
 | `dm.compose.failure` | anything else, on any command |
 
 A warning whose producer declares no code reports `dm.compose.warning`. These
@@ -359,6 +362,81 @@ warnings belong to the run's output rather than to composition:
 | `dm.link.legacy_structured_title` | a link title uses the removed `key=value` syntax; [`md clean`](./clean.md#migrating-link-titles) migrates it |
 | `dm.style.unknown_key` | `md render` found an unknown `style:` key |
 | `dm.style.deprecated` | `md render` found a deprecated `style:` key or inline rule style |
+
+### Style input errors
+
+`md render` (and `md FILE`) checks every [style it is given on the command
+line](./render.md#styling-from-the-command-line), setters and `--style`
+files, before it prints or opens anything, for every `--output`. A rejected
+style fails the run with exit status 1, and a data output carries the
+records in its one value with stderr empty. For a misspelled setter:
+
+```text
+$ md render doc.md style.magin=4 --output json
+```
+
+```json
+{
+  "file": "doc.md",
+  "outcome": "failure",
+  "document": null,
+  "diagnostics": [
+    {
+      "code": "dm.schema.unknown_key",
+      "severity": "error",
+      "message": "`style.magin`: `magin` is not a valid property under `style`; did you mean `style.margin`? (from the setter `style.magin=4`)",
+      "source": null,
+      "expected_type": null,
+      "actual_type": null,
+      "span": null,
+      "iteration_path": []
+    }
+  ],
+  "summary": null,
+  "lifecycle_output": [],
+  "read_set": []
+}
+```
+
+A schema problem's message starts with the property it is about,
+`` `style.<path>`: ``, and other messages about one property name it too. A
+problem with a value ends by naming where the value came from:
+`(from the setter …)`, `(in the style file … at line L, column C)`, or the
+document. A setter is in
+no file, so its `source` is `null`; a style-file record's `source` is that
+file, with the key's line and column when the format proves them, never the
+Markdown document.
+
+| Code | Severity | When |
+|---|---|---|
+| `dm.schema.unknown_key` | error | a setter names a key the document's schema does not declare (`style.magin=4`, `style.table.border.glow=1`, or a whole-object setter holding one); the message suggests a renamed key's new name, or else the nearest sibling key within two edits, as in ``did you mean `style.margin`?``; an unrelated word gets no suggestion |
+| `dm.schema.type_mismatch`, `dm.schema.constraint` | error | a setter or style file gives a declared key a value its schema refuses (`style.margin=abc`, `max-width: abc` in a file) |
+| `dm.style.unknown_key` | warning | a style file holds a key the schema does not declare; the key is left out and the rest applies. The document's own `style:` reports its unknown keys the same way |
+| `dm.style.deprecated` | warning | the document's `style:` uses a deprecated key or inline rule style |
+| `dm.style.invalid_value` | error | a value the schema admits but rendering cannot use, such as a color (`style.page.bg-color=currentColor`) or a length with an unsupported unit |
+| `dm.style.conflict` | error | one layer sets one field twice under different spellings (`style.ml=2 style.page.margin-left=3`), or sets both `width` and `max-width` on one component |
+| `dm.style.invalid_root` | error | a setter's `style=` value or a style file is not a mapping (`style='{ margin: '`, a file holding an array), or a `KEY@FILE` offset is missing or not a mapping |
+| `dm.style.empty_file` | error | a style file sets no value once unknown keys and nulls are removed (`{}`, or only unknown keys); an inline `style='{}'` is a valid no-op |
+| `dm.style.invalid_setter` | error | a setter's key is not a property path (`style..x=1`) |
+| `dm.data.malformed` | error | a style file is not valid in its format, located at the parser's line and column |
+| `dm.input.read_failure` | error | a `--style` argument that names no usable file: missing (with its `failure:` class, such as `no-match`), a URL, `-`, an inline object, or an extension other than `.json`, `.json5`, `.yaml`, `.yml`, and `.toml` |
+
+Two cases are easy to confuse:
+
+- **An unknown member of a compound value** is an unknown key, whichever
+  arm of the value it sits in: `table.border: { weight: thick, glow: 1 }`
+  drops `glow` with a `dm.style.unknown_key` warning in a style file or the
+  document, and is a `dm.schema.unknown_key` error in a setter. The rest of
+  the value still applies.
+- **Unknown-key warnings become errors under `--deny style`** (or
+  `--deny dm.style.unknown_key`, or `--deny all`), in a style file and in the
+  document alike; see [Policy Flags](./policy.md#diagnostics---deny). A setter
+  is already an error.
+
+A failure is reported with the warnings found before it, so a run whose
+style file is empty after its unknown keys are dropped reports the
+`dm.style.empty_file` error followed by each `dm.style.unknown_key`
+warning.
 
 ### Failures inside `::map` and `::filter` bodies
 
@@ -746,6 +824,7 @@ outcome, depending on whether its shape was published before `outcome` existed:
 | Command | Schema | Value |
 |---|---|---|
 | [`md clean`](./clean.md#version-1-json-envelope) | [`clean.yaml`](../../cli/schemas/output/clean.yaml) | the version-1 object: `version`, `source`, `frontmatter`, `diagnostics`, `applied`, `changed`, `warnings`; see below for its run-level records |
+| [`md list-themes`](./list-themes.md) | [`list-themes.yaml`](../../cli/schemas/output/list-themes.yaml) | a bare array of `{ name, description }`, one per theme in canonical order; a run with a diagnostic is `{ "outcome", "diagnostics", "value" }`, as for `md get` |
 | [`md toc`](./toc.md) | [`toc.yaml`](../../cli/schemas/output/toc.yaml) | `title`, the hashes, `preamble`, `structure` (the heading tree), `code_blocks`, `internal_links`, `slug_index` |
 | [`md delta`](./delta.md) | [`delta.yaml`](../../cli/schemas/output/delta.yaml) | `classification`, `statistics`, the frontmatter and preamble flags, `added`, `removed`, `modified`, `moved`, `code_block_changes`, `broken_links` |
 | [`md get`](./get.md) | [`get.yaml`](../../cli/schemas/output/get.yaml) | one path's value, or a flat object keyed by the [paths](./index.md#property-paths) as written; a missing path is `""` |

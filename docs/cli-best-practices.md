@@ -177,7 +177,16 @@ libraries so no CLI hand-writes a renderer per format
 
 8. **A CLI with subcommands never has a separate root command.** A root alias is fine
    for ergonomics, but it must be an exact alias of one named subcommand, so that
-   every flag and output rule has one meaning.
+   every flag and output rule has one meaning. Shared controls (width, verbosity,
+   debug, launch configuration, completion generation) are not part of the alias
+   and keep their documented placement rules: a root-only control stays root-only
+   rather than becoming a clap global, and an aliased option given both at the
+   root and after the subcommand is a usage error. Enforce this with tests
+   generated from the clap definition, not with a hand-kept list: `md`'s
+   `darkmatter/cli/tests/l1/render_alias_parity.rs` (for example
+   `every_root_argument_is_classified`, which fails on a root argument not
+   placed as aliased, shared, or root-only) and
+   `darkmatter/cli/src/args/cli.rs::the_root_declares_only_shared_controls_besides_render_options`.
 
 ### 2.2 Two CLIs are monolithic
 

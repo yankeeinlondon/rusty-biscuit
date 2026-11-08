@@ -23,8 +23,9 @@ md compose doc.md --deny all --allow shell-timeout
 # Validate without the built-in baseline schema.
 md schema validate doc.md --disable baseline-schema
 
-# Fail when the `style:` frontmatter has an unknown or deprecated key.
+# Fail when the `style:` frontmatter or a style file has an unknown or deprecated key.
 md doc.md --deny style
+md doc.md --style ./site.yaml --deny style
 ```
 
 Each verb is repeatable (`--allow missing-hyperlinks --allow shell-timeout`),
@@ -35,7 +36,7 @@ and repeating the same selection is harmless.
 | Command | `--allow` | `--deny` | `--disable` |
 |---|---|---|---|
 | `md compose` | every recovery, `host=HOST`, `all` | every recovery, `style`, a diagnostic code, `all` | `baseline-schema`, `schema-triggers`, `collection-blocks` |
-| `md render`, `md FILE` | — | `style`, the `dm.link.*` codes, `all` | — |
+| `md render`, `md FILE` | — | `style`, `dm.style.unknown_key`, `dm.style.deprecated`, the `dm.link.*` codes, `all` | — |
 | `md clean` | — | — | `baseline-schema`, `schema-triggers` |
 | `md schema validate` | — | — | `baseline-schema`, `schema-triggers` |
 
@@ -99,9 +100,16 @@ says. See
 
 ### Diagnostics (`--deny`)
 
-- **`style`**: unknown or deprecated `style:` keys, and deprecated inline
-  horizontal-rule styles in the body, fail rendering (`md FILE` and `md render`).
-  Informational notices never block.
+- **`style`**: fail rendering (`md FILE` and `md render`) on a style key that
+  would otherwise only warn:
+    - an unknown or deprecated key in the document's `style:` frontmatter, and
+      a deprecated inline horizontal-rule style in the body;
+    - an unknown key in a `--style` file, which is otherwise left out with a
+      warning.
+
+  A [style setter](./render.md#style-setters) needs no denial: an unknown key
+  or a wrong value there is already an error. Informational notices never
+  block. See [When a style is rejected](./render.md#when-a-style-is-rejected).
 - **A recovery identifier**: that recovery does not apply, and its warning
   blocks.
 - **A diagnostic code**, such as `dm.expression.uncertain_call` or
@@ -174,7 +182,9 @@ recoverable problem and still fails on an uncertain call.
 ## When a blocking diagnostic stops the command
 
 Denial changes a command's outcome, never a diagnostic: a blocked warning
-keeps its code, severity, and message. The command stops as soon as the
+keeps its code, severity, and message. The one exception is a `style` key
+denied on `md render`, which is reported with severity `error` (see
+[Diagnostics](./data-contracts.md#diagnostics)). The command stops as soon as the
 diagnostic is known, without reordering its steps or undoing work already
 done.
 

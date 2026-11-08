@@ -4,7 +4,7 @@
 each with a short description. Use a name as the value of `style.page.theme`
 (the prose theme) or `style.page.code.theme` (the code theme):
 
-```bash
+```sh
 md list-themes
 md README.md style.page.theme=github style.page.code.theme=dracula
 ```
@@ -15,7 +15,7 @@ completion offers.
 
 ## Usage
 
-```bash
+```sh
 # A list for reading
 md list-themes
 

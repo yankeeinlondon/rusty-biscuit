@@ -27,7 +27,7 @@ No business logic lives in the CLI crate. The CLI handles I/O only.
 
 For CLIs with many subcommands, use a `commands/` directory with one file per subcommand.
 
-**Root command:** a CLI that has subcommands never has a separate root command. A root alias is fine for ergonomics, but it must be an exact alias of one named subcommand.
+**Root command:** a CLI that has subcommands never has a separate root command. A root alias is fine for ergonomics, but it must be an exact alias of one named subcommand. Shared controls (width, verbosity, debug, launch configuration, completion generation) are not part of the alias and keep their documented placement rules; a root-only control stays root-only rather than becoming a clap global. Enforce both with parity tests generated from clap, as `md` does: `darkmatter/cli/tests/l1/render_alias_parity.rs` (`every_root_argument_is_classified`) and `darkmatter/cli/src/args/cli.rs::the_root_declares_only_shared_controls_besides_render_options`.
 
 ## Argument Parsing with clap
 

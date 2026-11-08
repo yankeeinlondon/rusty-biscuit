@@ -9,10 +9,14 @@ one; `commands::validate_subcommand_usage` rejects any root render argument
 (setters included) before a subcommand with exit 2, and
 `args::render::tests` enumerates the clap definition so a new field without a
 root representative fails. Shared controls (`--width`, `-v`, `--debug`,
-`--magic-root`) are not render arguments. After the help, version, and
+`--magic-root`, `--completions`) are not render arguments and keep their own
+placement: `--magic-root` and `--completions` are root-only (not clap globals).
+`cli/tests/l1/render_alias_parity.rs` proves both spellings parse, prepare,
+and print alike, and `every_root_argument_is_classified` fails on a root
+argument that is not placed as render, shared, or root-only. After the help, version, and
 completion actions, `Cli::command_or_render` returns the explicit command or a
-clone of the root options; nothing is combined (root `--save` and
-`--list-themes` are gone; `md list-themes` is a command leaf). Both forms
+clone of the root options; nothing is combined, and the root has no
+non-render behavior (`md list-themes` is a command leaf). Both forms
 enter `commands::render::dispatch_render(options, cli, request,
 &OutputEnvironment)`, which builds `args::PreparedRenderOptions` (classified
 input/setters, `--style` references, and resolved policy; `cli` supplies
@@ -31,13 +35,14 @@ target. Trigger findings from the schema selection go to the sink or stderr;
 `--deny style` also blocks body inline-rule styles, and `--deny <code>` a
 single warning code. Page builders (`render::terminal_page`,
 `artifact::html_page`, `render::apply_presentation`) take a
-`PagePresentation { style: &PreparedStyle, features, mermaid, legacy }` and
+`PagePresentation { style: &PreparedStyle, features, mermaid }` and
 `PageInputs`, never `Cli`; the terminal is `Terminal::from_output_options`.
 `commands/render.rs::document_value` (clean, set) uses `render::document_style`,
 the document layer alone with no CLI override.
 
 `cli/src/render_style.rs` turns those `--style` references and setters into
-`darkmatter::style::StyleLayer`s and prints nothing:
+`darkmatter::style::StyleLayer`s (one per file in order, then all setters as
+one final layer) and prints nothing:
 `prepare_cli_style_inputs` selects the Markdown document's schema once
 (`commands/schema/validate.rs::select_document_schema`, the same passive
 selection completion's `effective_document_schema` uses), reads each file

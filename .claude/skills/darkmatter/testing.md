@@ -255,3 +255,15 @@ sentinel" alone passes for the wrong reason. `cli/tests/l1/path_completion.rs` i
 - CSV/TSV readers live in biscuit-file's feature-gated `l1-delimited` target;
   its `just test` enables `delimited`, so a bare `cargo nextest -p
   biscuit-file` without the feature skips them.
+
+## Documented `md` examples
+
+`cli/tests/l1/docs_style_examples.rs` parses every `md` command in the sh
+fences of the render-surface docs (`docs/cli/*`, `cli/README.md`,
+`layouts-and-style.md`, `docs/rendering/{style,mermaid,code-highlighting}.md`)
+through `Cli`, `validate_subcommand_usage`, and render/setter preparation,
+prepares each YAML fence with a root `style:` with no warning allowed, and
+pins `docs/cli/index.md`'s `md --help` sample to the generated help. An
+example that shows a usage failure carries `# exit 2` or `# usage error` and
+must fail; a runtime failure goes in a `text` fence. A new doc that shows
+render commands gets its own `#[test]` with `include_str!` inside it.

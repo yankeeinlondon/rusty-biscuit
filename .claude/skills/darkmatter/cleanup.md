@@ -37,6 +37,10 @@ The user-facing record is the area's `docs/` tree.
   Compose maps its options (`IncidentalNewlineMode`, `with_list_spacing`
   taking `ListItemPadding`, `with_indentation`, `with_fixed_width`) to explicit
   overrides; a document's own `style.markdown` is not consulted there.
+  A `style.markdown` value from an `md render` setter or `--style` file is
+  validated with the style layers but never reaches cleanup: render's
+  guarded cleanup and `--indent` behave exactly as without it, and the CLI
+  layer is never injected into frontmatter or cleanup options.
   `strip_incidental_newlines` and `reflow_to_width` stay as standalone,
   unguarded helpers (they normalize CRLF); nothing in cleanup calls them.
 - Parse budget: cleanup parses go through `cleanup_parser`; directive and

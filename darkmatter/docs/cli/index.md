@@ -1,32 +1,66 @@
 # Darkmatter CLI
 
-The Darkmatter CLI works off of a "subcommand" structure but if no "subcommand" is specified it will default to _rendering_ with the `render` subcommand. Here's the layout of the help system you'll get when you run `md --help` (or just `md`):
+The Darkmatter CLI works off of a "subcommand" structure, and **`md FILE …` is `md render FILE …`**: with no subcommand, `md` renders, taking exactly the arguments, output, diagnostics, and exit status of [`md render`](./render.md). A file named like a command needs `./` or `--` (`md ./toc`, `md -- toc`). With no file and a terminal on stdin, `md` prints the help below to stderr and exits with status 1; a redirected stdin is read as the document.
+
+Render options, such as `--style`, `--output`, and the `style…=VALUE` setters, go after `md render` or anywhere on `md` alone, never before another subcommand; `--width`, `-v`, and `--debug` may go anywhere; `--magic-root` and `--completions` go before any subcommand. See [Where options go](./render.md#where-options-go).
+
+Here's the layout of the help system you'll get when you run `md --help`. Root help lists the commands, the shared controls, and `--style`; `md render --help` lists every render option.
 
 ```txt
 Command-line interface for the darkmatter markdown renderer.
 
 Use `md --help` to see all available options.
 
-Usage: md [OPTIONS] [INPUT] [COMMAND]
+Usage: md [OPTIONS] [COMMAND]
+
+`md [ARGS] [OPTIONS]` is `md render [ARGS] [OPTIONS]`; see `md render --help`.
 
 Commands:
-  render      Render a markdown document (same as default behavior without a subcommand)
-  clean       Clean up markdown formatting
-  compose     Compose a document through the compose pipeline
-  toc         Show markdown table of contents
-  delta       Compare two markdown documents
-  get         Get frontmatter properties from a markdown document
-  set         Set a frontmatter property on a markdown document
-  rm          Remove one or more frontmatter properties from a markdown document
-  edit        Open a markdown file in your preferred editor
-  validate    Validate references in a markdown document
-  hash        Hash a markdown document's frontmatter and body
-  schema      Schema authoring and validation commands
-  graph       Visualize a markdown file's dependency graph
-  code-block  Render a single code block from a file or literal content
+  render       Render a markdown document (same as default behavior without a subcommand)
+  clean        Clean up markdown formatting
+  compose      Compose a document through the compose pipeline
+  list-themes  List the themes `style.page.theme` and `style.page.code.theme` accept
+  toc          Show markdown table of contents
+  delta        Compare two markdown documents
+  get          Get frontmatter values from a markdown document, by property path
+  set          Set the value at a frontmatter property path in a markdown document
+  rm           Remove the values at one or more frontmatter property paths from a markdown document
+  edit         Open a markdown file in your preferred editor
+  validate     Validate references in a markdown document
+  hash         Hash a markdown document's frontmatter and body
+  schema       Schema authoring and validation commands
+  graph        Visualize a markdown file's dependency graph
+  code-block   Render a single code block from a file or literal content
 
-Arguments:
-  [INPUT]  Input file path (use "-" for stdin)
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Shared controls:
+      --width <WIDTH>
+          Width the output is wrapped to: N columns, N%, `auto` (`OUTPUT_COLUMNS`, else the
+          terminal, else unlimited), `source` (keep authored line breaks), or `unlimited`. `md
+          render`'s `style.max-width` caps content inside it
+
+  -v, --verbose...
+          Increase verbosity for styled user-facing output (-v summary, -vv detailed)
+
+      --magic-root <DIR>
+          Search DIR for `@` references, before the default roots (repeatable; searched in the order
+          given; give it before the subcommand). A relative DIR is relative to the launch directory;
+          DIR must exist
+
+      --completions <SHELL>
+          Generate shell completions for the specified shell
+
+          [possible values: bash, elvish, fish, powershell, zsh]
+
+Render:
+      --style <FILE>
+          A JSON, JSON5, YAML, or TOML style file (repeatable; later files merge over earlier ones)
 ```
 
 Three things work the same way on every command:
@@ -126,7 +160,7 @@ md compose foobar.md | md
 
 ## Property Paths
 
-`md get`, `md set`, `md rm`, and the `key=value` setters of `md compose` all name a value inside frontmatter the same way: with a **property path**, a list of keys joined by `.`.
+`md get`, `md set`, `md rm`, the `key=value` setters of `md compose`, and the [`style…=VALUE` setters](./render.md#style-setters) of `md render` all name a value inside frontmatter the same way: with a **property path**, a list of keys joined by `.`.
 
 ```yaml
 ---
@@ -153,6 +187,7 @@ md get doc.md 'a\.b'                 # the key whose name is a.b
 md set doc.md author.name Ann --save # changes one value, keeps the rest of author
 md rm doc.md items.0                 # removes it; the next element becomes items.0
 md compose doc.md author.name=Ann    # overrides it for this run only
+md doc.md style.page.max-width=72     # renders with it for this run only
 ```
 
 ### Spelling a path
@@ -199,7 +234,7 @@ A path command never destroys what you did not name. To replace `nick: Ken` with
 
 ## Command-Line Values
 
-`md set` and `md compose` setters read a value in the same way, in two steps. The text decides the value's form, then the type the document's schema declares for that place decides how plain text and a quoted string are read.
+`md set`, `md compose` setters, and `md render` style setters read a value in the same way, in two steps. The text decides the value's form, then the type the document's schema declares for that place decides how plain text and a quoted string are read.
 
 **Step 1, the form.** The whole text is read as JSON5:
 
