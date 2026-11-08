@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-11-06
-phase: 5
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -165,6 +165,88 @@ docs_created_during_phase_4:
 skills_files_updated_during_phase_4:
 - .claude/skills/darkmatter/cleanup.md
 - .claude/skills/darkmatter/cli.md
+source_files_during_phase_5:
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/completion.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/parsers.rs
+- darkmatter/cli/src/args/render.rs
+- darkmatter/cli/src/args/render/tests.rs
+- darkmatter/cli/src/args/render_prepare.rs
+- darkmatter/cli/src/args/wrappers.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/lib.rs
+- darkmatter/cli/src/render.rs
+- darkmatter/cli/src/style_claims.rs
+- darkmatter/cli/tests/common/mod.rs
+- darkmatter/cli/tests/common/style.rs
+- darkmatter/cli/tests/l1/code_block.rs
+- darkmatter/cli/tests/l1/feature_flag.rs
+- darkmatter/cli/tests/l1/help.rs
+- darkmatter/cli/tests/l1/layout_alignment.rs
+- darkmatter/cli/tests/l1/layout_fill.rs
+- darkmatter/cli/tests/l1/layout_flags.rs
+- darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/mermaid_features.rs
+- darkmatter/cli/tests/l1/output_envelope.rs
+- darkmatter/cli/tests/l1/render_alias_parity.rs
+- darkmatter/cli/tests/l1/render_basic.rs
+- darkmatter/cli/tests/l1/render_style_matrix.rs
+- darkmatter/cli/tests/l1/render_style_wiring.rs
+- darkmatter/cli/tests/level2/level2_code_block_styling.rs
+- darkmatter/cli/tests/level2/level2_disclosure_blocks.rs
+- darkmatter/cli/tests/level2/level2_frontmatter_images.rs
+- darkmatter/cli/tests/level2/level2_frontmatter_tables.rs
+- darkmatter/cli/tests/level2/level2_horizontal_rules.rs
+- darkmatter/cli/tests/level2/level2_layout_dimensions.rs
+- darkmatter/cli/tests/level2/level2_ordered_lists.rs
+- darkmatter/cli/tests/level2/level2_render_no_input.rs
+- darkmatter/cli/tests/level2/main.rs
+- darkmatter/lib/benches/render_pipeline_steps.rs
+- darkmatter/lib/src/layout/error.rs
+- darkmatter/lib/src/layout/page/tests.rs
+- darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+- darkmatter/lib/src/markdown/render_tree/style_tree_parity_tests.rs
+- darkmatter/lib/src/style/apply.rs
+- darkmatter/lib/src/style/bespoke.rs
+- darkmatter/lib/src/style/cli_claims.rs
+- darkmatter/lib/src/style/coverage_tests.rs
+- darkmatter/lib/src/style/descriptor.rs
+- darkmatter/lib/src/style/layer.rs
+- darkmatter/lib/src/style/mod.rs
+- darkmatter/lib/tests/browser/browser_render.rs
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+- darkmatter/lib/tests/l1/cutover_reference.rs
+- darkmatter/lib/tests/l1/disclosure_render_targets.rs
+- darkmatter/lib/tests/l1/horizontal_rule_integration.rs
+- darkmatter/lib/tests/l1/layout_snapshots.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/style_frontmatter.rs
+- darkmatter/lib/tests/l1/style_frontmatter_parity.rs
+- darkmatter/lib/tests/l1/style_layer_matrix.rs
+- darkmatter/lib/tests/l1/tree_features_characterization.rs
+- darkmatter/lib/tests/level2/level2_render_tree_terminal/layout_policy.rs
+- darkmatter/schemas/partials/style.yaml
+docs_updated_during_phase_5:
+- darkmatter/docs/cli/developing.md
+- darkmatter/docs/cli/output-and-width.md
+- darkmatter/docs/cli/render.md
+- darkmatter/docs/rendering/code-highlighting.md
+- darkmatter/docs/rendering/mermaid.md
+- darkmatter/docs/rendering/style.md
+- darkmatter/docs/topics/layouts-and-style.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/darkmatter/rendering.md
 ---
 
 # Render Surface Implementation Plan

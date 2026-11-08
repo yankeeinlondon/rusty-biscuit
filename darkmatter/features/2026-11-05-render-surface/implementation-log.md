@@ -254,6 +254,72 @@ decisions_for_review:
         and expected one match. Since Phase 2 added top-level `style.padding*`
         shorthands, that prefix has several matches, so the test now types
         `style.pag`.
+    - |-
+        Phase 5 ran its tasks out of the plan's wave order. First the layout tests
+        were migrated to setters while the old flags still worked. Then the flags and
+        the claim machinery were removed (Wave 8). The input-robustness matrix and the
+        alias-parity tests (Wave 7) came last. The plan put Wave 8 after all of
+        Wave 7. Doing parity last meant its clap-generated option inventory was the
+        final one, without `--max-width` or the old flags. Otherwise it would have
+        needed representatives for options that were about to be deleted. The end
+        state is the same. Nothing needs redoing.
+    - |-
+        `images` gained `padding`, `padding-left`, and `padding-right` in the
+        embedded style schema and the runtime descriptor. The image style model
+        already had and applied these fields, but the schema did not admit them. So
+        `--fill-images pad=N` / `indent=N` had no style replacement, and the spec says
+        every retained fill behavior must have one. Alternative: accept the loss and
+        document it. Reversing this would mean removing the three keys, re-blessing
+        six recursive-schema golden fixtures, and deleting
+        `layout_fill::images_padding_moves_a_lone_image_as_the_old_fill_did`.
+    - |-
+        The removed `--page-bg-color` flag accepted `30,30,35` (an RGB triple) and
+        `currentColor`. The style color grammar does not; the same colors are written
+        `#1e1e23` and `current`. I kept the grammar unchanged, and recorded this as a
+        spelling loss, not a capability loss. Widening it would change every color
+        field in frontmatter as well, which the spec did not ask for. If the reviewer
+        wants the old spellings, widen the shared style color parser and add
+        schema/parser agreement cases. No other code depends on this choice.
+    - |-
+        `render::apply_presentation` now calls `apply_prepared_style` directly.
+        Previously, a stylesheet with no recorded origin quietly fell back to the
+        document's context. Now it fails with `StylesheetContextMissing`. Style
+        preparation always records an origin for a winning `page.stylesheet`, so the
+        fallback should be unreachable, and an error is safer than resolving in a
+        guessed context. Restoring the fallback would be a small change in
+        `apply_prepared_style`.
+    - |-
+        Two defects were found by the input matrix and fixed in
+        `lib/src/style/layer.rs`:
+        (1) An unknown member inside a union's object arm, e.g.
+        `table.border: { weight: thick, glow: 1 }`, is now treated like any other
+        unknown key: a style file warns and drops it, a setter fails with
+        `dm.schema.unknown_key` at `table.border.glow`, and a document warns. Before
+        the fix it was a whole-value constraint error, and documents dropped it
+        silently.
+        (2) A style schema problem's message is now prefixed with
+        `` `style.<path>`: `` unless the message already names the path.
+        Alternative for (2): put the path only in a structured field. Reversing either
+        means editing `admit_pass`/`undeclared_members` or `StyleProblem`'s `Display`,
+        and the matching `style_layer_matrix` cells.
+    - |-
+        A failed data output with `--show` still opens its failure value, as
+        `docs/cli/output-and-width.md` documents and the code does. The plan's input
+        matrix says by default that a malformed style "opens no artifact". I read
+        that as being about the rendered page. So the no-artifact assertions use
+        formatted outputs, and data-output failures are tested without `--show`. If
+        the plan's literal reading wins, `ReportSink::finish_with` must skip opening
+        on failure, and the documented behavior changes.
+    - |-
+        Library test helpers that chain the `apply_*_style` functions (the
+        structural gate, parity tests, cutover reference, bench, and
+        tree-features characterization) still pass
+        `FileResolutionContext::new(std::env::temp_dir())` to `apply_bespoke_style`
+        rather than a request-derived context or `apply_prepared_style`. Switching
+        them to full preparation would change what those tests prove, because
+        preparation validates differently from `from_frontmatter`. The context is
+        explicit and never the process directory. Changing it later touches only
+        those helpers.
 source_files_during_phase_2:
     - darkmatter/lib/src/style/apply.rs
     - darkmatter/lib/src/style/bespoke.rs
@@ -354,39 +420,33 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/cli.md
 message_to_agent: |-
-    Phase 4 wired rendering. Both spellings go through
-    `commands::render::dispatch_render`, and setters, `--style` files,
-    `md list-themes`, and render completion all work. Docs for these are in
-    `docs/cli/render.md` and `docs/cli/list-themes.md`.
+    Phase 5 finished all of Wave 7 and Wave 8. The old root presentation
+    flags, `md render --max-width`, `cli/src/style_claims.rs`,
+    `lib/src/style/cli_claims.rs`, and every `*StyleOverrides` mask are gone.
+    `apply_*_style` take no mask. `render::apply_presentation` is one
+    `apply_prepared_style` call.
 
-    What Phase 5 removes, and where it lives:
-    - The old hidden root presentation flags and `md render --max-width` still
-      work. They travel as `style_claims::LegacyPresentation`, attached in
-      `dispatch_render` and stored in `PreparedRenderOptions.legacy`. The page
-      builders apply them in `render::apply_presentation` with
-      `apply_cli_claims` and the `*_overrides_from_claims` masks. Removing the
-      flags means deleting `LegacyPresentation`, `style_claims.rs`, the `legacy`
-      field of `PreparedRenderOptions`, and the `legacy` field of
-      `render::PagePresentation`. Then call `apply_prepared_style` (or the plain
-      `apply_*_style` functions without masks) in `apply_presentation`.
-    - `render::apply_cli_layout_flags(page, &Cli)` remains only for test callers:
-      `cli/tests/common/mod.rs` and `layout_fill.rs`.
-    - `RenderOptions.max_width` is still listed in `has_explicit_arguments` and in
-      the root-rejection sample map.
-    - Test helpers that build pages now use `render::document_style`,
-      `PagePresentation`, and `apply_presentation`; see `layout_fill.rs`,
-      `feature_flag.rs`, and `mermaid_features.rs`.
-
-    Other facts:
-    - Located failures: `ClassifiedFailure::located` and `located_from`. A
-      record built that way keeps `source: null`, and the sink never stamps the
-      document's path on it. Use them for any new CLI-layer failure.
-    - No input: `OutputEnvironment.stdin_is_terminal`. The in-process test is
-      `render_dispatch::no_input`. The single PTY wiring test the plan asks for is
-      not written yet.
-    - `render_dispatch.rs` holds the Phase 4 behavior tests. Its spelling-parity
-      tests are one per target, generated by a macro with a guard test that
-      checks the list against `OutputTarget::ALL`.
+    For Phase 6 (documentation):
+    - Partial doc fixes already landed: `docs/cli/render.md` has the full
+      presentation-flag migration table, a fill sub-table, and a "Themes and line
+      numbers" section. `docs/rendering/style.md` has one precedence section,
+      "Later Style Layers Win, Field by Field". Examples that would now fail were
+      fixed in `output-and-width.md`, `mermaid.md`, and `layouts-and-style.md`.
+      Review these rather than rewriting them.
+    - `docs/rendering/style.md` still says "sub-spec #N" in many places, which
+      predates this feature. Docs must not name specs; consider cleaning it.
+    - `images` now accepts `padding`/`padding-left`/`padding-right`; document it
+      with the other component keys.
+    - Two style-preparation behaviors changed and need docs:
+      - an unknown member of a union's object arm (e.g. `table.border.glow`) is an
+        unknown key (warned in a file or document, an error for a setter);
+      - schema problems are prefixed with `` `style.<path>`: ``.
+    - Color spellings `30,30,35` and `currentColor` (old `--page-bg-color`) are
+      not accepted; use `#1e1e23` and `current`. The migration table should say
+      so if it doesn't.
+    - The working tree was committed by the pipeline mid-phase (commit
+      `498f7cbbf`), so `git status` alone does not show Phase 5's files; use the
+      `*_during_phase_5` frontmatter lists.
 source_files_during_phase_4:
     - darkmatter/cli/src/args/cli.rs
     - darkmatter/cli/src/args/command.rs
@@ -441,6 +501,88 @@ docs_created_during_phase_4:
 skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/cleanup.md
     - .claude/skills/darkmatter/cli.md
+source_files_during_phase_5:
+    - darkmatter/cli/src/args/cli.rs
+    - darkmatter/cli/src/args/completion.rs
+    - darkmatter/cli/src/args/mod.rs
+    - darkmatter/cli/src/args/parsers.rs
+    - darkmatter/cli/src/args/render.rs
+    - darkmatter/cli/src/args/render/tests.rs
+    - darkmatter/cli/src/args/render_prepare.rs
+    - darkmatter/cli/src/args/wrappers.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/src/lib.rs
+    - darkmatter/cli/src/render.rs
+    - darkmatter/cli/src/style_claims.rs
+    - darkmatter/cli/tests/common/mod.rs
+    - darkmatter/cli/tests/common/style.rs
+    - darkmatter/cli/tests/l1/code_block.rs
+    - darkmatter/cli/tests/l1/feature_flag.rs
+    - darkmatter/cli/tests/l1/help.rs
+    - darkmatter/cli/tests/l1/layout_alignment.rs
+    - darkmatter/cli/tests/l1/layout_fill.rs
+    - darkmatter/cli/tests/l1/layout_flags.rs
+    - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/mermaid_features.rs
+    - darkmatter/cli/tests/l1/output_envelope.rs
+    - darkmatter/cli/tests/l1/render_alias_parity.rs
+    - darkmatter/cli/tests/l1/render_basic.rs
+    - darkmatter/cli/tests/l1/render_style_matrix.rs
+    - darkmatter/cli/tests/l1/render_style_wiring.rs
+    - darkmatter/cli/tests/level2/level2_code_block_styling.rs
+    - darkmatter/cli/tests/level2/level2_disclosure_blocks.rs
+    - darkmatter/cli/tests/level2/level2_frontmatter_images.rs
+    - darkmatter/cli/tests/level2/level2_frontmatter_tables.rs
+    - darkmatter/cli/tests/level2/level2_horizontal_rules.rs
+    - darkmatter/cli/tests/level2/level2_layout_dimensions.rs
+    - darkmatter/cli/tests/level2/level2_ordered_lists.rs
+    - darkmatter/cli/tests/level2/level2_render_no_input.rs
+    - darkmatter/cli/tests/level2/main.rs
+    - darkmatter/lib/benches/render_pipeline_steps.rs
+    - darkmatter/lib/src/layout/error.rs
+    - darkmatter/lib/src/layout/page/tests.rs
+    - darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+    - darkmatter/lib/src/markdown/render_tree/style_tree_parity_tests.rs
+    - darkmatter/lib/src/style/apply.rs
+    - darkmatter/lib/src/style/bespoke.rs
+    - darkmatter/lib/src/style/cli_claims.rs
+    - darkmatter/lib/src/style/coverage_tests.rs
+    - darkmatter/lib/src/style/descriptor.rs
+    - darkmatter/lib/src/style/layer.rs
+    - darkmatter/lib/src/style/mod.rs
+    - darkmatter/lib/tests/browser/browser_render.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+    - darkmatter/lib/tests/l1/cutover_reference.rs
+    - darkmatter/lib/tests/l1/disclosure_render_targets.rs
+    - darkmatter/lib/tests/l1/horizontal_rule_integration.rs
+    - darkmatter/lib/tests/l1/layout_snapshots.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/style_frontmatter.rs
+    - darkmatter/lib/tests/l1/style_frontmatter_parity.rs
+    - darkmatter/lib/tests/l1/style_layer_matrix.rs
+    - darkmatter/lib/tests/l1/tree_features_characterization.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/layout_policy.rs
+    - darkmatter/schemas/partials/style.yaml
+docs_updated_during_phase_5:
+    - darkmatter/docs/cli/developing.md
+    - darkmatter/docs/cli/output-and-width.md
+    - darkmatter/docs/cli/render.md
+    - darkmatter/docs/rendering/code-highlighting.md
+    - darkmatter/docs/rendering/mermaid.md
+    - darkmatter/docs/rendering/style.md
+    - darkmatter/docs/topics/layouts-and-style.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/cli.md
+    - .claude/skills/darkmatter/library-surfaces.md
+    - .claude/skills/darkmatter/rendering.md
 ---
 
 # Implementation Log for 2026-11-05-render-surface (7 phases)
@@ -1307,3 +1449,57 @@ Smell grep over `layer.rs`, `normalize.rs`, `render_style.rs`, and the
   terminal. For both `md` and `md render`, stdout is empty, the exit is 1, and
   stderr holds the same root help.
 - No spelling divergence was found, so there was no product change.
+
+### Requirement-to-test mapping (Phase 5)
+
+| Requirement | Tests |
+|---|---|
+| Alias parity of parse, prepared value, and effective style for every render option and sampled setter, generated from clap and the schema, with guards | `render_alias_parity::{every_render_argument_has_a_representative, every_root_argument_is_classified, every_style_setter_family_decides_the_same_in_both_spellings, …}` |
+| Every nonshared render option before a subcommand exits 2 | `args::render::tests::every_root_render_argument_before_a_subcommand_is_a_usage_error` (in process); `render_alias_parity` spawned rows (8) |
+| Help, version, and completion are separate early actions | `render_alias_parity` early-action rows (4) plus `-V` |
+| Styled byte parity for terminal, plain, HTML, and MarkdownPlus | `render_alias_parity::styled_*_bytes_agree`; unstyled per target in `render_dispatch` |
+| No-input TTY (PTY wiring), redirected empty and nonempty stdin, `-`, shared-controls-only, command-name inputs | `level2_render_no_input::level2_render_no_input_on_a_terminal_prints_root_help_in_both_spellings`; `render_alias_parity` stdin and command-name rows |
+| Input robustness matrix | the "Cover input failures" table above |
+| Layout behavior retained through setters (broadcasts, every fill mode, side naming, padding reset, HR placement) | the migrated `layout_*` L1 files and the seven L2 files listed above |
+| Removed flags are unknown arguments (exit 2), with no `REMOVED_FLAGS` entry | `args::cli::tests::{removed_render_flags_are_unknown_arguments, the_root_declares_only_shared_controls_besides_render_options}`, `render_basic::removed_render_flags_are_unknown_arguments`, `help::*`, `args::render::tests` help checks |
+| A layer beats the document field by field (replaces the claim precedence) | `style_frontmatter::{setter_layer_overrides_document_left_margin_field_by_field, code_theme_setter_layer_overrides_document_code_theme}`, `layout_style_frontmatter::*` |
+
+### Gates (macOS, run by this session after every subagent finished)
+
+| Command | Result |
+|---|---|
+| `darkmatter: just test` | 15172 run, 15172 passed, 10 skipped, 152.4 s; no test at or above 5 s; no reruns |
+| `darkmatter: just lint` | exit 0 (includes the zed-dmls wasm32-wasip2 check) |
+| `just check-tier-coverage darkmatter` | 0 stranded |
+| `cargo check -p darkmatter -p darkmatter-cli --examples --benches` | OK |
+| `just _test_l2 darkmatter-cli --features terminal-tests` (full CLI L2) | 83 passed |
+| `just _test_l2 darkmatter --features terminal-tests` (full library L2) | 18 passed |
+| browser (subagent, scoped): `just test-browser browser_component_ browser_page_ browser_table_center browser_local_image browser_translucent browser_list_left` | 13 passed, headless Chrome |
+| dependents: `cargo check -p claudine -p claudine-cli --tests` | OK. No package outside `darkmatter/` uses a removed or changed symbol (repository grep for the `apply_*_style` functions, the claim types, and the masks). |
+
+**Gate-skip check.** Midway through this phase the pipeline's commit process
+committed the working tree, including all of Phase 5's code:
+`498f7cbbf feat(darkmatter): complete layered render surface and CLI migration`
+and `da0c57a72 planning(darkmatter): record Phase 4 close …`. Both were signed
+by the author. This session staged or committed nothing.
+
+When the check ran, `git status --porcelain --untracked-files=all` was
+empty, so
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+printed nothing; it had no files to classify. The gates were run anyway,
+above. Run on one of this phase's files (`darkmatter/cli/src/render.rs`),
+the calculator returns `packages: [darkmatter-cli, test-toolkit]`, so
+skipping was never an option.
+
+### Skipped or not covered
+
+- The full browser tier was not run. Only the browser tests that use the
+  edited `style_page_doc` helper ran (13, all passed).
+- The terminal target on a real color TTY has no spelling-parity test.
+  Through a pipe it is byte-identical to plain, which is covered.
+- No cross-OS run, as in the earlier phases. Plan Phase 7 is the
+  validation phase. This phase's OS exposure is mostly test code. The
+  production changes are layer admission logic, schema keys, and flag
+  removal, none of them path or OS specific.
+- `render_alias_parity.rs` is 852 lines. That is over the advisory 500-line
+  `just lint-files` cap, which `just lint` does not enforce.
