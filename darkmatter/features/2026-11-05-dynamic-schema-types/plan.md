@@ -1,7 +1,7 @@
 ---
 total_phases: 9
 created: 2026-11-08
-phase: 9
+phase: 10
 agent: claude/sonnet
 yolo: true
 packages:
@@ -351,6 +351,263 @@ docs_updated_during_phase_8:
 docs_created_during_phase_8: []
 skills_files_updated_during_phase_8:
 - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_9:
+- darkmatter/dmls/src/workspace/watch.rs
+- darkmatter/lib/src/markdown/schemas/slots/cache.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+docs_updated_during_phase_9:
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/lsp/architecture.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/topics/caching.md
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/index.md
+- darkmatter/docs/topics/schemas/schema-constraints.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/docs/topics/schemas/schema-validation.md
+docs_created_during_phase_9:
+- darkmatter/features/2026-11-08-dynamic-whole-type-slots/spec.md
+skills_files_updated_during_phase_9:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/simplified-schema/SKILL.md
+source_code:
+- claudine/cli/src/completion/engine/mod.rs
+- claudine/cli/src/completion/engine/tests.rs
+- claudine/cli/src/completion/schema_completion/keys.rs
+- claudine/cli/src/completion/schema_completion/mod.rs
+- claudine/cli/src/completion/schema_completion/tests.rs
+- claudine/docs/research/sandboxing/providers/sandboxing.yaml
+- darkmatter/cli/schemas/output/clean.yaml
+- darkmatter/cli/schemas/output/code-block.yaml
+- darkmatter/cli/schemas/output/compose.yaml
+- darkmatter/cli/schemas/output/delta.yaml
+- darkmatter/cli/schemas/output/edit.yaml
+- darkmatter/cli/schemas/output/get.yaml
+- darkmatter/cli/schemas/output/graph.yaml
+- darkmatter/cli/schemas/output/hash.yaml
+- darkmatter/cli/schemas/output/list-themes.yaml
+- darkmatter/cli/schemas/output/render.yaml
+- darkmatter/cli/schemas/output/rm.yaml
+- darkmatter/cli/schemas/output/schema-about.yaml
+- darkmatter/cli/schemas/output/schema-detect.yaml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/schemas/output/set.yaml
+- darkmatter/cli/schemas/output/toc.yaml
+- darkmatter/cli/schemas/output/validate-refs.yaml
+- darkmatter/cli/src/approval.rs
+- darkmatter/cli/src/commands/clean.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/src/commands/graph.rs
+- darkmatter/cli/src/commands/schema/triggers.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/commands/validate.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/tests/common/fixture.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slots.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/dmls/src/capabilities.rs
+- darkmatter/dmls/src/context.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/mod.rs
+- darkmatter/dmls/src/diagnostics/slots.rs
+- darkmatter/dmls/src/diagnostics/yaml_document.rs
+- darkmatter/dmls/src/lib.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/overlay/yaml_document.rs
+- darkmatter/dmls/src/providers/code_actions.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/frontmatter/enum_item_tests.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/src/workspace/watch.rs
+- darkmatter/dmls/tests/common/mod.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/no_side_effects.rs
+- darkmatter/dmls/tests/l1/schema_slots_editor.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/context/capture/clock.rs
+- darkmatter/lib/src/markdown/compose/context/capture/datetime.rs
+- darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+- darkmatter/lib/src/markdown/compose/context/capture/observations.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/context/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/observation_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/agentic_cli.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/cicd.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/composition.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/data.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/dates.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/markdown_docs.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/network.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/shell.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/skills.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+- darkmatter/lib/src/markdown/output/command/data.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/schemas/clean.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/admission.rs
+- darkmatter/lib/src/markdown/schemas/slots/approval_tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/cache.rs
+- darkmatter/lib/src/markdown/schemas/slots/codes.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/auto.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/matching.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/request.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/store.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/targets.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/src/markdown/schemas/slots/session_tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/tests.rs
+- darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/select.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/semantic.rs
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/tests/dynamic_slots_fixtures/mod.rs
+- darkmatter/lib/tests/l1/diagnostic_projection.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slots.rs
+- darkmatter/lib/tests/l1/dynamic_slots_fixture_repos.rs
+- darkmatter/lib/tests/l1/global_catalog.rs
+- darkmatter/lib/tests/l1/load_data_runtime.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/report_diagnostics.rs
+- darkmatter/lib/tests/l1/shared_diagnostics.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+- darkmatter/lib/tests/l1/yaml_kind_registry.rs
+- simplified-schema/lib/src/completion.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/expression/scan.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/buffers.rs
+- simplified-schema/lib/src/resolve/recursive.rs
+- simplified-schema/lib/src/schema/error.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/schema/layering.rs
+- simplified-schema/lib/src/schema/mod.rs
+- simplified-schema/lib/src/schema/tests.rs
+- simplified-schema/lib/src/schema/view.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/definitions.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/grammar/slot_tests.rs
+- simplified-schema/lib/src/simplified/lint.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/narrowing.rs
+- simplified-schema/lib/src/simplified/query.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/subtype.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/slots.rs
+- simplified-schema/lib/src/slots/host.rs
+- simplified-schema/lib/src/slots/pending.rs
+- simplified-schema/lib/src/slots/substitute.rs
+- simplified-schema/lib/tests/fixtures/dynamic_slots/value-positions.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/values/default-retries.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/values/maximum.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/values/minimum.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/values/revision.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/values/slug-pattern.yaml
+- simplified-schema/lib/tests/l1/declaration_grammar.rs
+- simplified-schema/lib/tests/l1/dynamic_slots.rs
+- simplified-schema/lib/tests/l1/expression_scanner.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/schema_object.rs
+- simplified-schema/lib/tests/l1/slot_spans.rs
+- simplified-schema/lib/tests/l1/slot_templates.rs
+- simplified-schema/lib/tests/l1/yaml_schema_envelope.rs
+- sniff/lib/src/filesystem/git/mod.rs
+- sniff/lib/src/filesystem/git/tracked_state.rs
+- sniff/lib/src/filesystem/git/tracked_state_tests.rs
+- sniff/lib/src/filesystem/git/types.rs
+documentation:
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/docs/cli/clean.md
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/graph.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/cli/validate.md
+- darkmatter/docs/lsp/architecture.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/topics/caching.md
+- darkmatter/docs/topics/compose-requests.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/topics/schemas/index.md
+- darkmatter/docs/topics/schemas/schema-constraints.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/docs/topics/schemas/schema-validation.md
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/host-capabilities.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/language/slots.md
+- simplified-schema/docs/topics/language/types.md
+- simplified-schema/docs/topics/simplified-schema-struct.md
+- simplified-schema/docs/topics/validation.md
+- simplified-schema/lib/tests/fixtures/dynamic_slots/README.md
+- sniff/docs/sniff-library-architecture.md
+completed_phase: 9
+implemented: true
 ---
 
 # Plan: Dynamic Schema Types
@@ -420,18 +677,18 @@ Schema handling stays **passive** until an explicit, approved, cached
 All of these are observable and each has a test named in the phase that
 delivers it:
 
-- [ ] M1/M2: `enum(...)` and `suggest(...)` accept slots mixed with literals and
+- [x] M1/M2: `enum(...)` and `suggest(...)` accept slots mixed with literals and
   the `; required` / `default(...)` tail, on every type where `suggest` is
   allowed today.
-- [ ] Q16: `literal(...)`, `default(...)`, `min`/`max`, and `pattern(...)` accept a
+- [x] Q16: `literal(...)`, `default(...)`, `min`/`max`, and `pattern(...)` accept a
   whole-argument slot with the result shapes in N6; a data-supplied pattern is
   capped (N6a).
-- [ ] Q20: DMLS completion inside a static or resolved `enum(...)` list (the
+- [x] Q20: DMLS completion inside a static or resolved `enum(...)` list (the
   sandboxing `os[]` case) offers the members.
-- [ ] Q18: every input-reading function records its dependencies in the read set
+- [x] Q18: every input-reading function records its dependencies in the read set
   (including `load_data`'s not-found probe and missing contract imports), and
   pre-fetch URL discovery folds case and underscores like evaluation does.
-- [ ] M3: slot syntax errors, forbidden bindings, wrong result shapes, empty
+- [x] M3: slot syntax errors, forbidden bindings, wrong result shapes, empty
   results, approval failures, and `load_data` failures are positioned schema
   errors in `md schema validate` and DMLS; a failing slot keeps its `dm.data.*`
   code and `data_location`; positions are `null` unless proven.
@@ -440,33 +697,33 @@ delivers it:
   documents after explicit resolution, and the corpus carve-out
   (`awaiting_enum_slots` in `darkmatter/lib/tests/l1/shipped_schema_corpus.rs`)
   is gone.
-- [ ] M5: each guarantee of "The tension to resolve" is kept or replaced and the
+- [x] M5: each guarantee of "The tension to resolve" is kept or replaced and the
   replacement is documented (N36).
-- [ ] Parsing, query, YAML export, and trigger/kind discovery evaluate nothing and
+- [x] Parsing, query, YAML export, and trigger/kind discovery evaluate nothing and
   read nothing (proved by counters and by a read-nothing fixture).
-- [ ] `to_json_schema`, validator preparation, and layering on an unresolved
+- [x] `to_json_schema`, validator preparation, and layering on an unresolved
   schema return a typed unresolved error; a type query reports pending
   information; no placeholder schema exists anywhere.
-- [ ] A warm cache hit performs zero evaluator runs and zero validator compiles,
+- [x] A warm cache hit performs zero evaluator runs and zero validator compiles,
   and replays the recorded reads into the command's read set.
-- [ ] The Q5 approval matrix passes (clean grant; refusals for dirty, untracked,
+- [x] The Q5 approval matrix passes (clean grant; refusals for dirty, untracked,
   ignored, symlink-escaping, other-repo, no-repo; every grant scope; deny;
   batched prompt; computed targets; typed `approval-required` on data outputs
   and for library callers; DMLS commands write the user-level store; repository
   content cannot grant).
-- [ ] An unselected trigger payload with a template reads nothing; a write to a
+- [x] An unselected trigger payload with a template reads nothing; a write to a
   snapshot dependency forces re-resolution (Q6, Q7).
-- [ ] DMLS requests perform no I/O or evaluation; stale worker results and
+- [x] DMLS requests perform no I/O or evaluation; stale worker results and
   unsaved edits cannot overwrite newer snapshots.
-- [ ] `just test` and `just lint` pass in `simplified-schema/`, `sniff/`, and
+- [x] `just test` and `just lint` pass in `simplified-schema/`, `sniff/`, and
   `darkmatter/` (including `simplified-schema`'s minimal-feature checks), and
   `cargo check --all-targets -p claudine -p claudine-cli -p messenger` compiles;
   Claudine's CLI completion reports an unresolved template instead of silently
   offering nothing (N41).
-- [ ] Topic docs and the `darkmatter`, `simplified-schema`, `biscuit-file`-adjacent
+- [x] Topic docs and the `darkmatter`, `simplified-schema`, `biscuit-file`-adjacent
   skills are updated; whole-type slots are documented as **planned** and a
   follow-up spec for them exists (N6).
-- [ ] The Phase 9 timing sample is recorded against the S1 budgets (N1).
+- [x] The Phase 9 timing sample is recorded against the S1 budgets (N1).
 
 ## Phase 1 — Decisions, baseline, and fixtures
 
@@ -1542,7 +1799,7 @@ Q4/Q6/Q7.
 
 ### Wave 21 (parallel)
 
-- [ ] **Darkmatter docs**
+- [x] **Darkmatter docs**
   - Update `darkmatter/docs/topics/schemas/` (`schema-constraints.md`,
     `authoring-schemas.md`, `schema-validation.md`, `schema-triggers.md`,
     `dmls-schema-support.md`), `darkmatter/docs/cli/schema.md`, `compose.md`,
@@ -1554,30 +1811,30 @@ Q4/Q6/Q7.
     result shape (N6), the pattern cap, the `stat` re-check limitation (Q19), and
     whole-type slots as **planned**. Docs never
     name the feature/spec directory. No crate is added, so `docs/dependencies.md` files are not touched.
-- [ ] **Skills**
+- [x] **Skills**
   - `.claude/skills/darkmatter/schema.md`, `compose.md`, `dmls.md`, `cli.md`,
     `requests.md`; `.claude/skills/simplified-schema/SKILL.md`; the `sniff` skill
     note for `tracked_state`. Add the slot boundaries to `darkmatter/SKILL.md`'s
     non-negotiable list (passive default, explicit resolution, home-only grants).
-- [ ] **Doc drift pass**
+- [x] **Doc drift pass**
   - Re-read every changed symbol's `///`/`//!` and inline comments; fix drift; list
     any in the implementation log. No narration comments.
 
 ### Wave 22 (serial)
 
-- [ ] **Follow-up spec for whole-type slots (Q16)**
+- [x] **Follow-up spec for whole-type slots (Q16)**
   - Create `darkmatter/features/2026-11-08-dynamic-whole-type-slots/spec.md`
     (`kind: feature`, `status: draft-spec`, `related:
     2026-11-05-dynamic-schema-types`), stating the S8 findings for whole types
     and Q16's import rule. Not under `_unscheduled`.
-- [ ] **Timing sample against the S1 budgets**
+- [x] **Timing sample against the S1 budgets**
   - One host, load below 4 (record it), static and slot fixtures interleaved:
     cold and warm `md schema validate`/`md compose`, DMLS completion and hover
     latency; compare with N1's budgets and with the simulated numbers in
     `investigations/s1-s2-s3-s6-performance.md`. Record the numbers in
     `implementation-log.md` under Measurements. A missed budget is reported to the
     author there; make no speculative code change.
-- [ ] **Final verification**
+- [x] **Final verification**
   - `just test` and `just lint` in `simplified-schema/`, `sniff/`, `darkmatter/`;
     `cargo check --all-targets -p claudine -p claudine-cli -p messenger`; run the grep audit
     from Phase 1 over `slots/`; confirm Definition of Done items one by one and tick

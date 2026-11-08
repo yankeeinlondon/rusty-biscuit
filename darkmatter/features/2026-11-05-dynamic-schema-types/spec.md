@@ -28,8 +28,9 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-07
 clarified: true
-implemented: false
-review_iterations: 0
+implemented: true
+implemented_by: "claude/opus"
+review_iterations: 1
 related:
     - 2026-10-28-extract-simplified-schema
     - 2026-11-04-composition-errors
