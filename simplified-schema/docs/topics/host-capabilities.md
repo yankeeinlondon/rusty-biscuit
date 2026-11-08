@@ -39,6 +39,25 @@ When a check cannot run, the library never reports the value as valid:
 See [Strict and Soft Validation](./validation.md#failures) for the failure
 kinds.
 
+## Slots: Values a Host Computes
+
+A [slot](./language/slots.md) (`enum(none, {{ load_data("./os.yaml") }})`)
+is an expression the library never evaluates. Resolving a template asks a
+host for each slot's value through the `slots::SlotHost` trait:
+
+| Method | What the host does | Effects allowed |
+| --- | --- | --- |
+| `admit(&slot)` | decides whether the slot may run at all | none: no I/O, no evaluation |
+| `resolve(&request)` | computes the slot's JSON value | the host's own (reading data, under its own policy) |
+| `is_canceled()` | says the result is no longer wanted | none |
+
+`SlotRequest` gives the host the slot, its defining file (where a relative
+read starts), and the request context of the resolution; a host derives the
+slot's own context from those, never from the running process. The library
+then checks each value's shape and builds the concrete schema. Without a
+host, a template stays inspectable and every lowering or validation reports
+it unresolved. See [Resolving a Template](./language/slots.md#resolving-a-template).
+
 ## Which Builds and Schemas Have a Host
 
 Two things decide whether those checks can run: the `file` Cargo feature, and

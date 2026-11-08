@@ -109,7 +109,8 @@ assert!(page.validate_strict(&json!({ "tags": ["changelog"] })).is_err()); // `t
   type also accepts.
 - [Slots](./slots.md): `{{ … }}` expressions that supply `enum`/`suggest`
   elements and `literal`, `default`, `min`, `max`, and `pattern` values, and
-  what a schema holding one (a template) reports before it is resolved.
+  what a schema holding one (a template) reports, and how a host resolves it
+  into a concrete schema.
 - [Conversion](../conversion.md): exactly which almost-right values soft
   validation converts, and how unions choose an arm.
 - [Diagnostics](../diagnostics.md): the typed errors a schema or a value

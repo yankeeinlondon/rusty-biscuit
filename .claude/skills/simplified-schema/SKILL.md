@@ -75,6 +75,17 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   [slots.md](../../../simplified-schema/docs/topics/language/slots.md)).
   Tests: `src/simplified/grammar/slot_tests.rs`,
   `tests/l1/{slot_spans,slot_templates}.rs`, `schema_object.rs::templates`.
+- **Resolution replays, never patches.** A host (`slots::SlotHost`: passive
+  `admit`, effectful `resolve`, `is_canceled`) supplies values; the
+  library reruns the same resolution inside `slots::with_values`, and every
+  lowering site calls `slots::apply_active` right after import expansion
+  (`substitute`: result shapes, dedupe, stricter-bound/equal-default merge,
+  pattern cap). Public entry points (`resolving_entry` in `resolve.rs`)
+  attach `UnresolvedSlots::pending` (`PendingSchema`, replaying the recorded
+  `read_sources()` texts); `SimplifiedSchema::resolve_slots` reruns the
+  layer's own `Rebuild`. Expansion stamps `Slot::origin` with the file a
+  slot was written in (`DefNamespace::file`); a new lowering site must call
+  `apply_active` too. Tests: `tests/l1/dynamic_slots.rs`.
 - **Layering is atomic.** Each `layer_under` / `layer_over` commits completely
   or not at all, with whole-property replacement.
 - **One implementation.** Darkmatter calls the library; it never redefines a
@@ -110,6 +121,8 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Resolve over every unsaved buffer (targets, imports, examples, unsaved-only files) | `resolve::buffers::with(&SourceBuffers, \|\| …)` (thread-scoped; reads and selection only) |
 | Several resolutions in one host operation reading each file once | `resolve::buffers::with_reads_retained(\|\| …)`; read a file you will resolve with `resolve::buffers::read_to_string` (test builds count opens in `observed::Observed::opened`) |
 | One named type as its own schema | `schema.select("Person")` |
+| Resolve a template's `{{ … }}` slots | `schema.resolve_slots(&host)`, or `UnresolvedSlots::pending` → `PendingSchema::resolve(&host, &SlotRunRequest { context })` |
+| Read a slot's data file honoring editor buffers | `resolve::buffers::read(path)` |
 | Which file a `$schema`/`Name@file`/`example(file)` reference names, its probes, and a missing name's creation path | `resolve::select_schema_file(reference, base_dir, roots, &ctx)` → `SchemaFileSelection` (`into_result()` gives the resolver's error) |
 | Validate | `validate_strict` / `validate_soft` → `Result<ValidationSuccess, ValidationFailure>` |
 | Layer | `layer_under(&[&s])`, `layer_over(&[&s])`, `as_base`, `override_with` |

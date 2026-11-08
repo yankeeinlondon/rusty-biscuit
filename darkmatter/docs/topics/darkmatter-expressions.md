@@ -1354,7 +1354,9 @@ unchanged.
 
 `has_command(cmd)` is a `PATH`/executable existence probe: it reports whether
 `cmd` can be run on the host and **never executes** it, so it needs no command
-whitelisting. A bare name (`git`) triggers an OS-native `PATH` search; an
+whitelisting. A bare name (`git`) triggers an OS-native search of the `PATH`
+in the composition's captured environment (the environment the request was
+started with, never a `PATH` the process changed later); an
 absolute path (`/usr/bin/git`) must both exist and be executable. On Windows the
 search honors `PATHEXT`; on Unix the executable bit is required. Symlinked
 executables are followed, and directories are rejected.
@@ -1699,8 +1701,15 @@ cicd_list({ statuses: ["failed", "cancelled"], branch: "main", limit: 10 })
 
 ## Timezone & Date Behavior
 
-- The local system timezone is detected using the `sniff` library (already a
-  Darkmatter dependency).
+- Each composition reads the clock **once**. `ctx.now`, `ctx.today`, the
+  relative validators (`is_today`, …), `date()`'s optional year, and the
+  offset conversion in `date_delta`/`older_than`/`newer_than` all use that one
+  reading, so a run that crosses midnight still sees one date, and
+  `{{ is_today(ctx.today) }}` is always `true`.
+- The local timezone is the host's UTC offset at that reading. A datetime with
+  an offset from another season is converted with this offset, not with the
+  daylight saving rule for its own date. The timezone name (`ctx.timezone`,
+  `ctx.timezone_iana`) is detected with the `sniff` library.
 - Default behavior for date/datetime operators uses the **local timezone**.
 - UTC variants (`*Utc`) are provided for every date/datetime operator.
 - Datetime values with **no offset**:

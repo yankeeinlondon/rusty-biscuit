@@ -388,6 +388,30 @@ Passive callback frames retain declaration locations through
 survive dropping the parsed callback; a shadowing binding without a span does
 not borrow an outer binding’s location.
 
+## Function registration facts and the captured clock
+
+Every `FunctionBinding` (`functions/mod.rs`) carries a `SlotClass`
+(`Pure`, `InputReading`, `Captured`, `Volatile`, `Rejected`) and, for an
+input reader, a `ReadFact { kind: Content | Probe | Listing, remote }`
+(`.reads(..)`, `.reads_or_fetches(..)`, `.slot(..)`). `pure(..)` is `Pure`,
+`lazy`/`callback` `Pure` (their operands decide), a `context(..)` handler must
+declare one or the registry refuses to build; `the_call_table_covers_every_input_reading_function`
+and `every_binding_declares_its_slot_class` guard the table. `read_fact`/`slot_class`
+resolve a name as dispatch does (case folded, alias, a test or host function
+shadows the built-in and is `Pure`). `compose/remote.rs::fetches_url` (URL
+pre-fetch discovery, `calls_read_side_function`) derives from `ReadFact::remote`;
+there is no hand-kept list.
+
+The date functions are `FunctionBinding::clock(..)` handlers
+(`ClockFn(&BoundCall, &ClockReading)`): they read the request's one
+`context::capture::ClockReading` (`CapturedObservations::clock()`, seeded from
+the capture that formatted `ctx.now`; a `DocumentSeed::clock` keeps it across
+later group captures), never `Local::now`; offsets convert with the captured
+fixed offset. Without a resolution context a call reads the clock once.
+`has_command`/`has_binary` search the captured environment's `PATH`
+(`which::which_in`). `no_handler_source_reads_the_live_clock_or_process_state`
+greps the handler sources.
+
 ## `load_data` (data files)
 
 `load_data(file: file | null, as: type-definition(container))` reads YAML,

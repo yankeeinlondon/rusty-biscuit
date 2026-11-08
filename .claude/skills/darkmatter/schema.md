@@ -370,9 +370,26 @@ lowering of it returns `SchemaError::UnresolvedSlots`, so Darkmatter's
 existing resolution, validation, and trigger paths fail closed with that
 typed error rather than seeing a partial list. A trigger match condition
 never admits a slot (`triggers::grammar::is_match_safe_constraint` excludes
-them). `triggers/finding.rs::related_path` names an imported slot's defining
-file. Explicit resolution (the slot host, approval, cache) is not built yet;
-the language rules are in `simplified-schema/docs/topics/language/slots.md`.
+them). `triggers/finding.rs::related_path` names the file of the template's
+first slot written in a file (`Slot::origin`), and a refused slot value (`SchemaError::SlotResult`) its slot's file.
+The library's resolution hook is `simplified_schema::slots::SlotHost`
+(`PendingSchema::resolve`, `SimplifiedSchema::resolve_slots`). Darkmatter's
+host is `schemas::slots::DarkmatterSlotHost` (`schemas/slots/`):
+`admission.rs::slot_class_report` is the passive walk (every branch and
+callback; allowed roots `ctx` minus `cwd`/`self`/`last_updated`/`hash`/`id`/
+`sid`, `env`, literals, callback locals, `current`/`local` only inside a
+callback; a `SlotClass::Rejected` call refused), `evaluator.rs::SlotEvaluator`
+evaluates in `request.for_source(defining_file)` over the command's
+`DataRuntime` with a fresh default `IterationBudget` and a `ReadGate`
+(default `DenyAllReads`), returning observations (thread-local
+`data::runtime::capture_observations`) and context digests (`ctx` groups,
+`env.NAME`, whole `env`). A failure is a `SlotFailure` wrapping the
+`ExpressionError` (`host::failure_code`); `compose::report_diagnostics::slot_resolution_diagnostics`
+positions it at the slot in its defining file and keeps `data_location` and
+reference fields. Codes: `schemas/slots/codes.rs::SLOT_DIAGNOSTIC_CODES`.
+Approval, the resolution cache, sessions, and the surfaces that resolve are
+not built yet. User-facing: `darkmatter/docs/topics/schemas/schema-slots.md`;
+language rules: `simplified-schema/docs/topics/language/slots.md`.
 
 ## Runtime baseline
 

@@ -175,16 +175,21 @@ Owner: {{ frontmatter("team.md").owner }}
   `load_data`, `frontmatter`, `try_frontmatter`, `file_exists`,
   `markdown_title`, `markdown_body_empty`, and `validate_schema`. Schema files a
   `load_data` contract or `validate_schema` imports count too, at any depth,
-  including every one read before an import failed. Links,
-  transclusions, and other files the run touches without an expression do not.
+  including every one read before an import failed. The path functions
+  (`absolute`, `basename`, `join`, `link`, …) and `has_skill` record the
+  candidates they probed, and `find_first_index`/`find_last_index` the folder
+  they listed. Links, transclusions, `find_files` glob listings, and other
+  files the run touches without an expression do not.
 - **Every pass counts.** A read during the reference check, the lifecycle,
   pre-flight, or composition is reported, including a read in a transcluded
   document. A run that fails reports the reads made before it stopped, the file
   that failed to read or parse included, even when the failure came in the
   reference check before composition started.
-- **Misses count.** `file_exists` on a missing file records the path it looked
-  for, so `CHANGELOG.md` above appears whether or not it exists. A reference
-  that names no concrete file, such as an empty string, records nothing.
+- **Misses count.** A missing file records every path it was looked for:
+  `file_exists`, `load_data`, and `frontmatter` on a missing file, and a
+  contract import that does not exist. So `CHANGELOG.md` above appears whether
+  or not it exists. A reference that names no concrete file, such as an empty
+  string, records nothing.
 - **Form.** Local files are absolute paths with `/` separators; URLs are
   written as the remote cache normalizes them, query included. A URL a host
   policy refused is still listed. Each entry appears once, in lexical order.

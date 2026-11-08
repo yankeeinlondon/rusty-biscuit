@@ -163,6 +163,20 @@ every validation fails with `ValidationFailure::Unprepared` holding
 `SimplifiedSchemaError::Unresolved`. Nothing is judged and nothing is
 evaluated.
 
+`resolve_slots(&host)` resolves a template through a
+[`SlotHost`](./language/slots.md#resolving-a-template) and returns a new,
+concrete schema; the template is unchanged, so it can be resolved again with
+other values. A schema with nothing to resolve returns a clone of itself.
+
+```rust
+let concrete = template.resolve_slots(&host)?;   // SlotResolutionError on failure
+assert!(concrete.is_resolved());
+concrete.validate_strict(&document)?;
+```
+
+The rebuild reads the schema texts the first build read, so it never mixes
+two versions of a file, and a failed resolution publishes nothing.
+
 A schema built from content has no file context. Its `file(eager)` and
 `match(...)` checks cannot run, so a value that fails only those is
 `ValidationFailure::UnavailableCheck`, not invalid data.

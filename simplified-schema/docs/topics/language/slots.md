@@ -17,10 +17,11 @@ exporting a template never runs its expressions; only an explicit
 resolution step does, and it produces an ordinary schema with every slot
 replaced by its value.
 
-> **Planned:** the resolution step itself (evaluating slots through a host
-> such as Darkmatter, with approval and caching) is not built yet. Today a
-> template can be parsed, inspected, and exported, and every operation that
-> needs its values reports it unresolved.
+The library never evaluates an expression itself. Resolution goes through a
+**host** you supply (a [`SlotHost`](#resolving-a-template)): the host decides
+whether a slot may run and computes its value, and the library checks that
+value and builds the concrete schema. Darkmatter is such a host; its
+approval rules and caching are described in Darkmatter's own docs.
 
 ## Where a Slot May Be Written
 
@@ -77,7 +78,7 @@ flowchart LR
     template --> inspect["query, export,<br/>completion, lint"]
     template --> lower["to_json_schema, validate,<br/>layer_under / layer_over"]
     lower --> unresolved["typed unresolved error"]
-    template -. planned .-> resolve["explicit resolution"] -.-> concrete["concrete schema"]
+    template --> resolve["explicit resolution<br/>(through a SlotHost)"] --> concrete["concrete schema"]
 ```
 
 | Operation | On a template |
@@ -118,3 +119,190 @@ is written. It evaluates nothing and reads nothing: the files a slot names
 are not dependencies of the template (they are absent from its
 `provenance()`), and querying, exporting, or attempting to lower or validate
 a template does no further expression or validator work.
+
+## Resolving a Template
+
+A template is resolved in one of two ways, depending on how you hold it:
+
+- **A `SimplifiedSchema`:** call `resolve_slots(&host)`. It returns a *new*
+  concrete schema; the template is unchanged and can be resolved again.
+- **A lower-level resolution** (`resolve::resolve_schema`,
+  `resolve_yaml_schema` and its variants, `resolve_yaml_schema_owned_by`,
+  `prepare_standalone_yaml_schema`, `prepare_yaml_schema_text`): a template
+  fails with `SchemaError::UnresolvedSlots` whose `pending` field holds a
+  `PendingSchema`. Call `pending.resolve(&host, &SlotRunRequest { context })`
+  to get the concrete `ResolvedSchema`.
+
+Lowering on its own (`to_json_schema`, `to_json_schema_with_definitions`),
+`resolve_catalog_declaration`, and the embedded preparations cannot resolve
+anything: their `UnresolvedSlots` has `pending: None`. An embedded schema
+(a build input compiled into a host) refuses slots outright with
+`SchemaError::SchemaDocument` "an embedded schema cannot contain `{{ … }}`
+slots".
+
+A host implements three methods:
+
+```rust
+use serde_json::{Value, json};
+use simplified_schema::Slot;
+use simplified_schema::slots::{SlotAdmissionError, SlotFailure, SlotHost, SlotRequest};
+
+struct FixedValues;
+
+impl SlotHost for FixedValues {
+    // Passive: may this slot run at all? No I/O, no evaluation.
+    fn admit(&self, slot: &Slot) -> Result<(), SlotAdmissionError> {
+        Ok(())
+    }
+    // The one effectful step: compute the slot's value.
+    fn resolve(&self, request: &SlotRequest<'_>) -> Result<Value, SlotFailure> {
+        Ok(json!(["macOS", "Linux"]))
+    }
+    // Optional: return true to stop (an editor superseding a stale job).
+    fn is_canceled(&self) -> bool {
+        false
+    }
+}
+
+let template = simplified_schema::SimplifiedSchema::try_from("$schema:\n  os: enum(none, {{ os_list }})\n")?;
+let concrete = template.resolve_slots(&FixedValues)?;
+assert!(concrete.validate_strict(&json!({ "os": "Linux" })).is_ok());
+assert!(!template.is_resolved());
+```
+
+What happens during one resolution:
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant Library
+    participant Host as SlotHost
+    Caller->>Library: resolve_slots(host) / pending.resolve(host, request)
+    Library->>Host: admit(slot), for every slot
+    Note over Library,Host: any refusal stops here; nothing was evaluated
+    Library->>Host: resolve(slot), for every slot (all are attempted)
+    Library->>Library: same resolution again, values substituted after import expansion
+    Library-->>Caller: concrete schema, or SlotResolutionError
+```
+
+- **Every slot is admitted before any is evaluated.** One refusal means none
+  runs (`SlotResolutionError::Refused`).
+- **Every slot is attempted.** When some fail, each failure is reported
+  (`SlotResolutionError::Failed`), each with the host's own error inside a
+  `SlotFailure`; `failure.downcast_ref::<HostError>()` gets it back.
+- **A slot is evaluated once per resolution,** however many places use the
+  named type that holds it. Slots are identified by `SlotKey` (defining
+  file, start offset, expression text).
+- **A root union's later arms** may hold slots of their own; resolution
+  reaches them in turn and asks the host for those too.
+- **Nothing is published on failure,** and `is_canceled` is checked before
+  each slot and before the result is returned
+  (`SlotResolutionError::Canceled`).
+- **The result is an ordinary schema.** Its imports, examples, referenced
+  files, and probed locations are exactly those of the same schema written
+  with the values in place, and it layers and validates like one.
+
+### The exact schema texts are reused
+
+A `PendingSchema` remembers the text of every schema file the first pass
+read (`read_sources()`: the entry file and each import, with the bytes
+read). Resolution reads those texts again, never the disk, so a file edited
+in between cannot mix two versions into one result, and a host can key a
+cache on `read_sources()` knowing it describes exactly what was resolved.
+`resolve_slots` does the same for the files its schema read. Unsaved editor
+texts (`resolve::buffers::with`) in force when the template was built are
+kept the same way.
+
+A host that reads a data file for a slot can read it with
+`resolve::buffers::read(path)`: inside a `buffers::with` scope it returns an
+open editor buffer's text, outside one it is `std::fs::read`.
+
+## Where a Slot Evaluates
+
+`SlotRequest::defining_file` is the schema file the slot was written in
+(`Slot::origin`), so `load_data("./os.yaml")` in a type imported from
+`nested/types.yaml` reads `nested/os.yaml`:
+
+| The slot was written in | `Slot::origin` |
+| --- | --- |
+| a schema file (`$schema: ./schema.yaml`, a root-union file arm, a `SimplifiedSchema` read from a file) | that file |
+| a named type imported with `Name@./types.yaml` | `types.yaml`, wherever the type is used |
+| a schema-trigger file's inline payload | the trigger file |
+| a document's inline `$schema` mapping, or in-memory content | `None`: evaluate in the request context's own directory |
+
+The origin is set while imports are expanded, so a template's
+`pending_slots()` and `UnresolvedSlots::slots` already show it.
+
+## What a Slot's Value Must Be
+
+The host returns a JSON value. Each position takes one shape; any other is
+`SchemaError::SlotResult` at the slot, with a `SlotResultKind` saying what
+is wrong, and the whole resolution stops.
+
+| Position | Takes | Becomes | Refused |
+| --- | --- | --- | --- |
+| `enum(...)` | an array of strings | members | `null`, a scalar, a mapping; an element that is not a string (`WrongShape`) |
+| `suggest(...)` | an array of strings, numbers, booleans, `null`s | candidates, read for the list's type like literal ones | `null`, a scalar, a mapping; an array or mapping element (`WrongShape`) |
+| `literal(...)` | a string, number, or boolean | the value, its JSON type kept (`5` and `"5"` differ) | `null`, an array, a mapping |
+| `default(...)` | any value except `null` | the default | `null` (`WrongShape`); a value the property's type rejects (`Inadmissible`) |
+| `min(...)`, `max(...)` | a number | a bound; a non-negative integer where it counts (string length, array items) | a non-number; a count that is negative or fractional |
+| `pattern(...)` | a string | the pattern | a non-string; a pattern the cap below refuses (`PatternRejected`) |
+
+List rules:
+
+- each slot's array is flattened one level, in declaration order:
+  `enum(a, {{ x }})` with `["b", "c"]` has members `a, b, c`;
+- `[]` adds nothing, but a list left with no element at all is
+  `SlotResultKind::Empty`, reported at its first slot;
+- the first occurrence of each value is kept, across literals and slots:
+  `enum(macOS, {{ x }})` with `["macOS", "Linux"]` is `macOS, Linux`;
+- a number in a `suggest` list becomes its canonical text (`2.50` is
+  `2.5`), and `true`, `false`, `null` their words; the text is then read
+  exactly like a literal candidate, so an invalid numeric suggestion is kept
+  for linting, not refused;
+- a value holding `,`, `;`, `)`, or `{{` stays one value: values are placed
+  into the schema as data, never re-parsed as schema text.
+
+Value rules:
+
+- `null` is always a wrong shape, never "no value";
+- numbers enter through the library's numeric model (`numeric`), so an
+  integer no `f64` holds exactly is refused;
+- a slot bound beside an inherited one (`Count(min({{ low }}))` over
+  `Count: number(min(3))`) keeps the stricter, as two written bounds do; a
+  lower bound above its upper is refused at the later slot;
+- a slot default beside another default must equal it, as two written
+  defaults must.
+
+### The pattern cap
+
+Patterns are matched with a linear-time engine; only a schema whose
+*authored* pattern uses lookaround switches to a backtracking one. Data must
+never cause that switch, so a pattern from a slot is refused when it:
+
+- uses lookaround (`(?=`, `(?!`, `(?<=`, `(?<!`) or a backreference (`\1`,
+  `\k<name>`);
+- is longer than 4096 bytes (`MAX_SLOT_PATTERN_BYTES`);
+- does not compile with the linear engine within its default size limit
+  (`(?:\w{100}){100}` is too large).
+
+`slots::check_slot_pattern` applies the same test. Authored patterns are
+unchanged.
+
+## Whole Types (Planned)
+
+> **Planned:** a slot that supplies a whole property definition
+> (`os: {{ load_data("./os-type.yaml", "string") }}`), parsed by the
+> ordinary type parser, with imports in the returned type resolved against
+> the slot's defining file. It is not accepted today.
+
+## Failures
+
+| Error | When |
+| --- | --- |
+| `SlotResolutionError::Refused` | the host's `admit` refused one or more slots; each with its `SlotAdmissionError` (code, message, optional span inside the expression) |
+| `SlotResolutionError::Failed` | the host's `resolve` failed for one or more slots; each with its `SlotFailure` |
+| `SlotResolutionError::Schema` holding `SchemaError::SlotResult` | a value cannot fill its position; `slot.span` (in `slot.origin`'s file when set) is where it is reported |
+| `SlotResolutionError::Schema` holding another `SchemaError` | the schema the values make fails as any schema would |
+| `SlotResolutionError::Canceled` | `is_canceled` returned `true` |
+

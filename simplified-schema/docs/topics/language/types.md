@@ -756,6 +756,33 @@ The literal implies its scalar type, so conversion treats it like the correspond
 
 `literal` is a pure value-equality constraint (no I/O), so it is permitted in [schema-trigger](../../../../darkmatter/docs/topics/schemas/definition.md#repository-trigger-schemas) match expressions. `kind: literal(spec)` is the idiomatic trigger discriminant, replacing the older `enum(spec)` spelling.
 
+### Values From Slots
+
+A `{{ … }}` slot can supply part of a type from an expression a host
+evaluates, so a schema need not repeat data kept elsewhere:
+
+```yaml
+os: enum(none, {{ load_data("./os.yaml", "string[]") }}; required)
+```
+
+A schema holding a slot is a template until it is explicitly resolved; see
+[Slots](./slots.md) for the syntax, what a template reports, and how
+resolution works. Each position takes one shape of value:
+
+| Position | The slot's value | Example |
+| --- | --- | --- |
+| `enum(...)` member | an array of strings, flattened into the members | `enum(none, {{ list }})` |
+| `suggest(...)` candidate | an array of scalars, flattened into the candidates | `string(suggest(a, {{ list }}))` |
+| `literal(...)` | one string, number, or boolean, its type kept | `literal({{ revision }})` |
+| `default(...)` | any value but `null` that the type accepts | `number(default({{ n }}))` |
+| `min(...)` / `max(...)` | one number; a non-negative integer where it counts | `number(min({{ low }}))` |
+| `pattern(...)` | one string, at most 4096 bytes, without lookaround or backreferences | `string(pattern({{ re }}))` |
+| a whole property definition (**planned**) | one type-definition string | not accepted today |
+
+A pattern from a slot is capped so data never moves a schema onto the
+backtracking regex engine that lookaround needs; an authored pattern is not
+([The pattern cap](./slots.md#the-pattern-cap)).
+
 ### Expressions
 
 `expression` types a **string that must parse under the Darkmatter expression grammar**. It is the third member of the content-format string-type family alongside [`yaml` / `json`](objects-and-named-types.md#content-format-types-yaml--json), and it is **parse-only** — never evaluated, no I/O, no shell, no function execution.

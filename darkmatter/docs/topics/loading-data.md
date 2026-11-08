@@ -454,14 +454,16 @@ Every command keeps a **read set**: the files and URLs its expressions read.
 including the reference check. A file is recorded as soon as its reference
 resolves, before it is read, so an unreadable or malformed file is in the
 set, and so is a URL whose host was denied. A reference that resolves to no
-file at all (a missing `load_data` file) has no path to record;
-`file_exists` is the exception, and records every candidate path it probed.
+file at all (a missing `load_data` file) records every candidate path it
+probed, so creating the file changes the answer.
 The schema files a contract imports, and those `validate_schema` reads, are
 recorded too, at any depth of import. A preparation that fails keeps every
 schema file it read before stopping: an import that made the contract fail
 because it is not a schema or does not export the type `as` names, and every
-import read before it. An import file that does not exist was never read and
-is not recorded.
+import read before it. An import file that does not exist is recorded at
+every location it was looked for. The full list, including the path and skill
+functions, is in
+[Compose Requests](./compose-requests.md#reading-the-read-set).
 
 For example, with `good.yaml` exporting `Good` and `bad.yaml` exporting only
 `Other`, the contract `{ a: Good@./good.yaml, b: Missing@./bad.yaml }[]`

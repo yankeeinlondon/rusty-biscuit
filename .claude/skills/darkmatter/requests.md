@@ -92,8 +92,27 @@ makes its own, so separate library compositions never share. A standalone
 reference check, pre-flight, lifecycle, and composition share it. Hosts read
 the attached one with `ComposeOptions::data_runtime_handle()`; the
 crate-internal `data_runtime()` returns it or a fresh unshared one, like
-`remote_fetch_runtime()`. `DataRuntime` itself exposes only `new`,
-`read_set`, `stats`, and `same_instance`.
+`remote_fetch_runtime()`. `DataRuntime` exposes `new`, `read_set`, `stats`,
+`same_instance`, the observation log (`read_mark`, `observations_since`),
+`memo_generation`, and `record_entry` (cache replay into the read set).
+
+- **Observation log** (`runtime.rs::Observation`, `ObservationKind::{File,
+  Url, Exists, MissingProbe, Listing, Glob}`): every input-reading function
+  observes what it read, hashed at read with BLAKE3 (`LoadedSource::hash`
+  keeps it in the memo entry, so a memo hit observes again; a contract's
+  observations are kept per memo key). `observe` also adds the entry to the
+  read set, except a `Glob` (a `find_files` pattern is not a path). A failed
+  read observes `hash: None`. `capture_observations(f)` is a thread-local
+  frame: the slot gate's post-call check and the slot evaluator use it so a
+  concurrent document read on another thread never mixes in.
+- **Slot read gate** (`expression/read_gate.rs`): `ResolutionContext::slot_gate`
+  is set only by the schema-slot evaluator. `authorize_slot_read` runs at the
+  content/fetch sites (`load_data` before `record` and the memo,
+  `load_markdown`, URL `file_exists`) and `functions::call_entry` checks every
+  observation a `reads`-registered function made before returning
+  (`authorize_slot_observations`; an unnameable input is refused).
+  `ExpressionError::SlotReadRefused` is never recovered (`try_frontmatter`
+  re-raises it). With no gate nothing changes.
 
 - **Memo shape** (`runtime.rs`): contracts are prepared once per document
   context and written text; a parsed source is keyed by identity alone
@@ -107,16 +126,20 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
   check has no remote permission) is never stored.
 
 - Reads are recorded at the operation boundary, never in `resolve_arg`:
-  `functions/fs.rs::load_markdown` (the five Markdown readers), `file_exists_fn`
-  (probed candidates on a miss), and the schema files a contract
-  (`DataRuntime::prepare_contract`, inside the memo's prepare closure) or
-  `validate_schema_fn` read. Those two wrap the preparation in
-  `simplified_schema::resolve::observed::collect` and record `Observed::read`
-  on success and failure alike, so a later import's failure keeps every
-  earlier import (transitive ones too); never reconstruct reads from a
-  returned value or an error. A missing import was never read and is not
-  recorded; embedded schemas read nothing. Record after resolution, before
-  reading, so a failed read stays in the set.
+  `functions/fs.rs::load_markdown` (the five Markdown readers), `file_exists_fn`,
+  `load_data` (probed candidates on a miss, `record_probed_candidates`), the
+  path functions (`observe_reference_probes`: candidates up to the first that
+  exists), `has_skill` (each probed folder), `find_*_index` (the listed
+  folder), and the schema files a contract (`DataRuntime::prepare_contract`,
+  inside the memo's prepare closure) or `validate_schema_fn` read. Those two
+  wrap the preparation in `simplified_schema::resolve::observed::collect` (and
+  `buffers::recording` for the texts to hash) and record `Observed::read` on
+  success and failure alike, plus every `Observed::searched` location not read
+  (a missing import is a dependency); never reconstruct reads from a returned
+  value or an error. Embedded schemas read nothing. Record after resolution,
+  before reading, so a failed read stays in the set. `load_data` and
+  `load_markdown` read bytes through `simplified_schema::resolve::buffers::read`
+  (an editor buffer inside a `buffers::with` scope, else the file).
 - `invalidate_memo()` runs after every executed command attempt
   (`shell_expansion::execute_prepared_outcome`'s run closure,
   `MdShellRunner::execute`), never for a cached or skipped one, and after

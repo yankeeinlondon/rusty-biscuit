@@ -139,7 +139,10 @@ failure it is:
   It holds the shared `SchemaError` (`error`): the schema has a
   function-typed property, `jsonschema` rejected its lowered form, or it is
   content that names a file it cannot read. `problems()` is empty. `Prepared`
-  never returns it; a `SimplifiedSchema` does.
+  never returns it; a `SimplifiedSchema` does. A
+  [template](./language/slots.md) fails this way with
+  `SchemaError::UnresolvedSlots` until `resolve_slots` gives a concrete
+  schema to validate against.
 
 ```rust
 match prepared.validate_soft(&value) {

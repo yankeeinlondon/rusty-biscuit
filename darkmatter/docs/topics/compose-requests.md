@@ -240,23 +240,46 @@ runtime normalizes them, with their query kept. It contains:
 - every file or URL a read-side expression function resolved: `load_data`,
   `frontmatter`, `try_frontmatter`, `markdown_title`, `markdown_body_empty`,
   and `validate_schema`'s document;
-- for `file_exists`, the file it found or, when it found none, every
-  candidate path it probed;
+- for a reference that resolved to no file (a missing `load_data`,
+  `frontmatter`, or `file_exists` target), every candidate path it probed;
+- for the path functions (`absolute`, `relative`, `basename`, `join`,
+  `link`, …), each candidate they probed up to the first that exists, and for
+  `has_skill`/`has_local_skill`, each skill folder they probed;
+- for `find_first_index`/`find_last_index`, the folder they listed;
 - the schema files a `load_data` contract imports, and the schema files
   `validate_schema` reads, with their transitive imports (an embedded schema
-  adds none).
+  adds none), plus every location a missing import was looked for.
+
+`find_files` lists a glob pattern, not one file or folder, so it adds nothing
+to the set (its listing is still observed; see below).
 
 An entry is recorded when the reference resolves, before anything is read.
 An unreadable or malformed file therefore stays in the set, and so does a
-URL whose host policy denied the fetch. A reference that resolves to no file
-(a missing `load_data` or `frontmatter` file) has no concrete path and adds
-nothing; only `file_exists` records the candidates it probed. Reads in the reference check
+URL whose host policy denied the fetch, and a missing file is a dependency
+like a present one: creating it would change the answer. Reads in the reference check
 count, and emptying the memo after a command never removes an entry, so a
 run that fails in the reference check still reports the file it failed on.
 The set lists what expressions read, not every file a composition touches:
 transcluded files and link targets are not in it.
 `md compose --output json` prints it as
 [`read_set`](../cli/data-contracts.md#read-set).
+
+### Observations
+
+Beside the read set, the runtime keeps an ordered log of what each read
+observed (`DataRuntime::observations_since`): a content read with the BLAKE3
+hash of the bytes read, an existence answer, a missing probe, or a listing
+with the hash of its sorted names (`ObservationKind`). A read answered by the
+`load_data` memo is observed again with the same hash, so a caller that takes
+a mark before evaluating (`DataRuntime::read_mark`) and reads the log after
+it sees every input that evaluation depended on, which is what lets a
+computed result be reused only while those inputs are unchanged. A failed
+read is observed without a hash.
+
+`DataRuntime::memo_generation` starts at 0 and grows each time the memo is
+emptied after a command ran, so a holder of an earlier result knows to check
+its observations again. `DataRuntime::record_entry` adds an entry to the read
+set directly, for a cached result that replays the reads its first run made.
 
 ## When a request cannot be built
 

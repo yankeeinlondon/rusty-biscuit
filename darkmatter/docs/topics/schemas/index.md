@@ -43,6 +43,8 @@ I'm sure you're ready to dig into the magic we call `SimplifiedSchema` so choose
         - describes how this can be utilized  
             - from the terminal using the CLI 
             - as a library author calling into the Darkmatter library
+    - [Schema Slots in Darkmatter](./schema-slots.md)
+        - what a `{{ … }}` slot in a schema may contain, where it evaluates, what it may read, and how its failures are reported
     - [Schema Discovery](./schema-discovery.md)
         - how the definitions of YAML document kinds (`kind: yaml-schema`) are found in the schema roots, and what happens when two claim one kind or one fails
     - [Visual Support of Schemas from DMLS](dmls-schema-support.md)
