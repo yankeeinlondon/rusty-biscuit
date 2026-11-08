@@ -1,13 +1,16 @@
 ---
 total_phases: 9
 created: 2026-11-08
-phase: 5
+phase: 7
 agent: claude/sonnet
 yolo: true
 packages:
 - darkmatter-lsp
 - darkmatter
 - simplified-schema
+- sniff
+- darkmatter-cli
+- claudine-cli
 source_files_during_phase_1:
 - darkmatter/dmls/src/providers/frontmatter.rs
 - darkmatter/dmls/src/providers/frontmatter/enum_item_tests.rs
@@ -162,6 +165,95 @@ docs_created_during_phase_4:
 skills_files_updated_during_phase_4:
 - .claude/skills/darkmatter/expressions.md
 - .claude/skills/darkmatter/requests.md
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+- darkmatter/cli/src/approval.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/approval_tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/auto.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/matching.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/request.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/store.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/targets.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- sniff/lib/src/filesystem/git/mod.rs
+- sniff/lib/src/filesystem/git/tracked_state.rs
+- sniff/lib/src/filesystem/git/tracked_state_tests.rs
+- sniff/lib/src/filesystem/git/types.rs
+docs_updated_during_phase_5:
+- darkmatter/docs/topics/schemas/schema-slots.md
+- sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/sniff/SKILL.md
+- .claude/skills/sniff/remote-and-repository.md
+source_files_during_phase_6:
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/tests/l1/yaml_schema_envelope.rs
+- darkmatter/lib/src/markdown/schemas/slots/cache.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/src/markdown/schemas/slots/session_tests.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/codes.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/targets.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/select.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/semantic.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
+- darkmatter/lib/src/markdown/output/command/data.rs
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slots.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/global_catalog.rs
+- darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+- darkmatter/lib/tests/l1/yaml_kind_registry.rs
+- darkmatter/cli/src/commands/schema/triggers.rs
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/yaml_document.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+- claudine/cli/src/completion/schema_completion/mod.rs
+- claudine/cli/src/completion/schema_completion/keys.rs
+- claudine/cli/src/completion/schema_completion/tests.rs
+- claudine/cli/src/completion/engine/mod.rs
+- claudine/cli/src/completion/engine/tests.rs
+docs_updated_during_phase_6:
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/docs/cli/schema.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
 - .claude/skills/darkmatter/schema.md
 ---
 
@@ -1143,20 +1235,20 @@ Goal: the Q5 model works end to end for library and CLI callers.
 
 ### Wave 10 (parallel)
 
-- [ ] **Sniff tracked state (N25)**
+- [x] **Sniff tracked state (N25)**
   - Add `TrackedState` and `GitRepo::tracked_state` in `sniff/lib/src/filesystem/git/`,
     plus docs in the `sniff` topic page and skill note. Tests build real repos
     (tracked-clean, staged-modified, worktree-modified, untracked, ignored,
     conflicted, outside, symlink inside pointing out is handled by the caller's
     canonicalization).
   - Run `just test` and `just lint` in `sniff/`.
-- [ ] **Grant store (N23, N26)**
+- [x] **Grant store (N23, N26)**
   - `slots/grants/store.rs` (parser, writer, `GrantBook`) at
     `<home>/.config/darkmatter/schema-read-policy` (N26), `matching.rs`
     (specificity, deny-wins). Tests: Matrix 2 (all cells), control row, atomic
     append creating the parent directory, persisted + once allow and deny,
     no-home.
-- [ ] **Auto grant**
+- [x] **Auto grant**
   - `slots/grants/auto.rs` (N24) taking the observation root, `canonicalize_simplified`,
     `tracked_state`, the blob-hash comparison on bytes read, and buffers. Tests
     per refusal: dirty, untracked, ignored, LFS pointer, a file changed between
@@ -1171,10 +1263,10 @@ Goal: the Q5 model works end to end for library and CLI callers.
 
 ### Wave 11 (after Wave 10)
 
-- [ ] **Gate implementation and remote policy**
+- [x] **Gate implementation and remote policy**
   - `grants/gate.rs`: `ReadGate` over `GrantBook` + auto + handler; remote runtime
     per N27 (own `FetchPolicy`, scheme/port/query checks).
-- [ ] **Targets and pre-flight**
+- [x] **Targets and pre-flight**
   - `grants/targets.rs` (N29); `DarkmatterSchemas::pending_templates_for`;
     `compose_preflight_approvals_with` raises the combined batch; handler
     extension (N30). Tests: a document with `$schema` template + a shell command
@@ -1185,12 +1277,12 @@ Goal: the Q5 model works end to end for library and CLI callers.
 
 ### Wave 12 (after Wave 11)
 
-- [ ] **CLI prompt**
+- [x] **CLI prompt**
   - `cli/src/approval.rs`: numbered slot prompt in the same batch, including
     "deny for this run"; end of input or cancel ⇒ deny for this run; no TTY ⇒ no
     prompt, data output never prompts. Test the prompt with `approve_with_io`
     (no window, scripted IO).
-- [ ] **Validation checkpoint**
+- [x] **Validation checkpoint**
   - `just test`/`just lint` in `sniff/` and `darkmatter/`.
   - Approval matrix tests green (spec "Verification": clean grant, each refusal,
     every scope, deny, batched prompting beside shell, computed targets,
@@ -1206,7 +1298,7 @@ Q4/Q6/Q7.
 
 ### Wave 13 (parallel)
 
-- [ ] **Cache and snapshot types**
+- [x] **Cache and snapshot types**
   - `slots/cache.rs` (N21), `slots/session.rs` (N31–N33, N35): key building,
     observation re-verification, permission check against the requesting session,
     failure caching, volatile bypass, read-set replay (N22), stack for cycles,
@@ -1219,7 +1311,7 @@ Q4/Q6/Q7.
     cached then repaired ⇒ recovered; read set equal between cold and warm; volatile slot
     re-evaluates in a new command, not within one; a cross-command hit `stat`s
     and does not rehash unchanged inputs, and a changed `stat` rehashes (Q19).
-- [ ] **`kind`/baseline prohibitions (N34)**
+- [x] **`kind`/baseline prohibitions (N34)**
   - `yaml_documents/registry.rs`, `yaml_documents/semantic.rs`, baseline loaders,
     `catalog.rs`, the DMLS extension layer (Q15), and trigger match conditions:
     map `UnresolvedSlots` to the codes in N34, including slots through imports.
@@ -1227,7 +1319,7 @@ Q4/Q6/Q7.
 
 ### Wave 14 (after Wave 13)
 
-- [ ] **`DarkmatterSchemas` integration**
+- [x] **`DarkmatterSchemas` integration**
   - `with_slot_session`; in `effective_for_with_override` (mod.rs ~l.700) a
     template document layer resolves through the session before
     `merge_trigger/merge_baseline`; no session ⇒ `UnresolvedSlots`; `validate_yaml_document`
@@ -1238,10 +1330,10 @@ Q4/Q6/Q7.
   - Contract recursion (N33): `contract.rs::prepare_contract` resolves nested
     dynamic schemas through the session; cycle test with two schemas that load
     each other.
-- [ ] **Trigger payloads pending (N34)**
+- [x] **Trigger payloads pending (N34)**
   - `PayloadState::Pending`; `resolve_trigger_layers` resolves matched pending
     payloads; `TriggerRegistry` listing/`md schema triggers` shows "pending".
-- [ ] **Mutation staleness (N35)**
+- [x] **Mutation staleness (N35)**
   - Session generation check; test with a lifecycle/shell effect that rewrites the
     data file: next validation re-resolves with the grant decided earlier in the
     run (Q17), even though the file is now dirty; unrelated write keeps the pin;
@@ -1249,7 +1341,7 @@ Q4/Q6/Q7.
 
 ### Wave 15 (parallel)
 
-- [ ] **Integration tests**
+- [x] **Integration tests**
   - `darkmatter/lib/tests/l1/dynamic_schema_slots.rs`: end to end through
     `Markdown::compose` with a real repo fixture and the sandboxing-shaped schema:
     valid and invalid document values, passive default, pinned snapshot,
@@ -1258,7 +1350,7 @@ Q4/Q6/Q7.
   - Consumers (N41): Claudine's CLI completion reports an unresolved template
     instead of `.ok()?`-swallowing it; sweep Claudine and Messenger for other
     swallowed results; `cargo check --all-targets -p claudine -p claudine-cli -p messenger`.
-- [ ] **Validation checkpoint**
+- [x] **Validation checkpoint**
   - `just test`, `just lint` in `darkmatter/`; the existing `SHARED_VALIDATOR_CACHE`
     / `reset_process_caches` tests still pass.
 
