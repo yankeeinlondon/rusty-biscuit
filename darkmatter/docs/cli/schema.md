@@ -157,6 +157,17 @@ Triggers:
 - none
 ```
 
+A trigger whose payload holds `{{ … }}` slots is listed with
+`(payload pending: holds schema slots)`, and its data record has `pending: true`:
+it is valid, nothing is read to list or match it, and its slots resolve only when
+a document it matches is composed (see
+[Schema Slots](../topics/schemas/schema-slots.md#where-slots-may-appear)).
+
+```text
+Triggers:
+- /work/schemas/sandbox.trigger.yaml — matched (payload pending: holds schema slots)
+```
+
 A document outside every repository fails with status 1. A data output has `file`,
 `roots`, `shadowed`, `skipped`, `triggers`, `outcome`, and `diagnostics` on every
 run; see [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml).

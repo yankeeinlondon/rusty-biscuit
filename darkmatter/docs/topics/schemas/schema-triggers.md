@@ -291,6 +291,28 @@ every trigger was invalid the first time.
 DMLS refreshes on the same changes through its file events; see
 [When the registry changes](../../lsp/indexing.md#when-the-registry-changes).
 
+## A payload that holds slots
+
+A payload may take values from data with `{{ … }}`
+[slots](./schema-slots.md). Such a payload is **pending**, never invalid:
+discovery and matching read nothing a slot names, and `md schema triggers`
+lists it as pending. When a document it matches is composed, the payload's
+slots resolve in that composition's slot session, and the resolved schema
+must then pass the same payload rules (a mergeable object schema that
+compiles). A slot failure is reported at the slot, in the trigger's files.
+A document the trigger does not match never evaluates its slots.
+
+```yaml
+# schemas/sandbox.trigger.yaml
+kind: schema-trigger
+match:
+  topic: literal(sandbox; required)
+$schema:
+  os: enum({{ load_data("../data/os.yaml", "string[]") }}; required)
+```
+
+A slot in a `match` condition is refused: only the payload may hold slots.
+
 ## Applying a recursive type
 
 A trigger payload can declare the same reusable and recursive types as a

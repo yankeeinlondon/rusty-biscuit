@@ -387,8 +387,50 @@ evaluates in `request.for_source(defining_file)` over the command's
 `ExpressionError` (`host::failure_code`); `compose::report_diagnostics::slot_resolution_diagnostics`
 positions it at the slot in its defining file and keeps `data_location` and
 reference fields. Codes: `schemas/slots/codes.rs::SLOT_DIAGNOSTIC_CODES`.
-Approval, the resolution cache, sessions, and the surfaces that resolve are
-not built yet. User-facing: `darkmatter/docs/topics/schemas/schema-slots.md`;
+The gate is chosen per slot by its defining file
+(`evaluator.rs::SlotGates`; `with_gate` is one gate for all).
+Approval is `schemas/slots/grants/`: `store.rs` (the user-level
+`<home>/.config/darkmatter/schema-read-policy`, path from
+`FileResolutionContext::home_dir()`, never a repo or workspace file; any bad
+line fails the whole store), `matching.rs::GrantBook` (deny wins anywhere;
+`--allow host=` is a run-only site allow), `auto.rs::RepositoryGrounds`
+(Sniff `GitRepo::tracked_state` + `worktree_blob_id` at the request's
+observed root, `ComposeOptions::slot_repository_root`; probes and absent
+targets need only "schema and target in the repo"; listings/URLs never),
+`gate.rs::SlotGrants`/`RunGates` (deny → allow → automatic (memoized per run,
+post-read BLAKE3 must equal the granted bytes) → handler → `ApprovalRequired
+{ needed }`; slots fetch through their own `remote_runtime`),
+`targets.rs::collect_targets` (passive; literal/pure-folded args, URL or
+absolute/`./`/`../` path only), and `request.rs` (`SlotGrantRequest`,
+`SlotGrantDecision`; a decision not among `choices` is unanswered).
+`ShellApprovalHandler::approve_slot_reads` (provided, default unanswered) is
+asked by `compose_preflight_approvals*` before shell prompts
+(`ComposePreflightApprovals::slot_grants`, `stats.slot_reads_asked`); the CLI
+prompt is `cli/src/approval.rs::approve_slot_reads_with_io`. A discovery pass
+(`defer_shell_pending_schema_problems`) leaves an `UnresolvedSlots` schema to
+the terminal pass (`schema_validation::defers_template`).
+Resolution: `slots/session.rs::SlotSession` (one per command; built by
+`run_root_pipeline_collecting` from the request unless
+`ComposeOptions::with_slot_session` attached one; `prepare_schemas` hands it to
+`DarkmatterSchemas::with_slot_session`, pins-only when the pass defers).
+`DarkmatterSchemas::resolve_template` turns a layer's `UnresolvedSlots
+{ pending }` (document `$schema`, `validate_yaml_document`'s root `$schema`, a
+matched trigger payload: `ResolvedPayload::pending`, finished by
+`assemble::finish_file_payload`) into a concrete `ResolvedSchema`; a failure is
+`SchemaError::SlotResolution` (projected by
+`report_diagnostics::template_diagnostics`). The session holds one
+`SlotGrants` (Q17), pins per `cache::ResolutionKey` (re-verified when
+`DataRuntime::memo_generation` moved), and a thread-local resolution stack
+(`slot_cycle`; nested `load_data` contracts resolve through
+`session::resolve_contract_slots`, keyed apart in the contract memo).
+`slots/cache.rs` is the process cache (stat-first rechecks, grant coverage
+through `RecordingGates`, command-scoped entries for volatile/URL/listing
+reads, no grant-dependent failures; cleared by
+`reset_process_caches_for_bench`). Work counter: `Work::SlotResolution`
+(one per slot evaluated). `pending_templates_for` returns `PendingTemplate`s
+(document + matched trigger payloads, Q14-filtered). Kind definitions, the
+baseline/catalog, DMLS extensions, and trigger `match` refuse slots
+(`codes::slot_prohibition_code`). User-facing: `darkmatter/docs/topics/schemas/schema-slots.md`;
 language rules: `simplified-schema/docs/topics/language/slots.md`.
 
 ## Runtime baseline
