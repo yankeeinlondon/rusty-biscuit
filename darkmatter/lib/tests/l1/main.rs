@@ -56,6 +56,8 @@ mod position_fixtures;
 mod union_fixtures;
 #[path = "../content_policy_fixtures/mod.rs"]
 mod content_policy_fixtures;
+#[path = "../dynamic_slots_fixtures/mod.rs"]
+mod dynamic_slots_fixtures;
 
 mod absent_property_contract;
 mod plain_corpus;
@@ -69,6 +71,7 @@ mod schemas_runtime_parity;
 mod side_effect_partial;
 mod alias_lookup_once;
 mod ambient_ctx_capture;
+mod dynamic_slots_fixture_repos;
 mod array_rendering_json;
 mod as_block_error_registry;
 mod backslash_escape_spans;
