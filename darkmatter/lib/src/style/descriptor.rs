@@ -408,24 +408,32 @@ pub fn suggested_key(canonical_path: &str) -> Option<String> {
         .map(|(_, new)| join_path(parent, new))
 }
 
-/// The valid key nearest to a misspelled `canonical_path`, among the keys
-/// directly under its parent: a leaf or container one segment below it.
-///
-/// A candidate counts only within an edit distance of 2 and less than half
-/// the misspelled segment's length, so an unrelated word gets no
-/// suggestion. Ties go to the first candidate in descriptor order.
+/// The valid key nearest to a misspelled `canonical_path`, among the
+/// descriptor's keys directly under its parent: a leaf or container one
+/// segment below it. The choice is [`nearest_sibling`]'s; ties go to the first
+/// candidate in descriptor order.
 pub fn nearest_key(canonical_path: &str) -> Option<String> {
     let (parent, segment) = match canonical_path.rsplit_once('.') {
         Some((parent, segment)) => (parent, segment),
         None => ("", canonical_path),
     };
     let prefix = if parent.is_empty() { String::new() } else { format!("{parent}.") };
+    let children = SCHEMA.iter().filter_map(|leaf| {
+        let rest = leaf.canonical.strip_prefix(prefix.as_str())?;
+        Some(rest.split('.').next().unwrap_or(rest))
+    });
+    nearest_sibling(segment, children).map(|child| join_path(parent, child))
+}
+
+/// The candidate nearest to a misspelled `segment`, other than `segment`
+/// itself.
+///
+/// A candidate counts only within an edit distance of 2 and less than half
+/// the misspelled segment's length, so an unrelated word gets no
+/// suggestion. Ties go to the first candidate.
+pub fn nearest_sibling<'a>(segment: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
     let mut best: Option<(usize, &str)> = None;
-    for leaf in SCHEMA {
-        let Some(rest) = leaf.canonical.strip_prefix(prefix.as_str()) else {
-            continue;
-        };
-        let child = rest.split('.').next().unwrap_or(rest);
+    for child in candidates {
         if child == segment {
             continue;
         }
@@ -434,7 +442,7 @@ pub fn nearest_key(canonical_path: &str) -> Option<String> {
             best = Some((distance, child));
         }
     }
-    best.map(|(_, child)| join_path(parent, child))
+    best.map(|(_, child)| child)
 }
 
 /// `true` if `path` is a canonical container — a node that has children but

@@ -31,6 +31,8 @@ const FILE: &str = "style.yaml";
 /// A custom style schema admitting one number array and one string, for the
 /// collection cells; it replaces the built-in style definition.
 const ARRAY_SCHEMA: &str = "$schema:\n    style:\n        tags: number[]\n        foo: string\n";
+/// A custom style schema adding one open object field.
+const OBJECT_SCHEMA: &str = "$schema:\n    style:\n        extra: object\n";
 /// A custom style schema requiring `page.color`.
 const REQUIRED_SCHEMA: &str =
     "$schema:\n    style:\n        page:\n            color: string(required)\n            theme: string\n";
@@ -46,6 +48,8 @@ enum L {
 enum Schema {
     Baseline,
     Custom(&'static str),
+    /// No effective schema: setters are read by the descriptor.
+    Absent,
 }
 
 enum Expect {
@@ -73,9 +77,11 @@ const MISSING_REQUIRED: &str = "dm.schema.missing_required";
 fn run(schema: Schema, layers: Vec<L>, expect: Expect) {
     let dir = tempfile::tempdir().expect("temp dir");
     let context = FileResolutionContext::new(dir.path().to_path_buf());
-    let frontmatter = match schema {
+    let schema_choice = schema;
+    let frontmatter = match &schema_choice {
         Schema::Baseline => "title: Notes\n",
-        Schema::Custom(frontmatter) => frontmatter,
+        Schema::Custom(frontmatter) => *frontmatter,
+        Schema::Absent => "",
     };
     let markdown: Markdown = format!("---\n{frontmatter}---\nBody\n").as_str().into();
     let schema: EffectiveSchema = DarkmatterSchemas::new(context.clone())
@@ -101,7 +107,8 @@ fn run(schema: Schema, layers: Vec<L>, expect: Expect) {
             }
         })
         .collect();
-    let result = prepare_style_layers(&layers, Some(&schema), StylePreparationPolicy::render());
+    let schema = (!matches!(schema_choice, Schema::Absent)).then_some(&schema);
+    let result = prepare_style_layers(&layers, schema, StylePreparationPolicy::render());
     match (expect, result) {
         (Expect::Typed(check), Ok(prepared)) => check(&prepared),
         (Expect::Typed(_), Err(error)) => panic!("expected success, got {}", describe(&error)),
@@ -157,7 +164,7 @@ macro_rules! cells {
 }
 
 use L::{Doc, File, Set};
-use Schema::{Baseline, Custom};
+use Schema::{Baseline, Custom, Absent};
 
 // CLI style root: a mapping, never a scalar, array, or null; an inline `{}`
 // is a no-op, a file `{}` fails, and no layer at all is the default style.
@@ -171,8 +178,15 @@ cells! {
     });
     root_file_array_fails: Baseline, [File(json!([{"margin": 2}]))] => fails(INVALID_ROOT, "", FILE);
     root_file_string_fails: Baseline, [File(json!("margin: 2"))] => fails(INVALID_ROOT, "", FILE);
-    root_setter_array_fails: Baseline, [Set(&["style=[1]"])] => fails(INVALID_ROOT, "", "style=[1]");
-    root_setter_null_fails: Baseline, [Set(&["style=null"])] => fails(INVALID_ROOT, "", "style=null");
+    root_setter_array_fails: Baseline, [Set(&["style=[1]"])] => fails(TYPE_MISMATCH, "", "style=[1]");
+    root_setter_empty_array_fails: Baseline, [Set(&["style=[]"])] => fails(TYPE_MISMATCH, "", "style=[]");
+    root_setter_null_fails: Baseline, [Set(&["style=null"])] => fails(TYPE_MISMATCH, "", "style=null");
+    root_setter_number_fails: Baseline, [Set(&["style=4"])] => fails(TYPE_MISMATCH, "", "style=4");
+    root_setter_malformed_object_fails: Baseline, [Set(&["style={ margin: "])] =>
+        fails(TYPE_MISMATCH, "", "style={ margin: ");
+    root_setter_number_without_a_schema_fails: Absent, [Set(&["style=4"])] => fails(TYPE_MISMATCH, "", "style=4");
+    root_setter_null_member_is_absent: Baseline, [Doc(json!({"margin": 3})), Set(&["style={ margin: null }"])] =>
+        Expect::Typed(|prepared| assert_eq!(page(prepared).margin_top, Some(3)));
     root_inline_empty_over_a_document_is_a_no_op: Baseline, [Doc(json!({"margin": 3})), Set(&["style={}"])] =>
         Expect::Typed(|prepared| assert_eq!(page(prepared).margin_top, Some(3)));
     root_file_empty_over_a_document_fails: Baseline, [Doc(json!({"margin": 3})), File(json!({}))] =>
@@ -181,6 +195,26 @@ cells! {
         assert_eq!(prepared.value(), &json!({}));
         assert!(prepared.style().page.is_none());
     });
+}
+
+// A setter bound at a container path takes the same schema codes as a
+// scalar field's, whatever the container (`style` itself, a component, an
+// open object, a union).
+cells! {
+    container_setter_page_number_fails: Baseline, [Set(&["style.page=4"])] => fails(TYPE_MISMATCH, "page", "style.page=4");
+    container_setter_markdown_number_fails: Baseline, [Set(&["style.markdown=4"])] =>
+        fails(TYPE_MISMATCH, "markdown", "style.markdown=4");
+    container_setter_open_object_number_fails: Baseline, [Set(&["style.page.meta=4"])] =>
+        fails(TYPE_MISMATCH, "page.meta", "style.page.meta=4");
+    container_setter_table_null_is_absent: Baseline, [Doc(json!({"margin": 3})), Set(&["style.table=null"])] =>
+        Expect::Typed(|prepared| assert_eq!(page(prepared).margin_top, Some(3)));
+    container_setter_union_malformed_object_fails: Baseline, [Set(&["style.table.border={ left:"])] =>
+        fails(CONSTRAINT, "table.border", "style.table.border={ left:");
+    container_setter_scalar_field_fails: Baseline, [Set(&["style.margin=abc"])] => fails(TYPE_MISMATCH, "page.margin", "style.margin=abc");
+    // With no schema, every setter value is read by the descriptor's
+    // validators, so a wrong type below `style` is a rendering refusal.
+    container_setter_page_number_without_a_schema_is_invalid: Absent, [Set(&["style.page=4"])] =>
+        fails(INVALID_VALUE, "page", "style.page=4");
 }
 
 // Page rows (u16 terminal rows): the full walk on `margin-top`.
@@ -420,5 +454,38 @@ cells! {
     unknown_setter_beside_a_valid_sibling_fails: Baseline, [Set(&["style.margin=2", "style.bogus=1"])] =>
         fails(UNKNOWN_KEY, "bogus", "style.bogus=1");
     inline_container_setter_duplicate_keys_fail: Baseline, [Set(&["style={ margin: 1, margin: 2 }"])] =>
+        fails(INVALID_SETTER, "", "style={ margin: 1, margin: 2 }");
+}
+
+// Repeated exact setter paths: only the last assignment is read, so a
+// superseded one is never parsed, whatever its family. The survivor keeps the
+// duplicate-key rule (`inline_container_setter_duplicate_keys_fail`).
+cells! {
+    superseded_root_setter_duplicate_keys_are_not_read: Baseline,
+        [Set(&["style={ margin: 1, margin: 2 }", "style={ margin: 3 }"])] => Expect::Typed(|prepared| {
+            let page = page(prepared);
+            assert_eq!(
+                (page.margin_top, page.margin_right, page.margin_bottom, page.margin_left),
+                (Some(3), Some(Length::Ch(3)), Some(3), Some(Length::Ch(3)))
+            );
+        });
+    superseded_union_setter_duplicate_keys_are_not_read: Baseline,
+        [Set(&["style.table.border={left:true,left:false}", "style.table.border=thin"])] =>
+        Expect::Typed(|prepared| assert_eq!(prepared.value()["table"]["border"], json!("thin")));
+    superseded_open_object_setter_duplicate_keys_are_not_read: Baseline,
+        [Set(&["style.page.meta={a:1,a:2}", "style.page.meta={b:3}"])] =>
+        Expect::Typed(|prepared| assert_eq!(prepared.value()["page"]["meta"], json!({"b": 3})));
+    superseded_cleanup_setter_duplicate_keys_are_not_read: Baseline,
+        [Set(&["style.markdown={unwrap:true,unwrap:false}", "style.markdown={unwrap:true}"])] =>
+        Expect::Typed(|prepared| assert_eq!(prepared.value()["markdown"], json!({"unwrap": true})));
+    superseded_custom_field_setter_duplicate_keys_are_not_read: Custom(OBJECT_SCHEMA),
+        [Set(&["style.extra={a:1,a:2}", "style.extra={a:3}"])] =>
+        Expect::Typed(|prepared| assert_eq!(prepared.value()["extra"], json!({"a": 3})));
+    superseded_scalar_setter_is_not_converted: Baseline, [Set(&["style.margin=abc", "style.margin=2"])] =>
+        Expect::Typed(|prepared| assert_eq!(page(prepared).margin_top, Some(2)));
+    superseded_malformed_root_setter_is_not_read: Baseline, [Set(&["style={ margin: ", "style={ margin: 2 }"])] =>
+        Expect::Typed(|prepared| assert_eq!(page(prepared).margin_top, Some(2)));
+    surviving_setter_duplicate_keys_still_fail: Baseline,
+        [Set(&["style={ margin: 3 }", "style={ margin: 1, margin: 2 }"])] =>
         fails(INVALID_SETTER, "", "style={ margin: 1, margin: 2 }");
 }

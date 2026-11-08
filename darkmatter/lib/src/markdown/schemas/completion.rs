@@ -526,6 +526,19 @@ fn keeps_text_at(effective: &EffectiveSchema, frontmatter: &Value, path: &[PathS
     })
 }
 
+/// The keys `effective` declares directly under `path` (the root when empty),
+/// read over the same layers as [`declared_shape`] and [`path_candidates`]:
+/// a union narrows by `frontmatter`'s literal tags, and a pattern key names
+/// no key. Empty when the path leaves the schema.
+pub fn declared_keys(effective: &EffectiveSchema, frontmatter: &Value, path: &[PathStep<'_>]) -> Vec<String> {
+    let no_definitions = DefinitionTable::default();
+    SchemaView::new(PathSchema::Effective(effective), frontmatter, &no_definitions)
+        .declared_keys(path)
+        .into_iter()
+        .map(|key| key.name)
+        .collect()
+}
+
 /// The command a path is completed for. Each one decides which keys are offered
 /// and how a candidate is spelled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

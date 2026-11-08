@@ -20,7 +20,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Report, Result};
 use darkmatter::markdown::Markdown;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::{
@@ -420,24 +420,10 @@ pub(crate) fn discover_document_triggers(schemas: DarkmatterSchemas) -> Result<D
     if schemas.file_resolution_context().repository_root().is_some() { schemas.with_trigger_discovery() } else { Ok(schemas) }
 }
 
-/// A document's effective schema, selected passively, and the schema triggers
-/// its discovery skipped as invalid.
-pub(crate) struct SelectedDocumentSchema {
-    /// `None` when no schema layer applies to the document.
-    pub(crate) schema: Option<EffectiveSchema>,
-    pub(crate) trigger_findings: Vec<InvalidTriggerFinding>,
-}
-
-impl SelectedDocumentSchema {
-    /// No schema, and no trigger found.
-    pub(crate) fn none() -> Self {
-        Self { schema: None, trigger_findings: Vec::new() }
-    }
-}
-
 /// The effective schema of `document` from `schemas` (a baseline selection)
 /// in the document's `context`, with trigger discovery when
-/// `discover_triggers` and the context is inside a repository.
+/// `discover_triggers` and the context is inside a repository; `None` when no
+/// schema layer applies to the document.
 ///
 /// Passive: the document is not composed, and its `$schema` is read as
 /// written, never overlaid by anything a caller supplies.
@@ -450,17 +436,21 @@ pub(crate) fn effective_document_schema(
     document: &Markdown,
     context: FileResolutionContext,
     discover_triggers: bool,
-) -> Result<SelectedDocumentSchema, SchemaError> {
+) -> Result<Option<EffectiveSchema>, SchemaError> {
     let schemas = schemas.with_file_resolution_context(context);
     let schemas = if discover_triggers { discover_document_triggers(schemas)? } else { schemas };
-    Ok(SelectedDocumentSchema { trigger_findings: schemas.discovery_findings().to_vec(), schema: schemas.effective_for(document)? })
+    schemas.effective_for(document)
 }
 
-/// [`effective_document_schema`] with the baseline an ordinary run selects
-/// ([`request_schemas`], so `BASELINE_SCHEMA` and
+/// The effective schema of `document` with the baseline an ordinary run
+/// selects ([`request_schemas`], so `BASELINE_SCHEMA` and
 /// `DARKMATTER_NO_BASELINE_SCHEMA` are read from the request's snapshot) and
 /// trigger discovery, in the context of the document `opened` names, or the
 /// launch context for a document read from stdin.
+///
+/// The triggers discovery skipped as invalid are returned beside the schema,
+/// so a document schema that cannot be assembled still reports them; they are
+/// empty when the failure came before discovery.
 ///
 /// ## Errors
 ///
@@ -470,12 +460,18 @@ pub(crate) fn select_document_schema(
     document: &Markdown,
     opened: Option<&OpenedArgument>,
     request: &MdRequest,
-) -> Result<SelectedDocumentSchema> {
-    let context = match opened {
-        Some(opened) => opened.document_context(request)?,
-        None => request.launch_context()?.clone(),
-    };
-    Ok(effective_document_schema(request_schemas(request)?, document, context, true)?)
+) -> (Vec<InvalidTriggerFinding>, Result<Option<EffectiveSchema>>) {
+    let discovered = (|| -> Result<DarkmatterSchemas> {
+        let context = match opened {
+            Some(opened) => opened.document_context(request)?,
+            None => request.launch_context()?.clone(),
+        };
+        Ok(document_schemas(request, context)?)
+    })();
+    match discovered {
+        Ok(schemas) => (schemas.discovery_findings().to_vec(), schemas.effective_for(document).map_err(Report::from)),
+        Err(error) => (Vec::new(), Err(error)),
+    }
 }
 
 /// The baseline [`load_api`] selected.

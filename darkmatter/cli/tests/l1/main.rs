@@ -100,6 +100,7 @@ mod render_basic;
 mod render_alias_parity;
 mod render_dispatch;
 mod render_style_acceptance;
+mod render_style_carried_warnings;
 mod render_style_files;
 mod render_style_matrix;
 mod render_style_wiring;

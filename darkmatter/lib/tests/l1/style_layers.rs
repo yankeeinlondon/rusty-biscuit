@@ -413,7 +413,12 @@ mod admission {
         let schema = fixture.baseline();
         assert_eq!(codes(&failure(&[fixture.file(json!(5))], &schema)), [STYLE_INVALID_ROOT_CODE]);
         assert_eq!(codes(&failure(&[fixture.file(Value::Null)], &schema)), [STYLE_INVALID_ROOT_CODE]);
-        assert_eq!(codes(&failure(&[fixture.setters(&["style=5"])], &schema)), [STYLE_INVALID_ROOT_CODE]);
+        // A setter's root is an ordinary schema value, named by its key.
+        let setter = failure(&[fixture.setters(&["style=5"])], &schema);
+        assert_eq!(codes(&setter), [TYPE_MISMATCH]);
+        let message = setter.problems[0].to_string();
+        assert!(message.contains("`style` takes a mapping"), "{message}");
+        assert!(message.contains("from the setter `style=5`"), "{message}");
     }
 
     #[test]
@@ -507,5 +512,116 @@ mod sources {
         let error = failure(&[fixture.file(json!({"max-width": "abc"})), fixture.file(json!({"max-width": 50}))], &schema);
         assert_eq!(error.problems.len(), 1, "{:?}", error.problems);
         assert_eq!(error.problems[0].path, "page.max-width");
+    }
+}
+
+/// Typo suggestions name only keys the layer's effective schema admits; with
+/// no schema, the descriptor's.
+mod suggestions {
+    use super::*;
+
+    /// `style: { accent: string }`, replacing the built-in style definition.
+    const ACCENT_SCHEMA: &str = "$schema:\n    style:\n        accent: string\n";
+
+    /// The one problem message of a failing setter.
+    fn setter_message(fixture: &Fixture, schema: Option<&EffectiveSchema>, argument: &str) -> String {
+        let error = prepare_style_layers(&[fixture.setters(&[argument])], schema, StylePreparationPolicy::render())
+            .expect_err("the setter fails");
+        let [problem] = error.problems.as_slice() else {
+            panic!("one problem expected: {:#?}", error.problems);
+        };
+        assert_eq!(problem.code, UNKNOWN_KEY, "{problem:?}");
+        problem.message.clone()
+    }
+
+    /// The suggestion of a file's or document's one unknown-key warning.
+    fn warning_suggestion(layer: StyleLayer, schema: &EffectiveSchema) -> Option<String> {
+        let style = prepared(&[layer], schema);
+        let [warning] = style.diagnostics() else {
+            panic!("one warning expected: {:?}", style.diagnostics());
+        };
+        assert_eq!(warning.code, Some(STYLE_UNKNOWN_KEY), "{warning:?}");
+        warning.warning.suggestion.clone()
+    }
+
+    #[test]
+    fn a_custom_schema_setter_typo_suggests_the_custom_key() {
+        let fixture = Fixture::new();
+        let schema = fixture.schema(ACCENT_SCHEMA);
+        let style = prepared(&[fixture.setters(&["style.accent=blue"])], &schema);
+        assert_eq!(style.retained(), &json!({"accent": "blue"}));
+        let message = setter_message(&fixture, Some(&schema), "style.acent=blue");
+        assert!(message.ends_with("; did you mean `style.accent`?"), "{message}");
+    }
+
+    #[test]
+    fn a_custom_schema_setter_typo_never_suggests_a_rejected_built_in_key() {
+        let fixture = Fixture::new();
+        let schema = fixture.schema(ACCENT_SCHEMA);
+        let message = setter_message(&fixture, Some(&schema), "style.magin=4");
+        assert!(!message.contains("did you mean"), "{message}");
+        // A rename hint names a built-in key this schema rejects as well.
+        let message = setter_message(&fixture, Some(&schema), "style.left-margin=4");
+        assert!(!message.contains("did you mean"), "{message}");
+    }
+
+    #[test]
+    fn a_nested_custom_object_setter_typo_suggests_its_sibling() {
+        let fixture = Fixture::new();
+        let schema = fixture.schema("$schema:\n    style:\n        box:\n            accent: string\n");
+        let message = setter_message(&fixture, Some(&schema), "style.box.acent=blue");
+        assert!(message.ends_with("; did you mean `style.box.accent`?"), "{message}");
+    }
+
+    #[test]
+    fn a_pattern_opened_style_admits_a_typo_without_a_suggestion_error() {
+        let fixture = Fixture::new();
+        let schema = fixture.schema("$schema:\n    style:\n        \"<string>\": unknown\n");
+        let style = prepared(&[fixture.setters(&["style.acent=blue"])], &schema);
+        assert_eq!(style.retained(), &json!({"acent": "blue"}));
+    }
+
+    #[test]
+    fn a_baseline_setter_typo_suggests_the_built_in_sibling() {
+        let fixture = Fixture::new();
+        let schema = fixture.baseline();
+        let message = setter_message(&fixture, Some(&schema), "style.magin=4");
+        assert!(message.ends_with("; did you mean `style.margin`?"), "{message}");
+        let message = setter_message(&fixture, Some(&schema), "style.table.alignmnt=x");
+        assert!(message.ends_with("; did you mean `style.table.alignment`?"), "{message}");
+        let message = setter_message(&fixture, Some(&schema), "style.page.left-margin=4");
+        assert!(message.ends_with("; did you mean `style.page.margin-left`?"), "{message}");
+    }
+
+    #[test]
+    fn a_schemaless_setter_typo_suggests_the_descriptor_sibling() {
+        let fixture = Fixture::new();
+        let message = setter_message(&fixture, None, "style.magin=4");
+        assert!(message.ends_with("; did you mean `style.margin`?"), "{message}");
+        let message = setter_message(&fixture, None, "style.table.alignmnt=x");
+        assert!(message.ends_with("; did you mean `style.table.alignment`?"), "{message}");
+    }
+
+    #[test]
+    fn file_and_document_rename_suggestions_are_unchanged_under_the_baseline() {
+        let fixture = Fixture::new();
+        let schema = fixture.baseline();
+        let file = fixture.file(json!({"page": {"left-margin": 2, "max-width": 50}}));
+        assert_eq!(warning_suggestion(file, &schema).as_deref(), Some("page.margin-left"));
+        let document = fixture.document(json!({"page": {"left-margin": 2}}));
+        assert_eq!(warning_suggestion(document, &schema).as_deref(), Some("page.margin-left"));
+        // A file or document typo keeps the rename-only rule: no nearest key.
+        let file = fixture.file(json!({"magin": 2, "max-width": 50}));
+        assert_eq!(warning_suggestion(file, &schema), None);
+    }
+
+    #[test]
+    fn a_file_rename_suggestion_never_names_a_key_the_custom_schema_rejects() {
+        let fixture = Fixture::new();
+        let schema = fixture.schema(ACCENT_SCHEMA);
+        let file = fixture.file(json!({"left-margin": 2, "accent": "blue"}));
+        assert_eq!(warning_suggestion(file, &schema), None);
+        let document = fixture.document(json!({"left-margin": 2}));
+        assert_eq!(warning_suggestion(document, &schema), None);
     }
 }

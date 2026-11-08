@@ -118,3 +118,55 @@ fn an_hr_margin_setter_fails_as_an_unknown_property() {
     let (status, records) = codes(&run(&fixture, &["doc.md", "style.hr.margin=4", "--output", "json"]));
     assert_eq!((status, records), (Some(1), vec!["error:dm.schema.unknown_key".to_owned()]));
 }
+
+/// `style="{ margin: "` is not a mapping: an ordinary schema type mismatch
+/// naming `style`, with the setter as its origin and no file location.
+#[test]
+fn a_malformed_whole_style_setter_is_a_schema_type_mismatch() {
+    let fixture = CliProcessFixture::named("acceptance-malformed-style");
+    fixture.write_file("cwd/doc.md", "# Notes\n");
+
+    let output = run(&fixture, &["doc.md", "style={ margin: ", "--output", "json"]);
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| panic!("{error}: {}", stdout(&output)));
+    let (status, records) = codes(&output);
+    assert_eq!((status, records), (Some(1), vec!["error:dm.schema.type_mismatch".to_owned()]));
+    let record = &value["diagnostics"][0];
+    let message = record["message"].as_str().expect("a message");
+    assert!(message.contains("`style` takes a mapping"), "{record:#}");
+    assert!(message.contains("`style={ margin: `"), "{record:#}");
+    assert!(record["source"].is_null(), "a setter is in no file: {record:#}");
+}
+
+/// A repeated whole-style setter replaces the earlier assignment before it is
+/// read, so the earlier one's duplicate key does not fail the render.
+#[test]
+fn a_superseded_duplicate_key_style_setter_is_not_read() {
+    let fixture = CliProcessFixture::named("acceptance-superseded-style");
+    fixture.write_file("cwd/doc.md", "# Notes\n");
+
+    let output = run(&fixture, &["doc.md", "style={ margin: 1, margin: 2 }", "style={ margin: 3 }", "--output", "json"]);
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| panic!("{error}: {}", stdout(&output)));
+    let (status, records) = codes(&output);
+    assert_eq!((status, records), (Some(0), Vec::<String>::new()), "{value:#}");
+    assert_eq!(value["outcome"], "success", "{value:#}");
+}
+
+/// A setter typo under a document's own style schema suggests that schema's
+/// key, never a built-in one it rejects.
+#[test]
+fn a_custom_style_schema_setter_typo_suggests_the_custom_key() {
+    let fixture = CliProcessFixture::named("acceptance-custom-style-suggestion");
+    fixture.write_file("cwd/doc.md", "---\n$schema:\n    style:\n        accent: string\n---\n# Notes\n");
+
+    let messages = |setter: &str| {
+        let output = run(&fixture, &["doc.md", setter, "--output", "json"]);
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| panic!("{error}: {}", stdout(&output)));
+        let (status, records) = codes(&output);
+        assert_eq!((status, records), (Some(1), vec!["error:dm.schema.unknown_key".to_string()]), "{value:#}");
+        value["diagnostics"][0]["message"].as_str().expect("a message").to_string()
+    };
+    let message = messages("style.acent=blue");
+    assert!(message.contains("did you mean `style.accent`?"), "{message}");
+    let message = messages("style.magin=4");
+    assert!(!message.contains("did you mean"), "{message}");
+}

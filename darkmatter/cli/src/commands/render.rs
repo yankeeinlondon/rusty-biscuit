@@ -15,7 +15,9 @@ use crate::output::{
     OutputEnvironment, ResolvedOutput, output_diagnostic, resolve_output, stderr_terminal, stderr_warning, write_stdout,
 };
 use crate::render::{PageInputs, PagePresentation, document_style, terminal_page};
-use crate::render_style::{RenderStyle, document_style_layer, prepare_cli_style_inputs, prepare_render_style};
+use crate::render_style::{
+    RenderStyle, StyleWarningRecord, document_style_layer, prepare_read_render_style, read_cli_style_inputs,
+};
 use crate::request::MdRequest;
 use biscuit_terminal::output::{OutputTarget, WidthRequest};
 use biscuit_terminal::terminal::Terminal;
@@ -159,13 +161,15 @@ impl Render<'_> {
     }
 
     /// The effective style, its trigger findings and warnings reported and
-    /// its denied warnings refused.
+    /// its denied warnings refused. A failure still reports every warning
+    /// the inputs that were read raised, except a denied one, which is the
+    /// failure's own error record.
     fn prepare_style(&self, md: &Markdown, opened: Option<&OpenedArgument>, sink: Option<&ReportSink>) -> Result<RenderStyle> {
         let options = self.options;
-        let inputs = prepare_cli_style_inputs(md, opened, &options.styles, &options.setters, self.request)?;
+        let read = read_cli_style_inputs(md, opened, &options.styles, &options.setters, self.request);
         match sink {
-            Some(sink) => sink.diagnostics(inputs.trigger_findings.iter().map(finding_diagnostic).collect()),
-            None => emit_warnings(&inputs.trigger_findings, &stderr_terminal()),
+            Some(sink) => sink.diagnostics(read.inputs.trigger_findings.iter().map(finding_diagnostic).collect()),
+            None => emit_warnings(&read.inputs.trigger_findings, &stderr_terminal()),
         }
         let context = match opened {
             Some(opened) => opened.document_context(self.request)?,
@@ -173,14 +177,28 @@ impl Render<'_> {
         };
         let policy = StylePreparationPolicy::render().with_deny_style(self.deny_style);
         let page = builds_page(self.output.target);
-        let style = prepare_render_style(&inputs, document_style_layer(md, opened.map(OpenedArgument::path), context), policy, page)?;
+        let layer = document_style_layer(md, opened.map(OpenedArgument::path), context);
+        let style = match prepare_read_render_style(read, layer, policy, page) {
+            Ok(style) => style,
+            Err(failure) => {
+                Self::report_style_warnings(failure.warnings.iter(), sink, page);
+                return Err(failure.error);
+            }
+        };
 
         let document = opened.map(|opened| PathBuf::from(biscuit_file::to_portable_string(opened.path())));
         let inline_rules: Vec<Diagnostic> =
             scan_inline_hr_warnings(md.content()).iter().map(|warning| inline_rule_record(warning, document.as_deref())).collect();
-        self.stop_if_denied(&style, &inline_rules)?;
+        let denied = self.stop_if_denied(&style, &inline_rules);
+        let reported = style.warnings.iter().filter(|warning| denied.is_ok() || !self.blocks(&warning.record));
+        Self::report_style_warnings(reported, sink, page);
+        denied?;
+        Ok(style)
+    }
 
-        for warning in &style.warnings {
+    /// Reports `warnings` to the data output's `sink`, or on stderr.
+    fn report_style_warnings<'w>(warnings: impl Iterator<Item = &'w StyleWarningRecord>, sink: Option<&ReportSink>, page: bool) {
+        for warning in warnings {
             match sink {
                 Some(sink) => sink.diagnostics(vec![warning.record.clone()]),
                 // A formatted source output builds no page, so it shows only
@@ -189,23 +207,27 @@ impl Render<'_> {
                 None => {}
             }
         }
-        Ok(style)
+    }
+
+    /// Whether the policy makes the style warning `record` an error.
+    fn blocks(&self, record: &Diagnostic) -> bool {
+        self.deny_style || self.blocking.blocks(Some(&record.code), Severity::Warning)
     }
 
     /// Fails when the policy blocks a style warning: `--deny style` blocks the
     /// body's inline horizontal-rule styles (preparation already refused the
-    /// rest), and `--deny <code>` each warning with that code.
+    /// rest), and `--deny <code>` each warning with that code. The failure's
+    /// records are the blocked warnings, as errors; the caller reports the rest.
     fn stop_if_denied(&self, style: &RenderStyle, inline_rules: &[Diagnostic]) -> Result<()> {
         let mut records: Vec<Diagnostic> = if self.deny_style {
             inline_rules.to_vec()
         } else {
             style.warnings.iter().map(|warning| warning.record.clone()).chain(inline_rules.iter().cloned()).collect()
         };
-        let blocked = |record: &Diagnostic| self.deny_style || self.blocking.blocks(Some(&record.code), Severity::Warning);
-        let Some(first) = records.iter().find(|record| blocked(record)).cloned() else {
+        let Some(first) = records.iter().find(|record| self.blocks(record)).cloned() else {
             return Ok(());
         };
-        records.retain(|record| blocked(record));
+        records.retain(|record| self.blocks(record));
         for record in &mut records {
             record.severity = Severity::Error;
         }

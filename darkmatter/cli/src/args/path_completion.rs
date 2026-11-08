@@ -452,7 +452,7 @@ fn document_effective(
     request: &MdRequest,
 ) -> Option<Option<EffectiveSchema>> {
     let context = argument.document_context(request).ok()?;
-    effective_document_schema(schemas, overlay, context, policy.discovers_triggers()).ok().map(|selected| selected.schema)
+    effective_document_schema(schemas, overlay, context, policy.discovers_triggers()).ok()
 }
 
 #[cfg(test)]

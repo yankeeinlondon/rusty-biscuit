@@ -54,7 +54,7 @@ use simplified_schema::coercion::PathSegment;
 use simplified_schema::completion::PathStep;
 
 use crate::args::RawStyleSetter;
-use crate::commands::schema::validate::{SelectedDocumentSchema, select_document_schema};
+use crate::commands::schema::validate::select_document_schema;
 use crate::io::{DocumentArgumentError, OpenedArgument, open_argument};
 use crate::output::output_diagnostic;
 use crate::output::report::ClassifiedFailure;
@@ -251,8 +251,8 @@ impl std::fmt::Debug for CliStyleInputs {
 ///
 /// ## Errors
 ///
-/// The first [`load_style_file`] or [`setter_layer`] failure, or a schema
-/// selection failure.
+/// [`ReadStyleInputs::failure`]; [`read_cli_style_inputs`] keeps what was
+/// read before it.
 pub fn prepare_cli_style_inputs(
     document: &Markdown,
     opened: Option<&OpenedArgument>,
@@ -260,34 +260,70 @@ pub fn prepare_cli_style_inputs(
     setters: &[RawStyleSetter],
     request: &MdRequest,
 ) -> Result<CliStyleInputs> {
-    let selected = match select_document_schema(document, opened, request) {
-        Ok(selected) => selected,
+    let read = read_cli_style_inputs(document, opened, styles, setters, request);
+    match read.failure {
+        Some(failure) => Err(failure),
+        None => Ok(read.inputs),
+    }
+}
+
+/// A render's CLI style inputs as far as they could be read.
+#[derive(Debug)]
+pub struct ReadStyleInputs {
+    /// The selected schema (`None` when selection failed), the trigger
+    /// findings discovery made, and every layer read before the failure.
+    pub inputs: CliStyleInputs,
+    /// The first failure: the schema selection (only when a CLI layer needs
+    /// it), a [`load_style_file`] failure, or a [`setter_layer`] failure.
+    /// Nothing after it is read.
+    pub failure: Option<Report>,
+}
+
+/// [`prepare_cli_style_inputs`], keeping the inputs read before a failure so
+/// the run still reports their warnings, the trigger findings, and the
+/// document's own style warnings beside it.
+pub fn read_cli_style_inputs(
+    document: &Markdown,
+    opened: Option<&OpenedArgument>,
+    styles: &[OsString],
+    setters: &[RawStyleSetter],
+    request: &MdRequest,
+) -> ReadStyleInputs {
+    let (trigger_findings, selected) = select_document_schema(document, opened, request);
+    let mut inputs = CliStyleInputs {
+        schema: None,
+        layers: Vec::with_capacity(styles.len() + 1),
+        trigger_findings,
+        document: opened.map(|opened| opened.path().to_path_buf()),
+        files: HashMap::new(),
+    };
+    let failed = |inputs, failure| ReadStyleInputs { inputs, failure: Some(failure) };
+    match selected {
+        Ok(schema) => inputs.schema = schema,
         // Only a CLI layer needs the schema's verdict. A document-only render
         // keeps rendering with the built-in style descriptor, as it did before
         // rendering selected a schema; `md schema validate` reports the schema.
         Err(error) if styles.is_empty() && setters.is_empty() => {
             tracing::debug!(error = %format!("{error:#}"), "no effective schema; using the built-in style descriptor");
-            SelectedDocumentSchema::none()
         }
-        Err(error) => return Err(error),
-    };
-    let mut layers = Vec::with_capacity(styles.len() + 1);
-    let mut files = HashMap::new();
+        Err(error) => return failed(inputs, error),
+    }
     for style in styles {
-        let loaded = load_style_file(style, request).map_err(ClassifiedFailure::located_from)?;
-        files.insert(loaded.layer.source().to_string(), loaded.path);
-        layers.push(loaded.layer);
+        match load_style_file(style, request) {
+            Ok(loaded) => {
+                inputs.files.insert(loaded.layer.source().to_string(), loaded.path);
+                inputs.layers.push(loaded.layer);
+            }
+            Err(error) => return failed(inputs, ClassifiedFailure::located_from(error)),
+        }
     }
     if !setters.is_empty() {
-        layers.push(setter_layer(setters, request).map_err(ClassifiedFailure::located_from)?);
+        match setter_layer(setters, request) {
+            Ok(layer) => inputs.layers.push(layer),
+            Err(error) => return failed(inputs, ClassifiedFailure::located_from(error)),
+        }
     }
-    Ok(CliStyleInputs {
-        schema: selected.schema,
-        layers,
-        trigger_findings: selected.trigger_findings,
-        document: opened.map(|opened| opened.path().to_path_buf()),
-        files,
-    })
+    ReadStyleInputs { inputs, failure: None }
 }
 
 impl CliStyleInputs {
@@ -429,16 +465,67 @@ pub fn prepare_render_style(
     policy: StylePreparationPolicy,
     builds_page: bool,
 ) -> Result<RenderStyle> {
+    render_style(inputs, document_layer, policy, builds_page).map_err(|error| inputs.failure(&error))
+}
+
+/// A render style that was not prepared, and the warnings its run still
+/// reports.
+#[derive(Debug)]
+pub struct RenderStyleFailure {
+    /// The run's failure, as [`prepare_render_style`] or the read failure
+    /// gives it.
+    pub error: Report,
+    /// The warnings of every layer that was read, in precedence order; a
+    /// data output's failure records may repeat them.
+    pub warnings: Vec<StyleWarningRecord>,
+}
+
+/// [`prepare_render_style`] over what [`read_cli_style_inputs`] read. When
+/// reading failed, the layers it did read (the document's own `style:` and
+/// the earlier CLI layers) are still merged, only for their warnings.
+///
+/// ## Errors
+///
+/// The read failure, or [`prepare_render_style`]'s, each with the warnings.
+pub fn prepare_read_render_style(
+    read: ReadStyleInputs,
+    document_layer: StyleLayer,
+    policy: StylePreparationPolicy,
+    builds_page: bool,
+) -> std::result::Result<RenderStyle, RenderStyleFailure> {
+    let inputs = &read.inputs;
+    let prepared = render_style(inputs, document_layer, policy, builds_page);
+    match (read.failure, prepared) {
+        (None, Ok(style)) => Ok(style),
+        (None, Err(error)) => Err(RenderStyleFailure { warnings: inputs.warning_records(&error.diagnostics), error: inputs.failure(&error) }),
+        (Some(error), Ok(style)) => Err(RenderStyleFailure { error, warnings: style.warnings }),
+        (Some(error), Err(problems)) => Err(RenderStyleFailure { error, warnings: inputs.warning_records(&problems.diagnostics) }),
+    }
+}
+
+fn render_style(
+    inputs: &CliStyleInputs,
+    document_layer: StyleLayer,
+    policy: StylePreparationPolicy,
+    builds_page: bool,
+) -> std::result::Result<RenderStyle, StylePreparationError> {
     let (style, document_warnings) = match inputs.prepare_layers(Some(document_layer), policy) {
         Ok(style) => (style, Vec::new()),
         Err(error) if !builds_page && error.problems.iter().all(is_ignored_by_source_output) => {
             // The CLI layers alone, so their own problems and warnings are
-            // still found; the document's warnings come from the first pass.
-            let style = inputs.prepare_layers(None, policy).map_err(|error| inputs.failure(&error))?;
-            let document = error.diagnostics.into_iter().filter(|diagnostic| diagnostic.origin.kind == StyleSourceKind::Document);
-            (style, document.collect())
+            // still found; the document's warnings come from the first pass,
+            // and a CLI layer's failure keeps them.
+            let document: Vec<StyleDiagnostic> =
+                error.diagnostics.into_iter().filter(|diagnostic| diagnostic.origin.kind == StyleSourceKind::Document).collect();
+            match inputs.prepare_layers(None, policy) {
+                Ok(style) => (style, document),
+                Err(mut error) => {
+                    error.diagnostics.splice(0..0, document);
+                    return Err(error);
+                }
+            }
         }
-        Err(error) => return Err(inputs.failure(&error)),
+        Err(error) => return Err(error),
     };
     let diagnostics: Vec<StyleDiagnostic> = document_warnings.into_iter().chain(style.diagnostics().iter().cloned()).collect();
     for diagnostic in diagnostics.iter().filter(|diagnostic| diagnostic.code.is_none()) {

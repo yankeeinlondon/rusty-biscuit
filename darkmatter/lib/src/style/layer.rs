@@ -72,8 +72,8 @@ use simplified_schema::{PropertyPath, SetterValue, ValidationProblemCode};
 
 use crate::markdown::compose::policy::{STYLE_DEPRECATED_CODE, STYLE_UNKNOWN_KEY_CODE};
 use crate::markdown::schemas::EffectiveSchema;
-use crate::markdown::schemas::completion::declared_shape;
-use crate::style::descriptor::{LeafType, is_canonical_container, kebabify, leaf_for_canonical, nearest_key, suggested_key};
+use crate::markdown::schemas::completion::{declared_keys, declared_shape};
+use crate::style::descriptor::{LeafType, is_canonical_container, kebabify, leaf_for_canonical, nearest_key, nearest_sibling, suggested_key};
 use crate::style::normalize::{self, NormalizedLayer, Segments, flatten, insert_at, unflatten};
 use crate::style::parse;
 use crate::style::schema::StyleFrontmatter;
@@ -89,7 +89,8 @@ pub const STYLE_CONFLICT_CODE: &str = "dm.style.conflict";
 /// A style file that supplies no non-null value once unknown keys are
 /// excluded.
 pub const STYLE_EMPTY_FILE_CODE: &str = "dm.style.empty_file";
-/// A style file or `style` setter whose value is not a mapping.
+/// A style file whose value is not a mapping. A `style=` setter that is not a
+/// mapping is an ordinary schema type mismatch instead.
 pub const STYLE_INVALID_ROOT_CODE: &str = "dm.style.invalid_root";
 /// A style setter that cannot be read: its path does not start with `style`,
 /// its value is not admissible, or it sets a member of an open object such as
@@ -649,8 +650,9 @@ fn prepare_layer(
     // Schema admission, before the built-in walker can call an admitted
     // custom key unknown.
     let admission = admit(&view, schema, layer.kind);
+    let admitted_keys = schema.map(|schema| AdmittedKeys::new(schema, &view));
     for path in &admission.unknown {
-        report_unknown(path, &origins, policy, report);
+        report_unknown(path, admitted_keys.as_ref(), &origins, policy, report);
         remove_path(&mut view, path);
     }
     if layer.kind != StyleSourceKind::Document {
@@ -745,10 +747,21 @@ fn push_diagnostic(mut warning: StyleWarning, origins: &Origins<'_>, report: &mu
     report.diagnostics.push(StyleDiagnostic { code, warning, origin });
 }
 
-fn report_unknown(path: &[String], origins: &Origins<'_>, policy: StylePreparationPolicy, report: &mut Report) {
+/// Reports an unknown key. Its suggestion names only a key that `admitted`
+/// (the layer's effective schema) declares; with no schema, the descriptor
+/// decides.
+fn report_unknown(
+    path: &[String],
+    admitted: Option<&AdmittedKeys>,
+    origins: &Origins<'_>,
+    policy: StylePreparationPolicy,
+    report: &mut Report,
+) {
     let raw = origins.raw(path);
     let kebab: Vec<String> = path.iter().map(|segment| kebabify(segment)).collect();
-    let suggestion = suggested_key(&kebab.join(".")).filter(|key| *key != path.join("."));
+    let suggestion = suggested_key(&kebab.join("."))
+        .filter(|key| *key != path.join("."))
+        .filter(|key| admitted.is_none_or(|admitted| admitted.declares(&segments_of_warning(key))));
     let mut warning = StyleWarning::new(format!("style.{}", raw.join(".")), StyleWarningKind::UnknownKey);
     if let Some(key) = &suggestion {
         warning = warning.with_suggestion(key.clone());
@@ -768,7 +781,11 @@ fn report_unknown(path: &[String], origins: &Origins<'_>, policy: StylePreparati
             let mut message = format!("`{key}` is not a valid property under `{parent}`");
             // A setter is typed by hand, so a typo also gets the nearest
             // sibling; files and documents keep the rename-only suggestion.
-            if let Some(key) = suggestion.or_else(|| nearest_key(&kebab.join("."))) {
+            let nearest = || match admitted {
+                Some(admitted) => admitted.nearest(path),
+                None => nearest_key(&kebab.join(".")),
+            };
+            if let Some(key) = suggestion.or_else(nearest) {
                 message.push_str(&format!("; did you mean `style.{key}`?"));
             }
             let origin = origins.of(path, &canonical);
@@ -779,6 +796,41 @@ fn report_unknown(path: &[String], origins: &Origins<'_>, policy: StylePreparati
                 Some(origin),
             );
         }
+    }
+}
+
+/// The style keys an effective schema declares, the universe a typo
+/// suggestion is drawn from when the layer has a schema.
+struct AdmittedKeys<'a> {
+    schema: &'a EffectiveSchema,
+    frontmatter: Value,
+}
+
+impl<'a> AdmittedKeys<'a> {
+    fn new(schema: &'a EffectiveSchema, view: &Value) -> Self {
+        let mut frontmatter = Map::new();
+        frontmatter.insert("style".to_string(), view.clone());
+        Self {
+            schema,
+            frontmatter: Value::Object(frontmatter),
+        }
+    }
+
+    fn steps<'p>(path: &'p [String]) -> Vec<PathStep<'p>> {
+        std::iter::once("style").chain(path.iter().map(String::as_str)).map(PathStep::Key).collect()
+    }
+
+    /// Whether the schema admits a value at the style path `path`.
+    fn declares(&self, path: &[String]) -> bool {
+        declared_shape(self.schema, &self.frontmatter, &Self::steps(path), None).is_some()
+    }
+
+    /// The declared sibling nearest to `path`'s last segment, as a style path.
+    fn nearest(&self, path: &[String]) -> Option<String> {
+        let (segment, parent) = path.split_last()?;
+        let siblings = declared_keys(self.schema, &self.frontmatter, &Self::steps(parent));
+        let nearest = nearest_sibling(segment, siblings.iter().map(String::as_str))?;
+        Some(parent.iter().map(String::as_str).chain(std::iter::once(nearest)).collect::<Vec<_>>().join("."))
     }
 }
 
@@ -963,7 +1015,8 @@ fn relative_value(layer: &NormalizedLayer, group: &[String], paths: &[&Segments]
 /// setter's path and argument.
 ///
 /// The same decoded path given twice keeps its last value, so repeating
-/// `style` replaces that whole assignment. Shorter paths apply first, and a
+/// `style` replaces that whole assignment; the superseded value is never
+/// read, so it may be malformed or repeat a key. Shorter paths apply first, and a
 /// longer one below a scalar replaces it with an object, which is how
 /// `style.table.border.left=false` selects the border's object form after
 /// `style.table.border=thin`. This is style-only: the shared property editor
@@ -980,50 +1033,53 @@ fn assemble_setters(
         value: SetterValue,
     }
     let failures = report.problems.len();
-    let mut planned: Vec<Planned> = Vec::new();
+    let fail = |report: &mut Report, setter: &StyleSetter, path: &Segments, message: String| {
+        let origin = StyleOrigin {
+            kind: StyleSourceKind::Setters,
+            source: setter.argument.clone(),
+            path: path.join("."),
+            written: path.join("."),
+            span: None,
+            context: layer.context.clone(),
+        };
+        report.problem(STYLE_INVALID_SETTER_CODE, message, path.join("."), Some(origin));
+    };
+    // Replacement is settled before any value is parsed, as the shared
+    // setter plan (`compose::setters`) does.
+    let mut surviving: Vec<(&StyleSetter, Segments)> = Vec::new();
     for setter in setters {
         let segments = setter.path.segments();
         let path: Segments = segments.iter().skip(1).cloned().collect();
-        let mut fail = |message: String| {
-            let origin = StyleOrigin {
-                kind: StyleSourceKind::Setters,
-                source: setter.argument.clone(),
-                path: path.join("."),
-                written: path.join("."),
-                span: None,
-                context: layer.context.clone(),
-            };
-            report.problem(STYLE_INVALID_SETTER_CODE, message, path.join("."), Some(origin));
-        };
         if segments[0] != "style" {
-            fail(format!("a style setter's path starts with `style`, not `{}`", segments[0]));
+            fail(report, setter, &path, format!("a style setter's path starts with `style`, not `{}`", segments[0]));
             continue;
         }
+        if let Some(open) = open_object_ancestor(&path) {
+            fail(report, setter, &path, format!("`style.{open}` takes a whole-object value, such as `style.{open}='{{ ... }}'`"));
+            continue;
+        }
+        match surviving.iter_mut().find(|(_, kept)| *kept == path) {
+            Some(kept) => kept.0 = setter,
+            None => surviving.push((setter, path)),
+        }
+    }
+    let mut planned: Vec<Planned> = Vec::new();
+    for (setter, path) in surviving {
         let value = match &setter.value {
             StyleSetterValue::Raw(raw) => match SetterValue::parse(raw) {
                 Ok(value) => value,
                 Err(error) => {
-                    fail(error.to_string());
+                    fail(report, setter, &path, error.to_string());
                     continue;
                 }
             },
             StyleSetterValue::Parsed(value) => value.clone(),
         };
-        if let Some(open) = open_object_ancestor(&path) {
-            fail(format!("`style.{open}` takes a whole-object value, such as `style.{open}='{{ ... }}'`"));
-            continue;
-        }
-        match planned.iter_mut().find(|kept| kept.path == path) {
-            Some(kept) => {
-                kept.argument = setter.argument.clone();
-                kept.value = value;
-            }
-            None => planned.push(Planned {
-                argument: setter.argument.clone(),
-                path,
-                value,
-            }),
-        }
+        planned.push(Planned {
+            argument: setter.argument.clone(),
+            path,
+            value,
+        });
     }
     if report.problems.len() > failures {
         return None;
@@ -1046,8 +1102,15 @@ fn assemble_setters(
                         span: None,
                         context: layer.context.clone(),
                     };
+                    // An ordinary schema failure, like any other setter's
+                    // wrong type; `dm.style.invalid_root` is the file adapter's.
                     let message = format!("`style` takes a mapping, not {}", type_name(&other));
-                    report.problem(STYLE_INVALID_ROOT_CODE, message, String::new(), Some(origin));
+                    report.problem(
+                        ValidationProblemCode::TypeMismatch.diagnostic_code(),
+                        message,
+                        String::new(),
+                        Some(origin),
+                    );
                     continue;
                 }
             }
