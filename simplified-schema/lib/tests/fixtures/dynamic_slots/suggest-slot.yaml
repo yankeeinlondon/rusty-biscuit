@@ -1,0 +1,4 @@
+kind: schema
+description: a suggest slot mixed with literals on a string property
+$schema:
+    platform: string(suggest(FreeBSD, {{ load_data("./os.yaml", "string[]") }}, Plan9)) -> a platform name; any string is valid

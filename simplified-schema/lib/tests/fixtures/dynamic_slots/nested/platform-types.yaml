@@ -1,0 +1,4 @@
+kind: schema
+description: defines `platform` with a slot; `./os.yaml` is the sibling `nested/os.yaml`, so a resolver using the importer's directory reads a different list
+types:
+    platform: enum({{ load_data("./os.yaml", "string[]") }}) -> a platform from this folder's list
