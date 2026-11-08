@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-11-06
-phase: 6
+phase: 8
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -247,6 +247,186 @@ skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/cli.md
 - .claude/skills/darkmatter/library-surfaces.md
 - .claude/skills/darkmatter/rendering.md
+source_files_during_phase_6:
+- darkmatter/lib/src/markdown/delta/mod.rs
+- darkmatter/lib/src/style/descriptor.rs
+- darkmatter/lib/src/style/layer.rs
+- darkmatter/cli/tests/l1/docs_style_examples.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/render_style_matrix.rs
+docs_updated_during_phase_6:
+- darkmatter/cli/README.md
+- darkmatter/docs/cli/clean.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/list-themes.md
+- darkmatter/docs/cli/output-and-width.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/render.md
+- darkmatter/docs/rendering/code-highlighting.md
+- darkmatter/docs/rendering/mermaid.md
+- darkmatter/docs/rendering/style.md
+- darkmatter/docs/topics/layouts-and-style.md
+- darkmatter/docs/topics/markdown-formatting.md
+- docs/cli-best-practices.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/cli/SKILL.md
+- .claude/skills/cli/cli-best-practices.md
+- .claude/skills/darkmatter/cleanup.md
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/darkmatter/rendering.md
+- .claude/skills/darkmatter/terminal.md
+- .claude/skills/darkmatter/testing.md
+source_files_during_phase_7:
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/render_style_acceptance.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/os/macos.md
+source_code:
+- darkmatter/cli/schemas/output/list-themes.yaml
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/completion.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/output.rs
+- darkmatter/cli/src/args/parsers.rs
+- darkmatter/cli/src/args/path_completion.rs
+- darkmatter/cli/src/args/render.rs
+- darkmatter/cli/src/args/render/tests.rs
+- darkmatter/cli/src/args/render_prepare.rs
+- darkmatter/cli/src/args/target.rs
+- darkmatter/cli/src/args/wrappers.rs
+- darkmatter/cli/src/artifact.rs
+- darkmatter/cli/src/commands/clean.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/list_themes.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/io/mod.rs
+- darkmatter/cli/src/lib.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/output/command.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/cli/src/render.rs
+- darkmatter/cli/src/render_style.rs
+- darkmatter/cli/src/style_claims.rs
+- darkmatter/cli/tests/common/mod.rs
+- darkmatter/cli/tests/common/style.rs
+- darkmatter/cli/tests/l1/clean.rs
+- darkmatter/cli/tests/l1/clean_fidelity.rs
+- darkmatter/cli/tests/l1/clean_schema.rs
+- darkmatter/cli/tests/l1/code_block.rs
+- darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+- darkmatter/cli/tests/l1/docs_style_examples.rs
+- darkmatter/cli/tests/l1/feature_flag.rs
+- darkmatter/cli/tests/l1/help.rs
+- darkmatter/cli/tests/l1/layout_alignment.rs
+- darkmatter/cli/tests/l1/layout_fill.rs
+- darkmatter/cli/tests/l1/layout_flags.rs
+- darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/mermaid_features.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/cli/tests/l1/output_envelope.rs
+- darkmatter/cli/tests/l1/path_completion.rs
+- darkmatter/cli/tests/l1/render_alias_parity.rs
+- darkmatter/cli/tests/l1/render_basic.rs
+- darkmatter/cli/tests/l1/render_dispatch.rs
+- darkmatter/cli/tests/l1/render_style_acceptance.rs
+- darkmatter/cli/tests/l1/render_style_files.rs
+- darkmatter/cli/tests/l1/render_style_matrix.rs
+- darkmatter/cli/tests/l1/render_style_wiring.rs
+- darkmatter/cli/tests/level2/level2_code_block_styling.rs
+- darkmatter/cli/tests/level2/level2_disclosure_blocks.rs
+- darkmatter/cli/tests/level2/level2_frontmatter_images.rs
+- darkmatter/cli/tests/level2/level2_frontmatter_tables.rs
+- darkmatter/cli/tests/level2/level2_horizontal_rules.rs
+- darkmatter/cli/tests/level2/level2_layout_dimensions.rs
+- darkmatter/cli/tests/level2/level2_ordered_lists.rs
+- darkmatter/cli/tests/level2/level2_path_completion.rs
+- darkmatter/cli/tests/level2/level2_render_no_input.rs
+- darkmatter/cli/tests/level2/main.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/example-docs/rendering/code-blocks.md
+- darkmatter/example-docs/rendering/style-prop.md
+- darkmatter/lib/benches/render_pipeline_steps.rs
+- darkmatter/lib/src/layout/error.rs
+- darkmatter/lib/src/layout/page.rs
+- darkmatter/lib/src/layout/page/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/delta/mod.rs
+- darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+- darkmatter/lib/src/markdown/render_tree/style_tree_parity_tests.rs
+- darkmatter/lib/src/markdown/schemas/completion.rs
+- darkmatter/lib/src/style/apply.rs
+- darkmatter/lib/src/style/bespoke.rs
+- darkmatter/lib/src/style/cli_claims.rs
+- darkmatter/lib/src/style/coverage_tests.rs
+- darkmatter/lib/src/style/descriptor.rs
+- darkmatter/lib/src/style/error.rs
+- darkmatter/lib/src/style/layer.rs
+- darkmatter/lib/src/style/length.rs
+- darkmatter/lib/src/style/mod.rs
+- darkmatter/lib/src/style/normalize.rs
+- darkmatter/lib/src/style/parse.rs
+- darkmatter/lib/src/style/presentation.rs
+- darkmatter/lib/src/style/schema/common.rs
+- darkmatter/lib/src/style/schema/components.rs
+- darkmatter/lib/src/style/schema/hr.rs
+- darkmatter/lib/src/style/schema/mod.rs
+- darkmatter/lib/src/style/schema/page.rs
+- darkmatter/lib/src/style/walker.rs
+- darkmatter/lib/src/style/warning.rs
+- darkmatter/lib/tests/browser/browser_render.rs
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+- darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/cutover_reference.rs
+- darkmatter/lib/tests/l1/disclosure_render_targets.rs
+- darkmatter/lib/tests/l1/horizontal_rule_integration.rs
+- darkmatter/lib/tests/l1/layout_snapshots.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/meta_schema_phase6.rs
+- darkmatter/lib/tests/l1/style_effective_lowering.rs
+- darkmatter/lib/tests/l1/style_frontmatter.rs
+- darkmatter/lib/tests/l1/style_frontmatter_parity.rs
+- darkmatter/lib/tests/l1/style_layer_matrix.rs
+- darkmatter/lib/tests/l1/style_layers.rs
+- darkmatter/lib/tests/l1/tree_features_characterization.rs
+- darkmatter/lib/tests/level2/level2_render_tree_terminal/layout_policy.rs
+- darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+- darkmatter/schemas/partials/style.yaml
+documentation:
+- darkmatter/cli/README.md
+- darkmatter/docs/cli/clean.md
+- darkmatter/docs/cli/code-block.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/delta.md
+- darkmatter/docs/cli/developing.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/list-themes.md
+- darkmatter/docs/cli/output-and-width.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/render.md
+- darkmatter/docs/rendering/code-highlighting.md
+- darkmatter/docs/rendering/mermaid.md
+- darkmatter/docs/rendering/style.md
+- darkmatter/docs/topics/layouts-and-style.md
+- darkmatter/docs/topics/markdown-formatting.md
+- docs/cli-best-practices.md
+completed_phase: 7
+implemented: true
 ---
 
 # Render Surface Implementation Plan
@@ -433,12 +613,12 @@ Before completing this wave, search changed validators for `#[serde(default)]`, 
 
 ### Wave 9 — Documentation (parallel)
 
-- [ ] **Document CLI migration**
+- [x] **Document CLI migration**
   - Own `docs/cli/render.md`, `index.md`, `output-and-width.md`, `data-contracts.md`, `clean.md`, `policy.md`, and `cli/README.md`. Publish the alias/no-input rules, exact placement of controls, setters/file grammar, precedence/errors, theme-list data shape, and retained local flags.
   - Include a migration row for every removed flag and visible alias in the spec inventory; explicitly expand list/all-component broadcasts and value-dependent fill modes, including hyperlinks, HR, and disclosure. State indent-side selection's removal and no-op measured replacements accurately.
   - Explain available output width versus content cap and why `md compose ... | md render - ...` uses launch context for relative assets. Remove root `--save` examples, preserve editing command `--save`, and replace listing guidance with `md list-themes`.
 
-- [ ] **Document style architecture**
+- [x] **Document style architecture**
   - Own `docs/topics/layouts-and-style.md`, `docs/rendering/{style,mermaid,code-highlighting}.md`, affected example documents/golden fixtures, `.claude/skills/darkmatter/{cli,rendering,terminal,cleanup}.md`, and relevant CLI skill/reference text.
   - Explain sparse merge, shorthand specificity versus source precedence, repeat/conflict behavior, null absence, reader-specific duplicates, file/CSS origins, custom admission without rendering support, and validated cleanup values having no CLI render effect. Give compact examples and a Mermaid preparation/merge flow.
   - Replace old key names and flags in current docs, examples, and skill guidance. State shared-control placement and cite the parity test in `.claude/skills/cli/` and `docs/cli-best-practices.md`. Current docs never name feature/fix specs.
@@ -448,7 +628,7 @@ Before completing this wave, search changed validators for `#[serde(default)]`, 
 
 ### Wave 10 — Final Checks (serial)
 
-- [ ] **Run integrated checks**
+- [x] **Run integrated checks**
   - Run `just test`, `just lint`, and `just test-l2` from the absolute session-worktree `darkmatter/` directory. Run the area's `just test-browser` for changed browser style/geometry assertions, headlessly. Use nextest and the existing toolkit; never run `cargo test` or `cargo fmt`.
   - Compile examples and benchmarks with `cargo --color=never check -p darkmatter -p darkmatter-cli --examples --benches`; this covers the direct benchmark caller that L1 does not compile. Dependency areas retain their prerequisite validation evidence; run their focused checks again only for later edits to them.
   - Check every acceptance criterion against named tests/evidence in `implementation-log.md`: alias equality, root isolation, flags/help/completion, schema/typed agreement, sparse precedence, file formats/offsets/origins, output/stream/error behavior, all broadcasts, and theme listing.

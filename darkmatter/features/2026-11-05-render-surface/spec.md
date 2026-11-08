@@ -29,7 +29,8 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-06
 clarified: true
 review_iterations: 0
-implemented: false
+implemented: true
+implemented_by: claude/opus
 packages:
     - darkmatter-cli
     - darkmatter
