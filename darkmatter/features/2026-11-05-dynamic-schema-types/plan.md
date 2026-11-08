@@ -1,7 +1,7 @@
 ---
 total_phases: 9
 created: 2026-11-08
-phase: 3
+phase: 5
 agent: claude/sonnet
 yolo: true
 packages:
@@ -71,6 +71,97 @@ docs_created_during_phase_2:
 - simplified-schema/docs/topics/language/slots.md
 skills_files_updated_during_phase_2:
 - .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/buffers.rs
+- simplified-schema/lib/src/resolve/recursive.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/schema/mod.rs
+- simplified-schema/lib/src/simplified/definitions.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/slots.rs
+- simplified-schema/lib/src/slots/host.rs
+- simplified-schema/lib/src/slots/pending.rs
+- simplified-schema/lib/src/slots/substitute.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/dynamic_slots.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+docs_updated_during_phase_3:
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/host-capabilities.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/language/slots.md
+- simplified-schema/docs/topics/language/types.md
+- simplified-schema/docs/topics/simplified-schema-struct.md
+- simplified-schema/docs/topics/validation.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/context/capture/clock.rs
+- darkmatter/lib/src/markdown/compose/context/capture/datetime.rs
+- darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+- darkmatter/lib/src/markdown/compose/context/capture/observations.rs
+- darkmatter/lib/src/markdown/compose/context/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/observation_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/agentic_cli.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/cicd.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/composition.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/data.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/dates.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/markdown_docs.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/network.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/pull_requests.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/shell.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/skills.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate.rs
+- darkmatter/lib/src/markdown/compose/expression/read_gate_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/admission.rs
+- darkmatter/lib/src/markdown/schemas/slots/codes.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/tests.rs
+- darkmatter/lib/tests/l1/load_data_runtime.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/resolve/buffers.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/slots/substitute.rs
+- simplified-schema/lib/tests/l1/dynamic_slots.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/topics/compose-requests.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/topics/schemas/index.md
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/language/slots.md
+docs_created_during_phase_4:
+- darkmatter/docs/topics/schemas/schema-slots.md
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/requests.md
 - .claude/skills/darkmatter/schema.md
 ---
 
@@ -943,7 +1034,7 @@ immutable concrete schemas through a host-neutral `SlotHost`.
 
 ### Wave 5 (parallel)
 
-- [ ] **`slots` module**
+- [x] **`slots` module**
   - `simplified-schema/lib/src/slots.rs` per N8–N9 and N11: keys, values scope,
     `collect_slots`, `has_dynamic`, `substitute` (flatten, dedupe, enum/suggest
     shapes, value-position shapes, numeric text, positions), `SlotHost` with
@@ -954,33 +1045,33 @@ immutable concrete schemas through a host-neutral `SlotHost`.
     one invalid shape per value position, `min > max`, each pattern-cap
     refusal (lookaround, backreference, over 4 KiB, over `size_limit`), and
     cancellation publishing nothing.
-- [ ] **Buffer bytes API**
+- [x] **Buffer bytes API**
   - `resolve/buffers.rs`: `pub fn read(path) -> io::Result<Vec<u8>>` (N18) with
     tests inside and outside `with`.
 
 ### Wave 6 (parallel)
 
-- [ ] **`resolve.rs` integration**
+- [x] **`resolve.rs` integration**
   - Origin stamping (N12), `apply_active` at the lowering sites, embedded
     rejection, `PendingSchema` and replay closures at the six entry points (N10),
     `PendingSchema::resolve`. Imports/examples/searched lists are identical
     between a cold concrete resolve and a template-resolve (test).
   - Recursive named types and slots in imported + recursive types: tests.
-- [ ] **`SimplifiedSchema::resolve_slots`**
+- [x] **`SimplifiedSchema::resolve_slots`**
   - N13 resolve half: replay `resolve_authored` under `with_values`; new concrete
     schema, template unchanged, repeated resolves independent; failed resolution
     publishes nothing. Provenance includes the same import/searched edges.
 
 ### Wave 7 (parallel)
 
-- [ ] **Library tests**
+- [x] **Library tests**
   - `tests/l1/dynamic_slots.rs`: passive checks, resolve success, each
     Matrix 1 cell, mixed literals + slots, `; required` tail, duplicate
     normalization, imported + recursive, layering after resolution equals layering
     of equivalent static schemas, whole-property precedence preserved.
   - Guards: `dependency_direction_guard.rs` and ownership guards still pass; no
     `darkmatter` mention in the new module.
-- [ ] **Library docs**
+- [x] **Library docs**
   - `simplified-schema/docs/topics/language/types.md` (slot syntax, result rules,
     every N6 position with its result shape, the pattern cap, and whole types marked **planned**), `simplified-schema-struct.md` (object API),
     `host-capabilities.md` (the `SlotHost` hook), `validation.md`/`diagnostics.md`
@@ -988,8 +1079,8 @@ immutable concrete schemas through a host-neutral `SlotHost`.
 
 ### Validation checkpoint (end of Phase 3)
 
-- [ ] `just test` and `just lint` in `simplified-schema/` (all feature builds).
-- [ ] `cargo check --all-targets -p darkmatter` compiles (new `SchemaError` /
+- [x] `just test` and `just lint` in `simplified-schema/` (all feature builds).
+- [x] `cargo check --all-targets -p darkmatter` compiles (new `SchemaError` /
   `Constraint` variants handled in Darkmatter's exhaustive matches).
 
 ## Phase 4 — Admission, evaluator, fingerprints (darkmatter lib)
@@ -1000,22 +1091,22 @@ the evaluator takes a `ReadGate` that defaults to deny-all for tests that read.
 
 ### Wave 8 (parallel, disjoint files)
 
-- [ ] **Admission and classes**
+- [x] **Admission and classes**
   - `schemas/slots/admission.rs` (N14), the `SlotClass` registration fact and
     `slot_class` walk (N20), and codes (N37). Walk every branch and every
     callback body. Tests: `fm.x`, `fm['x']`, bare `title`, a host global,
     `ctx.cwd`, `ctx.self`, `ctx.id`, `current.x` outside a callback, each Q10
     function, each forbidden in a ternary's untaken branch and in a `||` operand;
     allowed `ctx.today`, `env.HOME`, `current.*`/`local.*` inside a callback.
-- [ ] **Captured clock, timezone, `PATH` (N20, Q11)**
+- [x] **Captured clock, timezone, `PATH` (N20, Q11)**
   - Move the 14 live-clock date functions and `has_command`/`has_binary` onto
     the captured request context; registration facts corrected. Tests: two
     evaluations in one request see one clock; `has_command` ignores a changed
     process `PATH`. Document behavior unchanged otherwise.
-- [ ] **Remote-read discovery (N20, Q18)**
+- [x] **Remote-read discovery (N20, Q18)**
   - Derive `REMOTE_READ_FUNCTIONS` from the facts; fold case and underscores in
     pre-fetch matching. Test: `loaddata("https://…")` is discovered up front.
-- [ ] **Data runtime observations**
+- [x] **Data runtime observations**
   - N17, N18, N22, N35-generation: `Observation` log, hash at read, stored in
     `LoadedSource`, `read_mark`/`observations_since`, `record_entry`,
     `memo_generation`, `load.rs` through `buffers::read`.
@@ -1025,7 +1116,7 @@ the evaluator takes a `ReadGate` that defaults to deny-all for tests that read.
     its dependency; missing probe recorded; one test per previously unrecorded
     function family; generation increments on `invalidate_memo`; document
     `load_data` results unchanged (its read set now gains the missing probes).
-- [ ] **Gate hook**
+- [x] **Gate hook**
   - `ReadGate` trait, `ResolutionContext::slot_gate`, `authorize_slot_read` at
     the read sites, before the memo lookup (N28). Tests with a recording gate:
     every read-side function asks before reading; a file the document already
@@ -1033,7 +1124,7 @@ the evaluator takes a `ReadGate` that defaults to deny-all for tests that read.
 
 ### Wave 9 (after Wave 8)
 
-- [ ] **Evaluator and host**
+- [x] **Evaluator and host**
   - `evaluator.rs` (N15, N16), `DarkmatterSlotHost` implementing
     `admit`/`resolve`, typed-cause preservation (N19), context-digest capture
     (N17).
@@ -1042,7 +1133,7 @@ the evaluator takes a `ReadGate` that defaults to deny-all for tests that read.
     `dm.data.malformed` with line/column; work limit trips
     `dm.iteration.visit_limit`; relative paths resolve against the defining
     file, including a slot in an imported schema in another directory.
-- [ ] **Validation checkpoint**
+- [x] **Validation checkpoint**
   - `just test`, `just lint` in `darkmatter/`; `rg` loader smell grep (see Phase 1
     Matrix note) clean for `slots/`.
 
