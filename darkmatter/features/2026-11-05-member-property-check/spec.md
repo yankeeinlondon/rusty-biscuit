@@ -148,7 +148,11 @@ until a snapshot is published). Slots never change which properties an object
 declares, so read declarations from the template: a pending template still
 supports this check, before and during resolution. A future slot that yields a
 whole type makes that property's type unknown, which is silent under the rules
-above.
+above. The same template declarations also feed the existing call check
+while slots are pending (author decision, 2026-11-08), on the condition that a
+constraint still waiting on a slot (a pending `enum(...)`, `suggest(...)`, or
+value-position slot) is treated as unknown rather than as the literals
+written beside it.
 
 **Review decision:** retain the draft's conservative union rule. Reporting
 only names absent from every known object alternative identifies definite
@@ -321,8 +325,10 @@ feature is implemented; this specification review changes no runtime code.
    including when the declared optional member is unset. Cover a typed
    function return and literal object as bases, not just variables.
 3. A schema with a pending enum slot still reports `server.nmae` in DMLS before
-   its snapshot is published, and composition reports it with or without
-   resolution.
+   its snapshot is published; composition, which always resolves the schema
+   first, reports it after resolution. While slots are pending, any constraint
+   waiting on a slot is treated as unknown, never as a narrower type (Ruling
+   B, 2026-11-08).
 4. Pin every row of the type and absence tables, including mixed scalar
    unions, null-only bases, dictionaries, open/pattern-key objects, bounded
    named references, and unresolved imports. Narrowed branches use the
