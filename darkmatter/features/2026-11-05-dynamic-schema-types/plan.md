@@ -493,6 +493,11 @@ fixtures and log every later phase uses.
   automatic when (a) and (b) hold, tracked or not; directory listings
   (`find_files` and the other `Listing` readers) are **never** automatic and
   need a directory grant. Pure expressions need no grant.
+  **Absent targets (Q21).** A content read (for example `load_data`) whose
+  target does not exist is judged as an existence probe: automatic when (a) and
+  (b) hold, reporting the ordinary typed not-found failure (recoverable by
+  `try`); outside the defining repository it still needs a grant. If the file
+  appears later in the run, the read is a content read again and (c) applies.
   Windows: under `core.autocrlf` the worktree bytes differ from the blob; apply
   gix's worktree-to-index conversion before hashing (load the `os` skill).
 - **N25. Repository cleanliness comes from Sniff.** Sniff has no per-file status
@@ -763,7 +768,7 @@ Loader code-smell grep before closing the phase's loaders: `rg
 - [x] **Implementation log skeleton**
   - Write `implementation-log.md` headings: Baseline, Departures (seed it with
     N26 location, N35 mechanism, N6 staging), Decisions applied, Measurements.
-- [ ] **Fixtures** (partly written by the first run: review the existing files
+- [x] **Fixtures** (partly written by the first run: review the existing files
   in both `dynamic_slots/` folders against this list and N4/N6 rather than
   recreating them; add value-position cases for Q16)
   - `simplified-schema/lib/tests/fixtures/dynamic_slots/`: `schema-with-slot.yaml`
@@ -775,7 +780,7 @@ Loader code-smell grep before closing the phase's loaders: `rg
     sandboxing schema shape with its `os.yaml`.
   - Real-tool fixture rule: each matrix cell edits one thing in the control
     fixture.
-- [ ] **DMLS enum completion (N42, Q20)**
+- [x] **DMLS enum completion (N42, Q20)**
   - Independent of slots and of every later phase (disjoint files under
     `darkmatter/dmls/`): failing L1 test on the static sandbox-shaped enum, then
     the fix.
@@ -1008,6 +1013,9 @@ Goal: the Q5 model works end to end for library and CLI callers.
     repo, no repo, defining schema outside the request's repository (Q13),
     unsaved buffer differing from disk. Probes and listings (Q11): `file_exists`
     automatic for an untracked in-repo path; `find_files` never automatic.
+    Absent targets (Q21): `load_data` of a missing in-repo file needs no grant
+    and fails with the typed not-found error; a missing file outside the
+    repository needs a grant.
 
 ### Wave 11 (after Wave 10)
 

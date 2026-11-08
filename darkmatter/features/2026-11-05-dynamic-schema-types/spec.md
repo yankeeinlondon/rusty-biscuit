@@ -723,3 +723,9 @@ None. The questions raised by the investigations were ruled on 2026-11-08
 - **Q20. Decided (2026-11-08): DMLS enum completion is fixed here.** Completion inside
   the sandbox schema's `os[]` enum list returns nothing today; investigate and fix it in
   this feature, since it is the motivating editor case.
+- **Q21. Decided (2026-11-08): a missing target is an existence probe.** A content read
+  (for example `load_data`) whose target does not exist inside the defining repository
+  is judged like `file_exists` under Q11: no grant is needed, and it fails with the
+  ordinary typed not-found error, which `try(...)` can recover. Reading a missing file
+  reveals no more than an existence probe. A missing target outside the defining
+  repository still needs a grant.
