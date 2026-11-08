@@ -54,10 +54,9 @@ from that pattern: `md compose` accepts only Markdown and the data family, and
 | [`md clean`](./clean.md), [`md set`](./set.md) | `markdown` | both families |
 | [`md get`](./get.md) | `json` | both families |
 | [`md schema detect`](./schema.md#md-schema-detect) | `terminal` | both families and `json-schema` |
-| [`md render`](./render.md) (and `md FILE`), [`md toc`](./toc.md), [`md delta`](./delta.md), [`md rm`](./rm.md), [`md edit`](./edit.md), [`md hash`](./hash.md), [`md graph`](./graph.md), [`md code-block`](./code-block.md), [`md validate refs`](./validate.md), [`md schema validate`](./schema.md#md-schema-validate), [`md schema triggers`](./schema.md#md-schema-triggers), [`md schema about`](./schema.md#md-schema-about) | `terminal` | both families |
+| [`md render`](./render.md) (and `md FILE`), [`md list-themes`](./list-themes.md), [`md toc`](./toc.md), [`md delta`](./delta.md), [`md rm`](./rm.md), [`md edit`](./edit.md), [`md hash`](./hash.md), [`md graph`](./graph.md), [`md code-block`](./code-block.md), [`md validate refs`](./validate.md), [`md schema validate`](./schema.md#md-schema-validate), [`md schema triggers`](./schema.md#md-schema-triggers), [`md schema about`](./schema.md#md-schema-about) | `terminal` | both families |
 
-`md --completions` and `md --list-themes` take no `--output`: combining them is a
-usage error. `md --help` and `md --version` print their text and ignore it.
+`md --completions` takes no `--output`: combining them is a usage error. `md --help` and `md --version` print their text and ignore it.
 
 ### The default rule
 
@@ -309,11 +308,12 @@ the width, depending on the value.
 In `html`, `--width N` adds a `max-width: Nch` rule to prose elements and leaves
 code blocks and tables alone. Markdown tables and code blocks are never reflowed.
 
-`--width` is the room available. On `md render` and `md FILE`, `--max-width <N>`
-caps the content inside it, whichever is smaller wins, and it exists only there:
+`--width` is the room available. On `md render` and `md FILE`, the style key
+`max-width` (`style.max-width=N`, or `max-width` in the document's `style:`)
+caps the content inside it, and whichever is smaller wins:
 
 ```sh
-md render notes.md --output plain --width 100 --max-width 60   # wraps at 60
+md render notes.md --output plain --width 100 style.max-width=60   # wraps at 60
 ```
 
 ### Width in data outputs and on stderr

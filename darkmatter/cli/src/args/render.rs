@@ -2,7 +2,8 @@ use clap::{ArgAction, Args};
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
 use crate::args::output::{ALL_TARGETS, target_parser};
-use crate::args::{Feature, complete_indent_values, complete_markdown_files, parse_indent_size, parse_max_width};
+use crate::args::path_completion::complete_render_word;
+use crate::args::{Feature, complete_indent_values, complete_markdown_files, complete_style_files, parse_indent_size};
 use biscuit_terminal::output::OutputTarget;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Args)]
 pub struct RenderOptions {
     /// The input file (`-` for stdin) and `style…=VALUE` setters, in any order
-    #[arg(value_name = "ARGS", num_args = 0.., add = ArgValueCompleter::new(complete_markdown_files))]
+    #[arg(value_name = "ARGS", num_args = 0.., add = ArgValueCompleter::new(complete_render_word))]
     pub args: Vec<OsString>,
 
     /// Arguments after `--`: always the input file, never a setter or a command
@@ -26,7 +27,7 @@ pub struct RenderOptions {
 
     /// A JSON, JSON5, YAML, or TOML style file (repeatable; later files merge
     /// over earlier ones)
-    #[arg(long = "style", value_name = "FILE", action = ArgAction::Append)]
+    #[arg(long = "style", value_name = "FILE", action = ArgAction::Append, add = ArgValueCompleter::new(complete_style_files))]
     pub style: Vec<OsString>,
 
     /// What to print [default: terminal, which is the same text as `plain` off
@@ -38,11 +39,6 @@ pub struct RenderOptions {
     /// printed, and a terminal output opens the document's Markdown
     #[arg(long)]
     pub show: bool,
-
-    /// Max content width in columns (0 rejected); it caps the content inside
-    /// `--width`
-    #[arg(long, value_name = "N", value_parser = parse_max_width)]
-    pub max_width: Option<u16>,
 
     /// Normalize nested list indentation width (spaces per level)
     #[arg(
@@ -89,14 +85,13 @@ impl RenderOptions {
     /// be listed here; `args::render::tests` enumerates the clap definition to
     /// keep that true.
     pub fn has_explicit_arguments(&self) -> Vec<&'static str> {
-        let Self { args, literal_args, style, output, show, max_width, indent, deny, features, mermaid } = self;
+        let Self { args, literal_args, style, output, show, indent, deny, features, mermaid } = self;
         [
             (!args.is_empty(), "[ARGS]"),
             (!literal_args.is_empty(), "-- [INPUT]"),
             (!style.is_empty(), "--style"),
             (output.is_some(), "--output"),
             (*show, "--show"),
-            (max_width.is_some(), "--max-width"),
             (indent.is_some(), "--indent"),
             (!deny.is_empty(), "--deny"),
             (!features.is_empty(), "--feature"),

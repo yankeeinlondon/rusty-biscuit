@@ -60,6 +60,7 @@ pub const COMMAND_LEAVES: &[CommandLeaf] = &[
     CommandLeaf { path: &["compose"], default_target: OutputTarget::Markdown, schema: "compose.yaml", formatted_family: false, extra_value: None },
     leaf(&["render"], OutputTarget::Terminal, "render.yaml"),
     leaf(&["clean"], OutputTarget::Markdown, "clean.yaml"),
+    leaf(&["list-themes"], OutputTarget::Terminal, "list-themes.yaml"),
     leaf(&["toc"], OutputTarget::Terminal, "toc.yaml"),
     leaf(&["delta"], OutputTarget::Terminal, "delta.yaml"),
     leaf(&["get"], OutputTarget::Json, "get.yaml"),

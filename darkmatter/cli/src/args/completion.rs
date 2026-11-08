@@ -54,6 +54,21 @@ pub fn complete_any_files(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_paths_from(Path::new("."), current, &|_| true)
 }
 
+/// Completes a `--style` file: directories, and JSON, JSON5, YAML (`.yaml`,
+/// `.yml`), and TOML files. It enumerates the directory and opens nothing.
+pub fn complete_style_files(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_style_files_from(Path::new("."), current)
+}
+
+pub fn complete_style_files_from(base_dir: &Path, current: &OsStr) -> Vec<CompletionCandidate> {
+    let is_style_file = |path: &Path| {
+        path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
+            ["json", "json5", "yaml", "yml", "toml"].iter().any(|accepted| ext.eq_ignore_ascii_case(accepted))
+        })
+    };
+    complete_paths_from(base_dir, current, &is_style_file)
+}
+
 /// Directories, and the files `accepts` admits, under what `current` has typed.
 fn complete_paths_from(
     base_dir: &Path,
@@ -179,12 +194,12 @@ pub fn complete_width_values(current: &OsStr) -> Vec<CompletionCandidate> {
     candidates
 }
 
-/// Completes theme names for `--theme` / `--code-theme`.
+/// Completes theme names for `md code-block --theme`.
 ///
 /// Enumerates every available [`ThemePair`](ThemePair)
-/// by its kebab-case name (the same set `--list-themes` prints), attaching each
+/// by its kebab-case name (the same set `md list-themes` prints), attaching each
 /// theme's description as completion help. Without this completer the dynamic
-/// completion engine has no value source for the theme flags, so `--theme <tab>`
+/// completion engine has no value source for the flag, so `--theme <tab>`
 /// offers nothing.
 pub fn complete_theme_names(current: &OsStr) -> Vec<CompletionCandidate> {
     let current_str = current.to_string_lossy();

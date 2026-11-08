@@ -80,9 +80,6 @@ md clean README.md --save
 
 # Clean in place with delta report + visual diff
 md clean README.md --save -v
-
-# Shorthand for clean-and-save
-md README.md --save
 ```
 
 ### Arguments

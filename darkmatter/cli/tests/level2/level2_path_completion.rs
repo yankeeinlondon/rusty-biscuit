@@ -1,4 +1,4 @@
-//! Real Tab presses in real shells: `style.pa<Tab>` through `ce<Tab>` to
+//! Real Tab presses in real shells: `style.pag<Tab>` through `ce<Tab>` to
 //! `style.page.alignment=center`, then Enter.
 //!
 //! The Level-1 tests prove the words `md` receives and prints. Only a shell can
@@ -83,7 +83,7 @@ fn open_shell(program: &str, flags: &[&str], setup: impl FnOnce(&CliProcessFixtu
 fn assert_round_trip(program: &str, flags: &[&str], setup: &str) {
     let (_fixture, mut harness) = open_shell(program, flags, |_| setup.to_string());
 
-    type_text(&mut harness, "md compose doc.md style.pa");
+    type_text(&mut harness, "md compose doc.md style.pag");
     press_tab(&mut harness);
     wait_for_line(&mut harness, "md compose doc.md style.page");
     type_text(&mut harness, ".");
@@ -188,7 +188,7 @@ fn a_tab_round_trip_in_elvish() {
     require_level!(Level::L2, elvish.is_some(), "elvish");
     let (_fixture, mut harness) = open_elvish(&elvish.expect("gated above"));
 
-    type_text(&mut harness, "md compose doc.md style.pa");
+    type_text(&mut harness, "md compose doc.md style.pag");
     press_tab(&mut harness);
     wait_for_line(&mut harness, ELVISH_LIST);
     wait_for_line(&mut harness, "md compose doc.md style.page.");
@@ -220,15 +220,15 @@ fn typing_in_an_elvish_list_filters_it_and_leaves_the_line_alone() {
     require_level!(Level::L2, elvish.is_some(), "elvish");
     let (_fixture, mut harness) = open_elvish(&elvish.expect("gated above"));
 
-    type_text(&mut harness, "md compose doc.md style.pa");
+    type_text(&mut harness, "md compose doc.md style.pag");
     press_tab(&mut harness);
     wait_for_line(&mut harness, ELVISH_LIST);
-    type_text(&mut harness, "ge.");
-    wait_for_line(&mut harness, "COMPLETING argument  ge.");
+    type_text(&mut harness, "e.");
+    wait_for_line(&mut harness, "COMPLETING argument  e.");
     wait_for_line(&mut harness, "md compose doc.md style.page.");
 
     harness.send_key("Escape").expect("send Escape");
-    wait_for_line(&mut harness, "md compose doc.md style.pa");
+    wait_for_line(&mut harness, "md compose doc.md style.pag");
 }
 
 /// PowerShell in a windowless pseudoconsole. A console output stream is a repaint, not
@@ -404,7 +404,7 @@ mod powershell {
         assert_eq!(read("before.txt"), "Alias", "`md` starts as `mkdir`");
         assert_eq!(read("after.txt"), "Application", "the setup line leaves `md` itself");
 
-        assert_eq!(console.line_after("md compose doc.md style.pa\t"), "md compose doc.md style.page.");
+        assert_eq!(console.line_after("md compose doc.md style.pag\t"), "md compose doc.md style.page.");
         assert_eq!(console.line_after("al\t"), "md compose doc.md style.page.alignment=");
         assert_eq!(console.line_after("ce\t"), "md compose doc.md style.page.alignment=center");
         assert_eq!(console.line_after(" zz=1"), "md compose doc.md style.page.alignment=center zz=1");

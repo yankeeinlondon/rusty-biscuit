@@ -824,3 +824,103 @@ mod selected_baseline {
         holds(&fish(&fixture, &["md", "compose", "broken.md", "style.page.alignment="]), &["style.page.alignment=left"]);
     }
 }
+
+// --- `md render` and `md`: style setters -----------------------------------
+
+#[test]
+fn render_offers_only_style_setters_and_files_in_both_spellings() {
+    let fixture = fixture("completion-render-root");
+    for words in [&["md", "doc.md", ""][..], &["md", "render", "doc.md", ""]] {
+        let candidates = fish(&fixture, words);
+        holds(&candidates, &["style.", "style=", "doc.md", "schemaed.md"]);
+        lacks(&candidates, &["title=", "author.", "items=", "s.yaml"]);
+    }
+    assert_eq!(fish(&fixture, &["md", "doc.md", "st"]), fish(&fixture, &["md", "render", "doc.md", "st"]));
+}
+
+#[test]
+fn render_walks_the_style_schema_to_keys_and_values() {
+    let fixture = fixture("completion-render-walk");
+    for lead in [&["md", "doc.md"][..], &["md", "render", "doc.md"]] {
+        let words = |word: &'static str| [lead, &[word]].concat();
+        holds(&fish(&fixture, &words("style.")), &["style.page.", "style.page=", "style.ul.", "style.table."]);
+        holds(&fish(&fixture, &words("style.ul.")), &["style.ul.padding-left="]);
+        holds(&fish(&fixture, &words("style.page.")), &["style.page.theme=", "style.page.margin-left="]);
+        assert_eq!(
+            fish(&fixture, &words("style.page.alignment=")),
+            ["style.page.alignment=left", "style.page.alignment=center", "style.page.alignment=right"]
+        );
+        holds(&fish(&fixture, &words("style.page.theme=git")), &["style.page.theme=github"]);
+    }
+    // A setter already on the line is not offered again, and the input may follow it.
+    lacks(&fish(&fixture, &["md", "style.page.alignment=left", "doc.md", "style.page.al"]), &["style.page.alignment="]);
+}
+
+#[test]
+fn render_reads_the_documents_own_style_declaration() {
+    let fixture = fixture("completion-render-custom");
+    write_in_cwd(&fixture, "custom.md", "---\n$schema:\n  style:\n    foo: string\n---\n");
+    let custom = fish(&fixture, &["md", "custom.md", "style."]);
+    holds(&custom, &["style.foo="]);
+    lacks(&custom, &["style.page.", "style.ul."]);
+
+    write_in_cwd(&fixture, "open.md", "---\n$schema:\n  style:\n    foo: string\n    \"<string>\": unknown\n---\n");
+    holds(&fish(&fixture, &["md", "render", "open.md", "style."]), &["style.foo="]);
+
+    // A schema that cannot be read leaves the baseline, as for every command.
+    write_in_cwd(&fixture, "broken.md", "---\n$schema: ./missing.yaml\n---\n");
+    holds(&fish(&fixture, &["md", "broken.md", "style."]), &["style.page."]);
+}
+
+#[test]
+fn render_after_the_terminator_offers_files_and_no_setter() {
+    let fixture = fixture("completion-render-terminator");
+    let candidates = fish(&fixture, &["md", "render", "--", "st"]);
+    lacks(&candidates, &["style.", "style="]);
+    let candidates = fish(&fixture, &["md", "--", ""]);
+    holds(&candidates, &["doc.md"]);
+    lacks(&candidates, &["style.", "style="]);
+}
+
+#[test]
+fn style_offers_only_style_files_and_directories() {
+    let fixture = fixture("completion-render-style-files");
+    for name in ["a.json", "b.json5", "c.yml", "d.toml", "notes.txt"] {
+        write_in_cwd(&fixture, name, "{}");
+    }
+    std::fs::create_dir_all(fixture.cwd().join("themes")).unwrap();
+    for words in [&["md", "--style", ""][..], &["md", "render", "doc.md", "--style", ""]] {
+        let candidates = fish(&fixture, words);
+        holds(&candidates, &["a.json", "b.json5", "c.yml", "d.toml", "s.yaml", "themes/"]);
+        lacks(&candidates, &["doc.md", "notes.txt"]);
+    }
+}
+
+#[test]
+fn render_offers_no_removed_root_flag() {
+    let fixture = fixture("completion-render-removed");
+    for words in [&["md", "--sa"][..], &["md", "--list"], &["md", "render", "--sa"], &["md", "render", "--list"]] {
+        let candidates = fish(&fixture, words);
+        lacks(&candidates, &["--save", "--list-themes"]);
+    }
+    holds(&fish(&fixture, &["md", "li"]), &["list-themes"]);
+}
+
+/// A `--style` file on the line is never opened, and the document's
+/// commands and expressions never run: a directory spelled as a style file
+/// changes nothing, and a style file's keys are never offered.
+#[test]
+fn render_completion_opens_no_style_file_and_runs_nothing() {
+    let fixture = commands_fixture("completion-render-sentinel", "description: D");
+    std::fs::create_dir_all(fixture.cwd().join("locked.yaml")).unwrap();
+    write_in_cwd(&fixture, "extra.yaml", "page:\n  from-the-file: \"{{ 1 + 1 }}\"\n");
+    let before = files_under(fixture.workspace_path());
+    let plain = fish(&fixture, &["md", "doc.md", "style.page."]);
+    holds(&plain, &["style.page.alignment="]);
+    let styled = fish(&fixture, &["md", "--style", "locked.yaml", "--style", "extra.yaml", "doc.md", "style.page."]);
+    assert_eq!(styled, plain, "a style file on the line changes nothing");
+    lacks(&styled, &["style.page.from-the-file="]);
+    holds(&fish(&fixture, &["md", "render", "doc.md", ""]), &["style."]);
+    assert_eq!(files_under(fixture.workspace_path()), before, "a Tab ran a command or wrote a file");
+    assert!(read_argv_records(&recorder_file(&fixture)).is_err(), "no command ran");
+}

@@ -21,7 +21,7 @@ use serde::Serialize;
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
 
-use super::report::{INTERRUPTED, ReportedExit, failure_diagnostics};
+use super::report::{INTERRUPTED, ReportedExit, failure_diagnostics, failure_records};
 use super::{OutputEnvironment, ResolvedOutput, SERIALIZATION_CODE, output_diagnostic, resolve_output, stderr_warning, width_warning_diagnostic, write_stdout_text};
 
 /// How a command's data carries its run status.
@@ -213,8 +213,10 @@ impl CommandRun {
             Err(error) if !self.is_data() => Err(error),
             Err(error) => {
                 let mut diagnostics = self.diagnostics.clone();
-                let mut failure = failure_diagnostics(&error);
-                with_document_fallback(&mut failure, self.document.as_deref());
+                let (mut failure, located) = failure_records(&error);
+                if !located {
+                    with_document_fallback(&mut failure, self.document.as_deref());
+                }
                 diagnostics.extend(failure);
                 self.write_data(None, false, diagnostics)
             }

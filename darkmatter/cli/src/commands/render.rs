@@ -1,42 +1,77 @@
 //! `md render` (implicit and explicit) subcommand implementation.
+//!
+//! Both spellings reach [`dispatch_render`], which prepares the options,
+//! resolves the output once, and hands [`run_render`] only prepared values.
+//! The render then reads the document, prepares its effective style (the
+//! document's `style:` under each `--style` file and the setters) before
+//! anything is printed or opened, and writes one target.
 
-use crate::args::{Cli, Feature, PreparedRenderOptions, RenderOptions};
+use crate::args::{Cli, PreparedRenderOptions, RenderOptions, setter_hint};
 use crate::artifact::{OutputArtifact, html_page, open_output_artifact};
-use crate::io::{OpenedArgument, load_opened_document};
-use crate::output::report::ReportSink;
-use crate::output::{OutputEnvironment, ResolvedOutput, resolve_output, stderr_terminal, stderr_warning, write_stdout};
-use crate::render::{PageInputs, terminal_page};
+use crate::commands::trigger_findings::{emit_warnings, finding_diagnostic};
+use crate::io::{DocumentArgumentError, OpenedArgument, load_opened_document};
+use crate::output::report::{ClassifiedFailure, ReportSink, ReportedExit};
+use crate::output::{
+    OutputEnvironment, ResolvedOutput, output_diagnostic, resolve_output, stderr_terminal, stderr_warning, write_stdout,
+};
+use crate::render::{PageInputs, PagePresentation, document_style, terminal_page};
+use crate::render_style::{RenderStyle, document_style_layer, prepare_cli_style_inputs, prepare_render_style};
 use crate::request::MdRequest;
 use biscuit_terminal::output::{OutputTarget, WidthRequest};
 use biscuit_terminal::terminal::Terminal;
-use color_eyre::eyre::{Context, Result};
+use clap::CommandFactory as _;
+use color_eyre::eyre::{Context, Report, Result, eyre};
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::block::scan_inline_hr_warnings;
 use darkmatter::markdown::cleanup::rules::{Indentation, Leaf, MarkdownRuleOverrides};
+use darkmatter::markdown::compose::expression::{Diagnostic, DiagnosticSource, Severity};
+use darkmatter::markdown::compose::policy::{BlockingPolicy, STYLE_DEPRECATED_CODE};
+use darkmatter::markdown::compose::report_diagnostics::INPUT_READ_CODE;
 use darkmatter::markdown::output::command::{CommandValue, DocumentOutput, document_markdown, empty_document};
+use darkmatter::style::{StylePreparationPolicy, StyleWarning, StyleWarningKind};
 use renderable::Width;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
-/// Shared render logic for both implicit (no subcommand) and explicit `render` subcommand.
+/// Prepares `options` (the root's for `md`, the subcommand's for
+/// `md render`), resolves the output once in `environment`, and renders.
+/// `cli` supplies only the shared controls (`--width`, `-v`).
+///
+/// With no input and a terminal on stdin there is nothing to read: a
+/// formatted output writes the root help to stderr and a data output its one
+/// failure value, both with exit 1.
+///
+/// ## Errors
+///
+/// A usage error (exit 2) from preparation or output resolution;
+/// [`ReportedExit`] or the failure itself otherwise.
 #[instrument(skip_all, fields(command = "render"))]
-pub fn run_render(options: &RenderOptions, cli: &Cli, request: &MdRequest) -> Result<()> {
+pub fn dispatch_render(options: &RenderOptions, cli: &Cli, request: &MdRequest, environment: &OutputEnvironment) -> Result<()> {
     let prepared = PreparedRenderOptions::prepare(options)?;
     let target = prepared.output.unwrap_or(OutputTarget::Terminal);
-    let output = source_markdown_width(
-        resolve_output(target, cli.width, WidthRequest::Auto, cli.verbose, &OutputEnvironment::detect())?,
-    );
+    let output = source_markdown_width(resolve_output(target, cli.width, WidthRequest::Auto, cli.verbose, environment)?);
+    if prepared.input.is_none() && environment.stdin_is_terminal {
+        return no_input(&prepared, &output);
+    }
+    run_render(&prepared, &output, request)
+}
+
+/// Renders the prepared invocation to `output`.
+///
+/// ## Errors
+///
+/// [`ReportedExit`] after a data output's failure value; the failure itself
+/// for a formatted output.
+pub fn run_render(options: &PreparedRenderOptions, output: &ResolvedOutput, request: &MdRequest) -> Result<()> {
     let render = Render {
-        options: &prepared,
-        max_width: options.max_width,
-        cli,
+        options,
         request,
-        strict_style: prepared.policy.denies("style"),
-        blocking: prepared.policy.blocking_policy(),
-        output: &output,
+        deny_style: options.policy.denies("style"),
+        blocking: options.policy.blocking_policy(),
+        output,
     };
-    if target.is_data() {
-        let file = prepared.input.as_ref().filter(|path| path.to_str() != Some("-")).map(|path| path.display().to_string());
-        let sink = ReportSink::new(&output, file, prepared.show, false);
+    if output.target.is_data() {
+        let sink = ReportSink::new(output, options.input_file(), options.show, false);
         let result = render.run(Some(&sink));
         return sink.finish(result);
     }
@@ -44,6 +79,17 @@ pub fn run_render(options: &RenderOptions, cli: &Cli, request: &MdRequest) -> Re
         stderr_warning(warning);
     }
     render.run(None)
+}
+
+/// The no-input outcome of [`dispatch_render`].
+fn no_input(options: &PreparedRenderOptions, output: &ResolvedOutput) -> Result<()> {
+    if output.target.is_data() {
+        let message = "no input: give a Markdown file, `-` for stdin, or pipe the document";
+        let failure = ClassifiedFailure::report(eyre!(message), vec![output_diagnostic(INPUT_READ_CODE, Severity::Error, message)]);
+        return ReportSink::new(output, None, options.show, false).finish(Err(failure));
+    }
+    eprint!("{}", Cli::command().render_help());
+    Err(ReportedExit(1).into())
 }
 
 /// A document's Markdown output is its source text, so with no `--width` and no
@@ -56,25 +102,28 @@ fn source_markdown_width(mut output: ResolvedOutput) -> ResolvedOutput {
     output
 }
 
+/// Whether `target` builds a page, and so reads the document's style.
+fn builds_page(target: OutputTarget) -> bool {
+    matches!(target, OutputTarget::Terminal | OutputTarget::Plain | OutputTarget::Html | OutputTarget::MarkdownPlus)
+}
+
 struct Render<'a> {
     options: &'a PreparedRenderOptions,
-    /// `md render --max-width`, which preparation does not carry.
-    max_width: Option<u16>,
-    cli: &'a Cli,
     request: &'a MdRequest,
-    strict_style: bool,
-    blocking: darkmatter::markdown::compose::policy::BlockingPolicy,
+    /// `--deny style`.
+    deny_style: bool,
+    blocking: BlockingPolicy,
     output: &'a ResolvedOutput,
 }
 
 impl Render<'_> {
     fn run(&self, sink: Option<&ReportSink>) -> Result<()> {
         debug!("rendering document");
-        let (mut md, opened) = load_opened_document(self.options.input.as_ref(), self.request)?;
+        let input = self.options.input.as_ref();
+        let (mut md, opened) = load_opened_document(input, self.request).map_err(|error| with_setter_hint(error, input))?;
         // Page-relative assets (images, `style:` files) resolve beside the file
         // the argument opened, not beside its spelling (`@doc.md` has no parent).
         let resolved = opened.as_ref().map(|opened| opened.path().to_path_buf());
-        let input = resolved.as_ref();
         if let Some(sink) = sink {
             sink.composes(md.source().as_ref());
         }
@@ -91,45 +140,97 @@ impl Render<'_> {
             }
         }
 
+        // Also before cleanup, so the document's style keeps its positions;
+        // and before any output, so a bad style prints and opens nothing.
+        let style = self.prepare_style(&md, opened.as_ref(), sink)?;
+
         // Guarded cleanup under the default rules, with `--indent` (which only
-        // parses 2, 4, or 8) as an explicit override.
+        // parses 2, 4, or 8) as an explicit override. The style never enters it.
         md.cleanup_with(&MarkdownRuleOverrides {
             indentation: self.options.indent.and_then(Indentation::from_spaces).map_or(Leaf::Absent, Leaf::Value),
             ..MarkdownRuleOverrides::default()
         });
 
-        if !self.strict_style {
-            crate::render::stop_if_style_code_denied(&md, &self.blocking)?;
-        }
-
         if let Some(sink) = sink {
-            sink.document_diagnostics(crate::render::style_diagnostics(&md, self.strict_style)?);
             sink.document(document_markdown(&md, true, self.output.options.width));
             return Ok(());
         }
-        self.write(&md, input, opened.as_ref())
+        self.write(&md, resolved.as_deref(), opened.as_ref(), &style)
     }
 
-    fn write(&self, md: &Markdown, input: Option<&PathBuf>, opened: Option<&OpenedArgument>) -> Result<()> {
-        let features: &[Feature] = &self.options.features;
+    /// The effective style, its trigger findings and warnings reported and
+    /// its denied warnings refused.
+    fn prepare_style(&self, md: &Markdown, opened: Option<&OpenedArgument>, sink: Option<&ReportSink>) -> Result<RenderStyle> {
+        let options = self.options;
+        let inputs = prepare_cli_style_inputs(md, opened, &options.styles, &options.setters, self.request)?;
+        match sink {
+            Some(sink) => sink.diagnostics(inputs.trigger_findings.iter().map(finding_diagnostic).collect()),
+            None => emit_warnings(&inputs.trigger_findings, &stderr_terminal()),
+        }
+        let context = match opened {
+            Some(opened) => opened.document_context(self.request)?,
+            None => self.request.launch_context()?.clone(),
+        };
+        let policy = StylePreparationPolicy::render().with_deny_style(self.deny_style);
+        let page = builds_page(self.output.target);
+        let style = prepare_render_style(&inputs, document_style_layer(md, opened.map(OpenedArgument::path), context), policy, page)?;
+
+        let document = opened.map(|opened| PathBuf::from(biscuit_file::to_portable_string(opened.path())));
+        let inline_rules: Vec<Diagnostic> =
+            scan_inline_hr_warnings(md.content()).iter().map(|warning| inline_rule_record(warning, document.as_deref())).collect();
+        self.stop_if_denied(&style, &inline_rules)?;
+
+        for warning in &style.warnings {
+            match sink {
+                Some(sink) => sink.diagnostics(vec![warning.record.clone()]),
+                // A formatted source output builds no page, so it shows only
+                // the CLI layers' warnings.
+                None if page || !warning.from_document => stderr_warning(&warning.record.message),
+                None => {}
+            }
+        }
+        Ok(style)
+    }
+
+    /// Fails when the policy blocks a style warning: `--deny style` blocks the
+    /// body's inline horizontal-rule styles (preparation already refused the
+    /// rest), and `--deny <code>` each warning with that code.
+    fn stop_if_denied(&self, style: &RenderStyle, inline_rules: &[Diagnostic]) -> Result<()> {
+        let mut records: Vec<Diagnostic> = if self.deny_style {
+            inline_rules.to_vec()
+        } else {
+            style.warnings.iter().map(|warning| warning.record.clone()).chain(inline_rules.iter().cloned()).collect()
+        };
+        let blocked = |record: &Diagnostic| self.deny_style || self.blocking.blocks(Some(&record.code), Severity::Warning);
+        let Some(first) = records.iter().find(|record| blocked(record)).cloned() else {
+            return Ok(());
+        };
+        records.retain(|record| blocked(record));
+        for record in &mut records {
+            record.severity = Severity::Error;
+        }
+        let denied = if self.deny_style { "style" } else { first.code.as_str() };
+        Err(ClassifiedFailure::located(eyre!("the style was rejected by `--deny {denied}`: {}", first.message), records))
+    }
+
+    fn write(&self, md: &Markdown, input: Option<&Path>, opened: Option<&OpenedArgument>, style: &RenderStyle) -> Result<()> {
         let target = self.output.target;
+        let presentation = PagePresentation {
+            style: &style.style,
+            features: &self.options.features,
+            mermaid: self.options.mermaid,
+        };
         let page = match target {
             OutputTarget::Terminal | OutputTarget::Plain => {
                 let inputs = PageInputs::for_opened(self.request, opened)?;
-                terminal_page(md, input, &inputs, self.cli, &Terminal::default(), self.strict_style, features, self.options.mermaid)?
+                terminal_page(input, &inputs, &presentation, &Terminal::from_output_options(&self.output.options))?
             }
             OutputTarget::Html | OutputTarget::MarkdownPlus => {
                 let inputs = PageInputs::for_opened(self.request, opened)?;
-                html_page(md, self.cli, &inputs, self.strict_style, features)?
+                html_page(&inputs, &presentation)?
             }
             // The source text needs no page; its style is never read.
             _ => darkmatter::layout::DarkmatterPage::new(&Terminal::new_optimistic(120)),
-        };
-        // `md render --max-width` is this subcommand's own flag; a root flag
-        // reached the page through the style claims above.
-        let page = match self.max_width {
-            Some(max_width) => page.with_max_width(u32::from(max_width)),
-            None => page,
         };
         let document = DocumentOutput::prepare(md, &page, target, &self.output.options)
             .wrap_err_with(|| format!("Failed to render {target} output"))?;
@@ -161,6 +262,30 @@ impl Render<'_> {
     }
 }
 
+/// `error`, when it is an input that did not resolve and looks like a
+/// misspelled setter, with the setter spelling suggested.
+fn with_setter_hint(error: Report, input: Option<&PathBuf>) -> Report {
+    let Some(hint) = input.and_then(|input| setter_hint(input.as_os_str())) else {
+        return error;
+    };
+    match error.downcast::<DocumentArgumentError>() {
+        Ok(argument) => Report::new(argument.with_setter_hint(hint)),
+        Err(error) => error,
+    }
+}
+
+/// A body's inline horizontal-rule style (`--- { style: waves }`) as a
+/// deprecation record in `document`.
+fn inline_rule_record(warning: &StyleWarning, document: Option<&Path>) -> Diagnostic {
+    let message = match &warning.kind {
+        StyleWarningKind::Deprecated { replacement } => format!("deprecated style key `{}`; use `{replacement}`", warning.path),
+        _ => format!("deprecated style key `{}`", warning.path),
+    };
+    let mut record = output_diagnostic(STYLE_DEPRECATED_CODE, Severity::Warning, &message);
+    record.source = document.map(|document| DiagnosticSource::file_only(Some(document.to_path_buf())));
+    record
+}
+
 /// A document command's value: `data` behind the data family, and `text`, which
 /// keeps its exact bytes, as the Markdown. Every other formatted output renders
 /// `document` through its page, which happens now so a failure surfaces here.
@@ -174,20 +299,28 @@ pub(crate) fn document_value<D>(
     text: String,
     input: Option<&PathBuf>,
     output: &ResolvedOutput,
-    cli: &Cli,
     request: &MdRequest,
 ) -> Result<CommandValue<D>> {
     let target = output.target;
-    let inputs = || PageInputs::for_resolved(request, input.map(PathBuf::as_path));
-    let page = match target {
-        OutputTarget::Terminal | OutputTarget::Plain => {
-            terminal_page(document, input, &inputs()?, cli, &Terminal::default(), false, &[], false)?
-        }
-        OutputTarget::Html | OutputTarget::MarkdownPlus => html_page(document, cli, &inputs()?, false, &[])?,
+    match target {
         OutputTarget::Markdown => return Ok(CommandValue::new(data, empty_document()).with_markdown(text)),
         OutputTarget::Json | OutputTarget::Json5 | OutputTarget::Yaml | OutputTarget::Toml => {
             return Ok(CommandValue::new(data, empty_document()));
         }
+        _ => {}
+    }
+    // The document's own style only: no render override reaches an edit.
+    let inputs = PageInputs::for_resolved(request, input.map(PathBuf::as_path))?;
+    let style = document_style(document, input.map(PathBuf::as_path), inputs.document_context.clone())?;
+    for diagnostic in style.diagnostics() {
+        if let Some(message) = diagnostic.message() {
+            stderr_warning(&message);
+        }
+    }
+    let presentation = PagePresentation { style: &style, features: &[], mermaid: false };
+    let page = match target {
+        OutputTarget::Html | OutputTarget::MarkdownPlus => html_page(&inputs, &presentation)?,
+        _ => terminal_page(input.map(PathBuf::as_path), &inputs, &presentation, &Terminal::from_output_options(&output.options))?,
     };
     let prepared = DocumentOutput::prepare(document, &page, target, &output.options)
         .wrap_err_with(|| format!("Failed to render {target} output"))?;

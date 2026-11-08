@@ -1,13 +1,6 @@
 use clap::Parser;
 use clap_complete::engine::ArgValueCompleter;
-use crate::args::{
-    CliFill, PageAlignmentArg, PageBackgroundArg,
-    complete_theme_names, parse_cli_fill,
-    parse_theme_name,
-};
 use biscuit_terminal::output::{OutputTarget, WidthRequest};
-use darkmatter::markdown::highlighting::ThemePair;
-use renderable::style::PaintColor;
 use std::path::PathBuf;
 
 /// The root help's heading for options every command shares.
@@ -42,7 +35,6 @@ const ROOT_HELP_TEMPLATE: &str = "\
     mut_arg("style", |arg| arg.help_heading(RENDER_HEADING)),
     mut_arg("output", |arg| arg.hide(true)),
     mut_arg("show", |arg| arg.hide(true)),
-    mut_arg("max_width", |arg| arg.hide(true)),
     mut_arg("indent", |arg| arg.hide(true)),
     mut_arg("deny", |arg| arg.hide(true)),
     mut_arg("features", |arg| arg.hide(true)),
@@ -53,102 +45,10 @@ pub struct Cli {
     #[command(flatten)]
     pub render: crate::args::RenderOptions,
 
-    /// Theme for prose content (kebab-case name)
-    #[arg(hide = true, long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
-    pub theme: Option<ThemePair>,
-
-    /// Theme for code blocks (overrides derived theme)
-    #[arg(hide = true, long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
-    pub code_theme: Option<ThemePair>,
-
-    /// List available themes
-    #[arg(hide = true, long)]
-    pub list_themes: bool,
-
-    /// Shorthand for `clean --save` with top-level [INPUT]
-    #[arg(hide = true, long)]
-    pub save: bool,
-
-    // ── Layout flags (Phase 5) ──────────────────────────────────────────
-    /// Margin on all sides (cells)
-    #[arg(hide = true, short = 'm', long, value_name = "N")]
-    pub margin: Option<u16>,
-
-    /// Horizontal margin (left + right)
-    #[arg(hide = true, long, value_name = "N")]
-    pub mx: Option<u16>,
-
-    /// Vertical margin (top + bottom)
-    #[arg(hide = true, long, value_name = "N")]
-    pub my: Option<u16>,
-
-    /// Top margin
-    #[arg(hide = true, long, visible_alias = "margin-top", value_name = "N")]
-    pub mt: Option<u16>,
-
-    /// Bottom margin
-    #[arg(hide = true, long, visible_alias = "margin-bottom", value_name = "N")]
-    pub mb: Option<u16>,
-
-    /// Left margin
-    #[arg(hide = true, long, visible_alias = "margin-left", value_name = "N")]
-    pub ml: Option<u16>,
-
-    /// Right margin
-    #[arg(hide = true, long, visible_alias = "margin-right", value_name = "N")]
-    pub mr: Option<u16>,
-
-    /// Padding on all sides (cells)
-    #[arg(hide = true, long, value_name = "N")]
-    pub padding: Option<u16>,
-
-    /// Horizontal padding (left + right)
-    #[arg(hide = true, long, value_name = "N")]
-    pub px: Option<u16>,
-
-    /// Vertical padding (top + bottom)
-    #[arg(hide = true, long, value_name = "N")]
-    pub py: Option<u16>,
-
-    /// Top padding
-    #[arg(hide = true, long, visible_alias = "padding-top", value_name = "N")]
-    pub pt: Option<u16>,
-
-    /// Bottom padding
-    #[arg(hide = true, long, visible_alias = "padding-bottom", value_name = "N")]
-    pub pb: Option<u16>,
-
-    /// Left padding
-    #[arg(hide = true, long, visible_alias = "padding-left", value_name = "N")]
-    pub pl: Option<u16>,
-
-    /// Right padding
-    #[arg(hide = true, long, visible_alias = "padding-right", value_name = "N")]
-    pub pr: Option<u16>,
-
-    /// Page background style
-    #[arg(
-        hide = true,
-        long,
-        visible_alias = "page-background",
-        value_enum,
-        value_name = "STYLE"
-    )]
-    pub page_bg: Option<PageBackgroundArg>,
-
-    /// Explicit page background color (e.g. `#1e1e23` or `30,30,35`).
-    ///
-    /// Overrides the computed `PageBackground` color when set. Accepts a
-    /// hex string (`#RGB` / `#RRGGBB`) or a comma-separated `R,G,B` triple
-    /// in the 0-255 range. Tailwind palette names (`red-500`, `slate-50`,
-    /// etc.) and CSS special keywords (`transparent`, `inherit`,
-    /// `currentColor`) are also accepted.
-    #[arg(hide = true, long, value_name = "COLOR", value_parser = PaintColor::from_css_str)]
-    pub page_bg_color: Option<PaintColor>,
-
     /// Width the output is wrapped to: N columns, N%, `auto` (`OUTPUT_COLUMNS`,
     /// else the terminal, else unlimited), `source` (keep authored line
-    /// breaks), or `unlimited`. `md render`'s `--max-width` caps content inside it.
+    /// breaks), or `unlimited`. `md render`'s `style.max-width` caps content
+    /// inside it.
     #[arg(
         long,
         value_name = "WIDTH",
@@ -158,92 +58,6 @@ pub struct Cli {
         add = ArgValueCompleter::new(crate::args::complete_width_values)
     )]
     pub width: Option<WidthRequest>,
-
-    /// Include line numbers in code blocks
-    ///
-    /// Accepts `--line-numbers` (defaults to `true`) or
-    /// `--line-numbers <true|false>` for explicit control.
-    #[arg(
-        hide = true,
-        long,
-        value_name = "BOOL",
-        num_args = 0..=1,
-        default_missing_value = "true",
-        require_equals = false,
-    )]
-    pub line_numbers: Option<bool>,
-
-    /// Default alignment for all components
-    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
-    pub alignment: Option<PageAlignmentArg>,
-
-    /// Image alignment
-    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
-    pub align_images: Option<PageAlignmentArg>,
-
-    /// List alignment
-    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
-    pub align_lists: Option<PageAlignmentArg>,
-
-    /// Unordered list alignment
-    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
-    pub align_ul: Option<PageAlignmentArg>,
-
-    /// Ordered list alignment
-    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
-    pub align_ol: Option<PageAlignmentArg>,
-
-    /// List item alignment
-    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
-    pub align_li: Option<PageAlignmentArg>,
-
-    /// Block quote alignment
-    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
-    pub align_block_quotes: Option<PageAlignmentArg>,
-
-    /// Table alignment
-    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
-    pub align_tables: Option<PageAlignmentArg>,
-
-    /// Code block alignment
-    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
-    pub align_code_blocks: Option<PageAlignmentArg>,
-
-    /// Default fill for all components
-    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
-    pub fill: Option<CliFill>,
-
-    /// Image fill
-    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
-    pub fill_images: Option<CliFill>,
-
-    /// List fill
-    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
-    pub fill_lists: Option<CliFill>,
-
-    /// Unordered list fill
-    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
-    pub fill_ul: Option<CliFill>,
-
-    /// Ordered list fill
-    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
-    pub fill_ol: Option<CliFill>,
-
-    /// List item fill
-    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
-    pub fill_li: Option<CliFill>,
-
-    /// Block quote fill
-    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
-    pub fill_block_quotes: Option<CliFill>,
-
-    /// Table fill
-    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
-    pub fill_tables: Option<CliFill>,
-
-    /// Code block fill
-    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
-    pub fill_code_blocks: Option<CliFill>,
 
     /// Increase verbosity for styled user-facing output (-v summary, -vv detailed)
     #[arg(
@@ -296,6 +110,7 @@ impl Cli {
                 Command::Clean { output, .. }
                 | Command::Compose { output, .. }
                 | Command::Toc { output, .. }
+                | Command::ListThemes { output }
                 | Command::Delta { output, .. }
                 | Command::Get { output, .. }
                 | Command::Set { output, .. }
@@ -487,82 +302,6 @@ mod tests {
     }
 
     #[test]
-    fn cli_margin_flags_parse_correctly() {
-        let cli = Cli::try_parse_from(["md", "doc.md", "--margin", "4", "--mt", "1", "--mx", "2"])
-            .unwrap();
-        assert_eq!(cli.margin, Some(4));
-        assert_eq!(cli.mt, Some(1));
-        assert_eq!(cli.mx, Some(2));
-    }
-
-    #[test]
-    fn cli_padding_flags_parse_correctly() {
-        let cli = Cli::try_parse_from(["md", "doc.md", "--padding", "2", "--px", "1"]).unwrap();
-        assert_eq!(cli.padding, Some(2));
-        assert_eq!(cli.px, Some(1));
-    }
-
-    #[test]
-    fn cli_page_bg_flag_parses() {
-        let cli = Cli::try_parse_from(["md", "doc.md", "--page-bg", "subtle"]).unwrap();
-        assert!(cli.page_bg.is_some());
-    }
-
-    #[test]
-    fn cli_alignment_flags_parse() {
-        let cli = Cli::try_parse_from([
-            "md",
-            "doc.md",
-            "--alignment",
-            "center",
-            "--align-images",
-            "left",
-        ])
-        .unwrap();
-        assert!(cli.alignment.is_some());
-        assert!(cli.align_images.is_some());
-    }
-
-    #[test]
-    fn cli_fill_flags_parse() {
-        let cli = Cli::try_parse_from([
-            "md",
-            "doc.md",
-            "--fill",
-            "pad=4",
-            "--fill-code-blocks",
-            "max=40",
-        ])
-        .unwrap();
-        assert!(cli.fill.is_some());
-        assert!(cli.fill_code_blocks.is_some());
-    }
-
-    #[test]
-    fn cli_line_numbers_bare_flag_parses_as_true() {
-        let cli = Cli::try_parse_from(["md", "doc.md", "--line-numbers"]).unwrap();
-        assert_eq!(cli.line_numbers, Some(true));
-    }
-
-    #[test]
-    fn cli_line_numbers_true_parses() {
-        let cli = Cli::try_parse_from(["md", "doc.md", "--line-numbers", "true"]).unwrap();
-        assert_eq!(cli.line_numbers, Some(true));
-    }
-
-    #[test]
-    fn cli_line_numbers_false_parses() {
-        let cli = Cli::try_parse_from(["md", "doc.md", "--line-numbers", "false"]).unwrap();
-        assert_eq!(cli.line_numbers, Some(false));
-    }
-
-    #[test]
-    fn cli_line_numbers_omitted_is_none() {
-        let cli = Cli::try_parse_from(["md", "doc.md"]).unwrap();
-        assert_eq!(cli.line_numbers, None);
-    }
-
-    #[test]
     fn schema_about_code_block_defaults_to_inverse() {
         let cli = Cli::try_parse_from(["md", "schema", "about"]).unwrap();
         assert!(matches!(
@@ -591,6 +330,95 @@ mod tests {
             let error = Cli::try_parse_from(args).err().expect("--code-block belongs to `schema about`");
             assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument, "{args:?}");
         }
+    }
+
+    /// Every root presentation flag `--style` and the style setters replaced,
+    /// with each visible alias, and `md render --max-width`, as written with a
+    /// sample value.
+    const REMOVED_RENDER_FLAGS: &[&[&str]] = &[
+        &["--theme", "nord"],
+        &["--code-theme", "nord"],
+        &["-m", "4"],
+        &["--margin", "4"],
+        &["--mx", "2"],
+        &["--my", "2"],
+        &["--mt", "1"],
+        &["--margin-top", "1"],
+        &["--mb", "1"],
+        &["--margin-bottom", "1"],
+        &["--ml", "1"],
+        &["--margin-left", "1"],
+        &["--mr", "1"],
+        &["--margin-right", "1"],
+        &["--padding", "4"],
+        &["--px", "2"],
+        &["--py", "2"],
+        &["--pt", "1"],
+        &["--padding-top", "1"],
+        &["--pb", "1"],
+        &["--padding-bottom", "1"],
+        &["--pl", "1"],
+        &["--padding-left", "1"],
+        &["--pr", "1"],
+        &["--padding-right", "1"],
+        &["--page-bg", "subtle"],
+        &["--page-background", "subtle"],
+        &["--page-bg-color", "#1e1e23"],
+        &["--max-width", "40"],
+        &["--line-numbers"],
+        &["--line-numbers", "false"],
+        &["--alignment", "center"],
+        &["--align-images", "left"],
+        &["--align-lists", "left"],
+        &["--align-ul", "left"],
+        &["--align-ol", "left"],
+        &["--align-li", "left"],
+        &["--align-block-quotes", "left"],
+        &["--align-tables", "left"],
+        &["--align-code-blocks", "left"],
+        &["--fill", "full"],
+        &["--fill-images", "max=40"],
+        &["--fill-lists", "pad=4"],
+        &["--fill-ul", "indent=4"],
+        &["--fill-ol", "explicit=50"],
+        &["--fill-li", "full"],
+        &["--fill-block-quotes", "max=40"],
+        &["--fill-tables", "max=40"],
+        &["--fill-code-blocks", "max=40"],
+    ];
+
+    /// A removed spelling is clap's ordinary unknown argument, with no custom
+    /// message, on both `md` and `md render`.
+    #[test]
+    fn removed_render_flags_are_unknown_arguments() {
+        for flag in REMOVED_RENDER_FLAGS {
+            for prefix in [&["md", "doc.md"][..], &["md", "render", "doc.md"][..]] {
+                let args: Vec<&str> = prefix.iter().chain(flag.iter()).copied().collect();
+                let error = Cli::try_parse_from(&args).err().unwrap_or_else(|| panic!("{args:?} should be rejected"));
+                assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument, "{args:?}: {error}");
+                assert_eq!(error.exit_code(), 2, "{args:?}");
+                assert!(error.to_string().contains(&format!("unexpected argument '{}'", flag[0])), "{args:?}: {error}");
+            }
+        }
+    }
+
+    /// The root's own arguments are only the shared controls: a new root flag
+    /// is a placement decision, so it must be added here deliberately. The
+    /// flattened render options are guarded by `args::render::tests`.
+    #[test]
+    fn the_root_declares_only_shared_controls_besides_render_options() {
+        use clap::{Args as _, CommandFactory as _};
+        let render: std::collections::BTreeSet<String> = crate::args::RenderOptions::augment_args(clap::Command::new("x"))
+            .get_arguments()
+            .map(|arg| arg.get_id().to_string())
+            .collect();
+        let root: std::collections::BTreeSet<String> = Cli::command()
+            .get_arguments()
+            .map(|arg| arg.get_id().to_string())
+            .filter(|id| !render.contains(id))
+            .collect();
+        let expected = ["completions", "debug_level", "magic_roots", "verbose", "width"];
+        assert_eq!(root, expected.iter().map(ToString::to_string).collect(), "root arguments");
     }
 
     #[test]

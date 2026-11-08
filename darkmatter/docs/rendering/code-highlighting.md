@@ -19,7 +19,7 @@ ThemePair::resolve(ColorMode) -> Theme
   ...
 ```
 
-> **Do not conflate the name with a concrete theme.** `--code-theme github`
+> **Do not conflate the name with a concrete theme.** `style.page.code.theme=github`
 > does not mean "the dark GitHub theme"; it means "GitHub, resolved for the
 > current mode."
 

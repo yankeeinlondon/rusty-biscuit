@@ -259,7 +259,7 @@ field:
 - **Horizontal margins and padding** resolve against the captured terminal width
   (`DarkmatterPage::new(&term)` captures it at construction time).
 - **`max-width`** resolves against the **content width** after final page margin
-  and padding values are known — including any CLI overrides. A `max-width` that
+  and padding values are known, from whichever style layer set them. A `max-width` that
   resolves to `0` cells is still rejected at apply time (`InvalidMaxWidth`), even
   though the `Length` itself is retained for the browser.
 
@@ -279,82 +279,55 @@ style:
 ---
 ```
 
-### Precedence: CLI Flags Win Over Frontmatter
+### Precedence: Later Style Layers Win, Field by Field
 
-`md` always applies its CLI flags before falling back to `style:` frontmatter. The integration order in `darkmatter-cli` is:
+`md` has no page-layout flags. A command line changes the style by adding
+_layers_ on top of the document's `style:` frontmatter: each `--style FILE`
+is one layer, and every `style.KEY=VALUE` setter on the command line forms
+one more. `prepare_style_layers` merges them in this order, lowest first:
 
-1. `DarkmatterPage::new(&terminal)`
-2. `apply_cli_layout_flags(page, &cli)` — CLI margin/padding/max-width/page-bg/alignment flags
-3. `darkmatter::style::apply_page_style(page, &style, overrides)` — frontmatter, with `overrides` listing every field the CLI already claimed
+1. built-in defaults (no layer; what an unset field renders as)
+2. the document's `style:` frontmatter
+3. each `--style` file, in command-line order
+4. the setters
 
-Override claims expand the same way `apply_cli_layout_flags` resolves shorthand:
+The merge is field by field. A later layer replaces only the leaves it sets,
+so a setter for `page.margin-left` changes the left margin and leaves the
+document's `margin-right` in place:
 
-| CLI Flag        | Claims                                                 |
-|-----------------|--------------------------------------------------------|
-| `--margin N`    | `margin_top`, `margin_right`, `margin_bottom`, `margin_left` |
-| `--mx N`        | `margin_left`, `margin_right`                          |
-| `--my N`        | `margin_top`, `margin_bottom`                          |
-| `--mt`/`--mr`/`--mb`/`--ml` | the named side only                        |
-| `--padding`/`--px`/`--py`/`--pt`/`--pr`/`--pb`/`--pl` | mirrors margin shorthand |
-| `--max-width N` | `max_width`                                            |
-| `--page-bg`     | `background`                                           |
-| `--alignment`   | `alignment` (also broadcasts to every component)       |
+```bash
+# style-prop.md sets margin-left: 2ch and margin-right: 4ch
+md render style-prop.md style.page.margin-left=7ch   # left 7, right 4
+```
 
-Once a field is claimed, the corresponding `style.page.*` value is skipped silently.
+```mermaid
+flowchart LR
+    D[document style:] --> M[prepare_style_layers<br/>field-by-field merge]
+    F1[--style a.yaml] --> M
+    F2[--style b.toml] --> M
+    S[style.KEY=VALUE setters] --> M
+    M --> P[PreparedStyle]
+    P --> A[apply_prepared_style] --> Page[DarkmatterPage]
+```
+
+The `apply_*_style` functions run after the merge, so they apply every field
+present in the effective style; none of them takes an override argument.
 
 ### Public API
 
-The page-level wiring is exposed through two public items in `darkmatter::style`:
-
 ```rust
-/// CLI fields that already claimed page-level layout/style values.
-///
-/// Constructed by darkmatter-cli from `Cli` after applying the same
-/// shorthand expansion rules as `apply_cli_layout_flags`. This type
-/// lives in the darkmatter library so the style applicator does not
-/// depend on CLI argument structs.
-///
-/// The component-specific alignment fields (`align_images`, `align_lists`,
-/// `align_ul`, `align_ol`, `align_li`, `align_block_quotes`, `align_tables`,
-/// `align_code_blocks`) record CLI claims made by the corresponding
-/// `--align-*` flags. When set, the `style.page.alignment` broadcast skips
-/// that component so component-specific CLI alignment is preserved.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PageStyleOverrides {
-    pub margin_top: bool,
-    pub margin_right: bool,
-    pub margin_bottom: bool,
-    pub margin_left: bool,
-    pub padding_top: bool,
-    pub padding_right: bool,
-    pub padding_bottom: bool,
-    pub padding_left: bool,
-    pub max_width: bool,
-    pub background: bool,
-    pub alignment: bool,
-    pub align_images: bool,
-    pub align_lists: bool,
-    pub align_ul: bool,
-    pub align_ol: bool,
-    pub align_li: bool,
-    pub align_block_quotes: bool,
-    pub align_tables: bool,
-    pub align_code_blocks: bool,
-}
-
-/// Apply parsed page-level style onto a DarkmatterPage builder.
-///
-/// CLI overrides suppress frontmatter for overlapping fields. The returned
-/// page has active `style.page.*` settings applied. Warnings remain owned
-/// by the parser; suppression is handled by the active wiring phase.
+/// Apply parsed page-level style onto a DarkmatterPage builder. Every
+/// `style.page.*` field present in `style` is applied.
 pub fn apply_page_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: PageStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError>;
 ```
 
-`PageStyleOverrides` is CLI-agnostic by design: `darkmatter-cli` constructs it from the parsed `Cli` struct after shorthand expansion, then passes it to `apply_page_style`. This keeps the library crate independent of CLI argument types. Both `render_terminal_output` and `html_artifact` in `darkmatter/cli/src/output.rs` call this helper before invoking `page.render(md)` / `page.render_to_browser(md)`, ensuring terminal and HTML rendering share the same frontmatter behavior.
+Most callers do not call it directly: `apply_prepared_style` (see
+[Prepared styles](#prepared-styles)) runs it with the
+other `apply_*` functions in their required order. Terminal and HTML
+rendering share the same call, so they read the same effective style.
 
 ### `--deny style`
 
@@ -410,7 +383,7 @@ Three knobs are live on each of the three buckets:
 `style.{bucket}.width` and `style.{bucket}.max-width` are mutually exclusive
 ```
 
-The exclusivity check runs **unconditionally** — a CLI fill flag (e.g. `--fill`, `--fill-tables`) chooses which value wins at render time, but it never makes an ambiguous frontmatter bucket valid. A document that sets both `width` and `max-width` in the same bucket always fails with `ComponentWidthConflict { bucket }` before rendering, with or without a CLI fill override.
+A style that sets both `width` and `max-width` in the same bucket always fails with `ComponentWidthConflict { bucket }` before rendering.
 
 Bucket names in diagnostics use canonical kebab-case (`style.block-quote.*`, not `style.block_quote.*`). Snake-case aliases still parse but emit a `Deprecated` warning.
 
@@ -434,64 +407,32 @@ style:
 ---
 ```
 
-### Precedence: CLI Flags, Page Broadcast, Component Frontmatter
+### Precedence: Page Broadcast, Then Component Style
 
-The integration order in `darkmatter-cli` is:
+Within one effective style, `apply_page_style` runs before
+`apply_component_style`:
 
-1. `DarkmatterPage::new(&terminal)`
-2. `apply_cli_layout_flags(page, &cli)` — global and component-specific CLI flags
-3. `darkmatter::style::apply_page_style(page, &style, page_overrides)` — page-level frontmatter, including any `style.page.alignment` broadcast
-4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — `style.{table|images|block-quote}.*` frontmatter
+1. `style.page.alignment` broadcasts to every component.
+2. `style.{table|images|block-quote|code-block}.alignment` then overrides the
+   broadcast for that component only; components it does not name keep the
+   broadcast.
 
-`ComponentStyleOverrides` records which fields the CLI already claimed:
-
-| CLI Flag                | Claims                                                     |
-|-------------------------|------------------------------------------------------------|
-| `--align-tables`        | `tables_alignment`                                         |
-| `--align-images`        | `images_alignment`                                         |
-| `--align-block-quotes`  | `block_quotes_alignment`                                   |
-| `--fill-tables`         | `tables_fill`                                              |
-| `--fill-images`         | `images_fill`                                              |
-| `--fill-block-quotes`   | `block_quotes_fill`                                        |
-| `--alignment` (global)  | every `*_alignment` field                                  |
-| `--fill` (global)       | every `*_fill` field                                       |
-
-Precedence resolution at each component:
-
-- **CLI flag wins over everything.** A CLI claim suppresses both the matching component frontmatter and the page-level alignment broadcast.
-- **Component frontmatter wins over the page broadcast.** When no CLI flag has claimed a component, `style.{bucket}.alignment` overrides `style.page.alignment` for that component only; untouched components keep the broadcast.
+Which layer supplied each value was decided earlier, when the layers were
+merged (see [Precedence: Later Style Layers Win, Field by
+Field](#precedence-later-style-layers-win-field-by-field)). For example, a
+document with `page.alignment: center` and a setter
+`style.table.alignment=right` centers every component except tables.
 
 ### Public API
 
-The component-level wiring is exposed through two public items in `darkmatter::style`:
-
 ```rust
-/// CLI fields that already claimed component-level layout values.
-///
-/// Built by darkmatter-cli from `Cli` after applying the same global-then-
-/// component-specific precedence as `apply_cli_layout_flags`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ComponentStyleOverrides {
-    pub tables_alignment: bool,
-    pub tables_fill: bool,
-    pub images_alignment: bool,
-    pub images_fill: bool,
-    pub block_quotes_alignment: bool,
-    pub block_quotes_fill: bool,
-}
-
-/// Apply parsed table/image/block-quote style onto a DarkmatterPage builder.
-///
-/// CLI overrides suppress frontmatter for overlapping component fields. The
-/// returned page has active sub-spec #3 settings applied.
+/// Apply parsed table/image/block-quote/code-block style onto a
+/// DarkmatterPage builder.
 pub fn apply_component_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: ComponentStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError>;
 ```
-
-`ComponentStyleOverrides` is CLI-agnostic by design: `darkmatter-cli` constructs it from the parsed `Cli` struct after shorthand expansion, then passes it to `apply_component_style`. Both `render_terminal_output` and `html_artifact` in `darkmatter/cli/src/output.rs` call this helper after `apply_page_style` and before rendering.
 
 ### Errors
 
@@ -542,7 +483,7 @@ Plus the bespoke `ul.left-margin` indent channel (see below).
 
 ### Width vs. Max-Width Exclusivity
 
-`width` and `max-width` remain mutually exclusive **per bucket** — the same exclusivity check from sub-spec #3 applies. Setting both `style.ul.width` and `style.ul.max-width` (or the equivalent for `ol`/`li`) returns `ComponentWidthConflict { bucket }` before rendering. This check runs unconditionally, regardless of CLI fill overrides.
+`width` and `max-width` remain mutually exclusive **per bucket** — the same exclusivity check from sub-spec #3 applies. Setting both `style.ul.width` and `style.ul.max-width` (or the equivalent for `ol`/`li`) returns `ComponentWidthConflict { bucket }` before rendering.
 
 ### ul.left-margin: Independent Indent Channel
 
@@ -581,66 +522,32 @@ This means `left-margin: 4ch` plus `max-width: 40` produces a 4-cell offset and 
 
 Per-component browser CSS comes from the renderable browser fold lowering each node's `Layout`/`Style` attributes; no bespoke component CSS blocks are emitted.
 
-### CLI Flags
+### Setting Lists from the Command Line
 
-Broadcast flags apply to all three concrete list variants:
+There are no list flags. A setter or `--style` file names each list
+component it changes; to set all three, name all three:
 
-| CLI Flag | Effect |
-|---|---|
-| `--align-lists <alignment>` | Sets alignment for `Ul`, `Ol`, and `Li` |
-| `--fill-lists <fill>` | Sets fill for `Ul`, `Ol`, and `Li` |
+```bash
+md render doc.md style.ul.alignment=center style.ol.alignment=center style.li.alignment=center
+```
 
-Granular flags override the broadcast for their specific component:
+### Integration Order
 
-| CLI Flag | Effect |
-|---|---|
-| `--align-ul` / `--align-ol` / `--align-li` | Alignment for a single list variant |
-| `--fill-ul` / `--fill-ol` / `--fill-li` | Fill for a single list variant |
-
-Precedence follows the same model as sub-specs #2 and #3: global CLI flags (`--alignment`, `--fill`) claim all list components; broadcast list flags claim `Ul`, `Ol`, and `Li`; granular flags claim only their concrete component. CLI flags always win over frontmatter.
-
-### Precedence and Integration Order
-
-The integration order in `darkmatter-cli` extends sub-spec #3's pipeline:
-
-1. `DarkmatterPage::new(&terminal)`
-2. `apply_cli_layout_flags(page, &cli)` — global and component-specific CLI flags
-3. `darkmatter::style::apply_page_style(page, &style, page_overrides)`
-4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
-5. `darkmatter::style::apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
+Within one effective style, `apply_list_style` runs after
+`apply_page_style` and `apply_component_style`, so a list bucket's own
+`alignment` overrides the `style.page.alignment` broadcast for that list
+component. Layer precedence (document, then `--style` files, then setters)
+was already decided field by field when the layers were merged.
 
 ### Public API
 
-The list-level wiring is exposed through two public items in `darkmatter::style`:
-
 ```rust
-/// CLI fields that already claimed list-level layout values.
-///
-/// Built by darkmatter-cli from `Cli` after applying broadcast-then-granular
-/// precedence rules for list flags.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ListStyleOverrides {
-    pub ul_alignment: bool,
-    pub ul_fill: bool,
-    pub ul_left_margin: bool,
-    pub ol_alignment: bool,
-    pub ol_fill: bool,
-    pub li_alignment: bool,
-    pub li_fill: bool,
-}
-
 /// Apply parsed ul/ol/li style onto a DarkmatterPage builder.
-///
-/// CLI overrides suppress frontmatter for overlapping list fields. The returned
-/// page has active sub-spec #4 settings applied.
 pub fn apply_list_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: ListStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError>;
 ```
-
-`ListStyleOverrides` is CLI-agnostic by design: `darkmatter-cli` constructs it from the parsed `Cli` struct after shorthand expansion, then passes it to `apply_list_style`. Both `render_terminal_output` and `html_artifact` in `darkmatter/cli/src/output.rs` call this helper after `apply_component_style` and before rendering.
 
 ### Example
 
@@ -803,20 +710,9 @@ pub fn apply_color_style(
 
 ### Precedence and Integration Order
 
-The integration order in `darkmatter-cli` extends sub-spec #4's pipeline:
-
-1. `DarkmatterPage::new(&terminal)`
-2. `apply_cli_layout_flags(page, &cli)` — global and component-specific CLI flags
-3. `darkmatter::style::apply_page_style(page, &style, page_overrides)`
-4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
-5. `darkmatter::style::apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
-6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
-7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
-8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, StyleAssetResolver::for_target(target), &document_context)` — stylesheet, meta, code-theme, hyperlink/image local-style
-10. `render / render_to_browser`
-
-Color has no CLI override in this sub-spec; frontmatter is the only color source.
+`apply_color_style` runs after the page, component, list, rule, and
+disclosure layout functions, so a component's `color` or `bg-color` overrides
+the page-level value for that component. See [Prepared styles](#prepared-styles) for the full order `md` applies.
 
 ### Example
 
@@ -910,7 +806,7 @@ pub enum HrAlignment {
 | `kind` | `Option<HrKind>` | `kind` | Visual style of the rule |
 | `weight` | `Option<HrWeight>` | `weight` | Stroke weight |
 | `padding` | `Option<ComponentEdges>` | `padding` | All four sides of the `Hr` component policy's `Layout.padding` |
-| `padding_left`, `padding_right` | `Option<Length>` | `padding-left`, `padding-right` | One side each, after `padding`; moves the rule inside the content width (`padding-left: 4` at width 50 draws 46 cells, 4 in). A CLI `--fill` claim on `hr` keeps its own padding |
+| `padding_left`, `padding_right` | `Option<Length>` | `padding-left`, `padding-right` | One side each, after `padding`; moves the rule inside the content width (`padding-left: 4` at width 50 draws 46 cells, 4 in). |
 
 `width` and `max-width` conflict: setting both in the same `style.hr` bucket returns `StyleApplyError` before rendering, matching the exclusivity rule from sub-specs #3 and #4.
 
@@ -926,41 +822,18 @@ HR foreground color maps to the rule stroke/fill color. Background color applies
 // darkmatter::style - extended
 
 /// Apply parsed HR style onto a DarkmatterPage builder.
-///
-/// CLI overrides suppress frontmatter for overlapping HR fields. The returned
-/// page has active sub-spec #6 settings applied.
 pub fn apply_hr_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: HrStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError>;
-
-/// CLI fields that already claimed HR-level layout/style values.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct HrStyleOverrides {
-    pub alignment: bool,
-    pub fill: bool,
-    pub color: bool,
-    pub bg_color: bool,
-}
 ```
 
-No dedicated CLI flags for HR are added in this sub-spec. Existing global color/fill flags from prior specs may claim HR fields through `HrStyleOverrides` if those flags were designed to broadcast to every `PageComponent`.
+There are no HR flags; a setter such as `style.hr.alignment=left` or a
+`--style` file sets HR fields like any other style layer.
 
 ### Precedence and Integration Order
 
-The integration order in `darkmatter-cli` extends sub-spec #5's pipeline:
-
-1. `DarkmatterPage::new(&terminal)`
-2. `apply_cli_layout_flags(page, &cli)` — global and component-specific CLI flags
-3. `darkmatter::style::apply_page_style(page, &style, page_overrides)`
-4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
-5. `darkmatter::style::apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
-6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
-7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
-8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, StyleAssetResolver::for_target(target), &document_context)` — stylesheet, meta, code-theme, hyperlink/image local-style
-10. `render / render_to_browser`
+See [Prepared styles](#prepared-styles) for the full order `md` applies.
 
 ### `--deny style` and HR
 
@@ -1079,9 +952,9 @@ style:
 
 ### `style.page.code.theme`
 
-Overrides the page-level default code-block theme. The string value parses via `ThemePair::try_from`, using the same accepted names as `--code-theme` and `--list-themes`. Unknown theme names return `StyleApplyError::InvalidCodeTheme { value }`.
+Overrides the page-level default code-block theme. The string value parses via `ThemePair::try_from`, using the same accepted names as `style.page.theme`; `md list-themes` lists them. Unknown theme names return `StyleApplyError::InvalidCodeTheme { value }`.
 
-CLI `--code-theme` wins over `style.page.code.theme`, consistent with the invocation-level CLI precedence established in sub-spec #2.
+A command-line setter (`style.page.code.theme=NAME`) or `--style` file wins over the document's value, like any later style layer.
 
 ### Presentation: themes, code-block mode, line numbers
 
@@ -1094,7 +967,7 @@ CLI `--code-theme` wins over `style.page.code.theme`, consistent with the invoca
 | code-block mode | `page.code.mode` → `inverse` |
 | line numbers | `code-block.line-numbers` (an explicit `false` is kept) → off |
 
-`PresentationDefaults` holds the `THEME`/`CODE_THEME` values of a request snapshot (`from_snapshot`, `from_context`, `from_env`); it never reads the process environment. A fence's `theme=` and a directly constructed `CodeBlock` theme still outrank every row. Color mode is not part of it: it comes from the `Terminal` or output options the page was built from. `md` writes its `--theme`, `--code-theme`, and `--line-numbers` flags over the document's style before resolving, so a flag wins and an omitted flag leaves the document's value.
+`PresentationDefaults` holds the `THEME`/`CODE_THEME` values of a request snapshot (`from_snapshot`, `from_context`, `from_env`); it never reads the process environment. A fence's `theme=` and a directly constructed `CodeBlock` theme still outrank every row. Color mode is not part of it: it comes from the `Terminal` or output options the page was built from. `md` resolves over the merged style, so a setter or `--style` file value wins and one left out leaves the document's value.
 
 The existing code-block contrast model is preserved: `ThemePair` resolves against the **inverted** color mode so the code panel contrasts against the page (light code on a dark page, and vice versa).
 
@@ -1195,7 +1068,6 @@ pub enum MetaTag {
 pub fn apply_bespoke_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: BespokeStyleOverrides,
     assets: StyleAssetResolver,
     context: &FileResolutionContext,
 ) -> Result<DarkmatterPage, StyleApplyError>;
@@ -1204,35 +1076,33 @@ pub fn apply_bespoke_style(
 /// OutputTarget::MarkdownPlus)` reads local CSS; every other target, and
 /// `passive()`, only validates.
 pub struct StyleAssetResolver { /* .. */ }
-
-/// CLI fields that already claimed bespoke style values.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct BespokeStyleOverrides {
-    /// Set when `--code-theme` was supplied on the command line.
-    pub code_theme: bool,
-}
 ```
-
-`BespokeStyleOverrides::code_theme` is set when `--code-theme` was supplied. There are no stylesheet or meta CLI overrides in v1.
 
 ### Prepared styles
 
-`darkmatter::style::apply_prepared_style(page, &prepared, assets, &defaults)` is the page-construction entry for a `PreparedStyle` (from `prepare_style_layers`). Preparation is passive; this call executes assets. It applies the resolved presentation, then the page, component, list, rule, disclosure, color, and bespoke style with no CLI claims (layer order already decided precedence), and resolves `page.stylesheet` in its winning origin's context.
+`darkmatter::style::apply_prepared_style(page, &prepared, assets, &defaults)` is the page-construction entry for a `PreparedStyle` (from `prepare_style_layers`). Preparation is passive; this call executes assets. Layer order already decided precedence, field by field, so nothing in this call overrides a merged value.
 
 ### Precedence and Integration Order
 
-The full integration order in `darkmatter-cli` is:
+The full integration order in `md` is:
 
 1. `DarkmatterPage::new(&terminal)`
-2. `apply_cli_layout_flags(page, &cli)` — global and component-specific CLI flags
-3. `darkmatter::style::apply_page_style(page, &style, page_overrides)`
-4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
-5. `darkmatter::style::apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
-6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
-7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
-8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, StyleAssetResolver::for_target(target), &document_context)` — stylesheet, meta, code-theme, hyperlink/image local-style
-10. `render / render_to_browser`
+2. `prepare_style_layers(&layers, schema, policy)` — merges the document's `style:`, each `--style` file in order, then the setters, field by field
+3. `apply_prepared_style(page, &prepared, StyleAssetResolver::for_target(target), &defaults)`, which runs, in order:
+    1. the presentation `defaults` resolved over the merged style (themes, code-block mode, line numbers)
+    2. `apply_page_style` — page frame and the `style.page.alignment` broadcast
+    3. `apply_component_style` — table/image/block-quote/code-block
+    4. `apply_list_style` — ul/ol/li
+    5. `apply_hr_style` — HR
+    6. `apply_disclosure_style` — disclosure
+    7. `apply_color_style` — color and bg-color for all wired components
+    8. the bespoke knobs (meta, code theme, hyperlink/image local-style), then `page.stylesheet` in the context of the layer that set it
+4. `render / render_to_browser`
+
+The individual `apply_*` functions are public for callers that hold a
+`StyleFrontmatter` rather than a `PreparedStyle`; run them in the order above.
+`apply_bespoke_style` resolves the stylesheet in the `context` its caller
+supplies.
 
 ### Errors
 
@@ -1316,23 +1186,12 @@ Disclosure style resolves from most specific to least specific:
 
 1. Inline `key=value` tokens on the `::disclosure` opener.
 2. `style.disclosure.*` frontmatter.
-3. Page-level `style.page.alignment` broadcast and any future disclosure-specific CLI flags.
+3. Page-level `style.page.alignment` broadcast.
 4. Built-in default.
 
 ### Integration Order
 
-`apply_disclosure_style` runs immediately after `apply_component_style` in the darkmatter-cli pipeline:
-
-1. `DarkmatterPage::new(&terminal)`
-2. `apply_cli_layout_flags(page, &cli)`
-3. `apply_page_style(page, &style, page_overrides)`
-4. `apply_component_style(page, &style, component_overrides)` — table/image/block-quote frontmatter
-5. `apply_list_style(page, &style, list_overrides)` — ul/ol/li frontmatter
-6. `apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
-7. `apply_color_style(page, &style)` — color and bg-color for all wired components
-8. `apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-9. `apply_bespoke_style(page, &style, bespoke_overrides, StyleAssetResolver::for_target(target), &document_context)` — stylesheet, meta, code-theme, hyperlink/image local-style
-10. `render / render_to_browser`
+`apply_disclosure_style` runs after `apply_hr_style` and before `apply_color_style`. See [Prepared styles](#prepared-styles) for the full order `md` applies.
 
 ### Errors
 
@@ -1354,7 +1213,7 @@ Each of the component buckets embeds a `CommonStyle` providing the shared layout
 | `alignment` | `alignment` | `left` \| `center` \| `right` | Overrides page-level broadcast for this component |
 | `margin` | `margin` | `Nch` or `N%` | Sub-spec #9; applies to all four sides |
 | `padding` | `padding` | `Nch` or `N%` | Sub-spec #9; applies to all four sides |
-| `padding-left`, `padding-right` | `padding-left`, `padding-right` | `Nch` or `N%` | One side each, applied after `padding`; a CLI fill claim on the bucket keeps its sides |
+| `padding-left`, `padding-right` | `padding-left`, `padding-right` | `Nch` or `N%` | One side each, applied after `padding` |
 | `color` | `color` | Tailwind, hex, or web named | Sub-spec #5 wired; inheritance from page-level, component override |
 | `bg-color` | `bg-color` | Tailwind, hex, or web named | Sub-spec #5 wired; inheritance from page-level, component override |
 | `border` | `border` | bool, string, or object | Sub-spec #9; see [Sub-Spec #9](#sub-spec-9-style-everywhere) |
@@ -1501,7 +1360,7 @@ color with the luminosity level.
 
 ## Code Block Theme & Contrast
 
-The `page.code` theme (`--code-theme`, `code_theme`) is a mode-agnostic
+The `page.code` theme (`style.page.code.theme`) is a mode-agnostic
 `ThemePair`, resolved to a concrete light/dark theme at render time. Code blocks
 deliberately resolve against the *inverted* color mode so the panel contrasts
 against the page (light code on a dark page, and vice versa); prose, tables, and

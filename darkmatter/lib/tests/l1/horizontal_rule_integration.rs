@@ -6,7 +6,7 @@ mod tests {
         Markdown,
         output::{ColorDepth, TerminalImageMode, TerminalOptions},
     };
-    use darkmatter::style::{HrStyleOverrides, apply_hr_style, from_frontmatter};
+    use darkmatter::style::{apply_hr_style, from_frontmatter};
 
     fn terminal_text_options() -> TerminalOptions {
         let mut options = TerminalOptions::default();
@@ -540,7 +540,7 @@ mod tests {
         let (style, _warnings) =
             from_frontmatter(md.frontmatter()).expect("parse style frontmatter");
         let term = Terminal::new_optimistic(80);
-        apply_hr_style(DarkmatterPage::new(&term), &style, HrStyleOverrides::default())
+        apply_hr_style(DarkmatterPage::new(&term), &style)
             .expect("apply hr style")
     }
 

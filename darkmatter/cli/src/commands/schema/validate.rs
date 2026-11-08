@@ -428,6 +428,13 @@ pub(crate) struct SelectedDocumentSchema {
     pub(crate) trigger_findings: Vec<InvalidTriggerFinding>,
 }
 
+impl SelectedDocumentSchema {
+    /// No schema, and no trigger found.
+    pub(crate) fn none() -> Self {
+        Self { schema: None, trigger_findings: Vec::new() }
+    }
+}
+
 /// The effective schema of `document` from `schemas` (a baseline selection)
 /// in the document's `context`, with trigger discovery when
 /// `discover_triggers` and the context is inside a repository.

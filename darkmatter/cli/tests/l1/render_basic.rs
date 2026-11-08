@@ -222,12 +222,9 @@ fn test_render_explicit_with_output() {
 fn test_line_numbers_html_output() {
     let fixture = CliProcessFixture::named("test_line_numbers_html_output");
     let input = "```rust\nfn main() {}\n```";
-    // Use `--line-numbers=true` to avoid the optional-arg ambiguity with the
-    // `-` stdin marker positional. The bare form `--line-numbers -` would let
-    // clap consume `-` as the optional value.
     fixture
         .command()
-        .args(["--output", "html", "--line-numbers=true", "-"])
+        .args(["--output", "html", "style.code-block.line-numbers=true", "-"])
         .write_stdin(input)
         .assert()
         .success()
@@ -315,19 +312,29 @@ fn render_rejects_an_invalid_frontmatter_code_mode() {
         .stderr(predicate::str::contains("style.page.code.mode"));
 }
 
+/// A removed render flag reaches the binary as clap's ordinary unknown
+/// argument (exit 2, nothing printed). Every removed spelling is enumerated
+/// in-process by `args::cli::tests::removed_render_flags_are_unknown_arguments`;
+/// these cases prove the wiring through `md` and `md render`.
 #[test]
-fn render_code_block_flag_is_an_unknown_argument() {
-    let fixture = CliProcessFixture::named("render_code_block_flag_is_an_unknown_argument");
+fn removed_render_flags_are_unknown_arguments() {
+    let fixture = CliProcessFixture::named("removed_render_flags_are_unknown_arguments");
     let tmp = md_file("# Title\n");
-    for prefix in [&[][..], &["render"][..]] {
+    for (prefix, flag) in [
+        (&[][..], &["--code-block", "dark"][..]),
+        (&["render"][..], &["--code-block", "dark"][..]),
+        (&[][..], &["--margin", "4"][..]),
+        (&["render"][..], &["--max-width", "40"][..]),
+        (&[][..], &["--code-theme", "nord"][..]),
+    ] {
         fixture
             .command()
             .args(prefix)
             .arg(tmp.path())
-            .args(["--code-block", "dark"])
+            .args(flag)
             .assert()
             .code(2)
             .stdout(predicate::str::is_empty())
-            .stderr(predicate::str::contains("unexpected argument '--code-block'"));
+            .stderr(predicate::str::contains(format!("unexpected argument '{}'", flag[0])));
     }
 }

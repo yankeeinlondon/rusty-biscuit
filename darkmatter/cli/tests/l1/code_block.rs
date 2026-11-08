@@ -687,9 +687,10 @@ fn code_block_html_output_matches_fenced_markdown_fence() {
     // render the same code to the HTML target through `render_html_code_block`,
     // so the `.code-block` fragment must be byte-for-byte identical — not merely
     // both containing the wrapper and body, which cannot catch a real
-    // theme/metadata divergence between the two paths. An explicit `--theme`
-    // pins the theme on both invocations so the comparison is independent of
-    // any ambient `CODE_THEME` / `THEME`.
+    // theme/metadata divergence between the two paths. An explicit theme
+    // (`--theme` here, `style.page.code.theme` on the fence) pins it on both
+    // invocations so the comparison is independent of any ambient
+    // `CODE_THEME` / `THEME`.
     let code = "fn a() {}\nfn b() {}\n";
 
     let direct = process
@@ -710,7 +711,7 @@ fn code_block_html_output_matches_fenced_markdown_fence() {
 
     let fence = process
         .command()
-        .args(["--output", "html", "--code-theme", "one-half"])
+        .args(["--output", "html", "style.page.code.theme=one-half"])
         .write_stdin(format!("```rust\n{code}```\n"))
         .assert()
         .success();

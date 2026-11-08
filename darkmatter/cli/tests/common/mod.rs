@@ -2,6 +2,7 @@
 
 pub mod fixture;
 pub mod protected_env;
+pub mod style;
 
 // Re-exported so a call site keeps saying `common::CliProcessFixture`; the
 // definitions live in their own file so this shared module stays near its
@@ -333,23 +334,13 @@ pub mod baseline {
 }
 
 pub mod layout {
-    use biscuit_terminal::terminal::Terminal;
-    use clap::Parser;
     use darkmatter::layout::{DarkmatterPage, PageComponent};
-    use darkmatter_cli::Cli;
-    use darkmatter_cli::render::apply_cli_layout_flags;
     use renderable::layout::{Alignment, Edges, Length, TargetValue, Width};
 
-    pub fn parse_cli(args: &[&str]) -> Cli {
-        let mut full = vec!["md"];
-        full.extend_from_slice(args);
-        Cli::try_parse_from(full).expect("CLI args must parse")
-    }
-
+    /// The page `md` builds for `args`' setters on a 120-column terminal, for a
+    /// document with no `style:` of its own.
     pub fn resolved_page(args: &[&str]) -> DarkmatterPage {
-        let cli = parse_cli(args);
-        let term = Terminal::new_optimistic(120);
-        apply_cli_layout_flags(DarkmatterPage::new(&term), &cli)
+        super::style::styled_page("# Doc\n", args, 120)
     }
 
     pub fn tv_cells(tv: &TargetValue<Length>) -> u16 {
@@ -379,15 +370,20 @@ pub mod layout {
             None => TestFill::Full,
             Some(p) => {
                 let l = &p.layout;
-                if l.width == Width::Auto && l.max_width.is_none() && l.padding == Edges::default()
+                // A style's `padding: 0` lowers to zero cells, the old fill's
+                // reset to `Length::Zero`: both are no padding.
+                let unpadded = [&l.padding.top, &l.padding.right, &l.padding.bottom, &l.padding.left]
+                    .into_iter()
+                    .all(is_zero);
+                if l.width == Width::Auto && l.max_width.is_none() && (l.padding == Edges::default() || unpadded)
                 {
                     TestFill::Full
                 } else if l.width == Width::Auto
                     && l.max_width.is_none()
                     && l.padding != Edges::default()
                 {
-                    if l.padding.top == TargetValue::universal(Length::Zero)
-                        && l.padding.bottom == TargetValue::universal(Length::Zero)
+                    if is_zero(&l.padding.top)
+                        && is_zero(&l.padding.bottom)
                         && l.padding.left == l.padding.right
                     {
                         TestFill::Pad(tv_length(&l.padding.left))
@@ -405,6 +401,10 @@ pub mod layout {
                 }
             }
         }
+    }
+
+    pub fn is_zero(tv: &TargetValue<Length>) -> bool {
+        matches!(tv, TargetValue::Universal(Length::Zero | Length::Ch(0)))
     }
 
     pub fn tv_length(tv: &TargetValue<Length>) -> Length {

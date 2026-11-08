@@ -24,8 +24,8 @@ The user-facing surface is defined under `darkmatter/cli/src/args/`:
 
 Runtime dispatch is `src/commands/mod.rs`, with one implementation per command beside
 it. Shared input loading is in `src/io/`, output artifact handling for `--show` is in
-`src/artifact.rs`, terminal rendering setup is in `src/render.rs`, and CLI flag
-precedence is lowered to `darkmatter::style::CliStyleClaims` in `src/style_claims.rs`.
+`src/artifact.rs`, terminal rendering setup is in `src/render.rs`, and command-line style
+(`--style` files and `style…=VALUE` setters) is prepared in `src/render_style.rs`.
 
 When a command's data output changes, its schema file changes with it; see
 [How the shapes are enforced](./data-contracts.md#how-the-shapes-are-enforced).

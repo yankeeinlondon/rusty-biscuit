@@ -100,7 +100,7 @@ A data output includes the same core analysis in machine-readable form, includin
 
 ### Related Workflow
 
-`md clean FILE.md --save` and `md FILE.md --save` reuse this same delta reporting style after in-place cleanup.
+`md clean FILE.md --save` reuses this same delta reporting style after in-place cleanup.
 
 ## Lessons Learned
 

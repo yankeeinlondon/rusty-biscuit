@@ -125,7 +125,8 @@ impl ReportSink {
     /// Records a failure's diagnostics, except those already recorded: a
     /// policy stop the CLI raised repeats the warnings it was given.
     pub fn failure(&self, error: &Report) {
-        let records = self.in_document(failure_diagnostics(error));
+        let (records, located) = failure_records(error);
+        let records = if located { records } else { self.in_document(records) };
         let mut diagnostics = self.diagnostics.lock().expect("sink lock");
         let mut recorded = diagnostics.clone();
         let fresh: Vec<Diagnostic> = records
@@ -296,12 +297,34 @@ impl std::error::Error for ReportedExit {}
 pub struct ClassifiedFailure {
     message: String,
     diagnostics: Vec<Diagnostic>,
+    /// The records' `source` is final: a record with none names no file, so
+    /// the run's document is never stamped onto it.
+    located: bool,
+    /// The failure this one classifies, kept so a renderer walking the chain
+    /// still finds its typed errors (a [`DocumentArgumentError`]'s block).
+    ///
+    /// [`DocumentArgumentError`]: crate::io::DocumentArgumentError
+    cause: Option<Report>,
 }
 
 impl ClassifiedFailure {
     /// `message`, classified by the replaced error's `diagnostics`.
     pub fn report(message: Report, diagnostics: Vec<Diagnostic>) -> Report {
-        Self { message: message.to_string(), diagnostics }.into()
+        Self { message: message.to_string(), diagnostics, located: false, cause: None }.into()
+    }
+
+    /// [`Self::report`] for records about something other than the run's
+    /// document, such as a `--style` file or a style setter: a record without
+    /// a `source` keeps none.
+    pub fn located(message: Report, diagnostics: Vec<Diagnostic>) -> Report {
+        Self { message: message.to_string(), diagnostics, located: true, cause: None }.into()
+    }
+
+    /// `error`, whose records ([`failure_diagnostics`]) are made
+    /// [`located`](Self::located); its chain stays reachable.
+    pub fn located_from(error: Report) -> Report {
+        let diagnostics = failure_diagnostics(&error);
+        Self { message: error.to_string(), diagnostics, located: true, cause: Some(error) }.into()
     }
 }
 
@@ -311,23 +334,34 @@ impl std::fmt::Display for ClassifiedFailure {
     }
 }
 
-impl std::error::Error for ClassifiedFailure {}
+impl std::error::Error for ClassifiedFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.cause.as_ref().map(|cause| -> &(dyn std::error::Error + 'static) { cause.as_ref() })
+    }
+}
 
 /// The shared records a failed run reports for `error`.
 pub fn failure_diagnostics(error: &Report) -> Vec<Diagnostic> {
+    failure_records(error).0
+}
+
+/// [`failure_diagnostics`], and whether their sources are final (see
+/// [`ClassifiedFailure::located`]); otherwise a caller names the run's
+/// document on a record that names no file.
+pub(crate) fn failure_records(error: &Report) -> (Vec<Diagnostic>, bool) {
     for cause in error.chain() {
         if let Some(classified) = cause.downcast_ref::<ClassifiedFailure>() {
-            return classified.diagnostics.clone();
+            return (classified.diagnostics.clone(), classified.located);
         }
         if let Some(collection) = cause.downcast_ref::<crate::collection_failure::CollectionFailure>() {
-            return collection.diagnostics().to_vec();
+            return (collection.diagnostics().to_vec(), false);
         }
         if let Some(argument) = cause.downcast_ref::<crate::io::DocumentArgumentError>() {
-            return vec![argument.diagnostic()];
+            return (vec![argument.diagnostic()], false);
         }
     }
     let root: &(dyn std::error::Error + 'static) = error.as_ref();
-    error_diagnostics(root)
+    (error_diagnostics(root), false)
 }
 
 #[cfg(test)]

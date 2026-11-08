@@ -47,13 +47,18 @@ fn root_help_points_at_render_help_for_render_options() {
     ] {
         assert!(root.contains(expected), "`md --help` lacks {expected:?}:\n{root}");
     }
-    for hidden in ["--output", "--show", "--indent", "--deny", "--feature", "--mermaid", "--max-width", "--margin", "--theme", "--save", "--list-themes"] {
+    for hidden in ["--output", "--show", "--indent", "--deny", "--feature", "--mermaid"] {
         assert!(!root.contains(&format!("{hidden} ")), "`md --help` lists {hidden}:\n{root}");
     }
 
     let render = help(&["render", "--help"]);
-    for expected in ["[ARGS]...", "--style <FILE>", "--output <TARGET>", "--show", "--max-width <N>", "--indent", "--deny <ID>", "--feature <NAME>", "--mermaid", "--width <WIDTH>"] {
+    for expected in ["[ARGS]...", "--style <FILE>", "--output <TARGET>", "--show", "--indent", "--deny <ID>", "--feature <NAME>", "--mermaid", "--width <WIDTH>"] {
         assert!(render.contains(expected), "`md render --help` lacks {expected:?}:\n{render}");
+    }
+    // Removed, so listed by neither help.
+    for removed in ["--max-width", "--margin", "--theme", "--code-theme", "--fill", "--align-", "--line-numbers", "--page-bg", "--save", "--list-themes"] {
+        assert!(!root.contains(removed), "`md --help` lists {removed}:\n{root}");
+        assert!(!render.contains(removed), "`md render --help` lists {removed}:\n{render}");
     }
     assert!(!render.contains("is `md render"), "the alias sentence is root-only:\n{render}");
 }
@@ -112,12 +117,14 @@ fn test_list_themes() {
     let fixture = CliProcessFixture::named("test_list_themes");
     fixture
         .command()
-        .arg("--list-themes")
+        .args(["list-themes", "--output", "plain"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Available themes"))
         .stdout(predicate::str::contains("github"))
-        .stdout(predicate::str::contains("solarized"));
+        .stdout(predicate::str::contains("solarized"))
+        .stdout(predicate::str::contains("style.page.theme=NAME"))
+        .stdout(predicate::str::contains("--theme").not());
 }
 
 #[test]

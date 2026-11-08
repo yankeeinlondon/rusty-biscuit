@@ -42,9 +42,12 @@ assembly. It cannot inspect component kinds or rewrite their content.
 `renderable::layout::Layout` and alpha-bearing `PaintColor`. Parsed
 `StyleColor` must not survive beyond the parser/apply boundary.
 
-`CliStyleClaims` records only flags explicitly supplied by the user. Merge
-claims with frontmatter as presentation policy; do not let CLI defaults
-silently override authored styles.
+Precedence is decided once, by `prepare_style_layers`, field by field, in
+layer order: defaults < the document's `style:` < each `--style` file in
+order < the setters. The `apply_*_style` functions take no override masks and
+apply every field of the effective style they receive; do not reintroduce a
+claim or mask type to protect one source from another. Test "override beats
+document" with two layers, never by pre-setting page state.
 
 A merged `PreparedStyle` (from `prepare_style_layers`) reaches a page only
 through `style::apply_prepared_style(page, &prepared, StyleAssetResolver,

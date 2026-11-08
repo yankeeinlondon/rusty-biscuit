@@ -1,6 +1,6 @@
 # Cleanup rules and frontmatter repair
 
-Cleanup (`md clean`, `md FILE --save`, DMLS `textDocument/formatting`,
+Cleanup (`md clean`, DMLS `textDocument/formatting`,
 compose's cleanup step, `md` rendering) never changes a document's meaning.
 The user-facing record is the area's `docs/` tree.
 

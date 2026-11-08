@@ -3878,6 +3878,57 @@
                       ],
                       "description": "Tailwind, hexadecimal, or CSS named foreground color, optionally with opacity."
                     },
+                    "padding": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-left": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-right": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
                     "local-style": {
                       "anyOf": [
                         {

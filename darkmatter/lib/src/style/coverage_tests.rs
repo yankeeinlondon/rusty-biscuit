@@ -258,12 +258,12 @@ fn descriptor_entry_count_matches_expected() {
         // table, block-quote, ol, li: 12 each = 48
         // ul: 13
         // hyperlinks: 5 outer + 12 local-style = 17
-        // images: 5 outer + 12 local-style = 17
+        // images: 8 outer (with padding and its sides) + 12 local-style = 20
         // hr: 10
         // disclosure: 12
         // code-block: 13
         // markdown (cleanup rules): 10
-        32 + 32 + 48 + 13 + 17 + 17 + 10 + 12 + 13 + 10;
+        32 + 32 + 48 + 13 + 17 + 20 + 10 + 12 + 13 + 10;
     assert_eq!(
         SCHEMA.len(),
         EXPECTED,

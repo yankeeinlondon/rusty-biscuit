@@ -230,8 +230,9 @@ fn a_render_style_warning_names_the_document() {
     };
     assert_eq!(record["code"], "dm.style.unknown_key", "{record:#}");
     assert_eq!(file_of(&record["source"]["file"]).file_name().unwrap(), "styled.md", "{record:#}");
-    assert_eq!(record["source"]["line"], Value::Null, "{record:#}");
-    assert_eq!(record["source"]["column"], Value::Null, "{record:#}");
+    // The authored key: `bogus_key` on the document's third line.
+    assert_eq!(record["source"]["line"], 3, "{record:#}");
+    assert_eq!(record["source"]["column"], 3, "{record:#}");
 }
 
 /// Input with no file reports positions with a null file, and otherwise a null

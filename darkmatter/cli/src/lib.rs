@@ -16,7 +16,6 @@ pub mod output;
 pub mod render;
 pub mod render_style;
 pub mod request;
-pub mod style_claims;
 
 // Re-export CLI types for programmatic access
 pub use args::{Cli, Command as CliCommand};

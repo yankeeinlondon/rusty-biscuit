@@ -77,8 +77,7 @@ use crate::layout::DarkmatterPage;
 use crate::markdown::Markdown;
 use crate::markdown::output::{HtmlOptions, TerminalOptions};
 use crate::style::{
-    BespokeStyleOverrides, ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides,
-    PageStyleOverrides, apply_bespoke_style, apply_color_style, apply_component_style,
+    apply_bespoke_style, apply_color_style, apply_component_style,
     apply_hr_style, apply_list_style, apply_page_style, from_frontmatter,
 };
 
@@ -160,14 +159,14 @@ fn styled_page(md: &Markdown) -> DarkmatterPage {
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
 
     let page =
-        apply_page_style(page, &style, PageStyleOverrides::default()).expect("apply_page_style");
-    let page = apply_component_style(page, &style, ComponentStyleOverrides::default())
+        apply_page_style(page, &style).expect("apply_page_style");
+    let page = apply_component_style(page, &style)
         .expect("apply_component_style");
     let page =
-        apply_list_style(page, &style, ListStyleOverrides::default()).expect("apply_list_style");
-    let page = apply_hr_style(page, &style, HrStyleOverrides::default()).expect("apply_hr_style");
+        apply_list_style(page, &style).expect("apply_list_style");
+    let page = apply_hr_style(page, &style).expect("apply_hr_style");
     let page = apply_color_style(page, &style).expect("apply_color_style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), crate::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
+    apply_bespoke_style(page, &style, crate::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .expect("apply_bespoke_style")
 }
 

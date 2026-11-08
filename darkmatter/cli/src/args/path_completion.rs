@@ -1,5 +1,6 @@
 //! Tab completion for property paths and their values, on `md compose`, `get`,
-//! `set`, and `rm`.
+//! `set`, and `rm`, and for the style setters of `md render` (and of `md` with
+//! no subcommand).
 //!
 //! A value completer receives only the current word, so this reads the rest of the
 //! line through [`recover_words`], opens the input document with the same opener
@@ -67,6 +68,48 @@ pub fn complete_compose_word(current: &OsStr) -> Vec<CompletionCandidate> {
     }
 }
 
+/// Completes a positional word of `md render` (or of `md` with no
+/// subcommand): a `style…=VALUE` setter's key or value, or the input
+/// document.
+///
+/// Only the input document on the line is opened; a `--style` file is never
+/// read, so completion offers what the document's schema declares under
+/// `style` and nothing a style file holds.
+pub fn complete_render_word(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(typed) = current.to_str() else {
+        return Vec::new();
+    };
+    let line = CommandLine::read(recover_words().before_cursor());
+    if line.escaped {
+        return complete_markdown_files(current);
+    }
+    let site = || DocumentSite::for_render(&line);
+    match typed.split_once('=') {
+        None => {
+            let mut candidates = shell_candidates(&site(), PathCommand::Render, PathPosition::Path(typed));
+            candidates.extend(complete_markdown_files(current));
+            candidates
+        }
+        Some((key, raw)) if is_style_key(key) => {
+            let site = site();
+            let mut candidates = shell_candidates(&site, PathCommand::Render, PathPosition::Path(typed));
+            if site.takes_files(PathCommand::Render, PathPosition::Path(typed)) {
+                let lead = &typed[..typed.len() - raw.len()];
+                candidates.extend(complete_any_files(OsStr::new(raw)).into_iter().map(|file| file.add_prefix(lead)));
+            }
+            candidates
+        }
+        // Any other word with `=` is the input document, whatever its name holds.
+        Some(_) => complete_markdown_files(current),
+    }
+}
+
+/// Whether `key` (the text before a word's first `=`) makes a render setter,
+/// as `args::render::classify_render_args` decides.
+fn is_style_key(key: &str) -> bool {
+    key == "style" || key.starts_with("style.")
+}
+
 /// Completes a path argument of `md get`.
 pub fn complete_get_path(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_path_word(PathCommand::Get, current)
@@ -130,6 +173,8 @@ struct CommandLine {
     baseline_schema: Option<PathBuf>,
     /// Each `--disable`, as typed.
     disabled: Vec<String>,
+    /// A `--` came before the cursor, so the word is an input, never a setter.
+    escaped: bool,
 }
 
 impl CommandLine {
@@ -173,6 +218,7 @@ impl CommandLine {
                 line.positionals.push(word.clone());
             }
         }
+        line.escaped = escaped;
         line
     }
 
@@ -229,7 +275,7 @@ enum SchemaPolicy<'a> {
         no_baseline_schema: bool,
         no_schema_triggers: bool,
     },
-    /// `md get`, `set`, and `rm`, which take no schema flags and read what
+    /// `md get`, `set`, `rm`, and `render`, which take no schema flags and read what
     /// `md schema validate` reads from the environment.
     Edit,
 }
@@ -294,6 +340,26 @@ impl DocumentSite {
         Self::load(request, line.compose_policy(), input, |document| {
             completion_overlay(document, defaults.as_ref(), overrides.as_ref(), setters)
         })
+    }
+
+    /// `md render` and `md`: the one positional that is not a style setter is
+    /// the document; the setters before the cursor are the paths already given.
+    fn for_render(line: &CommandLine) -> Self {
+        let mut input = None;
+        let mut setters = Vec::new();
+        for word in &line.positionals {
+            match word.split_once('=') {
+                Some((key, _)) if is_style_key(key) => {
+                    if let TokenClass::Setter(setter) = classify_token(word) {
+                        setters.push(setter);
+                    }
+                }
+                _ if input.is_none() => input = Some(word.as_str()),
+                _ => {}
+            }
+        }
+        let request = completion_request(&line.magic_roots);
+        Self::load(request.as_ref(), SchemaPolicy::Edit, input, |document| completion_overlay(document, None, None, setters))
     }
 
     /// `get`, `set`, and `rm`: the first positional is the document, and the rest

@@ -627,7 +627,6 @@ fn style_page_doc(width: u32, style_yaml: &str, body: &str) -> String {
     use biscuit_terminal::terminal::Terminal;
     use darkmatter::layout::DarkmatterPage;
     use darkmatter::style::{
-        ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides, PageStyleOverrides,
         apply_color_style, apply_component_style, apply_hr_style, apply_list_style,
         apply_page_style, from_frontmatter,
     };
@@ -649,11 +648,11 @@ fn style_page_doc(width: u32, style_yaml: &str, body: &str) -> String {
 
     let term = Terminal::new_optimistic(width);
     let page = DarkmatterPage::new(&term);
-    let page = apply_page_style(page, &style, PageStyleOverrides::default()).unwrap();
-    let page = apply_component_style(page, &style, ComponentStyleOverrides::default()).unwrap();
-    let page = apply_list_style(page, &style, ListStyleOverrides::default()).unwrap();
+    let page = apply_page_style(page, &style).unwrap();
+    let page = apply_component_style(page, &style).unwrap();
+    let page = apply_list_style(page, &style).unwrap();
     let page = apply_color_style(page, &style).unwrap();
-    let page = apply_hr_style(page, &style, HrStyleOverrides::default()).unwrap();
+    let page = apply_hr_style(page, &style).unwrap();
     let body_html = page.render_to_browser(&md).expect("browser render");
     wrap_fragment(&body_html, "#ffffff")
 }

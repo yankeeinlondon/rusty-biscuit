@@ -1,13 +1,11 @@
 //! Output artifact plumbing for the `md` CLI: the page behind HTML and
 //! MarkdownPlus output, and the temporary files `--show` opens.
 
-use crate::args::{Cli, Feature};
-use crate::render::{PageInputs, apply_cli_layout_flags, apply_features, apply_style_frontmatter};
+use crate::render::{PageInputs, PagePresentation, apply_features, apply_presentation};
 use biscuit_terminal::output::OutputTarget;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::layout::DarkmatterPage;
-use darkmatter::markdown::Markdown;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,23 +17,21 @@ pub struct OutputArtifact {
     pub label: &'static str,
 }
 
-/// Build the page that renders HTML and MarkdownPlus output: CLI layout flags,
-/// `style:` frontmatter, then `features`.
+/// Build the page that renders HTML and MarkdownPlus output: the effective
+/// style, then `features`.
 ///
-/// Only this page reads a local `style.page.stylesheet`; it resolves in
-/// `inputs.document_context`.
-pub fn html_page(
-    md: &Markdown,
-    cli: &Cli,
-    inputs: &PageInputs,
-    strict_style: bool,
-    features: &[Feature],
-) -> Result<DarkmatterPage> {
+/// Only this page reads a local `style.page.stylesheet`; it resolves in the
+/// context of the layer that supplied it.
+///
+/// ## Errors
+///
+/// The style cannot be applied, or a local stylesheet cannot be read.
+pub fn html_page(inputs: &PageInputs, presentation: &PagePresentation<'_>) -> Result<DarkmatterPage> {
+    // A browser page has no terminal; this one only seeds the page's defaults.
     let term = Terminal::new_optimistic(120);
-    let page = apply_cli_layout_flags(DarkmatterPage::new(&term).with_color_mode(term.color_mode()), cli);
-
-    let page = apply_style_frontmatter(page, md, cli, inputs, OutputTarget::Html, strict_style)?;
-    Ok(apply_features(page, features))
+    let page = DarkmatterPage::new(&term).with_color_mode(term.color_mode());
+    let page = apply_presentation(page, inputs, presentation, OutputTarget::Html)?;
+    Ok(apply_features(page, presentation.features))
 }
 
 /// How an artifact reaches the host's default application.

@@ -150,7 +150,7 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, cli: &Cli, req
         DataShape::Object,
     )?
     .exact_markdown();
-    let result = clean_value(input, options, cli, request, run.output());
+    let result = clean_value(input, options, request, run.output());
     run.finish(result)
 }
 
@@ -159,7 +159,6 @@ type CleanValue = CommandValue<Option<CleanJsonReport>>;
 fn clean_value(
     input: Option<&PathBuf>,
     options: &CleanOptions,
-    cli: &Cli,
     request: &MdRequest,
     output: &ResolvedOutput,
 ) -> Result<Completed<CleanValue>> {
@@ -224,7 +223,7 @@ fn clean_value(
         // What was printed is what a later `--save` would write, so a document
         // the guards declined prints unchanged.
         let document = Markdown::from(result.text.as_str());
-        return document_value(None, &document, result.text.clone(), resolved.as_ref(), output, cli, request).map(Completed::success);
+        return document_value(None, &document, result.text.clone(), resolved.as_ref(), output, request).map(Completed::success);
     };
     if result.outcome == CleanOutcome::Declined {
         return Ok(Completed::success(acknowledgment(String::new())));

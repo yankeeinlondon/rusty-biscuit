@@ -870,21 +870,21 @@ fn render_html_is_a_page() {
     assert!(html.contains("<!DOCTYPE"), "{html}");
 }
 
-/// `--max-width` caps the content inside the width `--width` makes available,
-/// in both the bare `md` form and `md render`; given before `render` it is a
-/// root render argument, which is a usage error.
+/// `style.max-width` caps the content inside the width `--width` makes
+/// available, in both the bare `md` form and `md render`; given before
+/// `render` it is a root render argument, which is a usage error.
 #[test]
 fn max_width_caps_prose_inside_the_width() {
     let fixture = with_document("max_width", LONG_PROSE);
     for args in [
-        &["doc.md", "--max-width", "30", "--width", "60", "--output", "plain"][..],
-        &["render", "doc.md", "--max-width", "30", "--width", "60", "--output", "plain"],
+        &["doc.md", "style.max-width=30", "--width", "60", "--output", "plain"][..],
+        &["render", "doc.md", "style.max-width=30", "--width", "60", "--output", "plain"],
     ] {
         let output = run(&fixture, args);
         assert_eq!(output.status.code(), Some(0), "{args:?}: {}", stderr_of(&output));
         assert_wrapped_at(&stdout_of(&output), 30);
     }
-    let output = run(&fixture, &["--max-width", "30", "render", "doc.md", "--width", "60", "--output", "plain"]);
+    let output = run(&fixture, &["style.max-width=30", "render", "doc.md", "--width", "60", "--output", "plain"]);
     assert_eq!(output.status.code(), Some(2), "{}", stderr_of(&output));
 }
 

@@ -242,7 +242,7 @@ mutates component content. Browser tests are headless (no window activation or
 host input) and assert DOM, computed style, accessibility state, or geometry;
 browser HTML and CSS come from the same lowered values, never string repair.
 
-Read [rendering.md](rendering.md) before changing style claims, code-block
+Read [rendering.md](rendering.md) before changing style precedence, code-block
 themes, disclosure blocks, browser safety, or the render-tree fold.
 
 ## CLI orientation
@@ -409,7 +409,7 @@ Every source-file argument opens through `cli/src/io::open_argument`:
 `FileReference` grammar first, resolved in the launch context, with the
 document context derived from the opening reference. Read [cli.md](cli.md)
 before adding a route that reads a file argument or changing CLI style
-claims.
+layers.
 
 ## Testing and verification
 

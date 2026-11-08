@@ -9,13 +9,32 @@ one; `commands::validate_subcommand_usage` rejects any root render argument
 (setters included) before a subcommand with exit 2, and
 `args::render::tests` enumerates the clap definition so a new field without a
 root representative fails. Shared controls (`--width`, `-v`, `--debug`,
-`--magic-root`) are not render arguments. After the help and `--save`
-shortcuts, `Cli::command_or_render` returns the explicit command or a clone of
-the root options; nothing is combined. Both forms enter the same
-`run_subcommand` branch and `run_render`, which builds
-`args::PreparedRenderOptions` (classified input/setters, `--style`
-references, resolved policy). Keep render argument definitions and
-preparation shared, including `--indent`.
+`--magic-root`) are not render arguments. After the help, version, and
+completion actions, `Cli::command_or_render` returns the explicit command or a
+clone of the root options; nothing is combined (root `--save` and
+`--list-themes` are gone; `md list-themes` is a command leaf). Both forms
+enter `commands::render::dispatch_render(options, cli, request,
+&OutputEnvironment)`, which builds `args::PreparedRenderOptions` (classified
+input/setters, `--style` references, and resolved policy; `cli` supplies
+only the shared `--width` and `-v`), resolves the output once, handles no input (`environment.stdin_is_terminal`:
+root help on stderr or one data failure value, exit 1), and calls
+`run_render(&PreparedRenderOptions, &ResolvedOutput, &MdRequest)`, which never
+sees `Cli`. Keep render argument definitions and preparation shared,
+including `--indent`.
+
+`Render::run` prepares the style before cleanup and before any output:
+`render_style::prepare_render_style` merges `document_style_layer` (the
+document's `style:`, positions shifted to document lines) under the CLI
+layers. A source target (Markdown, data) never reads the document's style,
+so only its denied warnings stop it, while CLI layers are checked on every
+target. Trigger findings from the schema selection go to the sink or stderr;
+`--deny style` also blocks body inline-rule styles, and `--deny <code>` a
+single warning code. Page builders (`render::terminal_page`,
+`artifact::html_page`, `render::apply_presentation`) take a
+`PagePresentation { style: &PreparedStyle, features, mermaid, legacy }` and
+`PageInputs`, never `Cli`; the terminal is `Terminal::from_output_options`.
+`commands/render.rs::document_value` (clean, set) uses `render::document_style`,
+the document layer alone with no CLI override.
 
 `cli/src/render_style.rs` turns those `--style` references and setters into
 `darkmatter::style::StyleLayer`s and prints nothing:
@@ -25,8 +44,19 @@ selection completion's `effective_document_schema` uses), reads each file
 through the library's `parse_local_document` (the `load_data` readers), and
 `CliStyleInputs::prepare` wraps a `StylePreparationError` in a
 `ClassifiedFailure` whose records keep the `dm.schema.*`/`dm.style.*` codes.
-A file record's `source` is the style file; a setter's is null. Tests:
-`cli/tests/l1/render_style_files.rs`.
+A file record's `source` is the style file; a setter's is null. Those
+failures are `ClassifiedFailure::located` (`located_from` keeps the wrapped
+chain, so a `DocumentArgumentError` still renders): `ReportSink::failure` and
+`CommandRun::finish` skip `with_document_fallback` for them, so the run's
+document is never stamped onto a style-file or setter record. Tests:
+`cli/tests/l1/render_style_files.rs`, `cli/tests/l1/render_dispatch.rs`.
+
+Render completion: `args::path_completion::complete_render_word` (the `ARGS`
+completer) asks `path_candidates` with `PathCommand::Render`, which offers
+only `style` and its descendants as setters (`style.` → `style.page.`, values
+after `=`); a word after `--` completes files only, and `--style` completes
+JSON/JSON5/YAML/YML/TOML files (`complete_style_files`). It opens only the
+input document, never a `--style` file.
 
 Render positionals are two clap fields: `args` (before `--`) and
 `literal_args` (`last = true`, only after `--`), so the terminator survives
@@ -85,9 +115,14 @@ A custom baseline path (`schema validate --schema`, `BASELINE_SCHEMA`, and
 with `resolve_file_path`; it never falls back when it fails. Baseline
 selection order is in [schema.md](schema.md#runtime-baseline).
 
-Rendering flags are presentation policy. `CliStyleClaims` captures explicitly
-supplied global CLI style claims so command handlers can merge them with
-frontmatter without mistaking defaults for user intent. Keep parsing in
+Presentation is style, never a flag: the old root presentation flags and
+`md render --max-width` are removed (clap's unknown-argument error, never a
+`REMOVED_FLAGS` entry), and `render::apply_presentation` applies only the
+prepared effective style (`darkmatter::style::apply_prepared_style`); the
+library has no claim or override-mask API. `args::cli::tests::removed_render_flags_are_unknown_arguments`
+lists every removed spelling, and
+`the_root_declares_only_shared_controls_besides_render_options` makes a new
+root argument a deliberate decision. Keep parsing in
 `cli/src/args`, command execution in `cli/src/commands`, and output in shared
 renderable components.
 

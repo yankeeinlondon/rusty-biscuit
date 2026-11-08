@@ -38,7 +38,6 @@
 pub mod alignment;
 pub mod apply;
 pub mod bespoke;
-pub mod cli_claims;
 pub mod color;
 pub mod descriptor;
 pub mod error;
@@ -56,21 +55,14 @@ mod coverage_tests;
 
 pub use apply::{
     apply_color_style, apply_component_style, apply_disclosure_style, apply_hr_style,
-    apply_list_style, apply_page_style, apply_prepared_style, ComponentStyleOverrides,
-    DisclosureStyleOverrides, HrStyleOverrides, ListStyleOverrides, PageStyleOverrides,
-    SharedFileReferenceError, StyleApplyError,
+    apply_list_style, apply_page_style, apply_prepared_style, SharedFileReferenceError,
+    StyleApplyError,
 };
 pub use bespoke::{
-    apply_bespoke_style, BespokeStyleOverrides, MetaTag, PageMeta, PageStylesheet,
+    apply_bespoke_style, MetaTag, PageMeta, PageStylesheet,
     StyleAssetResolver,
 };
 pub use apply::{map_hr_alignment, map_hr_kind, map_hr_weight};
-pub use cli_claims::{
-    apply_cli_claims, bespoke_style_overrides_from_claims,
-    component_style_overrides_from_claims, disclosure_style_overrides_from_claims,
-    hr_style_overrides_from_claims, list_style_overrides_from_claims, CliStyleClaims,
-    FillClaim, page_style_overrides_from_claims,
-};
 pub use color::{lower_to_css, lower_to_sgr, wrap_with_color, StyleColor};
 pub use error::StyleParseError;
 pub use layer::{

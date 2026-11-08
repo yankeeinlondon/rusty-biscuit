@@ -39,6 +39,9 @@ pub struct OutputEnvironment {
     pub stderr_is_terminal: bool,
     /// Stderr's columns; known only when it is a terminal.
     pub stderr_columns: Option<u32>,
+    /// Whether stdin is a terminal: a render with no input then has nothing
+    /// to read. Checked without reading stdin.
+    pub stdin_is_terminal: bool,
 }
 
 impl OutputEnvironment {
@@ -55,6 +58,7 @@ impl OutputEnvironment {
             stdout_columns: stdout_is_terminal.then(|| columns.or_else(|| Terminal::default().detected_columns())).flatten(),
             stderr_is_terminal,
             stderr_columns: stderr_is_terminal.then(|| columns.or_else(stderr_terminal_columns)).flatten(),
+            stdin_is_terminal: std::io::stdin().is_terminal(),
         }
     }
 

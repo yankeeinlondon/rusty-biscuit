@@ -70,17 +70,16 @@ md render README.md --indent 2
 
 ### Arguments
 
-- `[ARGS]...`: the Markdown file path (supports `@` file references; `-` for stdin) and any `style…=VALUE` setters, in any order. A word is a setter when the text before its first `=` is `style` or starts with `style.`; every other word is the file. More than one file is a usage error (exit code 2). If no file is given, reads stdin when piped; otherwise errors. Setters are **planned**: they are recognized but do not change the rendering yet.
+- `[ARGS]...`: the Markdown file path (supports `@` file references; `-` for stdin) and any `style…=VALUE` setters, in any order. A word is a setter when the text before its first `=` is `style` or starts with `style.`; every other word is the file. More than one file is a usage error (exit code 2). If no file is given, reads stdin when it is piped or redirected (even when empty); see [No input](#no-input) for a terminal. See [Styling from the command line](#styling-from-the-command-line) for setters.
 - `-- [INPUT]...`: everything after `--` is the file, never a setter or a command.
 
 ### Options
 
 - `--output <terminal|plain|markdown|markdown-plus|html|browser|json|json5|yaml|toml>`: What to print (default: `terminal`). See [Output Behavior](#output-behavior).
 - `--width <N|N%|auto|source|unlimited>`: Width the output is wrapped to (default: `auto`). See [Output and Width](./output-and-width.md#choosing-a-width).
-- `--max-width <N>`: Cap the content width inside `--width`. It exists only on this command and `md FILE`; zero is a usage error.
 - `--show`: Write output to a temp file and open it with the system default app. See [Opening the Output](#opening-the-output).
 - `--indent <#>`: Enforce a nested-list indentation step of 2, 4, or 8 spaces per level. Default: 4. For an eight-space step, cleanup uses CommonMark-valid marker padding on parent items when needed to preserve the same list tree.
-- `--style <FILE>`: a JSON, JSON5, YAML, or TOML style file (repeatable; later files merge over earlier ones). **Planned**: the option is accepted but its files are not read yet.
+- `--style <FILE>`: a JSON, JSON5, YAML, or TOML style file (repeatable; later files merge over earlier ones). See [Styling from the command line](#styling-from-the-command-line).
 - `--mermaid`: in terminal output, render Mermaid diagrams in automatic mode: an
   image where the terminal shows images, otherwise a text drawing when the
   diagram has one and it fits, otherwise the highlighted code block (see
@@ -88,18 +87,75 @@ md render README.md --indent 2
   and JSON output ignore it.
 - `--feature <NAME>`: turn on a named feature (see [Features](#features) below)
 
-### Global Flags Relevant to `render`
+### Themes and line numbers
 
-These are top-level flags (not render-specific) but affect `render` behavior:
+Themes and code line numbers are style keys, set in the document's `style:`
+or from the command line like any other (see
+[Styling from the command line](#styling-from-the-command-line)):
 
-- `--list-themes`: list the available theme names and exit
-- `--theme <NAME>`: prose theme
-- `--code-theme <NAME>`: code theme override (selects *which* theme pair, e.g. `dracula`)
-- `--line-numbers`: include code line numbers in terminal rendering
+- `style.page.theme=NAME`: prose theme
+- `style.page.code.theme=NAME`: code theme override (selects *which* theme pair, e.g. `dracula`)
+- `style.page.code.mode=MODE`: the code panel's light/dark variant (`inverse`, the default, `dark`, `light`, or `same`)
+- `style.code-block.line-numbers=true`: include code line numbers in terminal rendering
 
-The code panel's light/dark variant is the document's `style.page.code.mode`
-(`inverse`, the default, `dark`, `light`, or `same`); there is no render flag
-for it, and `--code-block` is an unknown argument here.
+```bash
+md README.md style.page.theme=github style.code-block.line-numbers=true
+```
+
+[`md list-themes`](./list-themes.md) lists the theme names these take.
+
+### Styling from the command line
+
+Two kinds of argument add style on top of the document's own `style:`
+frontmatter, without editing the file:
+
+- a **setter**, `style.KEY=VALUE` or `style=OBJECT`, sets one style value;
+- a **style file**, `--style FILE`, supplies a whole style object from a
+  JSON, JSON5, YAML (`.yaml`, `.yml`), or TOML file.
+
+```bash
+md README.md style.page.margin-left=4
+md README.md --style ./wide.yaml
+md README.md --style ./wide.yaml style.page.theme=github
+md render README.md style='{ page: { margin: 2 } }'
+```
+
+Later layers win, field by field: the document's own style, then each
+`--style` file in the order given, then the setters (wherever they sit on the
+line). A layer changes only the fields it names.
+
+```mermaid
+flowchart LR
+    D["document style:"] --> F1["--style first.yaml"] --> F2["--style second.yaml"] --> S["style… setters"] --> P["the page"]
+```
+
+Every layer is checked before anything is printed or opened, on every
+`--output`, so a bad value never looks as if it worked:
+
+- a setter is judged by the document's schema: an unknown key is
+  `dm.schema.unknown_key`, a wrong value `dm.schema.type_mismatch`, and the
+  run fails with exit code 1;
+- a style file that cannot be found or read, or holds invalid content, fails
+  the same way and names the file, never the document;
+- an unknown key in a style file is left out with a `dm.style.unknown_key`
+  warning, on stderr or in a data output's `diagnostics`.
+
+A Markdown or data output prints the document's source, so a setter or style
+file never enters it; the values are still checked. A misspelled setter that
+names no file (`stlye.page.margin-left=4`) fails with a hint naming the
+`style.…` spelling.
+
+Shell completion offers the keys the document's schema declares under
+`style`, one level at a time (`style.` → `style.page.`), and their values
+after `=`; `--style` completes JSON, JSON5, YAML, and TOML files. Completion
+never opens a style file.
+
+### No input
+
+With no file and a terminal on stdin there is nothing to read. Both spellings
+write the root help to stderr and exit with code 1; a data output instead
+prints its one failure value (`dm.input.read_failure`) and leaves stderr
+empty. A redirected stdin, even an empty one, is read as the document.
 
 ### Environment
 
@@ -264,18 +320,97 @@ These are usage errors (exit status 2).
 | `--output auto` | no `--output`: `terminal` falls back to `plain` by itself |
 | `--output text` | `--output markdown` |
 | `--output json` as the document AST, `--output ast` | no replacement: the document AST is not an output, and `--output json` prints the envelope |
-| `md render --save` | `md clean --save`, or the shorthand `md FILE --save` |
+| `md render --save`, `md FILE --save` | `md clean FILE --save` |
 | `--html`, `--show-html` | `--output html`, `--output html --show` |
 | `--ast`, top-level `--json` | `--output json` for the envelope; the document AST is not an output |
 | `--no-images` | `TERMINAL_IMAGES=0` |
 | top-level `--toc`, `--delta` | [`md toc`](./toc.md), [`md delta`](./delta.md) |
+| `--list-themes` | [`md list-themes`](./list-themes.md) |
+
+#### Presentation flags
+
+The old page, layout, and theme flags are gone from `md` and `md render`.
+Each is now an unknown argument (clap's ordinary error, exit status 2), and
+its value is a style key, written as a setter or in a `--style` file. Every
+replacement below works the same in a document's `style:` frontmatter.
+
+```bash
+md README.md --mx 6 --theme github            # before: now a usage error
+md README.md style.mx=6 style.page.theme=github
+```
+
+| Removed (aliases) | Use instead |
+|---|---|
+| `-m N`, `--margin N` | `style.margin=N` |
+| `--mx N` / `--my N` | `style.mx=N` / `style.my=N` |
+| `--mt N` (`--margin-top`) | `style.page.margin-top=N` (or `style.mt=N`) |
+| `--mb N` (`--margin-bottom`) | `style.page.margin-bottom=N` (or `style.mb=N`) |
+| `--ml N` (`--margin-left`) | `style.page.margin-left=N` (or `style.ml=N`) |
+| `--mr N` (`--margin-right`) | `style.page.margin-right=N` (or `style.mr=N`) |
+| `--padding N` | `style.padding=N` |
+| `--px N` / `--py N` | `style.px=N` / `style.py=N` |
+| `--pt N` (`--padding-top`) | `style.page.padding-top=N` (or `style.pt=N`) |
+| `--pb N` (`--padding-bottom`) | `style.page.padding-bottom=N` (or `style.pb=N`) |
+| `--pl N` (`--padding-left`) | `style.page.padding-left=N` (or `style.pl=N`) |
+| `--pr N` (`--padding-right`) | `style.page.padding-right=N` (or `style.pr=N`) |
+| `--page-bg STYLE` (`--page-background`) | `style.page.background=STYLE` |
+| `--page-bg-color COLOR` | `style.page.bg-color=COLOR` |
+| `--max-width N` (also `md render --max-width`) | `style.max-width=N`, or `style='{ max-width: N }'` |
+| `--theme NAME` | `style.page.theme=NAME` |
+| `--code-theme NAME` | `style.page.code.theme=NAME` |
+| `--line-numbers [BOOL]` | `style.code-block.line-numbers=true` (or `false`) |
+| `--alignment ALIGN` | `style.alignment=ALIGN`: the page and every component |
+| `--align-images ALIGN` | `style.images.alignment=ALIGN` |
+| `--align-lists ALIGN` | `style='{ ul: { alignment: ALIGN }, ol: { alignment: ALIGN }, li: { alignment: ALIGN } }'` |
+| `--align-ul` / `--align-ol` / `--align-li ALIGN` | `style.ul.alignment=ALIGN` / `style.ol.alignment=ALIGN` / `style.li.alignment=ALIGN` |
+| `--align-block-quotes ALIGN` | `style.block-quote.alignment=ALIGN` |
+| `--align-tables ALIGN` | `style.table.alignment=ALIGN` |
+| `--align-code-blocks ALIGN` | `style.code-block.alignment=ALIGN` |
+
+`--code-block` is an unknown argument here too: the code panel's variant is
+`style.page.code.mode`. `md schema about --code-block` keeps its own flag.
+
+##### Fill flags
+
+A fill flag took a mode (`full`, `pad=N`, `indent=N`, `max=N`, `explicit=N`)
+and lowered it onto a component's width or horizontal padding. Each mode is now
+those properties, set on the component bucket the flag named:
+
+| Flag | Bucket |
+|---|---|
+| `--fill-images` | `images` |
+| `--fill-lists` | `ul`, `ol`, and `li` (set each one) |
+| `--fill-ul` / `--fill-ol` / `--fill-li` | `ul` / `ol` / `li` |
+| `--fill-block-quotes` | `block-quote` |
+| `--fill-tables` | `table` |
+| `--fill-code-blocks` | `code-block` |
+| `--fill` | every component: `images`, `ul`, `ol`, `li`, `block-quote`, `table`, `code-block`, `hr`, `hyperlinks`, and `disclosure` (set each one, or keep the list in a `--style` file) |
+
+With `table` as the bucket:
+
+| Mode | Use instead |
+|---|---|
+| `max=40` | `style.table.max-width=40` |
+| `explicit=50` | `style.table.width=50` |
+| `full` | `style='{ table: { width: "auto", padding: 0 } }'` |
+| `pad=4` | `style='{ table: { padding: 0, "padding-left": 4, "padding-right": 4 } }'` |
+| `indent=4` | `style='{ table: { padding: 0, "padding-left": 4 } }'` |
+
+- `pad` and `indent` replaced the whole padding, so the replacements reset
+  `padding` to 0 before setting the sides; setting only the sides would keep
+  any vertical padding the component inherits.
+- `indent` picked its side from the component's alignment. That choice is now
+  yours: `padding-left` for a left-aligned component, `padding-right` for a
+  right-aligned one, and both for a centered one.
+- Setting `width` removes an inherited `max-width` (and the reverse), so
+  `full` needs no extra reset.
+- For a horizontal rule, `max` and `explicit` are `hr.max-width` and
+  `hr.width`, and `pad`/`indent` are `hr`'s `padding`, `padding-left`, and
+  `padding-right`; `full` never changed a rule. On `hyperlinks` no fill mode
+  had a visible effect, so there is nothing to carry over.
 
 ## Lessons Learned
 
 - A single `terminal` default that falls back to `plain` gives good results for both interactive terminals and pipelines.
 - `render` and implicit `md [INPUT]` share the same core path, so behavior remains aligned.
-- Theme and rendering controls are intentionally global CLI flags.
-
-## Issues
-
-- `render` has no command-local theme flags; theming is configured at root CLI level.
+- Theme and layout choices are style keys, so the same value works as a setter, in a `--style` file, and in a document's `style:`.

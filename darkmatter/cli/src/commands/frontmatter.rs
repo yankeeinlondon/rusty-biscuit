@@ -102,11 +102,10 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool, output:
     let file = input_label(input);
     let skeleton = SetData { file: file.clone(), property: prop.to_string(), value: Value::Null, document: None, saved: false };
     let mut run = CommandRun::begin(output, cli.width, WidthRequest::Source, cli.verbose, DataShape::typed(&skeleton))?.exact_markdown();
-    let result = set_value(input, &path, skeleton, raw_value, save, &mut run, cli, request);
+    let result = set_value(input, &path, skeleton, raw_value, save, &mut run, request);
     run.finish(result)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn set_value(
     input: &PathBuf,
     path: &PropertyPath,
@@ -114,7 +113,6 @@ fn set_value(
     raw_value: &str,
     save: bool,
     run: &mut CommandRun,
-    cli: &Cli,
     request: &MdRequest,
 ) -> Result<Completed<CommandValue<SetData>>> {
     if save && data.file.is_none() {
@@ -151,7 +149,7 @@ fn set_value(
         }
     }
     let resolved = resolved_input(input, request);
-    document_value(data, &md, text, resolved.as_ref(), output, cli, request).map(Completed::success)
+    document_value(data, &md, text, resolved.as_ref(), output, request).map(Completed::success)
 }
 
 /// The document to edit, with the opened argument and resolved file that give it

@@ -389,9 +389,9 @@ fn test_stdin_does_not_discover_repository_trigger_schemas() {
 /// The top-level `md <file> --save` shorthand runs the same pipeline with the
 /// same schema defaults.
 #[test]
-fn test_save_shorthand_uses_default_schema_state_and_repairs() {
+fn test_clean_save_uses_default_schema_state_and_repairs() {
     let fixture = CliProcessFixture::named(
-        "clean-schema-test-save-shorthand-uses-default-schema-state-and-repairs",
+        "clean-schema-test-clean-save-uses-default-schema-state-and-repairs",
     );
     let repo = Repo::new(&fixture);
     repo.with_release_trigger();
@@ -400,16 +400,16 @@ fn test_save_shorthand_uses_default_schema_state_and_repairs() {
         "---\nkind: thing\ntitle: @daily-report\nrelease: 1.20\n---\n\n# Body\n",
     );
 
-    fixture.command().arg(&doc).arg("--save").assert().success();
+    fixture.command().arg("clean").arg(&doc).arg("--save").assert().success();
 
     let saved = fs::read_to_string(&doc).unwrap();
     assert!(
         saved.contains("title: \"@daily-report\""),
-        "shorthand must run the syntax tier:\n{saved}"
+        "a default clean must run the syntax tier:\n{saved}"
     );
     assert!(
         saved.contains("release: \"1.20\""),
-        "shorthand must run trigger discovery:\n{saved}"
+        "a default clean must run trigger discovery:\n{saved}"
     );
 }
 

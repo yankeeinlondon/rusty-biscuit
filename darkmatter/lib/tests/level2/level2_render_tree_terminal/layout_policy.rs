@@ -211,7 +211,6 @@ fn level2_percent_page_frame_offset_and_width_in_real_terminal() {
     let page = darkmatter::style::apply_page_style(
         DarkmatterPage::new(&term),
         &style,
-        darkmatter::style::PageStyleOverrides::default(),
     )
     .expect("apply percentage page style");
     let rendered = page.render(&md).expect("decorated percent frame must render");

@@ -43,6 +43,7 @@ Three things work the same way on every command:
 - [`clean <file-reference>`](./clean.md) - cleans up the Markdown file by ensuring good headings structure, consistent indent levels, use of proper vertical spacing. Sends fixed file to STDOUT unless the `--save` switch is used
 - [`compose <file-reference>`](./compose.md) - runs the referenced Markdown file through the [composition pipeline](../darkmatter-compose-pipeline.md) and returns the composed Markdown to STDOUT, or the document and every problem as data; pipe it to `md render` for any other output
 - [`toc <file-ref>`](./toc.md) - shows the table of contents for the file referenced
+- [`list-themes`](./list-themes.md) - lists the theme names `style.page.theme` and `style.page.code.theme` accept
 - [`delta <file-ref> <file-ref>`](./delta.md) - describes the changes found between the two Markdown files. Uses a structured analysis to describe semantically what's changed. Adds visual diffing if you use the `--verbose` flag.
 - [`get <file-ref> <path>`](./get.md) - extracts a frontmatter value, named by [property path](#property-paths), from the Markdown file referenced
 - [`set <file-ref> <path> <value>`](./set.md) - sets a frontmatter value, named by [property path](#property-paths), on the referenced Markdown file

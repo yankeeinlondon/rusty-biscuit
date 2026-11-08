@@ -187,13 +187,14 @@ fn completion_offers_feature_names() {
     }
 }
 
-/// Page inputs with no document file: the stylesheet context is a scratch
-/// directory and no theme variable is set.
-fn page_inputs() -> darkmatter_cli::render::PageInputs {
-    darkmatter_cli::render::PageInputs::new(
-        biscuit_file::FileResolutionContext::new(std::env::temp_dir()),
-        darkmatter::style::PresentationDefaults::default(),
-    )
+/// The HTML page `md` builds for `md` and `cli`'s features.
+fn html_page_for(md: &Markdown, cli: &darkmatter_cli::Cli) -> darkmatter::layout::DarkmatterPage {
+    use common::style::{page_inputs, with_presentation};
+    use darkmatter_cli::render::document_style;
+    let style = document_style(md, None, biscuit_file::FileResolutionContext::new(std::env::temp_dir())).expect("style");
+    with_presentation(&style, &cli.render.features, false, |presentation| {
+        html_page(&page_inputs(), presentation).expect("html page")
+    })
 }
 
 #[test]
@@ -202,8 +203,8 @@ fn embed_mermaid_font_feature_sets_the_html_page_option() {
     let with = parse(&["--feature", "embed-mermaid-font", "doc.md"]).unwrap();
     let without = parse(&["doc.md"]).unwrap();
 
-    assert!(html_page(&md, &with, &page_inputs(), false, &with.render.features).unwrap().embed_mermaid_font());
-    assert!(!html_page(&md, &without, &page_inputs(), false, &without.render.features).unwrap().embed_mermaid_font());
+    assert!(html_page_for(&md, &with).embed_mermaid_font());
+    assert!(!html_page_for(&md, &without).embed_mermaid_font());
 }
 
 #[test]
@@ -215,10 +216,10 @@ fn no_frontmatter_key_turns_on_embedding() {
     let plain = Markdown::try_from_content(MERMAID_DOC).unwrap();
     let cli = parse(&["doc.md"]).unwrap();
 
-    assert!(!html_page(&with_keys, &cli, &page_inputs(), false, &cli.render.features).unwrap().embed_mermaid_font());
+    assert!(!html_page_for(&with_keys, &cli).embed_mermaid_font());
     assert_eq!(
-        html_page(&with_keys, &cli, &page_inputs(), false, &cli.render.features).unwrap().render_to_browser_document(&with_keys).unwrap(),
-        html_page(&plain, &cli, &page_inputs(), false, &cli.render.features).unwrap().render_to_browser_document(&plain).unwrap()
+        html_page_for(&with_keys, &cli).render_to_browser_document(&with_keys).unwrap(),
+        html_page_for(&plain, &cli).render_to_browser_document(&plain).unwrap()
     );
 }
 

@@ -210,6 +210,13 @@ pub enum Command {
         cache_root: Option<PathBuf>,
     },
 
+    /// List the themes `style.page.theme` and `style.page.code.theme` accept.
+    ListThemes {
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
+    },
+
     /// Show markdown table of contents.
     Toc {
         /// Input file path (use "-" for stdin)

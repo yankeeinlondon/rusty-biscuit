@@ -1491,7 +1491,7 @@ fn pronounced_background_on_dark_terminal_inverts_color_mode() {
 #[test]
 fn end_to_end_example_from_spec() {
     // Terminal is dark mode, 120 cols wide.
-    // md doc.md --margin 2 --padding 1 --page-bg subtle --max-width 100 --line-numbers true --align-code-blocks center
+    // md doc.md style.margin=2 style.padding=1 style.page.background=subtle style.max-width=100 style.code-block.line-numbers=true style.code-block.alignment=center
     let term = Terminal::new_optimistic(120);
     let page = DarkmatterPage::new(&term)
         .with_margin(2)

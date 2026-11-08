@@ -7,6 +7,7 @@
 //! page `md` renders (`render::terminal_page`) in-process; the HTML, Markdown,
 //! and JSON cases spawn `md`.
 
+use crate::common::style::{page_inputs, with_presentation};
 use crate::common::{CliProcessFixture, md_file};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_visualized::components::mermaid::PARTIAL_NOTE_ID;
@@ -53,15 +54,6 @@ fn terminal_process(fallback: Option<&str>) -> [EnvGuard; 2] {
     ]
 }
 
-/// Page inputs with no document file: the stylesheet context is a scratch
-/// directory and no theme variable is set.
-fn page_inputs() -> darkmatter_cli::render::PageInputs {
-    darkmatter_cli::render::PageInputs::new(
-        biscuit_file::FileResolutionContext::new(std::env::temp_dir()),
-        darkmatter::style::PresentationDefaults::default(),
-    )
-}
-
 fn page_for(args: &[&str], doc: &str) -> (darkmatter::layout::DarkmatterPage, Markdown) {
     let cli = parse(args);
     let md = Markdown::try_from_content(doc).unwrap();
@@ -70,9 +62,12 @@ fn page_for(args: &[&str], doc: &str) -> (darkmatter::layout::DarkmatterPage, Ma
     // unless its depth is set: pin it so `NO_COLOR` or `TERM=dumb` cannot
     // strip the highlighting these tests assert.
     let options = dispatched(&cli);
-    let page = terminal_page(&md, None, &page_inputs(), &cli, &term, false, &options.features, options.mermaid)
-        .expect("terminal page")
-        .with_color_depth(ColorDepth::TrueColor);
+    let style = darkmatter_cli::render::document_style(&md, None, biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
+        .expect("style");
+    let page = with_presentation(&style, &options.features, options.mermaid, |presentation| {
+        terminal_page(None, &page_inputs(), presentation, &term).expect("terminal page")
+    })
+    .with_color_depth(ColorDepth::TrueColor);
     (page, md)
 }
 

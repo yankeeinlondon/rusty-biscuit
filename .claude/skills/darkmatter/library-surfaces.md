@@ -173,8 +173,9 @@ directly: `darkmatter::markdown::schemas` does not re-export them.
 - `Markdown::as_terminal`, `Markdown::as_html`, and `DarkmatterPage::render`
   route through the render-tree document fold.
 - `DarkmatterPage` owns only viewport/page framing.
-- `CliStyleClaims` represents explicitly supplied CLI flags. It is not a second
-  style model.
+- Command-line style is a later `StyleLayer` (setters or a `--style` file)
+  merged by `prepare_style_layers`; there is no separate CLI style model and
+  no `apply_*_style` override argument.
 - `CodeBlock` is the primary highlighted-code component. `YamlBlock` is a
   deprecated compatibility wrapper.
 - Component layout and paint lower to `renderable` types before target folds.

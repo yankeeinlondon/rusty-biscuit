@@ -664,6 +664,57 @@ fn conforms_schema_about_carries_the_whole_catalog_at_any_verbosity() {
 }
 
 #[test]
+fn conforms_list_themes_json_is_every_theme_in_canonical_order() {
+    use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
+    let fixture = CliProcessFixture::named("output-list-themes-json");
+    let value = conforms(include_str!("../../schemas/output/list-themes.yaml"), &fixture, &["list-themes", "--output", "json"], 0);
+    let expected: Vec<Value> = ThemePair::all()
+        .iter()
+        .map(|theme| json!({ "name": theme.kebab_name(), "description": theme.description(ColorMode::Dark) }))
+        .collect();
+    assert_eq!(value, Value::Array(expected));
+}
+
+#[test]
+fn conforms_list_themes_in_every_other_data_format() {
+    use darkmatter::markdown::highlighting::ThemePair;
+    let fixture = CliProcessFixture::named("output-list-themes-formats");
+    let schema = include_str!("../../schemas/output/list-themes.yaml");
+    let names: Vec<&str> = ThemePair::all().iter().map(|theme| theme.kebab_name()).collect();
+    for format in ["json5", "yaml", "toml"] {
+        let output = run(&fixture, &["list-themes", "--output", format]);
+        assert_eq!(output.status.code(), Some(0), "{format}: {}", stderr_of(&output));
+        assert!(output.stderr.is_empty(), "{format}: {}", stderr_of(&output));
+        let text = stdout_of(&output);
+        let value: Value = match format {
+            "json5" => biscuit_file::Json5::from_str(&text).unwrap_or_else(|error| panic!("{error}: {text}")).value().clone(),
+            "yaml" => serde_yaml_ng::from_str(&text).unwrap_or_else(|error| panic!("{error}: {text}")),
+            _ => {
+                let parsed: toml::Value = toml::from_str(&text).unwrap_or_else(|error| panic!("{error}: {text}"));
+                serde_json::to_value(parsed).expect("JSON")
+            }
+        };
+        validate_strictly(schema, &value);
+        let rows = value.get("value").unwrap_or(&value).as_array().unwrap_or_else(|| panic!("{format}: {value:#}"));
+        let listed: Vec<&str> = rows.iter().map(|row| row["name"].as_str().unwrap()).collect();
+        assert_eq!(listed, names, "{format}");
+    }
+}
+
+#[test]
+fn list_themes_markdown_lists_every_theme_with_the_setter_guidance() {
+    use darkmatter::markdown::highlighting::ThemePair;
+    let fixture = CliProcessFixture::named("output-list-themes-markdown");
+    let output = run(&fixture, &["list-themes", "--output", "markdown"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr_of(&output));
+    let text = stdout_of(&output);
+    for theme in ThemePair::all() {
+        assert!(text.contains(&format!("`{}`", theme.kebab_name())), "{text}");
+    }
+    assert!(text.contains("style.page.code.theme=NAME"), "{text}");
+}
+
+#[test]
 fn every_schema_file_shares_one_diagnostic_type() {
     let compose = include_str!("../../schemas/output/compose.yaml");
     // A diagnostic's `data_location` is a named type of its own, shared too.
@@ -680,6 +731,7 @@ fn every_schema_file_shares_one_diagnostic_type() {
         ("get", include_str!("../../schemas/output/get.yaml")),
         ("graph", include_str!("../../schemas/output/graph.yaml")),
         ("hash", include_str!("../../schemas/output/hash.yaml")),
+        ("list-themes", include_str!("../../schemas/output/list-themes.yaml")),
         ("rm", include_str!("../../schemas/output/rm.yaml")),
         ("schema-about", include_str!("../../schemas/output/schema-about.yaml")),
         ("schema-detect", include_str!("../../schemas/output/schema-detect.yaml")),
@@ -816,6 +868,7 @@ help_shows_the_default! {
     help_clean => ["clean"], "markdown";
     help_set => ["set"], "markdown";
     help_get => ["get"], "json";
+    help_list_themes => ["list-themes"], "terminal";
     help_toc => ["toc"], "terminal";
     help_delta => ["delta"], "terminal";
     help_rm => ["rm"], "terminal";
@@ -886,7 +939,8 @@ usage_errors! {
     compact_with_yaml: ["get", "doc.md", "title", "--output", "yaml", "--compact"] names "--compact";
     compact_with_plain: ["get", "doc.md", "title", "--output", "plain", "--compact"] names "--compact";
     subcommand_with_top_level_output: ["--output", "json", "toc", "doc.md"] names "top-level options";
-    list_themes_with_output: ["--list-themes", "--output", "json"] names "--output";
+    root_list_themes_is_unknown: ["--list-themes"] names "unexpected argument '--list-themes'";
+    list_themes_takes_no_input: ["list-themes", "doc.md"] names "unexpected argument 'doc.md'";
     completions_with_output: ["--completions", "bash", "--output", "json"] names "--output";
     invalid_assignment: ["schema", "validate", "doc.md", "a=[1"] names "invalid assignment";
     bad_highlight: ["code-block", "--content", "x", "--highlight", "6-4"] names "--highlight";
@@ -1260,12 +1314,12 @@ fn saving_prints_nothing_formatted_for_set_and_rm() {
 }
 
 #[test]
-fn the_top_level_save_alias_forwards_output_and_width() {
+fn the_removed_root_save_is_a_usage_error_even_with_a_data_output() {
     let fixture = with_document("output-save-alias", "one two three four\n");
     let output = run(&fixture, &["--save", "doc.md", "--width", "10", "--output", "json"]);
-    assert_eq!(output.status.code(), Some(0), "{}", stderr_of(&output));
-    assert_eq!(one_value(&output)["version"], 1);
-    assert!(read_document(&fixture).contains("one two\nthree four"));
+    assert_eq!(output.status.code(), Some(2), "{}", stderr_of(&output));
+    assert!(output.stdout.is_empty(), "{}", stdout_of(&output));
+    assert_eq!(read_document(&fixture), "one two three four\n");
 }
 
 // Defects the Phase 6 verification pass reproduced through the real binary.

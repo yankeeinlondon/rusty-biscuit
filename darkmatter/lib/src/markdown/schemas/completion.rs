@@ -532,6 +532,9 @@ fn keeps_text_at(effective: &EffectiveSchema, frontmatter: &Value, path: &[PathS
 pub enum PathCommand {
     /// `md compose`, whose paths are `key=value` setters.
     Compose,
+    /// `md render`, whose paths are `style…=VALUE` setters: only `style` and
+    /// what is under it is offered.
+    Render,
     /// `md set`, which takes the path and the value as separate arguments.
     Set,
     /// `md get`.
@@ -540,10 +543,18 @@ pub enum PathCommand {
     Rm,
 }
 
+impl PathCommand {
+    /// Whether a path is written as a `key=value` setter.
+    const fn assigns(self) -> bool {
+        matches!(self, Self::Compose | Self::Render)
+    }
+}
+
 /// The word being completed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathPosition<'a> {
-    /// A word naming a path. Under [`PathCommand::Compose`] it may already hold
+    /// A word naming a path. Under [`PathCommand::Compose`] and
+    /// [`PathCommand::Render`] it may already hold
     /// a setter's `=`, which asks for that key's values.
     Path(&'a str),
     /// A value given as its own argument, as `md set` takes one.
@@ -680,7 +691,7 @@ fn word_target<'a>(query: &PathQuery<'a>) -> WordTarget<'a> {
             typed,
             lead: "",
         }),
-        PathPosition::Path(typed) if query.command != PathCommand::Compose || !typed.contains('=') => WordTarget::Path(typed),
+        PathPosition::Path(typed) if !query.command.assigns() || !typed.contains('=') => WordTarget::Path(typed),
         PathPosition::Path(typed) => match classify_token(typed) {
             TokenClass::Setter(setter) => {
                 let (lead, value) = typed.split_at(typed.len() - setter.raw.len());
@@ -882,7 +893,7 @@ fn ordered_children(command: PathCommand, declared: Vec<AlternativeKey>, present
     let (required, optional): (Vec<_>, Vec<_>) = declared.into_iter().partition(|key| key.required);
     let declared_names = required.into_iter().chain(optional).map(|key| key.name);
     let names: Vec<String> = match command {
-        PathCommand::Compose | PathCommand::Set => declared_names.chain(present).collect(),
+        PathCommand::Compose | PathCommand::Render | PathCommand::Set => declared_names.chain(present).collect(),
         PathCommand::Get => present.into_iter().chain(declared_names).collect(),
         PathCommand::Rm => present,
     };
@@ -898,7 +909,14 @@ fn ordered_children(command: PathCommand, declared: Vec<AlternativeKey>, present
 }
 
 fn command_can_spell(command: PathCommand, path: &PropertyPath) -> bool {
-    command != PathCommand::Compose || matches!(classify_token(&format!("{path}=")), TokenClass::Setter(setter) if setter.path == *path)
+    let in_style = || path.segments().first().is_some_and(|segment| segment == "style");
+    match command {
+        PathCommand::Render if !in_style() => false,
+        PathCommand::Compose | PathCommand::Render => {
+            matches!(classify_token(&format!("{path}=")), TokenClass::Setter(setter) if setter.path == *path)
+        }
+        PathCommand::Set | PathCommand::Get | PathCommand::Rm => true,
+    }
 }
 
 /// How one node may be written for `command`, descent first.
@@ -920,7 +938,7 @@ fn node_spellings(
     if descends {
         spellings.push((".", PathCandidateKind::Descend));
     }
-    if command == PathCommand::Compose {
+    if command.assigns() {
         spellings.push(("=", PathCandidateKind::Assign));
     } else if present.is_some() || !descends || view.admits_non_object(steps) {
         spellings.push(("", PathCandidateKind::Select));
@@ -1034,6 +1052,27 @@ mod tests {
         api.effective_for(&md)
             .expect("effective_for")
             .expect("effective schema present")
+    }
+
+    #[test]
+    fn render_offers_only_style_and_spells_each_key_as_a_setter() {
+        let eff = effective("$schema:\n  title: string\n  style:\n    page:\n      mode: enum(dark, light)\n");
+        let frontmatter = serde_json::json!({ "title": "T", "other": 1 });
+        let words = |command: PathCommand, typed: &str| -> Vec<String> {
+            let query = PathQuery {
+                schema: PathSchema::Effective(&eff),
+                frontmatter: &frontmatter,
+                command,
+                position: PathPosition::Path(typed),
+                earlier_paths: &[],
+            };
+            path_candidates(&query).into_iter().map(|candidate| candidate.insert).collect()
+        };
+        assert_eq!(words(PathCommand::Render, ""), ["style.", "style="]);
+        assert!(words(PathCommand::Compose, "").contains(&"title=".to_string()), "compose keeps every key");
+        assert_eq!(words(PathCommand::Render, "style.page."), ["style.page.mode="]);
+        assert_eq!(words(PathCommand::Render, "style.page.mode=l"), ["style.page.mode=light"]);
+        assert!(words(PathCommand::Render, "title=").is_empty(), "a key outside `style` has no value");
     }
 
     #[test]

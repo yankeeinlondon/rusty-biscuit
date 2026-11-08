@@ -28,9 +28,10 @@ pub enum PageRenderError {
 
     /// A caller set `max_width = Some(0)` via the library API.
     ///
-    /// The CLI rejects `--max-width 0` at parse time and never produces this
-    /// variant, but the library API accepts arbitrary values and
-    /// surfaces zero through this error.
+    /// Style application rejects a zero `style.page.max-width` first
+    /// (`StyleApplyError::InvalidMaxWidth`), so `md` never produces this
+    /// variant, but the library API accepts arbitrary values and surfaces
+    /// zero through this error.
     #[error("max_width must be greater than zero")]
     MaxWidthZero,
 

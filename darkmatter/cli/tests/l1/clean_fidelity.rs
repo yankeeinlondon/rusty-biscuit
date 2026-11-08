@@ -127,11 +127,11 @@ fn declined_clean_discards_frontmatter_repairs() {
 }
 
 #[test]
-fn top_level_save_writes_a_changed_document() {
-    let fixture = CliProcessFixture::named("clean-fidelity-top-level-save-writes-a-changed-document");
+fn clean_save_writes_a_changed_document() {
+    let fixture = CliProcessFixture::named("clean-fidelity-clean-save-writes-a-changed-document");
     let path = fixture.write_file("cwd/doc.md", "# Hello\n\nIntro:\n- a\n");
 
-    let assert = fixture.command().arg(&path).arg("--save").assert().success();
+    let assert = fixture.command().arg("clean").arg(&path).arg("--save").assert().success();
 
     assert_eq!(fs::read_to_string(&path).unwrap(), "# Hello\n\nIntro:\n\n- a\n");
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
@@ -139,12 +139,12 @@ fn top_level_save_writes_a_changed_document() {
 }
 
 #[test]
-fn top_level_save_leaves_a_declined_document_untouched() {
+fn clean_save_leaves_a_declined_document_untouched() {
     let fixture =
-        CliProcessFixture::named("clean-fidelity-top-level-save-leaves-a-declined-document-untouched");
+        CliProcessFixture::named("clean-fidelity-clean-save-leaves-a-declined-document-untouched");
     let path = fixture.write_file("cwd/doc.md", REPAIRABLE_AND_UNPAIRED);
 
-    let assert = fixture.command().arg(&path).arg("--save").assert().success();
+    let assert = fixture.command().arg("clean").arg(&path).arg("--save").assert().success();
 
     assert_eq!(fs::read(&path).unwrap(), REPAIRABLE_AND_UNPAIRED.as_bytes());
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);

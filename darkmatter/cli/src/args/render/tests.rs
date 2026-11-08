@@ -180,7 +180,6 @@ fn root_representatives() -> BTreeMap<&'static str, Option<&'static [&'static st
         ("style", Some(&["--style", "s.yaml"][..])),
         ("output", Some(&["--output", "html"][..])),
         ("show", Some(&["--show"][..])),
-        ("max_width", Some(&["--max-width", "60"][..])),
         ("indent", Some(&["--indent", "2"][..])),
         ("deny", Some(&["--deny", "style"][..])),
         ("features", Some(&["--feature", "embed-mermaid-font"][..])),
@@ -281,11 +280,16 @@ fn render_help_lists_every_render_option_and_root_help_does_not() {
         .expect("render subcommand")
         .render_help()
         .to_string();
-    for flag in ["--style", "--output", "--show", "--max-width", "--indent", "--deny", "--feature", "--mermaid", "[ARGS]"] {
+    for flag in ["--style", "--output", "--show", "--indent", "--deny", "--feature", "--mermaid", "[ARGS]"] {
         assert!(render_help.contains(flag), "`md render --help` lacks {flag}:\n{render_help}");
     }
-    for hidden in ["--output", "--show", "--indent", "--deny", "--feature", "--mermaid", "--margin", "--theme", "--fill"] {
+    for hidden in ["--output", "--show", "--indent", "--deny", "--feature", "--mermaid"] {
         assert!(!root_help.contains(hidden), "`md --help` lists {hidden}:\n{root_help}");
+    }
+    // Removed, so in neither help.
+    for removed in ["--max-width", "--margin", "--theme", "--code-theme", "--fill", "--align-", "--line-numbers", "--page-bg"] {
+        assert!(!root_help.contains(removed), "`md --help` lists {removed}:\n{root_help}");
+        assert!(!render_help.contains(removed), "`md render --help` lists {removed}:\n{render_help}");
     }
     for shown in ["--style", "--width", "--verbose", "--magic-root", "Commands:", "Shared controls:", "see `md render --help`"] {
         assert!(root_help.contains(shown), "`md --help` lacks {shown}:\n{root_help}");

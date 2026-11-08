@@ -14,13 +14,13 @@ fn level2_image_fallback_text_respects_alignment() {
 
     let Some((left, _)) = run_md(
         body,
-        "--align-images left --fill-images max=20 --max-width 60",
+        "style.images.alignment=left style.images.max-width=20 style.max-width=60",
     ) else {
         return;
     };
     let Some((center, _)) = run_md(
         body,
-        "--align-images center --fill-images max=20 --max-width 60",
+        "style.images.alignment=center style.images.max-width=20 style.max-width=60",
     ) else {
         return;
     };
@@ -79,10 +79,10 @@ style:
 ![Sentinel image alt](./does-not-exist.png)
 "#;
 
-    let Some((right_frame, _)) = run_md(right, "--max-width 60") else {
+    let Some((right_frame, _)) = run_md(right, "style.max-width=60") else {
         return;
     };
-    let Some((left_frame, _)) = run_md(left, "--max-width 60") else {
+    let Some((left_frame, _)) = run_md(left, "style.max-width=60") else {
         return;
     };
 
@@ -122,7 +122,7 @@ fn level2_hyperlink_color_applies_inside_table() {
 style:\n  hyperlinks:\n    color: red-500\n  table:\n    color: blue-500\n---\n\
 | col |\n|---|\n| [clickanchor](https://example.com) |\n";
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=60") else {
         return;
     };
 
@@ -164,7 +164,7 @@ fn level2_local_hyperlink_color_differs_from_remote_in_terminal() {
     let body = "---\nstyle:\n  hyperlinks:\n    color: red-500\n    local-style:\n      color: blue-500\n---\n\n\
         [LOCAL_LINK](./somewhere.md) [REMOTE_LINK](https://example.com)\n";
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=60") else {
         return;
     };
 
@@ -200,7 +200,7 @@ fn level2_style_hyperlinks_width_pads_label_in_terminal() {
     let body = "---\nstyle:\n  hyperlinks:\n    width: 20\n---\n\n\
         [HI](https://example.com)\n";
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=60") else {
         return;
     };
 
@@ -226,7 +226,7 @@ fn level2_style_hyperlinks_exact_width_truncates_label_in_terminal() {
     let body = "---\nstyle:\n  hyperlinks:\n    width: 5\n---\n\n\
         [A very long hyperlink label](https://example.com)\n";
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=60") else {
         return;
     };
 
@@ -256,7 +256,7 @@ fn level2_style_hyperlinks_truncation_does_not_bleed_color_in_terminal() {
     let body = "---\nstyle:\n  hyperlinks:\n    color: red-500\n    width: 8\n---\n\n\
         [A very long hyperlink label](https://example.com) ZZTRAIL\n";
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=60") else {
         return;
     };
 
@@ -303,7 +303,7 @@ fn level2_style_images_local_style_colors_fallback_in_terminal() {
     let body = "---\nstyle:\n  images:\n    local-style:\n      color: red-500\n---\n\n\
         ![ALT_LOCAL](./no-such-image.png)\n\n![ALT_REMOTE](https://example.com/x.png)\n";
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=60") else {
         return;
     };
 
@@ -340,7 +340,7 @@ fn level2_style_images_local_style_width_alignment_in_terminal() {
     let body = "---\nstyle:\n  images:\n    local-style:\n      width: 40\n      alignment: right\n---\n\n\
         ![A](./no-such-image.png)\n";
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=60") else {
         return;
     };
 
@@ -378,7 +378,7 @@ fn level2_style_images_exact_width_truncates_long_alt_in_terminal() {
     let body = "---\nstyle:\n  images:\n    local-style:\n      width: 12\n---\n\n\
         ![A very long image alt text](./no-such-image.png)\n";
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=60") else {
         return;
     };
 
@@ -417,7 +417,7 @@ fn level2_style_images_truncation_does_not_bleed_color_in_terminal() {
     let body = "---\nstyle:\n  images:\n    local-style:\n      color: red-500\n      width: 12\n---\n\n\
         ![A very long image alt text](./no-such-image.png) ZZTRAIL\n";
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=60") else {
         return;
     };
 

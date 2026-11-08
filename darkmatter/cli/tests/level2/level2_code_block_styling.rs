@@ -14,12 +14,12 @@ fn level2_code_block_fill_pad_adds_left_indent() {
     let body = "```rust\nfn main() {}\n```\n";
     let Some((frame, _)) = run_md(
         body,
-        "--fill-code-blocks pad=4 --max-width 40 --page-bg subtle",
+        "style.code-block.padding=0 style.code-block.padding-left=4 style.code-block.padding-right=4 style.max-width=40 style.page.background=subtle",
     ) else {
         return;
     };
 
-    // With Pad(4) on a 40-col page, the code block renders at 32 cols and is
+    // With 4 cells of padding on each side on a 40-col page, the code block renders at 32 cols and is
     // shifted right by 4 cols of left padding (Left alignment is the default
     // since the layout fix). Locate the header line (contains "rust") and
     // verify it starts with at least 4 leading spaces.
@@ -31,7 +31,7 @@ fn level2_code_block_fill_pad_adds_left_indent() {
     let leading = rust_line.chars().take_while(|c| *c == ' ').count();
     assert!(
         leading >= 4,
-        "expected >=4 leading spaces for Pad(4) left padding, got {leading}: {rust_line:?}"
+        "expected >=4 leading spaces for the 4-cell left padding, got {leading}: {rust_line:?}"
     );
 }
 
@@ -41,7 +41,7 @@ fn level2_code_block_max_fill_constrains_body_width() {
     let body = "```rust\nfn really_long_function_name_that_would_overflow() {}\n```\n";
     let Some((frame, _)) = run_md(
         body,
-        "--fill-code-blocks max=30 --max-width 60 --page-bg subtle",
+        "style.code-block.max-width=30 style.max-width=60 style.page.background=subtle",
     ) else {
         return;
     };
@@ -77,7 +77,7 @@ fn level2_align_code_block_center_indents_more_than_left() {
     let left_frame = run_md_in_tmux(
         body,
         None,
-        "--align-code-blocks left --fill-code-blocks max=20 --max-width 60",
+        "style.code-block.alignment=left style.code-block.max-width=20 style.max-width=60",
         &[],
     );
     let left_header = left_frame
@@ -97,7 +97,7 @@ fn level2_align_code_block_center_indents_more_than_left() {
     let center_frame = run_md_in_tmux(
         body,
         None,
-        "--align-code-blocks center --fill-code-blocks max=20 --max-width 60",
+        "style.code-block.alignment=center style.code-block.max-width=20 style.max-width=60",
         &[],
     );
     let center_header = center_frame
@@ -133,7 +133,7 @@ fn level2_code_block_inverts_to_light_in_dark_terminal() {
     let frame = run_md_in_tmux(
         CODE_DOC,
         None,
-        "--code-theme github --max-width 60",
+        "style.page.code.theme=github style.max-width=60",
         &[("COLORFGBG", "15;0")], // bg index 0 => dark terminal
     );
 
@@ -164,7 +164,7 @@ fn level2_default_code_block_inverts_background_and_foreground() {
         let frame = run_md_in_tmux(
             CODE_DOC,
             None,
-            "--max-width 60",
+            "style.max-width=60",
             &[("COLORFGBG", "15;0")], // bg index 0 => dark terminal
         );
 
@@ -227,7 +227,7 @@ fn level2_code_block_clears_inherited_dim_before_theme_colors() {
         let frame = run_md_in_tmux(
             CODE_DOC,
             Some("printf '\\033[2m'"),
-            "--max-width 60",
+            "style.max-width=60",
             &[("COLORFGBG", "15;0")],
         );
         bg = max_bg_luma_on_line(&frame.raw, "FooBar");
@@ -272,7 +272,7 @@ fn level2_code_block_clears_inherited_dim_before_theme_colors() {
 fn level2_code_block_respects_right_margin() {
     let Some((frame, _)) = run_md_env(
         CODE_DOC,
-        "--ml 4 --mr 4 --max-width 50",
+        "style.ml=4 style.mr=4 style.max-width=50",
         &[("COLORFGBG", "15;0")],
     ) else {
         return;
@@ -311,7 +311,7 @@ fn level2_code_block_respects_right_margin() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_no_trailing_blank_offset_after_code() {
-    let Some((frame, _)) = run_md_env(CODE_DOC, "--mb 1 --max-width 60", &[("COLORFGBG", "15;0")])
+    let Some((frame, _)) = run_md_env(CODE_DOC, "style.mb=1 style.max-width=60", &[("COLORFGBG", "15;0")])
     else {
         return;
     };
@@ -354,10 +354,10 @@ fn level2_style_page_code_theme_changes_terminal_rendering() {
     let doc_nord = "---\nstyle:\n  page:\n    code:\n      theme: nord\n---\n\n\
         ```rust\nfn _theme_marker_dm() { let x = 1; }\n```\n";
 
-    let Some((dracula, _)) = run_md(doc_dracula, "--max-width 60") else {
+    let Some((dracula, _)) = run_md(doc_dracula, "style.max-width=60") else {
         return;
     };
-    let Some((nord, _)) = run_md(doc_nord, "--max-width 60") else {
+    let Some((nord, _)) = run_md(doc_nord, "style.max-width=60") else {
         return;
     };
 
@@ -377,12 +377,14 @@ fn level2_style_page_code_theme_changes_terminal_rendering() {
     );
 }
 
-/// CLI `--code-theme` must beat `style.page.code.theme`. With frontmatter set
-/// to `dracula` and CLI passing `--code-theme nord`, the rendered output must
-/// use the nord theme — its panel background and at least one of its signature
+/// The setter `style.page.code.theme` must beat the document's
+/// `style.page.code.theme`, field by field. With frontmatter set to `dracula`
+/// and the setter `style.page.code.theme=nord`, the rendered output must use
+/// the nord theme — its panel background and at least one of its signature
 /// syntax foregrounds — and must not use the dracula panel background.
 ///
-/// Pins `style.page.code.mode: dark` so each pair resolves to its own
+/// The document pins `style.page.code.mode: dark`, which the setter does not
+/// name and so survives the merge; it makes each pair resolve to its own
 /// (distinct) dark theme. Under the default `inverse` mode on a dark terminal both nord and
 /// dracula would resolve to their light theme — and they share the same one
 /// (OneHalfLight) — collapsing the panel backgrounds and erasing the
@@ -390,11 +392,11 @@ fn level2_style_page_code_theme_changes_terminal_rendering() {
 
 #[test]
 #[serial(level2_terminal)]
-fn level2_cli_code_theme_overrides_style_page_code_theme() {
+fn level2_code_theme_setter_overrides_style_page_code_theme() {
     let doc_with_fm = "---\nstyle:\n  page:\n    code:\n      theme: dracula\n      mode: dark\n---\n\n\
         ```rust\nfn _cli_override_marker() { let x = 1; }\n```\n";
 
-    let Some((with_fm, _)) = run_md(doc_with_fm, "--code-theme nord --max-width 60")
+    let Some((with_fm, _)) = run_md(doc_with_fm, "style.page.code.theme=nord style.max-width=60")
     else {
         return;
     };
@@ -418,13 +420,13 @@ fn level2_cli_code_theme_overrides_style_page_code_theme() {
 
     assert!(
         with_fm.raw.contains(nord_bg_semi) || with_fm.raw.contains(nord_bg_colon),
-        "expected nord panel bg (46,52,64) from CLI override. raw={:?}",
+        "expected nord panel bg (46,52,64) from the setter. raw={:?}",
         with_fm.raw
     );
     assert!(
         !with_fm.raw.contains(dracula_bg_semi) && !with_fm.raw.contains(dracula_bg_colon),
-        "frontmatter dracula panel bg (40,42,54) must not appear when CLI --code-theme \
-         claims the slot. raw={:?}",
+        "frontmatter dracula panel bg (40,42,54) must not appear when the setter \
+         names the code theme. raw={:?}",
         with_fm.raw
     );
 
@@ -441,13 +443,13 @@ fn level2_cli_code_theme_overrides_style_page_code_theme() {
 
     assert!(
         with_fm.raw.contains(nord_kw_semi) || with_fm.raw.contains(nord_kw_colon),
-        "expected nord keyword fg (129,161,193) from CLI override. raw={:?}",
+        "expected nord keyword fg (129,161,193) from the setter. raw={:?}",
         with_fm.raw
     );
     assert!(
         !with_fm.raw.contains(dracula_kw_semi) && !with_fm.raw.contains(dracula_kw_colon),
-        "frontmatter dracula keyword fg (255,121,198) must not appear when CLI --code-theme \
-         claims the slot. raw={:?}",
+        "frontmatter dracula keyword fg (255,121,198) must not appear when the setter \
+         names the code theme. raw={:?}",
         with_fm.raw
     );
 }

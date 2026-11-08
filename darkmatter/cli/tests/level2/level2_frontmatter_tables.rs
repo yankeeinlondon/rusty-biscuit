@@ -15,7 +15,7 @@ fn level2_table_max_fill_constrains_visible_width() {
 | ---- | ---- | ---- |\n\
 | sentinel_alpha | beta | gamma |\n";
 
-    let Some((frame, _)) = run_md(body, "--fill-tables max=50 --max-width 80") else {
+    let Some((frame, _)) = run_md(body, "style.table.max-width=50 style.max-width=80") else {
         return;
     };
 
@@ -48,7 +48,7 @@ fn level2_table_max_fill_constrains_visible_width() {
 fn level2_table_center_alignment_indents_more_than_left() {
     // Use a unique sentinel cell value so we anchor on the rendered body row
     // and never accidentally match the shell command echo (which contains the
-    // temp file path and CLI numerics like `max=20`/`60`).
+    // temp file path and setter values like `max-width=40`/`60`).
     let body = "\
 | A | B |\n\
 | - | - |\n\
@@ -60,13 +60,13 @@ fn level2_table_center_alignment_indents_more_than_left() {
     // still leaves visible alignment surplus on the 60-col page.
     let Some((left, _)) = run_md(
         body,
-        "--align-tables left --fill-tables max=40 --max-width 60",
+        "style.table.alignment=left style.table.max-width=40 style.max-width=60",
     ) else {
         return;
     };
     let Some((center, _)) = run_md(
         body,
-        "--align-tables center --fill-tables max=40 --max-width 60",
+        "style.table.alignment=center style.table.max-width=40 style.max-width=60",
     ) else {
         return;
     };
@@ -98,9 +98,9 @@ fn level2_table_center_alignment_indents_more_than_left() {
 #[serial(level2_terminal)]
 fn level2_blockquote_indent_fill_caps_wrap_width() {
     // Long quoted prose so the wrap point is observable in the captured pane.
-    let body = "> This is a fairly long quoted paragraph that should wrap onto a second visible line once Indent(20) forces the blockquote render width below the page width.\n";
+    let body = "> This is a fairly long quoted paragraph that should wrap onto a second visible line once a 20-cell left padding forces the blockquote render width below the page width.\n";
 
-    let Some((frame, _)) = run_md(body, "--fill-block-quotes indent=20 --max-width 80") else {
+    let Some((frame, _)) = run_md(body, "style.block-quote.padding=0 style.block-quote.padding-left=20 style.max-width=80") else {
         return;
     };
 
@@ -114,16 +114,16 @@ fn level2_blockquote_indent_fill_caps_wrap_width() {
         .collect();
     assert!(
         quote_lines.len() >= 2,
-        "blockquote should wrap onto multiple lines under Indent(20). plain:\n{}",
+        "blockquote should wrap onto multiple lines under a 20-cell left padding. plain:\n{}",
         frame.plain
     );
     let max_len = quote_lines.iter().map(|l| l.chars().count()).max().unwrap();
-    // Indent(20) sets padding-left = 20ch. The content box is 60 cols,
+    // The padding reset and `padding-left: 20` set padding-left = 20ch. The content box is 60 cols,
     // and the prefix consumes 4 cols, leaving 56 cols for text.
     // Total line width = 20 (pad) + 4 (prefix) + text ≤ 80.
     assert!(
         max_len <= 80,
-        "blockquote lines must be capped to 80 cols by Indent(20) padding; got max={max_len}. plain:\n{}",
+        "blockquote lines must be capped to 80 cols by the 20-cell left padding; got max={max_len}. plain:\n{}",
         frame.plain
     );
 }
@@ -134,13 +134,13 @@ fn level2_blockquote_center_alignment_indents_more_than_left() {
     let body = "> Centered quoted line.\n";
     let Some((left, _)) = run_md(
         body,
-        "--align-block-quotes left --fill-block-quotes max=20 --max-width 60",
+        "style.block-quote.alignment=left style.block-quote.max-width=20 style.max-width=60",
     ) else {
         return;
     };
     let Some((center, _)) = run_md(
         body,
-        "--align-block-quotes center --fill-block-quotes max=20 --max-width 60",
+        "style.block-quote.alignment=center style.block-quote.max-width=20 style.max-width=60",
     ) else {
         return;
     };
@@ -185,7 +185,7 @@ fn level2_style_fixture_applies_top_and_left_margins_in_real_terminal() {
     // columns on non-empty content rows when rendered through the real
     // terminal pipeline. The fixture is composed inline to mirror
     // `darkmatter/example-docs/rendering/style-prop.md` page-level frontmatter.
-    let Some((frame, _)) = run_md(STYLE_PROP_FIXTURE, "--max-width 60") else {
+    let Some((frame, _)) = run_md(STYLE_PROP_FIXTURE, "style.max-width=60") else {
         return;
     };
 
@@ -233,7 +233,7 @@ fn level2_style_fixture_applies_top_and_left_margins_in_real_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_style_frontmatter_table_max_width_caps_visible_row() {
-    // `style.table.max-width: 50%` at --max-width 80 must cap rendered table
+    // `style.table.max-width: 50%` at style.max-width=80 must cap rendered table
     // rows at 40 visible columns. Anchored on a unique cell value so we never
     // accidentally match the shell command echo.
     let body = r#"---
@@ -247,7 +247,7 @@ style:
 | sentinel_fm_alpha | beta | gamma |
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 80") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=80") else {
         return;
     };
 
@@ -301,10 +301,10 @@ style:
 | sentinelR | xx |
 "#;
 
-    let Some((right_frame, _)) = run_md(right, "--max-width 60") else {
+    let Some((right_frame, _)) = run_md(right, "style.max-width=60") else {
         return;
     };
-    let Some((left_frame, _)) = run_md(left, "--max-width 60") else {
+    let Some((left_frame, _)) = run_md(left, "style.max-width=60") else {
         return;
     };
 
@@ -339,7 +339,7 @@ style:
 #[test]
 #[serial(level2_terminal)]
 fn level2_style_frontmatter_block_quote_max_width_caps_wrap_width() {
-    // `style.block-quote.max-width: 50%` at --max-width 80 must wrap quoted
+    // `style.block-quote.max-width: 50%` at style.max-width=80 must wrap quoted
     // text under 40 visible columns. Block-quote lines are prefixed by the
     // `▐` indicator glyph.
     let body = r#"---
@@ -351,7 +351,7 @@ style:
 > This is a fairly long quoted paragraph that should wrap onto a second visible line once the frontmatter max-width cap forces the blockquote render width to half the page width.
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 80") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=80") else {
         return;
     };
 

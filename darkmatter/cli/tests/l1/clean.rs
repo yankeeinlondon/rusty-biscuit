@@ -1118,14 +1118,15 @@ fn test_clean_subcommand_save_verbose_after_subcommand_shows_visual_diff() {
 }
 
 #[test]
-fn test_save_shorthand_cleans_in_place_and_reports_delta() {
+fn test_clean_save_cleans_in_place_and_reports_delta() {
     let fixture =
-        CliProcessFixture::named("clean-test-save-shorthand-cleans-in-place-and-reports-delta");
+        CliProcessFixture::named("clean-test-clean-save-cleans-in-place-and-reports-delta");
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "# Hello\n\nIntro:\n- World\n").unwrap();
 
     fixture
         .command()
+        .arg("clean")
         .arg(tmp.path())
         .arg("--save")
         .assert()
@@ -1134,6 +1135,22 @@ fn test_save_shorthand_cleans_in_place_and_reports_delta() {
 
     let updated = std::fs::read_to_string(tmp.path()).unwrap();
     assert_eq!(updated, "# Hello\n\nIntro:\n\n- World\n");
+}
+
+/// The root `--save` shorthand is gone: it is an unknown argument, and the
+/// file is not touched.
+#[test]
+fn root_save_is_an_unknown_argument_that_writes_nothing() {
+    let fixture = CliProcessFixture::named("clean-root-save-is-unknown");
+    let path = fixture.write_file("cwd/doc.md", "# Hello\n\nIntro:\n- World\n");
+    for args in [vec!["doc.md", "--save"], vec!["--save", "doc.md"], vec!["render", "doc.md", "--save"]] {
+        let output = fixture.command().args(&args).output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("unexpected argument '--save'"), "{args:?}: {stderr}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+    }
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "# Hello\n\nIntro:\n- World\n");
 }
 
 #[test]

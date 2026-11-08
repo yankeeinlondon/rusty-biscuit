@@ -192,8 +192,8 @@ style:
 A side on its own changes only that side, so a component keeps whatever top
 and bottom padding it already had. To indent a component with no vertical
 padding, reset with `padding: 0` first, as above. The same keys work in
-`table`, `block-quote`, `code-block`, `disclosure`, `ul`, `ol`, `li`, `hr`, and
-the `local-style` buckets of `hyperlinks` and `images`. In HTML they become
+`table`, `block-quote`, `code-block`, `disclosure`, `ul`, `ol`, `li`, `hr`,
+`images`, and the `local-style` buckets of `hyperlinks` and `images`. In HTML they become
 `padding-*` CSS on the element; in a terminal they move the component inside
 the content width.
 
@@ -350,7 +350,7 @@ style:
         line-numbers: true    # false turns the gutter off
 ```
 
-Theme names are the ones `--list-themes` prints, in any case (`Base16-Ocean`,
+Theme names are the ones `md list-themes` prints, in any case (`Base16-Ocean`,
 `vs-dark`). `mode` chooses a code block's light or dark variant relative to the
 page: `inverse` (the default) gives a light panel on a dark page and the
 reverse, `same` follows the page, and `dark`/`light` pin one variant.
@@ -366,49 +366,26 @@ When a key is not set, Darkmatter decides it like this:
 
 An environment value that names no theme falls back to `one-half`. A theme set
 on one fence (`theme=dracula`) still wins over all of these for that block.
-The `--theme`, `--code-theme`, and `--line-numbers` CLI flags override these
-fields; a flag you leave out leaves the document's value. `page.code.mode` has
-no render flag.
+A style setter (`style.page.theme=github`) or a `--style` file overrides
+these fields; one you leave out leaves the document's value.
 
 ## CLI Overrides
 
-CLI layout flags win over matching frontmatter fields. The override is
-field-level, so this command keeps the document's `margin-top`, `margin-bottom`,
-and `max-width`, but replaces the left and right margins:
+Style setters and `--style` files win over matching frontmatter fields. The
+override is field-level, so this command keeps the document's `margin-top`,
+`margin-bottom`, and `max-width`, but replaces the left and right margins:
 
 ```sh
-md guide.md --mx 6
+md guide.md style.mx=6
 ```
 
-Common CLI overrides include:
+Any style key can be set this way; see
+[Styling from the command line](../cli/render.md#styling-from-the-command-line).
+The old layout flags (`--mx`, `--fill`, `--theme`, …) are gone; the
+[migration table](../cli/render.md#presentation-flags) gives the setter for each.
 
-| CLI Flag | Frontmatter It Overrides |
-| --- | --- |
-| `--margin`, `--mx`, `--my`, `--mt`, `--mb`, `--ml`, `--mr` | `style.page.margin-*` |
-| `--padding`, `--px`, `--py`, `--pt`, `--pb`, `--pl`, `--pr` | `style.page.padding-*` |
-| `--max-width` | `style.page.max-width` |
-| `--page-bg` | `style.page.background` |
-| `--alignment` | component alignment defaults |
-| `--align-tables`, `--align-images`, `--align-block-quotes` | matching component alignment |
-| `--align-lists`, `--align-ul`, `--align-ol`, `--align-li` | list alignment |
-| `--fill`, `--fill-tables`, `--fill-images`, `--fill-block-quotes` | matching component fill |
-| `--fill-lists`, `--fill-ul`, `--fill-ol`, `--fill-li` | list fill |
-| `--theme` | `style.page.theme` |
-| `--code-theme` | `style.page.code.theme` |
-| `--line-numbers` | `style.code-block.line-numbers` |
-
-Fill flags use this grammar:
-
-```text
-full
-pad=4
-indent=4
-max=80
-explicit=50%
-```
-
-Use frontmatter for defaults that belong to the document. Use CLI flags for a
-one-off rendering choice.
+Use frontmatter for defaults that belong to the document. Use setters or a
+`--style` file for a one-off rendering choice.
 
 ## Validation and Troubleshooting
 

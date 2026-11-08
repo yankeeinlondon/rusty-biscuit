@@ -5,16 +5,11 @@ use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Context, Result};
 use darkmatter::markdown::errors::as_block_error as as_darkmatter_block_error;
-use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter_cli::Cli;
-use darkmatter_cli::args::classify_render_args;
 use darkmatter::markdown::compose::RequestSnapshot;
-use darkmatter_cli::commands::{
-    CleanOptions, run_clean, run_subcommand, validate_subcommand_usage,
-};
+use darkmatter_cli::commands::{run_subcommand, validate_subcommand_usage};
 use darkmatter_cli::output::{stderr_terminal, stderr_text};
 use darkmatter_cli::request::{MdRequest, with_magic_roots};
-use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Initialize tracing subscriber for developer debug output.
@@ -187,22 +182,16 @@ fn run() -> Result<()> {
         init_tracing(cli.debug_level);
     }
 
-    // These print a fixed listing, which is no command's typed result.
-    if (cli.completions.is_some() || cli.list_themes) && cli.render.output.is_some() {
+    // This prints a fixed listing, which is no command's typed result.
+    if cli.completions.is_some() && cli.render.output.is_some() {
         Cli::command()
-            .error(clap::error::ErrorKind::ArgumentConflict, "`--output` does not apply to `--completions` or `--list-themes`")
+            .error(clap::error::ErrorKind::ArgumentConflict, "`--output` does not apply to `--completions`")
             .exit();
     }
 
     // Handle --completions first (no input needed)
     if let Some(shell) = cli.completions {
         print_completions(shell);
-        return Ok(());
-    }
-
-    // Handle --list-themes (no input needed)
-    if cli.list_themes {
-        list_themes();
         return Ok(());
     }
 
@@ -214,46 +203,11 @@ fn run() -> Result<()> {
 
     if cli.command.is_some() {
         validate_subcommand_usage(&cli)?;
-    } else if cli.save {
-        if !cli.render.deny.is_empty() {
-            Cli::command()
-                .error(clap::error::ErrorKind::ArgumentConflict, "`--deny` does not apply to `--save` (a clean)")
-                .exit();
-        }
-        let options = CleanOptions {
-            save: true,
-            indent: cli.render.indent,
-            verbose: cli.verbose > 0,
-            output: cli.render.output,
-            ..CleanOptions::default()
-        };
-        let input = classify_render_args(&cli.render.args, &cli.render.literal_args).map_err(|error| error.usage_error())?;
-        run_clean(input.input.as_ref(), &options, &cli, &request)?;
-        return Ok(());
-    } else if classify_render_args(&cli.render.args, &cli.render.literal_args).is_ok_and(|input| input.input.is_none())
-        && io::stdin().is_terminal()
-    {
-        Cli::command().print_help()?;
-        return Ok(());
     }
 
     run_subcommand(cli.command_or_render(), &cli, &request)?;
 
     Ok(())
-}
-
-/// Lists all available themes with descriptions.
-fn list_themes() {
-    println!("Available themes:\n");
-    for theme_pair in ThemePair::all() {
-        println!(
-            "  {:20} {}",
-            theme_pair.kebab_name(),
-            theme_pair.description(ColorMode::Dark)
-        );
-    }
-    println!("\nUse --theme <name> to set prose theme");
-    println!("Use --code-theme <name> to override code theme");
 }
 
 /// Prints shell completions setup instructions.

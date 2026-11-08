@@ -63,5 +63,6 @@ md compose doc.md --output json
 | [`hash`](../docs/cli/hash.md) | hash a document, store the hash, and report drift |
 | [`schema`](../docs/cli/schema.md) | validate against a schema, detect one, and look up the language |
 | [`code-block`](../docs/cli/code-block.md) | render one code block |
+| [`list-themes`](../docs/cli/list-themes.md) | list the prose and code themes a style can name |
 
 For programmatic access, see [the Darkmatter library](../lib/README.md).

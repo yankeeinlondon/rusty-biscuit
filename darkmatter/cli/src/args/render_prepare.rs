@@ -50,4 +50,9 @@ impl PreparedRenderOptions {
             output: options.output,
         })
     }
+
+    /// The input as a data output's `file` names it: `None` for stdin.
+    pub fn input_file(&self) -> Option<String> {
+        self.input.as_ref().filter(|path| path.to_str() != Some("-")).map(|path| path.display().to_string())
+    }
 }

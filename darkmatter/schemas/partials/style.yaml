@@ -153,6 +153,9 @@ types:
             alignment: *style-alignment
             color: *style-color
             bg-color: *style-color
+            padding: *style-length
+            padding-left: *style-length
+            padding-right: *style-length
             local-style: *style-common
 
         hr:

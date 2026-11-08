@@ -20,5 +20,6 @@ mod level2_layout_dimensions;
 mod level2_ordered_lists;
 mod level2_path_completion;
 mod level2_reference_report;
+mod level2_render_no_input;
 mod level2_schema_about;
 mod level2_schema_validate;

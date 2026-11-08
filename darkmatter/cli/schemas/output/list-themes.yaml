@@ -1,0 +1,48 @@
+# The themes in their canonical order. A bare array is judged under `value`,
+# as TOML writes it. A result with a run diagnostic is the second arm's object.
+$schema:
+  - value: theme[](required) -> every theme, in canonical order
+  # A run with a diagnostic, or a failure before any result existed.
+  - outcome: enum(success,failure;required)
+    diagnostics: diagnostic[](required)
+    value: theme[] -> null when no result existed
+types:
+    theme:
+        name: string(required) -> the kebab-case name `style.page.theme` and `style.page.code.theme` take
+        description: string(required) -> the dark variant's description
+    diagnostic:
+        code: string(required) -> stable code, e.g. dm.output.fractional_width
+        severity: enum(info,warning,error;required)
+        message: string(required)
+        source: source -> null when no file is known
+        expected_type: string
+        actual_type: string
+        span: span
+        iteration_path: iteration-step[](required)
+        reason: string -> e.g. "file not found"
+        construct: string -> e.g. "hyperlink", "::code"
+        reference: string -> the reference as written
+        failure: string -> file-reference failure class, e.g. no-match
+        included_via: trail-step[] -> outermost first
+        data_location: data-location -> where in a loaded data file the problem is; dm.data.malformed and dm.data.contract_mismatch only
+    source:
+        file: string -> null for stdin
+        line: number -> 1-based authored line; null when unknown
+        column: number -> 1-based authored column, in characters; null when unknown
+        section: string -> composed anchor slug of the innermost heading at or before the problem
+        inserted: boolean -> true when an expression, shell step, or replace value created the reference
+    span:
+        start: number(required)
+        end: number(required)
+    iteration-step:
+        collection: string(required)
+        position: unknown(required) -> a number for an index, a string for a key
+    trail-step:
+        file: string(required)
+        line: number -> authored line of the directive; null when the parent was built in memory
+    data-location:
+        file: string(required) -> the resolved data file (portable path) or URL
+        pointer: string -> JSON Pointer of the offending value, e.g. /0; absent when the parser proves none
+        line: number -> 1-based line in the data
+        column: number -> 1-based column in the data, in characters
+        byte_offset: number -> zero-based byte offset of invalid UTF-8; no line or column accompanies it

@@ -63,16 +63,6 @@ pub enum MetaTag {
     },
 }
 
-/// Field-level CLI overrides for bespoke style knobs.
-///
-/// Each `true` value means the corresponding frontmatter field must be ignored
-/// because a CLI flag already claimed it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct BespokeStyleOverrides {
-    /// `--code-theme` was supplied; skip `style.page.code.theme`.
-    pub code_theme: bool,
-}
-
 /// Which page assets a page build may read, decided by its output target.
 ///
 /// Only a browser-backed target (HTML, MarkdownPlus) reads a local
@@ -166,7 +156,7 @@ impl StyleAssetResolver {
 ///
 /// This is the integration point for knobs that do not fit the standard
 /// page/component layout and color maps: `style.page.stylesheet`,
-/// `style.page.meta`, `style.page.code.theme` (unless `overrides` claims it),
+/// `style.page.meta`, `style.page.code.theme`,
 /// and the hyperlink and image local styles.
 ///
 /// `assets` decides whether a stylesheet is read (see
@@ -184,12 +174,11 @@ impl StyleAssetResolver {
 pub fn apply_bespoke_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: BespokeStyleOverrides,
     assets: StyleAssetResolver,
     context: &FileResolutionContext,
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let page = apply_stylesheet(page, style, assets, context)?;
-    apply_bespoke_knobs(page, style, overrides)
+    apply_bespoke_knobs(page, style)
 }
 
 /// Resolves `style.page.stylesheet`, if set, onto `page`.
@@ -212,7 +201,6 @@ pub(crate) fn apply_stylesheet(
 pub(crate) fn apply_bespoke_knobs(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: BespokeStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let mut page = page;
 
@@ -226,10 +214,7 @@ pub(crate) fn apply_bespoke_knobs(
             }
         }
 
-        // Code theme — CLI takes precedence over frontmatter.
-        if !overrides.code_theme
-            && let Some(theme) = page_style.code.as_ref().and_then(|c| c.theme)
-        {
+        if let Some(theme) = page_style.code.as_ref().and_then(|c| c.theme) {
             page = page.with_page_code_theme(theme);
         }
     }
@@ -619,12 +604,6 @@ mod tests {
     }
 
     #[test]
-    fn bespoke_style_overrides_default_is_false() {
-        let overrides = BespokeStyleOverrides::default();
-        assert!(!overrides.code_theme);
-    }
-
-    #[test]
     fn apply_bespoke_style_returns_page_unchanged_when_no_page_block() {
         use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
@@ -636,7 +615,6 @@ mod tests {
         let result = apply_bespoke_style(
             page.clone(),
             &style,
-            BespokeStyleOverrides::default(),
             StyleAssetResolver::passive(),
             &scratch(),
         )
@@ -888,7 +866,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), browser(), &context)
+        let page = apply_bespoke_style(page, &style, browser(), &context)
             .unwrap();
 
         assert!(page.stylesheet().is_some());
@@ -917,36 +895,10 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
 
         assert_eq!(page.page_code_theme(), Some(&ThemePair::Dracula));
-    }
-
-    #[test]
-    fn apply_bespoke_style_code_theme_cli_override_skips_frontmatter() {
-        use biscuit_terminal::terminal::Terminal;
-        use crate::layout::DarkmatterPage;
-        use crate::markdown::highlighting::ThemePair;
-        use crate::style::schema::{PageStyle, StyleFrontmatter};
-
-        let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term);
-        let style = StyleFrontmatter {
-            page: Some(PageStyle {
-                code: Some(crate::style::schema::CodeStyle {
-                    theme: Some(ThemePair::Dracula),
-                    ..Default::default()
-                }),
-                ..PageStyle::default()
-            }),
-            ..StyleFrontmatter::default()
-        };
-
-        let overrides = BespokeStyleOverrides { code_theme: true };
-
-        let page = apply_bespoke_style(page, &style, overrides, StyleAssetResolver::passive(), &scratch()).unwrap();
-        assert!(page.page_code_theme().is_none(), "CLI override should skip frontmatter code theme");
     }
 
     // ---------- Phase 4: hyperlink tests ----------
@@ -1022,7 +974,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let err = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap_err();
         assert_eq!(
             err,
@@ -1051,7 +1003,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let err = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap_err();
         assert_eq!(
             err,
@@ -1085,7 +1037,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
 
         assert_eq!(
@@ -1123,7 +1075,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[link](https://example.com)".into();
         let html = page.render_to_browser(&md).unwrap();
@@ -1165,7 +1117,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[local](./file.md) and [remote](https://example.com)".into();
         let html = page.render_to_browser(&md).unwrap();
@@ -1213,7 +1165,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown =
             "[x](https://example.com '{ style: \"color: green\" }')".into();
@@ -1261,7 +1213,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[link](https://example.com)".into();
         let output = page.render(&md).unwrap();
@@ -1304,7 +1256,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[local](./file.md)".into();
         let output = page.render(&md).unwrap();
@@ -1349,7 +1301,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let err = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap_err();
         assert_eq!(
             err,
@@ -1383,7 +1335,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
 
         assert_eq!(
@@ -1421,7 +1373,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![alt](./local.png)".into();
         let html = page.render_to_browser(&md).unwrap();
@@ -1457,7 +1409,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![alt](https://example.com/remote.png)".into();
         let html = page.render_to_browser(&md).unwrap();
@@ -1493,7 +1445,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![alt](./local.png)".into();
         let output = page.render(&md).unwrap();
@@ -1534,7 +1486,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[hi](https://example.com)".into();
         let output = page.render(&md).unwrap();
@@ -1570,7 +1522,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[abcdefghij](https://example.com)".into();
         let output = page.render(&md).unwrap();
@@ -1611,7 +1563,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[ab](https://example.com)".into();
         let output = page.render(&md).unwrap();
@@ -1647,7 +1599,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[x](https://example.com)".into();
         let err = page.render(&md).unwrap_err();
@@ -1682,7 +1634,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![alt](./local.png)".into();
         let err = page.render(&md).unwrap_err();
@@ -1717,7 +1669,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![a](./local.png)".into();
         let output = page.render(&md).unwrap();
@@ -1794,7 +1746,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
+        let page = apply_bespoke_style(page, &style, StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![alt](https://example.com/remote.png)".into();
         let output = page.render(&md).unwrap();

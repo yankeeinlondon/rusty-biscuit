@@ -334,7 +334,15 @@ pub struct StyleProblem {
 
 impl fmt::Display for StyleProblem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)?;
+        // A schema message (`"abc" is not valid ...`) names no property; a
+        // setter's argument may spell a shorthand, and a file's span is only
+        // a line, so the canonical path is always said.
+        let property = format!("style.{}", self.path);
+        if self.path.is_empty() || self.message.contains(&property) {
+            write!(f, "{}", self.message)?;
+        } else {
+            write!(f, "`{property}`: {}", self.message)?;
+        }
         let Some(origin) = &self.origin else {
             return Ok(());
         };
@@ -839,10 +847,38 @@ fn admit_pass(view: &Value, schema: &EffectiveSchema, admission: &mut Admission)
                 unknown.push(key);
                 unknown
             }));
+        } else if let undeclared @ [_, ..] = undeclared_members(view, &path, schema).as_slice() {
+            // A union's object arm (`table.border`) fails as a whole value, never
+            // as an unknown key; its undeclared members are unknown keys, and
+            // [`admit`]'s next pass judges what remains.
+            admission.unknown.extend(undeclared.iter().cloned());
         } else {
             admission.problems.push((path, problem.code.diagnostic_code(), problem.message));
         }
     }
+}
+
+/// The members of the object at `path` in `view` that the schema declares at
+/// no arm of its definition.
+fn undeclared_members(view: &Value, path: &[String], schema: &EffectiveSchema) -> Vec<Segments> {
+    let Some(Value::Object(members)) = path.iter().try_fold(view, |value, key| value.get(key)) else {
+        return Vec::new();
+    };
+    let mut frontmatter = Map::new();
+    frontmatter.insert("style".to_string(), view.clone());
+    let frontmatter = Value::Object(frontmatter);
+    members
+        .keys()
+        .filter(|key| {
+            let steps: Vec<PathStep<'_>> = std::iter::once("style")
+                .chain(path.iter().map(String::as_str))
+                .chain(std::iter::once(key.as_str()))
+                .map(PathStep::Key)
+                .collect();
+            declared_shape(schema, &frontmatter, &steps, None).is_none()
+        })
+        .map(|key| path.iter().cloned().chain(std::iter::once(key.clone())).collect())
+        .collect()
 }
 
 /// Fails a layer that sets both `width` and `max-width` of one component.

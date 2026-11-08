@@ -17,7 +17,8 @@ mod delta;
 mod frontmatter;
 mod graph;
 mod hash;
-mod render;
+pub mod list_themes;
+pub mod render;
 pub mod schema;
 mod toc;
 mod trigger_findings;
@@ -30,17 +31,14 @@ use hash::{HashFlags, run_hash};
 
 pub use clean::{CleanOptions, CleanSchemaFlags, run_clean};
 pub use crate::output::report::ReportedExit;
-use render::run_render;
+pub use render::{dispatch_render, run_render};
 
 /// Validates that top-level CLI options are not combined with subcommands.
 ///
 /// Every root render argument counts, setters included; shared controls
 /// (`--width`, `-v`, `--debug`, `--magic-root`) do not.
 pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
-    let mut conflicts = cli.render.has_explicit_arguments();
-    if cli.save {
-        conflicts.push("--save");
-    }
+    let conflicts = cli.render.has_explicit_arguments();
 
     if conflicts.is_empty() {
         Ok(())
@@ -57,7 +55,7 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
 #[instrument(skip_all)]
 pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Result<()> {
     match command {
-        CliCommand::Render(options) => run_render(&options, cli, request)?,
+        CliCommand::Render(options) => dispatch_render(&options, cli, request, &OutputEnvironment::detect())?,
         CliCommand::Clean {
             input,
             save,
@@ -182,6 +180,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 None => result?,
             }
         }
+        CliCommand::ListThemes { output } => list_themes::run_list_themes(output, cli)?,
         CliCommand::Toc { input, output } => toc::run_toc(input.as_ref(), output, cli, request)?,
         CliCommand::Delta { base, updated, output } => delta::run_delta(&base, &updated, output, cli, request)?,
         CliCommand::Get { input, props, output, compact } => run_get(&input, &props, output, compact, cli, request)?,

@@ -6,7 +6,10 @@
 //! error) whose records [`crate::output::report::failure_diagnostics`] finds:
 //! a file reference that does not resolve keeps its
 //! [`DocumentArgumentError`] (and so its `failure:` class) in the chain, and
-//! every other failure is a [`ClassifiedFailure`] carrying its records.
+//! every other failure is a [`ClassifiedFailure`] carrying its records. In
+//! [`prepare_cli_style_inputs`] and [`prepare_render_style`] those records are
+//! [located](ClassifiedFailure::located): a record about a style file or a
+//! setter never takes the Markdown document's path.
 //!
 //! ## Reading a `--style` argument
 //!
@@ -32,16 +35,17 @@ use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{DataFormat, FileReference, FileReferenceError, FileReferenceKind, FileType};
+use biscuit_file::{DataFormat, FileReference, FileReferenceError, FileReferenceKind, FileResolutionContext, FileType};
 use color_eyre::eyre::{Report, Result, WrapErr, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::data::{DataError, DataSourceIdentity, MALFORMED_CODE, parse_local_document};
 use darkmatter::markdown::compose::expression::{DataLocation, Diagnostic, DiagnosticSource, ReferenceDetails, Severity};
+use darkmatter::markdown::compose::policy::{STYLE_DEPRECATED_CODE, STYLE_UNKNOWN_KEY_CODE};
 use darkmatter::markdown::compose::report_diagnostics::INPUT_READ_CODE;
 use darkmatter::markdown::schemas::{EffectiveSchema, InvalidTriggerFinding};
 use darkmatter::style::layer::{STYLE_INVALID_ROOT_CODE, STYLE_INVALID_SETTER_CODE};
 use darkmatter::style::{
-    PreparedStyle, StyleDiagnostic, StyleLayer, StyleOrigin, StylePreparationError, StylePreparationPolicy, StyleSetter,
+    PreparedStyle, StyleDiagnostic, build_yaml_position_map, StyleLayer, StyleOrigin, StylePreparationError, StylePreparationPolicy, StyleSetter,
     StyleSourceKind, StyleSpan, prepare_style_layers,
 };
 use serde_json::Value;
@@ -50,7 +54,7 @@ use simplified_schema::coercion::PathSegment;
 use simplified_schema::completion::PathStep;
 
 use crate::args::RawStyleSetter;
-use crate::commands::schema::validate::select_document_schema;
+use crate::commands::schema::validate::{SelectedDocumentSchema, select_document_schema};
 use crate::io::{DocumentArgumentError, OpenedArgument, open_argument};
 use crate::output::output_diagnostic;
 use crate::output::report::ClassifiedFailure;
@@ -207,7 +211,7 @@ pub fn setter_layer(setters: &[RawStyleSetter], request: &MdRequest) -> Result<S
     }
     if !failures.is_empty() {
         let message = failures.iter().map(|failure| failure.message.as_str()).collect::<Vec<_>>().join("; ");
-        return Err(ClassifiedFailure::report(eyre!(message), failures));
+        return Err(ClassifiedFailure::located(eyre!(message), failures));
     }
     Ok(StyleLayer::setters(parsed, request.launch_context()?.clone()))
 }
@@ -256,16 +260,26 @@ pub fn prepare_cli_style_inputs(
     setters: &[RawStyleSetter],
     request: &MdRequest,
 ) -> Result<CliStyleInputs> {
-    let selected = select_document_schema(document, opened, request)?;
+    let selected = match select_document_schema(document, opened, request) {
+        Ok(selected) => selected,
+        // Only a CLI layer needs the schema's verdict. A document-only render
+        // keeps rendering with the built-in style descriptor, as it did before
+        // rendering selected a schema; `md schema validate` reports the schema.
+        Err(error) if styles.is_empty() && setters.is_empty() => {
+            tracing::debug!(error = %format!("{error:#}"), "no effective schema; using the built-in style descriptor");
+            SelectedDocumentSchema::none()
+        }
+        Err(error) => return Err(error),
+    };
     let mut layers = Vec::with_capacity(styles.len() + 1);
     let mut files = HashMap::new();
     for style in styles {
-        let loaded = load_style_file(style, request)?;
+        let loaded = load_style_file(style, request).map_err(ClassifiedFailure::located_from)?;
         files.insert(loaded.layer.source().to_string(), loaded.path);
         layers.push(loaded.layer);
     }
     if !setters.is_empty() {
-        layers.push(setter_layer(setters, request)?);
+        layers.push(setter_layer(setters, request).map_err(ClassifiedFailure::located_from)?);
     }
     Ok(CliStyleInputs {
         schema: selected.schema,
@@ -286,8 +300,33 @@ impl CliStyleInputs {
     /// with its code: `dm.schema.*` or `dm.style.*`) followed by the warnings
     /// gathered on the way.
     pub fn prepare(&self, document_layer: Option<StyleLayer>, policy: StylePreparationPolicy) -> Result<PreparedStyle> {
+        self.prepare_layers(document_layer, policy).map_err(|error| self.failure(&error))
+    }
+
+    fn prepare_layers(
+        &self,
+        document_layer: Option<StyleLayer>,
+        policy: StylePreparationPolicy,
+    ) -> std::result::Result<PreparedStyle, StylePreparationError> {
         let layers: Vec<StyleLayer> = document_layer.into_iter().chain(self.layers.iter().cloned()).collect();
-        prepare_style_layers(&layers, self.schema.as_ref(), policy).map_err(|error| self.failure(&error))
+        prepare_style_layers(&layers, self.schema.as_ref(), policy)
+    }
+
+    /// Whether any `--style` file or setter was given.
+    pub fn has_cli_layers(&self) -> bool {
+        !self.layers.is_empty()
+    }
+
+    /// [`Self::warnings`], each marked with whether the document's own
+    /// `style:` raised it.
+    fn warning_records(&self, diagnostics: &[StyleDiagnostic]) -> Vec<StyleWarningRecord> {
+        diagnostics
+            .iter()
+            .filter_map(|diagnostic| {
+                let record = self.warning(diagnostic)?;
+                Some(StyleWarningRecord { from_document: diagnostic.origin.kind == StyleSourceKind::Document, record })
+            })
+            .collect()
     }
 
     /// The warnings of a prepared style as run records; a notice with no
@@ -307,7 +346,7 @@ impl CliStyleInputs {
             })
             .collect();
         records.extend(error.diagnostics.iter().filter_map(|diagnostic| self.warning(diagnostic)));
-        ClassifiedFailure::report(eyre!("{error}"), records)
+        ClassifiedFailure::located(eyre!("{error}"), records)
     }
 
     fn warning(&self, diagnostic: &StyleDiagnostic) -> Option<Diagnostic> {
@@ -332,6 +371,88 @@ impl CliStyleInputs {
             None => DiagnosticSource::file_only(file),
         })
     }
+}
+
+/// One style warning a render reports.
+#[derive(Debug, Clone)]
+pub struct StyleWarningRecord {
+    /// The document's own `style:` raised it. A source output (Markdown, or
+    /// a data output's `document`) builds no page, so only a data output
+    /// reports these; a CLI layer's warnings are always reported.
+    pub from_document: bool,
+    pub record: Diagnostic,
+}
+
+/// A render's effective style: the document's `style:` under each `--style`
+/// file and the setters.
+#[derive(Debug, Clone)]
+pub struct RenderStyle {
+    pub style: PreparedStyle,
+    /// The warnings, by layer in precedence order.
+    pub warnings: Vec<StyleWarningRecord>,
+}
+
+/// The document's own `style:` as the bottom layer, named by `path` (the
+/// opened file; `None` for stdin) and in `context` (the opened document's,
+/// or the launch context for stdin), with its keys' positions as document
+/// lines.
+pub fn document_style_layer(document: &Markdown, path: Option<&Path>, context: FileResolutionContext) -> StyleLayer {
+    let frontmatter = document.frontmatter();
+    let value = frontmatter.as_map().get("style").cloned().unwrap_or(Value::Null);
+    // The position map counts the YAML block's own lines; a frontmatter block
+    // always opens with the `---` on the document's first line.
+    let positions = frontmatter.raw_source().map(|raw| {
+        build_yaml_position_map(raw)
+            .into_iter()
+            .map(|(key, span)| (key, StyleSpan { line: span.line + 1, ..span }))
+            .collect()
+    });
+    let identity = path.map_or_else(|| "<stdin>".to_string(), biscuit_file::to_portable_string);
+    StyleLayer::document(value, identity, context, positions)
+}
+
+/// Merges `document_layer` and `inputs` under `policy`, for a render that
+/// `builds_page` (terminal, plain, HTML, MarkdownPlus) or prints its source
+/// (Markdown and the data family).
+///
+/// A source output never reads the document's style, so a problem in the
+/// document's own `style:` does not stop it; a denied warning (`--deny
+/// style`) still does, and every CLI layer is checked on every target.
+/// `KnownButInactive` notices go to the debug log.
+///
+/// ## Errors
+///
+/// A located [`ClassifiedFailure`] holding every problem.
+pub fn prepare_render_style(
+    inputs: &CliStyleInputs,
+    document_layer: StyleLayer,
+    policy: StylePreparationPolicy,
+    builds_page: bool,
+) -> Result<RenderStyle> {
+    let (style, document_warnings) = match inputs.prepare_layers(Some(document_layer), policy) {
+        Ok(style) => (style, Vec::new()),
+        Err(error) if !builds_page && error.problems.iter().all(is_ignored_by_source_output) => {
+            // The CLI layers alone, so their own problems and warnings are
+            // still found; the document's warnings come from the first pass.
+            let style = inputs.prepare_layers(None, policy).map_err(|error| inputs.failure(&error))?;
+            let document = error.diagnostics.into_iter().filter(|diagnostic| diagnostic.origin.kind == StyleSourceKind::Document);
+            (style, document.collect())
+        }
+        Err(error) => return Err(inputs.failure(&error)),
+    };
+    let diagnostics: Vec<StyleDiagnostic> = document_warnings.into_iter().chain(style.diagnostics().iter().cloned()).collect();
+    for diagnostic in diagnostics.iter().filter(|diagnostic| diagnostic.code.is_none()) {
+        tracing::info!(path = %diagnostic.warning.path, "style key parsed but not yet wired");
+    }
+    Ok(RenderStyle { warnings: inputs.warning_records(&diagnostics), style })
+}
+
+/// A document's own problem that a source output, which never reads its
+/// style, does not report; a warning `--deny` made an error is not one.
+fn is_ignored_by_source_output(problem: &darkmatter::style::StyleProblem) -> bool {
+    problem.origin.as_ref().is_some_and(|origin| origin.kind == StyleSourceKind::Document)
+        && problem.code != STYLE_UNKNOWN_KEY_CODE
+        && problem.code != STYLE_DEPRECATED_CODE
 }
 
 /// The text a warning adds to name its layer, as [`StyleProblem`]'s display
@@ -447,7 +568,7 @@ fn kind_name(value: &Value) -> &'static str {
 fn refusal(argument: &str, message: String) -> Report {
     let mut record = output_diagnostic(INPUT_READ_CODE, Severity::Error, &message);
     record.reference_details = Some(ReferenceDetails { reference: Some(argument.to_string()), ..ReferenceDetails::default() });
-    ClassifiedFailure::report(eyre!(message), vec![record])
+    ClassifiedFailure::located(eyre!(message), vec![record])
 }
 
 fn unsupported(argument: &str, file: &str) -> Report {
@@ -463,7 +584,7 @@ fn located_failure(argument: &str, path: &Path, message: String) -> Report {
     let mut record = output_diagnostic(STYLE_INVALID_ROOT_CODE, Severity::Error, &message);
     record.source = Some(DiagnosticSource::file_only(Some(PathBuf::from(biscuit_file::to_portable_string(path)))));
     record.reference_details = Some(ReferenceDetails { reference: Some(argument.to_string()), ..ReferenceDetails::default() });
-    ClassifiedFailure::report(eyre!(message), vec![record])
+    ClassifiedFailure::located(eyre!(message), vec![record])
 }
 
 /// A file that is not UTF-8 or not valid in its format: `dm.data.malformed`,
@@ -491,7 +612,7 @@ fn malformed(argument: &str, path: &Path, error: &DataError) -> Report {
             byte_offset: location.byte_offset,
         });
     }
-    ClassifiedFailure::report(eyre!(message), vec![record])
+    ClassifiedFailure::located(eyre!(message), vec![record])
 }
 
 #[cfg(test)]
