@@ -23,7 +23,9 @@
 //! those can be re-checked cheaply. Failures are cached like successes, with
 //! their dependencies, so creating a missing file or repairing a bad one is
 //! a miss; a failure that depends on grants (a read needing approval or
-//! denied) or a cancellation is never cached. Nothing is written to disk.
+//! denied, an invalid grant store), on the resolution in progress (a
+//! `dm.schema.slot_cycle`), or a cancellation is never cached. Nothing is
+//! written to disk.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -175,7 +177,10 @@ impl InputCheck {
 fn current_hash(path: &Path) -> Option<[u8; 32]> {
     match simplified_schema::resolve::buffers::text(path) {
         Some(text) => Some(biscuit_hash::blake3_hash_bytes(text.as_bytes())),
-        None => std::fs::read(path).ok().map(|bytes| biscuit_hash::blake3_hash_bytes(&bytes)),
+        None => {
+            crate::note_work!(SlotInputRehash);
+            std::fs::read(path).ok().map(|bytes| biscuit_hash::blake3_hash_bytes(&bytes))
+        }
     }
 }
 
@@ -232,7 +237,8 @@ pub(crate) fn clear() {
 }
 
 /// Whether a failed resolution may be cached: not when it depends on the
-/// grants in force or was canceled.
+/// grants in force (including an invalid grant store), on the resolutions in
+/// progress on this thread (a cycle), or was canceled.
 pub(crate) fn caches_failure(error: &SlotResolutionError) -> bool {
     match error {
         SlotResolutionError::Failed(failed) => failed.iter().all(|(_, failure)| {

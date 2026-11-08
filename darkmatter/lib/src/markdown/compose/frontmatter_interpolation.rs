@@ -739,7 +739,8 @@ pub(crate) enum FrontmatterPass<'a> {
 /// `provenance`. A data leaf is never scanned, so a seed may contain `{{`.
 ///
 /// `exclude_keys` names top-level keys deferred from every compose-time
-/// resolution pass (DM1). An excluded key is neither classified as seed nor
+/// resolution pass (DM1); `$schema` is always excluded, because its slots are
+/// the slot resolver's to evaluate. An excluded key is neither classified as seed nor
 /// templated — its value survives raw and is invisible to other keys'
 /// resolution. A non-excluded templated key that references an excluded key
 /// is rejected during dependency analysis (DM1a), except through a bare read
@@ -862,6 +863,18 @@ fn record_missing_runtime_context(first: &mut Option<MarkdownError>, error: Mark
     }
 }
 
+/// `exclude_keys` with the document's `$schema` key added.
+fn with_schema_excluded(exclude_keys: &HashSet<String>) -> std::borrow::Cow<'_, HashSet<String>> {
+    if exclude_keys.contains(SCHEMA_KEY) {
+        return std::borrow::Cow::Borrowed(exclude_keys);
+    }
+    let mut excluded = exclude_keys.clone();
+    excluded.insert(SCHEMA_KEY.to_string());
+    std::borrow::Cow::Owned(excluded)
+}
+
+const SCHEMA_KEY: &str = "$schema";
+
 /// Shared implementation behind [`interpolate_frontmatter_located`] and
 /// [`interpolate_frontmatter_best_effort`]. When `best_effort` is `true`, a
 /// per-key rewrite error is skipped (the key is left unresolved) rather than
@@ -880,6 +893,11 @@ fn interpolate_frontmatter_impl(
     name_coercion_keys: &[String],
     mut before_eval: BeforeEval<'_>,
 ) -> Result<FrontmatterInterpolationReport, LocatedFrontmatterError> {
+    // A `$schema` subtree is schema syntax, and its `{{ … }}` are slots that
+    // only the slot resolver evaluates, after their reads are approved;
+    // interpolating it here would read a slot's targets ungated and turn its
+    // lists into text.
+    let exclude_keys = &with_schema_excluded(exclude_keys);
     // Pass 1 first decodes every authored whole-leaf literal token, so no scan
     // below ever sees one. Excluded (event-time) keys keep their raw text for
     // the caller that evaluates them.

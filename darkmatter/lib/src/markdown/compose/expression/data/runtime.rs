@@ -413,6 +413,11 @@ impl<S, B> DataMemo<S, B> {
         outcome.map(|value| BindEntry { value, from_memo: !ran })
     }
 
+    /// Drops the prepared contract under `key`, so the next caller prepares it.
+    pub(crate) fn forget_contract(&self, key: &str) {
+        self.lock().contracts.remove(key);
+    }
+
     /// The prepared contract under `key`, running `prepare` only when no entry
     /// holds it.
     ///
@@ -615,40 +620,57 @@ impl DataRuntime {
         self.inner.memo.bind(source, contract_key, binder)
     }
 
-    /// The contract `written` describes in the document context `document`,
+    /// The contract `written` describes in `ctx`'s document context,
     /// prepared once per context identity and text. The schema files the
     /// preparation read (imports at any depth, including the one that made
     /// it fail) are observed with the hash of the text read, and every other
     /// location an import probed (a missing import) as a missing probe,
     /// whether it succeeds or fails. A memo hit observes the same again.
     ///
+    /// In a schema slot, `ctx`'s gate judges each schema file before it is
+    /// opened. A memo hit opens nothing; the inputs it observes are judged by
+    /// the dispatch's check of what the call observed.
+    ///
     /// ## Errors
     ///
-    /// As [`prepare_contract`](super::contract::prepare_contract).
+    /// As [`prepare_contract`](super::contract::prepare_contract), and
+    /// [`ExpressionError::SlotReadRefused`](crate::markdown::compose::expression::ExpressionError::SlotReadRefused)
+    /// for the first import a slot may not read; that preparation is not kept.
     pub(crate) fn prepare_contract(
         &self,
         written: &str,
-        document: &biscuit_file::FileResolutionContext,
-    ) -> Result<Arc<PreparedContract>, Arc<DataError>> {
+        ctx: &crate::markdown::compose::expression::ResolutionContext,
+    ) -> Result<Arc<PreparedContract>, crate::markdown::compose::expression::ExpressionError> {
+        let document = &ctx.file_context();
         let identity = crate::markdown::compose::file_resolution_context_identity(document);
         // A contract prepared inside a slot's evaluation may resolve a
         // template through that slot's session, so it is kept apart.
         let session = crate::markdown::schemas::slots::session::active_session_id()
             .map_or_else(String::new, |session| format!("\0slots:{session}"));
         let key = format!("{identity:016x}\0{written}{session}");
+        let mut refused = None;
         let prepared = self.inner.memo.contract(key.clone(), || {
-            let ((prepared, texts), observed) = simplified_schema::resolve::observed::collect(|| {
-                simplified_schema::resolve::buffers::recording(|| super::contract::prepare_contract(written, document))
+            let prepare = || super::contract::prepare_contract(written, document);
+            let (((prepared, refusal), texts), observed) = simplified_schema::resolve::observed::collect(|| {
+                simplified_schema::resolve::buffers::recording(|| ctx.gate_schema_reads(super::load::FUNCTION, prepare))
             });
             // Kept per key, before the memo slot is filled, so every caller
             // the slot answers (one waiting on this preparation included)
             // observes the same inputs.
             self.contract_observations_guard().insert(key.clone(), Arc::new(contract_observations(&observed, &texts)));
+            refused = refusal;
             prepared
         });
+        if let Some(refusal) = refused {
+            // A refusal is this gate's answer, not the contract's: a later
+            // caller with other grants prepares it again.
+            self.inner.memo.forget_contract(&key);
+            self.contract_observations_guard().remove(&key);
+            return Err(refusal);
+        }
         let observations = self.contract_observations_guard().get(&key).cloned();
         observations.iter().flat_map(|observations| observations.iter()).cloned().for_each(|observation| self.observe(observation));
-        prepared
+        prepared.map_err(Into::into)
     }
 
     fn contract_observations_guard(&self) -> MutexGuard<'_, HashMap<String, Arc<Vec<Observation>>>> {
@@ -890,10 +912,10 @@ mod tests {
     fn a_contract_is_prepared_once_per_context_and_records_its_imports() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("types.yaml"), "kind: schema\ntypes:\n  Port: number\n").unwrap();
-        let document = biscuit_file::FileResolutionContext::new(dir.path());
-        let runtime = DataRuntime::new();
+        let ctx = crate::markdown::compose::expression::ResolutionContext::new(biscuit_file::FileResolutionContext::new(dir.path()));
+        let runtime = ctx.data.clone();
         for _ in 0..2 {
-            runtime.prepare_contract("{ port: Port@./types.yaml }[]", &document).unwrap();
+            runtime.prepare_contract("{ port: Port@./types.yaml }[]", &ctx).unwrap();
         }
         let stats = runtime.stats();
         assert_eq!((stats.contract_preparations, stats.contract_hits), (1, 1));

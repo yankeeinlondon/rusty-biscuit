@@ -601,6 +601,13 @@ pub(super) fn find_index_endpoint(
         .map(|(base, _, _)| base)
         .unwrap_or(input_stem);
 
+    // A slot's gate judges the folder before it is enumerated; a missing
+    // folder stays an existence probe, answered below.
+    ctx.authorize_slot_read(name, ReadKind::Listing, || {
+        parent
+            .is_dir()
+            .then(|| crate::markdown::compose::expression::read_gate::ReadLocation::Local(parent.to_path_buf()))
+    })?;
     let listed = crate::markdown::compose::expression::data::DataSourceIdentity::local(parent).read_set_entry();
     let entries = match std::fs::read_dir(parent) {
         Ok(entries) => entries,
@@ -1212,6 +1219,15 @@ pub fn find_files_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Va
     // A URL keeps its `//`, so the glob reference rejects it as remote.
     let pattern = if is_remote_url(raw) { raw.to_string() } else { normalize_path_arg(raw) };
     let globs = biscuit_file::GlobReference::new([pattern]).map_err(glob_error)?;
+    // A slot's gate judges each folder the pattern lists below before it is
+    // enumerated.
+    if ctx.slot_gate.is_some() {
+        for root in glob_listing_roots(raw, ctx) {
+            ctx.authorize_slot_read("find_files", ReadKind::Listing, || {
+                Some(crate::markdown::compose::expression::read_gate::ReadLocation::Local(root))
+            })?;
+        }
+    }
     let listing = globs.list_files(&ctx.file_context()).map_err(glob_error)?;
     ctx.glob_warnings.record("interpolation", &listing);
     // The pattern names no single folder, so the listing is observed by the
@@ -1228,6 +1244,15 @@ pub fn find_files_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Va
             .map(|path| Value::String(biscuit_file::to_portable_string(path)))
             .collect(),
     ))
+}
+
+/// The folders `find_files` lists below for the pattern `raw` in `ctx`:
+/// what a slot's gate judges for that listing, before it runs and again for
+/// its observation (which names the pattern as written). Empty when the
+/// pattern cannot be rooted in `ctx`.
+pub(crate) fn glob_listing_roots(raw: &str, ctx: &ResolutionContext) -> Vec<PathBuf> {
+    let pattern = if is_remote_url(raw) { raw.to_string() } else { normalize_path_arg(raw) };
+    biscuit_file::GlobReference::new([pattern]).map(|globs| globs.roots(&ctx.file_context())).unwrap_or_default()
 }
 
 /// A value read from another document's frontmatter, with stored literal
@@ -1292,6 +1317,8 @@ pub fn markdown_title_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resul
 /// an [`ExpressionError::SchemaFileRead`] naming that reference; a schema that
 /// reads but cannot be resolved or compiled is an [`ExpressionError::Other`].
 /// Both carry the same message. An invalid page is `false`, never an error.
+/// In a schema slot, a schema file the slot may not read is
+/// [`ExpressionError::SlotReadRefused`], and it is never opened.
 pub fn validate_schema_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     let Some(raw) = call.args().text(0) else {
         return Ok(Value::Null);
@@ -1319,8 +1346,9 @@ pub fn validate_schema_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resu
         return Ok(Value::Bool(true));
     }
     let schemas = DarkmatterSchemas::new(ctx.file_context());
-    let ((validated, texts), observed) = simplified_schema::resolve::observed::collect(|| {
-        simplified_schema::resolve::buffers::recording(|| schemas.validate(page))
+    // A slot's gate judges each schema file before the resolver opens it.
+    let (((validated, refusal), texts), observed) = simplified_schema::resolve::observed::collect(|| {
+        simplified_schema::resolve::buffers::recording(|| ctx.gate_schema_reads("validate_schema", || schemas.validate(page)))
     });
     // The schema files the preparation read, imports at any depth included,
     // are dependencies of the call like the page itself, also when a later
@@ -1334,6 +1362,9 @@ pub fn validate_schema_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resu
             .map(|(_, text)| biscuit_hash::blake3_hash_bytes(text.as_bytes()));
         ctx.data.record_local(dependency);
         ctx.data.observe_read(&identity, hash);
+    }
+    if let Some(refusal) = refusal {
+        return Err(refusal);
     }
     let report = validated.map_err(|e| {
         let message = format!("validate_schema() error for {raw:?}: {e}");

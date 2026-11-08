@@ -11,7 +11,10 @@
 //! - **before** a content read or a fetch, at the read site, and before the
 //!   shared `load_data` memo is consulted, so a forbidden file is never read
 //!   for the slot and a file the document already loaded is not handed to it
-//!   from the memo;
+//!   from the memo; before a folder is listed (`find_files`, the
+//!   `find_*_index` functions); and before each schema file a contract
+//!   imports or `validate_schema` resolves is opened
+//!   ([`ResolutionContext::gate_schema_reads`](super::ResolutionContext));
 //! - **after** any input-reading function returns, for every input it
 //!   observed (a probed candidate, a listing, a contract import, a schema
 //!   file `validate_schema` read), before its result can reach the slot.

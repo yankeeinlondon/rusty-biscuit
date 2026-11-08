@@ -261,6 +261,45 @@ impl ResolutionContext {
         gate.check(&target).map_err(|refusal| ExpressionError::SlotReadRefused { target: Box::new(target), refusal })
     }
 
+    /// Runs `resolve`, a schema resolution `function` makes (a contract's
+    /// imports, the schema of a page it validates), with the slot gate asked
+    /// before each schema file is opened; without a gate this is `resolve()`.
+    ///
+    /// Returns `resolve`'s result with the first refusal, an
+    /// [`ExpressionError::SlotReadRefused`]: the refused file was never
+    /// opened, and the caller reports the refusal in place of whatever
+    /// `resolve` made of the failed read.
+    pub(crate) fn gate_schema_reads<T>(&self, function: &str, resolve: impl FnOnce() -> T) -> (T, Option<ExpressionError>) {
+        let Some(gate) = &self.slot_gate else {
+            return (resolve(), None);
+        };
+        let refused: std::rc::Rc<std::cell::RefCell<Option<ExpressionError>>> = std::rc::Rc::default();
+        let guard: simplified_schema::resolve::buffers::ReadGuard = std::rc::Rc::new({
+            let (gate, refused, function) = (Arc::clone(gate), std::rc::Rc::clone(&refused), function.to_string());
+            move |path: &Path| {
+                // After one refusal the resolution is failing; nothing more is read.
+                if refused.borrow().is_some() {
+                    return false;
+                }
+                let target = super::read_gate::ReadTarget {
+                    function: function.clone(),
+                    kind: super::functions::ReadKind::Content,
+                    location: super::read_gate::ReadLocation::Local(path.to_path_buf()),
+                    observed_hash: None,
+                };
+                match gate.check(&target) {
+                    Ok(()) => true,
+                    Err(refusal) => {
+                        *refused.borrow_mut() = Some(ExpressionError::SlotReadRefused { target: Box::new(target), refusal });
+                        false
+                    }
+                }
+            }
+        });
+        let resolved = simplified_schema::resolve::buffers::guarded(guard, resolve);
+        (resolved, refused.take())
+    }
+
     /// Asks the slot gate about each input in `observed` that `function`
     /// observed, before its result reaches the slot.
     ///
@@ -276,6 +315,25 @@ impl ResolutionContext {
             return Ok(());
         };
         for observation in observed {
+            // A listing by pattern is judged by the folders it lists below,
+            // as `find_files` judged it before listing; a relative pattern
+            // names no folder by itself.
+            if observation.kind == super::data::ObservationKind::Glob {
+                let roots = super::functions::glob_listing_roots(&observation.entry, self);
+                if !roots.is_empty() {
+                    for root in roots {
+                        let target = super::read_gate::ReadTarget {
+                            function: function.to_string(),
+                            kind: super::functions::ReadKind::Listing,
+                            location: super::read_gate::ReadLocation::Local(root),
+                            observed_hash: observation.hash,
+                        };
+                        gate.check(&target)
+                            .map_err(|refusal| ExpressionError::SlotReadRefused { target: Box::new(target), refusal })?;
+                    }
+                    continue;
+                }
+            }
             // An input the gate cannot name is refused, never skipped.
             let (target, verdict) = match super::read_gate::ReadTarget::from_observation(function, observation) {
                 Some(target) => {

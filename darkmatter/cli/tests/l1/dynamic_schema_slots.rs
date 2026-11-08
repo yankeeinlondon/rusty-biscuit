@@ -168,6 +168,22 @@ fn compose_data_output_on_a_dirty_data_file_fails_naming_the_grants_needed() {
     assert_eq!(report["read_set"], json!([]), "nothing unapproved was read: {report:#}");
 }
 
+/// An inline `$schema` slot is left to the slot resolver: neither the
+/// reference check nor frontmatter interpolation reads its data file first.
+#[test]
+fn compose_reads_nothing_for_an_unapproved_inline_slot() {
+    let fixture = CliProcessFixture::named("slots-compose-inline");
+    fixture.write_file(Path::new("cwd").join("names.yaml"), "- Linux\n");
+    fixture.write_file(
+        Path::new("cwd").join("doc.md"),
+        "---\n$schema:\n    os: \"enum({{ load_data('./names.yaml', 'string[]') }})\"\nos: Linux\n---\n\nBody.\n",
+    );
+    let output = run(&fixture, &["compose", "doc.md", "--output", "json"]);
+    let report = data_output(&output, 1, include_str!("../../schemas/output/compose.yaml"));
+    assert_eq!(diagnostic_codes(&report["diagnostics"]), [APPROVAL_REQUIRED], "{report:#}");
+    assert_eq!(report["read_set"], json!([]), "nothing unapproved was read: {report:#}");
+}
+
 #[test]
 fn compose_without_a_terminal_never_prompts_and_reports_the_approval_needed() {
     let Some(fixture) = sandbox(

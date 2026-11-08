@@ -7,6 +7,11 @@
 //! back to a server-side rescan-and-rehash pass. Either way, bursts of events
 //! for the same path are coalesced to one change so a single save doesn't
 //! trigger repeated re-indexing.
+//!
+//! A second registration ([`SLOT_WATCH_REGISTRATION_ID`]) watches exactly the
+//! paths schema-slot resolutions read (whatever their extension, plus a
+//! repository's `.git/index` and `HEAD`), so a change to one refreshes the
+//! documents whose templates read it.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

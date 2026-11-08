@@ -264,6 +264,19 @@ mod reuse {
         assert_eq!(codes(&narrowed.unwrap_err()), vec![SLOT_APPROVAL_REQUIRED_CODE]);
     }
 
+    /// A session whose grants do not cover a cached resolution's reads is
+    /// refused it before any of its inputs is read again.
+    #[test]
+    fn an_uncovered_cache_entry_is_refused_before_its_inputs_are_reread() {
+        let repo = Repo::reading_data();
+        repo.write(DATA, "- macOS\n- Linux\n- Windows\n- FreeBSD\n");
+        resolve(&repo.granted_session(DataRuntime::new()), &repo, &[]).unwrap();
+        repo.write(DATA, "- macOS\n- Linux\n- Windows\n- BeOS\n");
+        let (narrowed, rehashes) = counted(Work::SlotInputRehash, || resolve(&repo.session(), &repo, &[]));
+        assert_eq!(rehashes, 0, "the uncovered entry's data file was read again");
+        assert_eq!(codes(&narrowed.unwrap_err()), vec![SLOT_APPROVAL_REQUIRED_CODE]);
+    }
+
     #[test]
     fn a_volatile_slot_resolves_once_per_command() {
         let repo = Repo::new(&schema_with("[remote_vendor() || \"none\"]"));

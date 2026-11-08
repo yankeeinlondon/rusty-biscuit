@@ -2,7 +2,7 @@
 //! by, the snapshots it pinned, and the templates it is resolving.
 //!
 //! A [`SlotSession`] belongs to one command (one `md` invocation, one
-//! library composition, one editor request). Every pass of the command that
+//! library composition, one editor resolution job). Every pass of the command that
 //! validates a document against a template resolves it through the same
 //! session, so:
 //!
@@ -514,28 +514,28 @@ impl SlotSession {
     }
 
     /// Whether the cached `entry` may be served to this session in
-    /// `context`: it belongs to any session or this one, its inputs and
-    /// context inputs are unchanged, and this session's grants cover every
-    /// read it made.
+    /// `context`: it belongs to any session or this one, this session's
+    /// grants cover every read it made, and its inputs and context inputs are
+    /// unchanged. Coverage is judged first, because confirming an input
+    /// rereads it.
     fn serves(&self, entry: &CacheEntry, context: &FileResolutionContext) -> bool {
         if entry.only_for.is_some_and(|session| session != self.id) {
             return false;
         }
-        if !entry.inputs.iter().all(|input| input.holds(true))
-            || !entry.context.iter().all(|check| cache::context_holds(check, context))
-        {
-            return false;
+        if !entry.reads.is_empty() {
+            let Ok(grants) = self.run_grants() else {
+                return false;
+            };
+            if !entry
+                .reads
+                .iter()
+                .all(|read| matches!(grants.decide_without_asking(&read.defining, &read.target), Some(Ok(()))))
+            {
+                return false;
+            }
         }
-        if entry.reads.is_empty() {
-            return true;
-        }
-        let Ok(grants) = self.run_grants() else {
-            return false;
-        };
-        entry
-            .reads
-            .iter()
-            .all(|read| matches!(grants.decide_without_asking(&read.defining, &read.target), Some(Ok(()))))
+        entry.inputs.iter().all(|input| input.holds(true))
+            && entry.context.iter().all(|check| cache::context_holds(check, context))
     }
 
     /// The pinned outcome for `key`, re-confirmed when the command's data
@@ -753,15 +753,19 @@ pub(crate) fn resolve_contract_slots(
         return Some(Err(contract_failure(SlotResolutionError::Refused(refused))));
     }
     let mut failed = Vec::new();
-    for slot in unique {
-        let request = simplified_schema::slots::SlotRequest { slot, defining_file: slot.origin.as_deref(), context: &context };
-        match host.resolve(&request) {
-            Ok(value) => {
-                values.insert(slot, value);
+    // These slots read under their own approvals, never the guard of the
+    // slot whose contract named the template.
+    simplified_schema::resolve::buffers::unguarded(|| {
+        for slot in unique {
+            let request = simplified_schema::slots::SlotRequest { slot, defining_file: slot.origin.as_deref(), context: &context };
+            match host.resolve(&request) {
+                Ok(value) => {
+                    values.insert(slot, value);
+                }
+                Err(failure) => failed.push((slot.clone(), failure)),
             }
-            Err(failure) => failed.push((slot.clone(), failure)),
         }
-    }
+    });
     if !failed.is_empty() {
         return Some(Err(contract_failure(SlotResolutionError::Failed(failed))));
     }

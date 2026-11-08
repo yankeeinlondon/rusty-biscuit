@@ -38,7 +38,7 @@ use crate::markdown::compose::expression::read_gate::ReadLocation;
 use crate::markdown::compose::expression::resolve_ctx::is_remote_url;
 use crate::markdown::compose::expression::{ExpressionError, FileRefFailure, ResolutionContext};
 
-const FUNCTION: &str = "load_data";
+pub(super) const FUNCTION: &str = "load_data";
 
 /// `load_data(file: file | null, as: type-definition(container)) -> any | null`.
 ///
@@ -67,7 +67,7 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
         function: FUNCTION.to_string(),
         message: "argument 1 did not bind to a type definition".to_string(),
     })?;
-    let contract = ctx.data.prepare_contract(&written, &ctx.file_context())?;
+    let contract = ctx.data.prepare_contract(&written, ctx)?;
 
     let remote = is_remote_url(raw);
     let identity = match url::Url::parse(raw) {

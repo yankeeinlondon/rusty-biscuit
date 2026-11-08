@@ -92,6 +92,9 @@ pub enum Work {
     /// A schema slot evaluated by Darkmatter's slot host (a resolution-cache
     /// hit evaluates none).
     SlotResolution,
+    /// A cached slot resolution's input file read again to confirm its bytes
+    /// are unchanged.
+    SlotInputRehash,
 }
 
 impl Work {
@@ -123,6 +126,7 @@ impl Work {
         Work::YamlKindCheck,
         Work::StandaloneImportCheck,
         Work::SlotResolution,
+        Work::SlotInputRehash,
     ];
 
     /// Whether [`add`] records the thread this work ran on.

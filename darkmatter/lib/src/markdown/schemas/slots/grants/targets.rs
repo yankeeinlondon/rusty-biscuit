@@ -20,7 +20,7 @@ use simplified_schema::simplified::Slot;
 
 use crate::markdown::compose::conditions::ShortcutLookup;
 use crate::markdown::compose::expression::call_check::visit_call_nodes;
-use crate::markdown::compose::expression::functions::{SlotClass, read_fact, slot_class};
+use crate::markdown::compose::expression::functions::{ReadKind, SlotClass, read_fact, slot_class};
 use crate::markdown::compose::expression::read_gate::{ReadLocation, ReadTarget};
 use crate::markdown::compose::expression::{ResolutionContext, evaluate};
 use crate::markdown::schemas::slots::evaluator::DenyAllReads;
@@ -86,7 +86,8 @@ fn reads_of(parsed: &SpannedExpr, folder: &Path, context: &FileResolutionContext
             .first()
             .and_then(|argument| fold_pure(argument, context))
             .and_then(|value| value.as_str().map(str::to_string))
-            .and_then(|written| location_of(&written, folder, fact.remote));
+            .and_then(|written| location_of(&written, folder, fact.remote))
+            .map(|location| if fact.kind == ReadKind::Listing { listed_folder(location) } else { location });
         reads.push(match known {
             Some(location) => {
                 CollectedRead::Known(ReadTarget { function, kind: fact.kind, location, observed_hash: None })
@@ -110,6 +111,21 @@ fn location_of(written: &str, folder: &Path, remote: bool) -> Option<ReadLocatio
     }
     let explicit = written.starts_with("./") || written.starts_with("../") || written.starts_with(".\\") || written.starts_with("..\\");
     explicit.then(|| ReadLocation::Local(lexically_joined(folder, path)))
+}
+
+/// The folder a listing of `location` enumerates, which is what its grant
+/// and its runtime check name: a pattern's leading folders before its first
+/// wildcard (`find_files`), or else the named file's folder (the index
+/// functions list the folder a file's family lives in).
+fn listed_folder(location: ReadLocation) -> ReadLocation {
+    let ReadLocation::Local(path) = location else {
+        return location;
+    };
+    let is_wildcard = |component: &std::path::Component<'_>| component.as_os_str().to_string_lossy().contains(['*', '?', '[', '{']);
+    if path.components().any(|component| is_wildcard(&component)) {
+        return ReadLocation::Local(path.components().take_while(|component| !is_wildcard(component)).collect());
+    }
+    ReadLocation::Local(path.parent().map_or_else(|| path.clone(), Path::to_path_buf))
 }
 
 /// `folder` joined with `relative`, `.` and `..` applied by name.
