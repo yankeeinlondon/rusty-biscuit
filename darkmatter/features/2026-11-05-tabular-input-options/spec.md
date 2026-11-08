@@ -21,7 +21,7 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 kind: feature
 created: 2026-11-07
-status: draft-spec
+status: finalized-spec
 area: darkmatter
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
@@ -36,6 +36,7 @@ related:
     - 2026-11-04-loading-data
 depends-on:
     - 2026-11-04-loading-data
+    - 2026-11-05-dynamic-schema-types
 ---
 
 # Tabular Input Options
@@ -106,8 +107,8 @@ contract. For example, `{header: null}` uses the default header behavior.
 
 | Key | Bound value | Meaning when absent |
 | --- | --- | --- |
-| `format` | `yaml`, `json`, `jsonl`, `csv`, `tsv`, `toml`, or `json5` | Detect from the extension as today. |
-| `delimiter` | A string containing exactly one ASCII character except `"`, CR, or LF | Comma for CSV, tab for TSV. |
+| `format` | `yaml` (or `yml`), `json`, `jsonl` (or `ndjson`), `csv`, `tsv`, `toml`, or `json5` | Detect from the extension as today. |
+| `delimiter` | For CSV: a string containing exactly one ASCII character except `"`, CR, or LF. For TSV: only `"\t"`. | Comma for CSV, tab for TSV. |
 | `header` | Boolean | `true` for CSV and TSV. |
 
 Use the shared function binder and coercion engine for this object, including
@@ -115,13 +116,19 @@ normal conversions to its declared field types. A value that cannot bind is
 an error; do not introduce a second, stricter native-type rule in the handler.
 The delimiter constraint is checked on the bound string. A tab is written as
 `"\t"`; empty strings, multiple characters, non-ASCII characters, quote, CR,
-and LF are invalid. Format names are case-sensitive canonical names; `yml`
-and `ndjson` remain supported filename extensions, not additional option
-values. Do not trim or lowercase option values.
+and LF are invalid. Format names are case-sensitive. `yml` and `ndjson` are
+accepted as aliases, matching the filename extensions the loader already
+recognizes, and normalize to `yaml` and `jsonl`: diagnostics and memo keys use
+the canonical name, so `{format: "yml"}` and `{format: "yaml"}` share entries.
+Do not trim or lowercase option values.
 
 A non-null `format` replaces extension detection completely, including for
 a misleading supported extension. CSV with a tab delimiter remains format
-`csv` in diagnostics; choosing a delimiter does not rename the format.
+`csv` in diagnostics; choosing a delimiter does not rename the format. TSV is
+tab-separated by definition: on `tsv`, a `delimiter` other than `"\t"` is
+`dm.data.invalid_options` (an explicit `"\t"` is the default spelled out and is
+accepted). Data separated by another character is read as `csv` with that
+delimiter.
 Neither contents nor HTTP `Content-Type` select a format. A non-null
 `delimiter` or `header` is invalid for a non-tabular format, even
 `header: true`; `{header: null}` is absent and therefore permitted.
@@ -218,6 +225,13 @@ Options never require DMLS to execute a load.
 
 ## Reuse within a command
 
+**Sequencing (2026-11-08).** 2026-11-05-dynamic-schema-types is implemented
+first and changes the same memo and loader: it stores read observations in the
+memo entry, checks its slot read gate before the memo lookup, and adds a
+memo-generation counter. This feature builds on that code. Observations belong
+on the raw-source layer (where bytes are read), and the slot gate stays ahead of
+the first memo layer consulted.
+
 A **memo** is the command's in-memory store of earlier reads, parses, and
 bound results. Option differences must separate interpretations without
 re-reading one source. Use these effective keys rather than serializing the
@@ -300,7 +314,9 @@ when implementation lands and never links back to this spec.
 
 ## Open questions
 
-None remain for this scope. The decisions above keep explicit format
+None remain for this scope. Author decisions on 2026-11-08: implement after
+2026-11-05-dynamic-schema-types; accept `yml` and `ndjson` as format aliases;
+restrict TSV's delimiter to tab. The decisions above keep explicit format
 selection and positional headerless rows; named columns and response-header
 inference are excluded, rather than left as implementation choices.
 
@@ -318,6 +334,10 @@ coverage to the existing suite rather than replacing it.
 - `load_data("rows.txt", "{ a: string }[]", {format: "csv", delimiter: ";"})`
   reads semicolon-separated input. Also cover overriding a supported but
   incorrect extension, choosing TSV's tab default, and using a pipe delimiter.
+  `{format: "yml"}` and `{format: "ndjson"}` behave as `yaml` and `jsonl` and
+  share memo entries with them. `{format: "tsv", delimiter: ","}` fails with
+  `dm.data.invalid_options` before reading; `{format: "tsv", delimiter: "\t"}`
+  is accepted.
 - Invalid option objects cover unknown keys, unbindable field types, invalid
   format names, and empty, multi-character, non-ASCII, quote, CR, and LF
   delimiters. Non-null `header` and `delimiter` on JSON fail before reading.

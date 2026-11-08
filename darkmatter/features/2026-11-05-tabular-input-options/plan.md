@@ -9,6 +9,13 @@ yolo: true
 
 # Plan: Tabular Input Options for `load_data`
 
+> **Outdated (2026-11-08): re-plan before executing.** This plan predates the
+> author's 2026-11-08 decisions in the spec (`yml`/`ndjson` format aliases, the
+> TSV delimiter rule, and sequencing after 2026-11-05-dynamic-schema-types).
+> Its memo and loader design (R7 and the `load.rs` execution order) must be
+> redone on top of the dynamic-schema-types changes to `runtime.rs` and
+> `load.rs` once that feature lands. Do not execute this plan as written.
+
 ## Summary and Definition of Done
 
 `load_data(file, as)` gains an optional third argument, a closed options
