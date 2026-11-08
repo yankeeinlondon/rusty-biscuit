@@ -153,6 +153,22 @@ let resolved = buffers::with_reads_retained(|| {
 });
 ```
 
+A host that must approve each file before it is read (Darkmatter's schema
+slots, whose reads need a grant) wraps the resolution in
+`resolve::buffers::guarded(guard, || ...)`. The guard is asked with each path
+before it is read, from an open buffer or the disk, at any import depth.
+When it answers `false` the file is not read, and the read fails as
+`std::io::ErrorKind::PermissionDenied`, which the resolver reports like any
+unreadable file. Probing which candidate exists is not a read and is never
+asked. `resolve::buffers::unguarded(|| ...)` suspends every guard for work the
+host judges another way.
+
+```rust
+let only_types: buffers::ReadGuard = Rc::new(move |path: &Path| path == allowed);
+let resolved = buffers::guarded(only_types, || resolve_yaml_schema(&reference, base_dir, &ctx, ShippedSources::NONE));
+// a `$schema` or import other than `allowed` failed as unreadable, unopened
+```
+
 ### As an error
 
 `SchemaFileSelection::into_result()` turns the selection into the same

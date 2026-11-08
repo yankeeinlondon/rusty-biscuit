@@ -85,7 +85,11 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   `read_sources()` texts); `SimplifiedSchema::resolve_slots` reruns the
   layer's own `Rebuild`. Expansion stamps `Slot::origin` with the file a
   slot was written in (`DefNamespace::file`); a new lowering site must call
-  `apply_active` too. Tests: `tests/l1/dynamic_slots.rs`.
+  `apply_active` too. Tests: `tests/l1/dynamic_slots.rs`. Whole-type slots (a
+  slot supplying a property's whole definition) are **planned**, not built: do
+  not widen the grammar to admit one ad hoc. The library never evaluates a
+  slot and never reads its targets; approval, caching, and evaluation are the
+  host's (Darkmatter's `schemas/slots/`).
 - **Layering is atomic.** Each `layer_under` / `layer_over` commits completely
   or not at all, with whole-property replacement.
 - **One implementation.** Darkmatter calls the library; it never redefines a
@@ -123,6 +127,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | One named type as its own schema | `schema.select("Person")` |
 | Resolve a template's `{{ … }}` slots | `schema.resolve_slots(&host)`, or `UnresolvedSlots::pending` → `PendingSchema::resolve(&host, &SlotRunRequest { context })` |
 | Read a slot's data file honoring editor buffers | `resolve::buffers::read(path)` |
+| Judge each schema source before it is read (a host's slot approvals) | `resolve::buffers::guarded(guard, \|\| …)`; a refusal fails the read as `PermissionDenied`; `unguarded` suspends the guards |
 | Which file a `$schema`/`Name@file`/`example(file)` reference names, its probes, and a missing name's creation path | `resolve::select_schema_file(reference, base_dir, roots, &ctx)` → `SchemaFileSelection` (`into_result()` gives the resolver's error) |
 | Validate | `validate_strict` / `validate_soft` → `Result<ValidationSuccess, ValidationFailure>` |
 | Layer | `layer_under(&[&s])`, `layer_over(&[&s])`, `as_base`, `override_with` |
