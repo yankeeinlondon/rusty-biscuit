@@ -1,7 +1,7 @@
 ---
 total_phases: 9
 created: 2026-11-08
-phase: 7
+phase: 9
 agent: claude/sonnet
 yolo: true
 packages:
@@ -11,6 +11,7 @@ packages:
 - sniff
 - darkmatter-cli
 - claudine-cli
+- claudine
 source_files_during_phase_1:
 - darkmatter/dmls/src/providers/frontmatter.rs
 - darkmatter/dmls/src/providers/frontmatter/enum_item_tests.rs
@@ -255,6 +256,101 @@ docs_updated_during_phase_6:
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
 - .claude/skills/darkmatter/schema.md
+source_files_during_phase_7:
+- darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/schemas/clean.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/tests/l1/diagnostic_projection.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/report_diagnostics.rs
+- darkmatter/lib/tests/l1/shared_diagnostics.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+- darkmatter/cli/src/commands/clean.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/src/commands/graph.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/commands/validate.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/tests/common/fixture.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slots.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- darkmatter/cli/schemas/output/clean.yaml
+- darkmatter/cli/schemas/output/code-block.yaml
+- darkmatter/cli/schemas/output/compose.yaml
+- darkmatter/cli/schemas/output/delta.yaml
+- darkmatter/cli/schemas/output/edit.yaml
+- darkmatter/cli/schemas/output/get.yaml
+- darkmatter/cli/schemas/output/graph.yaml
+- darkmatter/cli/schemas/output/hash.yaml
+- darkmatter/cli/schemas/output/list-themes.yaml
+- darkmatter/cli/schemas/output/render.yaml
+- darkmatter/cli/schemas/output/rm.yaml
+- darkmatter/cli/schemas/output/schema-about.yaml
+- darkmatter/cli/schemas/output/schema-detect.yaml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/schemas/output/set.yaml
+- darkmatter/cli/schemas/output/toc.yaml
+- darkmatter/cli/schemas/output/validate-refs.yaml
+- claudine/docs/research/sandboxing/providers/sandboxing.yaml
+docs_updated_during_phase_7:
+- darkmatter/docs/cli/clean.md
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/graph.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/cli/validate.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_8:
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/cache.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/grants/store.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/src/markdown/schemas/slots/session_tests.rs
+- darkmatter/dmls/src/capabilities.rs
+- darkmatter/dmls/src/context.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/mod.rs
+- darkmatter/dmls/src/diagnostics/slots.rs
+- darkmatter/dmls/src/lib.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/overlay/yaml_document.rs
+- darkmatter/dmls/src/providers/code_actions.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/src/workspace/watch.rs
+- darkmatter/dmls/tests/common/mod.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/no_side_effects.rs
+- darkmatter/dmls/tests/l1/schema_slots_editor.rs
+docs_updated_during_phase_8:
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+- .claude/skills/darkmatter/dmls.md
 ---
 
 # Plan: Dynamic Schema Types
@@ -339,7 +435,7 @@ delivers it:
   results, approval failures, and `load_data` failures are positioned schema
   errors in `md schema validate` and DMLS; a failing slot keeps its `dm.data.*`
   code and `data_location`; positions are `null` unless proven.
-- [ ] M4: `claudine/docs/research/sandboxing/providers/sandboxing.yaml` uses the
+- [x] M4: `claudine/docs/research/sandboxing/providers/sandboxing.yaml` uses the
   schema-relative `load_data` spelling, is admitted passively, validates its
   documents after explicit resolution, and the corpus carve-out
   (`awaiting_enum_slots` in `darkmatter/lib/tests/l1/shipped_schema_corpus.rs`)
@@ -1358,20 +1454,20 @@ Q4/Q6/Q7.
 
 ### Wave 16 (parallel, disjoint files)
 
-- [ ] **`md compose`**
+- [x] **`md compose`**
   - `cli/src/commands/compose.rs`: build the `SlotSession` from the command's
     `DataRuntime`, request context, `--allow host=` hosts, the grant book, and the
     handler (only when interactive and not a data output); run slot collection in
     the pre-flight even when no shell feature is enabled; read set equals what a
     cold run reports; data output prints `dm.schema.slot_approval_required`
     diagnostics with the grants needed and stays silent on stderr.
-- [ ] **`md schema validate`**
+- [x] **`md schema validate`**
   - `cli/src/commands/schema/validate.rs` per N38: this command does not use the
     compose pre-flight walk, so it gets its own small collect-and-approve step
     (N29's collector + the same handler) before resolving; document runs then
     resolve under the same gate (`error: slots`, `valid: false`, exit 1 when
     unavailable); a schema file argument is the passive check only.
-- [ ] **`md clean`, `md graph`, `md validate refs`**
+- [x] **`md clean`, `md graph`, `md validate refs`**
   - `md clean`: the same collect-and-approve step as `md schema validate`;
     unapproved slot ⇒ constraint unavailable diagnostic, document not reported
     clean. `graph`/`validate refs` use `SessionMode::ReferenceCheck`,
@@ -1379,16 +1475,16 @@ Q4/Q6/Q7.
 
 ### Wave 17 (after Wave 16)
 
-- [ ] **Output schemas and conformance**
+- [x] **Output schemas and conformance**
   - Add the new codes, `slots` error value and `grants_needed` to every output
     schema file that carries `diagnostic` (all 17 in `cli/schemas/output/`; the
     shared-diagnostic test requires identical types) and to
     `schema-validate.yaml`; conformance tests in `cli/tests/l1/output_commands.rs`.
-- [ ] **Shipped schema and corpus (N40)**
+- [x] **Shipped schema and corpus (N40)**
   - Edit `claudine/docs/research/sandboxing/providers/sandboxing.yaml`; delete
     `awaiting_enum_slots` from `shipped_schema_corpus.rs`; add the passive-admission
     assertion for the file.
-- [ ] **End-to-end tests**
+- [x] **End-to-end tests**
   - A normal `md compose` run (spawned `md`, isolated temp repo copy of the real
     sandboxing schema and `os.yaml`, `MD_DRY_RUN` set, no window): control row
     valid; document with `os_support: [BeOS]` fails with the enum error naming the
@@ -1396,7 +1492,7 @@ Q4/Q6/Q7.
     `approval-required` and exit 1; clean file resolves silently; read set includes
     `os.yaml`. `md schema validate` of the schema file is passive. One spawn for
     Matrix 2 (corrupt store ⇒ `grant_store_invalid`).
-- [ ] **Validation checkpoint**
+- [x] **Validation checkpoint**
   - `just test` and `just lint` in `darkmatter/` (the spawned-`md` tests are L1 in
     `cli/tests/l1/`; no L2 recipe is needed).
 
@@ -1404,32 +1500,32 @@ Q4/Q6/Q7.
 
 ### Wave 18 (parallel)
 
-- [ ] **Worker lane and snapshot store**
+- [x] **Worker lane and snapshot store**
   - N39 first bullet: a dedicated slot worker (not the registry job lane),
     `SlotSnapshots` with seq-based rejection, cancellation of superseded jobs,
     the DMLS work bound, buffer scoping; job enqueued on schema open/change and
     on refresh/grant; last-good retention; atomic publish.
-- [ ] **Watches**
+- [x] **Watches**
   - N39 second bullet: `Dependencies.slot_reads`, per-path watcher registration and
     `ServerRescan` `stat` re-check, `.git/index`/`HEAD` watches for automatic
     grants, event → invalidation → refresh.
 
 ### Wave 19 (after Wave 18)
 
-- [ ] **Serving**
+- [x] **Serving**
   - Diagnostics (`diagnostics/frontmatter.rs`, standalone-schema path): syntax,
     `.pending`, `.failed`, `.approval_required`, `.forbidden_binding` positioned at
     the slot; completion/hover (`providers/frontmatter.rs` `enum_members`
     l.2951, `suggestion_completions` l.1419, `overlay/suggestions.rs`) read the
     snapshot or literals + pending marker; stale marker while refreshing.
-- [ ] **Grant commands**
+- [x] **Grant commands**
   - `executeCommandProvider`, `dmls.grantSlotRead`, `dmls.refreshSchemaSlots`,
     quick-fix `Command` code actions per diagnostic choice (N30), user-level store
     write, in-memory once-grants; refresh on `didChangeConfiguration`.
 
 ### Wave 20 (parallel)
 
-- [ ] **DMLS tests**
+- [x] **DMLS tests**
   - L1 using `LspWorkspace`/`LspFixture` and the registry gates
     (`start_with_registry_gate`): request-path no-I/O/no-eval (extend
     `no_side_effects.rs`), stale worker result rejected, unsaved data buffer
@@ -1439,7 +1535,7 @@ Q4/Q6/Q7.
     refresh, once-grant not persisted, no prompt or block, a slow slot job does
     not delay a completion request, a newer edit cancels the in-flight job,
     staging a change to a granted file (`.git/index` event) refreshes it.
-- [ ] **Validation checkpoint**
+- [x] **Validation checkpoint**
   - `just test`, `just lint` in `darkmatter/` (DMLS crate included).
 
 ## Phase 9 — Docs, skills, measurement, closure

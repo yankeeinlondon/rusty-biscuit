@@ -29,6 +29,7 @@ packages:
     - sniff
     - darkmatter-cli
     - claudine-cli
+    - claudine
 decisions_for_review:
     - |-
         Array-item completion offers every scalar candidate of the item type, not only enum members.
@@ -348,6 +349,45 @@ decisions_for_review:
         `CompositionError::SchemaLoad` fallthrough (carrying the unresolved-slots message) rather than a dedicated
         `SchemaPending` variant. Adding one is one arm in
         `claudine/lib/src/composition/schema/translate.rs::schema_error_to_composition_error` plus its rendering.
+    - |-
+        (Phase 7) `md compose` attaches its one slot session after pre-flight, so pre-flight's answers for this
+        run can be handed to it. Its own reference check runs before pre-flight and keeps using a pass that reads
+        nothing a slot names, so a template is left for composition to judge there. The plan says one session per
+        command. Building the session first would mean a session that can take grants after it is built.
+        Redoing it means adding that and attaching the session before the reference check.
+    - |-
+        (Phase 7) In `md graph` and `md validate refs`, a template whose read nobody granted leaves the whole
+        schema unchecked for that run. The plan said to defer only the property that depends on the slot. The
+        existing deferral works per schema; per property would need a partial resolution that keeps the slots it
+        could resolve. Redoing it means changing `SlotSession::resolve` and `schema_validation::defers_template`.
+    - |-
+        (Phase 7) `md schema validate` judges automatic grants against the repository of the launch folder, once
+        per run, not against each document's own repository. A document in another repository gets no automatic
+        grant and needs approval. One session per run keeps grants decided once. The alternative is a session per
+        document, built in `validate_one`.
+    - |-
+        (Phase 7) The sessions of `md schema validate` and `md clean` are built from a file context
+        (`SlotSession::for_context`), which has none of the request's captured observations. A slot calling
+        `has_command` or `has_binary` there sees an empty `PATH`. Passing the command's observations through would
+        need a new public setter on the session.
+    - |-
+        (Phase 7) `grants_needed` lists only the grants that would allow the read, both once and persisted, in
+        prompt order. Deny choices are not listed. A file record in `md schema validate` repeats the union of its
+        diagnostics' grants, each once. A once grant can only be given at a prompt, so a script can act only on the
+        persisted ones. Listing persisted grants alone would be shorter but would not match the prompt.
+    - |-
+        (Phase 7) If the approval handler fails while asking (for example, stdin cannot be read), `md schema
+        validate` and `md clean` log the failure and go on. The read then reports
+        `dm.schema.slot_approval_required`, as an evaluation-time ask already does. The alternative is a new
+        error outcome for a file.
+    - |-
+        (Phase 7) A schema file that holds slots reports `slots: N` only when N > 0, and gets one note row in the
+        formatted report. A concrete schema has no `slots` key. The count comes from parsing the file as a
+        SimplifiedSchema, which reads imported schema files but nothing a slot names.
+    - |-
+        (Phase 7) `md schema validate` records gain an optional `code` naming a slot where none may appear (a kind
+        definition), and a baseline holding a slot reports `dm.schema.slot_not_allowed_in_baseline` instead of
+        `dm.schema.baseline`. The plan did not list these. The Phase 6 handoff noted they were not shown.
 source_files_during_phase_2:
     - simplified-schema/lib/src/completion.rs
     - simplified-schema/lib/src/errors.rs
@@ -484,24 +524,73 @@ skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/darkmatter/requests.md
     - .claude/skills/darkmatter/schema.md
+    - |-
+        The editor serves a template from the slot worker's own resolution session, not a separate snapshot copy. Each
+        background job builds a fresh session, resolves the document's schema with it, and the server keeps that session;
+        requests then use it in "pinned snapshots only" mode, which reads and evaluates nothing. The plan described a
+        `SlotSnapshots` store holding snapshots and a `Dependencies.slot_reads` list on the overlay's dependencies; the
+        store exists (`dmls/src/slot_jobs.rs`) but holds the session, its failure, and the paths it read, and the watched
+        paths come from it rather than from `Dependencies`. The alternative, copying resolved schemas into the overlay,
+        would duplicate the library's pin and cache logic. Changing it means replacing the `SlotUse::Pins` path in
+        `overlay/schema.rs::assemble` and moving the read list into the overlay's dependency record.
+    - |-
+        The editor's "about 25 ms of work" bound is a smaller work allowance, not a clock: each slot gets 25,000 visits and
+        4 MiB of expansion (a quarter of a command's), and exceeding it is the ordinary `dm.iteration.*` failure at the
+        slot. A wall-clock deadline would make results depend on how loaded the machine is and would flake in tests. A
+        500-member list resolves well inside it. If a time limit is wanted, `SlotSession::with_cancel` already gives a
+        hook: a timer could set the flag, which reports `dm.schema.slot_canceled` instead.
+    - |-
+        A failure that the editor's smaller allowance caused is never put in the process-wide resolution cache, so a
+        command with the full allowance never receives it. A successful editor resolution is shared as usual. The plan did
+        not cover this; without it, the editor could cache a work-limit failure that `md` would then report.
+    - |-
+        Fixed a library bug found by the editor tests: the cross-command cache trusted an unchanged file `stat` even when
+        an editor buffer with different text was open for that file, so an unsaved edit to a data file was ignored. The
+        check now re-hashes whenever a buffer is open (`slots/cache.rs::InputCheck::holds`).
+    - |-
+        Quick fixes for an unapproved read offer the library's allow choices (file and folder, this session and always)
+        plus "always deny" and "deny for this session" of the first target. The library's `grants_needed` list carries
+        allows only and no allow/deny word, so the deny choices are added by DMLS. "This session" grants live in the
+        server's memory until it exits. Adding the decision to `GrantNeeded` would mean changing all 18 CLI output schemas.
+    - |-
+        An inline `$schema` slot is positioned by finding its `{{ … }}` text inside the document's `$schema` value: the
+        library reports an inline slot's span relative to its type string, not the document. The alternative is to make
+        the library project inline slot spans into document coordinates, which is the better long-term fix; the DMLS
+        lookup (`diagnostics/slots.rs::authored_slot_span`) would then be deleted.
+    - |-
+        While no resolution serves a template, completion offers the template's literal parts (`enum(Haiku, {{ … }})`
+        offers `Haiku`) and hover adds a "pending" or "stale" note. Completion items carry no stale marker (the plan said
+        hover and completion annotate "stale"); a per-item marker would clutter every list while a refresh runs, which is
+        usually milliseconds. Diagnostics carry the stale marker as one `dm.schema.slot_pending` information record.
+    - |-
+        Severity in the editor: `dm.schema.slot_pending` is information (nothing is wrong yet), `dm.schema.slot_approval_required`
+        is a warning (it needs the author's decision, not a fix), and every other slot failure is an error. When a new
+        template has no resolution yet but the previous one failed, the previous failure stays shown until the refresh
+        lands, to avoid flicker on every keystroke.
+    - |-
+        A template left unresolved because only pinned snapshots may be used now keeps its resolution handle
+        (`UnresolvedSlots::pending`), so a caller can still read its literal parts. Before, that path dropped the handle.
+        No existing caller depended on its absence.
+    - |-
+        An unsaved edit reaches a slot's `load_data` only for open YAML and JSON buffers, the same buffers schema
+        resolution already reads. A change to any other open file a slot read still marks the document stale, and the
+        refresh reads that file from disk.
 message_to_agent: |-
-    Phase 6 is complete; see the log's Phase 6 section. What Phase 7 needs:
-    - Session: `schemas::slots::{SlotSession, SessionMode}`. Every root composition builds one from the request
-      (`SlotSession::for_request`) unless `ComposeOptions::with_slot_session(Arc<SlotSession>)` attached one. The CLI
-      should build ONE per `md` invocation (with `with_data_runtime` sharing the same `DataRuntime`), seeded with
-      pre-flight's run-only answers via `.with_run_grants(approvals.slot_grants)`. That hand-off is not wired yet
-      (docs mark it planned), so today `md compose` on a terminal asks in pre-flight and then the composition's own
-      session asks again or reports approval-required.
-    - Failures: `SchemaError::SlotResolution(SlotResolutionFailure { error: Arc<SlotResolutionError>, sources })`;
-      `report_diagnostics::error_diagnostics` already projects it (slot-positioned) and `UnresolvedSlots` as
-      `dm.schema.slot_pending`. For N38's `grants_needed`, read `GateRefusal::ApprovalRequired { needed }` out of
-      `SlotFailure::downcast_ref::<ExpressionError>()` (`ExpressionError::SlotReadRefused { refusal, .. }`).
-    - `md schema validate` / `md clean`: build `DarkmatterSchemas::with_slot_session`; without it a template is
-      `UnresolvedSlots`. Deferring passes use `with_slot_pins_only` (crate-internal) and read nothing.
-    - `md schema triggers` already lists `pending: true` (output schema updated).
-    - Kind/baseline/catalog/extension/`match` slot refusals carry codes via `codes::slot_prohibition_code`; the
-      CLI's `md schema validate` file records do not surface them yet (N38).
-    - Carried: the host sweep (Sun/Wed 04:00) can delete target/ mid-build; an outside process may commit the tree.
+    Phase 8 (DMLS) is complete; see the log's Phase 8 section. For Phase 9:
+    - The editor behavior is documented in `darkmatter/docs/topics/schemas/schema-slots.md` ("In the editor"), with a
+      short pointer in `dmls-schema-support.md`, and in the skill `.claude/skills/darkmatter/dmls.md` ("Schema slots").
+      `darkmatter/docs/lsp/features.md` and `architecture.md` were not touched; Phase 9's doc task covers them (the slot
+      worker, `dmls.grantSlotRead`/`dmls.refreshSchemaSlots`, `executeCommandProvider`, the slot watch registration
+      `dmls-schema-slot-watchers`).
+    - Timing sample: the worker logs `schema slots resolved` at debug with `elapsed_ms`; requests never resolve, and
+      `tests/l1/no_side_effects.rs` proves it with the `Work::SlotResolution` counter.
+    - The work bound is a visit/byte allowance (`dmls/src/slot_jobs.rs::DMLS_SLOT_LIMITS`), not a clock; see decisions.
+    - Library changes this phase: `SlotSession::{with_cancel, with_slot_limits}`, `DarkmatterSchemas::with_slot_pins_only`
+      is public, `GrantTarget::parse`, `report_diagnostics::template_slot_records`, and a cache fix (an open buffer is
+      never trusted by `stat`).
+    - The Phase 7 work was still uncommitted when Phase 8 started, so the working tree holds both phases.
+    - Carried over: the host sweep (Sun/Wed 04:00) can delete target/ mid-build, and an outside process may commit
+      the tree.
 source_files_during_phase_5:
     - darkmatter/cli/src/approval.rs
     - darkmatter/lib/src/markdown/compose/context/options.rs
@@ -591,6 +680,101 @@ docs_updated_during_phase_6:
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_7:
+    - darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs
+    - darkmatter/lib/src/markdown/schemas/slots/session.rs
+    - darkmatter/lib/tests/l1/diagnostic_projection.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/report_diagnostics.rs
+    - darkmatter/lib/tests/l1/shared_diagnostics.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - darkmatter/cli/src/commands/graph.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/commands/validate.rs
+    - darkmatter/cli/src/output/mod.rs
+    - darkmatter/cli/tests/common/fixture.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/output_commands.rs
+    - darkmatter/cli/tests/l1/dynamic_schema_slots.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/cli/schemas/output/clean.yaml
+    - darkmatter/cli/schemas/output/code-block.yaml
+    - darkmatter/cli/schemas/output/compose.yaml
+    - darkmatter/cli/schemas/output/delta.yaml
+    - darkmatter/cli/schemas/output/edit.yaml
+    - darkmatter/cli/schemas/output/get.yaml
+    - darkmatter/cli/schemas/output/graph.yaml
+    - darkmatter/cli/schemas/output/hash.yaml
+    - darkmatter/cli/schemas/output/list-themes.yaml
+    - darkmatter/cli/schemas/output/render.yaml
+    - darkmatter/cli/schemas/output/rm.yaml
+    - darkmatter/cli/schemas/output/schema-about.yaml
+    - darkmatter/cli/schemas/output/schema-detect.yaml
+    - darkmatter/cli/schemas/output/schema-triggers.yaml
+    - darkmatter/cli/schemas/output/schema-validate.yaml
+    - darkmatter/cli/schemas/output/set.yaml
+    - darkmatter/cli/schemas/output/toc.yaml
+    - darkmatter/cli/schemas/output/validate-refs.yaml
+    - claudine/docs/research/sandboxing/providers/sandboxing.yaml
+docs_updated_during_phase_7:
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/cli/data-contracts.md
+    - darkmatter/docs/cli/graph.md
+    - darkmatter/docs/cli/schema.md
+    - darkmatter/docs/cli/validate.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/schema-slots.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_8:
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/slots/cache.rs
+    - darkmatter/lib/src/markdown/schemas/slots/grants/mod.rs
+    - darkmatter/lib/src/markdown/schemas/slots/grants/store.rs
+    - darkmatter/lib/src/markdown/schemas/slots/host.rs
+    - darkmatter/lib/src/markdown/schemas/slots/session.rs
+    - darkmatter/lib/src/markdown/schemas/slots/session_tests.rs
+    - darkmatter/dmls/src/capabilities.rs
+    - darkmatter/dmls/src/context.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/src/diagnostics/slots.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/overlay/analysis.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/overlay/yaml_document.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/slot_jobs.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/dmls/tests/l1/schema_slots_editor.rs
+docs_updated_during_phase_8:
+    - darkmatter/docs/topics/schemas/schema-slots.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - .claude/skills/darkmatter/dmls.md
 ---
 
 # Implementation Log for 2026-11-05-dynamic-schema-types (9 phases)
@@ -1550,3 +1734,332 @@ Run on macOS after both forks finished, with nothing else running.
   first run, 11170 passed (1 slow), 66 skipped. The shell-rewrite compose test is
   `#[cfg(unix)]` because it runs `cp`; its session-level twin runs everywhere.
 - No pre-existing, skipped, or load-sensitive failures were seen.
+
+## Phase 7
+
+### What was done
+
+The library seams came first, done serially in this session because the CLI
+work depends on them; the library-level tests were then written by one
+subagent while this session wrote the spawned-`md` tests (disjoint files).
+
+- **Library seams.**
+  - `SlotSession::for_request` is public, and the new
+    `SlotSession::for_context(DataRuntime, &FileResolutionContext)` serves
+    commands that validate without composing.
+  - `SlotSession::approve_reads(templates, context)` is the batched
+    collect-and-approve step: Full mode with a handler only. It shares
+    `SlotGrants::undecided_requests` / `apply_all` with the compose
+    pre-flight, which now uses them too.
+  - `DarkmatterSchemas::approve_slot_reads(&Markdown)` wraps it.
+  - `Markdown::compose_slot_approvals(request, handler)` is the slot half
+    of the pre-flight, for a run with no shell operation.
+  - `SessionMode::ReferenceCheck` turns a resolution that failed only for
+    a grant (`slot_approval_required`, `slot_denied`) into `UnresolvedSlots`,
+    and `schema_validation::defers_template` defers that for a
+    ReferenceCheck session as for `for_reference_check`.
+  - `CleanSchemaConfig::with_slot_session`: `CleanSchemaContext::effective_schema`
+    asks once (a `Once`) before the first resolution.
+  - `Diagnostic::grants_needed: Option<Vec<GrantNeeded>>` (`{kind, target,
+    scope}`, skipped when `None`) is filled by `report_diagnostics::with_expression_cause`
+    from `ExpressionError::SlotReadRefused { ApprovalRequired { needed } }`.
+  - `report_diagnostics::template_diagnostics` is public, and
+    `error_diagnostics` now projects a bare `SchemaError` template failure,
+    which `md clean`'s failure path hands it.
+- **`md compose`.** One session per invocation, built after pre-flight by
+  `commands/compose.rs::with_command_slot_session`
+  (`for_request(&request)` shares the command's `DataRuntime`, so slot reads
+  join the envelope's `read_set`, plus `with_run_grants(slot_grants)`, plus the
+  handler only on an interactive formatted run). With no shell operation
+  enabled, `compose_slot_approvals` still asks first. The lifecycle path
+  (`commands/compose/lifecycle.rs`) gets the same hand-off.
+- **`md graph`, `md validate refs`.** `with_reference_check_slot_session`
+  attaches a ReferenceCheck session. They never prompt and defer an
+  unapproved template.
+- **`md schema validate`.**
+  - One session per invocation (`for_context` at the launch context; handler
+    only when formatted and interactive), attached to the loaded schemas.
+  - Each Markdown document runs `approve_slot_reads` before its first
+    resolution.
+  - A template failure is `FileOutcome::Slots`, whose record holds
+    `error: "slots"`, `valid: false`, `problems: []`, `message`,
+    `diagnostics`, and a deduplicated `grants_needed`. It exits 1.
+  - A YAML schema file reports `slots: N` passively
+    (`SimplifiedSchema::try_from_yaml(..).pending_slots()`, reading nothing a
+    slot names), with a note row in formatted output.
+  - The slot-prohibition codes now surface: a kind definition holding a slot
+    gives the record's `code`, and a baseline holding one gives the run
+    diagnostic's code (`codes::slot_prohibition_code`).
+- **`md clean`.** `schema_config` attaches a `for_context` session (handler
+  only when it may prompt). An unapproved read fails the run with the slot's
+  diagnostic, so the document is never reported clean and `--save` writes
+  nothing.
+- **Output schemas.**
+  - Every file in `cli/schemas/output/` (18) gains `diagnostic.grants_needed:
+    grant-needed[]` and the `grant-needed` type (identical everywhere, as
+    `every_schema_file_shares_one_diagnostic_type` requires).
+  - `schema-validate.yaml`'s `file-record` gains the `slots` error value and
+    the `slots`, `diagnostics`, `grants_needed`, and `code` fields.
+- **Shipped schema (N40).** `sandboxing.yaml`'s `os` type is now
+  `enum({{ load_data("../../../os.yaml", "string[]") }}; required)`. The
+  corpus carve-out was already gone (Phase 2). The new corpus test pins the
+  template's passive admission.
+- **Docs and skill.**
+  - `schema-slots.md`: the per-command table replaces the planned marker, the
+    pre-flight hand-off is no longer planned, and it covers reference-check
+    sessions, `for_context`, and a `grants_needed` example. DMLS is still
+    marked **planned** (Phase 8).
+  - `definition.md` (JSON output, the `schema` kind check), plus
+    `docs/cli/{schema,clean,compose,graph,validate,data-contracts}.md`.
+  - Skill: `.claude/skills/darkmatter/schema.md`.
+
+### Departures
+
+- The plan's `md compose` session is "built from ... the grant book". It is
+  built after pre-flight, so `md compose`'s own reference check, which runs
+  first, still uses the composition's transient session pins-only and reads
+  nothing. See decisions.
+- N31 says a ReferenceCheck session "defers that property's judgment". The
+  deferral is of the whole template layer (the existing `defers_template`
+  path), not one property.
+- N40's `awaiting_enum_slots` deletion was already done in Phase 2. This phase
+  adds only the assertion.
+- `MD_DRY_RUN` is not set in the end-to-end tests. The fixture builder sweeps
+  `MD_*`, and no case passes `--show`. Nothing opens a window.
+
+### Requirement-to-test mapping
+
+Boundaries: the CLI process boundary and the filesystem and Git (spawned
+`md` on real repositories that `git` built in temp dirs, with the shipped
+`sandboxing.yaml` and `os.yaml` read by `include_str!` inside each test),
+F3/L1. Library surfaces were tested in-process at the crate's public API,
+F2/L1. No terminal is attached, so no case can prompt; prompting itself is
+Phase 5's `approval.rs` seam tests.
+
+CLI (`darkmatter-cli::l1 dynamic_schema_slots::…` unless noted):
+
+| Behavior | Test |
+| --- | --- |
+| compose control: valid, `read_set` = `[os.yaml]`, conforms to `compose.yaml` | `compose_resolves_the_shipped_schema_and_reports_its_data_file_read` |
+| `os_support: [BeOS]` fails naming the resolved members, no slot code | `compose_rejects_a_value_outside_the_resolved_list_naming_its_members` |
+| dirty `os.yaml`, data output: exit 1, `slot_approval_required` at schema line 8, `grants_needed` (4, prompt order), empty read set, empty stderr | `compose_data_output_on_a_dirty_data_file_fails_naming_the_grants_needed` |
+| no terminal (formatted, stdin fed): never prompts | `compose_without_a_terminal_never_prompts_and_reports_the_approval_needed` |
+| persisted grant in the home store resolves the dirty file | `compose_with_a_persisted_grant_reads_the_dirty_data_file` |
+| Matrix 2 wiring: invalid store line, `slot_grant_store_invalid` at the store and line 2 | `compose_with_an_invalid_grant_store_fails_at_its_line` |
+| `md schema validate <schema file>` is passive: `slots: 1`, valid with `os.yaml` deleted | `schema_validate_of_the_shipped_schema_file_is_passive` |
+| `md schema validate <document>` clean: valid, no `slots` | `schema_validate_of_a_document_resolves_with_the_automatic_grant` |
+| `md schema validate <document>` dirty: `error: slots`, `valid: false`, `problems: []`, diagnostics, record and diagnostic `grants_needed`, exit 1 | `schema_validate_of_a_document_with_an_unapproved_slot_is_unavailable_never_valid` |
+| kind-definition slot: record `code` | `schema_validate_names_the_code_of_a_slot_in_a_kind_definition` |
+| baseline slot: run diagnostic code | `schema_validate_names_the_code_of_a_slot_in_the_baseline` |
+| `md clean` dirty: failure, run diagnostic with grants, `--save` writes nothing | `clean_with_an_unapproved_slot_never_reports_the_document_clean` |
+| `md clean` control: no findings | `clean_of_a_document_valid_under_the_resolved_list_reports_no_findings` |
+| `md graph` / `md validate refs` dirty: deferred, exit 0 | `graph_defers_an_unapproved_slot`, `validate_refs_defers_an_unapproved_slot` |
+| conformance (no repository: no automatic grant) | `output_commands::conforms_schema_validate_slots_failure_names_the_grants_needed`, `…::conforms_schema_validate_template_schema_file_counts_its_slots`, `…::conforms_clean_unapproved_slot_fails_with_the_grants_needed` |
+
+Library (`darkmatter::l1 dynamic_schema_slot_surfaces::…`, by the subagent):
+
+| Behavior | Test |
+| --- | --- |
+| `compose_slot_approvals` asks once (one request, canonical file); its grant feeds `with_run_grants`, and the read reaches the read set | `compose_slot_approvals::a_dirty_data_file_is_asked_once_and_its_grant_lets_the_composition_read_it` |
+| no handler: no grants, composition needs approval | `compose_slot_approvals::without_a_handler_nothing_is_granted_and_the_composition_needs_approval` |
+| clean file: never asked | `compose_slot_approvals::a_clean_committed_data_file_is_granted_automatically_without_asking` |
+| `approve_slot_reads`: Full asks once then resolves; a second call asks nothing | `approve_slot_reads::a_full_session_asks_once_and_the_answer_resolves_the_template` |
+| ReferenceCheck never asks | `approve_slot_reads::a_reference_check_session_never_asks` |
+| ReferenceCheck: ungranted becomes `UnresolvedSlots`; automatic resolves and validates | `reference_check::an_ungranted_read_leaves_the_template_unresolved`, `…::an_automatically_granted_read_resolves_and_the_resolved_list_validates` |
+| reference validation defers with the session, fails without it | `reference_check::a_reference_validation_with_a_reference_check_session_defers_the_unapproved_template` |
+| `grants_needed` order, targets, JSON; absent on a `dm.data.*` slot failure | `grants_needed::an_approval_record_lists_the_grants_a_prompt_would_offer`, `…::a_slot_failure_that_is_not_an_approval_names_no_grants` |
+| bare `SchemaError` projection; `template_diagnostics` pending at the document | `schema_error_projection::*` |
+| `CleanSchemaConfig` session: fails without a handler; asks once for two resolutions | `clean_schema_config::*` |
+| N40 passive admission of the shipped template | `darkmatter::l1 shipped_schema_corpus::the_shipped_sandboxing_schema_is_admitted_as_a_template_without_resolving` |
+
+The Input Robustness Matrix does not apply: no file-format loader changed this
+phase. Matrix 2's CLI wiring cell is the invalid-store test above. The loader
+smell grep over the changed `slots/` files found only intentional fail-closed
+uses: `approve_reads` returns 0 on an invalid store, which resolution then
+reports typed.
+
+### Gates
+
+Run on macOS after the subagent finished, with nothing else running.
+
+- `darkmatter` `just test`: 15449 passed, 10 skipped (1 slow), first run.
+  The last small edits came after that run's build: the slot-prohibition
+  `code` field, its two tests, and a store-line tweak in one test. The whole
+  `darkmatter-cli` package was then rerun: 2421 passed. `just lint`: pass.
+  `just check-tier-coverage darkmatter`: 0 stranded.
+- Dependents:
+  - `cargo check --all-targets -p claudine -p claudine-cli -p claudine-gen -p messenger -p research`: clean.
+  - `affected_scope.py` puts `claudine` and `claudine-cli` in scope because
+    of the shipped `sandboxing.yaml`. Targeted runs: claudine
+    `test(/claudine_schema_shipped_corpus/)` 67 passed; claudine-cli
+    `test(/research_sequence_artifacts|schema_completion|completion::engine/)`
+    119 passed.
+- Gate skipping: not applicable. `affected_scope.py` over the working tree
+  reports `packages: [darkmatter, darkmatter-cli, darkmatter-lsp,
+  test-toolkit, claudine, claudine-cli]`, `change_class: package`.
+- Cross-OS (canonical paths in `grants_needed` and in the new tests): `just
+  cross-check darkmatter --os windows` passed on the first run, 11185 passed
+  and 66 skipped.
+- No pre-existing, skipped, or load-sensitive failures were seen. One
+  subagent test first failed on an empty read set; the cause was the test
+  setup (no data runtime on the request), documented on
+  `SlotSession::for_request`. It passed alone after the fix.
+
+## Phase 8
+
+### What was done
+
+All of it was done in this session, serially: the worker, the overlay hook,
+the router, and the diagnostics depend on one another, and the tests drive
+the whole server. No subagent was used.
+
+- **Library seams** (`darkmatter`):
+  - `SlotSession::with_cancel(Arc<AtomicBool>)`: Darkmatter's slot host now
+    implements `SlotHost::is_canceled`, so a superseded editor job stops
+    with `dm.schema.slot_canceled`, which is never cached or pinned.
+  - `SlotSession::with_slot_limits(IterationLimits)`: the evaluator gets
+    the session's allowance. A work-limit failure under custom limits is
+    never cached for another session (`session.rs::exhausted_work`).
+  - `DarkmatterSchemas::with_slot_pins_only` is public.
+  - A pins-only miss keeps the template's `pending` handle
+    (`session.rs::unresolved_template`).
+  - `GrantTarget::parse(kind, argument)` shares the grant store's
+    line judgment (`store.rs::target_from_words`).
+  - `report_diagnostics::template_slot_records` returns each record with its
+    slot. `slot_resolution_diagnostics` is now a projection of it.
+  - Bug fix: `slots/cache.rs::InputCheck::holds` trusted an unchanged
+    `stat` while an editor buffer with other text was open.
+- **Worker and store** (`dmls/src/slot_jobs.rs`, new):
+  - The `dmls-slots` thread runs `SlotJob`s. Each job uses a fresh Full-mode
+    session with no handler, the in-memory once grants, the cancel flag, and
+    `DMLS_SLOT_LIMITS` (25,000 visits, 4 MiB). It runs
+    `overlay::resolve_slot_templates` inside `buffers::with`.
+  - Reads: every local observation (file, exists, missing probe, listing),
+    with `stat`. `.git/index` and `HEAD` are added when a read lies in the
+    repository.
+  - `SlotSnapshots` keeps one entry per document: the installed session and
+    its failure, its reads, the stale flag, the in-flight `seq`/key/cancel,
+    and a generation. Methods: `demand`, `take_demands`, `install` (seq and
+    cancel checked), `invalidate_paths`, `invalidate_all`, `recheck_stats`,
+    `watched_paths`, `add_once`, `forget`.
+- **Overlay**: `schema_for` puts the snapshot generation in the schema
+  cache key and assembles through `SlotUse::Pins(session)`.
+  - A pins miss serves the installed failure, if any.
+  - It records a demand when the pins missed (and the key was not already
+    resolved) or the entry is stale.
+  - It returns a `SlotStatus { refreshing, unresolved, template_shape }` on
+    `DocumentOverlay::slots`. `SchemaBundle::templated` marks a served
+    template.
+  - The analysis root layers the template's literal shape when no bundle
+    serves.
+- **Router**: `after_message` = schema watches, `dispatch_slot_jobs`,
+  `sync_slot_watches` (one `RelativePattern` per path, id
+  `dmls-schema-slot-watchers`; a rejection switches to the save fallback).
+  - `Internal::SlotPrepared` installs and republishes the document.
+  - Invalidation: buffer open/change/close (`note_schema_buffer`), watched
+    changes, saves (`recheck_stats` without watches), grants, refresh, and
+    `didChangeConfiguration`.
+  - `workspace/executeCommand` handles `dmls.grantSlotRead` (`persisted`
+    goes through `GrantStore::append` under the snapshot's home; `once` is
+    kept in memory) and `dmls.refreshSchemaSlots`. `executeCommandProvider`
+    is advertised.
+  - Test seams: `StartupHooks::slot_gate` and the
+    `StartupEvent::{SlotJobQueued, SlotPreparing, SlotPrepared}` events.
+- **Serving**: `diagnostics/slots.rs` (new). The severities:
+  - `slot_pending` is information;
+  - `slot_approval_required` is a warning, with `data.choices`;
+  - other failures are errors.
+
+  An inline slot is ranged at its `{{ … }}` text in the `$schema` value. A
+  slot in another file is ranged at the `$schema` value and gets related
+  information. A stale served snapshot adds one pending record.
+  `code_actions.rs` turns each choice into a quick-fix `Command`. Hover
+  appends a pending or stale note. `enum_members` reads the literal members
+  of an unresolved `Constraint::Dynamic` list.
+- **Docs and skill**:
+  - `schema-slots.md`: the **planned** DMLS row is gone, and a new "In the
+    editor" section has a Mermaid flow, a state table, grants, refresh
+    triggers, the `stat` limitation, and limits.
+  - `dmls-schema-support.md`: a pointer section.
+  - Skill: `.claude/skills/darkmatter/dmls.md`, "Schema slots".
+
+### Departures
+
+- `Dependencies.slot_reads` is not on the overlay's `Dependencies`. The
+  reads live on the store's installed entry, and the watches come from
+  there (see decisions).
+- The work bound is a visit and byte allowance, not 25 ms of wall time (see
+  decisions).
+- Completion items carry no "stale" annotation. Hover and diagnostics do.
+- A slot syntax error is caught passively at lowering (the existing
+  `SchemaError::Grammar` path), before any job. So "syntax diagnostics" on
+  first load are that path's, at the definition.
+
+### Requirement-to-test mapping
+
+Boundaries crossed: the LSP protocol (the in-memory `Connection` drives the
+real router, overlay, slot worker, and grant store), the filesystem (data
+files, the grant store under the fixture `HOME`), and Git (`git` builds the
+repository for the index-watch cell). The rung is F2 and the tier is L1. No
+terminal or window is involved.
+
+`darkmatter-lsp::l1 schema_slots_editor::…` unless noted:
+
+| Behavior | Test |
+| --- | --- |
+| persisted grant resolves; frontmatter judged against loaded members (control + `BeOS` rejected naming members) | `a_persisted_grant_resolves_the_slot_and_the_frontmatter_is_judged_against_the_loaded_members` |
+| first-load approval failure at the slot (warning, choices incl. deny); no verdict on other fields (never unconstrained); no prompt (no server request beyond registrations) | `an_unapproved_read_is_reported_at_the_slot_and_the_frontmatter_is_never_judged_unconstrained` |
+| code action ⇒ command ⇒ store written (exact line) ⇒ refresh | `a_quick_fix_runs_the_grant_command_which_writes_the_store_and_refreshes_the_document` |
+| once grant resolves, store never written | `a_once_grant_resolves_for_this_server_process_and_is_never_written_to_the_store` |
+| invalid command arguments (relative path, bad decision, bad scope, wrong type, unknown command) refused, nothing written | `a_grant_command_with_an_invalid_target_is_refused_and_changes_nothing` |
+| unsaved data buffer refreshes; disk untouched | `an_unsaved_edit_of_the_data_file_refreshes_the_snapshot` |
+| saved dependency change refreshes through its own watcher (registration asserted) | `a_saved_change_to_the_data_file_refreshes_the_snapshot_through_its_watch` |
+| missing file creation refreshes | `creating_a_missing_data_file_refreshes_the_snapshot` |
+| last-good served while the refresh is held: old verdict + one information `slot_pending`; hover says stale; then current | `while_a_refresh_is_held_the_last_good_snapshot_is_served_marked_stale` |
+| a held job does not delay completion; literal members offered before, loaded after; no request evaluates | `a_held_slot_job_never_delays_a_completion_and_the_template_offers_its_literal_members` |
+| a newer edit cancels the in-flight job; only the newest installs | `a_newer_edit_of_the_template_cancels_the_job_in_flight` |
+| `.git/index` event (staging) refreshes an automatically granted file; registration includes `index` and `HEAD` | `staging_a_change_to_an_automatically_granted_file_refreshes_it_through_the_index_watch` |
+| slot syntax error reported passively at the definition, nothing validated | `a_slot_syntax_error_is_reported_passively_without_a_slot_job` |
+| rescan fallback: a save re-checks by `stat` | `without_watchers_a_save_re_checks_the_slot_inputs_by_stat` |
+| request path evaluates nothing before or after install (counter, with control) | `no_side_effects::schema_slot_requests_evaluate_no_slot_before_or_after_the_worker_resolves_it` |
+| store: stale seq rejected, superseded job canceled; one demand per key; stale re-demands; `stat` change; missing file appears; once grant changes generation | `darkmatter-lsp slot_jobs::tests::*` (5) |
+| editor work bound: 500 members resolve; runaway stops with `dm.iteration.*`; the command allowance resolves it after (failure not cached) | `slot_jobs::tests::the_editor_work_bound_resolves_a_realistic_list_and_stops_a_runaway_one` |
+| open buffer defeats the `stat` shortcut (regression for the cache bug) | `darkmatter markdown::schemas::slots::session::tests::an_open_buffer_with_other_text_fails_the_check_though_the_stat_is_unchanged` |
+
+The Input Robustness Matrix applies only to the `dmls.grantSlotRead`
+argument, a JSON object read by serde. Every field is required (no
+`#[serde(default)]`). These shapes are rejected: wrong type for the whole
+argument, an unknown decision, an unknown scope, and a relative path (the
+store's own judgment through `GrantTarget::parse`). Absent and null fields
+are rejected by serde's required-field rule. The grant store loader is
+unchanged and its matrix is Phase 5's. Smell grep over the new files: no
+`unwrap_or_default()` or `.ok()` on a load-bearing parse. The two
+`.ok()` calls in `diagnostics/slots.rs` serialize `data` and compare
+canonical paths; neither decides an outcome.
+
+### Gates
+
+Run on macOS with no subagent running.
+
+- `darkmatter` `just test`: 15473 passed, 10 skipped (37 slow), first run.
+  `just lint`: passed (after one `manual_contains` fix); it passed again
+  after the last edit. `just check-tier-coverage darkmatter`: 0 stranded.
+- Gate skipping does not apply. `affected_scope.py` over the working tree
+  (Phases 7 and 8, both uncommitted) reports `packages: [darkmatter,
+  darkmatter-cli, darkmatter-lsp, test-toolkit, claudine, claudine-cli]`,
+  `change_class: package`.
+- Dependents:
+  - `cargo check --all-targets -p claudine -p claudine-cli -p messenger`: clean.
+  - claudine `test(/claudine_schema_shipped_corpus/)`: 67 passed.
+  - claudine-cli `test(/research_sequence_artifacts|schema_completion|completion::engine/)`: 119 passed.
+- Cross-OS (watch paths, canonical keys, grant-store paths):
+  - `just cross-check darkmatter --os windows`: 11186 passed.
+  - `just cross-check darkmatter-lsp --os windows`: first run 1778 passed and
+    1 failed. The failure was the Phase 7 test
+    `diagnostics::frontmatter::tests::a_schema_extension_holding_a_slot_is_refused_with_the_baseline_slot_code`.
+    Its `canonical_tempdir` helper used raw `canonicalize` (`\\?\C:\…`), so
+    the extension path did not resolve. The helper now uses
+    `biscuit_file::canonicalize_simplified`. Second run: 1779 passed,
+    including all 14 `schema_slots_editor` tests. Phase 7's cross-check had
+    covered only the `darkmatter` package, which is why it was missed.
+- Load-sensitive or pre-existing failures: none on macOS.
