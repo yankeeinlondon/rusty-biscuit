@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-11-06
-phase: 4
+phase: 5
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -110,6 +110,60 @@ docs_updated_during_phase_3:
 - darkmatter/docs/topics/layouts-and-style.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/cli.md
+source_files_during_phase_4:
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/completion.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/output.rs
+- darkmatter/cli/src/args/path_completion.rs
+- darkmatter/cli/src/args/render.rs
+- darkmatter/cli/src/args/render_prepare.rs
+- darkmatter/cli/src/artifact.rs
+- darkmatter/cli/src/commands/clean.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/list_themes.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/io/mod.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/output/command.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/cli/src/render.rs
+- darkmatter/cli/src/render_style.rs
+- darkmatter/cli/src/style_claims.rs
+- darkmatter/cli/schemas/output/list-themes.yaml
+- darkmatter/lib/src/markdown/schemas/completion.rs
+- darkmatter/cli/tests/l1/clean.rs
+- darkmatter/cli/tests/l1/clean_fidelity.rs
+- darkmatter/cli/tests/l1/clean_schema.rs
+- darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+- darkmatter/cli/tests/l1/feature_flag.rs
+- darkmatter/cli/tests/l1/help.rs
+- darkmatter/cli/tests/l1/layout_fill.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/mermaid_features.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/cli/tests/l1/path_completion.rs
+- darkmatter/cli/tests/l1/render_dispatch.rs
+- darkmatter/cli/tests/level2/level2_path_completion.rs
+docs_updated_during_phase_4:
+- darkmatter/cli/README.md
+- darkmatter/docs/cli/clean.md
+- darkmatter/docs/cli/delta.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/output-and-width.md
+- darkmatter/docs/cli/render.md
+- darkmatter/docs/rendering/mermaid.md
+- darkmatter/docs/rendering/style.md
+- darkmatter/docs/topics/layouts-and-style.md
+docs_created_during_phase_4:
+- darkmatter/docs/cli/list-themes.md
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/cleanup.md
 - .claude/skills/darkmatter/cli.md
 ---
 
@@ -224,7 +278,7 @@ Phases run in order. Wave numbers are unique across this plan. Tasks within a wa
 
 ### Wave 5 — Render Execution (serial)
 
-- [ ] **Unify render dispatch**
+- [x] **Unify render dispatch**
   - Own `commands/mod.rs`, `commands/render.rs`, `main.rs`, `render.rs`, and `artifact.rs`. Resolve output once, install the sink before file/value preparation, prepare schema and CLI layers before output, and call the isolated handler signature in Rule 6.
   - Capture original document diagnostics and context before cleanup; run existing guarded cleanup with `--indent` only; apply effective presentation separately. Preserve source/data behavior and complete all validation before artifact opening.
   - Implement common no-input behavior; remove implicit clean and root theme-list branches. Keep root help/version/completion early actions and existing removed-policy-flag diagnostics.
@@ -233,11 +287,11 @@ Phases run in order. Wave numbers are unique across this plan. Tasks within a wa
 
 ### Wave 6 — Secondary Surfaces (parallel)
 
-- [ ] **Add theme command**
+- [x] **Add theme command**
   - Own `commands/list_themes.rs`, output data model/schema, `COMMAND_LEAVES`, and theme conformance tests. Wire the completed handler into dispatch and data-output detection after the wave integrates.
   - Preserve theme ordering/descriptions and test all data formats plus one formatted control. Keep valid local `--theme`, `--save`, and `--code-block` command tests.
 
-- [ ] **Connect style completion**
+- [x] **Connect style completion**
   - Own render additions to `args/path_completion.rs`, `args/completion.rs`, and render completion L1 tests. Wire both spellings to effective-schema candidates; add file filtering and style-root scoping.
   - Test `style.` → `style.page.`, `style.ul.` → `padding-left=`, enum values after `=`, unknown/open/custom schemas, no per-key flags after `--`, and no removed flag suggestions. Reuse dependency shell adapters and their recorded shell constraints.
   - Use unreadable/side-effect sentinel style files and expressions to demonstrate that completion does not prepare styles or execute content.
@@ -246,16 +300,16 @@ Phases run in order. Wave numbers are unique across this plan. Tasks within a wa
 
 ### Wave 7 — Behavioral Coverage (parallel)
 
-- [ ] **Cover alias parity**
+- [x] **Cover alias parity**
   - Own new `cli/tests/l1/render_alias_parity.rs`, `help.rs`, and render output-contract tests. Generate the render option inventory from clap and setter candidates from effective schema/type information, with one explicit representative-value override map for conflict-sensitive combinations. Fail on an argument without a representative; never silently skip it.
   - Compare classified/prepared values and effective style as well as parser success. Enumerate each nonshared render option in root-before-subcommand rejection tests. Keep help/version/completion exceptions separate.
   - Prove byte parity with a styled MarkdownPlus fixture and deterministic terminal/plain/HTML fixtures. Cover no-input TTY, redirected empty/nonempty stdin, explicit `-`, shared-controls-only invocations, and command-name inputs without waiting on stdin.
 
-- [ ] **Cover input failures**
+- [x] **Cover input failures**
   - Own new public style-preparation robustness tests and CLI style-file/setter wiring tests. Implement the matrix below, including invalid overridden files, repeated setter replacement, empty-file versus inline-empty behavior, custom schemas, and diagnostics with paths/origins.
   - Verify a malformed or denied style cannot cause output, CSS access, network access, or artifact opening. A local style-file read is permitted preparation; expressions and shell commands never run. Use public preparation results for the matrix and sparse subprocess wiring cases per loader.
 
-- [ ] **Migrate layout coverage**
+- [x] **Migrate layout coverage**
   - Own existing `cli/tests/l1/layout_flags.rs`, `layout_alignment.rs`, `layout_fill.rs`, `layout_style_frontmatter.rs`, other style-flag callers, affected L2 files, and headless browser assertions. Replace flags with semantically equivalent setters/objects while retaining expected output for retained behavior.
   - Cover every broadcast target and each fill mode; name sides explicitly for indent, reset whole padding for pad/indent, and retain HR placement assertions. Pin output width and terminal depth rather than ambient host facts.
   - Set `MD_DRY_RUN` on artifact-opening tests. Use the toolkit's focus-preserving terminal harness and browser-protocol input only; do not activate host windows.
@@ -288,7 +342,7 @@ Before completing this wave, search changed validators for `#[serde(default)]`, 
 
 ### Wave 8 — Remove Compatibility Machinery (serial)
 
-- [ ] **Retire style claims**
+- [x] **Retire style claims**
   - Delete Rule 19's symbols/modules and simplify all application signatures. Update remaining callers in library tests, browser/terminal suites, render-tree structural gates, and `lib/benches/render_pipeline_steps.rs` to effective styles with explicit origins.
   - Search the entire repository for claim types, override-mask types, old page key spellings, old render presentation flags, and obsolete root `save`/theme-list branches. Retain old spellings only in removal/migration tests, migration documentation, and historical specs/logs.
   - Checkpoint: new equivalence cases and migrated historical expectations pass; repository code has no claim references and production page builders read no `Cli`. No behavior removal beyond the spec's explicit boundaries is introduced.

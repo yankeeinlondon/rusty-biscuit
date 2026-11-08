@@ -158,6 +158,102 @@ decisions_for_review:
         were not added to `RENDER_DIAGNOSTIC_CODES`. That list holds the warnings
         `--deny` can block, and these are always errors. If the reviewer wants
         `--deny` to accept them, it is one line each there.
+    - |-
+        The old hidden root presentation flags (`--margin`, `--fill`, `--theme`,
+        and the rest) still work in this phase, because Phase 5 migrates their
+        tests. They now travel as one transitional value (`LegacyPresentation`)
+        that the render applies over the effective style, so a flag still wins over
+        the document, a style file, and a setter. `md render --max-width` goes the
+        same way instead of being applied last. The plan says page builders never
+        read `Cli`; they don't: the flags are read once at dispatch. The alternative
+        was to translate each old flag into a setter now, but the fill flags have no
+        setter equivalent (an accepted loss in the spec), so that would have changed
+        behavior ahead of the test migration. Phase 5 deletes `LegacyPresentation`,
+        `style_claims.rs`, and the `legacy` field together with the flags.
+    - |-
+        Records about a style file or a setter must not take the document's path
+        (the previous phase asked for this). The handoff suggested exempting the
+        setter codes the way `dm.setter.invalid` is exempt, but `dm.schema.*` codes
+        are shared with document problems, which do need the document's path. So a
+        failure now says whether its records are already located
+        (`ClassifiedFailure::located`), and the report sink skips the fallback for
+        those. Undoing this means going back to a code list, which would wrongly
+        strip the document from document schema problems.
+    - |-
+        Render now selects the document's schema on every run, so a document's
+        own unknown style key is judged by its schema. When that selection fails
+        (for example, a `$schema` that points at a missing file), a render with no
+        setter and no `--style` keeps rendering with the built-in style rules and
+        logs the failure only at debug level, as rendering did before. A render
+        that has setters or style files fails instead, because their values cannot
+        be judged. The alternative, failing every render of such a document, would
+        make `md doc.md` stop working for documents that render today. This lives in
+        `render_style.rs::prepare_cli_style_inputs`.
+    - |-
+        Markdown and data outputs print the source and never read the document's
+        style. So a problem in the document's own `style:` (a bad value, two
+        spellings of one key) does not stop them; a warning that `--deny` made an
+        error still does. The CLI layers are checked on every target, as the spec
+        requires. To do that, a failed merge is retried with the CLI layers alone.
+        A formatted Markdown output prints only the CLI layers' warnings, as it
+        printed none of the document's before. A data output reports both. The
+        alternative was to fail Markdown and data outputs on a broken document
+        style, which the spec's "keep the existing target-dependent handling" rules
+        out.
+    - |-
+        A warning about the document's own style now carries its authored line
+        and column (the key's position in the frontmatter, as a document line). It
+        used to carry only the file. One existing test that pinned the null
+        position was updated (`a_render_style_warning_names_the_document`). Flow
+        mappings (`page: { bogus: 1 }`) still give no position.
+    - |-
+        `md clean` and `md set`, when they print a rendered page (terminal or
+        HTML), render it with the document's own style only. The old root layout
+        flags no longer reach them (`md --margin 4 clean doc.md` used to indent the
+        cleaned output). The plan's Rule 20 asks for this.
+    - |-
+        Pages are built on a terminal made from the resolved output options
+        (`Terminal::from_output_options`) instead of a fresh host detection
+        (`Terminal::default()`), as Rule 6 asks. The render itself already used the
+        output profile, and image protocol detection still happens inside the
+        renderer, so no test output changed. The CLI's L2 real-terminal tests pass.
+    - |-
+        `--deny` failures for style now carry the blocked warnings as error
+        records, with their own codes (`dm.style.deprecated` for a body inline-rule
+        style). The message reads "the style was rejected by `--deny CODE`: ...".
+        Before, the failure was an untyped error with a generic code.
+    - |-
+        Schema-trigger findings from the render's schema selection are now
+        reported (to stderr, or in a data output's `diagnostics`). If a `--style`
+        file then fails to load, the findings are not included in that failure's
+        report; selection runs first, but the findings are delivered only after
+        every style file has been read. Merging them into the failure is a small
+        change in `commands/render.rs::prepare_style` if the reviewer wants it.
+    - |-
+        With no input and a terminal on stdin, both spellings exit 1. A formatted
+        output writes the root help to stderr. A data output writes one failure
+        value with code `dm.input.read_failure`. Before, `md` printed the help to
+        stdout and exited 0, and `md render` failed with an untyped error. Whether
+        stdin is a terminal is now part of `OutputEnvironment` (`stdin_is_terminal`),
+        so an in-process test can set it. The plan's single PTY wiring test is part
+        of Phase 5's coverage task and was not written here.
+    - |-
+        `md list-themes` writes a bare array for JSON, JSON5, and YAML; TOML has
+        no top-level array, so it writes the list under `value`, as `md get` does
+        for a list. Each entry uses the dark-mode description, as `--list-themes`
+        did. Formatted outputs end with a line naming `style.page.theme=NAME` and
+        `style.page.code.theme=NAME`.
+    - |-
+        Render completion shows only `style` and the keys under it, using the
+        document's schema, through a new library mode (`PathCommand::Render`).
+        clap calls the same completer for words after `--`, so the completer checks
+        the recovered line for `--` and then offers files only. The old hidden
+        presentation flags are still offered by clap's completion when a prefix
+        like `--mar` is typed, until Phase 5 removes them; the removed `--save` and
+        `--list-themes` are not offered. A real-shell L2 test typed `style.pa<Tab>`
+        and expected one match. Since Phase 2 added top-level `style.padding*`
+        shorthands, that prefix has several matches, so the test now types
+        `style.pag`.
 source_files_during_phase_2:
     - darkmatter/lib/src/style/apply.rs
     - darkmatter/lib/src/style/bespoke.rs
@@ -258,41 +354,93 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/cli.md
 message_to_agent: |-
-    Phase 3 built CLI preparation. Nothing is wired into rendering yet.
+    Phase 4 wired rendering. Both spellings go through
+    `commands::render::dispatch_render`, and setters, `--style` files,
+    `md list-themes`, and render completion all work. Docs for these are in
+    `docs/cli/render.md` and `docs/cli/list-themes.md`.
 
-    - Arguments (`cli/src/args/render.rs`, `args/render_prepare.rs`):
-      `RenderOptions { args, literal_args, style, output, show, max_width, indent, deny, features, mermaid }`,
-      `classify_render_args(&args, &literal_args) -> RenderInput { input, setters: Vec<RawStyleSetter> }`,
-      `setter_hint(&OsStr)` (meant for the "input did not resolve" message; not
-      wired yet), and `PreparedRenderOptions::prepare(&RenderOptions)`
-      (`input, setters, styles, policy, show, indent, mermaid, features, output`).
-      `run_render` already builds it and reads `input`/`mermaid` from it.
-    - Style preparation (`cli/src/render_style.rs`):
-      `prepare_cli_style_inputs(&md, opened, &prepared.styles, &prepared.setters, request) -> CliStyleInputs { schema, layers, trigger_findings }`,
-      then `inputs.prepare(Some(document_layer), StylePreparationPolicy::render().with_deny_style(..)) -> PreparedStyle`
-      and `inputs.warnings(&prepared) -> Vec<Diagnostic>`.
-      Failures are `ClassifiedFailure` reports that keep their codes. The
-      schema is selected once by `commands/schema/validate.rs::select_document_schema`.
-      Build the document layer with `StyleLayer::document(..)`; its positions must
-      be converted to document lines.
-    - Phase 4 must handle:
-      1. `ReportSink::failure` / `CommandRun::finish` apply
-         `with_document_fallback`, which would stamp the document path onto a
-         setter record that has no `source`. Exempt the style setter codes, as
-         `dm.setter.invalid` already is.
-      2. `trigger_findings` from `CliStyleInputs` are returned but not delivered
-         to any report yet.
-      3. The old root flags are still present and hidden, as are `--save`,
-         `--list-themes`, and `render --max-width`, because their tests have not
-         been migrated (see decisions_for_review). Phase 4 removes the `--save` and
-         `--list-themes` dispatch. Phase 5 removes the presentation flags with its
-         test migration. `has_explicit_arguments` destructures `RenderOptions`, so
-         removing a field there requires listing or unlisting it there and in the
-         generated root-rejection test's sample map (`args/render/tests.rs`).
-      4. `terminal_page` gained a `mermaid: bool` parameter and an
-         `#[allow(clippy::too_many_arguments)]`; Phase 4 replaces that signature.
-    - `simplified-schema/docs/topics/types/container-types.md` is still modified by
-      someone outside this feature. Leave it alone.
+    What Phase 5 removes, and where it lives:
+    - The old hidden root presentation flags and `md render --max-width` still
+      work. They travel as `style_claims::LegacyPresentation`, attached in
+      `dispatch_render` and stored in `PreparedRenderOptions.legacy`. The page
+      builders apply them in `render::apply_presentation` with
+      `apply_cli_claims` and the `*_overrides_from_claims` masks. Removing the
+      flags means deleting `LegacyPresentation`, `style_claims.rs`, the `legacy`
+      field of `PreparedRenderOptions`, and the `legacy` field of
+      `render::PagePresentation`. Then call `apply_prepared_style` (or the plain
+      `apply_*_style` functions without masks) in `apply_presentation`.
+    - `render::apply_cli_layout_flags(page, &Cli)` remains only for test callers:
+      `cli/tests/common/mod.rs` and `layout_fill.rs`.
+    - `RenderOptions.max_width` is still listed in `has_explicit_arguments` and in
+      the root-rejection sample map.
+    - Test helpers that build pages now use `render::document_style`,
+      `PagePresentation`, and `apply_presentation`; see `layout_fill.rs`,
+      `feature_flag.rs`, and `mermaid_features.rs`.
+
+    Other facts:
+    - Located failures: `ClassifiedFailure::located` and `located_from`. A
+      record built that way keeps `source: null`, and the sink never stamps the
+      document's path on it. Use them for any new CLI-layer failure.
+    - No input: `OutputEnvironment.stdin_is_terminal`. The in-process test is
+      `render_dispatch::no_input`. The single PTY wiring test the plan asks for is
+      not written yet.
+    - `render_dispatch.rs` holds the Phase 4 behavior tests. Its spelling-parity
+      tests are one per target, generated by a macro with a guard test that
+      checks the list against `OutputTarget::ALL`.
+source_files_during_phase_4:
+    - darkmatter/cli/src/args/cli.rs
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/args/completion.rs
+    - darkmatter/cli/src/args/mod.rs
+    - darkmatter/cli/src/args/output.rs
+    - darkmatter/cli/src/args/path_completion.rs
+    - darkmatter/cli/src/args/render.rs
+    - darkmatter/cli/src/args/render_prepare.rs
+    - darkmatter/cli/src/artifact.rs
+    - darkmatter/cli/src/commands/clean.rs
+    - darkmatter/cli/src/commands/frontmatter.rs
+    - darkmatter/cli/src/commands/list_themes.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/io/mod.rs
+    - darkmatter/cli/src/main.rs
+    - darkmatter/cli/src/output/command.rs
+    - darkmatter/cli/src/output/mod.rs
+    - darkmatter/cli/src/output/report.rs
+    - darkmatter/cli/src/render.rs
+    - darkmatter/cli/src/render_style.rs
+    - darkmatter/cli/src/style_claims.rs
+    - darkmatter/cli/schemas/output/list-themes.yaml
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/cli/tests/l1/clean.rs
+    - darkmatter/cli/tests/l1/clean_fidelity.rs
+    - darkmatter/cli/tests/l1/clean_schema.rs
+    - darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+    - darkmatter/cli/tests/l1/feature_flag.rs
+    - darkmatter/cli/tests/l1/help.rs
+    - darkmatter/cli/tests/l1/layout_fill.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/mermaid_features.rs
+    - darkmatter/cli/tests/l1/output_commands.rs
+    - darkmatter/cli/tests/l1/path_completion.rs
+    - darkmatter/cli/tests/l1/render_dispatch.rs
+    - darkmatter/cli/tests/level2/level2_path_completion.rs
+docs_updated_during_phase_4:
+    - darkmatter/cli/README.md
+    - darkmatter/docs/cli/clean.md
+    - darkmatter/docs/cli/delta.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/cli/output-and-width.md
+    - darkmatter/docs/cli/render.md
+    - darkmatter/docs/rendering/mermaid.md
+    - darkmatter/docs/rendering/style.md
+    - darkmatter/docs/topics/layouts-and-style.md
+docs_created_during_phase_4:
+    - darkmatter/docs/cli/list-themes.md
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/cleanup.md
+    - .claude/skills/darkmatter/cli.md
 ---
 
 # Implementation Log for 2026-11-05-render-surface (7 phases)
@@ -747,3 +895,415 @@ were checked against `git status`.
   where it forms a property-path escape (`\.`, `\\`). The Windows-path test
   `themes\user@host.yaml` is a parser test, not a real-path test.
 - The browser tier was not run; this phase changed no browser code.
+
+## Phase 4
+
+### Execution approach
+
+All three Phase 4 tasks were done in this session, one after another, with no
+subagents. Every task edits the `darkmatter-cli` crate, and Wave 6's two tasks
+both depend on Wave 5's new dispatch, so parallel agents would have blocked on
+cargo's lock and seen each other's half-built state. Focused tests ran after
+each task; the area gates ran once at the end.
+
+### Wave 5: Unify render dispatch
+
+- **One entry for both spellings.** `commands::render::dispatch_render(&RenderOptions, &Cli, &MdRequest, &OutputEnvironment)`:
+  - builds `PreparedRenderOptions` and attaches `LegacyPresentation::from_cli(cli, options.max_width)`;
+  - resolves the output once (`resolve_output` + `source_markdown_width`);
+  - handles no input (below);
+  - calls `run_render(&PreparedRenderOptions, &ResolvedOutput, &MdRequest)`, which takes no `Cli`.
+
+  `run_subcommand`'s `Render` arm passes `OutputEnvironment::detect()`.
+  `main.rs` no longer has its own implicit branches: the root `--save`
+  (implicit clean), the root `--list-themes`, and the "no input → help on
+  stdout, exit 0" branch are gone. Only `--completions`, help, and version run
+  before dispatch, and the removed-policy-flag check is unchanged.
+- **Removed root flags.** `Cli.save` and `Cli.list_themes` were deleted, so
+  `md doc.md --save` and `md --list-themes` are clap unknown-argument errors
+  (exit 2). `validate_subcommand_usage` no longer special-cases `--save`.
+- **Style preparation before any output** (`Render::prepare_style`), in this order:
+  1. `prepare_cli_style_inputs` selects the schema and reads every `--style`
+     file and the setters.
+  2. The selection's trigger findings are delivered, to the sink or stderr.
+  3. `render_style::document_style_layer` builds the document's `style:` layer
+     from the original frontmatter, before cleanup. Its positions are shifted
+     to document lines.
+  4. `render_style::prepare_render_style` merges everything.
+  5. The deny checks run (below), then the warnings are reported.
+
+  Cleanup with `--indent` runs only after this, and the style never enters it.
+- **Target rules** (Rule 13). A page target (terminal, plain, HTML,
+  MarkdownPlus) fails on any problem. A source target (Markdown, data) does
+  not fail on a problem in the document's own `style:`, but a warning that
+  `--deny` made an error still fails it. In that case preparation runs again
+  with the CLI layers only, so their problems and warnings are still found.
+  A formatted source output prints only the CLI layers' warnings. A data
+  output reports every warning.
+- **Deny.**
+  - `--deny style`: preparation refuses unknown and deprecated keys in every
+    layer. The body's inline-rule styles (`--- { style: waves }`) are now
+    refused in `Render::stop_if_denied`.
+  - `--deny <code>` (one warning code) blocks every warning record with that
+    code, including the inline-rule deprecations.
+
+  The failure's records are the blocked warnings, with severity changed to
+  error.
+- **Page builders** (Rules 6, 20):
+  - `render::terminal_page(input_path, &PageInputs, &PagePresentation, &Terminal)`
+  - `artifact::html_page(&PageInputs, &PagePresentation)`
+  - `render::apply_presentation(page, &PageInputs, &PagePresentation, target)`
+
+  `PagePresentation { style: &PreparedStyle, features, mermaid, legacy }`.
+  The terminal is `Terminal::from_output_options(&output.options)`, in render
+  and in `document_value`. The stylesheet resolves in the context of the
+  winning `page.stylesheet` origin. `apply_style_frontmatter`,
+  `style_diagnostics`, `stop_if_style_code_denied`, `log_style_warnings`, and
+  `with_cli_presentation` were removed. `document_value` (`md clean`, `md set`)
+  uses `render::document_style`, which prepares the document layer alone: no
+  root flag and no CLI layer reaches an edit's rendering. Its `cli` parameter
+  is gone, and so is `clean_value`'s and `set_value`'s.
+- **Records the document's path must not be stamped on** (previous phase's
+  item 1).
+  - New `ClassifiedFailure::located` and `located_from`. `located_from` keeps
+    the wrapped report as `Error::source`, so `DocumentArgumentError` still
+    renders its status block.
+  - New `output::report::failure_records`, which returns the records and a
+    `located` flag.
+  - `ReportSink::failure` and `CommandRun::finish` skip
+    `with_document_fallback` for a located failure.
+  - Every failure from `render_style.rs`, and every load or setter failure
+    that `prepare_cli_style_inputs` wraps, is located. So a missing style file
+    and a setter both keep `source: null`.
+
+  The handoff suggested exempting the codes instead. That does not work:
+  `dm.schema.*` codes are also used by document records, which do need the
+  fallback.
+- **Trigger findings** (previous phase's item 2) are delivered by render. A
+  data output adds `finding_diagnostic` rows. A formatted output writes
+  `emit_warnings` rows to stderr.
+- **Schema selection failure.** A render with no CLI layer falls back to the
+  built-in descriptor (`SelectedDocumentSchema::none()`), with a debug-log
+  line only. A render with CLI layers fails.
+- **No input** (Rule 21). `OutputEnvironment` gained `stdin_is_terminal`,
+  which is detected without reading stdin.
+  - A formatted output writes `Cli::command().render_help()` to stderr and
+    returns `ReportedExit(1)`.
+  - A data output writes one failure envelope with code `dm.input.read_failure`.
+  - Redirected stdin, including empty stdin, still goes through
+    `load_opened_document`.
+- **Setter hint** (from the Phase 3 handoff). When an input does not resolve
+  and `setter_hint` matches it, `with_setter_hint` attaches the hint to its
+  `DocumentArgumentError`. It is added to the message (`; to set a style,
+  write \`style.…\``) and replaces the status block's hint.
+- **Rule 3.** `io::parse_argument` uses `to_str()`. A non-Unicode argument is
+  a typed `InvalidReference` (`InvalidSyntax`) and is never opened under its
+  lossy spelling.
+- **Transitional.** `style_claims::LegacyPresentation { claims, theme, code_theme, line_numbers }`
+  carries the old hidden root flags until Phase 5 removes them.
+  `md render --max-width` now goes into `claims.max_width` instead of a
+  trailing `with_max_width`. `render::apply_cli_layout_flags(page, &Cli)`
+  remains only for test callers.
+
+### Wave 6, task 1: Add theme command
+
+- `Command::ListThemes { output }` and `commands/list_themes.rs`. The data
+  value is a `DataShape::Bare` array of `ThemeEntry { name, description }`,
+  in `ThemePair::all()` order, using the dark descriptions.
+  - The Markdown is a code-span list followed by setter guidance.
+  - The terminal output uses `UnorderedList` and `Prose`.
+  - The guidance line names `style.page.theme=NAME` and
+    `style.page.code.theme=NAME`.
+- New `COMMAND_LEAVES` row, `Cli::requests_data_output` arm, and
+  `cli/schemas/output/list-themes.yaml`. The schema's first arm is
+  `value: theme[]`; TOML writes the array under `[[value]]`.
+- `md clean --save`, `md set --save`, `md code-block --theme`, and
+  `md schema about --code-block` keep their own definitions and tests.
+
+### Wave 6, task 2: Connect style completion
+
+- Library: new `PathCommand::Render`. It spells keys as setters, like
+  `Compose`, and `command_can_spell` keeps only `style` and the paths under
+  it. A private `PathCommand::assigns` replaces the `== Compose` checks.
+- CLI:
+  - `args::path_completion::complete_render_word` is the `ARGS` completer, so
+    it serves both spellings. `DocumentSite::for_render` takes the one
+    non-setter word as the input and the style setters as earlier paths, and
+    uses `SchemaPolicy::Edit`, the same baseline and trigger selection that
+    render uses.
+  - `CommandLine` records `escaped`: clap calls the `ARGS` completer even
+    after `--`, so a word after `--` completes files only.
+  - `--style` gets `complete_style_files` (directories, plus `json`, `json5`,
+    `yaml`, `yml`, and `toml` files).
+  - Completion never opens a `--style` file.
+
+### Requirement-to-test mapping (Phase 4)
+
+| Requirement | Tests |
+|---|---|
+| Both spellings give equal bytes, stderr, and status on every target (terminal, plain, HTML, Markdown, MarkdownPlus, and the four data formats) | `render_dispatch::both_spellings_print_the_same_bytes_for_every_target` |
+| CLI layers reach the page; precedence is document < file < setter, whatever the order on the line | `render_dispatch::a_setter_and_a_style_file_move_the_page_and_the_later_layer_wins` |
+| A style failure gives exit 1, no stdout, and no artifact opened (`MD_DRY_RUN=fail`) on every target; a data failure gives one value, empty stderr, and a setter record with null `source` | `render_dispatch::a_bad_setter_fails_every_target_before_anything_is_printed_or_opened` |
+| Style-file failures and warnings name the style file, never the document | `render_dispatch::{a_style_file_failure_names_the_style_file_never_the_document, a_style_file_warning_is_reported_on_every_target_and_names_its_file}` |
+| Target rules for authored style; CLI style never in source output | `render_dispatch::{a_formatted_source_output_shows_no_warning_of_the_document_style, a_source_output_carries_no_cli_style_and_ignores_a_broken_document_style}`, existing `output_envelope::a_style_warning_*`, `output_commands::render_deny_takes_the_style_codes_it_reports` |
+| `--deny style` and `--deny dm.style.deprecated` block inline-rule styles | `render_dispatch::denying_style_blocks_an_inline_rule_style_and_a_warning_code_blocks_on_its_own` |
+| Trigger findings delivered by render (data and formatted) | `render_dispatch::render_reports_an_invalid_trigger_its_schema_selection_skipped` |
+| Document style warnings keep their authored position | `compose_report_diagnostics::a_render_style_warning_names_the_document` (now line 3, column 3) |
+| Setter hint | `render_dispatch::a_misspelled_setter_suggests_the_style_spelling` |
+| Redirected and empty stdin; `-` | `render_dispatch::redirected_stdin_renders_in_both_spellings_even_when_empty` |
+| No input with a terminal on stdin: both spellings and both families exit 1 | `render_dispatch::no_input::both_spellings_fail_with_status_one_for_every_family` (in process, injected `stdin_is_terminal`) |
+| Rule 3, non-Unicode input | `render_dispatch::a_non_unicode_input_is_an_invalid_reference_not_a_lossy_file` (unix) |
+| Root `--save` and `--list-themes` are unknown arguments | `clean::root_save_is_an_unknown_argument_that_writes_nothing`, `output_commands::{the_removed_root_save_is_a_usage_error_even_with_a_data_output, root_list_themes_is_unknown}` |
+| `md clean --save` keeps the behavior the root shorthand tests covered | `clean::test_clean_save_cleans_in_place_and_reports_delta`, `clean_fidelity::{clean_save_writes_a_changed_document, clean_save_leaves_a_declined_document_untouched}`, `clean_schema::test_clean_save_uses_default_schema_state_and_repairs` |
+| `md list-themes`: order, every data format, Markdown and plain controls, schema conformance | `output_commands::{conforms_list_themes_json_is_every_theme_in_canonical_order, conforms_list_themes_in_every_other_data_format, list_themes_markdown_lists_every_theme_with_the_setter_guidance, help_list_themes, list_themes_takes_no_input, every_leaf_has_a_schema_file_and_a_conformance_test, every_schema_file_shares_one_diagnostic_type}`, `help::test_list_themes`, unit tests in `commands/list_themes.rs` |
+| Completion: `style.` → `style.page.`, `style.ul.` → `padding-left=`, enum and theme values, custom, open, and broken schemas, no setter after `--`, `--style` file filter, no removed flags, no style file opened and no command run | `path_completion::{render_offers_only_style_setters_and_files_in_both_spellings, render_walks_the_style_schema_to_keys_and_values, render_reads_the_documents_own_style_declaration, render_after_the_terminator_offers_files_and_no_setter, style_offers_only_style_files_and_directories, render_offers_no_removed_root_flag, render_completion_opens_no_style_file_and_runs_nothing}`; library `schemas::completion::tests::render_offers_only_style_and_spells_each_key_as_a_setter` |
+| Legacy flags still win over the effective style | `render::tests::a_legacy_flag_wins_over_the_effective_style_and_an_omitted_one_leaves_it`; existing `layout_*`, `mermaid_features`, `feature_flag` tests, migrated to the new page-builder API |
+
+Process tests run 0.05–2 s each. The slowest is
+`a_bad_setter_fails_every_target…`, with 8 spawns, at about 2 s.
+
+### Input-robustness matrix and smell grep
+
+No new file or configuration reader was added in this phase. The style-file
+loaders and layer validators are Phase 2 and Phase 3 code, and their full
+matrix belongs to Phase 5 Wave 7. I grepped the new and changed code
+(`commands/render.rs`, `render_style.rs`, `render.rs`, `list_themes.rs`, and
+the completion changes) for `#[serde(default)]`, `unwrap_or_default()`,
+`filter_map(.. as_str())`, and swallowed `.ok()`. Nothing was found on a
+load-bearing parse:
+- `document_style_layer` reads an absent `style:` as `Value::Null`, which
+  preparation already treats as an empty document layer (Phase 2 behavior).
+- `complete_render_word` uses `.ok()`, but completion is advisory by contract.
+
+### Gates (macOS, run serially by this session; no subagents)
+
+| Command | Result |
+|---|---|
+| `darkmatter: just test`, first run | 13236 passed, then stopped (fail-fast) on 1 failure: `spawn_site_guard` caught `.env("MD_DRY_RUN")` in the new `render_dispatch.rs`. In the same run the single-test spelling-parity check took 7.8 s, over the 5 s budget. Fixed: `MD_DRY_RUN` is now set through `command_builder().application_input`, and the parity check became one test per target with a guard. |
+| `darkmatter: just test`, second run | 15055 run, 15055 passed, 10 skipped, 132.6 s |
+| `darkmatter: just lint` | exit 0 (run before and after the test fixes; includes the zed-dmls wasm32-wasip2 check) |
+| `just check-tier-coverage darkmatter` | 0 stranded |
+| `cargo check -p darkmatter -p darkmatter-cli --examples --benches` | OK |
+| `cargo check -p darkmatter -p darkmatter-cli --tests --features terminal-tests` | OK |
+| `just _test_l2 darkmatter-cli --features terminal-tests` | 77 of 82 passed. The 5 `level2_path_completion::a_tab_round_trip_in_*` tests failed. The cause is Phase 2, not this phase: the top-level `style.padding*` shorthands made `style.pa<Tab>` ambiguous. The tests now type `style.pag`. Rerun: 6 of 6 passed. |
+| dependents: `cargo check -p claudine -p claudine-cli --tests` | OK. claudine-cli uses only `darkmatter_cli::approval`, and no crate outside darkmatter matches on `PathCommand`. |
+
+The gate-skip check was
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`.
+It returned `packages: [darkmatter, darkmatter-cli, test-toolkit]` with
+`change_class: package`, so the gates ran.
+
+### Skipped or not covered
+
+- The library's L2 suite, the DMLS L2 suite, and the browser tier were not
+  run. This phase changed no library rendering code, only one completion enum
+  variant in the library, and no browser code.
+- The plan's single controlled-PTY wiring test for no input was not written.
+  It is in Phase 5 Wave 7's scope ("no-input TTY"). The in-process test
+  covers the decision.
+- If a `--style` file fails to load, the trigger findings are not included in
+  that failure's report (see `decisions_for_review`).
+- No cross-OS run. Plan Phase 7 rules out `just cross-check` for this
+  feature. The changes with OS-specific behavior:
+  - `parse_argument` now refuses a non-Unicode argument instead of opening its
+    lossy spelling. That test is unix-only.
+  - The completion file filter matches extensions case-insensitively.
+
+## Phase 5
+
+### Execution approach
+
+Four foreground subagents ran **one after another**, because every task
+compiles the `darkmatter-cli` crate. They did not run in the plan's
+wave order:
+
+1. Wave 7 "Migrate layout coverage", while the old flags still worked
+2. Wave 8 "Retire style claims", CLI half (flags, `style_claims.rs`, `--max-width`)
+3. Wave 8, library half (`cli_claims.rs`, the override masks, lib tests and benches)
+4. Wave 7 "Cover input failures"
+5. Wave 7 "Cover alias parity"
+
+The parity inventory is generated from clap, so it was written last. By then
+the removed flags and `--max-width` were gone, and it covers the final option set. Each agent
+ran only its own scoped tests; the area gates ran once at the end, with no
+agent running.
+
+### Wave 7: Migrate layout coverage
+
+- Every CLI L1 and L2 test that used an old flag now uses setters or a
+  `style={…}` object:
+  - L1: `layout_flags`, `layout_alignment`, `layout_fill`,
+    `layout_style_frontmatter`, `output_envelope`, `render_basic`,
+    `code_block`, `feature_flag`, `mermaid_features`
+  - L2: `level2_code_block_styling`, `level2_layout_dimensions`,
+    `level2_frontmatter_images`, `level2_disclosure_blocks`,
+    `level2_frontmatter_tables`, `level2_horizontal_rules`,
+    `level2_ordered_lists`
+- New `cli/tests/common/style.rs` builds a page in process the way `md` does:
+  clap, then `PreparedRenderOptions`, then `prepare_cli_style_inputs` plus the
+  document layer, then `apply_presentation`. Each run gets a temp-dir request.
+  It also holds the ten-component broadcast helpers.
+- What the migrated tests cover:
+  - every broadcast target;
+  - each fill mode (`full`, `pad`, `indent`, `max`, `explicit`);
+  - `pad`/`indent` resetting inherited vertical padding, with a negative control;
+  - `indent` with the side named (left, right, both);
+  - HR placement at 50 columns (`style.hr.padding-left=4` gives 4 cells in, 46 wide).
+
+  The old "flag beats frontmatter" tests are now "a setter beats the document
+  field by field, and an unrelated document field survives".
+- **Product fix:** `images` had no `padding`, `padding-left`, or
+  `padding-right` in the schema or descriptor, although `ImageStyle` carries
+  and applies them, so `--fill-images pad=N` could not be expressed. They were
+  added, and the plain output now matches the old flag byte for byte. New
+  test: `layout_fill::images_padding_moves_a_lone_image_as_the_old_fill_did`.
+  The descriptor count went from 204 to 207, and six
+  `recursive_schema_golden` fixtures were re-blessed. Their only content change
+  is the three keys.
+- **Spelling loss, recorded for review:** the old `--page-bg-color` parser
+  accepted `30,30,35` and `currentColor`. The style color grammar does not;
+  write `#1e1e23` and `current` instead.
+
+### Wave 8: Retire style claims
+
+- CLI deleted:
+  - every hidden root presentation field and its aliases in `args/cli.rs`
+  - `RenderOptions.max_width`
+  - `PageBackgroundArg`, `PageAlignmentArg`, `CliFill`, `parse_cli_fill`,
+    `parse_max_width`, `parse_cli_length`
+  - `cli/src/style_claims.rs` (`LegacyPresentation`)
+  - the `legacy` fields of `PreparedRenderOptions` and `PagePresentation`
+  - `render::apply_cli_layout_flags`
+
+  `apply_presentation` is now one call to `apply_prepared_style`. No entry was
+  added to `REMOVED_FLAGS`. `dispatch_render` still takes `&Cli`, but only for
+  the shared `--width` and `-v`; `run_render` and the page builders read no `Cli`.
+- Library deleted:
+  - `lib/src/style/cli_claims.rs`: `CliStyleClaims`, `FillClaim`,
+    `apply_cli_claims`, and every `*_overrides_from_claims`
+  - `PageStyleOverrides`, `ComponentStyleOverrides`, `ListStyleOverrides`,
+    `HrStyleOverrides`, `DisclosureStyleOverrides`, `BespokeStyleOverrides`
+
+  `apply_{page,component,list,hr,disclosure}_style(page, &StyleFrontmatter)`
+  and `apply_bespoke_style(page, style, assets, context)` take no mask.
+  Callers were updated: the structural gate, the parity tests, the bench, the
+  browser and L2 suites, and six lib L1 files. 11 tests that only proved a mask
+  suppressed a field were deleted. The two lib tests of "CLI beats frontmatter"
+  became two-layer `prepare_style_layers` tests (`style_frontmatter::{setter_layer_overrides_document_left_margin_field_by_field, code_theme_setter_layer_overrides_document_code_theme}`).
+- Removal tests:
+  - `args::cli::tests::removed_render_flags_are_unknown_arguments`: all 49
+    removed spellings and aliases, through `md doc.md …` and
+    `md render doc.md …`, each `UnknownArgument` with exit 2
+  - `the_root_declares_only_shared_controls_besides_render_options`: the guard
+  - spawned `render_basic::removed_render_flags_are_unknown_arguments`
+- Repository search: no claim or mask type name remains outside
+  `features/`/`fixes/`. Old flag spellings remain only in removal tests,
+  migration-test comments, the `docs/cli/render.md` migration table, one
+  sentence of `docs/topics/layouts-and-style.md` pointing to that table, and
+  the removal-test description in `.claude/skills/darkmatter/cli.md`. The
+  `--fill`/`--theme` hits in `biscuit-terminal` belong to `bt`'s own flags.
+- Docs: `docs/cli/render.md` has a "Presentation flags" migration table for
+  every removed flag and alias, a fill sub-table, and a "Themes and line
+  numbers" section. The stale `md FILE --save` shorthand row is fixed.
+  `docs/rendering/style.md` replaces the claim and mask sections with one
+  precedence section, "Later Style Layers Win, Field by Field", which has a
+  Mermaid flow. The integration order now matches `apply_prepared_style`; the
+  old lists had HR after color, which was wrong. Failing examples were fixed in
+  `output-and-width.md`, `mermaid.md`, and `layouts-and-style.md`.
+
+### Wave 7: Cover input failures
+
+New tests:
+- `lib/tests/l1/style_layer_matrix.rs`: 111 field-shape cells at
+  `prepare_style_layers`, one `#[test]` each
+- `cli/tests/l1/render_style_matrix.rs`: 22 in-process loader and CLI-layer tests
+- `cli/tests/l1/render_style_wiring.rs`: 20 subprocess tests, including control,
+  malformed, and semantic failure per loader (JSON, JSON5, YAML, TOML), via
+  `loader_wiring!`
+
+| Matrix row | Where covered |
+|---|---|
+| CLI style root | `style_layer_matrix::root_*`; `style_layers::admission::a_cli_root_must_be_a_mapping` |
+| Page rows and shorthands | `style_layer_matrix::rows_*` (full walk on `margin-top`; siblings `mb`, `padding-top`, `my`, `py`, `padding`; `margin: '10%'` fails) |
+| Horizontal lengths and cap | `style_layer_matrix::length_*` (full walk on `ml`; `mx`, `padding-right`, `table.padding-left`), `cap_*`; `render_style_wiring::the_output_width_still_bounds_a_valid_cap` |
+| Enum, theme, bool | `style_layer_matrix::` theme walk (alias `Visual_Studio_Dark` passes); `code.mode`, `code.theme`, `alignment`, `line-numbers` control + invalid |
+| Compound border | `style_layer_matrix::border_*`; existing `style_layers::merging::*` for partial objects and scalar→object |
+| Admitted array / open metadata | `style_layer_matrix::` `tags: number[]` cells (`[]` replaces, `[]` alone is an empty file, element paths `tags.1`/`tags.0`); existing `an_open_object_takes_only_a_whole_value` |
+| Required | existing `required_style_fields_may_come_from_two_layers`; new `required_from_a_document_satisfies_a_sparse_file`, null cases |
+| Unknown | `style_layer_matrix::` invalid sibling and setter-unknown cells; `render_style_wiring::denying_style_blocks_a_style_file_unknown_key` |
+| JSON / JSON5 / YAML / TOML | `render_style_matrix::{json_*, json5_*, yaml_*, toml_*}` plus existing `render_style_files::` loader cases; per-loader subprocess `render_style_wiring::{json,json5,yaml,toml}_loader::*` |
+| Reference/offset adapter | existing `render_style_files::` and unit tests; `render_style_wiring::a_remote_style_file_makes_no_request` (mock server, zero requests) |
+
+Other cells the plan names:
+- CSS taken from an earlier file, with an unrelated later file
+- stdin Markdown with local `--style` files
+- document versus launch versus file CSS origins
+- source, data, terminal, and plain never read CSS
+- HTML and MarkdownPlus read local CSS, and a remote stylesheet stays a link
+- a malformed style reads no CSS and opens nothing
+- no expression or shell runs, with sentinel files
+- repeated setters, and a repeated `style=` replacing the whole assignment
+- empty file versus inline `{}`
+- an invalid overridden file
+- a custom open schema
+- a setter's location is its argument plus the canonical path, with no position
+
+All are in `render_style_wiring` or `render_style_matrix`.
+
+**Defects found and fixed** (`lib/src/style/layer.rs`):
+
+- **A. An unknown member of a union's object arm.** For example
+  `table.border: { weight: thick, glow: 1 }`. It was a whole-value
+  `dm.schema.constraint`: a file failed instead of warning, a setter had the
+  wrong code, path, and origin, and a document dropped `glow` silently.
+  - Fix: `admit_pass` asks `declared_shape` for the undeclared members of a
+    failing object (new `undeclared_members`), records them as unknown keys,
+    and judges what remains.
+  - Audit: every border consumer (including `code-block`) and every loader
+    feed the same `admit` path, and all their cells pass.
+- **B. A schema problem did not name its property.** `StyleProblem`'s
+  `Display` now prefixes `` `style.<path>`: `` unless the message already
+  names the path.
+  - Audit: runtime and conflict messages already carried the path.
+
+Smell grep over `layer.rs`, `normalize.rs`, `render_style.rs`, and the
+`parse_local_document` path: no defect.
+- `normalize.rs:290` `.ok()?` is the alignment broadcast only. The value is
+  still rejected (`alignment_unknown_fails`).
+- The `render_style.rs` `filter_map`s, `unwrap_or_default`, and `.ok()?` are
+  the ones the Phase 3 log already lists.
+- `#[serde(default)]` on `PageStyle`, `CodeStyle`, `CommonStyle`, and
+  `ComponentBorderObject` maps absent and null to `None`, which is correct.
+  CLI layers strip nulls (Rule 10), and a document null means absent.
+
+### Wave 7: Cover alias parity
+
+- `cli/tests/l1/render_alias_parity.rs` has 42 tests.
+  - **Option inventory:** built from `RenderOptions::augment_args`, with one
+    representative row per id and value (every `--output` target and
+    `--feature` name), plus `OVERRIDES` for conflict cases.
+  - **Guards:**
+    - `every_render_argument_has_a_representative`
+    - `every_root_argument_is_classified` (render, shared, root-only, help)
+    - `root_only_arguments_are_not_render_arguments`
+  - **Setters:** generated from the effective schema through `path_candidates`
+    (358 paths) and typed by `declared_shape`; 80 sampled per (type, last key),
+    with family guards.
+  - **Comparison:** in process. Both spellings must give the same parse result
+    or error kind and exit, shared controls, `PreparedRenderOptions` (as Debug
+    text), and effective style (merged value, retained keys, projection,
+    origins, warnings).
+  - **Spawned rows**, one `#[test]` per row, each list guarded:
+    - an option before a subcommand exits 2 (8)
+    - early actions `--help`, `--version`, `--completions zsh`, `COMPLETE=zsh` (4), plus `-V`
+    - styled byte parity for terminal, plain, html, and markdown-plus, with
+      pinned width and environment (4)
+    - stdin forms: empty and nonempty, with and without `-`, plain and json,
+      `--width` alone, `-v` alone (10)
+    - command-name files `-- toc` and `./toc` in both spellings (4), with
+      stdin closed and a 5 s timeout
+- `cli/tests/level2/level2_render_no_input.rs` is the plan's single PTY wiring
+  test. It runs in a detached tmux pane (no focus) and checks that stdin is a
+  terminal. For both `md` and `md render`, stdout is empty, the exit is 1, and
+  stderr holds the same root help.
+- No spelling divergence was found, so there was no product change.
