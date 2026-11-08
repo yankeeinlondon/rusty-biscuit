@@ -48,5 +48,6 @@ Check for starvation of `main` and queue depth, using recent merge history.
 
 ## Note on language
 
-This is mainly configuration. Any scheduling change the Python planner needs stays
+This is mainly configuration. Fixing the existing Python planner is allowed until
+its replacement lands (decided 2026-11-07); keep any scheduling change it needs
 minimal, since `2026-11-06-rust-ci-planner` follows.
