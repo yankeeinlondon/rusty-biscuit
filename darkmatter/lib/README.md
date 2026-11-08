@@ -48,11 +48,10 @@ The most _grokkable_ feature that Darkmatter provides is a well designed **rende
 The `Markdown` struct is a central player in how we interact with **Darkmatter** and here is a simple example of using the `Markdown` struct along with `TerminalOptions` to output markdown to the terminal:
 
 ```rust
-use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
+use darkmatter::markdown::{Markdown, output::TerminalOptions};
 
 let md: Markdown = "# Hello\n\nWorld".into();
-let mut stdout = std::io::stdout();
-write_terminal(&mut stdout, &md, TerminalOptions::default())?;
+print!("{}", md.as_terminal(TerminalOptions::default())?);
 ```
 
 ### Composition
@@ -473,7 +472,7 @@ Though the terminal is the _default_ target for rendering, it is not the **only*
 #### Terminal Output
 
 ```rust
-use darkmatter::markdown::output::{TerminalOptions, write_terminal, for_terminal};
+use darkmatter::markdown::output::{MermaidMode, TerminalOptions};
 
 let options = TerminalOptions {
     include_line_numbers: true,
@@ -481,20 +480,16 @@ let options = TerminalOptions {
     ..Default::default()
 };
 
-// Write to stdout
-write_terminal(&mut std::io::stdout(), &md, options)?;
-
-// Get as string
-let output = for_terminal(&md, options)?;
+let output: String = md.as_terminal(options)?;
+print!("{output}");
 ```
 
 #### HTML Output
 
 ```rust
-use darkmatter::markdown::output::{HtmlOptions, as_html};
+use darkmatter::markdown::output::HtmlOptions;
 
-let options = HtmlOptions::default();
-let html = as_html(&md, options)?;
+let html: String = md.as_html(HtmlOptions::default())?;
 ```
 
 #### MDAST JSON

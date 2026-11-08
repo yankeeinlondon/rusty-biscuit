@@ -296,9 +296,9 @@ DMLS refreshes on the same changes through its file events; see
 A payload may take values from data with `{{ … }}`
 [slots](./schema-slots.md). Such a payload is **pending**, never invalid:
 discovery and matching read nothing a slot names, and `md schema triggers`
-lists it as pending. When a document it matches is composed, the payload's
-slots resolve in that composition's slot session, and the resolved schema
-must then pass the same payload rules (a mergeable object schema that
+lists it as pending. When a document it matches is composed or validated,
+the payload's slots resolve in that command's slot session, and the resolved
+schema must then pass the same payload rules (a mergeable object schema that
 compiles). A slot failure is reported at the slot, in the trigger's files.
 A document the trigger does not match never evaluates its slots.
 
@@ -311,7 +311,9 @@ $schema:
   os: enum({{ load_data("../data/os.yaml", "string[]") }}; required)
 ```
 
-A slot in a `match` condition is refused: only the payload may hold slots.
+A slot in a `match` condition is refused: the trigger is invalid
+(`dm.schema.invalid_trigger`, its message naming the slot), because only the
+payload may hold slots.
 
 ## Applying a recursive type
 

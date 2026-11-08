@@ -28,6 +28,14 @@ extension.
   execute expressions, fetch remotes, or mutate documents.
 - Keep network access deny-all by default. Route every allowed remote read or
   write through `biscuit_file::FetchPolicy` and exact-host consent.
+- Keep schema `{{ … }}` slots passive by default. Only an explicit resolution
+  through a `SlotSession` (`DarkmatterSchemas::resolve_template`) evaluates
+  them, after every slot is admitted; nothing ever validates against a
+  template or a placeholder. Every slot read passes the grant gate before the
+  file is opened or the shared memo consulted, and grants come only from the
+  user-level store under the home (`<home>/.config/darkmatter/schema-read-policy`),
+  a prompt, or the clean-committed automatic grant; repository or workspace
+  content never grants. See [schema.md](schema.md), "Schema templates".
 - Render terminal output with `TerminalRenderable` components. The browser tier
   is headless and must use browser-protocol input, never host focus or OS input.
 - Preserve source spans and typed diagnostic provenance through parsing,

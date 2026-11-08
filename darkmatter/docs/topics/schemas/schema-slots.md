@@ -17,7 +17,12 @@ $schema:
 
 The grammar, the result shapes each position takes, and the substitution
 rules belong to the SimplifiedSchema language and are described in
-[Schema Slots](../../../../simplified-schema/docs/topics/language/slots.md).
+[Schema Slots](../../../../simplified-schema/docs/topics/language/slots.md):
+[Where a Slot May Be Written](../../../../simplified-schema/docs/topics/language/slots.md#where-a-slot-may-be-written)
+lists every position, and
+[What a Slot's Value Must Be](../../../../simplified-schema/docs/topics/language/slots.md#what-a-slots-value-must-be)
+the value each one takes, including
+[the cap on a slot's pattern](../../../../simplified-schema/docs/topics/language/slots.md#the-pattern-cap).
 This page covers what is Darkmatter's: which expressions a slot may contain,
 where it evaluates, what it may read, and how a failure is reported.
 
@@ -83,6 +88,13 @@ A trigger whose payload holds slots is **pending**, not invalid: matching it
 reads nothing, and `md schema triggers` lists it as `pending: true`. Its
 slots evaluate only for a document it matches.
 
+### Not yet supported
+
+A slot that supplies a whole property definition
+(`os: {{ load_data("./os-type.yaml", "string") }}`) is **planned**, not
+built, and is not accepted today. See
+[Whole Types (Planned)](../../../../simplified-schema/docs/topics/language/slots.md#whole-types-planned).
+
 ## What a slot may contain
 
 A schema describes documents, so a slot may depend only on the schema's own
@@ -141,13 +153,39 @@ read set like any other read (see
 
 ## What a slot may read
 
-Every read a slot makes is checked before it happens: a content read or a
-fetch is checked before the file is opened or the URL requested, and before
-the command's shared `load_data` memo is consulted, so a file the document
-itself already loaded is not handed to the slot. Any other input a function
-observed (a probed path, a folder listing, a contract import) is checked
-before the function's result reaches the slot. A refused read cannot be
-turned into a value by `try_frontmatter` or `||`.
+Every read a slot makes is checked before it happens:
+
+- a content read or a fetch is checked before the file is opened or the URL
+  requested, and before the command's shared `load_data` memo is consulted,
+  so a file the document itself already loaded is not handed to the slot;
+- a schema file is checked before it is opened: each file a `load_data`
+  contract imports (`Names@./types.yaml`), and the schema a page names when
+  `validate_schema` checks it (the page itself is a content read);
+- a folder listing is checked before the folder is enumerated: `find_files`
+  needs the folders its pattern lists below (`./*.md` lists the slot's own
+  folder), and `find_first_index` or `find_last_index` the folder the file's
+  family lives in. A listing is approved with a grant of that folder.
+
+Everything a function observed (a probed path, a listing, a contract import)
+is checked once more before the function's result reaches the slot. A
+refused read cannot be turned into a value by `try_frontmatter` or `||`.
+
+Slots belong to the slot resolver alone. Composing a document never
+evaluates the `{{ … }}` inside its inline `$schema` as an ordinary
+frontmatter expression, so a slot's read is never made, and its list never
+turned into text, before the slot's approvals are checked.
+
+For example, with an empty grant store and no repository, this document
+fails with `dm.schema.slot_approval_required`, and its read set stays empty:
+neither `names.yaml` nor `types.yaml` is opened.
+
+```yaml
+---
+$schema:
+    os: "enum({{ load_data('./names.yaml', 'Names@./types.yaml') }})"
+os: Linux
+---
+```
 
 A read happens only when something approves it. The gate decides each read
 in this order:

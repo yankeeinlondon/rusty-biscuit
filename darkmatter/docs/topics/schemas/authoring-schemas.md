@@ -534,6 +534,62 @@ There is a _variant_ of an enumeration which we will call a "suggestion" which p
 
 #### Wide versus Nested Dictionaries
 
+### Make an Enum from a Data File
+
+When the choices for a property already live in a data file (the operating
+systems a project supports, the regions a service runs in), copying them into
+the schema means two lists to keep in sync. A `{{ … }}` **slot** lets the
+schema take them from the file instead:
+
+```yaml
+# schemas/provider.yaml, beside schemas/os.yaml
+kind: schema
+$schema:
+    os: enum({{ load_data("./os.yaml", "string[]") }}; required)
+```
+
+A relative path in a slot resolves from the folder of the schema file the
+slot is written in, not from the document being validated. A slot may sit
+beside literal elements, so `enum(none, {{ … }})` adds `none` to the loaded
+values.
+
+A schema with a slot is a **template**. Reading it evaluates nothing: parsing,
+querying, exporting, trigger matching, completion, and hover all see the slot
+as text. The slot runs only when a command resolves the schema, and every
+read it makes must be approved first. A clean, committed file in the schema's
+own repository is approved automatically; anything else needs a grant or an
+answer at a prompt. See
+[When a slot is evaluated](./schema-slots.md#when-a-slot-is-evaluated) and
+[What a slot may read](./schema-slots.md#what-a-slot-may-read).
+
+A slot may be written in these positions, and each takes one shape of value:
+
+| Position | Example | The slot must produce |
+| --- | --- | --- |
+| an `enum(...)` member | `enum(none, {{ list }})` | an array of strings, spliced in as members |
+| a `suggest(...)` candidate | `string(suggest(a, {{ list }}))` | an array of strings, numbers, booleans, or `null`s, spliced in as candidates |
+| `literal(...)` | `literal({{ revision }})` | one string, number, or boolean |
+| `default(...)` | `number(default({{ n }}))` | one value other than `null` that the property's type accepts |
+| `min(...)`, `max(...)` | `number(min({{ low }}))` | a number (a non-negative integer for a length or item count) |
+| `pattern(...)` | `string(pattern({{ re }}))` | a string, within the pattern cap |
+
+A list slot must return an array even for a single value: a bare scalar is a
+wrong shape. A value slot is the whole argument, so `default({{ d }} + 1)` is
+a grammar error. A pattern from a slot is capped so that data can never slow
+down validation: it may not use lookaround or a backreference, and it may be
+at most 4096 bytes (see
+[The pattern cap](../../../../simplified-schema/docs/topics/language/slots.md#the-pattern-cap)).
+
+> **Planned:** a slot that supplies a whole property definition
+> (`os: {{ load_data("./os-type.yaml", "string") }}`) is not accepted yet;
+> see [Whole Types (Planned)](../../../../simplified-schema/docs/topics/language/slots.md#whole-types-planned).
+
+The full grammar and every result rule are in
+[Slots: Values Supplied by an Expression](../../../../simplified-schema/docs/topics/language/slots.md).
+Darkmatter's side (which expressions a slot may contain, where slots may
+appear, approvals and grants, caching, the editor, and failure codes) is in
+[Schema Slots in Darkmatter](./schema-slots.md).
+
 ### Union Types
 
 A union says a property may hold one of several types. Write it with `|`, as

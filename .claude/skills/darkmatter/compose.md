@@ -1046,6 +1046,16 @@ Shell approval and shell execution are separate concerns:
   snapshot of the document taken before frontmatter pass 1 for the same reason.
 - Frontmatter interpolation runs before the root's pre-approved gate, so the
   first nested call there runs the gate against the root document first.
+- Schema slot reads are the third approvable kind and are asked **before**
+  shell commands: `compose_preflight_approvals*` collects the document
+  schema's known slot targets passively (`schemas/slots/grants/targets.rs`)
+  and asks `ShellApprovalHandler::approve_slot_reads`; the run-only answers
+  (`ComposePreflightApprovals::slot_grants`) reach composition through one
+  `SlotSession` (`ComposeOptions::with_slot_session`). With no shell
+  operation enabled, `Markdown::compose_slot_approvals` asks alone. A
+  pre-flight or reference-check pass uses pinned schemas only and defers a
+  template (`schema_validation::defers_template`). Details:
+  [schema.md](schema.md), "Schema templates".
 
 ### Interactive approval: the stage policy snapshot
 

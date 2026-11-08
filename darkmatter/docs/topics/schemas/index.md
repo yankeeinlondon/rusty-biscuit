@@ -38,13 +38,14 @@ I'm sure you're ready to dig into the magic we call `SimplifiedSchema` so choose
     - [Schema Definition](./definition.md)
         - how Darkmatter applies schemas: the `$schema` property, the baseline, trigger schemas, and the `md schema` commands
         - also covers the `DarkmatterSchemas` library API and its entry points
+    - [Schema Constraints](./schema-constraints.md)
+        - what a constraint is, and which constraints may take their value from a `{{ … }}` slot
     - [Schema Validation](./schema-validation.md)
-        - shows how Darkmatter provides _schema validation_
-        - describes how this can be utilized  
-            - from the terminal using the CLI 
-            - as a library author calling into the Darkmatter library
+        - what Darkmatter validates a document against, with pointers to the CLI and library details
+        - how a schema with slots is resolved before validation, and how to check a template without resolving it
     - [Schema Slots in Darkmatter](./schema-slots.md)
         - what a `{{ … }}` slot in a schema may contain, where it evaluates, what it may read, and how its failures are reported
+        - how slot reads are approved and granted, and how resolutions are cached across commands
     - [Schema Discovery](./schema-discovery.md)
         - how the definitions of YAML document kinds (`kind: yaml-schema`) are found in the schema roots, and what happens when two claim one kind or one fails
     - [Visual Support of Schemas from DMLS](dmls-schema-support.md)

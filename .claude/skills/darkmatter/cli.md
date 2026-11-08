@@ -188,3 +188,23 @@ shell side and `cli/src/args/path_completion.rs` the value completers.
   the whole plan. A misplaced test document therefore does not fail loudly: it
   falls back to the baseline, and `CliProcessFixture::write_file` is relative to
   the workspace, not `cwd()`.
+
+## Schema slot sessions and prompts
+
+Each `md` invocation that can validate against a schema template builds
+exactly one `SlotSession` and passes it to every pass:
+
+- `md compose`: `commands/compose.rs::with_command_slot_session` after
+  pre-flight (run-only answers from `ComposePreflightApprovals::slot_grants`;
+  the approval handler only on an interactive, formatted run).
+- `md graph`, `md validate refs`: `with_reference_check_slot_session`
+  (`SessionMode::ReferenceCheck`: automatic and persisted grants, never asks;
+  an unapproved template is deferred, not failed).
+- `md schema validate`, `md clean`: `SlotSession::for_context` plus one batched
+  `DarkmatterSchemas::approve_slot_reads` per document before it resolves.
+
+The terminal prompt is `cli/src/approval.rs::approve_slot_reads_with_io` (testable
+over any `BufRead`/`Write`; ended input is deny-for-run). A data output never
+asks: an unapproved read is `dm.schema.slot_approval_required` with
+`grants_needed`, and `md schema validate` reports the file as `error: slots`
+(exit 1). The grant store is read from the request's home, never the repository.

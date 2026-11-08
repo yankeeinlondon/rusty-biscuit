@@ -539,6 +539,47 @@ document is reported at the `---` that starts it, a non-string key and a tag
 at the key or tag itself. A duplicate key is located less precisely: at the
 start of the mapping that holds it.
 
+## Loading data into a schema
+
+A schema can take a list of values from a data file by calling `load_data`
+inside a `{{ … }}` [schema slot](./schemas/schema-slots.md):
+
+```yaml
+# schemas/provider.yaml
+kind: schema
+$schema:
+    os: enum({{ load_data("./os.yaml", "string[]") }}; required)
+```
+
+The call works as everywhere else, with these differences:
+
+- **The path resolves from the schema file.** `./os.yaml` above is
+  `schemas/os.yaml`, whichever document the schema validates. A slot inside a
+  named type imported from another file resolves from that file's folder, and
+  a slot in a document's inline `$schema` from the document's folder.
+- **Every read must be approved.** The slot's reads are checked before the
+  file is opened or the URL fetched, and before the command's memo is
+  consulted, so a file the document already loaded is not handed to the slot
+  unapproved. A clean, committed file in the schema's own repository is
+  approved automatically; see
+  [What a slot may read](./schemas/schema-slots.md#what-a-slot-may-read).
+- **The reads join the command's read set.** A slot shares the command's
+  [memo](#reading-a-file-once-per-command) and records into its
+  [read set](#the-read-set) like any other call, including the candidate
+  paths probed for a file that was not found and every location searched for
+  a contract import that does not exist, so creating either one changes the
+  answer.
+- **A contract may name a type that holds slots.** Inside a slot, a contract
+  such as `"os-list@./types.yaml"` whose type is itself a template resolves
+  that type's slots in the same slot session; a contract that leads back to
+  a template already being resolved fails with `dm.schema.slot_cycle`.
+  Outside a slot, in a document's own `load_data`, the same contract fails as
+  unresolved.
+
+A failure inside a slot keeps its `dm.data.*` code and `data_location`, and
+is reported at the slot. The full rules are in
+[Schema Slots in Darkmatter](./schemas/schema-slots.md).
+
 ## See also
 
 - [`load_data` function page](../functions/load-data.md): signature and

@@ -401,7 +401,7 @@ targets need only "schema and target in the repo"; listings/URLs never),
 post-read BLAKE3 must equal the granted bytes) → handler → `ApprovalRequired
 { needed }`; slots fetch through their own `remote_runtime`),
 `targets.rs::collect_targets` (passive; literal/pure-folded args, URL or
-absolute/`./`/`../` path only), and `request.rs` (`SlotGrantRequest`,
+absolute/`./`/`../` path only; a listing names the folder it enumerates), and `request.rs` (`SlotGrantRequest`,
 `SlotGrantDecision`; a decision not among `choices` is unanswered).
 `ShellApprovalHandler::approve_slot_reads` (provided, default unanswered) is
 asked by `compose_preflight_approvals*` before shell prompts
@@ -422,12 +422,13 @@ matched trigger payload: `ResolvedPayload::pending`, finished by
 `SlotGrants` (Q17), pins per `cache::ResolutionKey` (re-verified when
 `DataRuntime::memo_generation` moved), and a thread-local resolution stack
 (`slot_cycle`; nested `load_data` contracts resolve through
-`session::resolve_contract_slots`, keyed apart in the contract memo).
-`slots/cache.rs` is the process cache (stat-first rechecks, grant coverage
-through `RecordingGates`, command-scoped entries for volatile/URL/listing
+`session::resolve_contract_slots`, keyed apart in the contract memo; their
+slots evaluate under `buffers::unguarded`, judged by their own gates only).
+`slots/cache.rs` is the process cache (grant coverage through
+`RecordingGates`, judged before the stat-first rechecks reread an input, command-scoped entries for volatile/URL/listing
 reads, no grant-dependent failures; cleared by
-`reset_process_caches_for_bench`). Work counter: `Work::SlotResolution`
-(one per slot evaluated). `pending_templates_for` returns `PendingTemplate`s
+`reset_process_caches_for_bench`). Work counters: `Work::SlotResolution`
+(one per slot evaluated), `Work::SlotInputRehash` (a cached input reread). `pending_templates_for` returns `PendingTemplate`s
 (document + matched trigger payloads, Q14-filtered). Kind definitions, the
 baseline/catalog, DMLS extensions, and trigger `match` refuse slots
 (`codes::slot_prohibition_code`).

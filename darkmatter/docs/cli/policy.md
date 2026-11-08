@@ -75,7 +75,9 @@ authorizes a shell command: shell approval and host consent are separate.
 `--allow host=example.com` lets composition read remote content from exactly
 that host (a hostname, an IP address, or a CIDR range for ICMP probes).
 `host=HOST` is an allowance only: `--deny host=…` and `--disable host=…` are
-usage errors, and `--deny all` does not take a named host away.
+usage errors, and `--deny all` does not take a named host away. A named host
+also allows schema slot reads of URLs on it; see
+[Schema slot reads](#schema-slot-reads).
 
 ### Features (`--disable`)
 
@@ -258,6 +260,48 @@ A failed command never writes the composed document to stdout, in any
 `--output` mode, and exits with status 1. With `--show`, a failed Markdown run opens
 no viewer; a failed data output still opens its failure value, which holds no
 document. See [Exit status](./output-and-width.md#exit-status).
+
+## Schema slot reads
+
+A schema can load values from data with a `{{ … }}`
+[slot](../topics/schemas/schema-slots.md), such as
+`enum({{ load_data("../os.yaml", "string[]") }})`. Whether a slot may read a
+file or URL is decided by **grants**, not by the verbs on this page, and not
+by the shell command whitelist or blacklist either:
+
+- **`--allow host=HOST` is the only flag that affects a slot read.** On
+  `md compose` it also allows a slot's `http` and `https` reads on that host
+  for the run, unless a deny grant covers them. No other `--allow`,
+  `--deny`, or `--disable` identifier governs a slot, and no
+  `dm.schema.slot_*` code is a recovery or one of the codes `--deny` takes, so
+  `--deny dm.schema.slot_denied` is a usage error and `--allow all` recovers
+  no slot failure.
+- **Persisted grants** live in the user's grant store,
+  `<home>/.config/darkmatter/schema-read-policy` on every OS, never in a
+  repository. Each line allows or denies one target, and a deny always wins:
+
+  ```text
+  allow file /home/me/data/os.yaml
+  deny dir /home/me/schemas/private
+  allow site https://schemas.example.com
+  ```
+
+  See [Grants](../topics/schemas/schema-slots.md#grants) for every target
+  kind and what makes the file invalid.
+- **On a terminal**, a read no grant decides is asked about with a numbered
+  prompt (see [Prompts](../topics/schemas/schema-slots.md#prompts)).
+- **A data output never asks.** An unapproved read fails with
+  `dm.schema.slot_approval_required`, whose `grants_needed` lists the grants
+  any one of which would allow it, so a script can add one to the store and
+  run again:
+
+  ```json
+  { "code": "dm.schema.slot_approval_required",
+    "grants_needed": [{ "kind": "file", "target": "/repo/data/os.yaml", "scope": "persisted" }, "..."] }
+  ```
+
+  A `persisted` entry is the store line `allow <kind> <target>`; a `once`
+  entry can only be given at a prompt.
 
 ## Removed flags
 

@@ -92,10 +92,15 @@ A schema whose definitions hold `{{ … }}` [slots](../topics/schemas/schema-slo
 - **A schema file argument** is checked as written. Its record is `valid: true` with
   `slots: 1` (how many slots it holds); nothing the slot names is read.
 - **A document** under the template is checked against the resolved schema. A data
-  file committed in the schema's repository is read without asking. Any other read
-  is asked about on a terminal, once per run, before the document is checked; a data
-  output never asks. A read nobody approved makes the file's check unavailable, so the
-  run exits 1:
+  file committed, unchanged, in the schema's repository is read without asking (the
+  [automatic grant](../topics/schemas/schema-slots.md#the-automatic-grant)). On a
+  terminal, every other read whose target is written in the slot is asked about in one
+  batch, just before that document's schema resolves, with the numbered prompt
+  `md compose` shows (see [Prompts](../topics/schemas/schema-slots.md#prompts)); a read
+  whose target is computed is asked about when its slot evaluates. An answer holds for
+  every later file in the run. A data output never asks, and neither does a run without
+  a terminal. A read nobody approved makes the file's check unavailable, so the run
+  exits 1:
 
 ```json
 {
@@ -113,6 +118,8 @@ A schema whose definitions hold `{{ … }}` [slots](../topics/schemas/schema-slo
 Adding `allow file /repo/claudine/docs/os.yaml` to `~/.config/darkmatter/schema-read-policy`
 grants the read in every later run; see
 [What a slot may read](../topics/schemas/schema-slots.md#what-a-slot-may-read).
+`md schema validate` takes no `--allow host=HOST`, so a slot's URL read needs a
+grant here (see [Schema slot reads](./policy.md#schema-slot-reads)).
 
 ## `md schema detect`
 

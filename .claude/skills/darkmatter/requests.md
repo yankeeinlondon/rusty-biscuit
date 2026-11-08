@@ -108,9 +108,17 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
 - **Slot read gate** (`expression/read_gate.rs`): `ResolutionContext::slot_gate`
   is set only by the schema-slot evaluator. `authorize_slot_read` runs at the
   content/fetch sites (`load_data` before `record` and the memo,
-  `load_markdown`, URL `file_exists`) and `functions::call_entry` checks every
+  `load_markdown`, URL `file_exists`) and the listing sites (`find_files` per
+  pattern root, `find_*_index` per existing parent folder) before any I/O;
+  `ResolutionContext::gate_schema_reads` wraps a schema resolution
+  (`DataRuntime::prepare_contract`, `validate_schema`'s `validate`) in
+  `simplified_schema::resolve::buffers::guarded`, so each schema file is
+  judged before `buffers::read` opens it (a refused contract is not
+  memoized). `functions::call_entry` then checks every
   observation a `reads`-registered function made before returning
-  (`authorize_slot_observations`; an unnameable input is refused).
+  (`authorize_slot_observations`, a `Glob` judged by its pattern's roots; an
+  unnameable input is refused). Frontmatter interpolation always excludes
+  `$schema` (`with_schema_excluded`): only the slot resolver evaluates slots.
   `ExpressionError::SlotReadRefused` is never recovered (`try_frontmatter`
   re-raises it). With no gate nothing changes.
 

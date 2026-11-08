@@ -212,6 +212,48 @@ let request = ComposeRequest::prepare(options, &RequestSnapshot::new(workspace_r
 let graph = md.reference_graph(ReferenceGraphOptions::with_compose(&request))?;
 ```
 
+## Schema Slot Resolution Cache
+
+A schema with `{{ … }}` [slots](./schemas/schema-slots.md) is resolved by
+evaluating each slot, which can read data files. So that a program running
+many commands (DMLS, or a library caller composing document after document)
+does not re-evaluate an unchanged template each time, resolved templates are
+kept in a process-wide cache (`markdown/schemas/slots/cache.rs`). Like every
+semantic result it lives in memory only: nothing is written to disk, and a
+new process starts empty.
+
+Within one command, a template is resolved once and pinned for the whole run
+(see [Resolving in a command](./schemas/schema-slots.md#resolving-in-a-command)).
+Across commands, a cached resolution is reused only when all of these hold:
+
+- the template is the same: its `$schema` value or trigger payload and where
+  it was written, the exact text of every schema file it read, and its slots;
+- the request context, the repository the automatic grant was judged
+  against, and the Darkmatter build (slot resolver version and function
+  catalog) are the same;
+- every file it read, every existence answer, and every `ctx` and `env`
+  value it read are unchanged;
+- the requesting command's grants allow every read the resolution made, so
+  a result that needed a grant for one run only is not served to a command
+  without it.
+
+Files are re-checked by `stat` first: a file whose size and modification
+time are unchanged counts as unchanged without being reread, and only a file
+whose `stat` changed is rehashed. A file open in an editor buffer is always
+rehashed, because unsaved edits leave its `stat` alone. A rewrite within the
+clock's resolution that keeps the file's size is therefore not noticed. That
+is the cost of not rehashing every input on every lookup.
+
+Some resolutions are never reused by another command, because their inputs
+cannot be re-checked cheaply: one that called a volatile function (git
+history, a network probe), fetched a URL, or listed a folder or glob.
+
+Failures are cached with their dependencies, like results, so creating a
+missing file or repairing a malformed one is a miss and resolves again. A
+failure that depends on grants (a read needing approval, a denied read, an
+invalid grant store), a `dm.schema.slot_cycle` failure, and a canceled
+resolution are never cached.
+
 ## Remote Transport Cache
 
 The remote transport cache (`markdown/compose/cache/remote_cache.rs`, reached
@@ -400,5 +442,6 @@ define its own unqualified `ContentPolicy`.
 - `darkmatter/lib/src/markdown/compose/remote_fetch.rs`
 - `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
 - `darkmatter/lib/src/markdown/compose/expression/data/runtime.rs`
+- `darkmatter/lib/src/markdown/schemas/slots/cache.rs`
 - `darkmatter/lib/src/markdown/reference/graph.rs`
 - `darkmatter/lib/tests/semantic_results_never_persist.rs`

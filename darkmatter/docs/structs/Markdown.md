@@ -42,7 +42,7 @@ The `Markdown` struct is the central type in Darkmatter's library. It represents
 From this foundation, it offers methods spanning five functional areas: construction, frontmatter management, content extraction, transformation, and output rendering.
 
 ```rust
-use darkmatter::Markdown;
+use darkmatter::markdown::Markdown;
 
 let md: Markdown = r#"---
 title: Getting Started
@@ -73,7 +73,7 @@ Both fields are private; access is provided through dedicated methods.
 Creates a document with content only (empty frontmatter).
 
 ```rust
-use darkmatter::Markdown;
+use darkmatter::markdown::Markdown;
 
 let md = Markdown::new("# Hello\n\nSome content.");
 ```
@@ -83,7 +83,7 @@ let md = Markdown::new("# Hello\n\nSome content.");
 Creates a document with explicit frontmatter and content.
 
 ```rust
-use darkmatter::{Markdown, Frontmatter};
+use darkmatter::markdown::{Frontmatter, Markdown};
 
 let fm = Frontmatter::new();
 let md = Markdown::with_frontmatter(fm, "# Hello");
@@ -94,7 +94,7 @@ let md = Markdown::with_frontmatter(fm, "# Hello");
 Fetches markdown from a URL via HTTP GET and parses frontmatter automatically.
 
 ```rust
-use darkmatter::Markdown;
+use darkmatter::markdown::Markdown;
 use url::Url;
 
 let url = Url::parse("https://example.com/doc.md").unwrap();
@@ -106,7 +106,7 @@ let md = Markdown::from_url(&url).await?;
 The most common construction path. Auto-detects and parses YAML frontmatter if present.
 
 ```rust
-use darkmatter::Markdown;
+use darkmatter::markdown::Markdown;
 
 let md: Markdown = "---\ntitle: Example\n---\n# Content".into();
 ```
@@ -116,7 +116,7 @@ let md: Markdown = "---\ntitle: Example\n---\n# Content".into();
 Loads a markdown file from disk. Returns `MarkdownError` on I/O failure.
 
 ```rust
-use darkmatter::Markdown;
+use darkmatter::markdown::Markdown;
 use std::path::Path;
 
 let md = Markdown::try_from(Path::new("./README.md"))?;
@@ -163,7 +163,7 @@ the selected strategy below.
 | `MergeStrategy::PreferDocument` | Document values win |
 
 ```rust
-use darkmatter::MergeStrategy;
+use darkmatter::markdown::MergeStrategy;
 
 md.fm_merge_with(
     serde_json::json!({"author": "Ken", "draft": false}),
