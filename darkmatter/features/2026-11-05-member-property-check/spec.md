@@ -21,7 +21,7 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 kind: feature
 created: 2026-11-07
-status: draft-spec
+status: finalized-spec
 area: darkmatter
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
@@ -36,6 +36,8 @@ related:
     - 2026-11-04-loading-data
 depends-on:
     - 2026-11-04-loading-data
+    - 2026-11-05-dynamic-schema-types
+    - 2026-11-05-expression-recovery
 ---
 
 # Member Property Check
@@ -94,6 +96,11 @@ The following behavior was checked against the source during the
   composition on a selected warning. Advisory severity does not mean that
   a warning can never block a command.
 
+**Sequencing (2026-11-08).** Implement after 2026-11-05-dynamic-schema-types
+and 2026-11-05-expression-recovery: this feature reads schema declarations that
+dynamic-schema-types makes possibly unresolved, and builds on the same
+`expression_type` and absence code that expression-recovery changes.
+
 ## Design
 
 ### Decide from the base type, not the runtime object
@@ -134,6 +141,14 @@ definition table can be inspected through the existing bounded reference
 projection; unresolved or cyclic alias chains remain unknown. A literal
 `load_data` contract's named references retain their current unknown
 projection. Do not add import resolution or file access to this check.
+
+**Unresolved schema templates.** A document whose schema contains dynamic
+slots has no resolved effective schema until resolution runs (and in DMLS,
+until a snapshot is published). Slots never change which properties an object
+declares, so read declarations from the template: a pending template still
+supports this check, before and during resolution. A future slot that yields a
+whole type makes that property's type unknown, which is silent under the rules
+above.
 
 **Review decision:** retain the draft's conservative union rule. Reporting
 only names absent from every known object alternative identifies definite
@@ -305,31 +320,34 @@ feature is implemented; this specification review changes no runtime code.
    `fm.server.nmae`, and constant-bracket forms. `server.name` stays silent,
    including when the declared optional member is unset. Cover a typed
    function return and literal object as bases, not just variables.
-3. Pin every row of the type and absence tables, including mixed scalar
+3. A schema with a pending enum slot still reports `server.nmae` in DMLS before
+   its snapshot is published, and composition reports it with or without
+   resolution.
+4. Pin every row of the type and absence tables, including mixed scalar
    unions, null-only bases, dictionaries, open/pattern-key objects, bounded
    named references, and unresolved imports. Narrowed branches use the
    narrowed type; a later write invalidates facts under existing rules.
-4. Cover nested dotted paths, a literal bracket key containing a dot,
+5. Cover nested dotted paths, a literal bracket key containing a dot,
    computed keys with an ordinary undeclared root inside them, and a typed
    array element followed by a misspelled member. Report the first missing
    step without cascading to the next name.
-5. Inline callbacks and region locals obey lexical shadowing, including
+6. Inline callbacks and region locals obey lexical shadowing, including
    `local` access and outer captures. Two separately authored callbacks
    using `h.nmae` retain separate warnings; iterations of each do not add
    warnings. Repeated includes deduplicate the same source site, while
    different source files remain distinct.
-6. Exercise the listed composition surfaces with the same shared cases.
+7. Exercise the listed composition surfaces with the same shared cases.
    Assert library/editor agreement on code, message, severity, and span for
    equivalent sites, and separately assert their documented reachability
    difference. Include body edits, multiline frontmatter, and Unicode before
    the member to verify authored positions.
-7. Default composition succeeds, explicit denial and denial of all warnings
+8. Default composition succeeds, explicit denial and denial of all warnings
    stop through existing policy checkpoints, and structured CLI output
    carries the shared diagnostic with clean stderr. A later failure retains
    previously reported member warnings. Existing root diagnostics,
    suppression rules, namespace diagnostics, and unobserved evaluators pass
    unchanged.
-8. Update the current behavior documentation in
+9. Update the current behavior documentation in
    [Darkmatter expressions](../../docs/topics/darkmatter-expressions.md),
    [DMLS diagnostics](../../dmls/docs/diagnostics.md), and
    [CLI policy](../../docs/cli/policy.md), plus the Darkmatter skill's

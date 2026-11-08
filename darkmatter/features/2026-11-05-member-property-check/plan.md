@@ -14,6 +14,11 @@ packages:
 
 # Plan: Member Property Check
 
+> **Outdated (2026-11-08): re-plan before executing.** This plan predates the
+> author's 2026-11-08 rulings and adjustments in the spec and the sequencing
+> after 2026-11-05-dynamic-schema-types and 2026-11-05-expression-recovery. Do not execute it as written;
+> re-plan once the earlier features have landed.
+
 ## Summary and Definition of Done
 
 **What is built.** A new advisory, `dm.expression.undeclared_member`, reports a
