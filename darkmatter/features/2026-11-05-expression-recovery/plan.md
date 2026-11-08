@@ -9,6 +9,11 @@ yolo: "true"
 
 # Expression Recovery Implementation Plan
 
+> **Outdated (2026-11-08): re-plan before executing.** This plan predates the
+> author's 2026-11-08 rulings and adjustments in the spec and the sequencing
+> after 2026-11-05-dynamic-schema-types and 2026-11-05-tabular-input-options. Do not execute it as written;
+> re-plan once the earlier features have landed.
+
 ## Summary and Definition of Done
 
 Implement `try(expr, fallback)` as a cataloged lazy expression that returns the protected value unchanged and evaluates the fallback only after a typed, recoverable read failure. Preserve unguarded failures, passive checking of both arguments, discovery deferral, request permissions, diagnostics, read accounting, and memo invalidation. No language grammar or dependency changes are required.

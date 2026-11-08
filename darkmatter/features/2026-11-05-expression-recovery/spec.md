@@ -21,7 +21,7 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 kind: feature
 created: 2026-11-07
-status: draft-spec
+status: finalized-spec
 area: darkmatter
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
@@ -34,6 +34,9 @@ packages:
     - darkmatter-lsp
 related:
     - 2026-11-04-loading-data
+    - 2026-11-05-tabular-input-options
+depends-on:
+    - 2026-11-05-dynamic-schema-types
 ---
 
 # Expression Recovery
@@ -43,9 +46,13 @@ Add `try(expr, fallback)`: evaluate `expr` and return its value, or evaluate
 optional data sources one consistent recovery mechanism without adding a
 separate `try_` function for each reader.
 
-This remains a draft. The inline review on 2026-11-07 settles the syntax,
-evaluation rules, initial error boundary, and reporting below. The breadth
-of recovery for other function failures remains in [Open questions](#open-questions).
+The inline review on 2026-11-07 settles the syntax, evaluation rules, initial
+error boundary, and reporting below. The author's 2026-11-08 rulings settle
+the remaining questions (see [Rulings](#rulings)).
+
+**Sequencing.** Implement after 2026-11-05-dynamic-schema-types, which changes
+the same data-error provenance and `load_data` memo, and after
+2026-11-05-tabular-input-options.
 
 ## Motivation and example
 
@@ -59,6 +66,7 @@ present file that contains malformed data or violates its expected shape.
 
 This produces the loaded array when valid and `[]` when the file is missing,
 unreadable, malformed, or contains values that cannot satisfy `string[]`.
+A file whose extension names no supported format still fails (Ruling ER-2).
 The explicit `as_json` makes the array's displayed representation clear;
 `try` itself returns a value, not rendered Markdown.
 
@@ -149,10 +157,10 @@ The initial boundary is deliberately explicit:
 | --- | --- |
 | A well-formed data-source reference names a missing file, or an ordinary local read fails | Recover |
 | An allowed remote read fails during transport, including an unusable UTF-8 response | Recover |
-| `dm.data.unsupported_format`, `dm.data.malformed`, or `dm.data.contract_mismatch` | Recover |
-| A malformed file reference, invalid `as` type, missing or invalid imported contract, `dm.data.not_a_container`, `dm.data.row_shape_conflict`, or `dm.data.this_import_rejected` | Propagate: the requested operation is invalid |
+| `dm.data.malformed` or `dm.data.contract_mismatch` | Recover |
+| A malformed file reference, invalid `as` type, missing or invalid imported contract, `dm.data.unsupported_format`, `dm.data.invalid_options`, `dm.data.not_a_container`, `dm.data.row_shape_conflict`, or `dm.data.this_import_rejected` | Propagate: the requested operation is invalid |
 | Parse errors, unknown functions, invalid callbacks, passive call-check rejections, or runtime argument/return binding failures | Propagate |
-| Policy refusal, including denied remote hosts and warnings made blocking with `--deny` | Propagate |
+| Policy refusal, including denied remote hosts, warnings made blocking with `--deny`, and schema-slot refusals (`dm.schema.slot_approval_required`, `dm.schema.slot_denied`, `dm.schema.slot_forbidden_binding`, `dm.schema.slot_forbidden_function`) | Propagate |
 | A read unavailable only because the current discovery/reference pass cannot perform it | Defer under that pass's existing rules; do not select the fallback |
 | Iteration or expansion limits, nested-composition depth limits, missing request context, unavailable host bindings, or internal contract failures | Propagate |
 | Arithmetic failures, provider failures, generic unclassified handler failures, or nested composition failures | Propagate in the initial design; see Open questions for broader function coverage |
@@ -222,6 +230,16 @@ memo invalidation after executed commands and nonempty lifecycle events
 still applies. A read deferred for lack of permission in the current pass
 is not memoized as a failure. Policy checks still precede memo/cache use.
 
+### Schema slots
+
+`try` is allowed inside a dynamic schema slot. It is lazy and has no effect of
+its own, so the slot's determinism class is derived from its two arguments,
+and only the selected argument's reads are recorded. A slot read the approval
+gate refuses is a policy refusal and propagates (table above); `try` never
+turns an unapproved read into its fallback. A fallback that yields `[]` in an
+`enum(...)` or `suggest(...)` slot contributes no candidates, and the existing
+rule that the final list must not be empty still applies.
+
 ### Static types and editor behavior
 
 In the **darkmatter** library,
@@ -258,7 +276,20 @@ apply the existing built-in collision checks to the new name.
 - Expanding remote permissions, reference resolution rules, or execution
   privileges during passive analysis and preflight discovery.
 
+## Rulings
+
+- **ER-1. Decided (2026-11-08): recovery stays at the typed read-failure
+  boundary** (option 1 below). Generic, provider, and other operational
+  function failures are not recoverable in this feature.
+- **ER-2. Decided (2026-11-08): `dm.data.unsupported_format` is not
+  recoverable.** A literal reference with an unsupported extension is an
+  author mistake that would otherwise silently select the fallback on every
+  run; a source whose extension is missing or wrong is read with the
+  `format` option from 2026-11-05-tabular-input-options.
+
 ## Open questions
+
+None remain. The options considered for ER-1 are kept below for context.
 
 ### How broad should recovery be beyond structured read failures?
 
@@ -322,7 +353,11 @@ This inline spec review itself does not change executable code.
 - Through `md compose`'s normal reference-check and composition path, the
   example above produces the data for a valid file and `[]` for missing,
   unreadable, malformed, and contract-mismatching data. An unsupported data
-  extension is recoverable. A missing or invalid contract import is not.
+  extension, invalid `load_data` options, and a missing or invalid contract
+  import are not recoverable.
+- Inside a dynamic schema slot, `try` recovers a missing data file to its
+  fallback, while an unapproved or denied slot read propagates its
+  `dm.schema.slot_*` error.
 - An instrumented fallback is not evaluated after success, including each
   falsy value. Each selected operand executes once per actual evaluation;
   multiple pipeline passes still share the existing data memo.
