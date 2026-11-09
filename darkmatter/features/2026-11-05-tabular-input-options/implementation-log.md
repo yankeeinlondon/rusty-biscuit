@@ -31,16 +31,18 @@ packages:
   - darkmatter-lsp
   - claudine-cli
 message_to_agent: |-
-  Phase 3 is done (only L1 test files; no source changed); read "## Phase 3" in this
-  log. Facts for Phase 4 (DMLS): (1) with a computed file, `CallCheck::binding_error` is
-  `None` for a refused options object; argument 2 is marked incompatible instead (same
-  `dm.expression.incompatible_call`, same span), so DMLS ranges must come from the
-  argument span, not from `binding_error`. (2) Literal `{format: "csv", header: false}`
-  beside a literal `null` file with an object contract is rejected passively as
-  `dm.data.row_shape_conflict` (a Phase 2 decision under review); keep DMLS consistent
-  with the library. (3) Use `tuple([string, string])[]` for list rows; `string[][]` is
-  not a type. (4) `just cross-check` mangles a quoted `-E 'test(...)'` filter; call
-  `./scripts/cross-check.sh --os windows <pkg> ...` directly for a scoped run.
+  Phase 5 (catalog examples, docs, skill) is done; read "## Phase 5" in this log. Facts for
+  Phase 6: (1) a real `md compose doc.md --output json` for
+  `{{ load_data("rows.csv", "tuple([string, number])[]", {delimiter: ",,"}) }}` exits 1 with
+  one `dm.data.invalid_options` diagnostic whose `source` is line 1, column 55 (the `{` of
+  the options argument) and whose `span` is `null`, as for every call-check rejection; its
+  `read_set` is `[]` because the passive check rejects before any expression runs. So assert
+  the plan's "span covers the third argument" for `compose_invalid_option_json_envelope`
+  through `source.line`/`source.column`, and expect an empty read set, not `rows.csv`. (2)
+  `Ports: {{ load_data("rows.csv", "tuple([string, number])[]", {header: false}) }}`
+  composes to `Ports: [["web",8080],["db",5432]]`. (3) `docs/cli/data-contracts.md` "Option
+  errors" shows that envelope field by field; if a Phase 6 test pins different output, fix
+  the doc in the same change.
 decisions_for_review:
   - |-
     The rebase check found two shape differences from what the plan assumed, and the plan
@@ -134,6 +136,37 @@ decisions_for_review:
     not that zero requests were made. Making pre-fetch skip calls whose format cannot be
     decided would be a new library rule; it was left for review rather than added in a
     tests-only phase.
+  - |-
+    The plan limited `type_definition_argument.rs` to visibility changes. Phase 4 also moved
+    its "find the expression text holding the cursor" code (body, Expression-typed
+    frontmatter value, `{{ }}` in a frontmatter string) into one shared `expression_text`
+    function, which the new option completion module calls too. Behavior is unchanged; its
+    tests pass as before. The alternative, copying about 40 lines of location code into the
+    new module, would leave two copies of the YAML-projection rules to keep in step.
+    Reverting means inlining `expression_text` back into both modules.
+  - |-
+    Option completion choices the plan did not settle: (1) after a complete key with no `:`
+    yet (`{format |`), the cursor is claimed with no items, because only `:` can follow;
+    (2) inside a quoted key (`{"for|`) it is not claimed, so ordinary completion runs; (3)
+    an enum member chosen inside an open quote inserts the bare member and replaces only
+    what was typed inside the quotes, while outside a string it inserts the quoted member;
+    (4) each item sets `filterText` to its inserted text so editors filter on what is typed.
+    Each is a small change in `option_argument.rs::completion` if the reviewer prefers
+    otherwise.
+  - |-
+    The plan said the `md compose --output json` option-failure example in the data-contracts
+    page has a span on the third argument, and Phase 6 expects `rows.csv` in its read set. The
+    real output (produced by running `md`) has `span: null` and an empty `read_set`, because the
+    passive call check refuses the document before any expression runs; the position is in
+    `source.line`/`source.column` (column 55, the options argument). The doc shows the real
+    output. The alternative was to change the CLI to fill `span` for call-check rejections,
+    which would change every call-check record, not only this one; that is out of scope.
+    Nothing needs redoing unless the reviewer wants spans on call-check records.
+  - |-
+    The new "Options" section in `docs/topics/loading-data.md` sits after "CSV and TSV",
+    with subsections for headerless files, other delimiters, options that cannot apply, and
+    computed options. The plan listed what it must contain but not where. Moving it is a
+    doc-only edit.
 source_files_during_phase_2:
   - darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
   - darkmatter/lib/src/markdown/compose/expression/data/load.rs
@@ -160,6 +193,42 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/dmls/src/providers/option_argument.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/type_definition_argument.rs
+  - darkmatter/dmls/src/diagnostics/codes.rs
+  - darkmatter/dmls/tests/l1/option_arguments.rs
+  - darkmatter/dmls/tests/l1/call_check_agreement.rs
+docs_updated_during_phase_4:
+  - darkmatter/dmls/docs/autocomplete.md
+  - darkmatter/dmls/docs/hover.md
+  - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5:
+  - darkmatter/schemas/partials/functions.yaml
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-headerless.csv
+  - darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-semicolon.txt
+  - darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-export
+docs_updated_during_phase_5:
+  - darkmatter/docs/functions/load-data.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/docs/topics/loading-data.md
+  - darkmatter/docs/topics/caching.md
+  - darkmatter/docs/cli/data-contracts.md
+  - darkmatter/docs/errors/composition-problems.md
+  - darkmatter/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/darkmatter/expressions.md
+  - .claude/skills/darkmatter/requests.md
+  - .claude/skills/darkmatter/testing.md
 ---
 
 # Implementation Log for 2026-11-05-tabular-input-options (6 phases)
@@ -527,3 +596,167 @@ loopback wiremock. All tests are L1, the largest takes 0.13 s, and
   arguments fails on the quoted filter (`syntax error near unexpected token
   '('`), so the script was called directly.
 - Darkmatter skill: no update needed; this phase changed no behavior.
+
+## Phase 4
+
+### Work done
+
+- **Option completion** (R21): new `dmls/src/providers/option_argument.rs`,
+  registered in `providers/mod.rs` and dispatched from `dsl.rs::completion`
+  (body; it also declines a frontmatter-claimed cursor) and
+  `frontmatter.rs::completion`, each right after the type-definition check.
+  It recovers the innermost open frame from `lex_spanned` tokens up to the
+  cursor's partial: a stack of call frames (name, argument index), groups,
+  and object frames (owning call and argument when the `{` starts an
+  argument, keys written so far, and key / after-key / value state). When
+  the catalog overload's parameter at that index is an inline object (after
+  dropping `null`), it offers undeclared-yet keys (`PROPERTY`, inserting
+  `key: `), quoted `enum` members (`ENUM_MEMBER`; bare inside an open
+  quote), or `true`/`false` (`VALUE`); any other value position returns
+  `None` so ordinary completion runs. Text edits replace only the partial
+  and are encoded through the site's YAML projection.
+- `type_definition_argument.rs`: the location code (body, Expression-typed
+  frontmatter value with its two-byte synthetic opener, `{{ }}` in a
+  frontmatter string) is now one `pub(crate) fn expression_text` shared by
+  both modules; `Analyzed`, `project`, and `encode` became `pub(crate)`.
+  No behavior change; recorded in `decisions_for_review`.
+- Diagnostics: no DMLS code was needed. The library already ranges
+  `dm.data.invalid_options` and binder refusals on the options argument, and
+  `row_shape_conflict` on `as`; the D tests prove it. The `codes.rs` module
+  table gained the `dm.data.invalid_options` row and the row-shape row
+  mentions `header: false`.
+- Docs: `dmls/docs/autocomplete.md` ("Keys and values of an options
+  object"), `dmls/docs/hover.md` ("Function signatures with an options
+  object", quoting the signature as it actually renders:
+  `[options: {…} | null]`), `dmls/docs/diagnostics.md` (new "`load_data`
+  data diagnostics" section: codes, when, where ranged, what defers).
+- Skill: `.claude/skills/darkmatter/dmls.md` describes the new provider.
+
+### Requirement → test mapping (Phase 4)
+
+Boundary: the LSP protocol, in process (`LspFixture`, F2), L1. Unit tests
+cover the token recovery (F1).
+
+| Requirement | Test |
+| --- | --- |
+| Keys at `{` and after `,`; key already present not offered; partial key range; offered keys equal the descriptor's inline-object properties (read from the catalog, no literal copy) | D `body_completion_offers_declared_keys_at_the_brace_and_after_a_comma` |
+| `format:` offers the nine declared names (aliases included), quoted, `ENUM_MEMBER`; partial inside quotes replaces only the typed text; `header:` offers `true`/`false`; `delimiter:` falls through to ordinary completion | D `enum_and_boolean_values_complete_and_other_values_fall_through` |
+| `pr_list({` and a non-options `{` argument get no declared keys | D `a_plain_object_parameter_gets_no_declared_key_completion` |
+| Frontmatter sites: double-quoted scalar (escaped `\"csv\"`), single-quoted scalar, Expression-typed value | D `frontmatter_option_completion_projects_through_yaml_quoting` |
+| Hover shows `options`, the three keys, and the defaults | D `hover_on_load_data_shows_the_options_parameter_and_its_defaults` |
+| Diagnostics ranged on the third argument / on `as` | D `invalid_delimiter_is_ranged_on_the_third_argument`, `unknown_option_key_is_ranged_on_the_third_argument`, `tabular_option_on_json_is_ranged_on_the_third_argument`, `header_false_with_object_contract_is_ranged_on_as` |
+| Computed options beside a literal JSON file are silent | D `computed_options_with_a_literal_json_file_produce_no_diagnostic` |
+| Both arities keep callback members and null-file typing | D `both_arities_keep_callback_member_completion`, `both_arities_keep_null_file_typing` |
+| Editor diagnostics equal composition rejections at three arguments | `call_check_agreement::composition_and_the_editor_reject_the_same_load_data_documents` (rows `load_data_unknown_option` rejected, `load_data_null_file_options` composes) |
+| Lexer recovery: after `{`, after `,`, after `format: `, partial quoted value, key present, second argument not claimed, nested object/array not claimed, callback inside the call | U `option_argument::tests::*` (6 tests) |
+
+### Gates
+
+- `just lint` in `darkmatter/`: clean (includes the zed-dmls wasm32 check).
+- `just test` in `darkmatter/`, no subagent running: **15,861 passed, 0
+  failed, 10 skipped** (Phase 3: 15,842; +19).
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Dependents: only `pub(crate)` items changed inside `darkmatter-lsp`; no
+  public API changed, so no dependent package was run (`zed-dmls` compiled
+  under `just lint`).
+- Cross-OS: no path, process, or OS-specific code changed (pure token and
+  offset logic plus in-process LSP tests), so no cross-check was run.
+- No subagents were used in this phase.
+
+## Phase 5
+
+### Work done
+
+- **Catalog examples and fixtures** (R28): `catalog/example_data/` gained
+  `fixture-headerless.csv` (`web,8080`, `db,5432`), `fixture-semicolon.txt`
+  (`name;port` header, two rows), and `fixture-export` (no extension, the same
+  JSON as `fixture.json`), all registered in `catalog/mod.rs::EXAMPLE_DATA_FILES`.
+  Exactly the three R28 examples were added to the `load_data` entry in
+  `schemas/partials/functions.yaml`. New test
+  `catalog/tests.rs::load_data_function_page_shows_option_examples`, beside
+  `load_data_function_page_shows_every_format_family`.
+- **Regenerated** (R29): `just regen-expr-doc` rewrote
+  `docs/functions/load-data.md` (three examples, three example files; the
+  extensionless file and `.txt` fenced as `text`) and the generated row in
+  `docs/topics/darkmatter-expressions.md`. `just regen-lifecycle-schema` made
+  no change (`lifecycle.yaml` was already current from Phase 1). A second run
+  of both recipes after the doc edits produced no diff.
+- **Topic docs**:
+  - `docs/topics/loading-data.md`: intro names the third argument; "How a
+    call runs" Mermaid redrawn with the options read, format choice,
+    applicability check, row-shape rule, and the raw → parse → bind layers;
+    "Formats" says a `format` option replaces the extension; "CSV and TSV"
+    makes the header rule conditional; new "Options" section (key table with
+    aliases and defaults, "Files without a header row", "Another delimiter"
+    with the TSV tab rule, "Options that cannot apply" with the real message
+    and an invalid-delimiter table, "When options are computed"); "Remote
+    URLs" covers an extensionless URL with `format` and says `format` grants
+    no access; "Reading a file once per command" has a reads/parses/
+    validations table; "When loading fails" lists `dm.data.invalid_options`
+    and where it is located (options argument passively and in DMLS, the
+    whole call for computed options; no `data_location`), and that unknown
+    keys, wrong types, and bad format names are
+    `dm.expression.incompatible_call`.
+  - `docs/topics/caching.md` "The `load_data` memo": three layers (Mermaid
+    and table), effective-value keys, equivalent spellings and aliases,
+    counter semantics with a table, failures kept per key, observations on
+    every call and the slot gate before any layer, invalidation clearing all
+    layers and advancing the generation once, never the read set.
+  - `docs/cli/data-contracts.md`: `invalid_options` in the Codes table and
+    the Data errors table and flowchart; new "Option errors" subsection with
+    the real `md compose --output json` envelope described field by field
+    and a headerless success example; the row-shape provability sentence now
+    covers a literal `format`.
+  - `docs/errors/composition-problems.md`: the `load_data` location row names
+    the options argument. `docs/topics/darkmatter-expressions.md` (hand-written
+    read-side table and paragraph) and `README.md` (Loading Data line) name
+    the third argument.
+- **Skill**: `.claude/skills/darkmatter/expressions.md` (signature and option
+  rules, headerless rows, the `invalid_options` code), `requests.md` (a stale
+  `LoadedSource::hash` reference corrected to `RawSource::hash`, the raw
+  entry), `testing.md` (the option test files and the catalog page test).
+  `dmls.md` was already updated in Phase 4. `SKILL.md` unchanged.
+- Doc drift found and fixed: an early draft of the new doc text listed
+  `"string[][]"` as a list-row contract; the skill records that nested arrays
+  are not in the grammar, so it was removed.
+
+### Requirement → test mapping (Phase 5)
+
+Boundary: the shipped catalog artifact and its generated pages, in process
+(F2), L1.
+
+| Requirement | Test |
+| --- | --- |
+| The three examples evaluate to their declared results against the shipped fixtures | `catalog/tests.rs::every_executable_example_evaluates_to_its_declared_result` (existing runner; now covers the three) |
+| The page shows each new example, its input file fenced correctly (`csv`, `text`, `text`), and the third parameter | `catalog/tests.rs::load_data_function_page_shows_option_examples` (new) |
+| Generated page and table equal the generator | `load_data_function_page_matches_catalog`, `narrative_doc_function_table_matches_catalog` |
+| Catalog parity and the passive shipped-artifact corpus | `function_catalog_parity`, `shipped_schema_corpus::*` (Checkpoint 5 filter: 303 passed) |
+| Doc's `md compose --output json` example matches real output | produced by running the built `md` on the doc's own input (recorded above); the asserting CLI test is Phase 6's `compose_invalid_option_json_envelope` |
+
+Input robustness matrix: not applicable to this phase (no reader or
+validator code changed; the option validator's matrix was covered in
+Phases 1–3).
+
+### Gates
+
+- Checkpoint 5 filter (`catalog | corpus | function_catalog_parity | docs |
+  load_data_function_page | every_executable_example`): 303 passed.
+- `just test` in `darkmatter/`, no subagent running: **15,862 passed, 0
+  failed, 10 skipped** (Phase 4: 15,861; +1, the new page test). No test at
+  or above 5 s.
+- `just lint` in `darkmatter/`: clean (includes the zed-dmls wasm32 check).
+- Scope calculator (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `change_class: package`, `packages: [darkmatter, darkmatter-lsp,
+  test-toolkit, claudine, darkmatter-cli, simplified-schema]`. The tree still
+  holds Phase 4's uncommitted DMLS work, which widens this; the gates were run
+  either way.
+- Dependents: only catalog example data, a `pub(crate)` constant, docs, and
+  the skill changed. `git grep` finds no consumer outside darkmatter that pins
+  the catalog examples (Claudine's function-order snapshot lists signatures,
+  not examples), so no dependent package was run.
+- Cross-OS: no path or process code changed. The new fixtures are covered by
+  `.gitattributes` `eol=lf`, so the page test's LF assertions hold on a
+  Windows checkout. No cross-check was run.
+- No subagents were used in this phase.
+- Phase 5 is complete; every Phase 5 checkbox in the plan is ticked.

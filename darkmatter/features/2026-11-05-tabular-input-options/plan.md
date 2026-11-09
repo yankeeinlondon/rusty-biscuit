@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 6
 created: 2026-11-08
-phase: 4
+phase: 6
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -58,6 +58,42 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+- darkmatter/dmls/src/providers/option_argument.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/type_definition_argument.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/tests/l1/option_arguments.rs
+- darkmatter/dmls/tests/l1/call_check_agreement.rs
+docs_updated_during_phase_4:
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5:
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-headerless.csv
+- darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-semicolon.txt
+- darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-export
+docs_updated_during_phase_5:
+- darkmatter/docs/functions/load-data.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/topics/caching.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/errors/composition-problems.md
+- darkmatter/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/requests.md
+- .claude/skills/darkmatter/testing.md
 ---
 
 # Plan: Tabular Input Options for `load_data`
@@ -838,7 +874,7 @@ Depends on Phases 1–2 (catalog, diagnostics).
 
 ### Wave 1 (parallel)
 
-- [ ] **Option completion provider** (R21) — `dmls/src/providers/option_argument.rs`
+- [x] **Option completion provider** (R21) — `dmls/src/providers/option_argument.rs`
   (new), `providers/mod.rs`, `providers/type_definition_argument.rs`
   (visibility only), `providers/dsl.rs`, `providers/frontmatter.rs` (one call
   beside the existing `type_definition_argument` call)
@@ -849,7 +885,7 @@ Depends on Phases 1–2 (catalog, diagnostics).
   - In-file unit tests over the lexer recovery: cursors after `{`, after `,`,
     after `format: `, inside a partial quoted value, a key already present (not
     offered again), the second argument (no claim), a callback inside the call.
-- [ ] **Diagnostics table and DMLS docs** — `dmls/src/diagnostics/codes.rs`
+- [x] **Diagnostics table and DMLS docs** — `dmls/src/diagnostics/codes.rs`
   (module doc table), `dmls/docs/autocomplete.md`, `dmls/docs/hover.md`,
   `dmls/docs/diagnostics.md`
   - Add `dm.data.invalid_options` (ERROR, a literal `load_data` options object
@@ -860,7 +896,7 @@ Depends on Phases 1–2 (catalog, diagnostics).
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **DMLS tests** — `dmls/tests/l1/option_arguments.rs`, and one added case in
+- [x] **DMLS tests** — `dmls/tests/l1/option_arguments.rs`, and one added case in
   `dmls/tests/l1/call_check_agreement.rs`
   - Completion at body and frontmatter sites: keys at `{` and after `,`;
     `format:` offers the nine declared names; `header:` offers `true`/`false`;
@@ -879,7 +915,7 @@ Depends on Phases 1–2 (catalog, diagnostics).
 
 ### Checkpoint 4
 
-- [ ] `just test` in `darkmatter/` is green (includes `darkmatter-lsp`).
+- [x] `just test` in `darkmatter/` is green (includes `darkmatter-lsp`).
 
 ## Phase 5 — Catalog examples, docs, skill
 
@@ -887,14 +923,14 @@ Depends on Phases 2–4. Wave 1 tasks are disjoint; Wave 2 regenerates.
 
 ### Wave 1 (parallel)
 
-- [ ] **Catalog examples and fixtures** (R28) — `schemas/partials/functions.yaml`,
+- [x] **Catalog examples and fixtures** (R28) — `schemas/partials/functions.yaml`,
   `catalog/example_data/` (three new files), `catalog/mod.rs`
   (`EXAMPLE_DATA_FILES`), `catalog/tests.rs`
   - Add the three fixtures and examples. Add
     `load_data_function_page_shows_option_examples` beside
     `load_data_function_page_shows_every_format_family`: the page shows each
     new example and its input file and mentions the third parameter.
-- [ ] **Topic docs** — `docs/topics/loading-data.md`, `docs/topics/caching.md`,
+- [x] **Topic docs** — `docs/topics/loading-data.md`, `docs/topics/caching.md`,
   `docs/cli/data-contracts.md`, `docs/topics/darkmatter-expressions.md`
   (hand-written parts only), `docs/errors/composition-problems.md` (only if its
   `dm.data.*` list enumerates codes), `README.md` (only if its Loading Data line
@@ -920,7 +956,7 @@ Depends on Phases 2–4. Wave 1 tasks are disjoint; Wave 2 regenerates.
     described field by field (code, severity, span; no `data_location` because
     no data file was read).
   - No doc names or links a feature, fix, spec, or this plan.
-- [ ] **Darkmatter skill** — `.claude/skills/darkmatter/expressions.md`
+- [x] **Darkmatter skill** — `.claude/skills/darkmatter/expressions.md`
   (`load_data` section), `requests.md` ("Memo shape"), `dmls.md`, `testing.md`
   - Signature with `options`; aliases and TSV rule; `dm.data.invalid_options`;
     passive verdict order and `PartialObject`; the three memo layers, keys,
@@ -929,14 +965,14 @@ Depends on Phases 2–4. Wave 1 tasks are disjoint; Wave 2 regenerates.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Regenerate and verify** — run `just regen-expr-doc` and
+- [x] **Regenerate and verify** — run `just regen-expr-doc` and
   `just regen-lifecycle-schema`; confirm the diff adds only the three examples,
   their files, and the signature; the passive shipped-artifact corpus check and
   catalog example runner pass.
 
 ### Checkpoint 5
 
-- [ ] `cargo nextest run -p darkmatter -E 'test(catalog) | test(corpus) | test(function_catalog_parity) | test(docs)'` passes.
+- [x] `cargo nextest run -p darkmatter -E 'test(catalog) | test(corpus) | test(function_catalog_parity) | test(docs)'` passes.
 
 ## Phase 6 — CLI wiring, log, and final verification
 
