@@ -1,7 +1,7 @@
 //! Setter-value completer for composition subcommands.
 //!
 //! Phase 4 of the `2026-04-24-improved-shell-completions` feature. This
-//! module owns the value slot of a `name=value` setter when the cursor
+//! module owns the setter value of a `name=value` setter when the cursor
 //! sits on a setter-shaped token inside a `compose`, `inline-compose`, or
 //! `sequence` invocation.
 //!
@@ -149,8 +149,8 @@ fn gather_value_candidates(active: &str, ctx: &ScopeContext) -> Vec<String> {
                 // override slot anyway.
                 continue;
             }
-            // Gate on Markdown extension before any other work. The setter-
-            // value slot is contractually a Markdown-document reference
+            // Gate on Markdown extension before any other work. The setter
+            // value is contractually a Markdown-document reference
             // (spec §5.4, review-1 finding 1); non-Markdown files must
             // never surface regardless of partial_len classification.
             if !has_markdown_extension(&entry) {

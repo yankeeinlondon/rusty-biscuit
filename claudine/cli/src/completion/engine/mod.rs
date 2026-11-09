@@ -256,7 +256,7 @@ pub(crate) fn run_with_context(
     }
 }
 
-/// Dispatch the setter-value slot.
+/// Dispatch the setter value.
 ///
 /// When `file_arg` is known, first try schema-aware completion: enum members
 /// for `enum` properties, filesystem paths for `file(match(...))` properties.
@@ -415,7 +415,7 @@ pub(crate) fn classify_completion_target(
         if token == "--debug" {
             // Global value-bearing flag; skip flag + value. If `--debug`
             // sits immediately before the cursor, the cursor is ON the
-            // value slot — that is not the root slot.
+            // option value — that is not the root slot.
             if i + 1 == current_index {
                 return CompletionTarget::Other;
             }

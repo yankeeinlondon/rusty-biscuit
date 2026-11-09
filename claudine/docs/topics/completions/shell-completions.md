@@ -456,7 +456,7 @@ early caps the wall-clock cost of pathological inputs (a user typing
 ## Setter values
 
 Inside a composition subcommand, a token of shape `name=value` is a
-frontmatter setter override. The completer triggers on the value slot
+frontmatter setter override. The completer triggers on the setter value
 when the value begins with `@` (or a quote followed by `@`). Any other
 leading character returns zero candidates.
 
@@ -507,7 +507,7 @@ claudine compose file.md spec=@<TAB>
 → spec='docs/spec.md'
 ```
 
-**Why Markdown only.** The setter-value slot is contractually a
+**Why Markdown only.** The setter value is contractually a
 Markdown-document reference — composition frontmatter overrides treat
 the resolved path as a Markdown source for body inlining. Surfacing
 non-Markdown files would suggest documents the runtime cannot use,
@@ -736,7 +736,7 @@ What you can expect, with a `plan.md` whose `$schema` declares `phase`
 | You type | Offered | Why |
 | --- | --- | --- |
 | `compose plan.md --codex -c low ph<TAB>` | `phase=` | `-c` took `low`; `ph` is Claudine's |
-| `compose plan.md --codex -c low mode=<TAB>` | `mode='fast'`, `mode='slow'` | the setter value slot completes as usual |
+| `compose plan.md --codex -c low mode=<TAB>` | `mode='fast'`, `mode='slow'` | the setter value completes as usual |
 | `compose plan.md --codex -c <TAB>` | nothing | the word is `-c`'s value: it belongs to Codex |
 | `compose plan.md --codex -c ph<TAB>` | nothing | an unfinished value of `-c`, not a setter name |
 | `compose plan.md --codex -c phase=2 ph<TAB>` | nothing | `phase=2` is a declared parameter, so `-c` has no value and the command would fail |
@@ -921,7 +921,7 @@ default completion. The engine emits zero candidates so each shell
 renders whatever its native completion produces (file names on
 bash/zsh/fish).
 
-Value slots on `--append-system-prompt` / `--replace-system-prompt`
+Option values on `--append-system-prompt` / `--replace-system-prompt`
 are **not** covered by the new engine. They resolve to the shell's
 native file completion.
 

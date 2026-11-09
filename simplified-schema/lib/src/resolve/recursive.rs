@@ -693,7 +693,7 @@ impl ImportEngine<'_> {
                         is_arm_property_marker(constraint)
                             || matches!(
                                 constraint,
-                                Constraint::Suggest(_) | Constraint::Dynamic(_) | Constraint::DynamicValue { .. }
+                                Constraint::Suggest(_) | Constraint::Dynamic(_) | Constraint::TemplateConstraint { .. }
                             )
                     })
                 && !(matches!(arm.ty, TypeExpr::Primitive(SimplifiedType::File)) && !arm.is_array)
@@ -728,7 +728,7 @@ fn use_is_representable(
             // holding one is always inlined.
             matches!(
                 constraint,
-                Constraint::Suggest(_) | Constraint::Options(_) | Constraint::Dynamic(_) | Constraint::DynamicValue { .. }
+                Constraint::Suggest(_) | Constraint::Options(_) | Constraint::Dynamic(_) | Constraint::TemplateConstraint { .. }
             )
         })
     {

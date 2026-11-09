@@ -282,7 +282,7 @@ mod rejected {
 /// The constraint-level cases are unit tests beside the grammar.
 mod slots {
     use super::*;
-    use simplified_schema::simplified::{DynamicElement, DynamicKind, DynamicList, ValueSlotKind};
+    use simplified_schema::simplified::{DynamicElement, DynamicKind, DynamicList, TemplateConstraintKind};
 
     fn slot_expressions(def: &PropertyDef) -> Vec<String> {
         atom_constraints(def).iter().flat_map(|constraint| constraint.slots()).map(|slot| slot.expression.clone()).collect()
@@ -341,7 +341,7 @@ mod slots {
         assert!(matches!(atom_constraints(&definition("literal(5)")).as_slice(), [Constraint::LiteralValue(_)]));
         assert!(matches!(
             atom_constraints(&definition("number(min({{ a }}))")).as_slice(),
-            [Constraint::DynamicValue { kind: ValueSlotKind::Min, .. }]
+            [Constraint::TemplateConstraint { kind: TemplateConstraintKind::Min, .. }]
         ));
     }
 

@@ -12,6 +12,14 @@ types:
     os: enum(none, {{ load_data("./os.yaml", "string[]") }}; required)
 ```
 
+A slot comes in two kinds:
+
+- a **template constraint** fills part of a type the author wrote: a member
+  of an `enum(...)` or `suggest(...)` list, or the whole argument of
+  `literal(...)`, `default(...)`, `min(...)`, `max(...)`, or `pattern(...)`;
+- a **template type** supplies a property's whole type definition
+  (**planned**, see [Template Types](#template-types-planned)).
+
 A schema with at least one slot is a **template**. Reading, inspecting, and
 exporting a template never runs its expressions; only an explicit
 resolution step does, and it produces an ordinary schema with every slot
@@ -25,7 +33,7 @@ approval rules and caching are described in Darkmatter's own docs.
 
 ## Where a Slot May Be Written
 
-A slot is recognised only where it is a whole value:
+A template constraint is recognized only where it is a whole value:
 
 | Position | Example | The slot supplies |
 | --- | --- | --- |
@@ -42,7 +50,7 @@ Rules, each with what happens otherwise:
   `)`. Slots and literal elements may alternate in any order:
   `enum({{ a }}, b, {{ c }})`. `enum(a, {{ b }} c)` is the grammar error
   "a `{{ … }}` slot must be a complete list element".
-- **A value slot is the whole argument.** `default({{ d }} + 1)` or
+- **A template constraint is the whole argument.** `default({{ d }} + 1)` or
   `default(a, {{ d }})` is the error "a `{{ … }}` slot must be the whole
   argument".
 - **A `{{` that does not start an element is text.** A quoted element is
@@ -58,7 +66,7 @@ Rules, each with what happens otherwise:
 - **Existing list rules still apply.** `suggest` is allowed on the same types
   as before, and a property definition holds at most one `suggest` list,
   static or not. A `null` default cannot be a slot, and `type-definition` and
-  `schema` take no value slots.
+  `schema` take no template constraints.
 - **Duplicates in a list with a slot are kept until resolution**, where the
   first occurrence of each value wins. A list without a slot keeps today's
   rule (a repeated `suggest` candidate is an error).
@@ -90,7 +98,7 @@ flowchart LR
 | `validate_strict`, `validate_soft` | `ValidationFailure::Unprepared` holding `SchemaError::UnresolvedSlots`; no value is judged |
 | `to_json_schema_with_definitions` and other lowering | `SchemaError::UnresolvedSlots`, before anything is lowered |
 | suggestion queries and completion | offer the literal elements and set `pending: true` |
-| `lint_suggestions` | judges literal candidates; none when a value slot (`min`, `pattern`, …) shapes the type |
+| `lint_suggestions` | judges literal candidates; none when a template constraint (`min`, `pattern`, …) shapes the type |
 | `is_subtype` | an `enum` or `literal` with a slot is a subtype of nothing but itself |
 
 ```rust
@@ -365,12 +373,15 @@ never cause that switch, so a pattern from a slot is refused when it:
 `slots::check_slot_pattern` applies the same test. Authored patterns are
 unchanged.
 
-## Whole Types (Planned)
+## Template Types (Planned)
 
-> **Planned:** a slot that supplies a whole property definition
-> (`os: {{ load_data("./os-type.yaml", "string") }}`), parsed by the
-> ordinary type parser, with imports in the returned type resolved against
-> the slot's defining file. It is not accepted today.
+> **Planned:** a **template type** is a slot that supplies a property's whole
+> type definition, for example
+> `status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`. It
+> accepts the same optional suffix an imported named type does (`[]`,
+> `(required)`, `-> description`). The returned definition is parsed by the
+> ordinary type parser, and imports in it resolve against the slot's
+> defining file. It is not accepted today.
 
 ## Failures
 

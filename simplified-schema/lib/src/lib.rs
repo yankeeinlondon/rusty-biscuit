@@ -114,7 +114,7 @@ pub use schema::{SchemaSource, repository_scope_catalog};
 pub use simplified::alias_search_work;
 pub use simplified::{
     Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar,
-    DynamicElement, DynamicKind, DynamicList, Slot, ValueSlotKind,
+    DynamicElement, DynamicKind, DynamicList, Slot, TemplateConstraintKind,
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, LocatedDefinitionFailure, LocatedRelated,
     PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,
     SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaCursor, SchemaCursorRole, SchemaDeclaration,

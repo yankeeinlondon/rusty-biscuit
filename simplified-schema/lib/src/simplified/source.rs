@@ -2914,7 +2914,7 @@ impl Projector<'_> {
 /// Whether `constraint` records authored spans that source-aware parsing
 /// projects into the document: suggestion candidates and `{{ … }}` slots.
 fn carries_spans(constraint: &Constraint) -> bool {
-    matches!(constraint, Constraint::Suggest(_) | Constraint::Dynamic(_) | Constraint::DynamicValue { .. })
+    matches!(constraint, Constraint::Suggest(_) | Constraint::Dynamic(_) | Constraint::TemplateConstraint { .. })
 }
 
 fn atom_has_suggestions(atom: &PropertyAtom) -> bool {
@@ -2981,7 +2981,7 @@ fn project_atom_suggestions(
                     }
                 }
             }
-            Constraint::DynamicValue { slot, .. } => project_slot(slot)?,
+            Constraint::TemplateConstraint { slot, .. } => project_slot(slot)?,
             _ => {}
         }
     }

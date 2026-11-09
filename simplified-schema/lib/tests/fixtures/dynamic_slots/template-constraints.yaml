@@ -1,5 +1,5 @@
 kind: schema
-description: one whole-argument slot in each value position; resolved against `values/`, `revision` is the literal 5, `retries` is a number from 1 to 10 that defaults to 3, and `slug` matches ^[a-z][a-z0-9-]*$
+description: one whole-argument slot in each template constraint; resolved against `values/`, `revision` is the literal 5, `retries` is a number from 1 to 10 that defaults to 3, and `slug` matches ^[a-z][a-z0-9-]*$
 $schema:
     revision: literal({{ load_data("./values/revision.yaml", "number") }}; required) -> the schema revision a document targets
     retries: number(min({{ load_data("./values/minimum.yaml", "number") }}); max({{ load_data("./values/maximum.yaml", "number") }}); default({{ load_data("./values/default-retries.yaml", "number") }})) -> how many attempts to make

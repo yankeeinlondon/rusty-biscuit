@@ -99,7 +99,7 @@ fn a_dirty_data_file_needs_approval_and_a_library_caller_is_never_asked() {
     assert!(at.line.is_some(), "{diagnostic:?}");
 }
 
-/// A value position: a slot-supplied `default` lowers exactly as the same
+/// A template constraint: a slot-supplied `default` lowers exactly as the same
 /// literal default does, and the document composes under it.
 #[test]
 fn a_slot_supplied_default_lowers_like_the_same_literal_default() {

@@ -79,7 +79,7 @@ every `<TAB>`. The supplement engine applies these rules in order:
 
 - **`KEY=<TAB>` setters** offer schema-aware completion when the prompt
     declares `$schema` (property names before `=`; enum members and
-    `file`-glob paths after `=`). Without a schema, the value slot still
+    `file`-glob paths after `=`). Without a schema, the setter value still
     supports `@`-gated file completion; plain string/number values yield
     no candidates so shell default behavior kicks in. See
     [Shell Completions](completions/shell-completions.md).

@@ -29,7 +29,7 @@ use crate::{errors::SchemaError, span::SourceSpan};
 
 use super::{
     Constraint, DynamicKind, DynamicList, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot,
-    SimplifiedType, TypeExpr, ValueSlotKind,
+    SimplifiedType, TypeExpr, TemplateConstraintKind,
     convert::suggestion_target_schema,
     query::{Alternative, flattened_alternatives},
 };
@@ -266,7 +266,7 @@ fn lint_candidates(
 /// no slot; `atom` without its dynamic `suggest` list and slot `default`,
 /// which do not shape the values it accepts; `None` when another slot does.
 fn lint_target_atom(atom: &PropertyAtom) -> Option<Cow<'_, PropertyAtom>> {
-    let dynamic = |constraint: &Constraint| matches!(constraint, Constraint::Dynamic(_) | Constraint::DynamicValue { .. });
+    let dynamic = |constraint: &Constraint| matches!(constraint, Constraint::Dynamic(_) | Constraint::TemplateConstraint { .. });
     if !atom.constraints.iter().chain(&atom.array_constraints).any(dynamic) {
         return Some(Cow::Borrowed(atom));
     }
@@ -274,7 +274,7 @@ fn lint_target_atom(atom: &PropertyAtom) -> Option<Cow<'_, PropertyAtom>> {
         matches!(
             constraint,
             Constraint::Dynamic(DynamicList { kind: DynamicKind::Suggest, .. })
-                | Constraint::DynamicValue { kind: ValueSlotKind::Default, .. }
+                | Constraint::TemplateConstraint { kind: TemplateConstraintKind::Default, .. }
         )
     };
     if atom.constraints.iter().chain(&atom.array_constraints).any(|c| dynamic(c) && !advisory(c)) {

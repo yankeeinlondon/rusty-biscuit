@@ -1,8 +1,8 @@
 //! `{{ … }}` slots in a parsed schema: finding them, and resolving them
 //! through a host.
 //!
-//! A schema whose `enum(...)`/`suggest(...)` lists or value positions hold a
-//! slot is a **template**. Finding slots is passive: it reads the typed
+//! A schema whose `enum(...)`/`suggest(...)` lists or constraint arguments hold
+//! a slot is a **template**. Finding slots is passive: it reads the typed
 //! declaration and never evaluates an expression or reads a file. Lowering a
 //! template fails with [`SchemaError::UnresolvedSlots`], which lists the
 //! slots [`collect_slots`] finds and, from a resolution entry point, carries
@@ -324,7 +324,7 @@ fn visit_constraint_slots_mut(constraints: &mut [Constraint], visit: &mut dyn Fn
                     }
                 }
             }
-            Constraint::DynamicValue { slot, .. } => visit(slot),
+            Constraint::TemplateConstraint { slot, .. } => visit(slot),
             _ => {}
         }
     }

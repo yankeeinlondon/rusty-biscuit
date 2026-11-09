@@ -59,7 +59,7 @@ use super::{
         to_json_schema, to_json_schema_with_definitions,
         grammar::{is_suggestion_list, suggestion_list_span},
         types::{
-            Constraint, DynamicKind, ValueSlotKind, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType,
+            Constraint, DynamicKind, TemplateConstraintKind, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType,
             TypeExpr,
         },
     },
@@ -3921,8 +3921,8 @@ fn is_array_container_constraint(constraint: &Constraint) -> bool {
             | Constraint::Unique
             | Constraint::Default(_)
             | Constraint::Example(_)
-            | Constraint::DynamicValue {
-                kind: ValueSlotKind::Min | ValueSlotKind::Max | ValueSlotKind::Default,
+            | Constraint::TemplateConstraint {
+                kind: TemplateConstraintKind::Min | TemplateConstraintKind::Max | TemplateConstraintKind::Default,
                 ..
             }
     )
@@ -3983,9 +3983,9 @@ fn reinterpret_bounds(
                 // judged once resolution supplies it. An items bound needs no
                 // retarget, since it sits in the container's list.
                 (
-                    Constraint::DynamicValue { kind: kind @ (ValueSlotKind::Min | ValueSlotKind::Max), slot, .. },
+                    Constraint::TemplateConstraint { kind: kind @ (TemplateConstraintKind::Min | TemplateConstraintKind::Max), slot, .. },
                     CountedBound::Length,
-                ) => Constraint::DynamicValue { kind, target: SimplifiedType::String, slot },
+                ) => Constraint::TemplateConstraint { kind, target: SimplifiedType::String, slot },
                 (other, _) => other,
             };
             Ok((constraint, origin))

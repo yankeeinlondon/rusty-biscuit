@@ -52,7 +52,7 @@ fn a_word_after_a_switch_value_is_claudines_and_completes_as_a_setter() {
 fn a_word_an_open_switch_takes_is_the_agents_and_offers_nothing() {
     let ws = TestWorkspace::named("complete-ownership-provider-slot");
     plan(ws.path(), "");
-    // Unfinished value slot: the cursor is `-c`'s value, empty or partial.
+    // Unfinished option value: the cursor is `-c`'s value, empty or partial.
     for cursor in ["", "ph", "mo"] {
         let got = complete(ws.path(), &["--codex", "-c", cursor]);
         assert!(got.is_empty(), "{cursor:?}: {got:?}");
@@ -291,11 +291,11 @@ const BEFORE_AN_OPTION: [Preceding; 5] = [
     Preceding { label: "missing value before a later selection", words: &["-c", "phase=2", "--codex"], valid: false },
 ];
 
-/// Options whose value slot offers candidates on a clean line, so their rows
+/// Options whose option value offers candidates on a clean line, so their rows
 /// prove suggestions survive as well as disappear.
 const OPTIONS_WITH_CANDIDATES: [&str; 4] = ["--debug", "--provider", "--exclude", "--on-rate-limit"];
 
-/// The value slot of one owned option and its aliases, separate or attached,
+/// The option value of one owned option and its aliases, separate or attached,
 /// empty and partial, after each kind of preceding line: a clean line offers
 /// what the option offers with no provider arguments at all, and any other
 /// line offers nothing. `long` is the option's first spelling.

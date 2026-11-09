@@ -311,10 +311,10 @@ fn classifier_other_when_current_index_is_zero() {
 }
 
 #[test]
-fn classifier_other_when_debug_value_slot_is_the_cursor() {
-    // `claudine --debug <TAB>` — the cursor sits on the value slot of
+fn classifier_other_when_debug_option_value_is_the_cursor() {
+    // `claudine --debug <TAB>` — the cursor sits on the option value of
     // `--debug`, not on the root subcommand slot. We treat this as
-    // Other so the (currently no-op) value-slot completer handles it.
+    // Other so the (currently no-op) option-value completer handles it.
     let a = argv(&["claudine", "--debug", ""]);
     assert_eq!(classify_completion_target(&a, 2), CompletionTarget::Other,);
 }
@@ -494,7 +494,7 @@ fn classifier_setter_name_with_empty_cursor_after_committed_file() {
     // property.
     let a = argv(&["claudine", "compose", "plan.md", "spec=foo", ""]);
     // Empty token has no shape, so `is_setter_name_partial` returns
-    // false: classifier returns Other (the value slot is fully filled).
+    // false: classifier returns Other (the setter value is fully filled).
     assert_eq!(classify_completion_target(&a, 4), CompletionTarget::Other);
 }
 

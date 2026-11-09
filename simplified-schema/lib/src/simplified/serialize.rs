@@ -16,7 +16,7 @@ use super::{
     types::{
         CallExample, Constraint, DynamicElement, DynamicKind, ExampleOutcome, FunctionParameters,
         FunctionType, PropertyAtom, PropertyDef, SimplifiedType, Slot, SuggestionCandidate, TupleType,
-        TypeExpr, ValueSlotKind,
+        TypeExpr, TemplateConstraintKind,
     },
 };
 use crate::numeric::{NumberTextError, admit_number_spelling, format_number};
@@ -528,8 +528,8 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
                 out.push(')');
             }
         }
-        Constraint::DynamicValue { kind, slot, .. } => {
-            if *kind == ValueSlotKind::Literal {
+        Constraint::TemplateConstraint { kind, slot, .. } => {
+            if *kind == TemplateConstraintKind::Literal {
                 write_slot(out, slot);
             } else {
                 let _ = write!(out, "{}(", kind.as_keyword());

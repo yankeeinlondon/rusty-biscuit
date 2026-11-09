@@ -586,15 +586,16 @@ A slot may be written in these positions, and each takes one shape of value:
 | `pattern(...)` | `string(pattern({{ re }}))` | a string, within the pattern cap |
 
 A list slot must return an array even for a single value: a bare scalar is a
-wrong shape. A value slot is the whole argument, so `default({{ d }} + 1)` is
+wrong shape. A template constraint is the whole argument, so `default({{ d }} + 1)` is
 a grammar error. A pattern from a slot is capped so that data can never slow
 down validation: it may not use lookaround or a backreference, and it may be
 at most 4096 bytes (see
 [The pattern cap](../../../../simplified-schema/docs/topics/language/slots.md#the-pattern-cap)).
 
-> **Planned:** a slot that supplies a whole property definition
-> (`os: {{ load_data("./os-type.yaml", "string") }}`) is not accepted yet;
-> see [Whole Types (Planned)](../../../../simplified-schema/docs/topics/language/slots.md#whole-types-planned).
+> **Planned:** a **template type**, a slot that supplies a property's whole
+> type definition (`status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`),
+> is not accepted yet;
+> see [Template Types (Planned)](../../../../simplified-schema/docs/topics/language/slots.md#template-types-planned).
 
 The full grammar and every result rule are in
 [Slots: Values Supplied by an Expression](../../../../simplified-schema/docs/topics/language/slots.md).

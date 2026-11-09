@@ -6,8 +6,8 @@ kind: canonical-documentation
 
 A schema can take some of its values from data instead of spelling them out.
 A `{{ … }}` **slot** in an `enum(...)` or `suggest(...)` list, or as the whole
-argument of `literal`, `default`, `min`, `max`, or `pattern`, is an
-expression that Darkmatter evaluates to fill that position:
+argument of `literal`, `default`, `min`, `max`, or `pattern`, is a **template
+constraint**: an expression that Darkmatter evaluates to fill that position:
 
 ```yaml
 kind: schema
@@ -134,10 +134,10 @@ document's `$schema` and the slot needs a grant again. The same holds when a
 
 ### Not yet supported
 
-A slot that supplies a whole property definition
-(`os: {{ load_data("./os-type.yaml", "string") }}`) is **planned**, not
+A **template type**, a slot that supplies a property's whole type definition
+(`status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`), is **planned**, not
 built, and is not accepted today. See
-[Whole Types (Planned)](../../../../simplified-schema/docs/topics/language/slots.md#whole-types-planned).
+[Template Types (Planned)](../../../../simplified-schema/docs/topics/language/slots.md#template-types-planned).
 
 ## What a slot may contain
 

@@ -64,8 +64,8 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   `tests/l1/{expression_scanner,expression_regions,scanner_corpus}.rs`.
 - **Templates are passive and fail closed.** A `{{ … }}` element of
   `enum`/`suggest`, or the whole argument of `literal`/`default`/`min`/`max`/
-  `pattern`, parses to `Constraint::Dynamic` / `Constraint::DynamicValue`
-  (only when a slot is present; static lists stay `Members`/`Suggest`). The
+  `pattern`, parses to `Constraint::Dynamic` / `Constraint::TemplateConstraint`
+  (a **template constraint**; only when a slot is present; static lists stay `Members`/`Suggest`). The
   grammar reads a slot with `scan::scan_expression_at`; `source.rs`'s
   argument scanner skips it whole and `project_atom_suggestions` projects its
   spans. Every lowering entry returns `SchemaError::UnresolvedSlots` first
@@ -88,7 +88,7 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   `apply_active` too (`apply_active_to_arm` for a root-union arm, never
   pruned by `omitting`; the union then marks the arm's template
   `is_union_arm` with the names every arm declares, `resolve.rs::pending_union_arm`,
-  read by `declared_properties()`). Tests: `tests/l1/dynamic_slots.rs`. Whole-type slots (a
+  read by `declared_properties()`). Tests: `tests/l1/dynamic_slots.rs`. Template types (a
   slot supplying a property's whole definition) are **planned**, not built: do
   not widen the grammar to admit one ad hoc. The library never evaluates a
   slot and never reads its targets; approval, caching, and evaluation are the

@@ -195,13 +195,13 @@ fn suggestion_slots_follow_the_exact_type_rule() {
 }
 
 #[test]
-fn value_positions_take_a_whole_argument_slot() {
+fn template_constraints_take_a_whole_argument_slot() {
     let input = "literal({{ revision }}; required)";
     assert_eq!(
         parse(input).constraints,
         vec![
-            Constraint::DynamicValue {
-                kind: ValueSlotKind::Literal,
+            Constraint::TemplateConstraint {
+                kind: TemplateConstraintKind::Literal,
                 target: SimplifiedType::Literal,
                 slot: slot_at(input, "{{ revision }}", "revision"),
             },
@@ -214,39 +214,39 @@ fn value_positions_take_a_whole_argument_slot() {
         .constraints
         .iter()
         .map(|constraint| match constraint {
-            Constraint::DynamicValue { kind, target, slot } => (*kind, *target, slot.expression.clone()),
+            Constraint::TemplateConstraint { kind, target, slot } => (*kind, *target, slot.expression.clone()),
             other => panic!("{other:?}"),
         })
         .collect();
     assert_eq!(
         kinds,
         vec![
-            (ValueSlotKind::Min, SimplifiedType::Number, "low".to_string()),
-            (ValueSlotKind::Max, SimplifiedType::Number, "high".to_string()),
-            (ValueSlotKind::Default, SimplifiedType::Number, "d".to_string()),
+            (TemplateConstraintKind::Min, SimplifiedType::Number, "low".to_string()),
+            (TemplateConstraintKind::Max, SimplifiedType::Number, "high".to_string()),
+            (TemplateConstraintKind::Default, SimplifiedType::Number, "d".to_string()),
         ]
     );
 
     let atom = parse("string(pattern({{ p }}))[](max({{ n }}))");
     assert!(matches!(
         &atom.constraints[..],
-        [Constraint::DynamicValue { kind: ValueSlotKind::Pattern, target: SimplifiedType::String, .. }]
+        [Constraint::TemplateConstraint { kind: TemplateConstraintKind::Pattern, target: SimplifiedType::String, .. }]
     ));
     // An array-level slot stays in the array list, which tells resolution it
     // counts items.
     assert!(matches!(
         &atom.array_constraints[..],
-        [Constraint::DynamicValue { kind: ValueSlotKind::Max, .. }]
+        [Constraint::TemplateConstraint { kind: TemplateConstraintKind::Max, .. }]
     ));
     // On a reference the target is not known yet.
     assert!(matches!(
         &parse("slug(default({{ s }}))").constraints[..],
-        [Constraint::DynamicValue { kind: ValueSlotKind::Default, target: SimplifiedType::Unknown, .. }]
+        [Constraint::TemplateConstraint { kind: TemplateConstraintKind::Default, target: SimplifiedType::Unknown, .. }]
     ));
 }
 
 #[test]
-fn a_value_slot_must_be_the_whole_argument() {
+fn a_template_constraint_slot_must_be_the_whole_argument() {
     for input in [
         "number(default({{ d }} + 1))",
         "string(default(a, {{ d }}))",
@@ -263,7 +263,7 @@ fn a_value_slot_must_be_the_whole_argument() {
 }
 
 #[test]
-fn value_slots_keep_the_type_rules_of_their_position() {
+fn template_constraints_keep_the_type_rules_of_their_position() {
     let (message, _) = rejected("null(default({{ x }}))");
     assert!(message.contains("`null` default"), "{message}");
     let (message, _) = rejected("type-definition(default({{ x }}))");

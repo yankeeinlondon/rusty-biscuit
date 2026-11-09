@@ -17,7 +17,7 @@ use crate::numeric::{admit_json_number, format_number, json_number};
 use crate::simplified::grammar::interpret_suggestion_parts;
 use crate::simplified::{
     Constraint, DefinitionTable, DynamicElement, DynamicKind, DynamicList, FunctionParameters, PropertyAtom, PropertyDef,
-    SchemaArm, SchemaRoot, SchemaShape, SimplifiedType, Slot, SuggestionCandidate, TypeExpr, ValueSlotKind,
+    SchemaArm, SchemaRoot, SchemaShape, SimplifiedType, Slot, SuggestionCandidate, TypeExpr, TemplateConstraintKind,
 };
 
 /// The identity of one slot across the use sites it is inlined into: a
@@ -219,7 +219,7 @@ impl Substitution<'_> {
         for pattern in &mut shape.pattern_keys {
             self.def(&mut pattern.def)?;
         }
-        // Object-level constraints take no value slot; a declaration option
+        // Object-level constraints take no template constraint; a declaration option
         // may hold a nested definition that does.
         self.list(&mut shape.constraints, List::Value, SimplifiedType::Unknown)?;
         Ok(())
@@ -297,7 +297,7 @@ impl Substitution<'_> {
                     None
                 }
                 Constraint::Dynamic(dynamic) => self.dynamic_list(dynamic)?,
-                Constraint::DynamicValue { kind, target, slot } => match self.values.get(slot) {
+                Constraint::TemplateConstraint { kind, target, slot } => match self.values.get(slot) {
                     Some(value) => {
                         let target = if *target == SimplifiedType::Unknown { atom_type } else { *target };
                         let concrete = value_constraint(*kind, target, list, slot, value)?;
@@ -416,31 +416,31 @@ fn slot_array<'v>(slot: &Slot, value: &'v Value, expected: &'static str) -> Resu
     }
 }
 
-/// The concrete constraint a value-position slot stands for.
+/// The concrete constraint a template-constraint slot stands for.
 fn value_constraint(
-    kind: ValueSlotKind,
+    kind: TemplateConstraintKind,
     target: SimplifiedType,
     list: List,
     slot: &Slot,
     value: &Value,
 ) -> Result<Constraint, SchemaError> {
     match kind {
-        ValueSlotKind::Literal => match value {
+        TemplateConstraintKind::Literal => match value {
             Value::String(_) | Value::Bool(_) => Ok(Constraint::LiteralValue(value.clone())),
             Value::Number(number) => Ok(Constraint::LiteralValue(admitted_number(slot, number)?)),
             other => Err(wrong_shape(slot, "a string, number, or boolean", json_kind(other))),
         },
-        ValueSlotKind::Default => match value {
+        TemplateConstraintKind::Default => match value {
             Value::Null => Err(wrong_shape(slot, "a value other than null", "null")),
             Value::Number(number) => Ok(Constraint::Default(admitted_number(slot, number)?)),
             other => Ok(Constraint::Default(other.clone())),
         },
-        ValueSlotKind::Min | ValueSlotKind::Max => {
+        TemplateConstraintKind::Min | TemplateConstraintKind::Max => {
             let Value::Number(number) = value else {
                 return Err(wrong_shape(slot, "a number", json_kind(value)));
             };
             let bound = admit_number(slot, number)?;
-            let lower = kind == ValueSlotKind::Min;
+            let lower = kind == TemplateConstraintKind::Min;
             let keyword = kind.as_keyword();
             Ok(if list == List::Array {
                 let count = count(slot, keyword, bound)?;
@@ -454,7 +454,7 @@ fn value_constraint(
                 Constraint::Max(bound)
             })
         }
-        ValueSlotKind::Pattern => match value {
+        TemplateConstraintKind::Pattern => match value {
             Value::String(pattern) => {
                 check_slot_pattern(pattern).map_err(|reason| slot_error(slot.clone(), SlotResultKind::PatternRejected(reason)))?;
                 Ok(Constraint::Pattern(pattern.clone()))

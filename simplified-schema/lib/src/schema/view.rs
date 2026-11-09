@@ -99,7 +99,7 @@ impl<'a> TypeDefinition<'a> {
     /// The unresolved `{{ … }}` slots this type holds, directly or through a
     /// stored definition it references, each once. Non-empty means the type
     /// is part of a template: its `enum(...)`/`suggest(...)` lists show only
-    /// their literal elements and are not complete, and its value positions
+    /// their literal elements and are not complete, and its template constraints
     /// are not known.
     pub fn pending_slots(&self) -> Vec<Slot> {
         crate::slots::reachable_slots(&self.def, self.definitions)

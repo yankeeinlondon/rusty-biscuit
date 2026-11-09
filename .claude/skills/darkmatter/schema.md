@@ -368,7 +368,8 @@ lands outside the report and a cold request reads as a `hit`.
 
 A schema whose `enum`/`suggest` elements or `literal`/`default`/`min`/`max`/
 `pattern` argument is a `{{ … }}` slot parses passively in the
-`simplified-schema` crate (`Constraint::Dynamic`/`DynamicValue`) and every
+`simplified-schema` crate (`Constraint::Dynamic`/`TemplateConstraint`, the
+**template constraint**) and every
 lowering of it returns `SchemaError::UnresolvedSlots`, so Darkmatter's
 existing resolution, validation, and trigger paths fail closed with that
 typed error rather than seeing a partial list. A trigger match condition

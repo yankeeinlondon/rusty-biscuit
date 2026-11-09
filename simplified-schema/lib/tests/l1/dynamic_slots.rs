@@ -207,9 +207,9 @@ mod control {
     }
 
     #[test]
-    fn every_value_position_takes_its_shape() {
+    fn every_template_constraint_takes_its_shape() {
         let dir = fixtures();
-        let resolved = resolve(&fixture_pending("value-positions.yaml"), &StubHost::loading(), &dir).unwrap();
+        let resolved = resolve(&fixture_pending("template-constraints.yaml"), &StubHost::loading(), &dir).unwrap();
         assert_eq!(property(&resolved, "revision")["const"], json!(5));
         let retries = property(&resolved, "retries");
         assert_eq!((retries["minimum"].clone(), retries["maximum"].clone()), (json!(1), json!(10)), "{retries}");
@@ -328,9 +328,9 @@ mod result_shapes {
     }
 }
 
-/// One valid and one invalid shape per value position, through the same
+/// One valid and one invalid shape per template constraint, through the same
 /// validator as the lists.
-mod value_positions {
+mod template_constraints {
     use super::*;
 
     fn resolve_with(yaml: &str, answers: &[(&str, Value)]) -> Result<ResolvedSchema, SlotResolutionError> {
@@ -822,7 +822,7 @@ mod authored_source {
     }
 
     #[test]
-    fn a_document_value_slot_is_spanned_in_the_document_through_its_carrier() {
+    fn a_document_template_constraint_slot_is_spanned_in_the_document_through_its_carrier() {
         let yaml = "title: x\n$schema:\n  os: \"enum(macOS, {{ \\\"x\\\" }})\"\n";
         let file = PathBuf::from("/docs/doc.md");
         let (pending, text) = authored_pending(yaml, "os: \"enum(macOS, {{ \\\"x\\\" }})\"\n", InlineOwner::Document, Some(file.clone()));

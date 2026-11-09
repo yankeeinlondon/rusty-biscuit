@@ -63,7 +63,7 @@ pub use standalone::{
 pub use types::{
     CallExample, Constraint, DynamicElement, DynamicKind, DynamicList, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
     LOCAL_REFERENCE, NarrowsClause, NarrowsKind, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SchemaRoot, SimplifiedType, Slot, SuggestionCandidate, TupleElement, TupleType, TypeExpr, ValueSlotKind, operands_verb,
+    SchemaRoot, SimplifiedType, Slot, SuggestionCandidate, TupleElement, TupleType, TypeExpr, TemplateConstraintKind, operands_verb,
 };
 #[cfg(feature = "work-counters")]
 pub use yaml_scalar::alias_search_work;

@@ -117,7 +117,7 @@ fn property_names_offers_root_union_arm_properties() {
 
 #[test]
 fn property_value_offers_files_for_root_union_arm() {
-    // The value slot for a root-union arm's file property must surface the
+    // The setter value for a root-union arm's file property must surface the
     // arm's `match(...)` candidates.
     let effective = effective_from_doc(concat!(
         "---\n",

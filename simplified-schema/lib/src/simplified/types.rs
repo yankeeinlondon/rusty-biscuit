@@ -664,7 +664,7 @@ impl PropertyAtom {
         self.constraints.iter().any(|constraint| {
             matches!(
                 constraint,
-                Constraint::Dynamic(_) | Constraint::DynamicValue { kind: ValueSlotKind::Literal, .. }
+                Constraint::Dynamic(_) | Constraint::TemplateConstraint { kind: TemplateConstraintKind::Literal, .. }
             )
         })
     }
@@ -753,7 +753,7 @@ impl PropertyAtom {
         self.property_constraints().any(|constraint| {
             matches!(
                 constraint,
-                Constraint::Default(_) | Constraint::DynamicValue { kind: ValueSlotKind::Default, .. }
+                Constraint::Default(_) | Constraint::TemplateConstraint { kind: TemplateConstraintKind::Default, .. }
             )
         })
             || self
@@ -1161,9 +1161,9 @@ pub enum Constraint {
     /// `pattern(...)` whose whole argument is one `{{ … }}` slot. Resolution
     /// replaces it with the matching concrete constraint; until then lowering
     /// fails with [`SchemaError::UnresolvedSlots`](crate::SchemaError::UnresolvedSlots).
-    DynamicValue {
-        /// Which value position the slot fills.
-        kind: ValueSlotKind,
+    TemplateConstraint {
+        /// Which constraint the slot fills.
+        kind: TemplateConstraintKind,
         /// The type the position belongs to: the atom's type keyword, or
         /// [`SimplifiedType::Unknown`] on a named-type reference, whose target
         /// is known only after resolution.
@@ -1174,8 +1174,8 @@ pub enum Constraint {
 }
 
 /// One `{{ … }}` expression written as a schema value: a complete
-/// `enum(...)`/`suggest(...)` list element, or the whole argument of a value
-/// position ([`ValueSlotKind`]).
+/// `enum(...)`/`suggest(...)` list element, or the whole argument of a
+/// template constraint ([`TemplateConstraintKind`]).
 ///
 /// Parsing records it and evaluates nothing. Spans are byte ranges into the
 /// source handed to the parser, exactly like [`SuggestionCandidate::span`]:
@@ -1243,9 +1243,9 @@ impl DynamicList {
     }
 }
 
-/// The value position a [`Constraint::DynamicValue`] slot fills.
+/// The constraint a [`Constraint::TemplateConstraint`] slot fills.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ValueSlotKind {
+pub enum TemplateConstraintKind {
     /// The value of a `literal(...)` type.
     Literal,
     /// `default(...)`.
@@ -1258,7 +1258,7 @@ pub enum ValueSlotKind {
     Pattern,
 }
 
-impl ValueSlotKind {
+impl TemplateConstraintKind {
     /// The keyword the position is written with.
     pub fn as_keyword(self) -> &'static str {
         match self {
@@ -1316,8 +1316,8 @@ impl Constraint {
                 Some(DynamicElement::Member(_)) => "<members>",
                 Some(DynamicElement::Suggestion(_)) => "suggest",
             },
-            Constraint::DynamicValue { kind: ValueSlotKind::Literal, .. } => "<value>",
-            Constraint::DynamicValue { kind, .. } => kind.as_keyword(),
+            Constraint::TemplateConstraint { kind: TemplateConstraintKind::Literal, .. } => "<value>",
+            Constraint::TemplateConstraint { kind, .. } => kind.as_keyword(),
         }
     }
 
@@ -1326,7 +1326,7 @@ impl Constraint {
     pub fn slots(&self) -> Vec<&Slot> {
         match self {
             Constraint::Dynamic(list) => list.slots().collect(),
-            Constraint::DynamicValue { slot, .. } => vec![slot],
+            Constraint::TemplateConstraint { slot, .. } => vec![slot],
             _ => Vec::new(),
         }
     }

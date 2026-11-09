@@ -1,6 +1,6 @@
 //! Value-candidate matching for schema `name=value` setters.
 //!
-//! Resolves the value slot after `=`: enum members for `enum` properties and
+//! Resolves the setter value after `=`: enum members for `enum` properties and
 //! filesystem paths constrained by `match(...)` globs for `file` properties.
 
 use std::collections::HashSet;

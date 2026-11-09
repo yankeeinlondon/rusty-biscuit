@@ -816,7 +816,7 @@ mod tests {
         for (case, text, property) in [
             ("enum", "os: enum({{ env.OS }})", "os"),
             ("enum mixed with literals", "os: enum(macOS, {{ env.OS }})", "os"),
-            ("value position allowed as a literal", "count: number(min({{ env.MIN }}))", "count"),
+            ("template constraint allowed as a literal", "count: number(min({{ env.MIN }}))", "count"),
             ("array items", "tags: enum({{ env.TAGS }})[]", "tags"),
             ("nested object", "config:\n    os: enum({{ env.OS }})", "config"),
             ("union arm", "os:\n    - string\n    - enum({{ env.OS }})", "os"),

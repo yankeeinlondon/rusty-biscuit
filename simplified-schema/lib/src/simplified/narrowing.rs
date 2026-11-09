@@ -18,7 +18,7 @@ use super::query::flattened_alternatives;
 use super::serialize::serialize_property_def;
 use super::types::{
     Constraint, DynamicKind, DynamicList, FunctionType, NarrowsClause, NarrowsKind, PropertyAtom, PropertyDef,
-    SimplifiedType, TypeExpr, ValueSlotKind,
+    SimplifiedType, TypeExpr, TemplateConstraintKind,
     narrows_target_problem, returns_exact_boolean,
 };
 use crate::span::SourceSpan;
@@ -176,8 +176,8 @@ pub fn has_ordinary_constraints(atom: &PropertyAtom) -> bool {
                 | Constraint::Members(_)
                 | Constraint::LiteralValue(_)
                 | Constraint::Dynamic(_)
-                | Constraint::DynamicValue {
-                    kind: ValueSlotKind::Default | ValueSlotKind::Literal,
+                | Constraint::TemplateConstraint {
+                    kind: TemplateConstraintKind::Default | TemplateConstraintKind::Literal,
                     ..
                 }
         )
@@ -203,8 +203,8 @@ pub fn type_identity(mut atom: PropertyAtom) -> PropertyAtom {
                     kind: DynamicKind::Suggest,
                     ..
                 })
-                | Constraint::DynamicValue {
-                    kind: ValueSlotKind::Default,
+                | Constraint::TemplateConstraint {
+                    kind: TemplateConstraintKind::Default,
                     ..
                 }
         )

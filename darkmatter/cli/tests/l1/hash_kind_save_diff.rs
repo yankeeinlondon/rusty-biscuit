@@ -434,7 +434,7 @@ fn test_hash_save_keeps_the_comment_after_a_quote_inside_a_plain_date() {
         "hash-kind-save-diff-test-hash-save-keeps-the-comment-after-a-quote-inside-a-plain-date",
     );
     const STALE: &str = "aaaa111111111111-bbbb222222222222";
-    // `{date}` is the value slot; the stale stored hash makes the save bump it.
+    // `{date}` is the value placeholder; the stale stored hash makes the save bump it.
     let layouts: [&[&str]; 2] = [
         &["last_updated: {date}   # keep this explanation"],
         &["last_updated:", "  {date}   # keep this explanation"],

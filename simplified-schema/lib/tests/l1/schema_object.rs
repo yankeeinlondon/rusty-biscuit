@@ -637,7 +637,7 @@ mod templates {
         for (name, text, slots) in [
             ("schema-with-slot", include_str!("../fixtures/dynamic_slots/schema-with-slot.yaml"), 1),
             ("suggest-slot", include_str!("../fixtures/dynamic_slots/suggest-slot.yaml"), 1),
-            ("value-positions", include_str!("../fixtures/dynamic_slots/value-positions.yaml"), 5),
+            ("template-constraints", include_str!("../fixtures/dynamic_slots/template-constraints.yaml"), 5),
         ] {
             let schema = template(text);
             assert_eq!(schema.pending_slots().len(), slots, "{name}");
@@ -681,7 +681,7 @@ mod templates {
         for text in [
             include_str!("../fixtures/dynamic_slots/schema-with-slot.yaml"),
             include_str!("../fixtures/dynamic_slots/suggest-slot.yaml"),
-            include_str!("../fixtures/dynamic_slots/value-positions.yaml"),
+            include_str!("../fixtures/dynamic_slots/template-constraints.yaml"),
         ] {
             let first = template(text);
             let exported = first.to_simplified_yaml().expect("a template exports");

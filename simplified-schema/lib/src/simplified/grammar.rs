@@ -99,8 +99,8 @@
 //! nesting is capped at [`MAX_INLINE_OBJECT_DEPTH`] levels (Decision #11).
 //!
 //! A `slot` is recorded, never evaluated: a list holding one is
-//! [`Constraint::Dynamic`], a value position holding one is
-//! [`Constraint::DynamicValue`], and a list without one keeps its static
+//! [`Constraint::Dynamic`], a constraint argument holding one is a template
+//! constraint ([`Constraint::TemplateConstraint`]), and a list without one keeps its static
 //! constraint. A `{{` that does not open an element (quoted, or after other
 //! text in the same word) is ordinary text.
 //!
@@ -122,7 +122,7 @@ use super::types::{
     CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
     DynamicElement, DynamicKind, DynamicList, NarrowsClause, NarrowsKind, PatternKey, PatternKeyDef, PropertyAtom,
     PropertyDef, SchemaShape, SimplifiedType, Slot, SuggestionCandidate, TupleElement, TupleType, TypeExpr,
-    ValueSlotKind, narrows_target_problem,
+    TemplateConstraintKind, narrows_target_problem,
 };
 use crate::expression::scan::scan_expression_at;
 
@@ -548,7 +548,7 @@ enum ListOwner {
 }
 
 impl ListOwner {
-    /// The type a value-position slot belongs to: the type keyword, or
+    /// The type a template-constraint slot belongs to: the type keyword, or
     /// `unknown` where the target is not known while parsing.
     fn value_target(self) -> SimplifiedType {
         match self {
@@ -1974,7 +1974,7 @@ impl<'a> Parser<'a> {
                 matches!(
                     c,
                     Constraint::LiteralValue(_)
-                        | Constraint::DynamicValue { kind: ValueSlotKind::Literal, .. }
+                        | Constraint::TemplateConstraint { kind: TemplateConstraintKind::Literal, .. }
                 )
             })
         {
@@ -2047,7 +2047,7 @@ impl<'a> Parser<'a> {
                 }
                 Constraint::MinItems(_) | Constraint::MaxItems(_) | Constraint::Unique
                     if is_array_level => {}
-                Constraint::DynamicValue { slot, .. } => {
+                Constraint::TemplateConstraint { slot, .. } => {
                     return self.err(
                         format!("a `{{{{ … }}}}` slot is not supported on `{}`", ty.as_keyword()),
                         slot.span.clone(),
@@ -2585,8 +2585,8 @@ impl<'a> Parser<'a> {
             if !matches!(self.lex.peek_byte(), Some(b';' | b')' | b',') | None) {
                 return self.err(SLOT_WHOLE_ARGUMENT, slot.span.start..self.lex.pos + 1);
             }
-            let constraints = vec![Constraint::DynamicValue {
-                kind: ValueSlotKind::Literal,
+            let constraints = vec![Constraint::TemplateConstraint {
+                kind: TemplateConstraintKind::Literal,
                 target: SimplifiedType::Literal,
                 slot,
             }];
@@ -2780,8 +2780,8 @@ impl<'a> Parser<'a> {
                     if owner == ListOwner::Type(SimplifiedType::Null) && !is_array_level {
                         return self.err("a `null` default must be null; it cannot be a `{{ … }}` slot", slot.span);
                     }
-                    return Ok(Constraint::DynamicValue {
-                        kind: ValueSlotKind::Default,
+                    return Ok(Constraint::TemplateConstraint {
+                        kind: TemplateConstraintKind::Default,
                         target: owner.value_target(),
                         slot,
                     });
@@ -2812,8 +2812,8 @@ impl<'a> Parser<'a> {
                 let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
                 if let Some(slot) = self.whole_argument_slot(&args)? {
-                    return Ok(Constraint::DynamicValue {
-                        kind: ValueSlotKind::Min,
+                    return Ok(Constraint::TemplateConstraint {
+                        kind: TemplateConstraintKind::Min,
                         target: owner.value_target(),
                         slot,
                     });
@@ -2840,8 +2840,8 @@ impl<'a> Parser<'a> {
                 let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
                 if let Some(slot) = self.whole_argument_slot(&args)? {
-                    return Ok(Constraint::DynamicValue {
-                        kind: ValueSlotKind::Max,
+                    return Ok(Constraint::TemplateConstraint {
+                        kind: TemplateConstraintKind::Max,
                         target: owner.value_target(),
                         slot,
                     });
@@ -2868,8 +2868,8 @@ impl<'a> Parser<'a> {
                 let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
                 if let Some(slot) = self.whole_argument_slot(&args)? {
-                    return Ok(Constraint::DynamicValue {
-                        kind: ValueSlotKind::Pattern,
+                    return Ok(Constraint::TemplateConstraint {
+                        kind: TemplateConstraintKind::Pattern,
                         target: owner.value_target(),
                         slot,
                     });
@@ -3138,7 +3138,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// The slot of a value position (`default`, `min`, `max`, `pattern`):
+    /// The slot of a template constraint (`default`, `min`, `max`, `pattern`):
     /// `None` when no argument is a slot; an error when a slot shares the
     /// position with another argument.
     fn whole_argument_slot(&self, args: &[Arg]) -> Result<Option<Slot>, SchemaError> {
@@ -3247,7 +3247,7 @@ struct Arg {
     slot: Option<Slot>,
 }
 
-/// The grammar error for a value position whose argument mixes a slot with
+/// The grammar error for a template constraint whose argument mixes a slot with
 /// other text.
 const SLOT_WHOLE_ARGUMENT: &str = "a `{{ … }}` slot must be the whole argument";
 
