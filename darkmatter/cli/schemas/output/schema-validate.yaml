@@ -16,7 +16,6 @@ types:
         line: number
         column: number
         warnings: warning[] -> discovery findings, then schema advisories
-        slots: number -> how many slots a schema file that is a template holds; checked as written, never resolved
         diagnostics: diagnostic[] -> with error slots, each slot's own record at the slot
         grants_needed: grant-needed[] -> with error slots, the grants any one of which would allow an unapproved read, each once
     problem:

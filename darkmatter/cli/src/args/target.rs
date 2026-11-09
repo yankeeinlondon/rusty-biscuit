@@ -55,7 +55,10 @@ pub enum SchemaTarget {
     /// frontmatter before validation. A `.yaml`/`.yml` file is validated as a
     /// whole document by the schema its claimed `kind` or root `$schema`
     /// selects, with no baseline; assignments and `--schema` cannot be used
-    /// with one. An argument is treated as an assignment when it
+    /// with one. A schema file is also resolved as a document naming it
+    /// would resolve it: every `{{ … }}` slot it holds is evaluated through
+    /// the schema-read grants, and a slot that is refused or fails makes the
+    /// check unavailable (exit 1). An argument is treated as an assignment when it
     /// contains `=` and the text before the first `=` is a dot-separated
     /// property path (e.g. `title=Hello`, `user.email=ken@ken.net`).
     /// File paths that contain `=` should be disambiguated with `./` —

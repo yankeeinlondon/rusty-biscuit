@@ -241,10 +241,11 @@ fn compose_with_an_invalid_grant_store_fails_at_its_line() {
     assert_eq!(report["read_set"], json!([]), "{report:#}");
 }
 
-/// A schema file argument is checked passively: its slot is counted, never
-/// resolved, so the run succeeds even with the data file gone.
+/// A schema file argument resolves its slot as a document naming it would:
+/// the committed data file gets the automatic grant, so the file is valid,
+/// and the record carries no slot count.
 #[test]
-fn schema_validate_of_the_shipped_schema_file_is_passive() {
+fn schema_validate_of_the_shipped_schema_file_resolves_its_slot() {
     let Some(fixture) = sandbox(
         "slots-validate-schema-file",
         include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
@@ -252,13 +253,73 @@ fn schema_validate_of_the_shipped_schema_file_is_passive() {
     ) else {
         return;
     };
-    std::fs::remove_file(in_repo(&fixture, DATA_FILE)).expect("the data file is removable");
     let output = run(&fixture, &["schema", "validate", SCHEMA_FILE, "--output", "json"]);
     let report = data_output(&output, 0, include_str!("../../schemas/output/schema-validate.yaml"));
     let record = &report["files"][0];
     assert_eq!(record["valid"], true, "{report:#}");
-    assert_eq!(record["slots"], 1, "{report:#}");
+    assert!(record.get("slots").is_none(), "a schema file is resolved, never counted: {report:#}");
     assert!(record.get("error").is_none(), "{report:#}");
+}
+
+/// With its data file gone the slot fails, so the schema file's check is
+/// unavailable: exit 1, the slot's record at the slot, never a "valid
+/// template".
+#[test]
+fn schema_validate_of_the_shipped_schema_file_without_its_data_is_unavailable() {
+    let schema = include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml");
+    let Some(fixture) = sandbox("slots-validate-schema-file-missing", schema, include_str!("../../../../claudine/docs/os.yaml")) else {
+        return;
+    };
+    std::fs::remove_file(in_repo(&fixture, DATA_FILE)).expect("the data file is removable");
+    let output = run(&fixture, &["schema", "validate", SCHEMA_FILE, "--output", "json"]);
+    let report = data_output(&output, 1, include_str!("../../schemas/output/schema-validate.yaml"));
+    let record = &report["files"][0];
+    assert_eq!(record["valid"], false, "{report:#}");
+    assert_eq!(record["error"], "slots", "{report:#}");
+    assert!(record.get("slots").is_none(), "{report:#}");
+    assert_eq!(diagnostic_codes(&record["diagnostics"]), ["dm.schema.slot_failed"], "{report:#}");
+    assert_eq!(record["diagnostics"][0]["source"]["file"], json!(canonical(&fixture, SCHEMA_FILE)), "{report:#}");
+    assert_eq!(record["diagnostics"][0]["span"], first_slot_span(schema), "{report:#}");
+}
+
+/// A dirty data file has no automatic grant and a data output never
+/// prompts: approval required, naming the grants that would allow it.
+#[test]
+fn schema_validate_of_the_shipped_schema_file_with_a_dirty_data_file_needs_approval() {
+    let Some(fixture) = sandbox(
+        "slots-validate-schema-file-dirty",
+        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/os.yaml"),
+    ) else {
+        return;
+    };
+    dirty_data(&fixture);
+    let output = run(&fixture, &["schema", "validate", SCHEMA_FILE, "--output", "json"]);
+    let report = data_output(&output, 1, include_str!("../../schemas/output/schema-validate.yaml"));
+    let record = &report["files"][0];
+    assert_eq!(record["error"], "slots", "{report:#}");
+    assert_eq!(diagnostic_codes(&record["diagnostics"]), [APPROVAL_REQUIRED], "{report:#}");
+    assert_eq!(grants(record), data_file_grants(&fixture), "{report:#}");
+}
+
+/// The same refusal on a formatted output: the failure header and the
+/// slot's row, and no "checked as written" note.
+#[test]
+fn schema_validate_of_a_schema_file_with_a_dirty_data_file_prints_the_slot_failure() {
+    let Some(fixture) = sandbox(
+        "slots-validate-schema-file-plain",
+        include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml"),
+        include_str!("../../../../claudine/docs/os.yaml"),
+    ) else {
+        return;
+    };
+    dirty_data(&fixture);
+    let output = run(&fixture, &["schema", "validate", SCHEMA_FILE, "--output", "plain"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{stdout}\n{}", stderr_of(&output));
+    assert!(stdout.contains("could not be checked: its schema's slots did not resolve"), "{stdout}");
+    assert!(stdout.contains(APPROVAL_REQUIRED), "{stdout}");
+    assert!(!stdout.contains("checked as written"), "{stdout}");
 }
 
 #[test]

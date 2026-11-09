@@ -46,10 +46,6 @@ enum FileOutcome {
         advisories: Vec<SchemaAdvisory>,
         schema_label: Option<String>,
         layers: AppliedLayers,
-        /// For a schema file that is a template, how many `{{ … }}` slots
-        /// it holds: its syntax and shape were checked, its slots were not
-        /// resolved. `0` otherwise.
-        slots: usize,
     },
     /// The file argument did not open (it is not valid reference syntax,
     /// failed to resolve, or matched no file); no document was read.
@@ -614,7 +610,6 @@ fn validate_one(
             advisories: report.advisories,
             schema_label,
             layers: AppliedLayers::for_markdown(summary.layers, &md, baseline),
-            slots: 0,
         },
         Err(err) => FileOutcome::schema_error(err, &discovery_path),
     };
@@ -643,7 +638,9 @@ fn yaml_usage_error(assignments: &[Assignment], schema: Option<&Path>) -> Option
 }
 
 /// Validates one whole YAML document in its own context: its claimed `kind`
-/// or root `$schema` selects the schema, and nothing else applies.
+/// or root `$schema` selects the schema, and nothing else applies. A schema
+/// file whose shape passes is then resolved ([`resolve_schema_file`]), so a
+/// template is judged by what its slots return, never as written.
 fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdRequest) -> FileOutcome {
     let path = biscuit_file::canonicalize_simplified(opened.path()).unwrap_or_else(|_| opened.path().to_path_buf());
     let text = match std::fs::read_to_string(&path) {
@@ -670,15 +667,14 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
         Ok(context) => context,
         Err(err) => return FileOutcome::YamlLoadError { message: format!("{err:#}"), location: None },
     };
-    let slots = template_slot_count(&text, &path, &context);
-    match api.clone().with_file_resolution_context(context).validate_loaded_yaml_document(&document) {
+    let api = api.clone().with_file_resolution_context(context);
+    let outcome = match api.validate_loaded_yaml_document(&document) {
         Ok(YamlOutcome::NoSchema) => FileOutcome::Validated {
             report_valid: true,
             problems: Vec::new(),
             advisories: Vec::new(),
             schema_label: None,
             layers: AppliedLayers::default(),
-            slots,
         },
         Ok(YamlOutcome::Validated(validation)) => FileOutcome::Validated {
             report_valid: validation.report.valid,
@@ -689,18 +685,39 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
                 ..AppliedLayers::default()
             },
             schema_label: Some(validation.definition),
-            slots,
         },
+        Err(err) => return FileOutcome::schema_error(err, &path),
+    };
+    if !matches!(outcome, FileOutcome::Validated { report_valid: true, .. }) {
+        return outcome;
+    }
+    match resolve_schema_file(&api, &path, &text) {
+        Ok(()) => outcome,
         Err(err) => FileOutcome::schema_error(err, &path),
     }
 }
 
-/// How many `{{ … }}` slots the schema file `text` (at `path`) holds; `0`
-/// for a concrete schema or a YAML document that is not a schema. Passive:
-/// the slots are listed, never evaluated, and nothing they name is read.
-fn template_slot_count(text: &str, path: &Path, context: &FileResolutionContext) -> usize {
-    let source = simplified_schema::SchemaSource::from(path).bound(context.clone()).with_text(text);
-    simplified_schema::SimplifiedSchema::try_from_yaml(source).map_or(0, |schema| schema.pending_slots().len())
+/// Resolves `text`, the schema file at `path` whose shape already passed,
+/// as a document naming it would: every `{{ … }}` slot it holds (template
+/// constraints and template types) through the run's slot session, after
+/// one batched approval of the reads they name, then every import the
+/// result needs. A YAML document that is not a schema file has nothing to
+/// resolve.
+///
+/// ## Errors
+///
+/// A slot that was refused or failed, or a returned definition or import
+/// that does not resolve: the check is unavailable, never a success.
+fn resolve_schema_file(api: &DarkmatterSchemas, path: &Path, text: &str) -> Result<(), SchemaError> {
+    if !matches!(simplified_schema::parse_standalone_schema_document(text, path), Ok(Some(_))) {
+        return Ok(());
+    }
+    // A handler that cannot answer leaves the reads undecided, which the
+    // resolution reports as approval-required.
+    if let Err(error) = api.approve_template_reads(&api.schema_file_templates(path, text)) {
+        tracing::warn!(%error, "the schema slot reads could not be approved");
+    }
+    api.resolve_schema_file(path, text).map(drop)
 }
 
 /// Writes one document's validation stage timings to stderr.
@@ -778,7 +795,6 @@ fn render_pretty(
             report_valid: true,
             advisories,
             layers,
-            slots,
             ..
         } => {
             if quiet {
@@ -788,11 +804,6 @@ fn render_pretty(
             let line =
                 format!("- <green>✔</green> _<dim>the document</dim>_ {link} _<dim>{tail}</dim>_");
             push_row(out, &Prose::new(line).with_verbosity(verbose).render(terminal));
-            if *slots > 0 {
-                let noun = if *slots == 1 { "slot" } else { "slots" };
-                let note = format!("    - <dim>a schema template with {slots} {noun}; checked as written, not resolved</dim>");
-                push_row(out, &Prose::new(note).render(terminal));
-            }
             for advisory in advisories {
                 push_advisory_bullet(out, advisory, terminal);
             }
@@ -1016,7 +1027,6 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
             advisories,
             schema_label,
             layers,
-            slots,
         } => {
             let problems_json: Vec<serde_json::Value> = problems
                 .iter()
@@ -1041,17 +1051,13 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                     "message": advisory.message(),
                 })
             }));
-            let mut record = json!({
+            json!({
                 "file": file_str,
                 "valid": report_valid,
                 "schema": schema_label,
                 "layers": layers.to_json(),
                 "problems": problems_json,
-            });
-            if *slots > 0 {
-                record["slots"] = json!(slots);
-            }
-            record
+            })
         }
         FileOutcome::Unopened(err) => json!({
             "file": file_str,
@@ -1162,4 +1168,81 @@ fn escape_prose(input: &str) -> String {
 /// The typed argument error inside an [`FileOutcome::Unopened`] report.
 fn unopened_argument(err: &color_eyre::eyre::Report) -> Option<&DocumentArgumentError> {
     err.chain().find_map(|cause| cause.downcast_ref::<DocumentArgumentError>())
+}
+
+#[cfg(test)]
+mod tests {
+    //! The prompted path of [`resolve_schema_file`]: a terminal's handler is
+    //! asked about the reads a schema file's slots name before anything is
+    //! read, through the same seam the CLI's terminal handler implements.
+
+    use super::*;
+    use darkmatter::markdown::compose::shell_expansion::{ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest};
+    use darkmatter::markdown::compose::{DataRuntime, ShellExpansionError};
+    use darkmatter::markdown::schemas::slots::SlotSession;
+    use darkmatter::markdown::schemas::slots::grants::{GrantDecision, GrantScope, GrantTarget, SlotGrantDecision, SlotGrantRequest};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const SCHEMA: &str = "kind: schema\n$schema:\n    status: \"{{ load_data('./status.yaml', '{ type: string }').type }}(required)\"\n";
+
+    /// Answers every slot read with a once-only file grant when `allow`,
+    /// and with a deny otherwise, counting the batches it was asked.
+    struct Scripted {
+        allow: bool,
+        asked: AtomicUsize,
+    }
+
+    impl ShellApprovalHandler for Scripted {
+        fn approve(&self, _request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            Ok(ShellApprovalDecision::Deny)
+        }
+
+        fn approve_slot_reads(&self, requests: &[SlotGrantRequest]) -> Result<Vec<SlotGrantDecision>, ShellExpansionError> {
+            self.asked.fetch_add(1, Ordering::SeqCst);
+            let wanted = if self.allow { GrantDecision::Allow } else { GrantDecision::Deny };
+            Ok(requests
+                .iter()
+                .map(|request| {
+                    request
+                        .choices
+                        .iter()
+                        .find(|grant| grant.decision == wanted && grant.scope == GrantScope::Once && matches!(grant.target, GrantTarget::File(_)))
+                        .map_or(SlotGrantDecision::Unanswered, SlotGrantDecision::from_grant)
+                })
+                .collect())
+        }
+    }
+
+    /// `schema.yaml` and its `status.yaml` type in a temp folder outside any
+    /// repository, so no automatic grant applies, resolved by the CLI's
+    /// function under `handler`.
+    fn resolve_under(handler: Arc<Scripted>) -> Result<(), SchemaError> {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = biscuit_file::canonicalize_simplified(temp.path()).expect("canonical temp dir");
+        std::fs::write(root.join("status.yaml"), "type: enum(draft, published)\n").expect("write");
+        let path = root.join("schema.yaml");
+        std::fs::write(&path, SCHEMA).expect("write");
+        let context = FileResolutionContext::new(&root).with_env(std::collections::HashMap::new());
+        let session = SlotSession::new(DataRuntime::new()).with_handler(handler);
+        let api = DarkmatterSchemas::new(context).with_slot_session(Arc::new(session));
+        resolve_schema_file(&api, &path, SCHEMA)
+    }
+
+    #[test]
+    fn an_approving_handler_is_asked_once_and_the_schema_file_resolves() {
+        let handler = Arc::new(Scripted { allow: true, asked: AtomicUsize::new(0) });
+        resolve_under(handler.clone()).expect("the approved read resolves");
+        assert_eq!(handler.asked.load(Ordering::SeqCst), 1, "one batched prompt before resolution");
+    }
+
+    #[test]
+    fn a_denying_handler_leaves_the_schema_file_unavailable_with_the_denied_code() {
+        let handler = Arc::new(Scripted { allow: false, asked: AtomicUsize::new(0) });
+        let error = resolve_under(handler).expect_err("a denied read never resolves");
+        let diagnostics = darkmatter::markdown::compose::report_diagnostics::template_diagnostics(&error, Path::new("schema.yaml"))
+            .expect("a slot failure has slot records");
+        let codes: Vec<&str> = diagnostics.iter().map(|diagnostic| diagnostic.code.as_str()).collect();
+        assert_eq!(codes, ["dm.schema.slot_denied"], "{error}");
+    }
 }

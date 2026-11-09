@@ -586,11 +586,17 @@ fn conforms_schema_validate_slots_failure_names_the_grants_needed() {
 }
 
 #[test]
-fn conforms_schema_validate_template_schema_file_counts_its_slots() {
+fn conforms_schema_validate_template_schema_file_resolves_its_slots() {
+    // Outside a repository `os.yaml` has no automatic grant, and a data output
+    // never prompts: the schema file's own check is unavailable, never "valid
+    // as written".
     let fixture = with_template_document("output-validate-template");
-    let value = conforms(include_str!("../../schemas/output/schema-validate.yaml"), &fixture, &["schema", "validate", "schema.yaml", "--output", "json"], 0);
-    assert_eq!(value["files"][0]["valid"], true, "{value:#}");
-    assert_eq!(value["files"][0]["slots"], 1, "{value:#}");
+    let value = conforms(include_str!("../../schemas/output/schema-validate.yaml"), &fixture, &["schema", "validate", "schema.yaml", "--output", "json"], 1);
+    let record = &value["files"][0];
+    assert_eq!(record["valid"], false, "{value:#}");
+    assert_eq!(record["error"], "slots", "{value:#}");
+    assert!(record.get("slots").is_none(), "{value:#}");
+    assert_eq!(record["diagnostics"][0]["code"], "dm.schema.slot_approval_required", "{value:#}");
 }
 
 #[test]
