@@ -100,11 +100,37 @@ fn json_reports_the_root_mapping_for_a_root_missing_field() {
     assert_case(&position_fixtures::ROOT_MISSING, "\n");
 }
 
+#[test]
+fn json_reports_each_alias_use_at_its_token() {
+    let _ = include_str!("../../../lib/tests/position_fixtures/mod.rs");
+    assert_case(&position_fixtures::ALIAS_USE, "\n");
+}
+
+#[test]
+fn json_reports_each_alias_use_at_its_token_with_crlf_line_ends() {
+    let _ = include_str!("../../../lib/tests/position_fixtures/mod.rs");
+    assert_case(&position_fixtures::ALIAS_USE, "\r\n");
+}
+
+#[test]
+fn json_keeps_a_failure_beside_an_alias_located() {
+    let _ = include_str!("../../../lib/tests/position_fixtures/mod.rs");
+    assert_case(&position_fixtures::ALIAS_BESIDE_UNRELATED_FAILURE, "\n");
+}
+
 /// Guards the per-case tests above: a case added to `CASES` needs its own test.
 #[test]
 fn every_shared_case_has_a_json_test() {
     let _ = include_str!("../../../lib/tests/position_fixtures/mod.rs");
-    let tested = ["acceptance", "block_list", "flow", "non_ascii_prefix", "root_missing"];
+    let tested = [
+        "acceptance",
+        "block_list",
+        "flow",
+        "non_ascii_prefix",
+        "root_missing",
+        "alias_use",
+        "alias_beside_unrelated_failure",
+    ];
     let cases: Vec<_> = position_fixtures::CASES.iter().map(|case| case.name).collect();
     assert_eq!(cases, tested);
 }

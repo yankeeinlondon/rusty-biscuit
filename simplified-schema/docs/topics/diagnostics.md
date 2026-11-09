@@ -264,6 +264,22 @@ is reported at (the node at its instance path, or the offending key of an
 unknown-key problem), for a caller that underlines text rather than printing
 a line and column. It is `None` when the map holds no authored tree.
 
+A YAML alias (`*name`) has no text for the value it expands to, so a problem
+at an alias, or anywhere below one, is reported at the `*name` token. Every
+other node in the document keeps its own position. In
+
+```yaml
+base: &b {port: x}
+one: *b
+```
+
+against a schema requiring a numeric `port`, `/base/port` is line 1,
+column 17 (the `x`) and `/one/port` is line 2, column 6, with `byte_range`
+covering only `*b`. When the authored YAML cannot be matched to the parsed
+value mapping for mapping (for example a key with an anchor, `&k a: 1`, or an
+unquoted `{{ }}`), the map falls back to top-level keys: a problem is reported at
+the line of the top-level key it falls under, column 1.
+
 ## Source-Aware Parsing and Located Failures
 
 An editor or linter that underlines a schema error needs to know *where* the

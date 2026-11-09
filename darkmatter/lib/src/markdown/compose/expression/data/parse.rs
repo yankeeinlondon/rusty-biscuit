@@ -131,8 +131,8 @@ impl LocalDataDocument {
 
     /// The 1-based line and character column at which the value at each of
     /// `paths` starts, in order; `None` where the format's locator cannot
-    /// prove a position (a YAML file with an alias or a flow collection
-    /// across lines is never positioned), never a guessed one.
+    /// prove a position (a YAML layout the position map cannot match to the
+    /// parsed value is never positioned), never a guessed one.
     pub fn positions(&self, paths: &[Vec<PathSegment>]) -> Vec<Option<(usize, usize)>> {
         let mut locator = SourceLocator::new(self.format, &self.text, None);
         paths.iter().map(|path| locator.place(path, false).position).collect()

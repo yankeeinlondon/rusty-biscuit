@@ -394,8 +394,8 @@ rejects! {
     // The parser accepts a non-string key; the shared loader refuses it
     // afterwards, at the key's own event mark.
     yaml_non_string_key_is_malformed: "d.yaml", "a:\n  1: x\n", "{ <string>: unknown }" => Some((2, 3));
-    // Aliases only make contract violations pointer-only; a parser error in
-    // a file that holds one keeps the parser's coordinates.
+    // A parser error in a file that holds an alias keeps the parser's
+    // coordinates.
     yaml_invalid_syntax_after_an_alias_keeps_its_parser_position: "d.yaml", "a: &x 1\nb: *x\nc: d: e\n",
         "{ <string>: unknown }" => Some((3, 5));
     yaml_unknown_alias_is_malformed: "d.yaml", "- a\n- *nope\n", "string[]" => Some((2, 3));

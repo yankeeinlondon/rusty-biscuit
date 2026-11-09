@@ -162,20 +162,7 @@ locates! {
         "m.json", "[\n  {\"name\": \"a\"}\n]\n", "{name: string, port: number(required)}[]" => "/0/port" at 2:3;
 }
 
-// ── Pointer only ────────────────────────────────────────────────────────────
-
-macro_rules! pointer_only {
-    ($($name:ident: $data:literal, $contract:literal => [$($pointer:literal),*];)*) => {$(
-        #[test]
-        fn $name() {
-            let dir = TempDir::new().unwrap();
-            let found = load(dir.path(), "p.yaml", $data, $contract);
-            assert_all_mismatches(&found);
-            let expected: Vec<_> = [$($pointer),*].iter().map(|pointer| (pointer.to_string(), None, None)).collect();
-            assert_eq!(places(&found), expected, "{found:#?}");
-        }
-    )*};
-}
+// ── YAML aliases and multi-line flow collections ────────────────────────────
 
 /// An alias use is located at its `*name` token, and the anchored original
 /// at its own authored node.
@@ -187,8 +174,188 @@ fn a_yaml_alias_under_a_sequence_root_is_located_at_its_token() {
     assert_eq!(places(&found), vec![place("/0", 1, 3), place("/1", 2, 3)], "{found:#?}");
 }
 
-pointer_only! {
-    a_yaml_multi_line_flow_sequence_reports_pointers_only: "items: [\n  x,\n  1\n]\n", "{items: number[]}" => ["/items/0"];
+const SERVERS: &str = "base: &b {port: 1}\nservers:\n  - *b\n  - {port: x}\n";
+const SERVERS_CONTRACT: &str = "{ base: { port: number }, servers: { port: number }[] }";
+const THREE_USES: &str = "base: &b {port: x}\none: *b\ntwo: *b\n";
+const THREE_USES_CONTRACT: &str = "{ base: { port: number }, one: { port: number }, two: { port: number } }";
+
+#[test]
+fn an_alias_beside_an_unrelated_failure_keeps_it_located() {
+    let dir = TempDir::new().unwrap();
+    let found = load(dir.path(), "s.yaml", SERVERS, SERVERS_CONTRACT);
+    assert_all_mismatches(&found);
+    assert_eq!(places(&found), vec![place("/servers/1/port", 4, 12)], "{found:#?}");
+}
+
+#[test]
+fn every_use_of_a_failing_anchor_is_one_record_at_its_alias() {
+    let dir = TempDir::new().unwrap();
+    let found = load(dir.path(), "t.yaml", THREE_USES, THREE_USES_CONTRACT);
+    assert_all_mismatches(&found);
+    assert_eq!(
+        places(&found),
+        vec![place("/base/port", 1, 17), place("/one/port", 2, 6), place("/two/port", 3, 6)],
+        "{found:#?}"
+    );
+}
+
+#[test]
+fn a_missing_child_under_an_alias_is_located_at_the_alias() {
+    let dir = TempDir::new().unwrap();
+    let found = load(
+        dir.path(),
+        "m.yaml",
+        "base: &b {port: 1}\none: *b\n",
+        "{ base: { port: number }, one: { port: number, extra: number(required) } }",
+    );
+    assert_eq!(types(&found), vec![typed("/one/extra", "number", "missing")]);
+    assert_eq!(places(&found), vec![place("/one/extra", 2, 6)]);
+}
+
+#[test]
+fn failing_children_of_one_alias_share_its_position_with_distinct_pointers() {
+    let dir = TempDir::new().unwrap();
+    let found = load(
+        dir.path(),
+        "c.yaml",
+        "base: &b {port: x, size: y}\none: *b\n",
+        "{ base: { port: number, size: number }, one: { port: number, size: number } }",
+    );
+    assert_eq!(
+        places(&found),
+        vec![place("/base/port", 1, 17), place("/base/size", 1, 26), place("/one/port", 2, 6), place("/one/size", 2, 6)],
+        "{found:#?}"
+    );
+}
+
+macro_rules! alias_targets {
+    ($($name:ident: $data:literal, $contract:literal => [$(($pointer:literal, $line:literal, $column:literal)),*];)*) => {$(
+        #[test]
+        fn $name() {
+            let dir = TempDir::new().unwrap();
+            let found = load(dir.path(), "a.yaml", $data, $contract);
+            assert_all_mismatches(&found);
+            assert_eq!(places(&found), vec![$(place($pointer, $line, $column)),*], "{found:#?}");
+        }
+    )*};
+}
+
+// An anchored scalar is located at its anchor, where its node starts.
+alias_targets! {
+    an_alias_to_a_scalar_keeps_its_neighbors_located:
+        "a: &x y\nb: *x\nc: z\n", "{ a: number, b: number, c: number }"
+        => [("/a", 1, 4), ("/b", 2, 4), ("/c", 3, 4)];
+    an_alias_to_a_sequence_keeps_its_neighbors_located:
+        "a: &x [y]\nb: *x\nc: z\n", "{ a: number[], b: number[], c: number }"
+        => [("/a/0", 1, 8), ("/b/0", 2, 4), ("/c", 3, 4)];
+    an_alias_to_a_mapping_keeps_its_neighbors_located:
+        "a: &x {p: y}\nb: *x\nc: z\n", "{ a: { p: number }, b: { p: number }, c: number }"
+        => [("/a/p", 1, 11), ("/b/p", 2, 4), ("/c", 3, 4)];
+    a_literal_merge_key_is_an_ordinary_key_located_at_its_alias:
+        "base: &b {port: x}\nserver: {<<: *b, port: 2}\n",
+        "{ base: { port: number }, server: { <string>: { port: number } } }"
+        => [("/base/port", 1, 17), ("/server/<</port", 2, 14), ("/server/port", 2, 24)];
+    a_quoted_literal_merge_key_is_an_ordinary_key_located_at_its_alias:
+        "base: &b {port: x}\nserver: {\"<<\": *b, port: 2}\n",
+        "{ base: { port: number }, server: { <string>: { port: number } } }"
+        => [("/base/port", 1, 17), ("/server/<</port", 2, 16), ("/server/port", 2, 26)];
+    a_sequence_of_aliases_is_located_item_by_item:
+        "base: &b {port: x}\nlist: [*b, *b]\n", "{ base: { port: number }, list: { port: number }[] }"
+        => [("/base/port", 1, 17), ("/list/0/port", 2, 8), ("/list/1/port", 2, 12)];
+    a_multi_line_flow_collection_is_located_inside_and_after_it:
+        "base: &b {port: 1}\nitems: [\n  {port: x},\n  *b, # ]\n  {port: \"}\"},\n  {port: \"]\"},\n  {nested: {port: y}}\n]\nafter: z\n",
+        "{ base: { port: number }, items: { port: number, nested: { port: number } }[], after: number }"
+        => [("/items/0/port", 3, 10), ("/items/2/port", 5, 10), ("/items/3/port", 6, 10), ("/items/4/nested/port", 7, 19), ("/after", 9, 8)];
+    a_failing_alias_item_in_a_multi_line_flow_sequence_is_located_at_its_token:
+        "base: &b {port: x}\nitems: [\n  *b, # }\n  {port: 2}\n]\nnext: y\n",
+        "{ base: { port: number }, items: { port: number }[], next: number }"
+        => [("/base/port", 1, 17), ("/items/0/port", 3, 3), ("/next", 6, 7)];
+    a_multi_line_flow_sequence_of_scalars_is_located:
+        "items: [\n  x,\n  1\n]\n", "{items: number[]}" => [("/items/0", 2, 3)];
+}
+
+/// A `<<` key a closed contract rejects says why it was not merged; any
+/// other unexpected key's message is unchanged.
+#[test]
+fn an_unexpected_merge_key_explains_that_merge_keys_are_not_applied() {
+    const HINT: &str = "YAML merge keys are not applied, so `<<` is read as an ordinary key.";
+    let dir = TempDir::new().unwrap();
+    let contract = "{ base: { port: number }, server: { port: number } }";
+    let message = |data: &str| {
+        let record = only(load(dir.path(), "h.yaml", data, contract));
+        assert_eq!(record.code, MISMATCH);
+        (places(std::slice::from_ref(&record)), record.message)
+    };
+    let file = entry(dir.path(), "h.yaml");
+    let unexpected = |key: &str| {
+        format!(
+            "load_data(): `{file}` does not match `{contract}`: server{key}: expected {{ port?: null | number, no other keys }}; \
+             received object {{\"port\":1}}; unexpected property"
+        )
+    };
+    for (data, column) in [
+        ("base: &b {port: 1}\nserver: {<<: *b, port: 2}\n", 14),
+        ("base: &b {port: 1}\nserver: {\"<<\": *b, port: 2}\n", 16),
+    ] {
+        let (found, text) = message(data);
+        assert_eq!(found, vec![place("/server/<<", 2, column)], "{data}");
+        assert_eq!(text, format!("{}. {HINT}", unexpected("[\"<<\"]")), "{data}");
+    }
+    let (found, text) = message("base: &b {port: 1}\nserver: {other: *b, port: 2}\n");
+    assert_eq!(found, vec![place("/server/other", 2, 17)]);
+    assert_eq!(text, unexpected(".other"), "an ordinary unexpected key keeps its message");
+}
+
+#[test]
+fn an_alias_position_is_a_character_column() {
+    let dir = TempDir::new().unwrap();
+    let found = load(
+        dir.path(),
+        "u.yaml",
+        "base: &b {port: x}\none: {note: é, link: *b}\n",
+        "{ base: { port: number }, one: { note: string, link: { port: number } } }",
+    );
+    assert_eq!(places(&found), vec![place("/base/port", 1, 17), place("/one/link/port", 2, 22)], "byte column is 23");
+}
+
+#[test]
+fn alias_positions_survive_line_endings_and_a_byte_order_mark() {
+    let dir = TempDir::new().unwrap();
+    let expected = vec![place("/base/port", 1, 17), place("/one/port", 2, 6), place("/two/port", 3, 6)];
+    let crlf = THREE_USES.replace('\n', "\r\n");
+    for (name, data) in [
+        ("lf.yaml", THREE_USES.to_string()),
+        ("crlf.yaml", crlf.clone()),
+        ("bom.yaml", format!("\u{feff}{THREE_USES}")),
+        ("bom-crlf.yaml", format!("\u{feff}{crlf}")),
+    ] {
+        assert_eq!(places(&load(dir.path(), name, data, THREE_USES_CONTRACT)), expected, "{name}");
+    }
+}
+
+#[test]
+fn aliases_keep_the_records_and_order_of_the_same_data_written_out() {
+    let dir = TempDir::new().unwrap();
+    let pointers = |records: Vec<Diagnostic>| -> Vec<String> { places(&records).into_iter().map(|(pointer, ..)| pointer).collect() };
+    let aliased = pointers(load(dir.path(), "a.yaml", THREE_USES, THREE_USES_CONTRACT));
+    let expanded = pointers(load(
+        dir.path(),
+        "e.yaml",
+        "base: {port: x}\none: {port: x}\ntwo: {port: x}\n",
+        THREE_USES_CONTRACT,
+    ));
+    assert_eq!(aliased, expanded);
+    assert_eq!(aliased, ["/base/port", "/one/port", "/two/port"]);
+}
+
+/// A layout the shared locator cannot prove (an anchored key) reports its
+/// violation by pointer alone.
+#[test]
+fn an_unproven_yaml_layout_reports_pointers_only() {
+    let dir = TempDir::new().unwrap();
+    let found = load(dir.path(), "k.yaml", "&k a: 1\nb: x\n", "{ a: number, b: number }");
+    assert_all_mismatches(&found);
+    assert_eq!(places(&found), vec![("/b".to_string(), None, None)], "{found:#?}");
 }
 
 #[test]

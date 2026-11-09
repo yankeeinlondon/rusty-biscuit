@@ -495,6 +495,10 @@ impl Mismatch<'_> {
     }
 }
 
+/// Added to an unexpected `<<` key's record: the YAML loader keeps a merge
+/// key as an ordinary key, so an author expecting inheritance learns why.
+const MERGE_KEY_HINT: &str = "YAML merge keys are not applied, so `<<` is read as an ordinary key.";
+
 /// One record per violating location, in file order: by source position,
 /// then (for YAML the file cannot position, and for a missing member or
 /// slot) by parsed container order, the engine's declaration order breaking
@@ -506,7 +510,7 @@ fn contract_records(
     format: biscuit_file::DataFormat,
     failure: &simplified_schema::coercion::ConversionError,
 ) -> Vec<Diagnostic> {
-    use simplified_schema::coercion::{ActualKind, FailureReason};
+    use simplified_schema::coercion::{ActualKind, FailureReason, PathSegment};
     let mut locator = SourceLocator::new(format, mismatch.text, mismatch.table);
     let mut placed: Vec<_> = failure
         .located_failures()
@@ -516,6 +520,12 @@ fn contract_records(
             let detail = violation.failure.to_string();
             let detail = match violation.failure.reason {
                 FailureReason::NoOptionAccepts { .. } => cut_union_detail(&detail),
+                FailureReason::UnexpectedProperty
+                    if format == biscuit_file::DataFormat::Yaml
+                        && matches!(violation.failure.path.last(), Some(PathSegment::Key(key)) if key == "<<") =>
+                {
+                    format!("{detail}. {MERGE_KEY_HINT}")
+                }
                 _ => detail,
             };
             let expected = if violation.pointer.is_empty() {

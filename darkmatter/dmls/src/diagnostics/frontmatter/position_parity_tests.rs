@@ -34,6 +34,10 @@ const DMLS_RANGED_TEXT: &[(&str, &str, &str)] = &[
     ("non_ascii_prefix", "/m", "zz"),
     ("non_ascii_prefix", "/n/b", "x"),
     ("root_missing", "", "other: x\n$schema:\n  title: string(required)\n"),
+    ("alias_use", "/base/port", "x"),
+    ("alias_use", "/one/port", "*b"),
+    ("alias_use", "/two/port", "*b"),
+    ("alias_beside_unrelated_failure", "/servers/1/port", "x"),
 ];
 
 const ENCODINGS: [PositionEncoding; 2] = [PositionEncoding::Utf8, PositionEncoding::Utf16];
@@ -154,9 +158,12 @@ fn assert_parity(encoding: PositionEncoding, line_end: &str, strict: bool) {
 
             for expected in surfaced {
                 let (problem, library_offset) = library_problem(&report.problems, &text, case, expected);
+                // Problems below several uses of one alias share a message,
+                // so the start tells them apart.
                 let matches: Vec<&&Diagnostic> = schema_diagnostics
                     .iter()
                     .filter(|d| code_of(d) == dmls_code(expected) && d.message == problem.message)
+                    .filter(|d| start_byte(sm, &text, d.range.start) == library_offset)
                     .collect();
                 let [diagnostic] = matches.as_slice() else {
                     panic!("{context} {:?}: expected one DMLS diagnostic, got {matches:#?}", expected.path);

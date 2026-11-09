@@ -783,21 +783,88 @@ editor:
 - Data fetched from a URL gets lines and columns too, counted in the fetched
   text.
 
+### YAML anchors, aliases, and merge keys
+
+YAML lets you name a value with an **anchor** (`&name`) and reuse it later with
+an **alias** (`*name`). The alias is not a copy written in the file: the parser
+expands it into the anchored value. A value reached through an alias therefore
+has no text of its own, so its record is located at the alias token that
+brought it in. Its pointer still names the expanded value.
+
+With a contract that requires numeric `port` values:
+
+```yaml
+base: &b {port: x}
+one: *b
+two: *b
+```
+
+| Pointer | Line | Column | Located at |
+| ------- | ---- | ------ | ---------- |
+| `/base/port` | 1 | 17 | the `x` inside the anchored mapping |
+| `/one/port` | 2 | 6 | the alias `*b` on line 2 |
+| `/two/port` | 3 | 6 | the alias `*b` on line 3 |
+
+Each use is its own record, in file order. Several failing values under one
+alias share its position but keep their own pointers, and a missing member
+under an alias is located at the alias too. An alias does not affect any
+other value in the file. Below, `/servers/1/port` is still line 4, column 12,
+the `x`:
+
+```yaml
+base: &b {port: 1}
+servers:
+  - *b
+  - {port: x}
+```
+
+A flow collection written across several lines is located like any other
+value, inside it and after it:
+
+```yaml
+items: [
+  {port: 1},
+  {port: x}
+]
+```
+
+`/items/1/port` is line 3, column 10.
+
+**Merge keys are not applied.** Some YAML tools read `<<: *b` as "inherit the
+members of `b`". `load_data` does not: `<<` is an ordinary key whose value is
+the expanded alias, so `server: {<<: *b, port: 2}` has the members `<<` and
+`port`, and nothing is inherited. A failure inside it, such as
+`/server/<</port`, is located at the `*b` after `<<`. A contract that does not
+allow a `<<` member reports it as an unexpected property and adds one
+sentence (the message is one line, wrapped here):
+
+```text
+load_data(): `/work/h.yaml` does not match
+`{ base: { port: number }, server: { port: number } }`: server["<<"]: expected { port?: null | number, no other keys }; received
+object {"port":1}; unexpected property. YAML merge keys are not applied, so
+`<<` is read as an ordinary key.
+```
+
+The sentence is added only for a YAML file and only for a key that is exactly
+`<<`, written plain or quoted.
+
 ### YAML positions that cannot be proven
 
 Most YAML problems have a line and column. A few have less, because the parser
 or the position map cannot prove one:
 
-- **Pointer only.** In a YAML file that contains an alias (`*name`) or a flow
-  collection written across several lines (`items: [` … `]`), contract-mismatch
-  records have `file` and `pointer` but no `line` or `column`, for every value in
-  that file. A parser error in such a file keeps the parser's line and column.
+- **Pointer only.** When a file's layout is one the position map cannot match
+  to the parsed value, contract-mismatch records in that file have `file` and
+  `pointer` but no `line` or `column`. An anchor on a key (`&k a: 1`) is an
+  example: `b: x` on the next line is reported as `/b` with no position. A
+  guessed position is never reported in its place. A parser error in such a
+  file keeps the parser's line and column.
 - **A duplicate key** is located at the start of the mapping that holds it, not
   at the second key: `a: 1` then `a: 2` at the top of a file is line 1,
   column 1, with no pointer.
 
-These are located even in a file with an alias, because they are problems in
-the YAML itself, not contract mismatches:
+These are always located, because they are problems in the YAML itself, not
+contract mismatches:
 
 - **A second YAML document** is located at the `---` that starts it
   (`a: ok`, `---`, `a: next` is line 2, column 1), or at its first value when

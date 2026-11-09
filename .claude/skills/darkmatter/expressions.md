@@ -486,9 +486,12 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   `locate_jsonl`, `locate_toml`, `locate_json5`, `json5_parse_error_offset`,
   raw `DelimitedField::offset` for CSV/TSV, then `source_position` for the
   1-based line and character column. YAML uses simplified-schema's
-  `PositionMap::byte_range`, never its top-level fallback. A YAML file with an
-  alias, or with a flow collection spanning lines (`has_multi_line_flow_collection`,
-  although `PositionMap` can locate those), reports pointers only. A missing
+  `PositionMap::byte_range`, never its top-level fallback: an alias and
+  everything below it is placed at its `*name` token, a flow collection
+  spanning lines is located, and only a layout the map cannot prove (an
+  anchored key `&k a: 1`) reports pointers only. `<<` is a literal key; an
+  unexpected `<<` record's message adds `report_diagnostics::MERGE_KEY_HINT`
+  (YAML only). A missing
   value keeps its own pointer but is positioned at its parent. Pointer-only
   is for contract mismatches alone: a YAML refusal made after parsing (second
   document, non-string key, tag) is located by

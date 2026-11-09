@@ -226,6 +226,29 @@ fn a_claimed_repository_kind_is_validated_by_its_definition_alone() {
     assert_eq!(start(&diagnostic), position_of(&text, "title"), "{diagnostic:#?}");
 }
 
+/// Each use of a failing anchor is published at its `*name` token and
+/// ranges only that token; the anchored original ranges its failing value.
+#[test]
+fn an_alias_use_is_ranged_at_its_token() {
+    let probe = Probe::new();
+    let platforms = "platforms:\n    - &p {name: [1]}\n    - *p\n";
+    for text in [
+        format!("kind: roster\nroster_version: 1\n{platforms}"),
+        format!("kind: roster\nroster_version: 1\nowner: é\n{platforms}"),
+        // `é` before the alias on its own line: one UTF-16 unit, two bytes.
+        "kind: roster\nroster_version: 1\nplatforms: [{name: é}, &p {name: [1]}, *p]\n".to_string(),
+    ] {
+        let diagnostics = probe.schema_diagnostics("roster.data.yaml", &text);
+        assert_eq!(codes(&diagnostics), ["dm.schema.type_mismatch", "dm.schema.type_mismatch"], "{diagnostics:#?}");
+        let mut starts: Vec<_> = diagnostics.iter().map(start).collect();
+        starts.sort();
+        assert_eq!(starts, [position_of(&text, "[1]"), position_of(&text, "*p")], "{diagnostics:#?}");
+        let alias = diagnostics.iter().find(|diagnostic| start(diagnostic) == position_of(&text, "*p")).unwrap();
+        let (line, character) = position_of(&text, "*p");
+        assert_eq!((alias.range.end.line, alias.range.end.character), (line, character + 2), "{alias:#?}");
+    }
+}
+
 #[test]
 fn a_shipped_kind_is_claimed_without_any_schema_root() {
     let probe = Probe::new();

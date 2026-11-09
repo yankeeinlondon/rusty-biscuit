@@ -316,10 +316,13 @@ validation report, shared by every problem and root-union arm):
   a new top-level path has no position. A replaced path keeps its authored
   node.
 - The alignment witness: `PositionMap::project` accepts the locator's tree
-  only when its mappings match the parsed `MappingOrders` and it holds no
-  alias. Otherwise (aliases, `<<`, unquoted `{{ }}`) it falls back to
-  top-level key line, column 1. The tolerant locator reads a flow collection
-  across lines and past its comments.
+  only when its mappings match the parsed `MappingOrders`. An alias is an
+  authored leaf at its `*name` token: anything at or below it is located
+  there, and the indexed mappings it expands to are accounted for by the
+  leaf. A literal `<<` is an ordinary key (merge keys are never applied).
+  Otherwise (an unproven layout: an anchored key `&k a: 1`, unquoted `{{ }}`)
+  it falls back to top-level key line, column 1. The tolerant locator reads
+  a flow collection across lines and past its comments.
   Positions never change validity.
 - `positions_for(&Markdown)` needs loaded text (parsed from text or a file);
   a constructed `Markdown` is located in its serialized YAML view.

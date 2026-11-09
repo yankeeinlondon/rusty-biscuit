@@ -182,6 +182,7 @@ decide the edge cases:
 | a zero-byte file | YAML: `null`; JSON and JSON5: malformed; JSON Lines, CSV, TSV: `[]`; TOML: `{}` |
 | several YAML documents in one file | malformed |
 | YAML anchors and aliases | the aliases are expanded |
+| YAML merge keys (`<<: *b`) | not applied; `<<` is an ordinary key |
 | YAML custom tags (`!foo`) | malformed |
 | YAML duplicate or non-string mapping keys | malformed |
 | a JSON object with a duplicate key | the last value wins |
@@ -526,15 +527,31 @@ on [Data Contracts](../cli/data-contracts.md#data-errors) and
 - In CSV and TSV a cell's position is where its raw text starts, including an
   opening quote, and a row problem points at the row's start.
 
+### YAML aliases and merge keys
+
+A YAML alias (`*name`) reuses the value an anchor (`&name`) marked earlier.
+A failure in the expanded value is located at the alias that brought it in,
+and every other value in the file keeps its own position. With
+`base: &b {port: x}` on line 1 and `one: *b` on line 2, `/base/port` is
+line 1, column 17 (the `x`) and `/one/port` is line 2, column 6 (the `*b`).
+A flow collection written across several lines (`servers: [` … `]`) is
+located inside and after it.
+
+YAML merge keys are not applied: `<<: *b` is an ordinary member named `<<`
+whose value is the expanded alias, and nothing is inherited. A contract that
+rejects the `<<` member says so in its message: "YAML merge keys are not
+applied, so `<<` is read as an ordinary key." See
+[Data Contracts](../cli/data-contracts.md#yaml-anchors-aliases-and-merge-keys).
+
 ### YAML positions that cannot be proven
 
-For a YAML file that contains an alias (`*name`) or a flow collection that
-spans more than one line (`servers: [` … `]`), a contract mismatch reports
-`file` and `pointer` only, with no `line` or `column`. A guessed position is
-never reported in their place. A syntax error in such a file still has the
+When a YAML file's layout cannot be matched to its parsed value, such as an
+anchor on a key (`&k a: 1`), a contract mismatch in that file reports `file`
+and `pointer` only, with no `line` or `column`. A guessed position is never
+reported in their place. A syntax error in such a file still has the
 parser's line and column.
 
-Malformed YAML always keeps a line and column, alias or not. A second
+Malformed YAML always keeps a line and column. A second
 document is reported at the `---` that starts it, a non-string key and a tag
 at the key or tag itself. A duplicate key is located less precisely: at the
 start of the mapping that holds it.

@@ -105,6 +105,46 @@ fn a_byte_order_mark_and_crlf_lines_are_accepted_and_spans_point_into_the_origin
     }
 }
 
+/// A document whose `one` is an alias of `base`.
+const ALIASED: &str = "$schema:\n    name: string(required)\n    base: \"{ port: number }\"\n    one: \"{ port: number }\"\nname: api\nbase: &b {port: 8080}\none: *b\n";
+
+#[test]
+fn control_an_aliased_document_validates() {
+    let YamlOutcome::Validated(validation) = outcome(ALIASED) else { panic!("validated") };
+    assert!(validation.report.valid, "{:?}", validation.report.problems);
+}
+
+/// The anchored original is located at its failing value and the alias use
+/// at its `*name` token, in every encoding variant.
+#[test]
+fn an_alias_use_is_located_at_its_token() {
+    let invalid = ALIASED.replace("port: 8080", "port: x");
+    for (label, text) in [
+        ("LF", invalid.clone()),
+        ("BOM", format!("\u{feff}{invalid}")),
+        ("CRLF", invalid.replace('\n', "\r\n")),
+        ("BOM + CRLF", format!("\u{feff}{}", invalid.replace('\n', "\r\n"))),
+        ("Unicode", invalid.replace("name: api", "name: «Ωμέγα»")),
+    ] {
+        let YamlOutcome::Validated(validation) = outcome(&text) else { panic!("{label}: validated") };
+        let problems = &validation.report.problems;
+        assert_eq!(problems.len(), 2, "{label}: {problems:?}");
+        let mut found: Vec<_> = problems
+            .iter()
+            .map(|problem| {
+                let range = validation.byte_range(problem).unwrap_or_else(|| panic!("{label}: {problem:?} located"));
+                (problem.path.clone(), problem.line, &text[range])
+            })
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [("/base/port".to_string(), Some(6), "x"), ("/one/port".to_string(), Some(7), "*b")],
+            "{label}"
+        );
+    }
+}
+
 #[test]
 fn a_scalar_sequence_or_empty_root_is_valid_but_unvalidated() {
     for text in ["just text\n", "- a\n- b\n", "", "# only a comment\n", "~\n"] {

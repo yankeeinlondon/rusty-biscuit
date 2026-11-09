@@ -1,6 +1,7 @@
 //! `load_data(file, as)` through the real `md` binary: one success and one
 //! malformed-input route per loader family, a contract failure that stops the
-//! document before a later action runs, the Markdown-mode report, absent
+//! document before a later action runs, YAML alias and multi-line flow
+//! locations, the Markdown-mode report, absent
 //! optional diagnostic fields, lifecycle reads, the `md graph` and
 //! `md validate refs` envelopes, and the file-reference fields of a missing
 //! data file.
@@ -243,6 +244,73 @@ fn a_contract_mismatch_runs_no_later_action() {
     );
     assert_eq!(envelope["read_set"], json!([read_entry(&data)]), "{envelope:#}");
     assert!(!fixture.cwd().join("sentinel").exists(), "the later command must not run: {envelope:#}");
+}
+
+// ── 2a. YAML aliases and multi-line flow collections are located ─────────
+
+const ALIAS_CONTRACT: &str = "{ base: { port: number }, one: { port: number } }";
+
+/// A document loading `data.yaml` against `contract`, then an approved
+/// `::shell` command recording to `sentinel` when it runs.
+fn yaml_sentinel_fixture(name: &str, data: &str, contract: &str) -> CliProcessFixture {
+    let fixture = sentinel_fixture(name, "[]\n");
+    fixture.write_file("cwd/data.yaml", data);
+    fixture.write_file(
+        "cwd/doc.md",
+        &format!("Data: {{{{ load_data(\"data.yaml\", \"{contract}\") }}}}\n\n::shell argv-recorder sentinel\n"),
+    );
+    fixture
+}
+
+#[test]
+fn conforming_aliased_yaml_lets_the_later_action_run() {
+    let fixture = yaml_sentinel_fixture("load_data_alias_control", "base: &b {port: 1}\none: *b\n", ALIAS_CONTRACT);
+    let envelope = run_sentinel(&fixture, 0);
+    validate_strictly(include_str!("../../schemas/output/compose.yaml"), &envelope);
+    assert_eq!(envelope["outcome"], "success", "{envelope:#}");
+    assert!(fixture.cwd().join("sentinel").exists(), "the command ran: {envelope:#}");
+}
+
+/// Each use of a failing anchor is its own record at its `*name` token, the
+/// call-site `source` is the one a plain file reports, and nothing later runs.
+#[test]
+fn an_aliased_yaml_mismatch_is_located_at_each_alias_and_runs_no_later_action() {
+    let fixture = yaml_sentinel_fixture("load_data_alias", "base: &b {port: x}\none: *b\n", ALIAS_CONTRACT);
+    let envelope = run_sentinel(&fixture, 1);
+    validate_strictly(include_str!("../../schemas/output/compose.yaml"), &envelope);
+    assert_failed(&envelope);
+    let data = read_entry(&fixture.cwd().join("data.yaml"));
+    let records = envelope["diagnostics"].as_array().expect("diagnostics");
+    assert!(records.iter().all(|record| record["code"] == "dm.data.contract_mismatch"), "{envelope:#}");
+    let locations: Vec<&Value> = records.iter().map(|record| &record["data_location"]).collect();
+    assert_eq!(
+        locations,
+        [
+            &json!({ "file": data, "pointer": "/base/port", "line": 1, "column": 17 }),
+            &json!({ "file": data, "pointer": "/one/port", "line": 2, "column": 6 }),
+        ],
+        "{envelope:#}"
+    );
+    assert_eq!(envelope["read_set"], json!([data]), "{envelope:#}");
+    assert!(!fixture.cwd().join("sentinel").exists(), "the later command must not run: {envelope:#}");
+
+    fixture.write_file("cwd/data.yaml", "base: {port: x}\none: {port: 1}\n");
+    let plain = run_sentinel(&fixture, 1);
+    assert_eq!(only_record(&plain)["source"], records[0]["source"], "{plain:#}");
+}
+
+#[test]
+fn a_multi_line_flow_sequence_is_located() {
+    let fixture = yaml_sentinel_fixture("load_data_multi_line_flow", "items: [\n  1,\n  x\n]\n", "{ items: number[] }");
+    let envelope = run_sentinel(&fixture, 1);
+    validate_strictly(include_str!("../../schemas/output/compose.yaml"), &envelope);
+    assert_failed(&envelope);
+    let data = read_entry(&fixture.cwd().join("data.yaml"));
+    assert_eq!(
+        only_record(&envelope)["data_location"],
+        json!({ "file": data, "pointer": "/items/1", "line": 3, "column": 3 }),
+        "{envelope:#}"
+    );
 }
 
 // ── 3. Markdown mode ───────────────────────────────────────────────────────

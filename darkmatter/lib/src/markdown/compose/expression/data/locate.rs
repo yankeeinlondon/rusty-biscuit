@@ -6,7 +6,11 @@
 //! place in file order. Positions come only from the format's own locator
 //! (`biscuit_file::data_locations`, simplified-schema's `PositionMap` for
 //! YAML, the delimited reader's field offsets for CSV/TSV); a path a locator
-//! cannot prove has no position, never a guessed one.
+//! cannot prove has no position, never a guessed one. For YAML that map
+//! places every value whose authored tree it can prove, including an alias
+//! (at its `*name` token, for the alias and everything below it) and a flow
+//! collection written across lines; a file whose layout it cannot prove is
+//! reported by pointer alone.
 //!
 //! [`DataError::ContractMismatch`]: super::DataError::ContractMismatch
 
@@ -16,7 +20,6 @@ use std::path::Path;
 use biscuit_file::{DataFormat, source_position};
 use serde_json::Value;
 use simplified_schema::PositionMap;
-use simplified_schema::simplified::SchemaValueKind;
 use simplified_schema::coercion::{PathSegment, json_pointer};
 
 use super::contract::RowMode;
@@ -56,10 +59,10 @@ pub(crate) struct SourceLocator<'a> {
 enum Format<'a> {
     /// A JSON Pointer locator over the text.
     Pointer(fn(&str, &str) -> Option<usize>),
-    /// YAML: node positions when the authored structure can be trusted
-    /// (`None` otherwise), and the parsed value in authored key order, which
-    /// orders the file even when it has no positions.
-    Yaml { positions: Option<PositionMap>, value: Option<Value> },
+    /// YAML: the shared position map (empty when the file did not load),
+    /// and the parsed value in authored key order, which orders the file
+    /// even when it has no positions.
+    Yaml { positions: PositionMap, value: Option<Value> },
     Table(&'a TabularSource),
     Unlocated,
 }
@@ -77,11 +80,8 @@ impl<'a> SourceLocator<'a> {
             (DataFormat::Yaml, _) => match load_yaml_document(text, Path::new("data.yaml")) {
                 // `byte_range` answers only from a projected tree, never from
                 // the top-level-keys fallback, whose columns are guesses.
-                Ok(loaded) => Format::Yaml {
-                    positions: (!has_multi_line_flow_collection(text)).then_some(loaded.positions),
-                    value: Some(loaded.json),
-                },
-                Err(_) => Format::Yaml { positions: None, value: None },
+                Ok(loaded) => Format::Yaml { positions: loaded.positions, value: Some(loaded.json) },
+                Err(_) => Format::Yaml { positions: PositionMap::new(), value: None },
             },
             _ => Format::Unlocated,
         };
@@ -114,30 +114,16 @@ impl<'a> SourceLocator<'a> {
         }
         let found = match &self.format {
             Format::Pointer(locate) => locate(self.text, &json_pointer(path)),
-            Format::Yaml { positions, .. } => positions.as_ref().and_then(|positions| {
+            Format::Yaml { positions, .. } => {
                 let segments: Vec<String> = path.iter().map(segment_text).collect();
                 positions.byte_range(&locating_problem(&segments)).map(|range| range.start)
-            }),
+            }
             Format::Table(table) => table_offset(table, path),
             Format::Unlocated => None,
         };
         self.offsets.insert(path.to_vec(), found);
         found
     }
-}
-
-/// Whether `text` writes a flow collection (`[…]`, `{…}`) across lines. The
-/// data contract reports such a YAML file's violations by pointer alone
-/// rather than trust positions inside it.
-fn has_multi_line_flow_collection(text: &str) -> bool {
-    let Some(root) = simplified_schema::simplified::locate_frontmatter_value(text, 0) else {
-        return false;
-    };
-    root.deepest_first().into_iter().any(|(_, node)| {
-        !matches!(node.kind, SchemaValueKind::Scalar)
-            && matches!(text.as_bytes().get(node.span.start), Some(b'[' | b'{'))
-            && text.get(node.span.clone()).is_some_and(|written| written.contains('\n'))
-    })
 }
 
 fn segment_text(segment: &PathSegment) -> String {
@@ -221,14 +207,18 @@ mod tests {
     }
 
     #[test]
-    fn only_a_flow_collection_across_lines_makes_yaml_pointer_only() {
-        let one_line = SourceLocator::new(DataFormat::Yaml, "items: [x, 1]
-more:
-  - y
-", None);
-        assert!(matches!(one_line.format, Format::Yaml { positions: Some(_), .. }));
-        let across = SourceLocator::new(DataFormat::Yaml, "items: [\n  x\n]\n", None);
-        assert!(matches!(across.format, Format::Yaml { positions: None, value: Some(_) }));
+    fn a_multi_line_flow_collection_keeps_yaml_positions() {
+        let mut locator = SourceLocator::new(DataFormat::Yaml, "items: [\n  x\n]\n", None);
+        assert_eq!(locator.place(&[key("items"), PathSegment::Index(0)], false).position, Some((2, 3)));
+    }
+
+    #[test]
+    fn an_unproven_yaml_layout_is_unpositioned_but_keeps_authored_order() {
+        let mut locator = SourceLocator::new(DataFormat::Yaml, "&k a: 1\nb: 2\n", None);
+        let first = locator.place(&[key("a")], false);
+        let second = locator.place(&[key("b")], false);
+        assert_eq!((first.position, second.position), (None, None));
+        assert_eq!((first.order, second.order), (vec![OrderStep::Placed(0)], vec![OrderStep::Placed(1)]));
     }
 
     #[test]
