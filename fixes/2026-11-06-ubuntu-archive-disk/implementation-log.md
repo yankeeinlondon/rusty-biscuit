@@ -170,19 +170,53 @@ decisions_for_review:
         as the plan's verification task says, instead of the root `just lint`,
         which lints every package area in the monorepo. Running the root recipe
         would cost far more time and check nothing this phase touched.
-message_to_agent: |-
-    Phase 3 is done: docs and skills now describe incremental publication,
-    the ledger, the owner measurement artifact, and the consumer build-status
-    check; a doc contract test pins that wording. All gates passed (log,
-    Phase 3). For Phase 4: docs/topics/ci-cd.md (subsection "Each archive is
-    uploaded, then released, before the next is built") and
-    .claude/skills/rust-devops/ci-cd.md (last bullet of "The owner job") say
-    hosted confirmation that a full-workspace Ubuntu owner fits its disk is
-    "not yet confirmed" / "still outstanding". If Phase 4 obtains a hosted
-    result, update both sentences to state it (verified or failed), without
-    naming this fix. If hosted evidence is unavailable, leave them. Nothing
-    from this work is merged, so a hosted run of the new code needs this
-    branch pushed. No BUILD_LINUX/WIN/WSL/MACOS rigs were configured.
+    - |-
+        Phase 4 classified hosted acceptance as "unverified" and completed the
+        phase instead of failing it. No hosted run has executed this fix: the
+        branch is not pushed and the nightly runs main, and this pipeline may
+        not push. The plan defines missing run access as "unverified", not as a
+        blocker, so the phase records it and ends. The latest main nightly
+        (old code) still ran out of disk in the Ubuntu owner; that is logged as
+        baseline only. Alternative: fail the phase until a hosted run exists,
+        which would stall the pipeline on a push only the author can make.
+        Nothing needs redoing either way; acceptance is read from the first
+        hosted run after the branch is pushed or merged.
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+    - scripts/ci/storage_sample.py
+    - scripts/ci/test_storage_sample.py
+    - scripts/ci/produce-owner.sh
+    - scripts/ci/affected_scope.py
+    - scripts/ci/test_affected_scope.py
+    - scripts/ci-build.rs
+    - scripts/ci-build-archive.rs
+    - scripts/ci-build-tests.rs
+    - scripts/ci-build-archive-tests.rs
+    - scripts/Cargo.toml
+    - .github/workflows/ci.yml
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+    - scripts/ci/artifacts/produce.cjs
+    - scripts/ci/artifacts/produce.test.cjs
+    - scripts/ci/artifacts/publish.cjs
+    - scripts/ci/artifacts/publish.test.cjs
+    - scripts/ci/build_status.py
+    - scripts/ci/test_build_status.py
+    - scripts/ci/runner_loss.py
+    - scripts/ci/test_runner_loss.py
+    - scripts/ci-rollup.rs
+    - scripts/ci-rollup-tests.rs
+    - .github/workflows/_package-ci.yml
+    - .github/workflows/_wsl-ci.yml
+documentation:
+    - docs/topics/ci-cd.md
+    - .github/ci/README.md
+    - .claude/skills/rust-devops/ci-cd.md
+    - .claude/skills/rust-testing/ci-execution.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-11-06-ubuntu-archive-disk (4 phases)
@@ -566,3 +600,97 @@ passed).
 | docs no longer say `blocked by build`; owner no longer "once without `--key`"; publisher suite not called unregistered | `the_ci_documentation_states_the_implemented_behavior` (RETIRED rows) |
 | docs state the ledger, record mode, owner measurement artifact, and both `not run:` forms | same test (REQUIRED rows) |
 | doc Markdown still parses for schema scanning | darkmatter `shipped_schema_corpus` (2 tests) |
+
+## Phase 4
+
+- Started and finished 2026-11-09, single agent, no subagents. The only work
+  was inspecting hosted runs; no code, workflow, or documentation changed.
+
+### Wave 5 — Hosted acceptance (outcome: **unverified**)
+
+#### What hosted evidence exists
+
+- Branch `feat/fuzz-infra-release` is 24 commits ahead of
+  `origin/feat/fuzz-infra-release`, and none of this fix's commits are on
+  `origin/main` (`git cat-file -e origin/main:scripts/ci/storage_sample.py`
+  fails; HEAD of `origin/main` is `a816f1447`). This session is not
+  authorized to push, and the nightly schedule runs `main`. So **no hosted
+  run has executed the enabled remedy** (incremental publication, the
+  consumer build-status check, or the storage sampler).
+- The only hosted runs of this branch are the 2026-10-30 pull-request `ci`
+  run (41095206484, 8 min, before this fix) and a 2026-11-08 `pr-health`
+  push. Neither contains a full-workspace Ubuntu owner of the new code.
+
+#### Baseline only (old code, not acceptance)
+
+The most recent nightly on `main` shows the original defect is still
+present without the remedy. It is recorded as baseline context and is **not**
+evidence for or against the remedy:
+
+- Run 42674352356, attempt 1, `schedule`, `main`, started
+  2026-11-09T18:28:35Z, concluded `failure` after 3 h 9 min.
+- Job `build (ubuntu-latest)` (id 129362554397) started 18:49:25Z and
+  ended 21:24:12Z (about 2 h 35 min). Every step through "Keep the
+  fresh-output guard report" succeeded; "Produce the archives" was still
+  `in_progress` and "Publish package builds and statuses" `pending` when the
+  runner died. The job annotation is the runner's own
+  `System.IO.IOException: No space left on device` writing its `_diag`
+  worker log, i.e. the disk was exhausted during production and nothing was
+  published.
+- The four earlier nightlies (42491863852, 42383053581, 42246114963,
+  42062626209) also concluded `failure`; they were not inspected further.
+- `build (windows-latest)` failed in the same run; it is outside this fix
+  and was not investigated.
+- Old code has no storage sampler, so this run has no free-byte or inode
+  minima, no required-versus-published key comparison, and no ledger.
+
+#### Acceptance classification
+
+| Requirement | State | Evidence / reason |
+| ----------- | ----- | ----------------- |
+| One full-workspace Ubuntu owner with the remedy publishes every planned record | **unverified** | no hosted run of the new code exists; branch not pushed |
+| …within 180 minutes | **unverified** | same |
+| …with positive observed free bytes and inodes at both locations (sampled minima, not instantaneous peaks) | **unverified** | same; the sampler has never run hosted |
+| Plan/run/attempt identity, cache state, duration, required vs published keys | **unverified** | no such run to read them from |
+| One planned WSL2 consumer verifies its archive and reaches test execution | **unverified** | WSL2 runs only on the nightly over `main`, which lacks the remedy; the last nightly's owner published nothing, so no WSL2 consumer had an archive |
+| Subsequent WSL2 test failures recorded separately | **unverified** | no consumer reached tests |
+
+Hosted acceptance is therefore **unverified**, not failed: no observation of
+the remedy exhausted space, missed a publication, or timed out. The storage
+objective is **not achieved** by this cycle's evidence. The investigation
+(Phase 1 local measurement) and the independent consumer-attribution work
+(Phase 2) are complete.
+
+What closes it: push this branch (or merge it) so a full-workspace Ubuntu
+owner runs the new code, e.g. the next nightly after merge or a
+`workflow_dispatch` of `ci.yml` on this branch. Then read, from that run: the
+`storage-*` samples and `compiler-work-owner-<producer>` artifact for the
+minimum free bytes/inodes of both locations, `publication-ledger.json` and
+the published `build-*` / status artifacts against the plan's required keys,
+the owner job's duration, and one WSL2 cell's build-status check, archive
+verification, and nextest start. Phase 1's measurement put live compiled
+output at about 81.5 GiB against 6.2 GiB of archives, so incremental
+publication alone may not fit if the hosted runner has less than about
+82 GiB free; that capacity decision remains open (see
+`decisions_for_review`).
+
+#### Documentation
+
+- `docs/topics/ci-cd.md` and `.claude/skills/rust-devops/ci-cd.md` were left
+  unchanged: they already say hosted confirmation is not yet confirmed /
+  still outstanding, which matches this result.
+
+#### Requirement → test mapping (Phase 4)
+
+Phase 4 adds no behavior and no tests; its single task is an evidence
+inspection, recorded above. No OS rigs: `BUILD_LINUX`, `BUILD_WIN`,
+`BUILD_WSL`, `BUILD_MACOS` are unset.
+
+### Gates (Phase 4)
+
+- Scope calculator after all Phase 4 edits (`git status --porcelain
+  --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`) over `implementation-log.md`, `plan.md`,
+  `spec.md`: `packages: []`, `change_class: documentation`. `just test` and
+  `just lint` were therefore skipped; Phase 3's gates covered the last code
+  change.

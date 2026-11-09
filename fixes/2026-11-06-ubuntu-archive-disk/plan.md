@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 4
 created: 2026-11-08
-phase: 4
+phase: 5
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 source_files_during_phase_1:
@@ -61,6 +61,42 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/rust-devops/ci-cd.md
 - .claude/skills/rust-testing/ci-execution.md
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+- scripts/ci/storage_sample.py
+- scripts/ci/test_storage_sample.py
+- scripts/ci/produce-owner.sh
+- scripts/ci/affected_scope.py
+- scripts/ci/test_affected_scope.py
+- scripts/ci-build.rs
+- scripts/ci-build-archive.rs
+- scripts/ci-build-tests.rs
+- scripts/ci-build-archive-tests.rs
+- scripts/Cargo.toml
+- .github/workflows/ci.yml
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+- scripts/ci/artifacts/produce.cjs
+- scripts/ci/artifacts/produce.test.cjs
+- scripts/ci/artifacts/publish.cjs
+- scripts/ci/artifacts/publish.test.cjs
+- scripts/ci/build_status.py
+- scripts/ci/test_build_status.py
+- scripts/ci/runner_loss.py
+- scripts/ci/test_runner_loss.py
+- scripts/ci-rollup.rs
+- scripts/ci-rollup-tests.rs
+- .github/workflows/_package-ci.yml
+- .github/workflows/_wsl-ci.yml
+documentation:
+- docs/topics/ci-cd.md
+- .github/ci/README.md
+- .claude/skills/rust-devops/ci-cd.md
+- .claude/skills/rust-testing/ci-execution.md
+completed_phase: 4
+implemented: true
 ---
 
 # Ubuntu archive storage implementation plan
@@ -154,7 +190,7 @@ The new build-status reader is the only new configuration/document reader. Reuse
 
 ### Wave 5
 
-- [ ] **Hosted acceptance**
+- [x] **Hosted acceptance**
   - Inspect one available full-workspace Ubuntu producer execution with the enabled remedy. Prefer an already-required run; this is acceptance of accumulated record storage, not a second diagnostic or a reason to rerun every test. Record plan/run/attempt identity, cache state, duration, required versus published keys, and actual minimum observed free bytes and inodes for both locations. Samples must not be described as instantaneous peaks.
   - Inspect one planned WSL2 consumer from that execution: record successful archive verification, test command start, and actual reports. Record ensuing test failures separately without changing their outcomes or fixing them here.
   - Classify each acceptance requirement as verified, failed, or unverified. Missing run access is unverified; exhausted space, missing required publication, or timeout is failed. Report the exact unresolved requirement and evidence without inventing a passing observation, scheduling repeated full-workspace attempts, or adding an intermediate human gate. An insufficient-capacity result completes the investigation and independent attribution work but leaves the storage objective explicitly unachieved.

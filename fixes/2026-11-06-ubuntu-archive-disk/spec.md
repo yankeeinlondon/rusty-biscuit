@@ -7,8 +7,10 @@ next_spec: 2026-11-06-windows-wsl-test-failures
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-08
-review_iterations: 0
-implemented: false
+review_iterations: 1
+completed: true
+implemented: true
+implemented_by: "claude/opus"
 $schema:
     status: |-
         enum(
