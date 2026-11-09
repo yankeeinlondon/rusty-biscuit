@@ -2,13 +2,14 @@
 kind: fix
 name: proven-push-planner-cell
 date: 2026-11-06
-status: draft-spec
+status: implemented
 next_spec: 2026-11-06-release-path-repair
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-07
-review_iterations: 0
-implemented: false
+review_iterations: 2
+implemented: true
+implemented_by: "claude/opus"
 $schema:
     status: |-
         enum(
@@ -29,6 +30,7 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
+completed: true
 ---
 
 # A proven merge must not plan a cell for an environment it removed
