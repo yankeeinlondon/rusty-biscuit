@@ -36,6 +36,22 @@ pub const SLOT_NOT_ALLOWED_IN_KIND_CODE: &str = "dm.schema.slot_not_allowed_in_k
 pub const SLOT_NOT_ALLOWED_IN_BASELINE_CODE: &str = "dm.schema.slot_not_allowed_in_baseline";
 /// The user's slot-read grant store could not be read.
 pub const SLOT_GRANT_STORE_INVALID_CODE: &str = "dm.schema.slot_grant_store_invalid";
+/// A template type's value is not a type definition: neither a string nor
+/// an array, or text the definition parser rejects.
+pub const SLOT_NOT_A_TYPE_CODE: &str = "dm.schema.slot_not_a_type";
+/// A template type's returned definition holds a `{{ … }}` slot of its own.
+pub const SLOT_NESTED_CODE: &str = "dm.schema.slot_nested";
+/// A type a template type's returned definition imports holds a slot.
+pub const SLOT_REACHABLE_CODE: &str = "dm.schema.slot_reachable";
+/// A template type's returned definition names a local type (`Name`,
+/// `Name@this`).
+pub const SLOT_LOCAL_REFERENCE_CODE: &str = "dm.schema.slot_local_reference";
+/// A template type's returned definition conflicts with the suffix written
+/// after its slot.
+pub const SLOT_SUFFIX_CONFLICT_CODE: &str = "dm.schema.slot_suffix_conflict";
+/// A template type's returned definition cannot stand at the slot's
+/// position once expanded.
+pub const SLOT_INVALID_EXPANSION_CODE: &str = "dm.schema.slot_invalid_expansion";
 
 /// Every code of the family, for registries and conformance tests.
 pub const SLOT_DIAGNOSTIC_CODES: &[&str] = &[
@@ -54,6 +70,12 @@ pub const SLOT_DIAGNOSTIC_CODES: &[&str] = &[
     SLOT_NOT_ALLOWED_IN_KIND_CODE,
     SLOT_NOT_ALLOWED_IN_BASELINE_CODE,
     SLOT_GRANT_STORE_INVALID_CODE,
+    SLOT_NOT_A_TYPE_CODE,
+    SLOT_NESTED_CODE,
+    SLOT_REACHABLE_CODE,
+    SLOT_LOCAL_REFERENCE_CODE,
+    SLOT_SUFFIX_CONFLICT_CODE,
+    SLOT_INVALID_EXPANSION_CODE,
 ];
 
 /// The code of a slot whose value the library could not use.
@@ -63,6 +85,13 @@ pub(crate) fn slot_result_code(kind: &simplified_schema::SlotResultKind) -> &'st
     match kind {
         SlotResultKind::Empty => SLOT_EMPTY_CODE,
         SlotResultKind::PatternRejected(_) => SLOT_PATTERN_REJECTED_CODE,
+        SlotResultKind::NotATypeDefinition(_) => SLOT_NOT_A_TYPE_CODE,
+        SlotResultKind::NestedSlot => SLOT_NESTED_CODE,
+        SlotResultKind::ReachableSlot => SLOT_REACHABLE_CODE,
+        SlotResultKind::LocalReference(_) => SLOT_LOCAL_REFERENCE_CODE,
+        SlotResultKind::SuffixConflict(_) => SLOT_SUFFIX_CONFLICT_CODE,
+        SlotResultKind::InvalidExpansion(_) => SLOT_INVALID_EXPANSION_CODE,
+        SlotResultKind::WrongShape { .. } | SlotResultKind::Inadmissible(_) => SLOT_WRONG_SHAPE_CODE,
         _ => SLOT_WRONG_SHAPE_CODE,
     }
 }
@@ -142,7 +171,34 @@ mod tests {
             assert!(segments[2].starts_with("slot_"), "{code}");
             assert!(seen.insert(code), "{code} repeats");
         }
-        assert_eq!(SLOT_DIAGNOSTIC_CODES.len(), 15);
+        assert_eq!(SLOT_DIAGNOSTIC_CODES.len(), 21);
+    }
+
+    /// Each template-type result kind has its own code, so a script can tell
+    /// the failures apart; the constraint kinds keep theirs.
+    #[test]
+    fn each_result_kind_maps_to_its_code() {
+        use simplified_schema::SlotResultKind;
+        let not_a_type = SlotResultKind::NotATypeDefinition(std::sync::Arc::new(simplified_schema::SchemaError::Grammar {
+            property: "status".into(),
+            message: "x".into(),
+            span: 0..0,
+            related: Vec::new(),
+        }));
+        for (kind, code) in [
+            (SlotResultKind::Empty, SLOT_EMPTY_CODE),
+            (SlotResultKind::WrongShape { expected: "array", found: "string".into() }, SLOT_WRONG_SHAPE_CODE),
+            (SlotResultKind::Inadmissible("x".into()), SLOT_WRONG_SHAPE_CODE),
+            (SlotResultKind::PatternRejected("x".into()), SLOT_PATTERN_REJECTED_CODE),
+            (not_a_type, SLOT_NOT_A_TYPE_CODE),
+            (SlotResultKind::NestedSlot, SLOT_NESTED_CODE),
+            (SlotResultKind::ReachableSlot, SLOT_REACHABLE_CODE),
+            (SlotResultKind::LocalReference("x".into()), SLOT_LOCAL_REFERENCE_CODE),
+            (SlotResultKind::SuffixConflict("x".into()), SLOT_SUFFIX_CONFLICT_CODE),
+            (SlotResultKind::InvalidExpansion("x".into()), SLOT_INVALID_EXPANSION_CODE),
+        ] {
+            assert_eq!(slot_result_code(&kind), code, "{kind:?}");
+        }
     }
 
     /// Only a prohibition carries a slot code: a template met where slots

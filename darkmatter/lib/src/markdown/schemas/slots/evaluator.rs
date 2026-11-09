@@ -158,6 +158,16 @@ impl SlotEvaluator {
         self
     }
 
+    /// The command's data runtime the slots read through.
+    pub(crate) fn data(&self) -> &DataRuntime {
+        &self.data
+    }
+
+    /// The gates slots' reads are asked of.
+    pub(crate) fn gates(&self) -> Arc<dyn SlotGates> {
+        Arc::clone(&self.gates)
+    }
+
     /// Gives each slot `limits` instead of the default allowances.
     #[must_use]
     pub(crate) fn with_limits(mut self, limits: IterationLimits) -> Self {

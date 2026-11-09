@@ -807,11 +807,27 @@ pub fn template_slot_records(
                 .iter()
                 .map(|slot| {
                     let text_of = |slot: &simplified_schema::simplified::Slot| template_slot_text(error, slot);
-                    (Some(slot.clone()), slot_record(slot, &slot.span, SLOT_PENDING_CODE, error.to_string(), &text_of))
+                    let message = pending_slot_message(error, unresolved, slot);
+                    (Some(slot.clone()), slot_record(slot, &slot.span, SLOT_PENDING_CODE, message, &text_of))
                 })
                 .collect(),
         ),
         _ => None,
+    }
+}
+
+/// The pending report of `slot`, one of `unresolved`'s: `error`'s message,
+/// naming the property that holds the slot and whether its whole type is
+/// pending (a template type) or one constraint is (a template constraint),
+/// when the kept template shows it.
+fn pending_slot_message(
+    error: &simplified_schema::SchemaError,
+    unresolved: &simplified_schema::UnresolvedSlots,
+    slot: &simplified_schema::simplified::Slot,
+) -> String {
+    match crate::markdown::schemas::slots::pending_report::pending_context(unresolved, slot) {
+        Some(context) => format!("{context}: {error}"),
+        None => error.to_string(),
     }
 }
 

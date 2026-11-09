@@ -18,6 +18,7 @@
 //!   read, when a slot first needs them.
 //! - [`session`] resolves a command's templates, pinning one snapshot per
 //!   template and sharing results across commands through `cache`.
+//! - [`pending_report`] names the property an unresolved slot belongs to.
 //! - [`codes`] holds the `dm.schema.slot_*` codes.
 
 pub(crate) mod admission;
@@ -28,6 +29,7 @@ pub(crate) mod evaluator;
 pub mod grants;
 pub mod host;
 pub(crate) mod observations;
+pub(crate) mod pending_report;
 pub mod session;
 
 pub use codes::SLOT_DIAGNOSTIC_CODES;

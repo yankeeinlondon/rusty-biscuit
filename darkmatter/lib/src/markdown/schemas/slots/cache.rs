@@ -260,16 +260,25 @@ pub(crate) fn clear() {
 /// progress on this thread (a cycle), or was canceled.
 pub(crate) fn caches_failure(error: &SlotResolutionError) -> bool {
     match error {
-        SlotResolutionError::Failed(failed) => failed.iter().all(|(_, failure)| {
-            !matches!(
-                failure.code,
-                Some(super::codes::SLOT_APPROVAL_REQUIRED_CODE)
-                    | Some(super::codes::SLOT_DENIED_CODE)
-                    | Some(super::codes::SLOT_GRANT_STORE_INVALID_CODE)
-                    | Some(super::codes::SLOT_CYCLE_CODE)
-            )
-        }),
+        SlotResolutionError::Failed(failed) => failed.iter().all(|(_, failure)| caches_code(failure.code)),
+        // A template type's refused read carries the gate's code; a slot's
+        // own admission refusal (syntax, a forbidden binding) is cached.
+        SlotResolutionError::Refused(refused) => refused.iter().all(|(_, refusal)| caches_code(refusal.code)),
         SlotResolutionError::Canceled => false,
         _ => true,
     }
+}
+
+/// Whether a failure with `code` may be kept: not one that depends on the
+/// session's grants, its grant store, or what else it is resolving.
+fn caches_code(code: Option<&str>) -> bool {
+    !matches!(
+        code,
+        Some(
+            super::codes::SLOT_APPROVAL_REQUIRED_CODE
+                | super::codes::SLOT_DENIED_CODE
+                | super::codes::SLOT_GRANT_STORE_INVALID_CODE
+                | super::codes::SLOT_CYCLE_CODE
+        )
+    )
 }

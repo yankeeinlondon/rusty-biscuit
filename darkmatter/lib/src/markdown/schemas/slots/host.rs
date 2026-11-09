@@ -6,6 +6,7 @@
 //! `DataError`, its `dm.data.*` code, and its data location), and its code is
 //! [`failure_code`]'s.
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -13,7 +14,7 @@ use serde_json::Value;
 use simplified_schema::expression::parse_spanned;
 use simplified_schema::simplified::Slot;
 use simplified_schema::slots::{
-    SchemaRead, SchemaReadOutcome, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, TemplateReads,
+    SchemaRead, SchemaReadKind, SchemaReadOutcome, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, TemplateReads,
 };
 use simplified_schema::span::SourceSpan;
 
@@ -27,7 +28,9 @@ use super::cache::ContextCheck;
 use super::dependencies;
 use super::evaluator::{ContextDigest, SlotEvaluation, SlotEvaluator, context_digest_now, context_inputs, slot_context};
 use crate::markdown::compose::expression::ExpressionError;
-use crate::markdown::compose::expression::read_gate::GateRefusal;
+use crate::markdown::compose::expression::data::DataSourceIdentity;
+use crate::markdown::compose::expression::functions::ReadKind;
+use crate::markdown::compose::expression::read_gate::{GateRefusal, ReadLocation, ReadTarget};
 
 /// Resolves a template's slots on Darkmatter's expression engine.
 #[derive(Debug)]
@@ -35,12 +38,24 @@ pub struct DarkmatterSlotHost {
     evaluator: SlotEvaluator,
     evaluations: Mutex<Vec<(Slot, SlotEvaluation)>>,
     cancel: Option<Arc<AtomicBool>>,
+    /// Where a slot with no defining file was written (the request
+    /// context's `base_dir()`), for its returned definition's reads.
+    request_base: Option<PathBuf>,
 }
 
 impl DarkmatterSlotHost {
     /// A host evaluating with `evaluator`.
     pub(crate) fn new(evaluator: SlotEvaluator) -> Self {
-        Self { evaluator, evaluations: Mutex::new(Vec::new()), cancel: None }
+        Self { evaluator, evaluations: Mutex::new(Vec::new()), cancel: None, request_base: None }
+    }
+
+    /// Judges the reads of a returned definition whose slot has no defining
+    /// file (an inline `$schema`) as written at `base`, the base folder of
+    /// the request context the resolution runs in, as [`SlotHost::resolve`]
+    /// does for the slot's own reads.
+    pub(crate) fn with_request_base(mut self, base: &Path) -> Self {
+        self.request_base = Some(base.to_path_buf());
+        self
     }
 
     /// Reports the resolution canceled once `cancel` is set.
@@ -90,7 +105,11 @@ impl SlotHost for DarkmatterSlotHost {
     }
 
     fn template_reads(&self) -> std::rc::Rc<dyn TemplateReads> {
-        std::rc::Rc::new(UngrantedTemplateReads)
+        std::rc::Rc::new(DarkmatterTemplateReads {
+            gates: self.evaluator.gates(),
+            data: self.evaluator.data().clone(),
+            request_base: self.request_base.clone(),
+        })
     }
 
     fn resolve(&self, request: &SlotRequest<'_>) -> Result<Value, SlotFailure> {
@@ -126,21 +145,70 @@ impl SlotHost for DarkmatterSlotHost {
     }
 }
 
-/// Refuses every read a template type's returned definition asks for: no
-/// grant reaches those reads yet, so a returned definition that imports or
-/// references a file needs approval, and one that names none resolves.
-struct UngrantedTemplateReads;
+/// Judges and records the reads a template type's returned definition
+/// causes (its imports, their transitive imports, examples, and the
+/// candidates probed to select them) exactly as the slot's own reads are:
+///
+/// - `admit` asks the gate of the slot's defining file (or, for an inline
+///   slot, the request's base folder) before anything is probed or read, so
+///   a deny grant refuses with `dm.schema.slot_denied`, an allow, persisted,
+///   or automatic grant allows, the approval handler is asked where the
+///   session has one, and anything else needs approval
+///   (`dm.schema.slot_approval_required`). An import named by returned data
+///   is a computed target: pre-flight never sees it. The session's gates
+///   record each allowed read with its defining file, so a cached result is
+///   served only where the same reads are granted;
+/// - `observe` records every read and probe, found or missing, succeeded or
+///   failed, in the command's data runtime: it joins the read set and the
+///   resolution's observations, which become the cache's input checks and
+///   the editor's watches.
+struct DarkmatterTemplateReads {
+    gates: Arc<dyn super::evaluator::SlotGates>,
+    data: crate::markdown::compose::DataRuntime,
+    request_base: Option<PathBuf>,
+}
 
-impl TemplateReads for UngrantedTemplateReads {
-    fn admit(&self, _: &Slot, read: &SchemaRead<'_>) -> Result<(), SlotAdmissionError> {
-        Err(SlotAdmissionError {
-            code: Some(SLOT_APPROVAL_REQUIRED_CODE),
-            message: format!("reading `{}` for a template type needs approval", read.path.display()),
-            span: None,
+/// The function a returned definition's reads are attributed to in a
+/// prompt, a grant request, and a refusal.
+const TEMPLATE_READ_FUNCTION: &str = "schema import";
+
+impl TemplateReads for DarkmatterTemplateReads {
+    fn admit(&self, slot: &Slot, read: &SchemaRead<'_>) -> Result<(), SlotAdmissionError> {
+        let refused = |code, message: String| SlotAdmissionError { code: Some(code), message, span: None };
+        let Some(defining) = slot.origin.as_deref().or(self.request_base.as_deref()) else {
+            return Err(refused(
+                SLOT_APPROVAL_REQUIRED_CODE,
+                format!("reading `{}` for a template type needs approval", read.path.display()),
+            ));
+        };
+        let target = ReadTarget {
+            function: TEMPLATE_READ_FUNCTION.to_string(),
+            kind: match read.kind {
+                SchemaReadKind::Content => ReadKind::Content,
+                SchemaReadKind::Probe => ReadKind::Probe,
+            },
+            location: ReadLocation::Local(read.path.to_path_buf()),
+            observed_hash: None,
+        };
+        self.gates.gate_for(defining).check(&target).map_err(|refusal| {
+            let code = match refusal {
+                GateRefusal::Denied => SLOT_DENIED_CODE,
+                GateRefusal::ApprovalRequired { .. } => SLOT_APPROVAL_REQUIRED_CODE,
+            };
+            let verb = if read.kind == SchemaReadKind::Content { "read" } else { "probe" };
+            refused(code, format!("the template type's definition may not {verb} `{}`: {refusal}", target.location))
         })
     }
 
-    fn observe(&self, _: &Slot, _: &SchemaReadOutcome<'_>) {}
+    fn observe(&self, _: &Slot, outcome: &SchemaReadOutcome<'_>) {
+        match outcome.kind {
+            SchemaReadKind::Content => {
+                let hash = outcome.bytes.map(biscuit_hash::blake3_hash_bytes);
+                self.data.observe_read(&DataSourceIdentity::local(outcome.path), hash);
+            }
+            SchemaReadKind::Probe => self.data.observe_existence(outcome.path, outcome.exists),
+        }
+    }
 }
 
 /// The code a failed slot reports: a refused read's slot code, a

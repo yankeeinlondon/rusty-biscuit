@@ -1,11 +1,13 @@
 //! The library surfaces a host uses to approve, defer, and report schema
 //! slot reads: compose pre-flight's slot approvals, a session's batched ask,
 //! the reference-check session, `grants_needed` on approval records, the
-//! bare-`SchemaError` projection, and `md clean`'s schema configuration.
+//! bare-`SchemaError` projection, and `md clean`'s schema configuration;
+//! then a template type through the same paths.
 //!
 //! Every case builds a real Git repository from the sandboxing-shaped
-//! fixture, anchors its request or context there with a temp home (so the
-//! user's real grant store is never read), and stubs only the approval
+//! fixture (or, to have no automatic grant, a temp folder outside any
+//! repository), anchors its request or context there with a temp home (so
+//! the user's real grant store is never read), and stubs only the approval
 //! handler.
 
 use std::collections::HashMap;
@@ -454,5 +456,275 @@ mod clean_schema_config {
         assert!(matches!(second, Ok(Some(_))), "{:?}", second.err());
 
         assert_eq!(handler.calls(), 1);
+    }
+}
+
+/// A template type (a slot supplying a property's whole type definition)
+/// follows the same command paths a template constraint does: composition,
+/// `md clean`, reference checks, and the pending report.
+mod template_types {
+    use darkmatter::markdown::compose::report_diagnostics::template_slot_records;
+    use serde_json::Value;
+
+    use super::*;
+
+    const NOT_A_TYPE: &str = "dm.schema.slot_not_a_type";
+    const PENDING: &str = "dm.schema.slot_pending";
+
+    /// A canonical temp folder outside any repository, so no read is
+    /// granted automatically.
+    struct Folder {
+        _temp: tempfile::TempDir,
+        root: PathBuf,
+    }
+
+    impl Folder {
+        fn new() -> Self {
+            let temp = tempfile::tempdir().expect("temp dir");
+            let root = biscuit_file::canonicalize_simplified(temp.path()).expect("canonical temp dir");
+            Self { _temp: temp, root }
+        }
+
+        /// Writes `doc.md` with `frontmatter` and returns its path.
+        fn document(&self, frontmatter: &str) -> PathBuf {
+            let path = self.root.join("doc.md");
+            write(&path, &format!("---\n{frontmatter}---\n\nBody.\n"));
+            path
+        }
+
+        fn context(&self) -> FileResolutionContext {
+            FileResolutionContext::new(&self.root).with_env(HashMap::new())
+        }
+    }
+
+    fn compose_in(document: &Path, home: &Path) -> Result<(Markdown, ComposeReport), Box<ComposeFailure>> {
+        compose(document, &request(document, home))
+    }
+
+    /// The composed value of `key`; `None` when composition left it absent.
+    fn composed_value(document: &Path, key: &str) -> Option<Value> {
+        let home = empty_home();
+        let (composed, _) =
+            compose_in(document, home.path()).unwrap_or_else(|failure| panic!("composes: {}", failure.error));
+        composed.frontmatter().as_map().get(key).cloned()
+    }
+
+    fn failure_codes(failure: &ComposeFailure) -> Vec<String> {
+        error_diagnostics(&failure.error).into_iter().map(|record| record.code).collect()
+    }
+
+    mod composition {
+        use super::*;
+
+        /// Composition materializes an absent optional key as `null` only
+        /// when it has no default, so the returned default must be known
+        /// before that decision.
+        #[test]
+        fn an_inline_template_type_default_is_known_before_the_default_decision() {
+            let folder = Folder::new();
+            let defaulted = folder.document("$schema:\n    count: \"{{ 'number(default(3))' }}\"\n");
+            assert_eq!(composed_value(&defaulted, "count"), None);
+
+            let plain = folder.document("$schema:\n    count: \"{{ 'number' }}\"\n");
+            assert_eq!(composed_value(&plain, "count"), Some(Value::Null));
+        }
+
+        #[test]
+        fn a_referenced_schema_file_template_type_coerces_the_value() {
+            let folder = Folder::new();
+            write(&folder.root.join("schema.yaml"), "kind: schema\n$schema:\n    count: \"{{ 'number' }}\"\n");
+            let document = folder.document("$schema: ./schema.yaml\ncount: \"4\"\n");
+
+            assert_eq!(composed_value(&document, "count"), Some(json!(4)));
+        }
+
+        #[test]
+        fn a_required_suffix_makes_the_missing_key_a_validation_failure() {
+            let folder = Folder::new();
+            let document = folder.document("$schema:\n    title: \"{{ 'string' }}(required)\"\n");
+            let home = empty_home();
+
+            let failure = compose_in(&document, home.path()).expect_err("title is required");
+
+            let codes = failure_codes(&failure);
+            assert!(!codes.iter().any(|code| code.starts_with("dm.schema.slot_")), "{codes:?}");
+            let messages: String =
+                error_diagnostics(&failure.error).into_iter().map(|record| record.message).collect();
+            assert!(messages.contains("title"), "{messages}");
+        }
+
+        #[test]
+        fn a_required_suffix_over_a_null_or_unknown_definition_stays_optional() {
+            for definition in ["null", "unknown"] {
+                let folder = Folder::new();
+                let document = folder.document(&format!("$schema:\n    note: \"{{{{ '{definition}' }}}}(required)\"\n"));
+                let home = empty_home();
+
+                let composed = compose_in(&document, home.path());
+
+                assert!(composed.is_ok(), "{definition}: {}", composed.err().map(|f| f.error.to_string()).unwrap_or_default());
+            }
+        }
+
+        #[test]
+        fn a_refused_read_fails_the_composition_with_approval_required() {
+            let folder = Folder::new();
+            write(&folder.root.join("status-type.yaml"), "- enum(draft, published)\n");
+            let document =
+                folder.document("$schema:\n    status: \"{{ load_data('./status-type.yaml', 'string[]') }}\"\nstatus: draft\n");
+            let home = empty_home();
+
+            let failure = compose_in(&document, home.path()).expect_err("no grant covers the read");
+
+            assert_eq!(failure_codes(&failure), vec![APPROVAL_REQUIRED.to_string()]);
+        }
+
+        #[test]
+        fn a_malformed_returned_definition_fails_the_composition_as_not_a_type() {
+            let folder = Folder::new();
+            let document = folder.document("$schema:\n    status: \"{{ 123 }}\"\nstatus: draft\n");
+            let home = empty_home();
+
+            let failure = compose_in(&document, home.path()).expect_err("123 is not a type definition");
+
+            assert_eq!(failure_codes(&failure), vec![NOT_A_TYPE.to_string()]);
+        }
+    }
+
+    mod clean {
+        use super::*;
+
+        fn codes(error: &SchemaError, document: &Path) -> Vec<String> {
+            template_diagnostics(error, document)
+                .expect("a template failure")
+                .into_iter()
+                .map(|record| record.code)
+                .collect()
+        }
+
+        fn analyze(folder: &Folder, document: &Path) -> Result<bool, SchemaError> {
+            let context = folder.context();
+            let clean = CleanSchemaConfig::new(context.clone())
+                .with_slot_session(Arc::new(session(&context)))
+                .resolve(Some(document))
+                .expect("clean context");
+            let yaml = std::fs::read_to_string(document).expect("document");
+            let yaml = yaml.split("---\n").nth(1).expect("frontmatter").to_string();
+            clean.analyze(&markdown(document), &yaml).map(|analysis| analysis.is_clean())
+        }
+
+        #[test]
+        fn a_resolved_template_type_is_the_type_clean_checks_against() {
+            let folder = Folder::new();
+            let matching = folder.document("$schema:\n    status: \"{{ 'enum(draft, published)' }}\"\nstatus: draft\n");
+            assert!(analyze(&folder, &matching).expect("resolves"));
+
+            let outside = folder.document("$schema:\n    status: \"{{ 'enum(draft, published)' }}\"\nstatus: bogus\n");
+            assert!(!analyze(&folder, &outside).expect("resolves"), "bogus is outside the returned enum");
+        }
+
+        #[test]
+        fn a_failed_template_type_is_never_reported_clean() {
+            let folder = Folder::new();
+            let malformed = folder.document("$schema:\n    status: \"{{ 123 }}\"\nstatus: draft\n");
+            let error = analyze(&folder, &malformed).expect_err("123 is not a type definition");
+            assert_eq!(codes(&error, &malformed), vec![NOT_A_TYPE.to_string()]);
+
+            write(&folder.root.join("status-type.yaml"), "- enum(draft, published)\n");
+            let refused =
+                folder.document("$schema:\n    status: \"{{ load_data('./status-type.yaml', 'string[]') }}\"\nstatus: draft\n");
+            let error = analyze(&folder, &refused).expect_err("no grant covers the read");
+            assert_eq!(codes(&error, &refused), vec![APPROVAL_REQUIRED.to_string()]);
+        }
+    }
+
+    mod reference_check {
+        use super::*;
+
+        const FRONTMATTER: &str = "$schema:\n    status: \"{{ load_data('./status-type.yaml', 'string[]') }}\"\nstatus: bogus\n";
+
+        fn reference_check_schemas(context: FileResolutionContext) -> DarkmatterSchemas {
+            let session = session(&context).with_mode(SessionMode::ReferenceCheck);
+            DarkmatterSchemas::new(context).with_slot_session(Arc::new(session))
+        }
+
+        fn validate(document: &Path, request: &ComposeRequest) -> bool {
+            Markdown::try_from(document)
+                .expect("document")
+                .validate_references(ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(request)))
+                .is_ok()
+        }
+
+        #[test]
+        fn an_ungranted_template_type_stays_deferred() {
+            let folder = Folder::new();
+            write(&folder.root.join("status-type.yaml"), "- enum(draft, published)\n");
+            let document = folder.document(FRONTMATTER);
+
+            let effective = reference_check_schemas(folder.context()).effective_for(&markdown(&document));
+            assert!(matches!(effective, Err(SchemaError::UnresolvedSlots(_))), "{:?}", effective.map(|e| e.is_some()));
+
+            let home = empty_home();
+            let request = request(&document, home.path());
+            let session = Arc::new(SlotSession::for_request(&request).with_mode(SessionMode::ReferenceCheck));
+            let checked = request.clone().map_options(|options| options.with_slot_session(session));
+            assert!(validate(&document, &checked), "a deferred template type is not a failure");
+            assert!(!validate(&document, &request), "without the session the same check stops at the read");
+        }
+
+        #[test]
+        fn a_granted_template_type_resolves_and_the_returned_type_validates() {
+            let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+            let repo = SlotRepo::build(&source, RepoState::Clean);
+            let folder = folder_of(&repo.path(DOCUMENT_FILE));
+            write(&folder.join("status-type.yaml"), "- enum(draft, published)\n");
+            let document = folder.join("status.md");
+            write(&document, &format!("---\n{FRONTMATTER}---\n\nBody.\n"));
+            git(repo.root(), &["add", "-A"]);
+            git(repo.root(), &["commit", "-q", "-m", "status type"]);
+            let home = empty_home();
+
+            let effective = reference_check_schemas(context(&repo, home.path()))
+                .effective_for(&markdown(&document))
+                .expect("a clean committed read is granted")
+                .expect("a schema applies");
+
+            assert!(!effective.validate(&json!({ "status": "bogus" })).valid);
+            assert!(effective.validate(&json!({ "status": "draft" })).valid);
+        }
+    }
+
+    mod pending_report {
+        use super::*;
+
+        #[test]
+        fn each_pending_record_names_its_property_and_slot_role() {
+            let folder = Folder::new();
+            let document = folder.document(
+                "$schema:\n    status: \"{{ 'enum(draft, published)' }}\"\n    os: \"enum({{ ['macOS', 'Linux'] }})\"\n",
+            );
+            let context = folder.context();
+            let passive = session(&context).with_mode(SessionMode::Passive);
+            let error = DarkmatterSchemas::new(context)
+                .with_slot_session(Arc::new(passive))
+                .effective_for(&markdown(&document))
+                .err()
+                .expect("a passive session leaves the template unresolved");
+            assert!(matches!(error, SchemaError::UnresolvedSlots(_)), "{error:?}");
+
+            let records = template_slot_records(&error).expect("a template failure");
+
+            let messages: Vec<&str> = records.iter().map(|(_, record)| record.message.as_str()).collect();
+            assert_eq!(records.len(), 2, "{messages:?}");
+            assert!(records.iter().all(|(_, record)| record.code == PENDING), "{records:?}");
+            assert!(
+                messages.iter().any(|message| message.starts_with("property `status` has a template type, so its type is pending: ")),
+                "{messages:?}"
+            );
+            assert!(
+                messages.iter().any(|message| message.starts_with("property `os` has a template constraint: ")),
+                "{messages:?}"
+            );
+        }
     }
 }

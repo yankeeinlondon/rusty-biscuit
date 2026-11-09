@@ -468,7 +468,8 @@ impl SlotSession {
             Err(error) => return Err(Arc::new(store_failure(pending.slots(), &error))),
         };
         let host = DarkmatterSlotHost::new(self.evaluator(&grants, Arc::new(RecordingGates(RunGates(Arc::clone(&grants))))))
-            .with_cancel(self.cancel.clone());
+            .with_cancel(self.cancel.clone())
+            .with_request_base(context.base_dir());
         // Everything the evaluations consumed is collected as they run, so
         // a later union round and a nested contract's slots count too.
         let ((result, consumed), observed) = {
@@ -600,13 +601,18 @@ fn exhausted_work(error: &SlotResolutionError) -> bool {
 
 /// Whether `error` failed only because a read was not granted (or denied),
 /// so a session that never asks leaves its template unresolved.
+///
+/// A template type's returned definition whose read was refused arrives as
+/// [`SlotResolutionError::Refused`] with the gate's code, and counts too.
 fn needs_grant(error: &SlotResolutionError) -> bool {
+    let grant_code =
+        |code: Option<&str>| matches!(code, Some(super::codes::SLOT_APPROVAL_REQUIRED_CODE | super::codes::SLOT_DENIED_CODE));
     match error {
         SlotResolutionError::Failed(failed) => {
-            !failed.is_empty()
-                && failed.iter().all(|(_, failure)| {
-                    matches!(failure.code, Some(super::codes::SLOT_APPROVAL_REQUIRED_CODE | super::codes::SLOT_DENIED_CODE))
-                })
+            !failed.is_empty() && failed.iter().all(|(_, failure)| grant_code(failure.code))
+        }
+        SlotResolutionError::Refused(refused) => {
+            !refused.is_empty() && refused.iter().all(|(_, refusal)| grant_code(refusal.code))
         }
         _ => false,
     }
