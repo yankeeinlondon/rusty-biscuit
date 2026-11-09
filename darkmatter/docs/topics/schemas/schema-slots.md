@@ -174,7 +174,8 @@ Every expression function declares what it may do in a slot:
 | rejected | `as_markdown`, `pr`, `pr_list`, `cicd`, `cicd_list`, `ping`, `ping_under`, `has_alias`, `has_builtin_function`, `has_user_function`, `can_execute` | refused (`dm.schema.slot_forbidden_function`) |
 
 A host function registered by an embedding program is pure: its handler
-sees only its arguments.
+sees only its arguments. A `try(expr, fallback)` call takes the class of its
+two arguments together.
 
 ## Where a slot evaluates
 
@@ -240,7 +241,8 @@ Every read a slot makes is checked before it happens:
 
 Everything a function observed (a probed path, a listing, a contract import)
 is checked once more before the function's result reaches the slot. A
-refused read cannot be turned into a value by `try_frontmatter` or `||`.
+refused read cannot be turned into a value by `try_frontmatter`, `||`, or
+[`try`](#an-optional-data-file).
 
 Slots belong to the slot resolver alone. Composing a document never
 evaluates the `{{ … }}` inside its inline `$schema` as an ordinary
@@ -381,6 +383,41 @@ library caller does the same with `SlotSession::with_run_grants`.
 `md schema validate` and `md clean` do not run the compose pre-flight; they
 ask about each document's known reads in one batch just before its schema
 resolves (`DarkmatterSchemas::approve_slot_reads`), with the same prompt.
+
+### An optional data file
+
+A slot can make its data file optional with
+[`try(expr, fallback)`](../../functions/try.md), which returns `fallback` when
+`expr` fails to read its data (see
+[Recovering from read failures](../darkmatter-expressions.md#recovering-from-read-failures)).
+Here `extra.yaml` adds choices when it exists:
+
+```yaml
+$schema:
+    os: enum(macOS, {{ try(load_data("./extra.yaml", "string[]"), []) }})
+```
+
+`try` changes what a slot recovers from, never what it may read:
+
+- **A missing file in the repository recovers without a grant**, because the
+  [automatic grant](#the-automatic-grant) covers it. A missing file outside
+  the repository is still a read that needs a grant, so without one the slot
+  fails with `dm.schema.slot_approval_required`, not the fallback.
+- **Refusals are never recovered.** An approval or deny refusal, and a
+  forbidden binding or function in either argument, fail the slot as they
+  would without `try`. A forbidden fallback is refused before anything is
+  evaluated.
+- **Only the selected argument's reads are recorded.** When `expr` succeeds,
+  the fallback's reads are not in the read set; pre-flight still asks about
+  the known reads of both.
+- **An empty fallback adds no candidates.** In an `enum(...)` or
+  `suggest(...)` list, a fallback `[]` contributes nothing, and the final list
+  must still not be empty: above, a missing `extra.yaml` leaves `macOS`, but
+  `enum({{ try(load_data("./extra.yaml", "string[]"), []) }})` alone fails
+  with `dm.schema.slot_empty`.
+
+Once the file is created and committed, the next command reads it rather
+than reusing the recovered result.
 
 ## Resolving in a command
 

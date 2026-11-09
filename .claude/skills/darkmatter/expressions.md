@@ -125,7 +125,8 @@ parameter only through an explicit `| null`. `and`/`or`/`try` are lazy:
 the precheck visits every argument, the runtime binds only the ones it
 evaluates. Each lazy name maps explicitly to a `functions::LazyKind`
 (`All`, `Any`, `Recover`) with no default arm, so a new lazy binding must add
-its own kind. `and`/`or` bind through `LazyCall`; `try` (`Recover`) is
+its own kind (`functions::lazy_function` maps `try` to `Recover`, the third
+lazy kind). `and`/`or` bind through `LazyCall`; `try` (`Recover`) is
 `expression/mod.rs::evaluate_recovery` and, for lifecycle template operands,
 `lifecycle/executor.rs::call_recovery`: it binds only the selected operand
 (`bind_callback_value` at its index, then `check_lazy_return`), and only
@@ -459,12 +460,24 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   `unsupported_format`, `invalid_options`, `ContractImport`, `NestedData`,
   `SlotReadRefused`, tree escapes and missing anchors (also labeled
   `NotFound`), and `Provider`. The match is exhaustive (no `_` arm), so a new
-  variant must be classified on purpose; it is independent of
-  `is_authoring_fatal`. Never recover by function name or message.
+  variant must be classified on purpose, and it defaults to `false` unless it
+  is a typed missing-file or transport failure of the data source; it is
+  independent of `is_authoring_fatal`. `Callback { source }` delegates to its
+  cause. Never recover by function name or message, and never by matching the
+  generic `Other` variant (always `false`): give a recoverable failure its own
+  typed variant. Callers: `expression/mod.rs::evaluate_recovery` (every
+  composition surface) and `lifecycle/executor.rs::call_recovery` (lifecycle
+  operands, `md` and Claudine); pinned by the variant table
+  `every_variant_is_classified_and_callbacks_delegate` in `error.rs` and
+  `data/provenance_tests.rs`. Behavior:
+  [Recovering from read failures](../../../darkmatter/docs/topics/darkmatter-expressions.md#recovering-from-read-failures).
 - **Call order** (`load.rs`): a `null` file returns `null` before anything
   else (options included); read the options (`options.rs::DataOptions`,
   aliases `yml`/`ndjson` normalized there); prepare the contract; resolve the
-  file, run the slot gate, record it in the read set; pick the effective
+  file (a miss with no `format` option whose every resolution candidate has an
+  unreadable extension is `unsupported_format`, not a miss, so `try` never
+  absorbs it: `load.rs::unreadable_candidates`), run the slot gate, record it
+  in the read set; pick the effective
   format (`options.format`, else `load.rs::data_format_of` on the extension,
   a URL's path included, shared with the call check); `check_applicability`
   (`delimiter`/`header` only on CSV/TSV, TSV tab only); pick the CSV/TSV row

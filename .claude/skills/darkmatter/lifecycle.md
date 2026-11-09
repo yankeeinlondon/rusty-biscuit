@@ -46,6 +46,16 @@ pages with the behavior.
   live in `protocol_tests.rs`.
 - Never add a hand-maintained list of lifecycle event keys or late roots;
   derive it from the host's `EventRegistry`.
+- Lifecycle operands evaluate lazy functions in
+  `executor.rs::call_with_operand_values`: its `LazyKind::Recover` arm sends
+  `try` to `call_recovery`, which evaluates the fallback only when the first
+  operand fails with `is_recoverable_read_failure()` (a template operand's
+  `Compose` failure propagates). Claudine's lifecycle `message`, `set`, and
+  `when:` reach it because Claudine runs its stacks through the same
+`StackExecutor`; never add a Claudine copy
+  (`claudine/lib/src/composition/lifecycle/executor/tests/recovery.rs`).
+  Lifecycle shell failures are outside the boundary. See
+  [Recovering from read failures](../../../darkmatter/docs/topics/darkmatter-expressions.md#recovering-from-read-failures).
 
 ## Planned
 

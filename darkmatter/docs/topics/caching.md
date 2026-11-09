@@ -196,6 +196,15 @@ format, delimiter, or header choice never answers a call with another. A
 result that only means "not possible yet" is never kept, so a later call
 tries again.
 
+A [`try`](./darkmatter-expressions.md#recovering-from-read-failures) around a
+call does not change what the memo holds: it keeps the source's own result or
+failure under the keys above, never the fallback. So after
+`try(load_data("bad.yaml", "string[]"), [])`, a later unguarded call on
+`bad.yaml` fails from the memo, and a second `try` with a different fallback
+gets its own fallback, not the first one's. A read deferred by a discovery
+pass, such as a URL the reference check cannot fetch, is not kept as a
+failure. Emptying the memo works as described below.
+
 Every call is observed in the command's
 [observation log](./compose-requests.md#observations), with the hash of the
 bytes its raw source holds, whichever layer answered it. A call inside a

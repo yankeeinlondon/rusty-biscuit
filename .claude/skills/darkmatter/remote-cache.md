@@ -64,7 +64,10 @@ Detail behind the "Remote and cache safety" section of [SKILL.md](SKILL.md).
   and `get_content_typed` feeds `ResolutionContext::fetch_remote_text`, whose
   policy-derived `RemoteTextError::Denied` is checked first so a denied host is
   never typed `Transport`. `ExpressionError::RemoteRead.kind` carries the kind;
-  only `Transport` is recoverable (see expressions.md). Never classify a fetch
-  by its message.
+  only `Transport` is recoverable (see expressions.md and
+  [Recovering from read failures](../../../darkmatter/docs/topics/darkmatter-expressions.md#recovering-from-read-failures)).
+  Never classify a fetch by its message; a new `FetchError` or
+  `RemoteReadError` variant gets its kind in the exhaustive `From` impls in
+  `remote_fetch/error.rs`.
 - `absolute` and `relative` are local path transforms, never remote fetches.
 - `EffectEngine::http_post` uses the same host policy as remote reads.

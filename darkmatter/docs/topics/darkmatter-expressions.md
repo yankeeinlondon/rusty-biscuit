@@ -851,8 +851,8 @@ it agrees with boolean OR on every input; returning the operand is what lets
 
 `||` supplies a default for a falsy value, not for a failure. An operand that
 fails to evaluate (a missing file passed to `frontmatter(…)` or `load_data(…)`)
-is an error, and the error stops the expression; test with `file_exists(…)`
-first instead (see [Loading Data](./loading-data.md#files-that-may-be-missing)).
+is an error, and the error stops the expression; wrap the read in `try(…)`
+instead (see [Recovering from read failures](#recovering-from-read-failures)).
 
 Because the value is the same everywhere, a defaulted collection works inside a
 condition exactly as it does inside `{{ … }}`:
@@ -873,6 +873,164 @@ surface. `or(…)` is how to ask for a boolean OR explicitly. `&&` is not
 value-returning because that would change interpolated output — `{{ x && 'yes' }}`
 renders `true`, and an operand-returning `&&` would render `yes` — while giving
 conditions nothing they lack: a condition only asks whether `a && b` is truthy.
+
+## Recovering from read failures
+
+This section covers `try(expr, fallback)`, the way to give a value to a read
+that may fail. The common case is an optional data file: a document should use
+the file when it is there and a default when it is not.
+
+```md
+{{ as_json(try(load_data("optional.yaml", "string[]"), [])) }}
+```
+
+With `optional.yaml` holding `- a`, this renders `["a"]`; with no such file it
+renders `[]`. The signature and catalog examples are on the generated
+[`try` function page](../functions/try.md).
+
+`try` looks like a function call but evaluates its arguments itself, the way
+`and(…)` and `or(…)` do. A call runs in four steps:
+
+1. Evaluate `expr` once, in the current scope and request context.
+2. If it succeeds, return its value unchanged. `fallback` is never evaluated.
+3. If it fails with a **recoverable read failure** (listed below), evaluate
+   `fallback` once, in the same scope, and return its value.
+4. If it fails in any other way, the failure propagates as it would without
+   `try`. `fallback` is never evaluated.
+
+```mermaid
+flowchart TD
+    E["evaluate expr"] --> S{result}
+    S -->|success, any value| V["return expr's value"]
+    S -->|recoverable read failure| F["evaluate fallback<br/>in the same scope"]
+    F --> FV["return fallback's value<br/>(or its failure)"]
+    S -->|any other failure| P["propagate the failure"]
+```
+
+### Which failures `try` recovers
+
+A **read failure** is a problem with the data a read function was asked to
+read, as opposed to a problem with the request itself. Only these are
+recovered; everything else propagates:
+
+| Recovered | Propagated |
+| --- | --- |
+| a data source names a file that does not exist | a malformed file reference, or an `as` type that is not valid |
+| an ordinary local read fails (the file cannot be read) | an imported contract that is missing or invalid: the schema `as` imports is not the data source |
+| an allowed remote read fails in transport: an HTTP error status such as `500`, a refused connection, a body that is not valid UTF-8 | `dm.data.unsupported_format`, `dm.data.invalid_options`, `dm.data.not_a_container`, `dm.data.row_shape_conflict`, `dm.data.this_import_rejected` |
+| `dm.data.malformed`: the file cannot be parsed | parse errors, unknown functions, invalid callbacks, and calls the [call check](../inline/call-check.md) rejects |
+| `dm.data.contract_mismatch`: the data does not fit `as` | policy refusals: a denied remote host (even when a cached copy exists), a redirect to a denied host, a warning made blocking by `--deny`, and schema slot refusals (approval required, denied, forbidden binding or function) |
+| | iteration and nested-composition limits, missing request context, unavailable host bindings |
+| | arithmetic failures, provider failures (such as `pr_list` with no remote), path-boundary refusals, glob failures, and a failure inside a nested composition such as `as_markdown` |
+
+`load_data` is the main data source; any read function whose failure is a
+missing file or a remote transport failure counts. The decision is made from
+the kind of failure, never from the function's name or the message text, and a
+kind of failure that is not on the left is not recovered.
+
+A source whose extension names no readable format fails with
+`dm.data.unsupported_format` even when the file is missing, so
+`try(load_data("optional.xyz", "string[]"), [])` is still an error. Name the
+format to make a missing file an ordinary miss; see
+[Loading Data](./loading-data.md#files-that-may-be-missing).
+
+### Falsy values are successes
+
+`try` reacts to failures, not to values. A read that returns `null`, `false`,
+`0`, `""`, `[]`, or `{}` has succeeded, so the fallback is not used:
+
+```text
+try(null, 7)    ⇒ null
+try(0, 7)       ⇒ 0
+```
+
+Use `||` to replace a falsy value (see [Logical OR](#logical-or)). The two
+combine: `try(load_data(f, "string[]"), []) || ["default"]` covers both a
+missing file and an empty one.
+
+### When the fallback fails
+
+A `try` does not catch its own fallback's failure: the fallback's error is
+reported with its normal code. An enclosing `try` can catch it, if that
+failure is recoverable:
+
+```text
+try(load_data("a.yaml", "string[]"), load_data("b.yaml", "string[]"))
+    a missing, b missing → fails: b's missing-file error
+try(try(load_data("a.yaml", "string[]"), load_data("b.yaml", "string[]")), [])
+    a missing, b missing → []
+```
+
+Recovery does not undo or retry anything. Files already read, callback items
+already visited, and the iteration budget already spent stay spent, and the
+budget is shared by both arguments. A fallback that inserts text inserts it
+as data; it is never scanned for `{{ … }}` again.
+
+### Whole result or one item
+
+Where `try` sits in a callback decides what the fallback replaces. Around the
+whole `map`, one failing item replaces the entire result:
+
+```md
+{{ try(map(files, f => load_data(f, "string[]")), []) }}
+```
+
+Inside the callback, only the failing item is replaced and the walk continues:
+
+```md
+{{ map(files, f => try(load_data(f, "string[]"), [])) }}
+```
+
+With `files: [a.yaml, missing.yaml]`, the first call's value is `[]` and the
+second's is a list holding `a.yaml`'s value followed by `[]`. The fallback sees the
+callback's locals, so `f => try(load_data(f, "string[]"), [f])` can use `f`.
+A failure that propagates out of a callback keeps its item position.
+
+### Where `try` works
+
+`try` works on every surface that evaluates expressions: body and frontmatter
+interpolation, `::block` conditions, transclusion `when=` and target
+expressions, inline `map` and `filter` callbacks, `::map` callbacks and
+`::filter` predicates, region `when=`, shell-template expressions, lifecycle
+expressions in `md` and Claudine (`message`, `set`, `when:`), and `{{ }}`
+slots inside a schema. It cannot be a `::map` or `::filter` source, which must
+be a name or dotted path. A failing lifecycle shell command is not an
+expression failure and is not caught.
+
+In a schema slot, `try` keeps the slot's rules: a missing file inside the
+repository recovers without a grant, but a read outside it still needs one,
+and an approval refusal propagates. See
+[Schema Slots in Darkmatter](./schemas/schema-slots.md).
+
+### Reporting, discovery, and types
+
+- **No report for a recovered failure.** A recovered cause produces no error
+  or warning in formatted output or in the `--output json` envelope. Earlier,
+  unrelated warnings stay and still obey `--deny`.
+- **Not an absence guard.** `try` handles failures, not missing properties:
+  `try(titel, "x")` still warns that `titel` is undeclared, and its value is
+  `null`, not `"x"`.
+- **Discovery passes defer.** `md compose` checks references, and shell
+  approval walks the document, before composition. A real recoverable failure
+  there chooses the fallback and the pass continues. A read the pass cannot
+  perform (the reference check has no network permission, for example) is
+  deferred instead: the fallback is not chosen, and composition later reads the
+  real value. Both arguments are inspected for dependencies and approvals, so a
+  command only the fallback needs is still listed. `try` around one read does
+  not excuse another, unguarded read of the same missing file.
+- **The type is a union.** The call check, DMLS, and callback item typing see
+  `try`'s type as the union of both arguments' types. A literal `[]` fallback
+  adds nothing when the other argument is an array type that accepts an empty
+  list, so `try(load_data("optional.yaml", "{ a: string }[]"), [])` stays
+  `{ a: string }[]` and member completion works in a later callback. A
+  non-empty array, a fixed-length tuple, or an object gets the ordinary union.
+  `try` proves nothing for guards. Both arguments go through the
+  [call check](../inline/call-check.md), so a provably invalid call in a
+  fallback that never runs still rejects the document.
+
+How the data memo and read set behave under `try`, and the `format` escape
+for an unrecognized extension, are in
+[Loading Data](./loading-data.md#files-that-may-be-missing).
 
 ## Comparison Operators
 

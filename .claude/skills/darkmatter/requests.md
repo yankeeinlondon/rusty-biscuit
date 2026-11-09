@@ -149,6 +149,17 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
   through `ExpressionError::data_failure()` and `file_reference_diagnostic()`;
   never rebuild an import as `ExpressionError::FileReference`, which would
   make it recoverable (`provenance_tests.rs` beside `data/runtime.rs`).
+  A contract import is not the data source, so `ContractImport` is never
+  recovered by `try`; `nested.rs` marks a data failure from an `as_markdown`
+  child as `NestedData` so an enclosing `try` never takes it for its own read
+  (always fatal).
+- `try` never writes its fallback into a memo layer or the read set: the memo
+  keeps the source's result or failure under its usual keys (a later
+  unguarded call fails from it; another `try` can pick a different fallback),
+  an executed fallback's own reads are recorded, and an unexecuted one adds
+  none, so a guarded read set equals the unguarded one. A deferral
+  (`DataError::is_deferral`) is never memoized
+  ([Recovering from read failures](../../../darkmatter/docs/topics/darkmatter-expressions.md#recovering-from-read-failures)).
 
 - Reads are recorded at the operation boundary, never in `resolve_arg`:
   `functions/fs.rs::load_markdown` (the five Markdown readers), `file_exists_fn`,

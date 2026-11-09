@@ -673,27 +673,45 @@ pub struct ExpressionFunctionPage {
 
 /// Every function that has a generated reference page, written by the
 /// `expression_doc_generator` example (`just regen-expr-doc`).
-pub const EXPRESSION_FUNCTION_PAGES: &[ExpressionFunctionPage] = &[ExpressionFunctionPage {
-    function: "load_data",
-    path: "docs/functions/load-data.md",
-    see_also: &[
-        (
-            "Loading data",
-            "../topics/loading-data.md",
-            "each format, the input rules for tabular cells, the optional-file pattern, and typing limits",
-        ),
-        (
-            "Container types",
-            "../topics/schemas/definition.md#container-types",
-            "which `as` contracts describe a container",
-        ),
-        (
-            "Data contracts",
-            "../cli/data-contracts.md",
-            "the `dm.data.*` diagnostic codes, `data_location`, and the read set",
-        ),
-    ],
-}];
+pub const EXPRESSION_FUNCTION_PAGES: &[ExpressionFunctionPage] = &[
+    ExpressionFunctionPage {
+        function: "load_data",
+        path: "docs/functions/load-data.md",
+        see_also: &[
+            (
+                "Loading data",
+                "../topics/loading-data.md",
+                "each format, the input rules for tabular cells, the optional-file pattern, and typing limits",
+            ),
+            (
+                "Container types",
+                "../topics/schemas/definition.md#container-types",
+                "which `as` contracts describe a container",
+            ),
+            (
+                "Data contracts",
+                "../cli/data-contracts.md",
+                "the `dm.data.*` diagnostic codes, `data_location`, and the read set",
+            ),
+        ],
+    },
+    ExpressionFunctionPage {
+        function: "try",
+        path: "docs/functions/try.md",
+        see_also: &[
+            (
+                "Recovering from read failures",
+                "../topics/darkmatter-expressions.md#recovering-from-read-failures",
+                "which failures `try` recovers, which it propagates, and how it behaves in callbacks",
+            ),
+            (
+                "Loading data",
+                "../topics/loading-data.md",
+                "the optional-file pattern, the `format` option, and the read set under recovery",
+            ),
+        ],
+    },
+];
 
 /// Generates the Markdown reference page for the catalog function `name`
 /// (canonical name or alias): category, aliases, and for each overload its

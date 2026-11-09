@@ -592,6 +592,39 @@ fn load_data_function_page_matches_catalog() {
     );
 }
 
+/// The committed `try` reference page must equal the generator's output;
+/// regenerate it with `just regen-expr-doc`.
+#[test]
+fn try_function_page_matches_catalog() {
+    let page_path = biscuit_test_harness::manifest_dir!().join("../../darkmatter/docs/functions/try.md");
+    let content = std::fs::read_to_string(&page_path).expect("docs/functions/try.md should be readable");
+    let generated = generate_expression_function_page("try").expect("try is cataloged");
+    assert_eq!(content, generated, "docs/functions/try.md does not match generated output");
+    assert!(
+        EXPRESSION_FUNCTION_PAGES.iter().any(|page| page.function == "try" && page.path == "docs/functions/try.md"),
+        "the generator writes the page this test reads"
+    );
+}
+
+/// The generated `try` page states the lazy contract the evaluator
+/// implements: the fallback runs only after a recoverable read failure, every
+/// other failure propagates, falsy values are successes, and the page links
+/// the topic sections that list the recoverable failures.
+#[test]
+fn try_page_states_lazy_semantics() {
+    let page = generate_expression_function_page("try").expect("try is cataloged");
+    assert!(page.contains("try(expr: unknown | null, fallback: unknown | null)"), "the page shows the two-operand signature");
+    assert!(page.contains("Only when expr fails with a recoverable read failure"), "the fallback is lazy");
+    assert!(page.contains("every other failure propagates"), "non-recoverable failures propagate");
+    assert!(page.contains("including a falsy one"), "falsy values are successes");
+    for example in ["try(null, 7)", "try(0, 7)"] {
+        assert!(page.contains(example), "the page shows the falsy-success example `{example}`");
+    }
+    for link in ["../topics/darkmatter-expressions.md#recovering-from-read-failures", "../topics/loading-data.md"] {
+        assert!(page.contains(&format!("]({link})")), "the page links {link}");
+    }
+}
+
 /// R12: the generated `load_data` page shows an executable example, and its
 /// input file, for every format family.
 #[test]

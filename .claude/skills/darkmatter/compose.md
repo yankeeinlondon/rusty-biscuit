@@ -768,6 +768,22 @@ Full specification lives in `darkmatter/docs/topics/context-variables.md`.
 
 Uses first truthy value, or the fallback.
 
+### Recovering from read failures (`try`)
+
+Every surface that evaluates expressions (body and frontmatter interpolation,
+`::block`/`when=` conditions, transclusion targets, map/filter callbacks and
+predicates, shell-template expressions, schema slots) gets `try` from the one
+evaluator, `expression/mod.rs::evaluate_recovery`; lifecycle operands use
+`lifecycle/executor.rs::call_recovery` (see [lifecycle.md](lifecycle.md)).
+Never add a surface-specific recovery. Discovery passes (the reference check,
+approval discovery) never pick the fallback for a read they cannot perform:
+a remote read without remote permission is `FileRefFailure::RemoteNotEnabled`
+(`DataError::is_deferral`), which is not recoverable, so it propagates as the
+usual lenient deferral, the expression is kept, and composition loads the real
+value. A discovery-time fallback must never be frozen as the final value.
+Static dependency and approval collection walk both arguments. Behavior:
+[Recovering from read failures](../../../darkmatter/docs/topics/darkmatter-expressions.md#recovering-from-read-failures).
+
 ### Ternary Expressions
 
 ```handlebars

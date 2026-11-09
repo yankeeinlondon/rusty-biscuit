@@ -144,6 +144,34 @@ part: "$(echo pending)"
 {{ map(['::shell echo child'], part => as_markdown(part)) }}
 ```
 
+### Recoverable reads in `try`
+
+A discovery pass, such as this approval walk or the reference check
+`md compose` runs first, evaluates expressions before composition does. This
+section covers what it does with
+[`try(expr, fallback)`](../functions/try.md), which returns `fallback` when
+`expr` fails to read its data (see
+[Recovering from read failures](../topics/darkmatter-expressions.md#recovering-from-read-failures)).
+
+- **A real recoverable failure takes the fallback.** When the pass reads a
+  missing file, it uses the fallback and keeps going. With no `build.yaml`,
+  it approves `ls src`, and composition later runs the same command:
+
+  ```md
+  ::shell ls {{ try(load_data("build.yaml", "{ dir: string }"), {dir: "src"}).dir }}
+  ```
+
+- **A read the pass cannot perform is deferred.** The reference check has no
+  network permission, so it does not fetch a remote `load_data`. It does not
+  treat that as a failure and does not take the fallback: the expression is
+  left for composition, which reads the real value. A fallback chosen during
+  discovery never becomes the final value.
+- **Both arguments are inspected.** Like both sides of a ternary, a command or
+  a file the fallback would need is collected even when `expr` succeeds.
+- **`try` loosens nothing.** It does not approve a command, does not absorb
+  `NotPreApproved` or `MissingValue`, and does not relax fetch policy: a
+  denied host stays an error inside `try`.
+
 ## ICMP Effects
 
 Shell commands are not the only approvable effect. `ping` and `ping_under` are

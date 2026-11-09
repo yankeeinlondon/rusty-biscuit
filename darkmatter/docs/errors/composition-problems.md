@@ -23,7 +23,7 @@ is the whole list, while an expression error may have another behind it.
 | Schema | Every problem in one document is collected, then the run stops | Every problem in that document, none from later documents |
 | Transclusion | A fatal failure, such as a cycle, stops the run; a tolerated failure is reported and composition continues | A fatal error, or a notice in the document and a warning |
 | Expression | The run stops at the first error it meets, which is not always the earliest in the document | One error |
-| Data (`load_data`) | The run stops at the first failure, which can come in the reference check before composition; see [Data failures](#data-failures) | One failure: one record, or one per violating value (up to 20) for a contract mismatch |
+| Data (`load_data`) | The run stops at the first failure that no explicit `try` recovers, which can come in the reference check before composition; see [Data failures](#data-failures) | One failure: one record, or one per violating value (up to 20) for a contract mismatch |
 | Shell | The run stops at the first error | One error |
 | Lifecycle | The run stops at the first error, then runs the [cleanup events](../topics/lifecycle/error-handling.md) | One error, plus what cleanup reports |
 
@@ -60,15 +60,17 @@ checking at the first error. `md compose` always collects them.
 
 ## Data failures
 
-A [`load_data`](../functions/load-data.md) call that fails stops the command.
+A [`load_data`](../functions/load-data.md) call that fails stops the command,
+unless an explicit [`try`](../functions/try.md) recovers it.
 This section covers when that happens, which surrounding constructs pass the
-failure on, and why it can stop the run before composition starts. The codes and
-fields of the failure are in [Data errors](../cli/data-contracts.md#data-errors).
+failure on, what an explicit recovery reports, and why a failure can stop the
+run before composition starts. The codes and fields of the failure are in
+[Data errors](../cli/data-contracts.md#data-errors).
 
-### A data failure is never recovered
+### An unguarded data failure is never recovered
 
-No partial value stands in for data that did not load, and nothing turns the
-failure into a warning:
+Outside a `try`, no partial value stands in for data that did not load, and
+nothing turns the failure into a warning:
 
 - **Nothing later in the document runs.** No later expression, directive, or
   `::shell` command runs, and no document is written. The lifecycle's
@@ -88,8 +90,38 @@ failure into a warning:
 - **Every surface passes it on.** A failure inside a callback (`map(items, i => load_data(…))`),
   a `::map` or `::filter` body, frontmatter interpolation, a `::block` condition,
   or nested composition (`as_markdown(…)`) stops the command with its own
-  `dm.data.*` code, located at the call. A failure inside a repeated body also
-  carries its [`iteration_path`](../cli/data-contracts.md#failures-inside-map-and-filter-bodies).
+  `dm.data.*` code, located at the start of the `{{ … }}` interpolation that
+  holds the call (a condition's failure at its directive). A failure inside a repeated body also carries its
+  [`iteration_path`](../cli/data-contracts.md#failures-inside-map-and-filter-bodies).
+
+### What an explicit `try` reports
+
+`try(expr, fallback)` returns its fallback when `expr` fails with a
+*recoverable* read failure: a missing or unreadable file, a malformed file or
+one that breaks its contract, or an allowed remote read that fails in transport.
+Every other failure, such as an unsupported format, a denied host, or a failure
+inside nested composition, still stops the run as above. Which causes are
+recoverable is listed in
+[Recovering from read failures](../topics/darkmatter-expressions.md#recovering-from-read-failures).
+
+```md
+{{ as_json(try(load_data("optional.yaml", "string[]"), [])) }}
+```
+
+With no `optional.yaml`, this composes `[]` and the run succeeds. What the run
+reports follows from that:
+
+- **A recovered cause is not reported.** It produces no error and no warning,
+  neither in a terminal nor in the `--output json` envelope, whose
+  `diagnostics` stays empty.
+- **Other warnings are unaffected.** A warning raised elsewhere, including one
+  inside the same `try` such as an undeclared property, is still reported, and
+  naming its code with [`--deny`](../cli/policy.md) still stops the run.
+- **A failing fallback is reported normally.** `try` does not catch its own
+  fallback's failure. That failure keeps its own code, is located at the start
+  of the `{{ … }}` interpolation that holds it, and keeps its `iteration_path`
+  when it happens inside a callback. The recovered cause leaves no trace in the
+  record.
 
 ### It can stop the run in the reference check
 
@@ -98,6 +130,8 @@ prepares each document, which evaluates its expressions, transcluded documents
 included. A data failure the check can prove on its own stops the command
 there: composition never starts, the data output's `summary` is `null`, and its
 `read_set` still lists the data file.
+A recoverable failure inside a `try` does not stop it: the check takes the
+fallback and continues, as composition will.
 
 ```mermaid
 flowchart LR
@@ -188,7 +222,7 @@ What each family reports:
 | Problem | `source` |
 | --- | --- |
 | A schema problem | the file, at its [location](../topics/schemas/definition.md#problem-locations) when it has one; a schema that could not be prepared has the file alone |
-| A `load_data` failure | the call; its `as` argument for a contract the call check rejects; its options argument for options the call check rejects; a position inside the data file is in [`data_location`](../cli/data-contracts.md#data-location) |
+| A `load_data` failure | the start of the `{{ … }}` interpolation that holds the call; its `as` argument for a contract the call check rejects; its options argument for options the call check rejects; a position inside the data file is in [`data_location`](../cli/data-contracts.md#data-location) |
 | A `when=` condition on `::block` or `::file` that fails or warns | the directive's opener, unless a stage rewrote it (then the file alone) |
 | A `$( … )` frontmatter command | the file and the line of its key; the column is `null` |
 | A `::file` directive that does not parse, or a malformed `::block` | the file |

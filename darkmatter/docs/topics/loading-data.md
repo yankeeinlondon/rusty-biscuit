@@ -173,7 +173,9 @@ can each be read as any format.
 | `.json5` | one JSON5 value, any top-level shape |
 
 Any other extension, or no extension, fails with `dm.data.unsupported_format`
-unless the call names a `format`.
+unless the call names a `format`. This holds whether or not the file exists:
+`load_data("notes.txt", "string[]")` reports `dm.data.unsupported_format`, not
+a missing file, so `try` never mistakes the bad request for an absent source.
 
 ```md
 {{ load_data("events.ndjson", "{ id: number, ok: boolean }[]") }}
@@ -437,26 +439,70 @@ before anything runs.
 
 ## Files that may be missing
 
-There is no `try_load_data`. For a file that may be absent, test for it
-first:
+Wrap a read that may fail in [`try`](./darkmatter-expressions.md#recovering-from-read-failures).
+`try(expr, fallback)` returns the file's value when it loads and evaluates
+`fallback` only when the read fails:
 
 ```md
-{{ file_exists(f) ? load_data(f, "string[]") : [] }}
+{{ try(load_data("optional.yaml", "string[]"), []) }}
 ```
 
 `load_data(f, "string[]") || []` does **not** recover. `||` supplies a
 default for a falsy value, but a failed call is an error, not a value, and
 the error stops the composition (see [Logical OR](./darkmatter-expressions.md#logical-or)).
 
-The guard handles absence only. A file that exists but is malformed, or does
-not fit `as`, still fails.
+`try` covers a file that is present but bad as well as one that is absent.
+An existence check only answers whether the file is there:
 
-The same guard is needed for a file that a frontmatter `$( … )` command
-creates. Before composition, `md compose` runs a reference check that
-evaluates expressions before any command has run. An unguarded call on a
-file that does not exist yet fails there, before the command can create it.
-A file that exists but is broken also stops the check, so generate or repair
-such inputs before running `md compose`.
+```md
+{{ file_exists(f) ? load_data(f, "string[]") : [] }}
+```
+
+| `f` is | Existence check | `try(load_data(f, "string[]"), [])` |
+| --- | --- | --- |
+| missing | `[]` | `[]` |
+| present and valid | the data | the data |
+| present but malformed (`dm.data.malformed`) | fails | `[]` |
+| present but not a `string[]` (`dm.data.contract_mismatch`) | fails | `[]` |
+
+`try` recovers only failures of the data itself: a missing or unreadable
+file, a remote read that fails in transport, malformed data, and a contract
+mismatch. A mistake in the request still fails: an invalid `as`, bad
+options, a missing or invalid imported contract, and a denied host. The full
+list is in
+[Recovering from read failures](./darkmatter-expressions.md#which-failures-try-recovers).
+
+An extension that names no format is a mistake in the request, not a missing
+file: it fails with `dm.data.unsupported_format` whether or not the file
+exists (see [Formats](#formats)), so `try` does not recover it. Name the
+format, and a missing file becomes an ordinary miss:
+
+```md
+{{ try(load_data("optional.xyz", "string[]"), []) }}                    <!-- fails: dm.data.unsupported_format -->
+{{ try(load_data("optional.xyz", "string[]", {format: "json"}), []) }}  <!-- []: the file is missing -->
+```
+
+A file that a frontmatter `$( … )` command creates needs the same care.
+Before composition, `md compose` runs a reference check that evaluates
+expressions before any command has run. An unguarded call on a file that
+does not exist yet fails there, before the command can create it. Inside
+`try`, the check takes the fallback and continues, and composition, which
+runs after the command, reads the real file.
+
+### The memo and read set under `try`
+
+Recovery changes what the expression returns, not what was read:
+
+- The [memo](#reading-a-file-once-per-command) keeps the source's own result
+  or failure, never the fallback. A later unguarded call on the same malformed
+  file fails from the memo, and another `try` on it can supply a different
+  fallback.
+- The [read set](#the-read-set) is the same as it would be without `try`: a
+  malformed or unreadable file is in it, and so are the paths a missing file
+  was looked for at. Reads made by a fallback that ran are recorded; a
+  fallback that did not run records nothing.
+- A contract import is not the data source. An `as` that imports a missing or
+  invalid schema file fails inside `try` too.
 
 ## Typed results
 
@@ -643,7 +689,7 @@ from the compose report; see
 ## When loading fails
 
 A `load_data` failure is an error, never a warning, and it stops the
-composition. That includes a failure in the reference check `md compose` runs
+composition unless a [`try`](#files-that-may-be-missing) recovers it. That includes a failure in the reference check `md compose` runs
 before composing: a malformed data file stops the command there, and the
 failed run's `read_set` still lists it. The stopping rules are in
 [Composition Problems](../errors/composition-problems.md#data-failures).

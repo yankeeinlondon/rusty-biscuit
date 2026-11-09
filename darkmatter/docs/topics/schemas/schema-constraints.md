@@ -38,3 +38,9 @@ and authoring guidance is in
 [Make an Enum from a Data File](./authoring-schemas.md#make-an-enum-from-a-data-file).
 Every other constraint, such as `required` or `not-empty`, is written
 literally, and so is a `null` default.
+
+A list slot can read an optional file with `try`, as in
+`enum(macOS, {{ try(load_data("./extra.yaml", "string[]"), []) }})`: a
+missing file adds no candidates, but the final list must still not be empty.
+What `try` recovers from inside a slot, and what it never does, is in
+[An optional data file](./schema-slots.md#an-optional-data-file).
