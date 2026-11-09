@@ -696,6 +696,13 @@ touches. Three shapes recur:
   `#[cfg_attr(windows, allow(dead_code, reason = "…"))]` instead of deleting
   them.
 
+A related compile error happens only on Windows. On Windows a dependency
+(`encode_unicode`) adds `impl FromIterator<Utf16Char> for Vec<u16>`, so
+`.map(|s| s.parse().unwrap()).collect::<Vec<u16>>()`, or the same thing
+returned as `Vec<u16>`, no longer infers the parse target (E0283/E0284). It
+compiles on macOS and Linux. Always write `.parse::<u16>()` when collecting
+into `Vec<u16>`.
+
 ## Spawning a program from a test
 
 - Windows PowerShell (`powershell`) rejects `--version`, so a generic "does it start" probe

@@ -447,7 +447,7 @@ fn regular_only_arial_chain() -> Arc<FontChain> {
 fn rule_weights(css: &str) -> Vec<u16> {
     css.split("font-weight:")
         .skip(1)
-        .map(|rest| rest[..rest.find(';').expect("weight ends")].parse().expect("a weight"))
+        .map(|rest| rest[..rest.find(';').expect("weight ends")].parse::<u16>().expect("a weight"))
         .collect()
 }
 
