@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-11-09
-phase: 6
+phase: 8
 agent: claude/sonnet
 yolo: true
 packages:
@@ -149,16 +149,19 @@ source_files_during_phase_5:
 - darkmatter/cli/tests/l1/dynamic_schema_slot_template_types.rs
 - darkmatter/cli/tests/l1/output_commands.rs
 source_files_during_phase_6:
-- darkmatter/dmls/src/slot_jobs.rs
 - darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/overlay/mod.rs
 - darkmatter/dmls/src/overlay/schema.rs
-- darkmatter/dmls/src/overlay/suggestions.rs
-- darkmatter/dmls/src/diagnostics/slots.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/tests/l1/schema_slots_editor.rs
 source_files_during_phase_7:
-- claudine/cli/src/completion/schema_completion/mod.rs
-- claudine/cli/src/completion/schema_completion/keys.rs
-- claudine/cli/src/completion/schema_completion/candidates.rs
+- darkmatter/lib/src/markdown/schemas/completion.rs
 - claudine/cli/src/completion/engine/mod.rs
+- claudine/cli/src/completion/schema_completion/mod.rs
+- claudine/cli/src/completion/schema_completion/candidates.rs
+- claudine/cli/src/completion/schema_completion/keys.rs
+- claudine/cli/src/completion/schema_completion/tests.rs
+- claudine/cli/tests/l1/completion_committed_prompt_schema.rs
 docs_updated_during_phase_8:
 - simplified-schema/docs/topics/language/slots.md
 - darkmatter/docs/topics/schemas/schema-slots.md
@@ -205,6 +208,20 @@ docs_updated_during_phase_5:
 - darkmatter/docs/topics/schemas/definition.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/schema.md
+docs_updated_during_phase_6:
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/dmls/docs/autocomplete.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/darkmatter/dmls.md
+docs_updated_during_phase_7:
+- claudine/docs/topics/completions/shell-completions.md
+- claudine/docs/topics/execution-flow.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/claudine/topics/execution-flow.md
 - .claude/skills/darkmatter/schema.md
 ---
 
@@ -880,11 +897,11 @@ and one invalid document).
 
 ### Wave 13 — Editor (parallel by file; then tests)
 
-- [ ] **Pending views** — R24
+- [x] **Pending views** — R24
     - `providers/frontmatter.rs`: hover (`:2266 schema_hover_details`, `:1935`, `:2173`), key completion (`shape_key_completions`, `nested_key_completions`, `top_level_key_completions`), value completion (`value_completions`, `def_value_completions`, `union_item_completions`, `array_item_value_completions`), `known_shape`/`nested_shape` (`:2554`, `:2607`): a pending atom shows the authored property and "type pending"; it never invents nested keys, requiredness, defaults, or value suggestions; static sibling information (other properties, static union arms) is preserved. `overlay/suggestions.rs` (`collect_reference_candidates` `:125`) and `overlay/schema.rs` get the explicit pending answer.
-- [ ] **Worker and diagnostics** — `slot_jobs.rs`, `diagnostics/slots.rs`
+- [x] **Worker and diagnostics** — `slot_jobs.rs`, `diagnostics/slots.rs`
     - Pending → resolved transition, failed state, stale marking of last-good completion/hover, no "valid" diagnostics while pending, cancellation/supersession publishing no partial schema (reuse `seq`/`canceled`); confirm the unsaved-buffer and import/missing-candidate watches via R18 (`watched_paths`).
-- [ ] **Editor tests** — `darkmatter/dmls/tests/l1/schema_slots_editor.rs` and `slot_jobs.rs` inline tests
+- [x] **Editor tests** — `darkmatter/dmls/tests/l1/schema_slots_editor.rs` and `slot_jobs.rs` inline tests
     - Pending-to-resolved transition after the worker finishes; cancellation by a newer edit; an unsaved edit to an imported file re-resolves; a created missing candidate re-resolves; a failed resolution shows failed status, last-good is stale.
 
 **Checkpoint 6:** `just test` and `just lint` in `darkmatter` (dmls crate included) pass.
@@ -893,14 +910,14 @@ and one invalid document).
 
 ### Wave 14 — Completion (single agent)
 
-- [ ] **Resolve on value requests** — spec "Claudine shell completion"
+- [x] **Resolve on value requests** — spec "Claudine shell completion"
     - `claudine/cli/src/completion/schema_completion/mod.rs`: `load_prompt_schema` (`:98`) builds `DarkmatterSchemas::new(prompt.context).with_slot_session(Arc::new(SlotSession::for_context(DataRuntime::new(), &context).with_mode(SessionMode::ReferenceCheck)))` and calls `effective_for` only for a **value request on a property whose authored definition holds a slot** (`slots::reachable_slots(def, definitions)` non-empty on the template's declaration). `ReferenceCheck` with no handler never prompts and uses only the automatic and persisted grants (`session.rs:69`, `run_grants` `:370`), exactly the non-prompting set; nothing is written to the terminal.
     - A successful resolution supplies the resolved property definition to `candidates.rs::property_value` (enum members, matched files). An unresolved or failed resolution returns no candidates so the shell fallback runs (`engine/mod.rs:270–274`), silently.
     - Names: `run_setter_name` keeps using the authored template declarations (`PromptSchema::declarations`), nothing evaluated; required-first ordering (`keys.rs:286`) uses the authored suffix via `requiredness()` with `Pending` ordered as optional-by-authored-suffix (a template type's requiredness is not resolved for ordering).
     - A property with no slot completes its values from the template declaration without evaluation, even in a template (`kind: enum(a, b)` → `kind='a'`, `kind='b'`).
     - Resolution is of the whole template through the existing resolver and cross-command cache; a slot elsewhere in the template that is ungranted fails the resolution, and the property then offers nothing (accepted: all-or-nothing keeps one code path and one cache entry).
     - `PromptSchema::Pending` keeps carrying the template; its producer at `mod.rs:106` stays; the consumers change as above.
-- [ ] **Completion tests** — `claudine/cli/tests/l1/completion_committed_prompt_schema.rs`, `completion_setter.rs`, `schema_completion/tests.rs` (replace the Pending test at `:1167`)
+- [x] **Completion tests** — `claudine/cli/tests/l1/completion_committed_prompt_schema.rs`, `completion_setter.rs`, `schema_completion/tests.rs` (replace the Pending test at `:1167`)
     - `stat<TAB>` → `status=` with nothing evaluated (a counting file read proves it); `status=<TAB>` with a template-constraint slot and with a template type on a committed clean repo (automatic grant) offers the resolved enum members; with the grant absent offers nothing and prints nothing (assert empty stdout and stderr); `kind=<TAB>` in a template completes from the static enum without evaluation; a persisted user grant (fake home via `common::completion::fake_home`) is honored; a volatile or URL-reading resolution is not served cross-process and offers nothing. Run through the existing `run_complete*` helpers; no terminal windows.
     - Update `claudine/docs/topics/completions/shell-completions.md` (Phase 8 verifies).
 

@@ -201,6 +201,64 @@ decisions_for_review:
     record lists the code and position but not the grant to add; a `load_data` read in the slot itself does list
     them. Redo cost if the reviewer wants grants on import refusals: a field on the library's admission error and
     its mapping in `report_diagnostics`.
+  - |-
+    A failed slot resolution in the editor now still offers the template's literal parts. The plan said the worker
+    needed no code; the docs (the "a slot failed" row of the editor table in schema-slots.md) already said a failed
+    slot shows the literal parts said to be pending, but the code showed nothing from the schema once a resolution
+    had failed (true for template constraints too: `enum(Haiku, {{ … }})` lost `Haiku`). For a template type that
+    meant hover and completion lost even the property name and its static siblings. I made the code match the
+    docs: when the installed resolution failed, the overlay runs one extra passive assembly (no slot evaluated,
+    nothing read that a slot names) to recover the template's literal shape. Alternative: keep the old behavior
+    and change the docs to say a failure serves nothing. Redo cost: delete one match arm in
+    `dmls/src/overlay/mod.rs::schema_for` and the test `a_failed_slot_still_offers_the_template_literal_members`.
+  - |-
+    In the editor, a property-level union with a pending arm is described by listing every arm (the pending one
+    as "type pending"), while a fully static union keeps its existing hover, which describes only its first arm.
+    Listing every arm is the only way to keep the static sibling information the spec asks to preserve without
+    the first arm hiding the pending one. Alternative: list every arm for static unions too (a wider change in
+    hover output that existing tests pin). Redo cost: one branch in `pending_hover_details`.
+  - |-
+    `suggest(...)` completion in the editor no longer stops at an empty answer caused only by a pending template
+    type. The library's `suggestions_for_def` returns "pending, no items" for a definition whose only claim to
+    suggestions is a pending template type; DMLS used to treat any answer as final, which hid the enum members and
+    `true`/`false` of static union arms. DMLS now falls through to ordinary value completion when no arm declares
+    `suggest(...)`. Alternative: change the library to return `None` there, which would lose the "pending" signal
+    other consumers may want. Redo cost: three lines in `suggestion_completions`.
+  - |-
+    Claudine orders a template-type property among the required names by its written `(required)` suffix alone
+    (`'{{ … }}(required)'` sorts with required properties, a bare `'{{ … }}'` with optional ones). The spec says
+    ordering "uses the authored suffix"; the plan's wording ("Pending ordered as optional-by-authored-suffix") could
+    also be read as "always optional". I followed the spec. Alternative: put every pending template type in the
+    optional group. Redo cost: one match arm in `claudine/cli/src/completion/schema_completion/keys.rs::is_required`
+    and the expected order in two unit tests.
+  - |-
+    The proof that a name request evaluates nothing is not a counting file read: Claudine does not compile
+    Darkmatter's `work-counters` feature, and enabling it for one test would change feature unification for the
+    whole test build. Instead, in a clean committed repository where value requests do resolve, the name path is
+    shown to still see the template unresolved (it would load as a concrete schema had anything resolved it), and
+    the CLI test completes names with no repository at all, where any evaluation would fail. Alternative: add
+    `darkmatter/work-counters` as a claudine-cli dev feature and assert `SlotResolution` stays 0. Redo cost: a
+    Cargo feature line and one assertion per name test.
+  - |-
+    Values of a template property with no slot are completed from the authored declaration through a new
+    Darkmatter function, `completion::for_root_property` (the existing `for_property` made generic over any
+    definition lookup), instead of resolving the template. This keeps the spec's "no evaluation" for static
+    properties and keeps working when another slot in the template is ungranted. Alternative: none that meets the
+    spec without duplicating Darkmatter's completion rules in Claudine.
+  - |-
+    The plan asked for a test that "a volatile or URL-reading resolution is not served cross-process and offers
+    nothing". Every `claudine __complete` is its own process and Darkmatter's resolution cache lives in process
+    memory, so nothing is ever served across processes. A URL read offers nothing (tested: completion builds no
+    remote runtime, so even a granted site fetches nothing). A volatile function such as `remote_vendor()` is
+    simply evaluated afresh in each completion process and does offer its values; I did not make completion refuse
+    volatile slots, since the spec does not ask for it. Alternative: refuse any resolution in which a volatile
+    function ran. Redo cost: a check on the resolution's dependencies in `LoadedPrompt::resolve_template` (needs a
+    Darkmatter accessor) and one test.
+  - |-
+    A property declared only in a matched trigger payload while the document's own `$schema` is pending gets no
+    schema values: Darkmatter's pending template holds the document layer only, so the property is not found
+    there. Alternative: resolve the whole template whenever the property is not found in the document layer.
+    Redo cost: a fallback branch in `setter_value_candidates` and a trigger fixture test.
 source_files_during_phase_1:
 - simplified-schema/lib/src/lib.rs
 - simplified-schema/lib/src/resolve.rs
@@ -277,19 +335,15 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
 - .claude/skills/darkmatter/schema.md
 message_to_agent: |-
-  Phase 5 (the `md` CLI) is done. What Phase 6 (DMLS) and Phase 8 (docs) should know:
-  - `md schema validate <schema file>` now resolves every slot through the run's slot session
-    (darkmatter/cli/src/commands/schema/validate.rs `resolve_schema_file`: envelope check, then
-    `schema_file_templates` -> `approve_template_reads` -> `DarkmatterSchemas::resolve_schema_file`). The `slots`
-    count is gone from the code, the JSON record, and `cli/schemas/output/schema-validate.yaml`. Passive syntax
-    checking of a schema file stays a library/DMLS concern only.
-  - Docs that described the old passive mode were already corrected in this phase (docs/cli/schema.md
-    "Schema templates", topics/schemas/schema-slots.md table row and example, topics/schemas/definition.md
-    `schema` row, and the darkmatter skill's schema.md). Phase 8 should still do its full pass but need not
-    rediscover those.
-  - Assignments needed no code: the effective schema holds the substituted definition, so `label=123` under a
-    slot returning `alphanumeric` arrives as text (cli/tests/l1/dynamic_schema_slot_template_types.rs).
-  - A refusal caused by a returned definition's import still has no `grants_needed` (see decisions_for_review).
+  Phase 7 (Claudine shell completion) is done. What Phase 8 (docs and final verification) should know:
+  - `claudine/docs/topics/completions/shell-completions.md` already has a "Template schemas" section (name vs value
+    table, non-prompting grants, all-or-nothing resolution, Mermaid flow, ordering by suffix); Phase 8 should check
+    it against the rest of the page and the R2 vocabulary rather than write it again.
+  - New public Darkmatter API: `markdown::schemas::completion::for_root_property(root, definitions, name)`
+    (`for_property` over any `DefinitionLookup`); document it wherever the completion helpers are listed.
+  - Claudine's value completion does not use `suggestions_for_def`, so the "pending, no items" trap from Phase 6 does
+    not apply; a slot-free property is answered from the authored template, a slot-bearing one only after resolution.
+  - The Phase 6 DMLS changes are still uncommitted in the tree beside Phase 7's.
   - Windows cross-check is still blocked by "Host key verification failed" for build-win-native.
 source_files_during_phase_2:
 - claudine/gen/src/schema_compat.rs
@@ -393,6 +447,34 @@ docs_updated_during_phase_5:
 - darkmatter/docs/topics/schemas/definition.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_6:
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/tests/l1/schema_slots_editor.rs
+docs_updated_during_phase_6:
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/dmls/docs/autocomplete.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/darkmatter/dmls.md
+source_files_during_phase_7:
+- darkmatter/lib/src/markdown/schemas/completion.rs
+- claudine/cli/src/completion/engine/mod.rs
+- claudine/cli/src/completion/schema_completion/mod.rs
+- claudine/cli/src/completion/schema_completion/candidates.rs
+- claudine/cli/src/completion/schema_completion/keys.rs
+- claudine/cli/src/completion/schema_completion/tests.rs
+- claudine/cli/tests/l1/completion_committed_prompt_schema.rs
+docs_updated_during_phase_7:
+- claudine/docs/topics/completions/shell-completions.md
+- claudine/docs/topics/execution-flow.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/claudine/topics/execution-flow.md
 - .claude/skills/darkmatter/schema.md
 ---
 
@@ -811,3 +893,147 @@ to the library's resolver), so it does not apply.
 - Cross-OS: no OS-specific code was touched (the CLI passes the already-canonicalized path to the library;
   tests compare paths through `biscuit_file::canonicalize_simplified`), so no cross-check was run;
   `build-win-native` is in any case still unreachable ("Host key verification failed").
+
+## Phase 6
+
+### Wave 13 — Editor
+
+- **Pending views (R24)** — `dmls/src/providers/frontmatter.rs`. A pending template type is shown, not guessed:
+  - presence goes through `PropertyDef::requiredness()` (`is_required` now means `Requiredness::Required`), so a
+    `(required)` suffix on a slot never shows *Required* or `(required)` while the type is pending;
+  - key completion's detail is `type pending` (new `TYPE_PENDING` constant, shared by every pending label);
+  - `schema_hover_details` hands a pending definition to the new `pending_hover_details`: the type line (a
+    property-level union lists every arm, the pending one as *type pending*), `eager`, and the authored
+    description; no values, default, or alphanumeric lines;
+  - `def_value_completions` skips pending atoms, so static arms still complete;
+  - `suggestion_completions` falls through when no arm declares `suggest(...)`: the library answers a pending
+    template type with an empty pending query, which used to hide the static arms' values;
+  - `overlay/schema.rs::meta_schema_kinds` gets an explicit `TypeExpr::Slot` arm (no schema authoring while pending).
+    `overlay/suggestions.rs` already had its explicit pending arm (Phase 2) and needed no change.
+- **Worker and diagnostics** — the worker, supersession, stale marking, and watches needed no code, as R24
+  predicted: returned imports and their missing candidates are `Observation`s that `slot_reads` collects (proved by
+  the new `slot_jobs` tests). `diagnostics/slots.rs` already gives `dm.schema.slot_pending` and never a verdict while
+  pending. **One fix:** after a resolution *failed*, the editor served nothing from the schema, although
+  `schema-slots.md` documented that a failed slot still shows the template's literal parts. That was true for
+  template constraints too. `overlay/mod.rs::schema_for` now runs one passive assembly (`SlotUse::None`, nothing
+  evaluated) on a slot failure to recover the template shape. See `decisions_for_review`.
+- Docs: `schema-slots.md` "In the editor" gained a template-type subsection with a table, and its watched-reads
+  list now names returned imports; `dmls/docs/hover.md` and `autocomplete.md` gained "Properties whose type is
+  pending". Skill: `.claude/skills/darkmatter/dmls.md` (Schema slots).
+
+### Requirement → test mapping
+
+The boundary is the LSP protocol (an in-memory connection driving the real server, overlay, slot worker, and the
+grant store under the fixture `HOME`) plus the filesystem; F2, L1, with no terminal or window. The worker cells are
+in-process unit tests of `run_job`.
+
+| Requirement | Tests |
+| --- | --- |
+| Hover while pending: property and "type pending", no Required/values/default, pending note; resolved type replaces it | `schema_slots_editor::template_types::a_pending_template_type_claims_nothing_and_the_resolved_type_replaces_it` |
+| No value suggestions while pending; a static sibling (`kind`) unaffected; no verdict while pending; resolved values and verdict after | same test |
+| Key completion: `type pending`, never `(required)` from the suffix; `(required)` after resolution | `…::key_completion_marks_a_pending_template_type_and_never_its_suffix_requiredness` |
+| Static union arm preserved (values and hover) beside a pending arm | `…::a_static_union_arm_beside_a_pending_template_type_keeps_its_values_and_hover` |
+| Cancellation by a newer edit; superseded job publishes nothing | `…::a_newer_edit_cancels_the_template_type_job_in_flight` |
+| Stale last-good (verdict, hover, completion marked stale) during a refresh; then failed status (ERROR `dm.schema.slot_not_a_type`, no verdict, type pending again, static sibling kept) | `…::a_failed_refresh_serves_the_last_good_type_marked_stale_then_the_failure` |
+| Unsaved edit to a returned import re-resolves; disk untouched | `…::an_unsaved_edit_to_a_returned_import_re_resolves_the_document` |
+| Created missing import candidate re-resolves | `…::creating_a_missing_returned_import_re_resolves_the_document` |
+| Failed template constraint still offers literal members (the drift fix) | `schema_slots_editor::a_failed_slot_still_offers_the_template_literal_members` |
+| Worker: returned import is a watched read; missing candidate watched; no grant → approval required, nothing read | `slot_jobs::tests::{a_template_type_job_watches_the_import_its_returned_definition_names, a_template_type_job_with_a_missing_import_fails_and_watches_the_candidate, a_template_type_job_without_a_grant_needs_approval_and_reads_nothing}` |
+
+Regression proof: with the Phase 5 `providers/frontmatter.rs` restored, the three view tests fail (union arm, pending
+claims, key completion); the worker tests passed before and after, which confirms that the worker needed no change.
+Input Robustness Matrix: no loader or field validator changed; it does not apply.
+
+### Gates
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): `packages: [darkmatter-lsp, test-toolkit, darkmatter, darkmatter-cli]`,
+  `change_class: package`, so the gates are required and were run.
+- Targeted first: `cargo nextest run -p darkmatter-lsp -E 'test(template_types) | test(a_template_type_job) |
+  test(a_failed_slot_still)'` all passed; `-E 'test(slot) | test(schema) | test(frontmatter) | test(completion) |
+  test(hover)'`: 719 passed.
+- darkmatter `just test`: 16325 passed, 10 skipped. 8 tests went over 5 s under full-suite load, all of them
+  pre-existing and none touched here (darkmatter-cli `compose_lifecycle`, `compose_shell_template`,
+  `path_completion`, `render_basic`, `render_dispatch`; darkmatter-lsp `claudine_editor_parity` ×2,
+  `content_policy_baseline`). No failures and no reruns.
+- darkmatter `just lint`: clean (including the zed-dmls wasm check). `just check-tier-coverage darkmatter`: nothing stranded.
+- Dependents: no package depends on `darkmatter-lsp`, and the darkmatter library is unchanged in this phase, so
+  there is nothing downstream to test.
+- Cross-OS: no OS-specific code was touched (tests build paths from a canonicalized temp dir via
+  `biscuit_file::canonicalize_simplified`), so no cross-check was run. `build-win-native` was unreachable in earlier phases.
+
+## Phase 7
+
+### Wave 14 — Claudine shell completion
+
+- **Value requests resolve, names never do** — `claudine/cli/src/completion/schema_completion/mod.rs`.
+  - New `setter_value_candidates(file_arg, property, partial, ctx)` is the one value entry point; the engine's
+    `run_setter_value` calls it and falls back to `setter_value::run` on an empty answer, as before.
+  - A concrete schema answers as it did. In a template (`PromptSchema::Pending`), the property's authored
+    definition is found with `simplified_schema::completion::root_property_def` and checked with
+    `simplified_schema::slots::reachable_slots` (so a slot inside a named type the property uses counts):
+    - no slot → values come from the authored declaration through the new Darkmatter
+      `completion::for_root_property(root, definitions, name)`; nothing is evaluated;
+    - a slot → `LoadedPrompt::resolve_template` builds `DarkmatterSchemas::new(context).with_slot_session(
+      SlotSession::for_context(DataRuntime::new(), &context).with_mode(SessionMode::ReferenceCheck))` with no
+      handler and calls `effective_for`; success completes from the resolved schema, any error is logged at
+      `debug` (tracing, never stderr) and offers nothing.
+  - `LoadedPrompt` reads and parses the committed prompt once per request for both steps. `PendingPromptSchema`
+    now keeps the template's `DefinitionTable` beside its root (the static path needs it to open references).
+- **Names** — `keys.rs::is_required` reads `PropertyDef::requiredness()`: `Required`/`Optional` as before, and
+  `Pending` (a template type) ordered by its authored `(required)` suffix alone. Nothing is resolved for names; the
+  name path never installs a slot session.
+- **Darkmatter** — `darkmatter/lib/src/markdown/schemas/completion.rs`: `for_property` now delegates to the new
+  `for_root_property`, generic over `DefinitionLookup`; `suggestion_from_def`, `suggestion_from_union`, and
+  `first_completable_atom` are generic too. Behavior for `EffectiveSchema` callers is unchanged.
+- Docs: `claudine/docs/topics/completions/shell-completions.md` gained "Template schemas" (name vs value table,
+  non-prompting grants, all-or-nothing resolution, a Mermaid flow, ordering by suffix). Skills:
+  `.claude/skills/claudine/topics/execution-flow.md` (setter bullet; the skill folder links to `claudine/docs/`, so
+  this is also `claudine/docs/topics/execution-flow.md`) and `.claude/skills/darkmatter/schema.md`
+  (`for_root_property`).
+
+### Requirement → test mapping
+
+Boundary: the `claudine __complete` process (argv in, candidate lines and stderr out) over a real Git repository
+and a fixture `HOME` holding the Darkmatter grant store; F2, L1, no terminal or window. In-process unit tests cover
+the same rules at the module API (`setter_value_candidates`, `load_prompt_schema`, `property_names_in`).
+
+| Requirement | Tests |
+| --- | --- |
+| `stat<TAB>` → `status=`, nothing evaluated, nothing printed | `completion_committed_prompt_schema::template_names_complete_from_the_authored_template` (no repository, so no slot could resolve); unit `template_names_complete_from_the_authored_template_without_resolving_it` (in a clean committed repository where values do resolve, the name path still sees the template unresolved) |
+| Required-first ordering by authored suffix for a template type | unit `template_names_complete_…` (`'{{ … }}(required)'` first), `a_template_type_without_a_required_suffix_orders_with_the_optional_properties` |
+| `os=<TAB>` (template constraint) resolves with the automatic grant | `template_constraint_value_resolves_on_a_clean_commit`; unit `a_template_constraint_value_resolves_with_the_automatic_grant` (also a value partial) |
+| `status=<TAB>` (template type) resolves with the automatic grant | `template_type_value_resolves_on_a_clean_commit`; unit `a_template_type_value_resolves_with_the_automatic_grant` |
+| Grant absent → nothing offered, empty stdout and stderr; all-or-nothing across slots | `an_ungranted_template_offers_nothing_and_prints_nothing`; unit `an_ungranted_read_offers_nothing_while_static_properties_still_complete` |
+| `kind=<TAB>` static in a template completes without evaluation | `a_static_property_of_a_template_completes_without_evaluation` (no repository, no grant: resolution would fail); unit same as above |
+| Persisted user grant honored (control first: nothing without it) | `a_persisted_user_grant_is_honored`; unit `a_persisted_user_grant_resolves_a_template_outside_any_repository` |
+| Persisted deny wins over the automatic grant; invalid grant store offers nothing | unit `a_persisted_deny_wins_over_the_automatic_grant`, `an_invalid_grant_store_offers_nothing_for_a_slot_property` |
+| URL-reading template offers nothing, even with the site granted | `a_url_reading_template_offers_nothing_even_when_its_site_is_granted` |
+| Darkmatter `for_root_property` over a pending template | `markdown::schemas::completion::tests::root_property_of_a_pending_template_completes_only_its_static_properties` |
+
+The Pending test at `schema_completion/tests.rs:1167` was replaced by the unit tests above. Input Robustness
+Matrix: no loader or field validator changed (the grant store loader is Darkmatter's and unchanged; the
+invalid-store case is a wiring check only); it does not apply.
+
+### Gates
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): `packages: [claudine-cli, darkmatter, darkmatter-lsp, test-toolkit,
+  darkmatter-cli]`, `change_class: package` (the uncommitted Phase 6 DMLS files are still in the tree), so every gate
+  ran.
+- Targeted first: `cargo nextest run -p claudine-cli --bin claudine -E 'test(/schema_completion::tests::/)'` (55
+  passed); `cargo nextest run -p claudine-cli --test l1 -E 'test(/completion_committed_prompt_schema::|completion_setter::/)'`
+  (30 passed); `cargo nextest run -p darkmatter --lib -E 'test(/completion::tests::/)'` (24 passed).
+- claudine `just lint`: clean. claudine `just test`: the first run stopped on
+  `spawn_site_guard::migrated_l1_tests_keep_the_isolation_the_builder_gave_them`, which flagged the new test's
+  `.current_dir(…)` git spawn; it now uses `common::helper_command("git").arg("-C")` like `ctx_per_run.rs`. The rerun:
+  11859 passed, 15 skipped, 1 slow (pre-existing `container_schema_recursion::deep_container_deferral…`, 5.7 s, not
+  touched here).
+- darkmatter `just lint`: clean (including zed-dmls wasm). darkmatter `just test`: 16326 passed, 10 skipped; 9 slow
+  under full-suite load, all pre-existing and untouched (darkmatter-cli `compose_remote_caching`,
+  `compose_report_diagnostics`, `compose_shell_template`, `frontmatter_key_order`, `path_completion`, `render_basic`,
+  `render_dispatch`; darkmatter-lsp `claudine_editor_parity`, `content_policy_baseline`).
+- Dependents: the only Darkmatter change is a source-compatible generalization of `completion::for_property`; no
+  package outside `darkmatter/` and `claudine/` uses `schemas::completion`, and claudine's full suite ran above.
+- Cross-OS: no OS-specific code; the tests spell grant paths with `biscuit_file::canonicalize_simplified` and spawn
+  git through the fixture helper. No cross-check was run (and `build-win-native` was unreachable in earlier phases).
