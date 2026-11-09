@@ -2418,10 +2418,30 @@ def selected(package: str = "biscuit-hash-cli", *, prerelease: bool = False, **c
     return d.Selection.from_json(result.as_json(), source="selection")
 
 
+# Job results of a run whose package enables no optional channel.
+NO_CHANNELS = {"install": "success", "binstall": "skipped", "tap": "skipped", "brew_install": "skipped", "formula_current": None}
+# Job results of a run that installed through every channel on every target.
+EVERY_CHANNEL = {"install": "success", "binstall": "success", "tap": "success", "brew_install": "success", "formula_current": True}
+
+
 def bh_entry(**changes) -> dict:
-    entry = d.rollout_candidate(selected(), run_id=LEDGER_RUN_ID, install="success", binstall="skipped", tap="skipped")
+    """A verified bh entry that proves the complete chain: every channel `pass`."""
+    entry = d.rollout_candidate(selected(brew="bh", binstall="true"), run_id=LEDGER_RUN_ID, **EVERY_CHANNEL)
     entry.update(changes)
     return entry
+
+
+def bh_partial_entry(**changes) -> dict:
+    """A valid bh ledger record from a run with both optional channels disabled."""
+    entry = d.rollout_candidate(selected(), run_id=LEDGER_RUN_ID, **NO_CHANNELS)
+    entry.update(changes)
+    return entry
+
+
+def other_version(entry: dict, version: str, run_id: int) -> dict:
+    tag = f"{entry['package']}-v{version}"
+    return {**entry, "version": version, "tag": tag, "run_id": run_id,
+            "run_url": f"{d.CANONICAL_URL}/actions/runs/{run_id}", "release_url": f"{d.CANONICAL_URL}/releases/tag/{tag}"}
 
 
 def ledger_text(verified: list | None = None, pending: list | None = None, **top) -> str:
@@ -2459,7 +2479,7 @@ class RolloutLedgerTests(unittest.TestCase):
 
     def test_a_candidate_round_trips_through_the_ledger_and_permits_widening(self) -> None:
         entry = bh_entry()
-        self.assertEqual(entry["channels"], {"archive": "pass", "shell-installer": "pass", "brew": "disabled", "binstall": "disabled"})
+        self.assertEqual(entry["channels"], {"archive": "pass", "shell-installer": "pass", "brew": "pass", "binstall": "pass"})
         self.assertEqual(entry["run_url"], f"{d.CANONICAL_URL}/actions/runs/{LEDGER_RUN_ID}")
         text = ledger_text([entry])
         first = ledger(text)
@@ -2468,11 +2488,42 @@ class RolloutLedgerTests(unittest.TestCase):
         permitted = d.check_rollout("darkmatter-cli", first)
         self.assertEqual((permitted.tag, permitted.commit, permitted.run_id), (entry["tag"], TAG_SHA, LEDGER_RUN_ID))
         d.check_policy_rollout(policy(approve(POLICY_TEXT, "darkmatter-cli")), first)
+        self.assertEqual(first.verified[0].channels, tuple((channel, "pass") for channel in d.ROLLOUT_CHANNELS))
 
     def test_the_newest_verified_first_package_entry_is_used(self) -> None:
-        newer = bh_entry(version="0.2.0", tag="biscuit-hash-cli-v0.2.0", run_id=7,
-                         run_url=f"{d.CANONICAL_URL}/actions/runs/7", release_url=f"{d.CANONICAL_URL}/releases/tag/biscuit-hash-cli-v0.2.0")
+        newer = other_version(bh_entry(), "0.2.0", 7)
         self.assertEqual(d.check_rollout("git-wt-cli", ledger(ledger_text([bh_entry(), newer]))).run_id, 7)
+
+    def test_an_entry_with_any_channel_not_installed_is_a_record_but_never_the_first_chain(self) -> None:
+        """A disabled or unchanged channel is a valid ledger record of that
+        release; it is not proof of the complete chain, so it unlocks nothing."""
+        partial = bh_partial_entry()
+        self.assertEqual(partial["channels"], {"archive": "pass", "shell-installer": "pass", "brew": "disabled", "binstall": "disabled"})
+        complete = bh_entry()["channels"]
+        for name, channels in (
+            ("both disabled", partial["channels"]),
+            ("brew disabled", {**complete, "brew": "disabled"}),
+            ("brew unchanged", {**complete, "brew": "unchanged"}),
+            ("binstall disabled", {**complete, "binstall": "disabled"}),
+        ):
+            with self.subTest(name):
+                records = ledger(ledger_text([bh_entry(channels=channels)]))  # parses: a valid record
+                with self.assertRaisesRegex(
+                        d.DistributionError,
+                        r"^rollout\.json: darkmatter-cli cannot be distributed before the first biscuit-hash-cli release proves the "
+                        r"complete chain: no verified biscuit-hash-cli entry records every channel as 'pass' "
+                        r"\(verified\[0\] biscuit-hash-cli-v0\.1\.0 records (brew|binstall) "):
+                    d.check_rollout("darkmatter-cli", records)
+                with self.assertRaisesRegex(d.DistributionError, r"packages\.darkmatter-cli\.approved: .*proves the complete chain"):
+                    d.check_policy_rollout(policy(approve(POLICY_TEXT, "darkmatter-cli")), records)
+                self.assertIsNone(d.check_rollout("biscuit-hash-cli", records))
+
+    def test_a_newer_incomplete_entry_does_not_hide_an_older_complete_chain(self) -> None:
+        newer = other_version(bh_partial_entry(), "0.2.0", 7)
+        mixed = ledger(ledger_text([newer, bh_entry()]))
+        self.assertEqual(d.check_rollout("darkmatter-cli", mixed).run_id, LEDGER_RUN_ID)
+        newest_complete = other_version(bh_entry(), "0.3.0", 8)
+        self.assertEqual(d.check_rollout("darkmatter-cli", ledger(ledger_text([newer, bh_entry(), newest_complete]))).run_id, 8)
 
     def test_empty_lists_are_valid_and_permit_nothing_but_bh(self) -> None:
         empty = ledger(ledger_text())
@@ -2481,7 +2532,7 @@ class RolloutLedgerTests(unittest.TestCase):
             d.check_rollout("sniff-detection-cli", empty)
 
     def test_only_a_verified_first_package_entry_permits_widening(self) -> None:
-        other = d.rollout_candidate(selected("biscuit-file-cli"), run_id=LEDGER_RUN_ID, install="success", binstall="skipped", tap="skipped")
+        other = d.rollout_candidate(selected("biscuit-file-cli"), run_id=LEDGER_RUN_ID, **NO_CHANNELS)
         pending = [{"name": "live-release", "package": "biscuit-hash-cli", "reason": "not yet"}]
         with self.assertRaisesRegex(d.DistributionError, r"rollout\.json: .*no verified biscuit-hash-cli entry"):
             d.check_rollout("tree-hugger-cli", ledger(ledger_text([other], pending)))
@@ -2549,40 +2600,77 @@ class RolloutLedgerTests(unittest.TestCase):
 
 
 class RolloutCandidateTests(unittest.TestCase):
-    """The entry a publishing run proposes, from its jobs' results."""
+    """The entry a publishing run proposes, from its jobs' results. A channel
+    is `pass` only when the job that installs through it succeeded."""
 
-    def candidate(self, selection: d.Selection | None = None, **results: str) -> dict:
-        values = {"install": "success", "binstall": "skipped", "tap": "skipped", **results}
-        return d.rollout_candidate(selection or selected(), run_id=LEDGER_RUN_ID, **values)
+    def candidate(self, selection: d.Selection | None = None, **results) -> dict:
+        return d.rollout_candidate(selection or selected(), run_id=LEDGER_RUN_ID, **{**NO_CHANNELS, **results})
 
-    def test_channel_results_follow_the_selection(self) -> None:
+    def test_channel_results_follow_the_installation_jobs(self) -> None:
         brew = selected(brew="bh")
         both = selected(brew="bh", binstall="true")
-        for selection, results, expected in (
-            (selected(), {}, ("disabled", "disabled")),
-            (brew, {"tap": "success"}, ("pass", "disabled")),
-            (both, {"tap": "success", "binstall": "success"}, ("pass", "pass")),
-            (selected(prerelease=True, brew="bh"), {}, ("unchanged", "disabled")),
+        installed = {"tap": "success", "brew_install": "success", "formula_current": True}
+        for name, selection, results, expected in (
+            ("nothing enabled", selected(), {}, ("disabled", "disabled")),
+            ("brew installed", brew, installed, ("pass", "disabled")),
+            ("both installed", both, {**installed, "binstall": "success"}, ("pass", "pass")),
+            ("binstall only", selected(binstall="true"), {"binstall": "success"}, ("disabled", "pass")),
+            ("older retry under a newer formula", brew, {"tap": "success", "formula_current": False}, ("unchanged", "disabled")),
+            ("prerelease", selected(prerelease=True, brew="bh"), {}, ("unchanged", "disabled")),
         ):
-            with self.subTest(expected=expected):
+            with self.subTest(name):
                 entry = self.candidate(selection, **results)
                 self.assertEqual((entry["channels"]["brew"], entry["channels"]["binstall"]), expected)
                 self.assertEqual(entry["targets"], {target: "pass" for target in d.TARGETS})
 
     def test_a_run_that_did_not_prove_every_enabled_route_proposes_nothing(self) -> None:
         brew = selected(brew="bh")
+        prerelease = selected(prerelease=True, brew="bh")
         for selection, results, message in (
             (None, {"install": "failure"}, "install: is 'failure'"),
             (None, {"install": "skipped"}, "install: is 'skipped'"),
             (brew, {"tap": "skipped"}, "homebrew-tap: is 'skipped'; an enabled channel's job must be 'success'"),
             (brew, {"tap": "failure"}, "homebrew-tap: is 'failure'"),
+            # Publishing the formula is not installing it.
+            (brew, {"tap": "success", "formula_current": True},
+             "brew-install: is 'skipped'; the Homebrew installation of a formula the tap holds at this version must be 'success'"),
+            (brew, {"tap": "success", "brew_install": "failure", "formula_current": True}, "brew-install: is 'failure'"),
+            (brew, {"tap": "success", "brew_install": "cancelled", "formula_current": True}, "brew-install: is 'cancelled'"),
+            (brew, {"tap": "success", "brew_install": "success", "formula_current": False},
+             "brew-install: is 'success'; the Homebrew installation under a newer formula must be 'skipped'"),
+            (brew, {"tap": "success", "brew_install": "success"}, "formula-current: is not set"),
             (None, {"tap": "success"}, "homebrew-tap: is 'success'; a disabled channel's job must be 'skipped'"),
+            (None, {"brew_install": "success"}, "brew-install: is 'success'; a disabled channel's job must be 'skipped'"),
+            (None, {"formula_current": True}, "formula-current: is True, but the tap job did not run"),
+            (prerelease, {"tap": "success"}, "homebrew-tap: is 'success'; a release that does not update the formula"),
+            (prerelease, {"brew_install": "success"}, "brew-install: is 'success'; a release that does not update the formula"),
             (selected(binstall="true"), {"binstall": "cancelled"}, "binstall: is 'cancelled'"),
+            (selected(binstall="true"), {"binstall": "skipped"}, "binstall: is 'skipped'; an enabled channel's job must be 'success'"),
+            (None, {"binstall": "success"}, "binstall: is 'success'; a disabled channel's job must be 'skipped'"),
             (None, {"install": "passed"}, "--install: must be one of"),
+            (None, {"brew_install": "ok"}, "--brew-install: must be one of"),
             (verification(), {}, "a verification run proves no rollout"),
         ):
             with self.subTest(message=message), self.assertRaisesRegex(d.DistributionError, re.escape(message)):
                 self.candidate(selection, **results)
+
+    def test_only_a_run_that_installed_every_channel_proposes_the_first_chain(self) -> None:
+        """The candidate the workflow writes from each shape of run, through
+        the ledger and the widening gate."""
+        brew, both = selected(brew="bh"), selected(brew="bh", binstall="true")
+        for name, selection, results, unlocks in (
+            ("both channels disabled", selected(), {}, False),
+            ("brew installed, binstall disabled", brew, {"tap": "success", "brew_install": "success", "formula_current": True}, False),
+            ("older retry", both, {"tap": "success", "formula_current": False, "binstall": "success"}, False),
+            ("every channel installed", both, {**EVERY_CHANNEL}, True),
+        ):
+            with self.subTest(name):
+                records = ledger(ledger_text([self.candidate(selection, **results)]))
+                if unlocks:
+                    self.assertEqual(d.check_rollout("darkmatter-cli", records).run_id, LEDGER_RUN_ID)
+                else:
+                    with self.assertRaisesRegex(d.DistributionError, "proves the complete chain"):
+                        d.check_rollout("darkmatter-cli", records)
 
 
 class RolloutPreflightTests(PreflightFixture, unittest.TestCase):
@@ -2625,6 +2713,12 @@ class RolloutPreflightTests(PreflightFixture, unittest.TestCase):
         code, result, _ = self.md_preflight()
         self.assertEqual((code, result["status"], result["command"]), (0, "selected", "md"))
 
+    def test_an_incomplete_bh_chain_refuses_the_second_package_before_any_run_lookup(self) -> None:
+        self.write_ledger(ledger_text([bh_partial_entry()]))
+        self.forge["runs"] = {}
+        self.assertRefused(r"rollout\.json: darkmatter-cli cannot be distributed before the first biscuit-hash-cli release proves "
+                           r"the complete chain: .*verified\[0\] biscuit-hash-cli-v0\.1\.0 records brew 'disabled', binstall 'disabled'")
+
     def test_without_a_verified_bh_entry_the_second_package_is_refused(self) -> None:
         self.write_ledger(ledger_text(pending=[{"name": "live-release", "package": "biscuit-hash-cli", "reason": "r"}]))
         self.assertRefused(r"rollout\.json: darkmatter-cli cannot be distributed before the first biscuit-hash-cli release is verified")
@@ -2648,17 +2742,40 @@ class RolloutPreflightTests(PreflightFixture, unittest.TestCase):
         code, out, _ = self.preflight("real.yaml", "--rollout", str(self.dir / "absent.json"))
         self.assertEqual((code, json.loads(out)["status"]), (0, "ignored"))
 
+    def candidate_main(self, selection: d.Selection, *results: str, run_id: str = str(LEDGER_RUN_ID)) -> tuple[int, dict, str]:
+        (self.dir / "selection.json").write_text(json.dumps(selection.record), encoding="utf-8")
+        code, out, err = self.run_main("rollout-candidate", "--selection", str(self.dir / "selection.json"), "--run-id", run_id,
+                                       *results, "--output", str(self.dir / "candidate.json"))
+        return code, json.loads(out), err
+
     def test_the_candidate_command_writes_an_entry_the_ledger_accepts(self) -> None:
-        (self.dir / "selection.json").write_text(json.dumps(selected().record), encoding="utf-8")
-        code, out, _ = self.run_main("rollout-candidate", "--selection", str(self.dir / "selection.json"), "--run-id", str(LEDGER_RUN_ID),
-                                     "--install", "success", "--binstall", "skipped", "--tap", "skipped",
-                                     "--output", str(self.dir / "candidate.json"))
+        every = ("--install", "success", "--binstall", "success", "--tap", "success", "--brew-install", "success",
+                 "--formula-current", "true")
+        code, _, _ = self.candidate_main(selected(brew="bh", binstall="true"), *every)
         self.assertEqual(code, 0)
         self.write_ledger(ledger_text([json.loads((self.dir / "candidate.json").read_text())]))
         self.assertEqual(self.md_preflight()[0], 0)
-        code, out, err = self.run_main("rollout-candidate", "--selection", str(self.dir / "selection.json"), "--run-id", "x",
-                                       "--install", "success", "--binstall", "skipped", "--tap", "skipped")
-        self.assertEqual((code, json.loads(out)["status"]), (2, "invalid"))
+        code, out, _ = self.candidate_main(selected(brew="bh", binstall="true"), *every, run_id="x")
+        self.assertEqual((code, out["status"]), (2, "invalid"))
+
+    def test_the_candidate_command_reads_the_tap_output_strictly(self) -> None:
+        none = ("--install", "success", "--binstall", "skipped", "--tap", "skipped", "--brew-install", "skipped")
+        code, out, _ = self.candidate_main(selected(), *none, "--formula-current", "")
+        self.assertEqual((code, out["channels"]["brew"]), (0, "disabled"))
+        self.write_ledger(ledger_text([out]))
+        self.assertRefused(r"proves the complete chain")
+        for value, pattern in (("yes", r"--formula-current: must be one of \['', 'false', 'true'\], found 'yes'"),
+                               ("True", r"--formula-current: must be one of"),
+                               ("true", r"formula-current: is True, but the tap job did not run")):
+            with self.subTest(value=value):
+                code, out, err = self.candidate_main(selected(), *none, "--formula-current", value)
+                self.assertEqual((code, out["status"]), (2, "invalid"))
+                self.assertRegex(err, pattern)
+        err = io.StringIO()
+        with self.assertRaises(SystemExit) as caught, redirect_stderr(err), redirect_stdout(io.StringIO()):
+            d.main(["rollout-candidate", "--selection", str(self.dir / "selection.json"), "--run-id", str(LEDGER_RUN_ID), *none])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("the following arguments are required: --formula-current", err.getvalue())
 
 
 if __name__ == "__main__":

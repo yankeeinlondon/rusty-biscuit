@@ -55,15 +55,20 @@ below. No package is approved and no channel is live yet.
 - **Authorities.** `docs/deployment.yaml` approves (tagged *and* current
   copies); only `brew` and `binstall` are publishable channels.
   `.github/distribution/rollout.json` is the rollout ledger: nothing but
-  `biscuit-hash-cli` is distributed until it holds a verified `bh` entry tied
-  to a successful run. Entries are evidence, never approvals.
+  `biscuit-hash-cli` is distributed until it holds a verified `bh` entry with
+  every channel `pass` (so `bh` ships both `brew` and `binstall`), tied to a
+  successful run; `disabled`/`unchanged` entries are records, not the first
+  chain. Entries are evidence, never approvals.
 - **Pins.** `dist-workspace.toml` (dist 0.34.0, glibc 2.35 floor, opts no
   package in), `.github/distribution/build-images.json` (digest-pinned Ubuntu
   22.04, macOS 15.0, runners), `about.toml` (third-party notices).
 - **Invariants.** Four targets (macOS and Linux GNU, arm64 and x86_64); one
   command per archive; uploads never replace bytes (fix with a new version);
   the Homebrew formula never downgrades or takes a prerelease; only `upload`
-  writes, only `homebrew-tap` sees `HOMEBREW_TAP_TOKEN`.
+  writes, only `homebrew-tap` sees `HOMEBREW_TAP_TOKEN`. A channel result is
+  `pass` only when the job that installs through it succeeded on every target
+  (`smoke`, `install`, `brew-install`, `binstall`); publishing the formula is
+  never installation proof.
 - **Checks.** `just distribution-test` (CI's `distribution` companion suite
   of `repo-deps`), `just distribution-check` (adds the `distribution_*` Rust
   workflow contracts), `just distribution-verify OUT --artifacts DIR`

@@ -4,6 +4,17 @@ args=()
 if [ "${MEASURE:-false}" = true ]; then
     args+=(--counter-dir "$RUNNER_TEMP/build-counters")
 fi
+# The hosted job names a diagnostics directory on Ubuntu only; local callers,
+# including the real-Cargo fixture, leave it unset and sample nothing.
+if [ -n "${BUILD_DIAGNOSTICS:-}" ]; then
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    args+=(--sample-command "$(jq -nc \
+        --arg script "$here/storage_sample.py" \
+        --arg out "$BUILD_DIAGNOSTICS/storage.jsonl" \
+        --arg target "${CARGO_TARGET_DIR:-$PWD/target}" \
+        --arg output "$RUNNER_TEMP/build" \
+        '["python3", $script, "--out", $out, "--target", $target, "--output", $output]')")
+fi
 # All records assigned to this owner share Cargo's target directory. This
 # entry point is also exercised by the real-Cargo shared-dependency fixture.
 start=$(date +%s)

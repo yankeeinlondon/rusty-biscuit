@@ -713,6 +713,25 @@ crates with child Cargo processes, so they run on the owner rather than archive 
 The consumers' normal L1 filter excludes them from both execution and expected-test listings;
 the owner keeps the guard's reports and runs it before producing the archive.
 
+The Ubuntu owner also records **storage samples**, because that is the owner whose disk fills.
+`scripts/ci/storage_sample.py` appends one JSON line to `$RUNNER_TEMP/build-diagnostics/storage.jsonl`
+before and after the cache restore, before and after the fresh-output guard, at the start of
+production and after every record attempt (success, compile failure, or preflight refusal), and
+before and after publication. The job uploads the file as `build-diagnostics-<producer>` even when
+an earlier step failed. Each line keeps its measurements apart and never adds them up:
+
+| Field | What it measures |
+| ----- | ---------------- |
+| `locations` | free bytes and free inodes for the target, archive-output, and temp filesystems; a missing directory is measured at its nearest existing parent |
+| `shared_filesystem` | whether two of those locations are on the same device |
+| `categories` | allocated bytes of `target`, retained archives and sidecars, inventory scratch, other output metadata, and the guard's `target/schematic-fresh-output` (marked as overlapping `target`) |
+| `restore` | after the cache restore only: which restored target entries are profile directories no planned identity uses (`obsolete`), which are `live`, and which are `unknown` |
+
+A measurement that could not be taken reads `{"unavailable": "<reason>"}`, never zero. The
+samples are boundary observations, not the peak reached while linking or compressing in between,
+and a sampler failure never changes a record's status or the job's result. Other owners and local
+`ci-build produce` runs take no samples.
+
 A consumer downloads that artifact, runs `ci-build verify` — plan key, realized digest, source
 identity, producer/execution compatibility, archive and sidecar checksums, expected binaries, and
 the host's own runtime ABI and observed external library identities — before tests run. Inventory and

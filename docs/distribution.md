@@ -255,9 +255,11 @@ flowchart TD
     U --> I["Install x4<br/>published installer on every target"]
     U --> BI["Binstall x4<br/>only when the channel is on"]
     I --> T["Homebrew tap<br/>only when the formula changes"]
+    T -->|tap now holds this version| BR["Homebrew install x4<br/>brew install from the tap on every target"]
     I --> C["Rollout candidate<br/>proposed ledger entry"]
     BI --> C
     T --> C
+    BR --> C
 ```
 
 | Job                 | What it does                                                                                                   |
@@ -271,6 +273,7 @@ flowchart TD
 | `install` (×4)      | Downloads the published installer and installs into an isolated directory on each target                     |
 | `binstall` (×4)     | Installs with cargo-binstall from the exact tag, only when the `binstall` channel is on                       |
 | `homebrew-tap`      | Publishes the formula, only after every `install` job passed                                                  |
+| `brew-install` (×4) | Runs `brew install` from the public tap on each target and runs the installed command, only when the tap now holds this version |
 | `rollout-candidate` | Writes the ledger entry this run proves                                                                       |
 
 Building uses [`dist`](https://github.com/axodotdev/cargo-dist) (cargo-dist), pinned in
@@ -290,7 +293,7 @@ message:
 - the Release exists and is published, not a draft;
 - the tag points at the final commit of a merged, reviewed release proposal;
 - for any package other than `biscuit-hash-cli`, the [rollout ledger](#7-the-rollout-ledger) holds a
-  verified `biscuit-hash-cli` entry.
+  verified `biscuit-hash-cli` entry that records every channel as `pass`.
 
 ### Following a run
 
@@ -364,9 +367,16 @@ binstall, Homebrew) before any other package may follow. The rollout ledger,
 [`.github/distribution/rollout.json`](../.github/distribution/rollout.json), records that proof.
 
 Preflight refuses every package other than `biscuit-hash-cli` until the ledger's `verified` list
-holds a `biscuit-hash-cli` entry whose `run_id` GitHub reports as a successful run of
-`distribute-binaries.yml`. That holds even when `docs/deployment.yaml` approves the other package.
-Ledger entries are evidence, never approvals: a verified entry does not approve anything by itself.
+holds a `biscuit-hash-cli` entry that proves the **complete chain**, meaning all four channels are
+`pass`, and whose `run_id` GitHub reports as a successful run of `distribute-binaries.yml`. That
+holds even when `docs/deployment.yaml` approves the other package. Ledger entries are evidence,
+never approvals: a verified entry does not approve anything by itself.
+
+So the `bh` release that opens the rollout must have both `brew` and `binstall` turned on. A `bh`
+entry with a `disabled` or `unchanged` channel is still a valid record of that release, but it does
+not unlock any other package; preflight then says that no `biscuit-hash-cli` entry proves the
+complete chain and lists the channels that fall short. When several entries qualify, the newest
+version's entry is the one preflight checks against GitHub.
 
 ### Recording a verified release
 
@@ -398,9 +408,26 @@ through a reviewed pull request. An entry has this shape:
 }
 ```
 
-`brew` may also be `unchanged` (the tap already held that or a newer version) or `disabled`;
-`binstall` may be `disabled`. Every target must be `pass`. The ledger is validated strictly: an
-unknown field, a URL that does not match the run or tag, or a duplicate tag is an error.
+Each channel result says how the run proved that channel. `pass` always means the run itself
+installed through the channel on all four targets; publishing something is never enough:
+
+| Channel           | `pass` means                                                                                       | Other allowed values |
+| ----------------- | -------------------------------------------------------------------------------------------------- | -------------------- |
+| `archive`         | every target's `smoke` job ran the archived command (required before anything is uploaded)         | none                 |
+| `shell-installer` | every target's `install` job installed from the published installer and ran the command           | none                 |
+| `brew`            | the tap now holds this version, and every target's `brew-install` job installed it from the tap and ran the command | `unchanged`, `disabled` |
+| `binstall`        | every target's `binstall` job installed with cargo-binstall (no compile fallback) and ran the command | `disabled`         |
+
+- `unchanged` (brew only): this run installed nothing with Homebrew because the formula did not
+  change to this version, either because the release is a prerelease or because the tap already
+  held a newer version (a retried older run). A tap that already held exactly this version still
+  counts as current, so it is installed and can be `pass`.
+- `disabled`: the package does not ship that channel.
+
+The candidate command refuses any combination of job results that does not fit this table, for
+example a successful tap publication without a successful `brew-install`. Every target must be
+`pass`. The ledger is validated strictly: an unknown field, a URL that does not match the run or
+tag, or a duplicate tag is an error.
 
 ### Outstanding items
 
@@ -416,7 +443,7 @@ unknown field, a URL that does not match the run or tag, or a duplicate tag is a
 | `x86_64-runtime`      | No native x86_64 macOS or Linux host has run the archives and installer |
 | `wsl2-runtime`        | No WSL2 host has run the Linux archive and installer                    |
 | `live-release`        | No release of the package has been distributed yet                      |
-| `first-chain`         | The package waits for a verified `biscuit-hash-cli` entry               |
+| `first-chain`         | The package waits for a verified `biscuit-hash-cli` entry with every channel `pass` |
 | `brew-description`    | The Cargo `description` fails `brew audit`; shorten it when enabling `brew` |
 
 Remove an item in the same reviewed change that resolves it.
@@ -489,12 +516,42 @@ job checks the signature both through GitHub and with `git verify-commit` agains
 signing key. Publishing the same version again with different formula contents is refused; publish
 a new version instead.
 
+### Installing from the tap
+
+Publishing a formula does not show that it installs, so the `brew-install` job checks it the way a
+user would, on each of the four targets. It runs only when the tap job reports that the tap's
+formula now names this version (it was created or updated, or the tap already held exactly this
+version). An older retry that left a newer formula alone installs nothing, and its ledger entry
+records `brew: unchanged`.
+
+On each target the job:
+
+1. uses the runner's Homebrew; a runner without one gets Homebrew/brew at the release tag pinned in
+   the workflow (`HOMEBREW_BREW_TAG`), cloned to Homebrew's default prefix and checked against the
+   pinned commit (`HOMEBREW_BREW_COMMIT`);
+2. taps `yankeeinlondon/tap` anonymously (no token reaches the job, and auto-update, analytics, and
+   cleanup are off) and confirms that the tapped formula names this version;
+3. runs `brew install yankeeinlondon/tap/<formula>`, confirms that `brew list --versions` reports
+   this version, and runs the installed command's `--version`, which must print it;
+4. uninstalls the formula.
+
+The job keeps `brew-install.json` as the `distribution-brew-install-<target>` artifact. To repeat
+the check on a host with Homebrew, download the run's `distribution-preflight` artifact and pass
+its `selection.json` and the host's own target:
+
+```bash
+bash scripts/distribution/pinned-python.sh bash -c '"${PYTHON}" scripts/distribution/tap.py \
+  install-check --selection selection.json --target aarch64-apple-darwin --report brew-install.json'
+```
+
+Only a successful `brew-install` on every target lets the rollout candidate record `brew: pass`.
+
 ## 10. Credentials and setup
 
 Credentials are scoped to the one job that needs them:
 
-- Build, package, smoke, install, and binstall jobs can only read the repository and see no
-  secrets.
+- Build, package, smoke, install, binstall, and Homebrew install jobs can only read the repository
+  and see no secrets.
 - Only `upload` may write to the repository (`contents: write`), and only to add Release assets.
 - Only `homebrew-tap` sees the tap credentials.
 
@@ -591,7 +648,8 @@ gh workflow run distribute-binaries.yml --ref my-branch \
 It builds the dispatched revision for one package, approved by the run's own inputs instead of
 `docs/deployment.yaml`, and keeps everything as artifacts. `brew` exercises the formula output, and
 `binstall=true` checks that the manifest's binstall metadata is in its enabled form. A verify run
-cannot reach `upload`, `install`, `binstall`, `homebrew-tap`, or `rollout-candidate`.
+cannot reach `upload`, `install`, `binstall`, `homebrew-tap`, `brew-install`, or
+`rollout-candidate`.
 
 ## Where to look next
 

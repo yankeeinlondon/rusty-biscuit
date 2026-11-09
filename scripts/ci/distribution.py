@@ -37,8 +37,10 @@ distributed, and with what, before anything is built or uploaded:
   alone, by SemVer order; it never downgrades.
 - `preflight` also reads the rollout ledger (`.github/distribution/rollout.json`):
   no package but `biscuit-hash-cli` is distributed until the ledger holds a
-  verified `biscuit-hash-cli` entry whose run GitHub reports successful.
-  `rollout-candidate` writes the entry a successful publishing run proposes.
+  verified `biscuit-hash-cli` entry with every channel `pass` whose run GitHub
+  reports successful. `rollout-candidate` writes the entry a successful
+  publishing run proposes; a channel is `pass` only when its installation job
+  succeeded on every target.
 
 Every input is parsed strictly: an invalid document or field is a located
 error (`file:line:column: field path: message`) and nothing runs. Exit codes:
@@ -1940,17 +1942,23 @@ def check_bundle_run(run: Any, jobs: Any, run_id: int, *, run_source: str = "run
 # ---------------------------------------------------------------------------
 
 # `bh` proves the whole chain first. Until the ledger holds a verified entry
-# for it, tied to a successful distribution run, preflight refuses every other
-# package even when `docs/deployment.yaml` approves it. Entries are evidence
-# carried in by a reviewed repository change, never approvals.
+# for it that records every channel as `pass`, tied to a successful
+# distribution run, preflight refuses every other package even when
+# `docs/deployment.yaml` approves it. Entries are evidence carried in by a
+# reviewed repository change, never approvals.
 ROLLOUT_LEDGER = ".github/distribution/rollout.json"
 FIRST_PACKAGE = "biscuit-hash-cli"
 ROLLOUT_CHANNELS = ("archive", "shell-installer", "brew", "binstall")
 ROLLOUT_TOP_LEVEL = frozenset({"first_package", "verified", "pending"})
 ROLLOUT_ENTRY_FIELDS = frozenset({"package", "version", "tag", "commit", "run_id", "run_url", "release_url", "targets", "channels"})
 ROLLOUT_PENDING_FIELDS = frozenset({"name", "package", "reason"})
-# What a verified entry may record per channel. The archive and installer are
-# what the run itself proved; `unchanged` is a formula an older retry left alone.
+# What a verified entry may record per channel. `pass` is only ever an
+# installation the run itself performed: the archive smoke and the shell
+# installer on every target, `brew install` from the tap on every target, and
+# cargo-binstall on every target. `unchanged` is a formula this run did not
+# install (a prerelease, or an older retry under a newer formula); `disabled`
+# is a channel the package does not ship. Both are valid records of a release,
+# but only an entry with every channel `pass` is the first complete chain.
 ROLLOUT_CHANNEL_RESULTS: Mapping[str, frozenset[str]] = {
     "archive": frozenset({"pass"}),
     "shell-installer": frozenset({"pass"}),
@@ -1966,6 +1974,12 @@ class RolloutEntry:
     tag: str
     commit: str
     run_id: int
+    channels: tuple[tuple[str, str], ...]  # (channel, result), in ROLLOUT_CHANNELS order
+
+    @property
+    def incomplete(self) -> list[str]:
+        """The channels this entry did not prove by installation."""
+        return [f"{channel} {result!r}" for channel, result in self.channels if result != "pass"]
 
 
 @dataclass(frozen=True)
@@ -2008,11 +2022,13 @@ def _rollout_entry(fields: Fields, path: list[Any]) -> RolloutEntry:
         if fields.string([*path, "targets", target]) != "pass":
             raise fields.error([*path, "targets", target], "must be 'pass'; a verified entry records only a target whose install passed")
     _exact_keys(fields, [*path, "channels"], frozenset(ROLLOUT_CHANNELS))
+    channels = []
     for channel in ROLLOUT_CHANNELS:
         result = fields.string([*path, "channels", channel])
         if result not in ROLLOUT_CHANNEL_RESULTS[channel]:
             raise fields.error([*path, "channels", channel], f"must be one of {sorted(ROLLOUT_CHANNEL_RESULTS[channel])}, found {result!r}")
-    return RolloutEntry(package, version, tag, commit, run_id)
+        channels.append((channel, result))
+    return RolloutEntry(package, version, tag, commit, run_id, tuple(channels))
 
 
 def parse_rollout(data: bytes, *, source: str) -> RolloutLedger:
@@ -2051,8 +2067,10 @@ def load_rollout(path: Path, *, source: str | None = None) -> RolloutLedger:
 
 
 def check_rollout(package: str, ledger: RolloutLedger) -> RolloutEntry | None:
-    """The verified first-package entry that permits distributing `package`,
-    or None for the first package itself, which needs none."""
+    """The newest verified first-package entry whose every channel is `pass`
+    (the first complete chain), which permits distributing `package`; None for
+    the first package itself, which needs none. An entry with a `disabled` or
+    `unchanged` channel is a valid record but never permits widening."""
     if package == ledger.first_package:
         return None
     entries = [entry for entry in ledger.verified if entry.package == ledger.first_package]
@@ -2062,7 +2080,16 @@ def check_rollout(package: str, ledger: RolloutLedger) -> RolloutEntry | None:
             f"{package} cannot be distributed before the first {ledger.first_package} release is verified: "
             f"the ledger has no verified {ledger.first_package} entry (see docs/distribution.md)",
         )
-    return max(entries, key=lambda entry: entry.version)
+    complete = [entry for entry in entries if not entry.incomplete]
+    if not complete:
+        found = "; ".join(f"verified[{ledger.verified.index(entry)}] {entry.tag} records {', '.join(entry.incomplete)}"
+                          for entry in entries)
+        raise DistributionError(
+            ledger.source,
+            f"{package} cannot be distributed before the first {ledger.first_package} release proves the complete chain: "
+            f"no verified {ledger.first_package} entry records every channel as 'pass' ({found}) (see docs/distribution.md)",
+        )
+    return max(complete, key=lambda entry: entry.version)
 
 
 def check_policy_rollout(policy: Policy, ledger: RolloutLedger) -> None:
@@ -2110,27 +2137,60 @@ def gate_rollout(result: Preflight, ledger: RolloutLedger, forge: Forge) -> None
 
 # Each workflow job's `needs.<job>.result`, as the candidate job passes it.
 JOB_RESULTS = frozenset({"success", "failure", "cancelled", "skipped"})
+# `needs.homebrew-tap.outputs.formula_current`: whether the tap's formula names
+# this version after the tap job ran. Empty when the tap job did not run.
+FORMULA_CURRENT = {"true": True, "false": False, "": None}
 
 
-def rollout_candidate(selection: Selection, *, run_id: int, install: str, binstall: str, tap: str) -> dict[str, Any]:
+def rollout_candidate(selection: Selection, *, run_id: int, install: str, binstall: str, tap: str,
+                      brew_install: str, formula_current: bool | None) -> dict[str, Any]:
     """The ledger entry a successful publishing run proposes. The workflow
-    keeps it as an artifact; a reviewed change copies it into the ledger."""
+    keeps it as an artifact; a reviewed change copies it into the ledger.
+
+    A channel is `pass` only when the job that installs through it succeeded on
+    every target; a publication job (the tap commit) never proves installation.
+    Any combination of job results the workflow cannot produce is refused."""
     if not selection.publishable:
         raise DistributionError("selection", "a verification run proves no rollout")
-    for name, result in (("install", install), ("binstall", binstall), ("homebrew-tap", tap)):
+    for name, result in (("install", install), ("binstall", binstall), ("tap", tap), ("brew-install", brew_install)):
         if result not in JOB_RESULTS:
-            raise DistributionError(f"--{name.replace('homebrew-', '')}", f"must be one of {sorted(JOB_RESULTS)}, found {result!r}")
+            raise DistributionError(f"--{name}", f"must be one of {sorted(JOB_RESULTS)}, found {result!r}")
     if install != "success":
         raise DistributionError("install", f"is {install!r}; a rollout needs every target's install to pass")
 
-    def channel(name: str, enabled: bool, result: str, skipped_as: str) -> str:
-        expected = "success" if enabled else "skipped"
+    def expect(name: str, result: str, expected: str, why: str) -> None:
         if result != expected:
-            raise DistributionError(name, f"is {result!r}; {'an enabled' if enabled else 'a disabled'} channel's job must be {expected!r}")
-        return "pass" if enabled else skipped_as
+            raise DistributionError(name, f"is {result!r}; {why} must be {expected!r}")
 
-    brew_enabled = "brew" in selection.channels
-    brew = channel("homebrew-tap", selection.formula_update, tap, "unchanged" if brew_enabled else "disabled")
+    def skipped(why: str) -> None:
+        expect("homebrew-tap", tap, "skipped", why)
+        expect("brew-install", brew_install, "skipped", why)
+        if formula_current is not None:
+            raise DistributionError("formula-current", f"is {formula_current!r}, but the tap job did not run")
+
+    if "brew" not in selection.channels:
+        skipped("a disabled channel's job")
+        brew = "disabled"
+    elif not selection.formula_update:
+        skipped("a release that does not update the formula (a prerelease)")
+        brew = "unchanged"
+    else:
+        expect("homebrew-tap", tap, "success", "an enabled channel's job")
+        if formula_current is None:
+            raise DistributionError("formula-current", "is not set, but the tap job succeeded and must report it")
+        if formula_current:
+            expect("brew-install", brew_install, "success", "the Homebrew installation of a formula the tap holds at this version")
+            brew = "pass"
+        else:
+            expect("brew-install", brew_install, "skipped", "the Homebrew installation under a newer formula")
+            brew = "unchanged"
+
+    if "binstall" in selection.channels:
+        expect("binstall", binstall, "success", "an enabled channel's job")
+        binstall_result = "pass"
+    else:
+        expect("binstall", binstall, "skipped", "a disabled channel's job")
+        binstall_result = "disabled"
     entry = {
         "package": selection.package,
         "version": selection.version,
@@ -2144,7 +2204,7 @@ def rollout_candidate(selection: Selection, *, run_id: int, install: str, binsta
             "archive": "pass",
             "shell-installer": "pass",
             "brew": brew,
-            "binstall": channel("binstall", "binstall" in selection.channels, binstall, "disabled"),
+            "binstall": binstall_result,
         },
     }
     # The candidate must be exactly what the ledger accepts.
@@ -2527,8 +2587,11 @@ def _command_verify_select(args: argparse.Namespace, env: Mapping[str, str]) -> 
 
 def _command_rollout_candidate(args: argparse.Namespace, env: Mapping[str, str]) -> tuple[int, Any]:
     selection = Selection.from_json(_read_json_file(args.selection), source=args.selection.as_posix())
+    if args.formula_current not in FORMULA_CURRENT:
+        raise DistributionError("--formula-current", f"must be one of {sorted(FORMULA_CURRENT)}, found {args.formula_current!r}")
     entry = rollout_candidate(selection, run_id=_run_id(args.run_id, "--run-id"), install=args.install,
-                              binstall=args.binstall, tap=args.tap)
+                              binstall=args.binstall, tap=args.tap, brew_install=args.brew_install,
+                              formula_current=FORMULA_CURRENT[args.formula_current])
     return 0, entry
 
 
@@ -2666,6 +2729,9 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     candidate.add_argument("--install", required=True, help="needs.install.result")
     candidate.add_argument("--binstall", required=True, help="needs.binstall.result")
     candidate.add_argument("--tap", required=True, help="needs.homebrew-tap.result")
+    candidate.add_argument("--brew-install", required=True, help="needs.brew-install.result")
+    candidate.add_argument("--formula-current", required=True,
+                           help="needs.homebrew-tap.outputs.formula_current: 'true', 'false', or '' when the tap job did not run")
 
     for command in (preflight, config, stage, plan, provenance, reconcile, tap, verify, runners, bundle, check, publish, candidate):
         command.add_argument("--output", type=Path, help="also write the JSON result here")

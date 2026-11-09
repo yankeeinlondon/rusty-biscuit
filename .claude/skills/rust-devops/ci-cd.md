@@ -649,6 +649,16 @@ publisher in `scripts/ci/artifacts/` uploads separate package-keyed archives and
 statuses, including successful records when a sibling fails. Artifact transport
 must not change build ownership. Its Node dependencies are pinned by `npm ci`.
 
+The Ubuntu owner alone samples storage: the job's first step exports
+`BUILD_DIAGNOSTICS` on Linux, workflow steps call `scripts/ci/storage_sample.py`
+around the cache restore, the schematic guard, and publication, and
+`produce-owner.sh` passes the same sampler to `ci-build produce
+--sample-command '<json argv>'`, which runs it at owner start and after every
+record's status is written. Samples land in `build-diagnostics-<producer>`
+(always uploaded). Every sample step ends in `|| true` — never
+`continue-on-error`, which the owner job may not carry — and the producer
+ignores the sampler's exit: a diagnostic never decides a result.
+
 Manifest generation 3 verifies clean tracked source at the planned commit on
 both boundaries. That makes the checkout ref part of the contract: every
 `actions/checkout` in `ci.yml`, `_area-ci.yml`, `_package-ci.yml`, and

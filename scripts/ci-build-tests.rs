@@ -429,6 +429,45 @@ fn report_takes_its_directory_from_the_flag_in_both_spellings_or_the_environment
     assert_eq!(inherited, expected);
 }
 
+fn sample_command_of(extra: &[&str]) -> Result<Option<Vec<String>>> {
+    let mut args = strings(&["produce", "--plan", "p.json", "--producer", "ubuntu-latest", "--out-dir", "o"]);
+    args.extend(strings(extra));
+    match parse(&args, None)? {
+        Invocation::Produce(options) => Ok(options.sample_command),
+        other => panic!("expected a produce invocation, got {other:?}"),
+    }
+}
+
+/// The storage diagnostic reaches the producer as an exact argv, and only when
+/// a caller supplies one: an ordinary local `produce` samples nothing.
+#[test]
+fn a_sample_command_is_an_exact_argv_and_is_absent_unless_given() {
+    assert_eq!(sample_command_of(&[]).unwrap(), None);
+    let argv = sample_command_of(&[
+        "--sample-command",
+        r#"["python3","scripts/ci/storage_sample.py","--output","/a dir/with spaces"]"#,
+    ])
+    .unwrap();
+    assert_eq!(
+        argv,
+        Some(strings(&["python3", "scripts/ci/storage_sample.py", "--output", "/a dir/with spaces"]))
+    );
+    let joined = sample_command_of(&[r#"--sample-command=["sampler"]"#]).unwrap();
+    assert_eq!(joined, Some(strings(&["sampler"])));
+}
+
+#[test]
+fn a_sample_command_that_is_not_a_nonempty_json_argv_is_refused() {
+    for bad in [r#"python3 sampler.py"#, r#"{"program":"x"}"#, "[]", r#"[""]"#, "[1]", r#"["a", 2]"#, "null"] {
+        let error = sample_command_of(&["--sample-command", bad])
+            .expect_err("a malformed sample command must be refused, not ignored");
+        assert!(
+            format!("{error:#}").contains("--sample-command"),
+            "{bad}: the error names the flag: {error:#}"
+        );
+    }
+}
+
 #[test]
 fn an_explicit_directory_overrides_the_inherited_one() {
     let parsed = parse(

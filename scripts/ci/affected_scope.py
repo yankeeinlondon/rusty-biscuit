@@ -271,6 +271,7 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
             "test_runner_loss.py",
             "test_schema.py",
             "test_seed.py",
+            "test_storage_sample.py",
         )
     },
     # Lint-only on purpose, and the one entry with no `recipe`: a source-policy

@@ -646,7 +646,14 @@ jobs:
       - name: Mark the owner's start
         id: job_start
         shell: bash
-        run: echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
+        run: |
+          echo "epoch=$(date +%s)" >>"$GITHUB_OUTPUT"
+          # Storage samples are an Ubuntu diagnostic: that owner is the one
+          # whose disk fills. Every sampling step below, and the producer's own
+          # per-record samples (`produce-owner.sh`), key off this variable.
+          if [ "$RUNNER_OS" = Linux ]; then
+            echo "BUILD_DIAGNOSTICS=$RUNNER_TEMP/build-diagnostics" >>"$GITHUB_ENV"
+          fi
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.scope.outputs.head }}
@@ -701,14 +708,38 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
+      - name: Sample storage before the cache restore
+        if: ${{ env.BUILD_DIAGNOSTICS != '' }}
+        shell: bash
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label before-cache-restore --inventory || true
       # The producer cache. Both workspaces in one entry: `scripts/` builds the
       # producer tool itself and has no cache of its own anywhere else in this
       # workflow, and a second `rust-cache` step would install a second post-job
       # save racing the first.
       - uses: Swatinem/rust-cache@v2
+        id: cache
         with:
           workspaces: ". -> target"
           shared-key: build-owner-${{ steps.slice.outputs.producer }}
+      # Restored entries are classified against this owner's planned target
+      # triples and profiles; `release` holds the producer tool this job builds
+      # and the guard's child target is live whenever the guard runs.
+      - name: Sample storage after the cache restore
+        if: ${{ env.BUILD_DIAGNOSTICS != '' }}
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          PRODUCER: ${{ matrix.build }}
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label after-cache-restore --cache-hit "$CACHE_HIT" --inventory
+          --restored-since before-cache-restore
+          --plan ci-artifacts/ci-resolved-plan/resolved-plan.json --producer "$PRODUCER"
+          --live-path release --live-path schematic-fresh-output || true
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       # `--no-default-features --features build-tools` keeps `sniff` — and so
@@ -720,6 +751,13 @@ jobs:
           cargo build --release \
             -p repo-deps \
             --no-default-features --features build-tools --bin ci-build
+      - name: Sample storage before the schematic guard
+        if: ${{ env.BUILD_DIAGNOSTICS != '' }}
+        shell: bash
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label before-schematic-guard || true
       # Schematic's fresh-output guard compiles freshly generated client crates
       # with a child Cargo, which archive consumers do not have. Its tests are
       # schematic-gen's `slow_` L1 tests: the L1 filter already leaves them out
@@ -744,6 +782,13 @@ jobs:
           # The guard builds offline against the generated crate's lockfile.
           cargo fetch --manifest-path schematic/schema/Cargo.toml
           just -f schematic/justfile test-fresh-output
+      - name: Sample storage after the schematic guard
+        if: ${{ always() && env.BUILD_DIAGNOSTICS != '' && steps.fresh_output.outputs.ran == 'true' }}
+        shell: bash
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label after-schematic-guard || true
       - name: Keep the fresh-output guard report
         if: ${{ always() && steps.fresh_output.outputs.ran == 'true' }}
         uses: actions/upload-artifact@v6
@@ -758,6 +803,13 @@ jobs:
           MEASURE: ${{ inputs.measure-compiler-work && 'true' || 'false' }}
           PRODUCER: ${{ matrix.build }}
         run: bash scripts/ci/produce-owner.sh
+      - name: Sample storage before publication
+        if: ${{ always() && env.BUILD_DIAGNOSTICS != '' }}
+        shell: bash
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label before-publication || true
       - name: Publish package builds and statuses
         if: ${{ always() }}
         uses: actions/github-script@v8
@@ -785,6 +837,23 @@ jobs:
               upload: (...args) => client.uploadArtifact(...args),
             });
             if (!ok) core.setFailed('One or more package builds could not be published');
+      - name: Sample storage after publication
+        if: ${{ always() && env.BUILD_DIAGNOSTICS != '' }}
+        shell: bash
+        run: >-
+          python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
+          --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
+          --label after-publication || true
+      # Every sample taken, including those before a failure. A runner lost
+      # outright uploads nothing; each sample also prints a one-line summary
+      # to the job log as it is taken.
+      - name: Keep the storage samples
+        if: ${{ always() && env.BUILD_DIAGNOSTICS != '' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-diagnostics-${{ matrix.build }}
+          path: ${{ runner.temp }}/build-diagnostics
+          if-no-files-found: warn
 
   # One caller identity per selected AREA — the top-level entry a reader sees
   # for the tested half of the run (AC2). The area's packages, their gates, and

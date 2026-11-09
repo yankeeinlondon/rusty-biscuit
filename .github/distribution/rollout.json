@@ -5,7 +5,7 @@
     {
       "name": "approval",
       "package": "biscuit-hash-cli",
-      "reason": "docs/deployment.yaml does not approve biscuit-hash-cli; approval (with brew: bh) arrives through a reviewed release proposal"
+      "reason": "docs/deployment.yaml does not approve biscuit-hash-cli; approval (with brew: bh and binstall enabled, which the complete first chain needs) arrives through a reviewed release proposal"
     },
     {
       "name": "release-app",
@@ -40,7 +40,7 @@
     {
       "name": "first-chain",
       "package": "biscuit-file-cli",
-      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+      "reason": "waits for a verified biscuit-hash-cli entry with every channel pass; preflight refuses this package until then"
     },
     {
       "name": "approval",
@@ -50,7 +50,7 @@
     {
       "name": "first-chain",
       "package": "tree-hugger-cli",
-      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+      "reason": "waits for a verified biscuit-hash-cli entry with every channel pass; preflight refuses this package until then"
     },
     {
       "name": "approval",
@@ -60,7 +60,7 @@
     {
       "name": "first-chain",
       "package": "git-wt-cli",
-      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+      "reason": "waits for a verified biscuit-hash-cli entry with every channel pass; preflight refuses this package until then"
     },
     {
       "name": "approval",
@@ -70,7 +70,7 @@
     {
       "name": "first-chain",
       "package": "sniff-detection-cli",
-      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+      "reason": "waits for a verified biscuit-hash-cli entry with every channel pass; preflight refuses this package until then"
     },
     {
       "name": "approval",
@@ -80,7 +80,7 @@
     {
       "name": "first-chain",
       "package": "darkmatter-cli",
-      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+      "reason": "waits for a verified biscuit-hash-cli entry with every channel pass; preflight refuses this package until then"
     },
     {
       "name": "approval",
@@ -90,7 +90,7 @@
     {
       "name": "first-chain",
       "package": "darkmatter-lsp",
-      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+      "reason": "waits for a verified biscuit-hash-cli entry with every channel pass; preflight refuses this package until then"
     },
     {
       "name": "approval",
@@ -100,7 +100,7 @@
     {
       "name": "first-chain",
       "package": "claudine-cli",
-      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+      "reason": "waits for a verified biscuit-hash-cli entry with every channel pass; preflight refuses this package until then"
     },
     {
       "name": "approval",

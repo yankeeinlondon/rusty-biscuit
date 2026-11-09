@@ -19,6 +19,12 @@ The formula is a projection of dist's own `<formula>.rb` (plan rule 16):
   `GITHUB_TOKEN`.
 - `audit` runs `brew audit --strict` and `brew style` on a prepared formula
   in a throwaway local tap.
+- `formula-current` reads a `publish` report strictly and says whether the
+  tap's formula now names this release's version (the `brew-install` job runs
+  only then).
+- `install-check` installs the published formula with Homebrew from the public
+  tap on the runner's own target, checks the installed version and runs the
+  installed command's `--version`, then uninstalls. It never sees a token.
 
 Output is a JSON report on stdout (and `--report`). Exit status: 0 success
 or a no-op, 2 invalid input or a failed check, 3 missing credentials or
@@ -31,6 +37,7 @@ import argparse
 import base64
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -451,8 +458,11 @@ def formula_path(selection: Selection) -> str:
     return f"Formula/{selection.channels['brew']}.rb"
 
 
-def _report(status: str, selection: Selection, reason: str, commit: str | None = None) -> dict[str, Any]:
-    return {"status": status, "formula": formula_path(selection), "version": selection.version, "reason": reason, "commit": commit}
+def _report(status: str, selection: Selection, reason: str, *, current: bool, commit: str | None = None) -> dict[str, Any]:
+    """`formula_current`: the tap's formula names exactly this version after
+    the run, so installing it from the tap proves this release."""
+    return {"status": status, "formula": formula_path(selection), "version": selection.version, "reason": reason,
+            "commit": commit, "formula_current": current}
 
 
 def load_prepared(selection: Selection, assets: Path) -> bytes:
@@ -503,7 +513,7 @@ def publish(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     if check_selection(selection):
-        return _report("skip", selection, f"{selection.version} is a prerelease; the stable formula is unchanged")
+        return _report("skip", selection, f"{selection.version} is a prerelease; the stable formula is unchanged", current=False)
     if selection.record.get("formula_update") is not True:
         raise DistributionError("selection: formula_update", "is not true; this release does not update the formula")
     token, author = env.get(TOKEN_ENV), env.get(AUTHOR_ENV)
@@ -527,9 +537,12 @@ def publish(
     installed = None if current is None else FormulaVersion(installed_version(current, source=f"{HOMEBREW_TAP}:{path}@{head}"), current)
     decision = select_tap_update(FormulaVersion(selection.version, prepared), installed)
     if decision.action in ("noop", "skip"):
-        return _report(decision.action, selection, decision.reason)
+        # A no-op either found this exact version (current) or a newer one an
+        # older retry must not replace (not current).
+        same = installed is not None and parse_version(installed.version, "installed formula version") == parse_version(selection.version, "selection.version")
+        return _report(decision.action, selection, decision.reason, current=decision.action == "noop" and same)
     if dry_run:
-        return _report("dry-run", selection, f"would {decision.action}: {decision.reason}")
+        return _report("dry-run", selection, f"would {decision.action}: {decision.reason}", current=False)
 
     result = client.create_commit(BRANCH, head, path, prepared, f"{selection.channels['brew']} {selection.version}")
     where = f"{HOMEBREW_TAP}@{result.oid}"
@@ -544,7 +557,112 @@ def publish(
         except DistributionError as error:
             raise TapFailure(where, str(error), result.oid) from None
     status = "created" if decision.action == "create" else "updated"
-    return _report(status, selection, decision.reason, result.oid)
+    return _report(status, selection, decision.reason, current=True, commit=result.oid)
+
+
+# What each `publish` status may report as `formula_current`. A dry run never
+# reaches the workflow's install job, and a failed report proves nothing.
+REPORT_CURRENT: Mapping[str, frozenset[bool]] = {
+    "created": frozenset({True}),
+    "updated": frozenset({True}),
+    "noop": frozenset({True, False}),
+    "skip": frozenset({False}),
+}
+
+
+def formula_current(report: Any, selection: Selection, *, source: str) -> bool:
+    """Whether a `publish` report says the tap now holds this release's
+    formula. Every field read here is required and checked against the
+    selection; nothing defaults."""
+    fields = _fields(report, source)
+    status = fields.string(["status"])
+    if status not in REPORT_CURRENT:
+        raise fields.error(["status"], f"must be one of {sorted(REPORT_CURRENT)}, found {status!r}")
+    for key, expected in (("formula", formula_path(selection)), ("version", selection.version)):
+        if fields.string([key]) != expected:
+            raise fields.error([key], f"is {fields.string([key])!r}, but the selection is {expected!r}")
+    current = fields.boolean(["formula_current"])
+    if current not in REPORT_CURRENT[status]:
+        raise fields.error(["formula_current"], f"cannot be {str(current).lower()} for status {status!r}")
+    return current
+
+
+# ---------------------------------------------------------------------------
+# Homebrew installation from the public tap
+# ---------------------------------------------------------------------------
+
+# `brew tap` name of `HOMEBREW_TAP` (Homebrew drops the `homebrew-` prefix).
+TAP_NAME = HOMEBREW_TAP.replace("/homebrew-", "/", 1)
+# The runner's `(uname -s, uname -m)` for each target: the install check runs
+# on the target it proves, so Homebrew resolves that target's archive.
+HOST_TARGETS: Mapping[tuple[str, str], str] = {
+    ("Darwin", "arm64"): "aarch64-apple-darwin",
+    ("Darwin", "x86_64"): "x86_64-apple-darwin",
+    ("Linux", "aarch64"): "aarch64-unknown-linux-gnu",
+    ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
+}
+# Credentials Homebrew would otherwise use; the tap is public and the check
+# must prove an anonymous user's installation.
+_BREW_SECRETS = frozenset({"GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN", TOKEN_ENV})
+_BREW_ENV = {"HOMEBREW_NO_AUTO_UPDATE": "1", "HOMEBREW_NO_ANALYTICS": "1", "HOMEBREW_NO_INSTALL_CLEANUP": "1",
+             "HOMEBREW_NO_ENV_HINTS": "1", "NONINTERACTIVE": "1", "GIT_TERMINAL_PROMPT": "0"}
+
+
+def install_check(selection: Selection, target: str, *, env: Mapping[str, str], run: Runner = subprocess.run,
+                  host: tuple[str, str] | None = None) -> dict[str, Any]:
+    """Install this release's formula from the public tap with the runner's
+    Homebrew and prove the installed command is this version."""
+    if check_selection(selection) or selection.record.get("formula_update") is not True:
+        raise DistributionError("selection: formula_update", f"{selection.version} does not update the formula; there is nothing to install")
+    if target not in TARGETS:
+        raise DistributionError("--target", f"must be one of {list(TARGETS)}, found {target!r}")
+    host = host or (platform.system(), platform.machine())
+    if HOST_TARGETS.get(host) != target:
+        raise DistributionError("--target", f"is {target}, but this runner is {' '.join(host)}")
+    name = selection.channels["brew"]
+    brew_env = {key: value for key, value in env.items() if key not in _BREW_SECRETS} | _BREW_ENV
+    ran: list[str] = []
+
+    def call(*args: str, timeout: int = 300) -> str:
+        ran.append(" ".join(args))
+        try:
+            result = run(list(args), env=brew_env, capture_output=True, text=True, timeout=timeout)
+        except FileNotFoundError:
+            raise DistributionError(args[0], "is not on PATH; the workflow installs the pinned Homebrew first") from None
+        if result.returncode != 0:
+            detail = "\n".join((result.stdout + result.stderr).rstrip().splitlines()[-40:])
+            raise DistributionError(" ".join(args), f"exited {result.returncode}:\n{detail}")
+        return result.stdout.strip()
+
+    def absolute(text: str, where: str) -> Path:
+        path = Path(text)
+        if not path.is_absolute():
+            raise DistributionError(where, f"must print an absolute path, found {text!r}")
+        return path
+
+    brew_version = (call("brew", "--version").splitlines() or [""])[0]
+    call("brew", "tap", TAP_NAME)
+    tapped = absolute(call("brew", "--repository", TAP_NAME), f"brew --repository {TAP_NAME}")
+    formula = tapped / "Formula" / f"{name}.rb"
+    try:
+        text = formula.read_bytes()
+    except OSError as error:
+        raise DistributionError(formula.as_posix(), f"the tapped formula cannot be read: {error}") from None
+    tapped_version = installed_version(text, source=formula.as_posix())
+    if tapped_version != selection.version:
+        raise DistributionError(formula.as_posix(), f"names {tapped_version}, but this run proves {selection.version}")
+    qualified = f"{TAP_NAME}/{name}"
+    call("brew", "install", qualified, timeout=1800)
+    listed = call("brew", "list", "--versions", name)
+    if listed != f"{name} {selection.version}":
+        raise DistributionError(f"brew list --versions {name}", f"is {listed!r}, expected {name} {selection.version!r}")
+    command = absolute(call("brew", "--prefix"), "brew --prefix") / "bin" / selection.command
+    reported = call(str(command), "--version", timeout=60)
+    if selection.version not in reported:
+        raise DistributionError(f"{command} --version", f"printed {reported!r}, which does not contain {selection.version}")
+    call("brew", "uninstall", name)
+    return {"status": "installed", "target": target, "formula": qualified, "version": selection.version,
+            "homebrew": brew_version, "command": command.as_posix(), "command_version": reported, "commands": ran}
 
 
 # ---------------------------------------------------------------------------
@@ -655,13 +773,21 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     audit_cmd = commands.add_parser("audit", help="brew audit --strict and brew style a prepared formula")
     audit_cmd.add_argument("--formula", type=Path, required=True)
     audit_cmd.add_argument("--name", required=True)
+    current_cmd = commands.add_parser("formula-current", help="whether a publish report leaves this version in the tap")
+    current_cmd.add_argument("--selection", type=Path, required=True)
+    current_cmd.add_argument("--tap-report", type=Path, required=True, help="the publish command's --report")
+    install_cmd = commands.add_parser("install-check", help="brew install the published formula from the public tap")
+    install_cmd.add_argument("--selection", type=Path, required=True)
+    install_cmd.add_argument("--target", required=True, help="the target this runner proves")
+    install_cmd.add_argument("--report", type=Path)
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None, *, env: Mapping[str, str] | None = None,
          client_factory: Callable[[str], TapClient] = GitHubTapClient,
          fetch: Callable[[RemoteAsset], Iterator[bytes]] = distribution.download,
-         verify: Callable[[Path, str], str] = verify_signature) -> int:
+         verify: Callable[[Path, str], str] = verify_signature,
+         run: Runner = subprocess.run, host: tuple[str, str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     env = os.environ if env is None else env
     selection: Selection | None = None
@@ -675,6 +801,16 @@ def main(argv: Sequence[str] | None = None, *, env: Mapping[str, str] | None = N
                 prepared = load_prepared(selection, args.assets_dir)
                 args.output.write_bytes(prepared)
                 result = {"status": "prepared", "formula": formula_path(selection), "output": args.output.as_posix()}
+            elif args.command == "formula-current":
+                source = args.tap_report.as_posix()
+                try:
+                    data = args.tap_report.read_bytes()
+                except OSError as error:
+                    raise DistributionError(source, f"cannot read: {error}") from None
+                current = formula_current(distribution.load_json(data, source=source), selection, source=source)
+                result = {"status": "read", "formula_current": current}
+            elif args.command == "install-check":
+                result = install_check(selection, args.target, env=env, run=run, host=host)
             else:
                 result = publish(selection, args.assets_dir, env=env, client_factory=client_factory,
                                  fetch=fetch, verify=verify, dry_run=args.dry_run)

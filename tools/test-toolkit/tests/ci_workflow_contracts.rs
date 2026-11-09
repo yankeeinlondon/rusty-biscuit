@@ -7250,6 +7250,97 @@ fn every_build_publishes_a_keyed_artifact_and_a_status_for_any_outcome() {
     }
 }
 
+/// The Ubuntu owner leaves a storage record at every boundary the disk fix
+/// needs (cache restore, schematic guard, each record via the producer, and
+/// publication), keeps it under `always()`, and never lets the diagnostic
+/// decide the job's result. Scope, runner, and timeout stay as they were.
+#[test]
+fn the_ubuntu_build_owner_samples_storage_at_every_boundary_without_deciding_the_result() {
+    let build = job_block("ci.yml", "  build:");
+    let all = steps(&build);
+    assert!(build.contains("timeout-minutes: 180\n"), "the owner's timeout is unchanged");
+    assert!(
+        build.contains("runs-on: ${{ fromJSON(needs.scope.outputs.build_owner_runners)[matrix.build] }}"),
+        "the owner's runner still comes from the plan"
+    );
+
+    let start = step_with_id(&all, "job_start").expect("the owner marks its start");
+    assert!(
+        start.contains(r#"if [ "$RUNNER_OS" = Linux ]; then"#)
+            && start.contains(r#"echo "BUILD_DIAGNOSTICS=$RUNNER_TEMP/build-diagnostics" >>"$GITHUB_ENV""#),
+        "only the Ubuntu owner turns storage sampling on: {start}"
+    );
+
+    let position = |needle: &str| {
+        all.iter()
+            .position(|step| step.contains(needle))
+            .unwrap_or_else(|| panic!("the build owner must have a step containing `{needle}`"))
+    };
+    let order = [
+        "--label before-cache-restore",
+        "uses: Swatinem/rust-cache@v2",
+        "--label after-cache-restore",
+        "--label before-schematic-guard",
+        "just -f schematic/justfile test-fresh-output",
+        "--label after-schematic-guard",
+        "bash scripts/ci/produce-owner.sh",
+        "--label before-publication",
+        "scripts/ci/artifacts/publish.cjs",
+        "--label after-publication",
+        "name: build-diagnostics-${{ matrix.build }}",
+    ];
+    let positions: Vec<usize> = order.iter().map(|needle| position(needle)).collect();
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "the samples must bracket each boundary in order: {order:?} at {positions:?}"
+    );
+
+    let samples: Vec<&String> = all
+        .iter()
+        .filter(|step| step.contains("scripts/ci/storage_sample.py"))
+        .collect();
+    assert_eq!(samples.len(), 6, "six workflow-level samples; records are sampled by the producer");
+    for step in &samples {
+        // `|| true`, not `continue-on-error`: the owner hides no step failure
+        // (`the_owner_job_reaches_the_gate_as_infrastructure_and_owns_no_cell`),
+        // so the sampler's own exit is what is discarded.
+        assert!(step.contains("env.BUILD_DIAGNOSTICS != ''"), "samples are Ubuntu-only: {step}");
+        assert!(step.trim_end().ends_with("|| true"), "a sample's exit status is ignored: {step}");
+    }
+    for label in ["after-schematic-guard", "before-publication", "after-publication"] {
+        let step = samples
+            .iter()
+            .find(|step| step.contains(&format!("--label {label}")))
+            .expect("the labelled sample exists");
+        assert!(step.contains("always()"), "{label} must still sample after a failure: {step}");
+    }
+    let restored = samples
+        .iter()
+        .find(|step| step.contains("--label after-cache-restore"))
+        .expect("the restore is sampled");
+    assert!(
+        restored.contains("steps.cache.outputs.cache-hit")
+            && restored.contains("--restored-since before-cache-restore")
+            && restored.contains("--plan ci-artifacts/ci-resolved-plan/resolved-plan.json"),
+        "the restore sample classifies restored entries against this owner's plan: {restored}"
+    );
+
+    let keep = &all[position("name: build-diagnostics-${{ matrix.build }}")];
+    assert!(
+        keep.contains("if: ${{ always() && env.BUILD_DIAGNOSTICS != '' }}")
+            && keep.contains("path: ${{ runner.temp }}/build-diagnostics"),
+        "the samples are kept whatever happened before: {keep}"
+    );
+
+    let wrapper = read("scripts/ci/produce-owner.sh");
+    assert!(
+        wrapper.contains(r#"if [ -n "${BUILD_DIAGNOSTICS:-}" ]; then"#)
+            && wrapper.contains("--sample-command")
+            && wrapper.contains("storage_sample.py"),
+        "the producer samples each record only when the hosted job asks it to"
+    );
+}
+
 /// Every archive consumer verifies before it extracts, and compiles nothing.
 #[test]
 fn an_archive_consumer_verifies_first_and_never_reaches_a_compiler() {
@@ -9690,7 +9781,20 @@ fn distribution_scopes_each_credential_to_the_one_job_that_needs_it() {
         }
         seen.push(id);
     }
-    for id in ["preflight", "prepare", "build", "package", "reuse-bundle", "smoke", "upload", "install", "binstall", "homebrew-tap"] {
+    for id in [
+        "preflight",
+        "prepare",
+        "build",
+        "package",
+        "reuse-bundle",
+        "smoke",
+        "upload",
+        "install",
+        "binstall",
+        "homebrew-tap",
+        "brew-install",
+        "rollout-candidate",
+    ] {
         assert!(seen.iter().any(|job| job == id), "{DISTRIBUTION} must define `{id}`: {seen:?}");
     }
 }
@@ -9702,7 +9806,7 @@ fn distribution_scopes_each_credential_to_the_one_job_that_needs_it() {
 #[test]
 fn distribution_verification_runs_cannot_reach_publication() {
     let production = "(github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'recover'))";
-    for id in ["upload", "homebrew-tap", "rollout-candidate"] {
+    for id in ["upload", "homebrew-tap", "brew-install", "rollout-candidate"] {
         let condition = job_condition(&named_job(DISTRIBUTION, id));
         assert!(
             condition.contains("needs.preflight.outputs.publishable == 'true'") && condition.contains(production),
@@ -9746,6 +9850,102 @@ fn distribution_verification_runs_cannot_reach_publication() {
         publish.contains("args=(publish --selection ") && publish.contains("check-bundle"),
         "upload rechecks the bundle and publishes through `distribution.py publish`:\n{publish}"
     );
+}
+
+/// `brew: pass` in a rollout candidate is earned by installing, never by
+/// publishing: a separate, secret-free `brew-install` job runs `brew install`
+/// from the public tap on every build target once the tap job reports that the
+/// formula names this version, and the candidate receives that job's result
+/// and the tap's `formula_current` output. A runner without Homebrew gets the
+/// pinned Homebrew/brew release, checked against its commit.
+#[test]
+fn distribution_records_brew_pass_only_after_homebrew_installs_on_every_target() {
+    let source = read(".github/workflows/distribute-binaries.yml");
+    let job = |id: &str| {
+        jobs(&source)
+            .into_iter()
+            .find(|block| job_id(block) == id)
+            .unwrap_or_else(|| panic!("distribute-binaries.yml must define `{id}`"))
+    };
+
+    let tap = job("homebrew-tap");
+    assert!(
+        tap.contains("\n    outputs:\n")
+            && tap.contains("\n      formula_current: ${{ steps.current.outputs.formula_current }}\n"),
+        "`homebrew-tap` must expose `formula_current` from its tap report:\n{tap}"
+    );
+    let tap_steps = steps(&tap);
+    let current = step_with_id(&tap_steps, "current").expect("homebrew-tap has a `current` step");
+    assert!(
+        current.contains("scripts/distribution/tap.py formula-current ")
+            && current.contains("--tap-report \"${RUNNER_TEMP}/tap-report.json\""),
+        "`formula_current` comes from the strict reader of the publish report:\n{current}"
+    );
+
+    let install = job("brew-install");
+    assert!(install.contains("\n    needs: [preflight, homebrew-tap]\n"), "`brew-install` follows the tap job:\n{install}");
+    let condition = job_condition(&install);
+    for required in [
+        "always()",
+        "needs.homebrew-tap.result == 'success'",
+        "needs.homebrew-tap.outputs.formula_current == 'true'",
+        "needs.preflight.outputs.formula_update == 'true'",
+    ] {
+        assert!(condition.contains(required), "`brew-install` must require `{required}`: {condition}");
+    }
+    assert!(
+        install.contains("\n    runs-on: ${{ matrix.runner }}\n")
+            && install.contains("\n      fail-fast: false\n")
+            && install.contains("\n        include: ${{ fromJSON(needs.preflight.outputs.build_matrix) }}\n")
+            && install.contains("\n    timeout-minutes: "),
+        "`brew-install` runs on every build target, unaborted by a sibling, with a bounded timeout:\n{install}"
+    );
+    let executable = executable_lines(&install);
+    for credential in ["secrets.", "github.token", "GITHUB_TOKEN", "HOMEBREW_TAP_TOKEN", "HOMEBREW_GITHUB_API_TOKEN"] {
+        assert!(!executable.contains(credential), "`brew-install` installs anonymously; it must not name `{credential}`");
+    }
+    assert!(
+        executable.contains("scripts/distribution/tap.py install-check ")
+            && executable.contains("--target \"${TARGET}\"")
+            && executable.contains("name: distribution-brew-install-${{ matrix.target }}"),
+        "`brew-install` runs the install check for its own target and keeps the evidence:\n{install}"
+    );
+    let tag = executable
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("HOMEBREW_BREW_TAG: "))
+        .expect("the Homebrew/brew release is pinned");
+    let commit = executable
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("HOMEBREW_BREW_COMMIT: "))
+        .expect("the Homebrew/brew release's commit is pinned");
+    assert!(
+        !tag.is_empty() && tag.chars().all(|c| c.is_ascii_digit() || c == '.'),
+        "HOMEBREW_BREW_TAG must be a release version, found `{tag}`"
+    );
+    assert!(
+        commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+        "HOMEBREW_BREW_COMMIT must be a full commit SHA, found `{commit}`"
+    );
+    assert!(
+        executable.contains("--branch \"${HOMEBREW_BREW_TAG}\"")
+            && executable.contains(r#"[ "${head}" != "${HOMEBREW_BREW_COMMIT}" ]"#)
+            && !executable.contains("install.sh")
+            && !executable.contains("| bash"),
+        "Homebrew is installed only from the pinned tag, checked against its commit:\n{install}"
+    );
+
+    let candidate = job("rollout-candidate");
+    assert!(
+        candidate.contains("\n    needs: [preflight, upload, install, binstall, homebrew-tap, brew-install]\n"),
+        "`rollout-candidate` must wait for `brew-install`:\n{candidate}"
+    );
+    for wiring in [
+        "BREW_INSTALL_RESULT: ${{ needs.brew-install.result }}",
+        "FORMULA_CURRENT: ${{ needs.homebrew-tap.outputs.formula_current }}",
+        r#"--brew-install "${BREW_INSTALL_RESULT}" --formula-current "${FORMULA_CURRENT}""#,
+    ] {
+        assert!(candidate.contains(wiring), "`rollout-candidate` must pass `{wiring}`:\n{candidate}");
+    }
 }
 
 /// Assets are added to the Release release-plz already published; nothing in

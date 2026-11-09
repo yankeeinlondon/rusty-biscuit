@@ -9,6 +9,8 @@ name: Distribute binaries
 #
 #   preflight -> prepare -> build (4 targets) -> package -> smoke (4 targets)
 #             -> upload -> install (4 targets) -> homebrew-tap
+#                          -> brew-install (4 targets, when the tap now
+#                             holds this version)
 #                       -> binstall (4 targets, when that channel is on)
 #             -> rollout-candidate (the ledger entry this run proves)
 #
@@ -20,22 +22,24 @@ name: Distribute binaries
 # - `release: published` (production): the Release's tag must name an approved
 #   package in both the tagged and the current `docs/deployment.yaml`. Any
 #   package but biscuit-hash-cli also needs a verified biscuit-hash-cli entry
-#   in the current `.github/distribution/rollout.json`.
+#   with every channel `pass` in the current `.github/distribution/rollout.json`.
 # - `workflow_dispatch` mode `recover`: repeat the same checks for an EXISTING
 #   tag. With `bundle-run-id`, reuse that run's verified build bundle instead
 #   of rebuilding; a Release that already holds some of its assets accepts
 #   only its original bundle, because a rebuild's bytes may differ.
 # - `workflow_dispatch` mode `verify`: build the dispatched revision for one
 #   package with fixture approval and keep the results as workflow artifacts.
-#   It cannot reach `upload`, `install`, `binstall`, `homebrew-tap`, or
-#   `rollout-candidate`: their `if:` requires a production event, the selection says
+#   It cannot reach `upload`, `install`, `binstall`, `homebrew-tap`,
+#   `brew-install`, or `rollout-candidate`: their `if:` requires a production
+#   event (or a job that does), the selection says
 #   `publishable: false`, and `distribution.py publish` refuses a verification
 #   selection and rechecks everything against GitHub before writing.
 #
 # Credentials: every job reads with the workflow token except `upload`, the
 # only job with `contents: write`, and `homebrew-tap`, the only job that sees
-# `HOMEBREW_TAP_TOKEN`. Build jobs see no secret. The operational guide is
-# `docs/distribution.md`.
+# `HOMEBREW_TAP_TOKEN`. Build and installation jobs see no secret; the
+# Homebrew installation check uses the public tap anonymously. The
+# operational guide is `docs/distribution.md`.
 on:
   release:
     types:
@@ -774,6 +778,11 @@ jobs:
     concurrency:
       group: homebrew-tap
       cancel-in-progress: false
+    outputs:
+      # 'true' only when the tap's formula names this version after the run
+      # (created, updated, or already identical); an older retry under a newer
+      # formula is 'false' and installs nothing.
+      formula_current: ${{ steps.current.outputs.formula_current }}
     env:
       BREW_NAME: ${{ needs.preflight.outputs.brew }}
     steps:
@@ -817,6 +826,15 @@ jobs:
             --selection "${RUNNER_TEMP}/distribution/selection.json" \
             --assets-dir "${RUNNER_TEMP}/bundle/assets" --report "${RUNNER_TEMP}/tap-report.json"
 
+      - name: Read whether the tap now holds this version
+        id: current
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${PYTHON}" scripts/distribution/tap.py formula-current --selection "${RUNNER_TEMP}/distribution/selection.json" \
+            --tap-report "${RUNNER_TEMP}/tap-report.json" > "${RUNNER_TEMP}/formula-current.json"
+          echo "formula_current=$(jq -r .formula_current "${RUNNER_TEMP}/formula-current.json")" >> "$GITHUB_OUTPUT"
+
       - name: Keep the tap report
         if: always()
         uses: actions/upload-artifact@v6
@@ -825,12 +843,109 @@ jobs:
           path: ${{ runner.temp }}/tap-report.json
           if-no-files-found: warn
 
+  # The Homebrew channel installed as a user would: `brew install` from the
+  # public tap on every target, then the installed command's `--version`.
+  # Publishing the formula proves nothing about installing it; only this job's
+  # success lets the rollout candidate record `brew: pass`. It runs only when
+  # the tap now names this version, sees no secret, and uses the runner's
+  # Homebrew, or installs the pinned Homebrew/brew release where the runner
+  # has none.
+  brew-install:
+    name: Homebrew install ${{ matrix.target }}
+    needs: [preflight, homebrew-tap]
+    if: >-
+      always() && needs.homebrew-tap.result == 'success' &&
+      needs.homebrew-tap.outputs.formula_current == 'true' &&
+      needs.preflight.outputs.formula_update == 'true' &&
+      needs.preflight.outputs.publishable == 'true' &&
+      (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'recover'))
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.preflight.outputs.build_matrix) }}
+    env:
+      TARGET: ${{ matrix.target }}
+      # Homebrew/brew release installed only where the runner has no Homebrew;
+      # the tag is resolved and must be this commit.
+      HOMEBREW_BREW_TAG: 7.0.12
+      HOMEBREW_BREW_COMMIT: bf464f57275cae0be106b43d190c98564ac59b0e
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      NONINTERACTIVE: "1"
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Download the selection
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-preflight
+          path: ${{ runner.temp }}/distribution
+
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+
+      - name: Put Homebrew on PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew_bin="$(command -v brew || true)"
+          for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do
+            if [ -z "${brew_bin}" ] && [ -x "${candidate}" ]; then
+              brew_bin="${candidate}"
+            fi
+          done
+          if [ -z "${brew_bin}" ]; then
+            if [ "$(uname -s)" != Linux ]; then
+              echo "::error title=distribution::this macOS runner has no Homebrew"
+              exit 1
+            fi
+            prefix=/home/linuxbrew/.linuxbrew
+            sudo mkdir -p "${prefix}"
+            sudo chown -R "$(id -un):$(id -gn)" /home/linuxbrew
+            git -c advice.detachedHead=false clone --quiet --depth 1 --branch "${HOMEBREW_BREW_TAG}" \
+              https://github.com/Homebrew/brew "${prefix}/Homebrew"
+            head="$(git -C "${prefix}/Homebrew" rev-parse HEAD)"
+            if [ "${head}" != "${HOMEBREW_BREW_COMMIT}" ]; then
+              echo "::error title=distribution::Homebrew/brew ${HOMEBREW_BREW_TAG} is ${head}, pinned ${HOMEBREW_BREW_COMMIT}"
+              exit 1
+            fi
+            mkdir -p "${prefix}/bin"
+            ln -s ../Homebrew/bin/brew "${prefix}/bin/brew"
+            brew_bin="${prefix}/bin/brew"
+          fi
+          dirname "${brew_bin}" >> "$GITHUB_PATH"
+
+      - name: Install with Homebrew from the tap
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/brew-install"
+          "${PYTHON}" scripts/distribution/tap.py install-check --selection "${RUNNER_TEMP}/distribution/selection.json" \
+            --target "${TARGET}" --report "${RUNNER_TEMP}/brew-install/brew-install.json"
+
+      - name: Keep the Homebrew install evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-brew-install-${{ matrix.target }}
+          path: ${{ runner.temp }}/brew-install
+          if-no-files-found: warn
+
   # The rollout ledger entry this run proves, kept as an artifact. A reviewed
-  # change copies it into `.github/distribution/rollout.json`; until the first
-  # biscuit-hash-cli entry is there, preflight refuses every other package.
+  # change copies it into `.github/distribution/rollout.json`; until it holds a
+  # biscuit-hash-cli entry with every channel `pass`, preflight refuses every
+  # other package.
   rollout-candidate:
     name: Rollout candidate
-    needs: [preflight, upload, install, binstall, homebrew-tap]
+    needs: [preflight, upload, install, binstall, homebrew-tap, brew-install]
     if: >-
       always() && needs.install.result == 'success' &&
       needs.preflight.outputs.publishable == 'true' &&
@@ -860,11 +975,14 @@ jobs:
           INSTALL_RESULT: ${{ needs.install.result }}
           BINSTALL_RESULT: ${{ needs.binstall.result }}
           TAP_RESULT: ${{ needs.homebrew-tap.result }}
+          FORMULA_CURRENT: ${{ needs.homebrew-tap.outputs.formula_current }}
+          BREW_INSTALL_RESULT: ${{ needs.brew-install.result }}
         run: |
           set -euo pipefail
           "${PYTHON}" scripts/ci/distribution.py rollout-candidate \
             --selection "${RUNNER_TEMP}/distribution/selection.json" --run-id "${GITHUB_RUN_ID}" \
             --install "${INSTALL_RESULT}" --binstall "${BINSTALL_RESULT}" --tap "${TAP_RESULT}" \
+            --brew-install "${BREW_INSTALL_RESULT}" --formula-current "${FORMULA_CURRENT}" \
             --output "${RUNNER_TEMP}/rollout-candidate.json" > /dev/null
           {
             echo "### Rollout ledger candidate"

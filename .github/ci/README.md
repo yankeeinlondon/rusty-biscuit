@@ -869,6 +869,11 @@ The artifact publisher uses the pinned `@actions/artifact` client to upload each
 manifest, archive, sidecars, and verifier. A failed record or upload does not
 stop publication of unrelated records. No owner bundle replaces package keys.
 
+The Ubuntu owner writes storage samples (`scripts/ci/storage_sample.py`) around
+the cache restore, the schematic guard, every record attempt, and publication,
+and always uploads them as `build-diagnostics-<producer>`; see
+`docs/topics/ci-cd.md` for the fields. A sample never changes a result.
+
 With `measure-compiler-work: true`, the owner script enables the counter for
 package compiles. Each package artifact carries its own compiler-work report
 and an owner aggregate, including measured record count and owner wall time.

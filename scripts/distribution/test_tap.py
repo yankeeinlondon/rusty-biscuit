@@ -280,7 +280,7 @@ class PublishTest(TempCase):
         h = self.harness()
         report = h.run(selection())
         self.assertEqual(report, {"status": "created", "formula": "Formula/darkmatter-cli.rb", "version": "0.1.0",
-                                  "reason": "the tap has no formula; creating 0.1.0", "commit": NEW})
+                                  "reason": "the tap has no formula; creating 0.1.0", "commit": NEW, "formula_current": True})
         self.assertEqual(h.factory_tokens, ["token"])
         self.assertEqual(h.client.names(), ["viewer_login", "branch_head", "read_file", "create_commit", "fetch_commit_for_verification"])
         self.assertEqual(sorted(h.fetched), sorted(tap.release_url(selection(), t) for t in TARGETS))
@@ -295,7 +295,8 @@ class PublishTest(TempCase):
     def test_update_older_to_newer(self) -> None:
         h = self.harness(installed="0.0.9")
         report = h.run(selection())
-        self.assertEqual((report["status"], report["reason"], report["commit"]), ("updated", "0.0.9 -> 0.1.0", NEW))
+        self.assertEqual((report["status"], report["reason"], report["commit"], report["formula_current"]),
+                         ("updated", "0.0.9 -> 0.1.0", NEW, True))
 
     def test_numeric_not_lexical_ordering(self) -> None:
         h = self.harness(installed="0.9.0", version="0.10.0")
@@ -305,18 +306,19 @@ class PublishTest(TempCase):
     def test_numeric_not_lexical_ordering_never_downgrades(self) -> None:
         h = self.harness(installed="0.10.0", version="0.9.0")
         report = h.run(selection(version="0.9.0"))
-        self.assertEqual((report["status"], report["commit"]), ("noop", None))
+        self.assertEqual((report["status"], report["commit"], report["formula_current"]), ("noop", None, False))
         self.assert_no_commit(h)
 
     def test_newer_installed_is_noop(self) -> None:
         h = self.harness(installed="0.2.0")
         report = h.run(selection())
-        self.assertEqual((report["status"], report["commit"]), ("noop", None))
+        self.assertEqual((report["status"], report["commit"], report["formula_current"]), ("noop", None, False))
         self.assert_no_commit(h)
 
     def test_identical_is_noop(self) -> None:
         h = self.harness(installed="0.1.0")
-        self.assertEqual(h.run(selection())["status"], "noop")
+        report = h.run(selection())
+        self.assertEqual((report["status"], report["formula_current"]), ("noop", True))
         self.assert_no_commit(h)
 
     def test_same_version_different_bytes_fails(self) -> None:
@@ -329,7 +331,7 @@ class PublishTest(TempCase):
     def test_prerelease_skips_without_touching_the_tap(self) -> None:
         h = self.harness(version="0.2.0-rc.1")
         report = h.run(selection(version="0.2.0-rc.1", prerelease=True, formula_update=False))
-        self.assertEqual(report["status"], "skip")
+        self.assertEqual((report["status"], report["formula_current"]), ("skip", False))
         self.assertEqual((h.factory_tokens, h.fetched), ([], []))
 
     def test_refused_selections_touch_nothing(self) -> None:
@@ -432,7 +434,7 @@ class PublishTest(TempCase):
     def test_dry_run_stops_before_commit(self) -> None:
         h = self.harness(installed="0.0.9")
         report = h.run(selection(), dry_run=True)
-        self.assertEqual((report["status"], report["reason"]), ("dry-run", "would update: 0.0.9 -> 0.1.0"))
+        self.assertEqual((report["status"], report["reason"], report["formula_current"]), ("dry-run", "would update: 0.0.9 -> 0.1.0", False))
         self.assert_no_commit(h)
         self.assertEqual(len(h.fetched), 4)
 
@@ -472,7 +474,8 @@ class CommandLineTest(TempCase):
                                  "--dry-run", "--report", str(report), harness=h)
         self.assertEqual(code, 0)
         self.assertEqual(result, {"status": "dry-run", "formula": "Formula/darkmatter-cli.rb", "version": "0.1.0",
-                                  "reason": "would create: the tap has no formula; creating 0.1.0", "commit": None})
+                                  "reason": "would create: the tap has no formula; creating 0.1.0", "commit": None,
+                                  "formula_current": False})
         self.assertEqual(json.loads(report.read_text(encoding="utf-8")), result)
 
     def test_malformed_selection_is_located_and_launches_nothing(self) -> None:
@@ -655,6 +658,202 @@ class SignatureTest(TempCase):
         lines = result.stdout.splitlines()
         primaries = {lines[i + 1].split(":")[9] for i, line in enumerate(lines) if line.startswith("pub:")}
         self.assertEqual(primaries, tap.WEB_FLOW_FINGERPRINTS)
+
+
+def tap_report(**overrides: Any) -> dict[str, Any]:
+    base = {"status": "created", "formula": "Formula/darkmatter-cli.rb", "version": "0.1.0", "reason": "r",
+            "commit": NEW, "formula_current": True}
+    base.update(overrides)
+    return base
+
+
+class FormulaCurrentTest(unittest.TestCase):
+    """The tap report field the workflow turns into the `brew-install` job's
+    condition: a control and one invalid shape per field read."""
+
+    def read(self, report: Any) -> bool:
+        return tap.formula_current(report, selection(), source="tap-report.json")
+
+    def test_status_decides_what_the_field_may_say(self) -> None:
+        for status, current in (("created", True), ("updated", True), ("noop", True), ("noop", False), ("skip", False)):
+            with self.subTest(status=status, current=current):
+                self.assertIs(self.read(tap_report(status=status, formula_current=current)), current)
+
+    def test_every_invalid_shape_is_a_located_error(self) -> None:
+        without = {k: v for k, v in tap_report().items() if k != "formula_current"}
+        cases = [
+            (without, r"^tap-report\.json: formula_current: is required"),
+            (tap_report(formula_current=None), r"^tap-report\.json: formula_current: must not be null"),
+            (tap_report(formula_current="true"), r"^tap-report\.json: formula_current: must be true or false"),
+            (tap_report(status="created", formula_current=False), r"formula_current: cannot be false for status 'created'"),
+            (tap_report(status="updated", formula_current=False), r"formula_current: cannot be false for status 'updated'"),
+            (tap_report(status="skip", formula_current=True), r"formula_current: cannot be true for status 'skip'"),
+            (tap_report(status="dry-run", formula_current=False), r"status: must be one of"),
+            (tap_report(status="failed"), r"status: must be one of"),
+            ({k: v for k, v in tap_report().items() if k != "status"}, r"status: is required"),
+            (tap_report(version="0.0.9"), r"version: is '0\.0\.9', but the selection is '0\.1\.0'"),
+            (tap_report(formula="Formula/bh.rb"), r"formula: is 'Formula/bh\.rb'"),
+            ([], r"must be a mapping"),
+        ]
+        for report, pattern in cases:
+            with self.subTest(pattern=pattern), self.assertRaisesRegex(DistributionError, pattern):
+                self.read(report)
+
+    def test_publish_reports_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_assets(Path(tmp))
+            for installed, current in ((None, True), ("0.0.9", True), ("0.1.0", True), ("0.2.0", False)):
+                with self.subTest(installed=installed):
+                    data = None if installed is None else tap.prepare_formula(
+                        dist_formula(version=installed), selection(version=installed), checksums()).encode()
+                    report = Harness(Path(tmp), FakeClient(installed=data)).run(selection())
+                    self.assertIs(self.read(json.loads(json.dumps(report))), current)
+
+
+class FakeBrew:
+    """A recording Homebrew: `brew` subcommands answer like the real one for a
+    tap holding `tapped_version`; a step named in `fail` exits 1."""
+
+    def __init__(self, root: Path, *, tapped_version: str = "0.1.0", listed: str | None = None,
+                 reported: str = "md 0.1.0", fail: str | None = None, missing: bool = False) -> None:
+        self.root, self.calls, self.envs = root, [], []
+        self.listed = "darkmatter-cli 0.1.0" if listed is None else listed
+        self.reported, self.fail, self.missing = reported, fail, missing
+        self.tap_dir = root / "Taps" / "yankeeinlondon" / "homebrew-tap"
+        (self.tap_dir / "Formula").mkdir(parents=True)
+        formula = tap.prepare_formula(dist_formula(version=tapped_version), selection(version=tapped_version), checksums())
+        (self.tap_dir / "Formula" / "darkmatter-cli.rb").write_text(formula, encoding="utf-8")
+
+    def __call__(self, args: list[str], *, env: dict[str, str], **_: Any) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        self.envs.append(env)
+        if self.missing:
+            raise FileNotFoundError(args[0])
+        step = args[1] if args[0] == "brew" else args[0].rsplit("/", 1)[-1]
+        out = {"--version": "Homebrew 7.0.12\n", "--repository": f"{self.tap_dir}\n", "list": f"{self.listed}\n",
+               "--prefix": f"{self.root}\n", "md": f"{self.reported}\n"}.get(step, "")
+        return subprocess.CompletedProcess(args, 1 if step == self.fail else 0, out, "boom" if step == self.fail else "")
+
+
+DARWIN_ARM = ("Darwin", "arm64")
+
+
+class InstallCheckTest(TempCase):
+    def check(self, brew: FakeBrew, sel: Selection | None = None, target: str = "aarch64-apple-darwin",
+              host: tuple[str, str] = DARWIN_ARM, env: dict[str, str] | None = None) -> dict[str, Any]:
+        return tap.install_check(sel or selection(), target, env=env or {"PATH": "/bin"}, run=brew, host=host)
+
+    def test_installs_from_the_public_tap_and_runs_the_installed_command(self) -> None:
+        brew = FakeBrew(self.tmp)
+        env = {"PATH": "/bin", "GITHUB_TOKEN": "t", "GH_TOKEN": "t", "HOMEBREW_GITHUB_API_TOKEN": "t", "HOMEBREW_TAP_TOKEN": "t"}
+        evidence = self.check(brew, env=env)
+        self.assertEqual(brew.calls, [
+            ["brew", "--version"],
+            ["brew", "tap", "yankeeinlondon/tap"],
+            ["brew", "--repository", "yankeeinlondon/tap"],
+            ["brew", "install", "yankeeinlondon/tap/darkmatter-cli"],
+            ["brew", "list", "--versions", "darkmatter-cli"],
+            ["brew", "--prefix"],
+            [str(self.tmp / "bin" / "md"), "--version"],
+            ["brew", "uninstall", "darkmatter-cli"],
+        ])
+        for seen in brew.envs:
+            self.assertFalse(set(seen) & {"GITHUB_TOKEN", "GH_TOKEN", "HOMEBREW_GITHUB_API_TOKEN", "HOMEBREW_TAP_TOKEN"})
+            self.assertEqual((seen["HOMEBREW_NO_AUTO_UPDATE"], seen["HOMEBREW_NO_ANALYTICS"], seen["HOMEBREW_NO_INSTALL_CLEANUP"],
+                              seen["NONINTERACTIVE"], seen["PATH"]), ("1", "1", "1", "1", "/bin"))
+        self.assertEqual((evidence["status"], evidence["target"], evidence["version"], evidence["homebrew"], evidence["command_version"]),
+                         ("installed", "aarch64-apple-darwin", "0.1.0", "Homebrew 7.0.12", "md 0.1.0"))
+
+    def test_each_target_must_run_on_its_own_host(self) -> None:
+        for host, target in tap.HOST_TARGETS.items():
+            with self.subTest(target=target):
+                self.assertEqual(self.check(FakeBrew(Path(tempfile.mkdtemp(dir=self.tmp))), target=target, host=host)["target"], target)
+        brew = FakeBrew(self.tmp)
+        with self.assertRaisesRegex(DistributionError, r"--target: is x86_64-apple-darwin, but this runner is Darwin arm64"):
+            self.check(brew, target="x86_64-apple-darwin")
+        with self.assertRaisesRegex(DistributionError, r"--target: must be one of"):
+            self.check(brew, target="x86_64-pc-windows-msvc")
+        self.assertEqual(brew.calls, [])
+
+    def test_a_release_without_a_formula_update_installs_nothing(self) -> None:
+        for name, sel in (("prerelease", selection(version="0.2.0-rc.1", prerelease=True, formula_update=False)),
+                          ("no update", selection(formula_update=False)),
+                          ("verify", selection(mode="verify", publishable=False)),
+                          ("no brew", selection(channels={}))):
+            with self.subTest(name):
+                brew = FakeBrew(Path(tempfile.mkdtemp(dir=self.tmp)))
+                with self.assertRaises(DistributionError):
+                    self.check(brew, sel)
+                self.assertEqual(brew.calls, [])
+
+    def test_every_failed_proof_fails_before_uninstall(self) -> None:
+        cases = [
+            (dict(tapped_version="0.2.0"), r"darkmatter-cli\.rb: names 0\.2\.0, but this run proves 0\.1\.0", "--repository"),
+            (dict(listed="darkmatter-cli 0.0.9"), r"brew list --versions darkmatter-cli: is 'darkmatter-cli 0\.0\.9'", "list"),
+            (dict(reported="md 0.0.9"), r"md --version: printed 'md 0\.0\.9', which does not contain 0\.1\.0", "md"),
+            (dict(fail="install"), r"brew install yankeeinlondon/tap/darkmatter-cli: exited 1:\nboom", "install"),
+            (dict(fail="tap"), r"brew tap yankeeinlondon/tap: exited 1", "tap"),
+            (dict(missing=True), r"^brew: is not on PATH", "--version"),
+        ]
+        for options, pattern, last in cases:
+            with self.subTest(pattern=pattern):
+                brew = FakeBrew(Path(tempfile.mkdtemp(dir=self.tmp)), **options)
+                with self.assertRaisesRegex(DistributionError, pattern):
+                    self.check(brew)
+                self.assertNotIn(["brew", "uninstall", "darkmatter-cli"], brew.calls)
+                called = brew.calls[-1][1] if brew.calls[-1][0] == "brew" else brew.calls[-1][0].rsplit("/", 1)[-1]
+                self.assertEqual(called, last)
+
+    def test_unusable_paths_are_refused(self) -> None:
+        brew = FakeBrew(self.tmp)
+        brew.tap_dir = Path("relative")
+        with self.assertRaisesRegex(DistributionError, r"brew --repository yankeeinlondon/tap: must print an absolute path"):
+            self.check(brew)
+        brew = FakeBrew(Path(tempfile.mkdtemp(dir=self.tmp)))
+        (brew.tap_dir / "Formula" / "darkmatter-cli.rb").unlink()
+        with self.assertRaisesRegex(DistributionError, r"the tapped formula cannot be read"):
+            self.check(brew)
+
+
+class InstallCommandLineTest(TempCase):
+    def main(self, *argv: str, **kwargs: Any) -> tuple[int, dict[str, Any]]:
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = tap.main(list(argv), env={"PATH": "/bin"}, **kwargs)
+        return code, json.loads(out.getvalue())
+
+    def write(self, name: str, value: Any) -> str:
+        path = self.tmp / name
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return str(path)
+
+    def test_formula_current_command(self) -> None:
+        sel = self.write("selection.json", record())
+        for current in (True, False):
+            with self.subTest(current=current):
+                report = self.write("tap-report.json", tap_report(status="noop", formula_current=current))
+                code, result = self.main("formula-current", "--selection", sel, "--tap-report", report)
+                self.assertEqual((code, result["status"], result["formula_current"]), (0, "read", current))
+        code, result = self.main("formula-current", "--selection", sel, "--tap-report", self.write("bad.json", tap_report(formula_current="yes")))
+        self.assertEqual((code, result["status"]), (2, "failed"))
+        self.assertIn("bad.json: formula_current: must be true or false", result["reason"])
+        code, result = self.main("formula-current", "--selection", sel, "--tap-report", str(self.tmp / "absent.json"))
+        self.assertEqual((code, result["status"]), (2, "failed"))
+        self.assertIn("absent.json: cannot read", result["reason"])
+
+    def test_install_check_command_writes_evidence(self) -> None:
+        sel = self.write("selection.json", record())
+        brew = FakeBrew(Path(tempfile.mkdtemp(dir=self.tmp)))
+        evidence = self.tmp / "evidence.json"
+        code, result = self.main("install-check", "--selection", sel, "--target", "aarch64-apple-darwin",
+                                 "--report", str(evidence), run=brew, host=DARWIN_ARM)
+        self.assertEqual((code, result["status"]), (0, "installed"))
+        self.assertEqual(json.loads(evidence.read_text(encoding="utf-8")), result)
+        failing = FakeBrew(Path(tempfile.mkdtemp(dir=self.tmp)), fail="install")
+        code, result = self.main("install-check", "--selection", sel, "--target", "aarch64-apple-darwin",
+                                 "--report", str(evidence), run=failing, host=DARWIN_ARM)
+        self.assertEqual((code, result["status"]), (2, "failed"))
+        self.assertEqual(json.loads(evidence.read_text(encoding="utf-8"))["status"], "failed")
 
 
 # Real output of Homebrew 2026-11-09 on a prepared four-target claudine

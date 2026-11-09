@@ -4455,6 +4455,7 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
         "test_runner_loss.py": "repo-deps",
         "test_schema.py": "repo-deps",
         "test_seed.py": "repo-deps",
+        "test_storage_sample.py": "repo-deps",
         "test-audit-typecheck": "test-toolkit",
         "test-audit-vitest": "test-toolkit",
     }
