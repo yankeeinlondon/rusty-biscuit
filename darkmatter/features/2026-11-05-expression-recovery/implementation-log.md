@@ -8,6 +8,8 @@ packages:
     - darkmatter
     - claudine
     - claudine-cli
+    - darkmatter-cli
+    - biscuit-visualized
 source_files_during_phase_1:
     - darkmatter/dmls/tests/l1/validation_timing_log.rs
 docs_updated_during_phase_1: []
@@ -167,40 +169,201 @@ decisions_for_review:
       checks must pass, so I ran `just regen-expr-doc` now. It added one row,
       which uses the catalog description as written. Phase 5 can still
       reword the description and regenerate.
-message_to_agent: |-
-  Phase 3 (lazy recovery and passive types) is done. try(expr, fallback) is
-  registered (functions.yaml under Logical; FunctionBinding::lazy("try");
-  LazyKind::{All, Any, Recover} replaced ShortCircuit) and evaluates in
-  expression/mod.rs::evaluate_recovery and lifecycle/executor.rs::call_recovery.
-  call_check.rs::try_type does the typing with the [] exception.
-  What Phase 4 should know:
-  (1) absence.rs::call_argument excludes try operands from "handles absence"
-  (otherwise its unknown|null params would hide undeclared-property warnings).
-  Phase 4's undeclared_property_warning_inside_try_remains should pass as is.
-  (2) The generated table row in docs/topics/darkmatter-expressions.md was
-  regenerated (the catalog test requires it). Rerun just regen-expr-doc after
-  any functions.yaml description change.
-  (3) design_time_call_check.rs is behind #[cfg(feature =
-  "effects-instrumentation")]; run tests with
-  --features effects-instrumentation,work-counters (just test does).
-  (4) In lifecycle executor tests, a relative load_data needs the fixture's
-  source_path inside its temp dir; the default "doc.md" gives an empty cwd,
-  whose miss is RelativeContextDirectory (correctly not recoverable). See the
-  action_call helper in lifecycle/executor/tests.rs.
-  (5) Tests in the expression mod.rs: TestLookup now has an optional
-  ResolutionContext (context_lookup(dir)) for real read failures.
-  (6) Adding try to the catalog rippled into generated and pinned artifacts,
-  all updated: darkmatter/schemas/partials/lifecycle.yaml (regenerated; try is
-  now a lifecycle verb), md-lifecycle.yaml's hand-kept md-unknown-action
-  pattern, six recursive_schema_golden goldens, a DMLS completions golden,
-  claudine/schemas/{action,lifecycle}.yaml (hand-kept verb lists), and a
-  claudine-cli insta snapshot. Phase 5's description edits to functions.yaml
-  need just regen-expr-doc and just regen-lifecycle-schema again (descriptions
-  flow into lifecycle.yaml), then the golden blesses
-  (DARKMATTER_BLESS_RECURSIVE_GOLDEN=1, DMLS_UPDATE_GOLDEN=1) if they move.
-  (7) CDPATH on this host: never "cd darkmatter" relatively from inside
-  darkmatter/; it lands in the main checkout. Use absolute paths. This
-  worktree's darkmatter just test runs 15951 tests.
+    - |-
+      A missing data file with an unreadable extension is now an
+      "unsupported format" error, not a missing file (Phase 4). The spec
+      rules that a request for a format Darkmatter cannot read must never be
+      recovered by `try`, because the fallback would then be chosen silently
+      on every run. The landed loader checked the file exists before it
+      checked the extension, so `try(load_data("optional.xyz", ...), [])`
+      with no such file quietly returned the fallback. I changed the loader:
+      when the file is missing, no `format` option is given, and no file
+      the reference could resolve to has a readable extension, the call fails
+      with `dm.data.unsupported_format`. This also changes the unguarded
+      message for that case (from "file not found" to "unsupported format"),
+      which is the more useful report. The alternative was to keep the loader
+      order and accept that a missing `.xyz` silently recovers, contradicting
+      the ruling. Reverting means removing `unreadable_candidates` from
+      `data/load.rs`, its regression test, and one sentence in each of two docs.
+    - |-
+      Some planned tests check the nearest observable behavior (Phase 4).
+      Where the plan named a mechanism the code does not have, the test
+      proves the same rule another way:
+      - The "provider failure" test uses a real provider error from a
+        repository with no remote. Test hooks can only return generic
+        errors.
+      - The "slot class is the join of both arguments" test checks what the
+        class causes (what is read, cached, and admitted), because the class
+        itself is private to the library.
+      - The `md compose` command tests have no "unreadable file" case. A
+        spawned program has no portable way to make a file that exists but
+        cannot be read, without permission bits, which do not work on
+        Windows or as root. The library tests cover that case in-process.
+      - The command test for a failing fallback checks the location of the
+        whole `{{ ... }}` that holds it. Errors raised while an expression
+        runs are located at the start of their expression, with or without
+        `try`.
+      Each alternative needs a new test-only hook or a product change: a
+      hook that returns a provider error, a public slot-class accessor, or
+      per-call runtime spans.
+    - |-
+      Where the slot rules for `try` are documented (Phase 5). The plan
+      named `topics/schemas/schema-constraints.md` for "try in a slot".
+      That page is a short overview; dynamic schema slots are documented in
+      `topics/schemas/schema-slots.md`. The full rules went there (a new
+      "An optional data file" subsection), and `schema-constraints.md` got a
+      short paragraph with an example that links to it. The alternative was
+      to put everything on the overview page, which would split slot rules
+      across two pages. Moving it means moving one subsection.
+    - |-
+      The `try` description in the function catalog was left as written in
+      Phase 3 (Phase 5). The generated `docs/functions/try.md` uses it word
+      for word, and it already states the lazy contract, the recoverable
+      list, and falsy success. Rewording it would also regenerate the
+      lifecycle schemas and several golden files for no change in meaning.
+      One consequence: the generated page says "Not fallible", because the
+      catalog marks a function fallible only when the function itself adds a
+      failure; `try`'s failures come from its arguments, exactly like `and`
+      and `or`. The topic section explains that every non-recoverable
+      failure propagates. If the reviewer prefers the page to say otherwise,
+      either declare `try` fallible in `functions.yaml` (and regenerate the
+      lifecycle schemas and goldens) or special-case lazy functions in the
+      page generator.
+    - |-
+      The README and Claudine's lifecycle page were left unchanged (Phase 5).
+      The plan asked for an edit only if the README summary reads as "data
+      failures always stop" or the Claudine page lists lazy functions or
+      says data failures always stop. Neither does: the README's only "stop"
+      wording is about missing shell template values, and the Claudine page's
+      `and`/`or` mention is about long-form action arguments. Adding `try`
+      to either is a one-line change if wanted.
+    - |-
+      The spec says a value-only call API must reject a lazy function "as a
+      call contract error". The code (unchanged by this feature; `and` and
+      `or` already behave this way) returns a generic evaluation error whose
+      message says the function is called only by the evaluator. That error
+      is never recoverable, so `try` cannot be caught by mistake through that
+      path; the docs describe the message rather than an error class. Making
+      it a typed call-contract error would be a small change in
+      `functions/mod.rs::call_entry` plus a test.
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/compose/expression/data/load.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/expression_recovery.rs
+    - darkmatter/lib/tests/l1/expression_recovery_data.rs
+    - darkmatter/lib/tests/l1/expression_recovery_slots.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/load_data_runtime.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/expression_recovery.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/recovery.rs
+    - biscuit-visualized/src/src/tests/embed_render_tests.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/loading-data.md
+    - darkmatter/docs/cli/data-contracts.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/os/windows.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/load.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/expression-engine.md
+    - darkmatter/docs/topics/loading-data.md
+    - darkmatter/docs/topics/caching.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/errors/composition-problems.md
+    - darkmatter/docs/topics/schemas/schema-constraints.md
+    - darkmatter/docs/topics/schemas/schema-slots.md
+docs_created_during_phase_5:
+    - darkmatter/docs/functions/try.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/remote-cache.md
+    - .claude/skills/darkmatter/requests.md
+source_code:
+    - darkmatter/dmls/tests/l1/validation_timing_log.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/load.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/provenance_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+    - darkmatter/lib/src/markdown/compose/nested.rs
+    - darkmatter/lib/src/markdown/compose/remote_fetch.rs
+    - darkmatter/lib/src/markdown/compose/remote_fetch/error.rs
+    - darkmatter/lib/src/markdown/compose/cache/remote_cache.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/schemas/slots/host.rs
+    - darkmatter/lib/tests/l1/load_data_diagnostics.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - darkmatter/schemas/partials/functions.yaml
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/tests/l1/load_data_passive.rs
+    - darkmatter/lib/tests/l1/design_time_call_check.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+    - darkmatter/lib/tests/l1/function_binding_registry.rs
+    - darkmatter/schemas/partials/lifecycle.yaml
+    - darkmatter/schemas/partials/md-lifecycle.yaml
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/expression_recovery.rs
+    - darkmatter/lib/tests/l1/expression_recovery_data.rs
+    - darkmatter/lib/tests/l1/expression_recovery_slots.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/load_data_runtime.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/expression_recovery.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/recovery.rs
+    - biscuit-visualized/src/src/tests/embed_render_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+documentation:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/loading-data.md
+    - darkmatter/docs/cli/data-contracts.md
+    - darkmatter/docs/topics/expression-engine.md
+    - darkmatter/docs/topics/caching.md
+    - darkmatter/docs/inline/call-check.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/errors/composition-problems.md
+    - darkmatter/docs/topics/schemas/schema-constraints.md
+    - darkmatter/docs/topics/schemas/schema-slots.md
+    - darkmatter/docs/functions/try.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-11-05-expression-recovery (5 phases)
@@ -839,3 +1002,290 @@ behavior with no path comparison, process, console, or OS-specific code. The
 new tests use temp directories and in-process evaluation only.
 
 Phase 3 is complete: implementation complete for this phase, all gates green.
+
+## Phase 4
+
+Phase 4 proves the `try` contract through every normal entry point. It is
+almost all tests, plus one product fix that the tests exposed (below). Wave 6
+(scaffolding) ran first in this session. The six Wave 7 tasks ran as five
+parallel subagents, each owning disjoint files: editor and host functions
+were combined with lifecycle hosts. Paths are relative to `darkmatter/`
+unless stated otherwise.
+
+### What changed
+
+**Wave 6 (scaffolding).** `lib/tests/l1/expression_recovery.rs`,
+`expression_recovery_data.rs`, `expression_recovery_slots.rs`, and
+`cli/tests/l1/expression_recovery.rs`, each with a `//!` summary, registered
+once in `lib/tests/l1/main.rs` and `cli/tests/l1/main.rs`.
+
+**Wave 7 (tests).** New and extended test files:
+
+- `lib/tests/l1/expression_recovery.rs`: 32 tests (12 surface cases plus 20).
+- `lib/tests/l1/expression_recovery_data.rs`: 35 tests (34 plus the ER-2
+  regression below).
+- `lib/tests/l1/expression_recovery_slots.rs`: 13 tests.
+- `cli/tests/l1/expression_recovery.rs`: 13 tests (spawned `md`).
+- `dmls/tests/l1/expression_call_diagnostics.rs` (`mod try_calls`, 3 tests),
+  `dmls/tests/l1/expression_scopes.rs` (`mod try_recovery`, 5 tests);
+  `value_hovers.rs` needed no change (the hover test sits with the completion
+  tests in `expression_scopes.rs`).
+- `lib/tests/l1/host_functions.rs` (`mod try_reservation`, 2 tests).
+- `lib/tests/l1/load_data_runtime.rs` (`mod lifecycle_recovery`, 3 tests).
+- `claudine/lib/src/composition/lifecycle/executor/tests/recovery.rs` (new,
+  5 tests) and its `mod recovery;` line in that directory's `mod.rs`.
+
+**Product fix: a missing source with an unsupported extension (ER-2).** Two
+subagents found the same thing independently. `try(load_data("optional.xyz",
+"string[]"), [])` with no `optional.xyz` on disk recovered to `[]`.
+`load_data` resolved the source before choosing its format (T5), so a missing
+`.xyz` was a plain miss, which `try` absorbs. That is the case ER-2 rules
+out: an author mistake that would silently select the fallback on every run.
+The plan's own test text assumed the other behavior. It reads "the same file
+read with `{format: "json"}` recovers its miss", which implies the same
+missing file without `format` does not recover.
+`lib/src/markdown/compose/expression/data/load.rs` now checks, on the miss
+path only and only when no `format` option is given, whether any file the
+reference could resolve to has an extension `load_data` reads. It uses the
+same candidate plan the existing probe recording uses. If none does, the call
+fails with `dm.data.unsupported_format`, naming the first candidate, before
+the miss is recorded. The resolved-file path is unchanged. Test:
+`expression_recovery_data::missing_source_with_unsupported_extension_is_not_recovered`.
+Docs: `docs/topics/loading-data.md` (Formats) and
+`docs/cli/data-contracts.md` (data error table) now say the error holds
+whether or not the file exists.
+
+### Requirement-to-test mapping (Phase 4)
+
+Rungs: F2 is the crate's public API in-process
+(`Markdown::compose_with_warnings`, `DarkmatterSchemas`, `DataRuntime`, the
+DMLS session harness, Claudine's real executor). F3 is the spawned `md`
+binary through `CliProcessFixture`.
+
+| Behavior | Test(s) | Rung |
+|---|---|---|
+| Recovery on every expression surface (body; frontmatter pass 1 and 2; `::block`; transclusion `when=` and target; inline `map`/`filter`; `::map` callback, `::filter` predicate, region `when=`; shell template). Each has a present control, a recovered miss with no warnings, and a propagated `unsupported_format` at its authored line and column | `expression_recovery::try_recovers_on_every_expression_surface::*` (12) | F2 |
+| Expressions-off surfaces stay off | `expression_recovery::try_is_not_enabled_where_expressions_are_disabled` | F2 |
+| Callback semantics | `whole_map_recovery_replaces_the_result`, `per_item_recovery_continues`, `propagated_callback_error_keeps_item_position`, `fallback_sees_callback_locals_and_captures` | F2 |
+| Inserted fallback text is not rescanned | `inserted_fallback_text_is_not_rescanned` | F2 |
+| E1/E3 nonrecoverable failures propagate, and the fallback never runs (its sentinel read is absent from the read set; a control shows it present when it runs) | `parse_error_inside_try_is_fatal`, `runtime_binding_failure_propagates`, `arithmetic_failure_propagates`, `iteration_limit_propagates`, `missing_request_context_is_fatal`, `malformed_reference_is_fatal`, `tree_escape_is_fatal`, `glob_reference_failure_is_fatal`, `provider_failure_is_fatal` | F2 |
+| E5 nested data failure is fatal; a pending nested blocking diagnostic stays fatal | `nested_composition_data_failure_is_fatal`, `pending_nested_blocking_diagnostic_stays_fatal` | F2 |
+| E16 warnings survive recovery; `try` does not hide undeclared properties; an unguarded read of the same file still fails | `unrelated_warning_survives_recovery`, `undeclared_property_warning_inside_try_remains`, `independent_reference_to_missing_file_still_fails` | F2 |
+| Recoverable loader failures, each with an unguarded control: missing, unreadable (E22 read guard), malformed (YAML; invalid UTF-8), contract mismatch, headerless ragged row | `expression_recovery_data::{valid_source_is_returned, missing_source_recovers, unreadable_source_recovers, malformed_source_recovers, contract_mismatch_recovers, headerless_malformed_record_recovers}` | F2 |
+| ER-2 and request errors propagate with the same code, text, and read set as unguarded | `unsupported_format_is_not_recovered`, `missing_source_with_unsupported_extension_is_not_recovered`, `format_option_makes_unsupported_extension_readable`, `computed_invalid_options_are_not_recovered`, `headerless_object_rows_are_not_recovered`, `missing_contract_import_is_not_recovered`, `invalid_contract_import_is_not_recovered`, `not_a_container_is_not_recovered`, `this_import_is_not_recovered` | F2 |
+| E15/T2/T7 memo: failures reused, never the fallback; positional and object modes stay separate; passes share the memo; a command invalidates (D5) | `second_unguarded_call_fails_from_memo`, `different_fallbacks_stay_distinct`, `fallback_never_enters_any_memo_layer`, `object_mode_failure_does_not_poison_positional_mode`, `pipeline_passes_share_the_data_memo`, `executed_command_invalidates_recovered_failure` | F2 |
+| E15 read set | `guarded_read_set_equals_unguarded`, `resolved_failed_source_stays_in_read_set`, `denied_url_stays_in_read_set`, `unresolved_miss_gets_no_canonical_entry`, `executed_fallback_reads_are_recorded`, `unexecuted_fallback_adds_no_reads` | F2 |
+| E7/E8 remote: transport failures recover (HTTP 500, invalid UTF-8, connection refused); denied host and denied redirect are fatal with zero requests; a reference-check deferral loads the real data at composition | `allowed_transport_failure_recovers::{http_500, invalid_utf8_body, connection_refused}`, `denied_host_is_fatal_with_warm_cache_and_memo`, `redirect_to_denied_host_is_fatal`, `reference_check_deferral_loads_remote_data_at_composition` | F2 (wiremock) |
+| E12 approval discovery | `approval_discovery_recovers_local_miss_without_freezing`, `approval_discovery_keeps_fallback_requirements_visible` | F2 |
+| E17/E18 slots: Q21 in-repo miss recovers without a grant; outside-repo miss, approval-required, and denied propagate with their codes at the slot; forbidden binding or function in the fallback rejected before evaluation; `[]` contributes nothing; empty list is `slot_empty`; only selected reads; class join; pre-flight lists both targets; reference check defers; cache recovers after the file is created | `expression_recovery_slots::*` (13) | F2 |
+| DMLS: completion, hover, arity, callback misuse, unknown function in the fallback, item members over `try(..., [])`, analysis reads nothing, both operands in static reads | `expression_scopes::try_recovery::*` (5), `expression_call_diagnostics::try_calls::*` (3) | F2 |
+| Host catalog reserves `try` (any case, as a name or an alias) | `host_functions::try_reservation::*` (2) | F2 |
+| md lifecycle: a `set` value and a `when:` guard recover; a nonrecoverable error stops the stack; a side effect invalidates a recovered failure | `load_data_runtime::lifecycle_recovery::*` (3) | F2 |
+| Claudine lifecycle: recovery in a message, `set`, and `when:`; binding and contract failures stay fatal; shell failure is outside `try` | `claudine composition::lifecycle::executor::tests::recovery::*` (5) | F2 (real executor) |
+| `md compose`: spec example recovers (valid, missing, malformed, mismatched; exit 0, exact stdout); invalid requests fatal (exit 1; fallback and later `::shell` sentinel not run); no diagnostic for a recovered cause (formatted and `--output json`, schema-conformant); `--deny all` blocks on an unrelated warning; a failing fallback reports its own location and callback path | `cli … expression_recovery::*` (13) | F3 |
+
+The Input Robustness Matrix does not apply (E20): no loader or configuration
+reader was added. The `load.rs` fix changes which error a missing source gets
+when its extension is unsupported, and is covered by the regression test
+above plus the existing loader suites (553 `load_data`/recovery tests rerun
+green after the fix).
+
+### Departures
+
+- Editor and host functions and Lifecycle hosts ran in one subagent. That
+  subagent ended before writing its report. Its tests were reviewed and its
+  scoped verification was rerun here: DMLS 62 of 62 (`test(/try/)`),
+  `host_functions` plus `load_data_runtime` 65 of 65, Claudine `recovery` 5 of 5.
+- `load_data_runtime::lifecycle_recovery` has one test beyond the plan:
+  `lifecycle_side_effect_creates_a_recovered_missing_file` (a clean miss is
+  not memoized; a later step loads the file a side effect created).
+- Plan test wording that the landed code could not express. The closest
+  faithful check was used instead:
+  - `provider_failure_is_fatal`: a test hook cannot return
+    `ExpressionError::Provider`, because hooks return `String` errors, which
+    are wrapped as `Other`. The test uses `pr_list({remote: 'nowhere'})` in a
+    `gix::init` repository instead. Sniff's `RemoteNotConfigured` is a real
+    `Provider` error, raised before any network request.
+  - `malformed_reference_is_fatal`: `load_data` cannot produce
+    `FileRefFailure::Malformed`. Its `file` parameter rejects `~user/…` and
+    `ftp://…` in the call check (written literally) or at binding (computed).
+    Both are asserted.
+  - `runtime_binding_failure_propagates`: a non-string `as` converts to text
+    (and then fails as `this_import_rejected`), so the binding failure uses
+    `contract: {a: 1}`.
+  - `::map`/`::filter` region source: the grammar allows only an identifier or
+    a dotted path, so the region cases cover the callback, the predicate, and
+    `when=`. A `try` in the source position is the "disabled surface" case.
+  - `nested_composition_data_failure_is_fatal`: `as_markdown` takes content,
+    so the child is inline content that runs a malformed `load_data`.
+  - `slot_try_class_is_join_of_arguments`: the class report is crate-private.
+    Its public consequences are asserted instead (see decisions).
+  - CLI "unreadable": no portable spawned-binary fixture exists (see
+    decisions).
+  - CLI `fallback_failure_reports_its_own_location`: a runtime data error is
+    located at the start of the interpolation that raised it, not at the
+    failing call inside it (the same is true without `try`). The test
+    therefore puts the recovered call and the failing fallback in separate
+    interpolations and asserts the fallback's line, column, and callback
+    path.
+- **Windows fix outside this feature.** The Windows cross-check would not
+  compile `biscuit-visualized`'s lib tests. At
+  `src/src/tests/embed_render_tests.rs:450`, `.parse()` collected into
+  `Vec<u16>` is ambiguous on Windows, where `encode_unicode` adds a second
+  `FromIterator` impl for `Vec<u16>`. The line came from an earlier commit on
+  this branch (`91be59e5b`). It is now `.parse::<u16>()`. That package's
+  `just test` (1165 of 1165) and `just lint` pass.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| Wave 7 scoped runs (each subagent, its own filter) | all pass: 32, 34, 13, 13, plus DMLS 62 (`/try/`), lib `host_functions`/`load_data_runtime` 65, Claudine `recovery` 5 |
+| After the `load.rs` fix: lib `expression_recovery`, `load_data`, and `unsupported` filters | **pass**: 553 of 553 |
+| `darkmatter/` `just test` | **pass**: 16057 run, 16057 passed, 10 skipped (first run; no failures, nothing load-sensitive) |
+| `darkmatter/` `just lint` | **pass** |
+| `just check-tier-coverage darkmatter` | **pass**: 0 stranded |
+| `cargo check -p darkmatter --examples` | **pass** |
+| `claudine/` `just test-library` | **pass**: 6506 of 6506 |
+| `claudine/` `just lint` | **pass** |
+| `claudine-cli` (dependent; `test-fixtures`), filter `load_data\|unsupported\|data_format\|try` | **pass**: 233 of 233 |
+| `biscuit-visualized/` `just test` and `just lint` (after the Windows fix) | **pass**: 1165 of 1165 |
+| `just cross-check darkmatter --os windows` | attempt 1: compile failure in `biscuit-visualized` (above). Attempt 2: **pass**, 11676 of 11676 on build-win |
+
+Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`),
+before the Windows fix: `packages: [claudine, darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit]`,
+`change_class: package`. The gates were required, and all ran.
+
+Cross-OS: run for Windows because the new tests build absolute paths
+outside the repository and compare canonical read-set spellings. It passes.
+
+Phase 4 is complete: implementation complete for this phase, all gates green.
+
+## Phase 5
+
+Phase 5 documents `try` and closes the plan. Wave 8 ran as three parallel
+doc-only subagents (topic pages A, topic pages B, skills); none compiled or
+ran tests. The catalog page entry, its tests, the comment drift pass, and
+every gate ran in this session. Paths are relative to `darkmatter/` unless
+stated otherwise.
+
+### What changed
+
+**Generated function page.** `lib/src/markdown/compose/expression/catalog/mod.rs`:
+`EXPRESSION_FUNCTION_PAGES` gained a `try` entry (`docs/functions/try.md`,
+"See also" links to `topics/darkmatter-expressions.md#recovering-from-read-failures`
+and `topics/loading-data.md`). `just regen-expr-doc` created
+`docs/functions/try.md`; the function table in `darkmatter-expressions.md` did
+not move (Phase 3 had regenerated it). The catalog description in
+`functions.yaml` is unchanged, so the lifecycle schemas and goldens did not move.
+Tests in `catalog/tests.rs`: `try_function_page_matches_catalog` (committed
+page equals generator output) and `try_page_states_lazy_semantics` (signature,
+lazy fallback, propagation, falsy success, both links).
+
+**Topic docs.**
+
+- `topics/darkmatter-expressions.md`: new `## Recovering from read failures`
+  (task-first example, four steps, Mermaid flowchart, recovered/propagated
+  table, the unsupported-format rule, falsy success, failing and nested
+  fallbacks, whole-map vs per-item, surfaces, reporting, discovery deferral,
+  typing). The Logical OR section no longer advises `file_exists(…)` for a
+  failing read; it points to the new section.
+- `topics/expression-engine.md`: the three lazy functions and selected-argument
+  evaluation.
+- `topics/loading-data.md`: "Files that may be missing" rewritten around `try`
+  (existence check vs `try` table, `format` escape, reference check), new
+  "The memo and read set under `try`", and "When loading fails" qualified.
+- `topics/caching.md`: the `load_data` memo stores a result or failure, never
+  a fallback; deferrals are not memoized.
+- `inline/call-check.md`: a `try` row and "A `try` call" (both arguments
+  checked, union typing, the empty-array exception, no narrowing).
+- `errors/composition-problems.md`: unguarded vs explicit recovery, "What an
+  explicit `try` reports". **Drift fixed:** the page said a data failure is
+  located "at the call"; the tests (`cli … expression_recovery::fallback_failure_reports_its_own_location`,
+  the surface tests) show the start of the enclosing `{{ … }}`. Corrected in
+  the bullet and the "What each family reports" table.
+- `inline/preflight-checks.md`: "Recoverable reads in `try`" (deferral never
+  picks the fallback; both arguments inspected; no approval or policy change).
+- `topics/schemas/schema-slots.md` (new "An optional data file", class line
+  after the Functions table, `try` in the "refused read" sentence) and a short
+  pointer paragraph in `topics/schemas/schema-constraints.md` (see decisions).
+- Left unchanged: `README.md` and `claudine/docs/topics/flow-control/lifecycle.md`
+  (neither meets the plan's condition; see decisions).
+
+**Skills** (`.claude/skills/darkmatter/`): `expressions.md` (classifier callers
+`evaluate_recovery` and `call_recovery`, callback delegation, never match
+`Other`, `Recover` lazy kind), `compose.md` (new "Recovering from read
+failures (`try`)": surfaces and discovery deferral through
+`FileRefFailure::RemoteNotEnabled` not being a recoverable miss),
+`requests.md` (memo/read set never hold a fallback, `ContractImport`,
+`NestedData`), `remote-cache.md` (a new fetch error variant gets its kind in
+the exhaustive `From` impls), `lifecycle.md` (the `LazyKind::Recover` arm in
+`call_with_operand_values`; Claudine reaches it through `StackExecutor`).
+Each symbol was verified against the code by the subagent.
+
+**Comment drift pass.** Reviewed the lazy-function docs (`LazyKind`,
+`evaluate_recovery`), `DataError::FileReference`/`ContractImport`,
+`RemoteRead`/`RemoteReadKind`, and `load_data_fn`. One drift fixed:
+`data/load.rs::load_data_fn`'s `## Errors` did not mention the Phase 4 rule
+that a missing source with no `format` whose candidates are all unreadable
+fails with `dm.data.unsupported_format`. The `DataError::FileReference` doc the
+plan flagged ("or a contract import") had already been corrected in Phase 2.
+
+### Leftover searches
+
+- `rg "RemoteTextError::Failed\(String|Failed\(String\)|ShortCircuit|_ => .*OnFalsy"`:
+  no hit on the targets. Remaining `Failed(String)` hits are unrelated types
+  (`compose/cache/runtime.rs::SlotState`, DMLS `index_store/workspace.rs`,
+  Claudine CLI/control, a completed spec's spike). `RemoteTextError::Failed`
+  now holds `RemoteFetchFailure`.
+- `rg "is_recoverable_read_failure"`: callers are the evaluator
+  (`expression/mod.rs::evaluate_recovery`), the lifecycle executor
+  (`lifecycle/executor.rs::call_recovery`), and tests only. The classifier has
+  no wildcard arm and returns `false` for `Other`.
+
+### Requirement-to-test mapping (Phase 5)
+
+| Requirement | Test |
+|---|---|
+| Generated `try` page exists and matches the catalog | `catalog::tests::try_function_page_matches_catalog` |
+| Page states lazy semantics, propagation, falsy success, links | `catalog::tests::try_page_states_lazy_semantics` |
+| Function table and other pages unchanged | `narrative_doc_function_table_matches_catalog`, `load_data_function_page_matches_catalog`, `function_pages_render_only_cataloged_functions` |
+
+The Input Robustness Matrix does not apply: no loader or configuration reader
+changed in this phase.
+
+### Acceptance coverage (final)
+
+Every test named in the plan's "Acceptance coverage" table exists and passed
+in the full `just test` run below, with the Phase 4 departures already
+recorded (the provider, malformed-reference, binding, region-source, nested,
+slot-class, CLI-unreadable, and CLI-location substitutions).
+`try_page_states_lazy_semantics` (the last row) was added in this phase.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| Scoped: lib catalog page tests | **pass**: 7 of 7 |
+| `darkmatter/` `just test` | **pass**: 16059 run, 16059 passed, 10 skipped; none at or above 5 s |
+| `darkmatter/` `just lint` | **pass** (before and after the doc merge) |
+| `just check-tier-coverage darkmatter` | **pass**: 0 stranded |
+| `cargo check --color=never -p darkmatter --examples` | **pass** |
+| `claudine/` `just test-library` | **pass**: 6506 of 6506 |
+| `claudine/` `just lint` | **pass** |
+
+Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+`packages: [biscuit-visualized, claudine, darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit, claudine-cli]`,
+`change_class: package` (the uncommitted tree still holds Phase 4's work). The
+gates were required, and all ran.
+
+Dependents: this phase's code change is a `const` read only by the doc
+generator and catalog tests, plus a doc comment, so no dependent package can
+observe it. Claudine's library suite ran in full anyway; the claudine-cli
+filtered run from Phase 4 still covers the unchanged runtime.
+
+Cross-OS: not run. The phase changed docs, skills, a static page table, and
+tests that read one committed file through `manifest_dir!()` (the same form as
+the existing `load_data` page test); none of it carries OS-specific risk.
+
+Phase 5 is complete. Implementation complete, ready for review.

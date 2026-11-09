@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-08
 total_phases: 5
-phase: 4
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 packages:
@@ -10,6 +10,8 @@ packages:
 - darkmatter
 - claudine
 - claudine-cli
+- darkmatter-cli
+- biscuit-visualized
 source_files_during_phase_1:
 - darkmatter/dmls/tests/l1/validation_timing_log.rs
 docs_updated_during_phase_1: []
@@ -74,6 +76,124 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/expressions.md
 - .claude/skills/os/macos.md
+source_files_during_phase_4:
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/expression_recovery.rs
+- darkmatter/lib/tests/l1/expression_recovery_data.rs
+- darkmatter/lib/tests/l1/expression_recovery_slots.rs
+- darkmatter/lib/tests/l1/host_functions.rs
+- darkmatter/lib/tests/l1/load_data_runtime.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/expression_recovery.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- darkmatter/dmls/tests/l1/expression_scopes.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/recovery.rs
+- biscuit-visualized/src/src/tests/embed_render_tests.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/cli/data-contracts.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/os/windows.md
+source_files_during_phase_5:
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+docs_updated_during_phase_5:
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/expression-engine.md
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/topics/caching.md
+- darkmatter/docs/inline/call-check.md
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/errors/composition-problems.md
+- darkmatter/docs/topics/schemas/schema-constraints.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+docs_created_during_phase_5:
+- darkmatter/docs/functions/try.md
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/darkmatter/remote-cache.md
+- .claude/skills/darkmatter/requests.md
+source_code:
+- darkmatter/dmls/tests/l1/validation_timing_log.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/error.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/provenance_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/nested.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch/error.rs
+- darkmatter/lib/src/markdown/compose/cache/remote_cache.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/tests/l1/load_data_diagnostics.rs
+- claudine/lib/src/composition/error/render/mod.rs
+- claudine/lib/src/composition/error/tests.rs
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/tests/l1/load_data_passive.rs
+- darkmatter/lib/tests/l1/design_time_call_check.rs
+- claudine/schemas/action.yaml
+- claudine/schemas/lifecycle.yaml
+- claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+- darkmatter/lib/tests/l1/function_binding_registry.rs
+- darkmatter/schemas/partials/lifecycle.yaml
+- darkmatter/schemas/partials/md-lifecycle.yaml
+- darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/expression_recovery.rs
+- darkmatter/lib/tests/l1/expression_recovery_data.rs
+- darkmatter/lib/tests/l1/expression_recovery_slots.rs
+- darkmatter/lib/tests/l1/host_functions.rs
+- darkmatter/lib/tests/l1/load_data_runtime.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/expression_recovery.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- darkmatter/dmls/tests/l1/expression_scopes.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/recovery.rs
+- biscuit-visualized/src/src/tests/embed_render_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+documentation:
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/topics/expression-engine.md
+- darkmatter/docs/topics/caching.md
+- darkmatter/docs/inline/call-check.md
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/errors/composition-problems.md
+- darkmatter/docs/topics/schemas/schema-constraints.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/functions/try.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: Expression Recovery (`try(expr, fallback)`)
@@ -151,33 +271,33 @@ The work has five parts:
 Each item is observable and has a named test in the phase that delivers it. The
 full mapping is in [Acceptance coverage](#acceptance-coverage).
 
-- [ ] Missing and unreadable sources, allowed transport failures,
+- [x] Missing and unreadable sources, allowed transport failures,
   `dm.data.malformed`, and `dm.data.contract_mismatch` recover under `try`.
   Everything else in the spec's error table propagates, including
   `dm.data.unsupported_format` (ER-2), `dm.data.invalid_options`, contract
   imports, policy refusals, and `dm.schema.slot_*` refusals.
-- [ ] All six falsy values are successes. The fallback runs only after a
+- [x] All six falsy values are successes. The fallback runs only after a
   recoverable failure, and each selected operand runs once per evaluation.
   Recovery resets no budget and rolls back no read.
-- [ ] Reference checking and approval discovery recover genuine failures but
+- [x] Reference checking and approval discovery recover genuine failures but
   never pick the fallback for a deferred read. A later permitted pass loads the
   real value.
-- [ ] A recovered cause produces no diagnostic in the formatted output or the
+- [x] A recovered cause produces no diagnostic in the formatted output or the
   data envelope. Propagated errors keep their codes, wording, locations,
   callback paths, and reference fields.
-- [ ] The read set and every memo layer hold the source result or failure,
+- [x] The read set and every memo layer hold the source result or failure,
   never the fallback. Memo invalidation still applies.
-- [ ] Inside a dynamic schema slot, `try` recovers a missing in-repository
+- [x] Inside a dynamic schema slot, `try` recovers a missing in-repository
   file without any grant (dynamic-schema-types Q21), and
   approval or deny refusals propagate. The slot's class is derived from both
   arguments.
-- [ ] Static typing unions both branches and keeps the typed array's items next
+- [x] Static typing unions both branches and keeps the typed array's items next
   to an authored `[]` only when the other branch provably accepts `[]`. DMLS
   recognizes `try` without executing anything.
-- [ ] `just test` and `just lint` pass in `darkmatter/`; `just test-library` and
+- [x] `just test` and `just lint` pass in `darkmatter/`; `just test-library` and
   `just lint` pass in `claudine/`; `cargo check -p darkmatter --examples`
   compiles.
-- [ ] Topic docs, the generated `try` function page, the README overview, and
+- [x] Topic docs, the generated `try` function page, the README overview, and
   the `darkmatter` skill describe the implemented behavior. No doc names a
   feature or spec.
 
@@ -744,14 +864,14 @@ Goal: prove the contract through every normal entry point.
 
 ### Wave 6 (serial)
 
-- [ ] **Test scaffolding (E23)**
+- [x] **Test scaffolding (E23)**
   - Create the three library modules and the CLI module, each with a `//!`
     summary and no tests, and register them in `lib/tests/l1/main.rs` and
     `cli/tests/l1/main.rs`. This is the only edit to those `main.rs` files.
 
 ### Wave 7 (parallel, disjoint files)
 
-- [ ] **Composition surfaces** (`lib/tests/l1/expression_recovery.rs`)
+- [x] **Composition surfaces** (`lib/tests/l1/expression_recovery.rs`)
   - `try_recovers_on_every_expression_surface`: rstest cases for body
     interpolation, whole-value frontmatter interpolation (passes 1 and 2), a
     conditional page block, a transclusion `when=` condition and an expression
@@ -779,7 +899,7 @@ Goal: prove the contract through every normal entry point.
     `undeclared_property_warning_inside_try_remains`.
   - `independent_reference_to_missing_file_still_fails`: the same file read
     unguarded elsewhere in the document still stops it.
-- [ ] **Data, memo, remote, read set** (`lib/tests/l1/expression_recovery_data.rs`)
+- [x] **Data, memo, remote, read set** (`lib/tests/l1/expression_recovery_data.rs`)
   - Positive controls and recoveries: `valid_source_is_returned`,
     `missing_source_recovers`, `unreadable_source_recovers` (E22),
     `malformed_source_recovers` (YAML, plus invalid UTF-8),
@@ -815,7 +935,7 @@ Goal: prove the contract through every normal entry point.
   - Approval discovery: `approval_discovery_recovers_local_miss_without_freezing`
     and `approval_discovery_keeps_fallback_requirements_visible` (a shell
     template in the fallback is still in the approval batch).
-- [ ] **Schema slots** (`lib/tests/l1/expression_recovery_slots.rs`)
+- [x] **Schema slots** (`lib/tests/l1/expression_recovery_slots.rs`)
   - Use the landed dynamic-slot fixtures (miniature repo, grant store under a
     temp home). Apply E17–E18.
   - `slot_try_recovers_missing_in_repo_file`: no grant, an
@@ -837,7 +957,7 @@ Goal: prove the contract through every normal entry point.
     landed `slot_class`), and `slot_try_preflight_collects_both_targets`.
   - `slot_try_reference_check_defers_instead_of_fallback` (D4) and
     `slot_try_resolution_cache_recovers_after_file_created` (D9).
-- [ ] **Editor and host functions**
+- [x] **Editor and host functions**
   - Own `dmls/tests/l1/expression_call_diagnostics.rs`,
     `dmls/tests/l1/expression_scopes.rs`, `dmls/tests/l1/value_hovers.rs`, and
     `lib/tests/l1/host_functions.rs`.
@@ -851,7 +971,7 @@ Goal: prove the contract through every normal entry point.
     `both_try_arguments_appear_in_static_reads`.
   - `host_catalog_rejects_try_collision` and
     `host_catalog_rejects_try_case_variant`.
-- [ ] **Lifecycle hosts**
+- [x] **Lifecycle hosts**
   - Own the md lifecycle L1 cases (`lib/tests/l1/load_data_runtime.rs` holds the
     `md_host` fixtures; add a `mod lifecycle_recovery` block at its end) and
     `claudine/lib/src/composition/lifecycle/executor/tests/` (a new
@@ -864,7 +984,7 @@ Goal: prove the contract through every normal entry point.
     `claudine_lifecycle_try_keeps_contract_failure_fatal`,
     `claudine_when_condition_try_recovers`, and
     `claudine_lifecycle_shell_failure_is_outside_try`.
-- [ ] **Compose command** (`cli/tests/l1/expression_recovery.rs`)
+- [x] **Compose command** (`cli/tests/l1/expression_recovery.rs`)
   - Through `CliProcessFixture` and normal `md compose` with the reference check
     on: `compose_recovers_optional_data` (valid, missing, unreadable,
     malformed, and mismatched cases of the spec example; exit 0; stdout
@@ -880,7 +1000,7 @@ Goal: prove the contract through every normal entry point.
 
 ### Validation checkpoint (end of Phase 4)
 
-- [ ] `just test` in `darkmatter/` and `just test-library` in `claudine/`. A
+- [x] `just test` in `darkmatter/` and `just test-library` in `claudine/`. A
   shared-runtime defect found here is fixed by the file's Phase 2 or 3 owner
   rules, and only the affected focused tests repeat before the checkpoint.
 
@@ -888,7 +1008,7 @@ Goal: prove the contract through every normal entry point.
 
 ### Wave 8 (parallel, disjoint files)
 
-- [ ] **Darkmatter docs**
+- [x] **Darkmatter docs**
   - Add `ExpressionFunctionPage { function: "try", path: "docs/functions/try.md", see_also: … }`
     to `EXPRESSION_FUNCTION_PAGES` (`catalog/mod.rs:667`), linking to
     `../topics/darkmatter-expressions.md` and `../topics/loading-data.md`. Add
@@ -921,7 +1041,7 @@ Goal: prove the contract through every normal entry point.
     lazy functions or says data failures always stop, add `try` with a link to
     the Darkmatter topic. Otherwise leave it untouched, and record that in the
     log.
-- [ ] **Skills**
+- [x] **Skills**
   - `.claude/skills/darkmatter/expressions.md`: the classifier, the
     recoverable list, ER-2, "never recover by function name or message", and
     `LazyKind`. `compose.md`: surfaces and discovery deferral. `requests.md`
@@ -933,7 +1053,7 @@ Goal: prove the contract through every normal entry point.
 
 ### Wave 9 (serial: final validation)
 
-- [ ] **Final checks**
+- [x] **Final checks**
   - Run `just test` and `just lint` in `darkmatter/`, `just test-library` and
     `just lint` in `claudine/`, and `cargo check --color=never -p darkmatter --examples`
     (the doc generator). Do not run L2, browser, real, or prompt tiers, a

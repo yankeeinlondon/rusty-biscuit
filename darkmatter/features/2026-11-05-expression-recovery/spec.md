@@ -27,7 +27,7 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-07
 clarified: false
-implemented: false
+implemented: true
 review_iterations: 0
 packages:
     - darkmatter
@@ -37,6 +37,7 @@ related:
     - 2026-11-05-tabular-input-options
 depends-on:
     - 2026-11-05-dynamic-schema-types
+implemented_by: "claude/opus"
 ---
 
 # Expression Recovery
