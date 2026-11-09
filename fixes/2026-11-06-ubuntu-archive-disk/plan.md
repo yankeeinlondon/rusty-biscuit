@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 4
 created: 2026-11-08
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 source_files_during_phase_1:
@@ -24,9 +24,43 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
 - .claude/skills/rust-devops/ci-cd.md
+source_files_during_phase_2:
+- scripts/ci/artifacts/produce.cjs
+- scripts/ci/artifacts/produce.test.cjs
+- scripts/ci/artifacts/publish.cjs
+- scripts/ci/artifacts/publish.test.cjs
+- scripts/ci/produce-owner.sh
+- scripts/ci/build_status.py
+- scripts/ci/test_build_status.py
+- scripts/ci/runner_loss.py
+- scripts/ci/test_runner_loss.py
+- scripts/ci/affected_scope.py
+- scripts/ci/test_affected_scope.py
+- scripts/ci-build-archive-tests.rs
+- scripts/ci-build-tests.rs
+- scripts/ci-rollup.rs
+- scripts/ci-rollup-tests.rs
+- scripts/Cargo.toml
+- .github/workflows/ci.yml
+- .github/workflows/_package-ci.yml
+- .github/workflows/_wsl-ci.yml
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_2:
+- .github/ci/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
 - repo-deps
 - test-toolkit
+source_files_during_phase_3:
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_3:
+- docs/topics/ci-cd.md
+- .github/ci/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/rust-devops/ci-cd.md
+- .claude/skills/rust-testing/ci-execution.md
 ---
 
 # Ubuntu archive storage implementation plan
@@ -73,20 +107,20 @@ Completion requires focused producer, publisher, consumer, and workflow checks; 
 
 The following tasks have disjoint primary files and may run concurrently after Wave 2. Execute only storage tasks enabled by its recorded result; mark disabled tasks with the measured reason. Consumer attribution always executes.
 
-- [ ] **Incremental publication**
+- [x] **Incremental publication**
   - Implement Rules 6–8 in `produce.cjs`, `publish.cjs`, `produce-owner.sh`, and the build job. Aggregate nonzero child/upload outcomes while attempting later records. Preserve the schematic guard failure as a job failure; do not erase it with a successful finalizer.
   - Keep the always-run final publication step for unfinished status uploads and records never reached; avoid duplicate immutable artifact names. Persist ledger updates atomically after successful uploads and before cleanup. A process lost between remote upload and ledger persistence remains infrastructure failure; do not overwrite a remote artifact to manufacture success.
   - Add hermetic Node tests for upload-before-delete ordering, pending upload retention, archive failure retention, failed status upload, finalizer replay, successful sibling beside failure, record ordering, and retained verifier/manifests. Update the shared-dependency fixture to exercise the new sequential hosted coordinator with a fake upload transport and retain its existing compile-count assertions.
 
-- [ ] **Temporary cleanup**
+- [x] **Temporary cleanup** _(disabled by the Wave 2 selection: no retained inventory/packaging scratch was measured, 0 B; see `implementation-log.md`, Phase 1)_
   - Implement Rule 11 in `ci-build-archive.rs::produce_one`; make cleanup run after inventory failure and runtime observation failure as well as success, preserving the original error. Remove partial producer-owned packaging outputs only after the failed record is finished and no publication reader exists.
   - Extend `ci-build-archive-tests.rs` with small fake-nextest failures demonstrating scratch release and retained successful payloads; preserve the existing portability/inventory checks.
 
-- [ ] **Cache isolation**
+- [x] **Cache isolation** _(disabled by the Wave 2 selection: 0 restored bytes, no producer cache exists (`gh cache list --key build-owner` is empty); see `implementation-log.md`, Phase 1)_
   - For the stale-cache outcome, disable target-cache restore/save for the Ubuntu producer only; retain current caching for other producers and shared target reuse during the current run. This is narrower and safer than deleting entries guessed stale from Cargo fingerprints. Keep the existing lockfile/toolchain cache identity elsewhere.
   - Record diagnostic restore bytes and the resulting cold-build tradeoff. Update workflow contract tests to pin the Ubuntu exclusion and unchanged current-run sharing. Do not clear Cargo's registry or change `RUSTC_WRAPPER` policy.
 
-- [ ] **Consumer attribution**
+- [x] **Consumer attribution**
   - Implement Rules 9–10 in `build_status.py`, both consumer workflows, and rollup reason rendering. Gate native download/check steps on `consumes_archive`; WSL resolves status on the Windows host before guest provisioning.
   - Keep always-run status/report uploads; blocked cells produce an ordinary failure status with no test completion. Preserve runner-loss attribution in `runner_loss.py`, and add regression cases to its existing `test_runner_loss.py` only where changed wording affects it.
   - Add in-process tests of the public status-check result and narrow CLI wiring tests described below. No GitHub network request is needed in these tests.
@@ -106,13 +140,13 @@ The new build-status reader is the only new configuration/document reader. Reuse
 
 ### Wave 4
 
-- [ ] **Focused verification**
+- [x] **Focused verification**
   - Run the canonical root `just test repo-deps test-toolkit` once after Wave 3 integration. Run the registered `artifact-publisher` companion through its existing command, `node --test 'scripts/ci/artifacts/*.test.cjs'`, and register new Python status tests as a `repo-deps` companion using the existing suite registry/metadata pattern.
   - Update `tools/test-toolkit/tests/ci_workflow_contracts.rs` around `every_build_publishes_a_keyed_artifact_and_a_status_for_any_outcome`, compiler-work timing contracts, and archive consumer contracts. Assert no scope/matrix/timeout/gate drift, always-run diagnostics/finalization, and success beside failure. Test behavior through fake transports rather than only source-string assertions.
   - Run `actionlint` on the edited workflows and scoped Clippy for `repo-deps` and `test-toolkit`; run new Python tests through their registered companion command. Do not run `cargo fmt`, `cargo test`, a workspace-wide test gate, or terminal/browser tests for this change.
   - Fix failures in the touched paths and rerun only affected checks. Record commands, outcomes, and material limitations in the implementation log.
 
-- [ ] **Current documentation**
+- [x] **Current documentation**
   - Update `docs/topics/ci-cd.md` and `.claude/skills/rust-devops/ci-cd.md` with the enabled remedy, publication/cleanup lifetimes, blocked-consumer wording, diagnostic locations, final owner measurement artifact, and unverified hosted acceptance where applicable. Include a compact production → upload → delete flow diagram for incremental publication.
   - Inspect edited symbol docs and comments; remove the stale cutover explanation in rollup when updating attribution. No README expansion is needed because no user-facing command is added. Do not link current topic documentation to this dated fix or move its lifecycle directory.
 

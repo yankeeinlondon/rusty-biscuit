@@ -22,9 +22,43 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/rust-devops/ci-cd.md
+source_files_during_phase_2:
+    - scripts/ci/artifacts/produce.cjs
+    - scripts/ci/artifacts/produce.test.cjs
+    - scripts/ci/artifacts/publish.cjs
+    - scripts/ci/artifacts/publish.test.cjs
+    - scripts/ci/produce-owner.sh
+    - scripts/ci/build_status.py
+    - scripts/ci/test_build_status.py
+    - scripts/ci/runner_loss.py
+    - scripts/ci/test_runner_loss.py
+    - scripts/ci/affected_scope.py
+    - scripts/ci/test_affected_scope.py
+    - scripts/ci-build-archive-tests.rs
+    - scripts/ci-build-tests.rs
+    - scripts/ci-rollup.rs
+    - scripts/ci-rollup-tests.rs
+    - scripts/Cargo.toml
+    - .github/workflows/ci.yml
+    - .github/workflows/_package-ci.yml
+    - .github/workflows/_wsl-ci.yml
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_2:
+    - .github/ci/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
     - repo-deps
     - test-toolkit
+source_files_during_phase_3:
+    - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_3:
+    - docs/topics/ci-cd.md
+    - .github/ci/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/rust-devops/ci-cd.md
+    - .claude/skills/rust-testing/ci-execution.md
 decisions_for_review:
     - |-
         Hosted diagnostic replaced by the S4 local measurement. The plan says to
@@ -71,24 +105,84 @@ decisions_for_review:
         remedy can make the job fit. The spec's open question (larger runner,
         partitioned producers, or less debug information) then needs a human
         decision. Nothing here authorizes any of those.
+    - |-
+        Coordinator hosted inside a github-script step. The plan said
+        produce-owner.sh should hand its hosted behavior to the coordinator. I did
+        the reverse: a JavaScript workflow step runs the coordinator, which starts
+        produce-owner.sh once per record in an explicit "record" mode. The reason is
+        that GitHub gives the artifact upload credentials only to JavaScript
+        actions, not to shell steps. The alternative is to copy those credentials
+        into the job environment for all later steps, which widens their exposure.
+        produce-owner.sh keeps its local mode (one run, no upload), and the
+        real-Cargo fixture drives the coordinator's local command line with a fake
+        directory upload. Switching to the other direction means exporting the
+        token and moving the loop into the shell script.
+    - |-
+        After a failed upload, the final step retries only what is still missing.
+        If a record's archive upload failed, its published status already says
+        "failure at upload" and the final step does not retry the archive. If only
+        the status upload failed, the final step retries the status and never
+        re-uploads the archive, because artifact names cannot be reused. The
+        alternative, retrying a failed archive upload in the final step, would need
+        the already-published failure status to be replaced, which the artifact
+        service does not allow.
+    - |-
+        Each record's compiler-work file now holds only that record's counts. The
+        owner total is uploaded once, by the final step, as a separate artifact named
+        compiler-work-owner-{producer}. That artifact name is my choice; the plan
+        asked only for "a separate diagnostic artifact". No code reads the old
+        per-record owner field; only documentation did, and Phase 3 updates it.
+    - |-
+        On a Windows owner, the coordinator finds bash by searching PATH in order,
+        the same way the existing Rust fixture does. If a runner listed System32
+        before Git's bin directory, it would pick the WSL launcher. Hosted Windows
+        runners list Git first, and the old `shell: bash` step relied on that too.
+        Not tested on Windows from this host.
+    - |-
+        The repo-deps package does not declare Node as a runner tool, even though
+        the shared-dependency fixture now needs node. Its Node publisher suite
+        already makes the Ubuntu cell install Node 22, and macOS and Windows images
+        ship Node. The WSL2 guest has no Rust toolchain, so this real-Cargo test does
+        not run there. If a Node-less environment ever runs the test, it fails with
+        an explicit "node not found" message rather than skipping.
+    - |-
+        The WSL2 build-status steps are not gated on the cell consuming an
+        archive. The existing WSL archive download is not gated either, and gating
+        only the new check would let such a row skip the check and still reach the
+        download. Native cells are gated as the plan says.
+    - |-
+        The rollup changes its wording but not which cells it blocks. A cell with
+        no results reads "not run: producer failed; build ...". A cell that did run
+        tests keeps its own result and adds "producer failed; build ..." as context.
+        An absent status still blocks nothing in the rollup, which cannot tell a
+        missing status apart from a lost consumer report; the "producer outcome
+        unknown" wording appears in the consumer's own check instead. Adding that
+        note in the rollup would need a new input distinguishing the two cases.
+    - |-
+        Phase 3 fixed a drifted paragraph in .github/ci/README.md that said the
+        artifact-publisher Node suite still needed a suite-registry entry. The
+        entry exists in scripts/ci/affected_scope.py, so I took the code as
+        correct and rewrote the paragraph. The plan did not ask for this. The
+        alternative was to leave it for a separate cleanup; reverting means
+        restoring one paragraph and one retired-phrase row in the doc test.
+    - |-
+        Phase 3 used scoped Clippy (repo-deps, test-toolkit) as the lint gate,
+        as the plan's verification task says, instead of the root `just lint`,
+        which lints every package area in the monorepo. Running the root recipe
+        would cost far more time and check nothing this phase touched.
 message_to_agent: |-
-    Phase 1 is done. The hosted diagnostic was unavailable because the
-    instrumentation is not merged and nightlies run main. I applied Rule 4 to the
-    S4 spike's local measurement instead (see the log's Wave 2 section and
-    decisions_for_review). Phase 2 selection: ENABLE "Incremental publication";
-    DISABLE "Temporary cleanup" (no retained scratch was measured) and "Cache
-    isolation" (0 restored bytes; `gh cache list --key build-owner` is empty).
-    Mark the disabled tasks with those reasons. "Consumer attribution" always
-    runs. The new sampler is scripts/ci/storage_sample.py (underscore). The
-    producer's hook is ProduceOptions::sample_command / `--sample-command`, and
-    run_produce samples once at start and once after each record's status is
-    written. Keep that hook working when produce.cjs drives `ci-build produce
-    --key` once per record: pass the same --sample-command through, or the
-    per-record samples disappear. produce-owner.sh builds that argument only
-    when BUILD_DIAGNOSTICS is set. The working tree also has uncommitted changes
-    from the unrelated publish feature (distribution.py, tap.py,
-    distribute-binaries.yml, and parts of ci_workflow_contracts.rs); they are
-    not part of this fix. No BUILD_LINUX/WIN/WSL/MACOS rigs were configured.
+    Phase 3 is done: docs and skills now describe incremental publication,
+    the ledger, the owner measurement artifact, and the consumer build-status
+    check; a doc contract test pins that wording. All gates passed (log,
+    Phase 3). For Phase 4: docs/topics/ci-cd.md (subsection "Each archive is
+    uploaded, then released, before the next is built") and
+    .claude/skills/rust-devops/ci-cd.md (last bullet of "The owner job") say
+    hosted confirmation that a full-workspace Ubuntu owner fits its disk is
+    "not yet confirmed" / "still outstanding". If Phase 4 obtains a hosted
+    result, update both sentences to state it (verified or failed), without
+    naming this fix. If hosted evidence is unavailable, leave them. Nothing
+    from this work is merged, so a hosted run of the new code needs this
+    branch pushed. No BUILD_LINUX/WIN/WSL/MACOS rigs were configured.
 ---
 
 # Implementation Log for 2026-11-06-ubuntu-archive-disk (4 phases)
@@ -238,3 +332,237 @@ passed).
   `BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`, and `BUILD_MACOS` are unset, so all
   testing ran on macOS. The Unix-only recorder and wrapper tests run on Linux
   CI; the cannot-start test runs everywhere.
+
+## Phase 2
+
+- Started 2026-11-09. Applied the Phase 1 Wave 2 selection: **Incremental
+  publication** and **Consumer attribution** run; **Temporary cleanup** (0 B
+  retained scratch measured) and **Cache isolation** (0 restored bytes; no
+  producer cache exists) are disabled and marked so in the plan.
+- The two enabled tasks have disjoint primary files and ran as two parallel
+  subagents, each verifying only its own slice; the area gates ran once
+  afterward.
+
+### Wave 3 — Incremental publication (enabled)
+
+- New `scripts/ci/artifacts/produce.cjs` coordinator. `produceOwner` sorts the
+  owner's records by `(package, key)` in byte order, matching Rust. It runs one
+  `produce-owner.sh --key <key>` child per record, with `PRODUCE_MODE=record`,
+  all sharing one target tree, and publishes each record before starting the
+  next. A nonzero child or failed upload is remembered and later records are
+  still attempted. `hostedOptions` builds the shared hosted arguments. A local
+  CLI (`--upload-dir`, a fake directory transport) is used by the real-Cargo
+  fixture.
+- `publish.cjs` is split into `publishRecord` and `finalizeOwner`; `publish`
+  remains as an alias of `finalizeOwner`. The publication ledger
+  (`<out>/publication-ledger.json`, written atomically by temp file + rename)
+  records archive and status uploads separately. The archive and its
+  `<artifact>-sidecars` directory are deleted only after the awaited upload
+  resolves and the ledger is persisted. Containment is checked first (inside
+  `out`, no symlink, no realpath escape). Manifests, statuses, the verifier
+  copy, counters, and the target tree are never deleted. A failed status
+  upload retries only the status. The finalizer synthesizes statuses for
+  records never reached and uploads nothing twice. Each record's
+  compiler-work file now holds only `{record}`. The owner aggregate is
+  uploaded once as `compiler-work-owner-{producer}`
+  (`owner-compiler-work.json`), and only when a record was measured.
+- `produce-owner.sh`: `PRODUCE_MODE` unset behaves as before (local, no
+  upload, writes `owner-timing.json`). `record` leaves owner timing to the
+  coordinator. Any other value exits 2. `CI_BUILD_OUT` overrides the output
+  directory. `--sample-command` is still added to every per-key call, so
+  per-record storage samples survive, now with a `produce-start` sample per
+  record.
+- `ci.yml` `build`: "Produce and publish the archives" is a github-script step
+  (`id: produce`, not `always()`, so a failed schematic guard still skips
+  production and fails the job). It is a JavaScript action because only
+  those receive the artifact runtime token. The `always()` "Publish package
+  builds and statuses" step now calls `finalizeOwner`. Runner, timeout (180),
+  matrix, cache, guard, artifact names, and sample labels are unchanged, and
+  no `continue-on-error` was added.
+- `.github/ci/README.md`: corrected two paragraphs that this change made false
+  (the owner running "once, without `--key`" and the per-artifact owner
+  aggregate).
+
+### Wave 3 — Consumer attribution (always runs)
+
+- New `scripts/ci/build_status.py`: `check(path, Cell) -> Verdict` and
+  `StatusError(file, field, problem)`. It uses `schema.loads_strict` and reads
+  bytes as explicit UTF-8, then applies the plan's field rules. Failure or
+  cancelled gives `not run: producer failed` with package, key, producer,
+  stage, and detail. Absent gives `not run: producer outcome unknown` and
+  names the owner job. The CLI exits 0 only for a valid matching `success`
+  status.
+- `_package-ci.yml` (gated on `consumes_archive`) and `_wsl-ci.yml` (on the
+  Windows host, before any guest provisioning): "Download this cell's build
+  status" (`continue-on-error` on that step only; the allowlist in
+  `only_recovery_and_diagnostic_steps_ignore_errors` was narrowed to it), then
+  "Check this cell's build status", then the existing archive download. The
+  always-run status and report uploads are kept. WSL's "Record producer
+  status" names a refused check rather than reporting a guest provisioning
+  failure.
+- `runner_loss.py`: the synthesized detail says the per-record
+  production/publication outcome is unknown. Real statuses still win.
+- `ci-rollup.rs`: blocked-cell reasons now read `not run: producer failed;
+  build …`, or `producer failed; build …` for a cell that did run tests. An
+  absent status still never blocks or infers compilation failure. The
+  drifted "not cut over / compile in place" comments were rewritten.
+- `test_build_status.py` is registered as a `repo-deps` companion (the
+  `SUITE_REGISTRY`, `companion-suites`, and `EXPECTED_COMPANION_OWNERS`
+  entries).
+
+#### Requirement → test mapping (Phase 2)
+
+| Requirement | Test |
+| ----------- | ---- |
+| records in Rust byte order; each published before the next child starts | `produce.test.cjs` "records are produced in ci-build's byte order, each published before the next starts", "the comparator matches Rust byte order on the key once packages tie" |
+| upload-before-delete; pending upload keeps the archive; ledger written first | "an archive is deleted only after its upload resolves and the ledger records it" |
+| successful sibling beside a failed record and a nonzero child | "a successful record beside a failed one and a silent child is still published" |
+| never-reached records get synthesized statuses; owner aggregate published once | "records the owner never reached get synthesized statuses, and the owner measurement is published once" |
+| failed status upload: archive never re-uploaded, status retried alone | `publish.test.cjs` "a failed status upload is retried alone: the immutable archive is never uploaded twice" |
+| finalizer replay uploads nothing; verifier/manifests/statuses retained | "replaying the finalizer after a complete publication uploads nothing" |
+| archive upload failure keeps payload, publishes failure, sibling succeeds | "a failed archive upload keeps its payload and publishes an upload failure beside a successful sibling" |
+| containment: escape, symlink, parent escape not deleted | "an uploaded payload outside the output directory or behind a symbolic link is not deleted" |
+| separate owner aggregate (Rule 8), degenerate measurements still refused | updated aggregate and degenerate-fixture tests; "an owner with no measured record publishes no owner measurement" |
+| real Cargo through the coordinator: compile-once kept, archives released locally, statuses published | `ci-build-archive-tests.rs` `one_owner_tree_shares_a_dependency_compile_without_unifying_features` |
+| wrapper modes (record / local / unknown refused) | `the_owner_wrapper_leaves_owner_timing_to_the_coordinator_in_record_mode` |
+| build-owner workflow: per-key coordinator, `always()` finalizer, guard failure still fails, sample order, no drift | `ci_workflow_contracts.rs` `the_build_owner_expands_one_leg_per_producer`, `every_build_publishes_a_keyed_artifact_and_a_status_for_any_outcome`, `the_ubuntu_build_owner_samples_storage_at_every_boundary_without_deciding_the_result`, `the_build_owner_runs_the_schematic_fresh_output_guard_before_archiving`, `an_archive_miss_never_enters_a_fallback_build` |
+| status reader: control, shared required-string validator (missing/null/type/empty), each wired field | `test_build_status.py` `ControlTests` (3), `RequiredStringTests` (2) |
+| `schema_version` exact integer 1 | `SchemaVersionTests` |
+| result enumeration, producer-failed wording, unknown fails closed, stage never authorizes | `ResultTests` (3) |
+| identity must match the cell, per field | `IdentityTests` |
+| optional `detail` exceptions | `DetailTests` (3) |
+| loader: duplicate key, trailing garbage, invalid JSON, NaN, Infinity, second document, non-object | `LoaderTests` (2) |
+| absent status → outcome unknown naming the owner; UTF-8 | `FileTests` (3) |
+| CLI wiring: control, malformed JSON, mismatched key (location + exit) | `CliTests` (3) |
+| consumer workflows: status download → check → archive download, `continue-on-error` only on the status download, `consumes_archive` gate, no WSL guest step after a refusal | `an_archive_consumer_checks_its_build_status_before_downloading`, `only_recovery_and_diagnostic_steps_ignore_errors` |
+| runner-loss wording | `test_runner_loss.py` `test_a_lost_build_owner_is_attributed_to_its_build_record` |
+| rollup reasons | five updated `ci-rollup-tests.rs` cases incl. `a_cell_whose_build_published_no_status_is_not_inferred_to_be_blocked` |
+
+### Gates (Phase 2)
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [repo-deps, test-toolkit]`, `change_class: package`, so the gates
+  ran.
+- `just test repo-deps`: 513 passed, 1 skipped. Four pre-existing archive
+  fixtures (`a_consumer_reports_its_extraction_apart_from_its_identity_checks`,
+  `a_real_external_dynamic_dependency_is_discovered_and_refused_when_removed`,
+  `the_archive_runs_every_tier_from_another_checkout_with_no_compiler_in_reach`,
+  `the_canonical_tier_recipes_run_the_fixture_archive_without_rebuilding_it`)
+  took 5.3–8.6 s. None were changed in this phase. A trailing cargo
+  global-cache cleanup warning (permission denied in `~/.cargo/registry`) is
+  host noise and did not affect the result.
+- `just test test-toolkit`: 526 passed, 4 skipped. Three slow tests are
+  pre-existing and not touched by this phase.
+- Companion suites: `node --test 'scripts/ci/artifacts/*.test.cjs'` 14 passed;
+  `test_build_status.py` 21 OK; `test_runner_loss.py` 60 OK;
+  `test_storage_sample.py` OK; full `test_affected_scope.py` 492 OK (708 s).
+- Lint: `cargo clippy -p repo-deps -p test-toolkit --all-targets
+  --all-features -- -D warnings` clean; `actionlint` on `ci.yml`,
+  `_package-ci.yml`, `_wsl-ci.yml` clean.
+- Dependents: the calculator selects no other package, and no docs read by
+  other packages' tests were changed.
+- No OS rigs: `BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`, `BUILD_MACOS` are unset;
+  everything ran on macOS. Hosted behavior (the real artifact client inside
+  github-script, per-key production on the Ubuntu runner) is **unverified**
+  until a hosted run; Phase 4 owns that.
+- Docs left for the Phase 3 "Current documentation" task:
+  `docs/topics/ci-cd.md` and `.claude/skills/rust-devops/ci-cd.md` still
+  describe end-of-job publication and the per-record owner aggregate. They,
+  `.github/ci/README.md:925`, and
+  `.claude/skills/rust-testing/ci-execution.md:38` still say `MISSING —
+  blocked by build <key>`.
+
+## Phase 3
+
+- Started and finished 2026-11-09, single agent (the work was documentation
+  plus one contract-test extension; no subagents were used).
+
+### Wave 4 — Current documentation
+
+- `docs/topics/ci-cd.md` ("One native owner compiles, every tier consumes"):
+  new subsection "Each archive is uploaded, then released, before the next is
+  built", with a Mermaid flow (produce → upload → ledger → delete → status →
+  next record; upload failure keeps the payload; finalizer at the end). It
+  documents the github-script coordinator and why it is JavaScript,
+  `PRODUCE_MODE=record` / unset / refused, `CI_BUILD_OUT`,
+  `<out>/publication-ledger.json` (separate archive/status entries, atomic
+  write, no re-upload), the containment-checked deletion, the `always()`
+  finalizer (synthesized `failure`/`cancelled` at stage `produce`), the
+  enabled remedy and why it was chosen, that hosted confirmation is still
+  outstanding, and the separate `compiler-work-owner-<producer>` artifact.
+  The storage-sample text became its own "Storage samples" subsection. The
+  `MISSING — blocked by build <key>` paragraph was replaced by "A consumer
+  checks its build's status before downloading the archive", with a table of
+  status → outcome using the exact `not run: producer failed` /
+  `not run: producer outcome unknown` wording, the rollup wording, and the
+  runner-loss synthesis.
+- `.claude/skills/rust-devops/ci-cd.md`: "The owner job" now describes the
+  per-record coordinator (Mermaid diagram), wrapper modes, ledger, deletion
+  rules, finalizer, the enabled/disabled remedies, and that
+  `schematic-fresh-output` is not deleted; the per-key `produce-start`
+  sample; the separate owner measurement artifact; the consumer
+  status check and the rollup's new reasons.
+- `.github/ci/README.md`: replaced `MISSING — blocked by build <key>` with the
+  consumer check and rollup wording. **Drift found and fixed**: the paragraph
+  after the suite-selection table said the `artifact-publisher` Node suite
+  "still needs a `SUITE_REGISTRY` entry"; `affected_scope.py` has had that
+  entry. Following the code, the paragraph now says it is registered and
+  names `test_build_status.py` as a `repo-deps` companion.
+- `.claude/skills/rust-testing/ci-execution.md`: the blocked-cell sentence
+  now uses the two `not run:` forms.
+- No docs page names this fix. Code comments in the touched Phase 2 files were
+  re-checked: no `cut over`, `compile in place`, or "no archive was uploaded"
+  text remains in `ci-rollup.rs`, `runner_loss.py`, `build_status.py`,
+  `produce-owner.sh`, or `scripts/ci/artifacts/`.
+- Regression guard: `ci_workflow_contracts.rs::
+  the_ci_documentation_states_the_implemented_behavior` gained six retired
+  phrases (`blocked by build` in all four files, `invokes the producer once
+  without`, the stale "still needs a SUITE_REGISTRY entry") and eight required
+  phrases (`publication-ledger.json`, `PRODUCE_MODE=record`,
+  `compiler-work-owner-<producer>`, both `not run:` forms). The committed
+  (HEAD) versions of all four files contain `blocked by build` and the topic
+  lacks `publication-ledger.json`, so the new assertions fail on the old docs.
+
+### Wave 4 — Focused verification
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [repo-deps, test-toolkit, darkmatter]`, `change_class: package`.
+  `darkmatter` is selected because its shipped-Markdown schema corpus tests
+  scan `docs/topics` and `.claude/skills`. The gates ran.
+- `just test repo-deps test-toolkit` (root): 1039 passed, 5 skipped, 9 slow.
+  The slow tests (archive fixtures, archive path guard, planner/guard
+  contract, kache contracts; 5.2–9.2 s) are pre-existing and untouched by
+  this phase.
+- Companions: `node --test 'scripts/ci/artifacts/*.test.cjs'` 14 passed
+  (the `refusing to delete …` stderr line is the containment test's expected
+  output); `suite_runner.py test_build_status.py` 21 OK;
+  `test_runner_loss.py` 60 OK; `test_storage_sample.py` 17 OK.
+  `test_affected_scope.py` (708 s) was not rerun: neither it nor
+  `affected_scope.py` changed in this phase, and it passed in Phase 2.
+- Lint: `cargo clippy -p repo-deps -p test-toolkit --all-targets
+  --all-features -- -D warnings` clean (the plan's scoped Clippy; the root
+  `just lint` orchestrates every area in the monorepo, so it was not run).
+  `actionlint` (`~/go/bin/actionlint`) on `ci.yml`, `_package-ci.yml`,
+  `_wsl-ci.yml` clean.
+- Dependents: `darkmatter`'s two corpus tests
+  (`shipped_markdown_inline_schemas_parse_passively`,
+  `shipped_markdown_named_type_references_resolve`) passed. No other package
+  is selected.
+- The contract tests the plan names (`the_build_owner_expands_one_leg_per_producer`,
+  `every_build_publishes_a_keyed_artifact_and_a_status_for_any_outcome`,
+  the storage-sampling and compiler-work contracts,
+  `an_archive_consumer_checks_its_build_status_before_downloading`) were
+  written in Phase 2 and pass; behavior through fake transports is covered by
+  the Node suite. No further workflow or code change was needed.
+- No OS rigs: `BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`, `BUILD_MACOS` are unset;
+  everything ran on macOS.
+
+#### Requirement → test mapping (Phase 3)
+
+| Requirement | Test |
+| ----------- | ---- |
+| docs no longer say `blocked by build`; owner no longer "once without `--key`"; publisher suite not called unregistered | `the_ci_documentation_states_the_implemented_behavior` (RETIRED rows) |
+| docs state the ledger, record mode, owner measurement artifact, and both `not run:` forms | same test (REQUIRED rows) |
+| doc Markdown still parses for schema scanning | darkmatter `shipped_schema_corpus` (2 tests) |
