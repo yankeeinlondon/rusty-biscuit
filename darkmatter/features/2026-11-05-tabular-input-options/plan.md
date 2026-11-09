@@ -310,7 +310,9 @@ change if it fails.
   found a separate counter, it is bumped inside `DataMemo::invalidate` under
   the same lock.
 - **R9. Raw-source entry carries the bytes' result and the observation.**
-  `pub(crate) struct RawSource { text: Result<Arc<str>, usize>, len: usize, observation: <N17 Observation> }`:
+  `pub(crate) struct RawSource { text: Result<Arc<str>, usize>, len: usize, hash: [u8; 32] }`
+  (revised by the rebase check: N17 stores the BLAKE3 hash of the bytes read on
+  the memo entry, `LoadedSource::hash`, not an `Observation` value):
   `text` is the BOM-stripped decoded text, or `Err(offset)` of the first
   invalid UTF-8 byte in the **original** bytes (BOM counted, the existing rule
   at `parse.rs:48-62`); `len` is the size reported in the `bytes` span field
@@ -324,7 +326,7 @@ change if it fails.
   call A3 found (N18 `buffers::read`) and computes the observation exactly where
   N17 placed it; a fetched body becomes `Ok(Arc::from(strip_bom(&body)))` with
   its observation. A local read failure is the existing memoized
-  `DataError::FileReference` (`load.rs:103-111`). The observation moves off
+  `DataError::FileReference` (`load.rs:103-111`). The hash moves off
   `LoadedSource` (where N17 stored it) onto `RawSource`; `LoadedSource` keeps
   `content`, `format`, `text: Arc<str>` (an `Arc` clone of the raw text), and
   `bytes`.
@@ -332,10 +334,13 @@ change if it fails.
   `load_data` consults the raw layer on every non-null call (a raw hit is a map
   lookup and bumps no counter), then the parse layer, then the bind layer, as
   three sequential calls; no loader calls another layer, so no `OnceLock` is
-  ever waited on while another is held. After the raw lookup, `load_data`
-  records the entry's observation through the N17 recording call, whichever
-  layer later answers; a memoized raw failure records the failed-read
-  observation N17 defines for it (`hash: None`), built from the identity. So a
+  ever waited on while another is held. `load_data`
+  records the raw entry's hash through `ctx.data.observe_read(&identity, Some(hash))`
+  (revised: N17's recording call), whichever layer later answers; a memoized
+  raw failure records `observe_read(&identity, None)`. To keep N17's existing
+  outcome, the call is made once per call after the parse layer answers: the
+  raw hash when the parse layer succeeded (hit or miss), `None` when the raw
+  read or the parse failed, exactly as `load.rs` observes today. So a
   hit at the parse or bind layer still re-records, which N17 requires and which
   a parse-only lookup would lose. This changes no two-argument count: `reads`
   rises only when the raw loader runs and `source_hits` still counts parse-layer
@@ -374,16 +379,18 @@ change if it fails.
      further, and nothing is imported or read);
   2. `DataOptions::from_bound(call.args().get(2))` (semantic option checks);
   3. read `as` and `prepare_contract` (unchanged, `load.rs:56-60`);
-  4. resolve the identity, including the N17 not-found probe, and `record` it
-     in the read set (unchanged, `load.rs:62-75`);
+  4. resolve the identity, including the N17 not-found probe; then the N28
+     slot gate (`ctx.authorize_slot_read`, revised by the rebase check: it
+     already sits here, before recording); then `record` it in the read set
+     (unchanged, `load.rs:62-90`);
   5. effective format: `options.format`, else `format_of(&identity)`
      (`load.rs:146-164`, the `dm.data.unsupported_format` path, which an
      explicit format skips entirely);
   6. `options.check_applicability(format)`;
   7. for tabular formats, `contract.row_mode()` (`load.rs:79-84`) and, when the
      effective header is `Some(false)`, `require_positional_rows`;
-  8. the N28 slot gate, at the position A4 found, which must precede steps
-     9–12 (it is not moved; a gate later than step 9 is a rebase failure);
+  8. (the N28 slot gate ran in step 4, at the position A4 found; it is not
+     moved);
   9. remote fetch and host policy through `ctx.fetch_remote_text`, on every
      call, before any memo lookup (unchanged, `load.rs:86-95`);
   10. `load_raw(&identity, …)`, then record the observation (R10);
@@ -558,7 +565,7 @@ change if it fails.
 
 ### Wave 1 (serial; gates the plan)
 
-- [ ] **Rebase check and baseline** (R1)
+- [x] **Rebase check and baseline** (R1)
   - Read `darkmatter/features/2026-11-05-dynamic-schema-types/implementation-log.md`;
     confirm its data-runtime and gate work (its Phase 4 "Data runtime
     observations", "Gate hook", "Remote-read discovery") is implemented and
@@ -577,7 +584,7 @@ change if it fails.
 
 ### Wave 2 (parallel; disjoint files)
 
-- [ ] **Option model and error types** (R4, R5, R6) —
+- [x] **Option model and error types** (R4, R5, R6) —
   `<Data module>/options.rs` (new), `error.rs`, `contract.rs`, `mod.rs`
   - Implement `DataOptions`, `format_from_name`, `delimiter_byte`,
     `check_applicability`, `effective_delimiter`, `effective_header`,
@@ -595,7 +602,7 @@ change if it fails.
   - Unit tests in `error.rs` (`code()`, `Display`, `written_contract() == None`)
     and `contract.rs` (`HeaderlessObjectRows` display mentions `header: false`;
     `Provisional` and `List` stay open).
-- [ ] **Catalog signature** (R2, R3, R29) — `schemas/partials/functions.yaml`
+- [x] **Catalog signature** (R2, R3, R29) — `schemas/partials/functions.yaml`
   plus regenerated `docs/functions/load-data.md`,
   `docs/topics/darkmatter-expressions.md` (generated table only),
   `schemas/partials/lifecycle.yaml`
@@ -610,13 +617,13 @@ change if it fails.
     same catalog test file) that `{quote: ","}` and `{header: [1]}` fail binding
     at argument 2 and `{header: null}` binds; if the binder cannot do this,
     stop and revise R2 with the author (R1 discipline).
-- [ ] **Test stubs** (R23) — the five lib stub files, `dmls/tests/l1/option_arguments.rs`,
+- [x] **Test stubs** (R23) — the five lib stub files, `dmls/tests/l1/option_arguments.rs`,
   `lib/tests/l1/main.rs`, `dmls/tests/l1/main.rs`
   - Each stub has a module doc comment and no tests.
 
 ### Checkpoint 1
 
-- [ ] `cargo nextest run -p darkmatter -E 'test(options) | test(catalog) | test(function_binding_registry) | test(function_catalog_parity) | test(lifecycle) | test(load_data)'`
+- [x] `cargo nextest run -p darkmatter -E 'test(options) | test(catalog) | test(function_binding_registry) | test(function_catalog_parity) | test(lifecycle) | test(load_data)'`
   passes; existing `load_data_*` suites pass unmodified (a two-argument call
   still evaluates; a three-argument call binds and is ignored by the unchanged
   handler).
