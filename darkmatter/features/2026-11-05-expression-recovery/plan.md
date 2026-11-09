@@ -2,14 +2,17 @@
 kind: plan
 created: 2026-11-08
 total_phases: 5
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
-yolo: "true"
+yolo: 'true'
 packages:
-    - darkmatter
-    - darkmatter-cli
-    - darkmatter-lsp
-    - claudine
+- darkmatter-lsp
+source_files_during_phase_1:
+- darkmatter/dmls/tests/l1/validation_timing_log.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/darkmatter/dmls.md
 ---
 
 # Plan: Expression Recovery (`try(expr, fallback)`)
@@ -281,6 +284,10 @@ Do not implement on top of a partial dependency.
   sites: `report_diagnostics.rs:348`, `nested.rs:375`, and the `is_authoring_fatal`
   arm (`error.rs:656`). The `dm.data.*` records at the `as_markdown` call stay
   byte-identical.
+  *2026-11-08 rebase check:* there is a fourth site,
+  `markdown/schemas/slots/host.rs:132` (`failure_code`), which also uses
+  `data_failure()`. The current lines for the other sites are in the
+  implementation log.
 
 - **E6. A diagnostic view that keeps the cause.** Add
   `ExpressionError::file_reference_diagnostic(&self) -> Option<&FileReferenceDiagnostic>`.
@@ -455,6 +462,9 @@ Do not implement on top of a partial dependency.
   selected. If D2 shows that the walk does not visit lazy-call arguments, fix
   the walk (not the registration) in the file D2 names. Only the selected
   argument's reads become observations (E15 plus D1).
+  *2026-11-08 rebase check:* the walk is
+  `markdown/schemas/slots/admission.rs::slot_class_report`, and it already
+  visits every argument of a call. The registration alone is enough.
 
 - **E18. Slot behavior is the gate's.** Inside a slot, `try` sees the gate's
   refusal as a nonrecoverable error (E3, D3), so an unapproved or denied read
@@ -502,6 +512,12 @@ Do not implement on top of a partial dependency.
   a unit test beside `data/runtime.rs` that seeds the raw layer with a typed
   `Io` failure for a real resolved identity and composes through the public
   API. Record which approach was used.
+  *2026-11-08 rebase check:* resolution treats the directory as no match (a
+  clean miss), so the directory fixture is not used. Instead, a
+  `simplified_schema::resolve::buffers::guarded` guard refuses the resolved
+  path. The real read then fails with an `Io` cause (`PermissionDenied`), and
+  the runtime-seeding unit test stays as the fallback. See the implementation
+  log.
 
 - **E23. Test placement.** New L1 modules, each registered once in its crate's
   `tests/l1/main.rs` by the Phase 4 scaffolding task:
@@ -518,7 +534,7 @@ Do not implement on top of a partial dependency.
 
 ### Wave 1
 
-- [ ] **Rebase check and implementation log**
+- [x] **Rebase check and implementation log**
   - Create `implementation-log.md` beside this plan with the headings Rebase
     check, Baseline, Departures, Decisions applied, and one heading per phase.
   - Verify D1–D11 and T1–T8 against the code (not plans), recording holds or
@@ -535,14 +551,14 @@ Do not implement on top of a partial dependency.
 
 ### Wave 2
 
-- [ ] **Baseline**
+- [x] **Baseline**
   - Run `just test` then `just lint` in `darkmatter/`, and `just test-library`
     then `just lint` in `claudine/`. Record pass/fail counts and any failure
     already present in the log, so later red results can be attributed.
 
 ### Validation checkpoint (end of Phase 1)
 
-- [ ] Every assumption has a recorded verdict, every difference has a revised
+- [x] Every assumption has a recorded verdict, every difference has a revised
   rule, and the baseline is recorded. A failing baseline test that this
   feature's files touch is investigated before Phase 2 starts.
 
