@@ -1,27 +1,47 @@
 ---
 total_phases: 8
 created: 2026-11-09
-phase: 1
+phase: 2
 agent: claude/sonnet
 yolo: true
 packages:
 - simplified-schema
 - darkmatter
 - darkmatter-cli
-- darkmatter-lsp
-- claudine
 - claudine-cli
 source_files_during_phase_1:
-- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/recursive.rs
+- simplified-schema/lib/src/schema/view.rs
 - simplified-schema/lib/src/simplified/grammar.rs
 - simplified-schema/lib/src/simplified/grammar/slot_tests.rs
+- simplified-schema/lib/src/simplified/lint.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/narrowing.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/types.rs
 - simplified-schema/lib/src/slots.rs
 - simplified-schema/lib/src/slots/substitute.rs
-- simplified-schema/lib/src/resolve.rs
-- simplified-schema/lib/tests/fixtures/dynamic_slots/value-positions.yaml
-- claudine/cli/src/completion/schema_completion/candidates.rs
+- simplified-schema/lib/tests/fixtures/dynamic_slots/template-constraints.yaml
+- simplified-schema/lib/tests/l1/declaration_grammar.rs
+- simplified-schema/lib/tests/l1/dynamic_slots.rs
+- simplified-schema/lib/tests/l1/schema_object.rs
+- darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slots.rs
+- darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+- claudine/cli/src/argv/partition.rs
+- claudine/cli/src/argv/partition/tests.rs
 - claudine/cli/src/completion/engine/mod.rs
+- claudine/cli/src/completion/engine/tests.rs
+- claudine/cli/src/completion/schema_completion/candidates.rs
+- claudine/cli/src/completion/schema_completion/tests.rs
 - claudine/cli/src/completion/setter_value.rs
+- claudine/cli/tests/common/owned_value_options.rs
+- claudine/cli/tests/l1/completion_cli.rs
+- claudine/cli/tests/l1/completion_ownership.rs
+- claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap
 source_files_during_phase_2:
 - simplified-schema/lib/src/simplified/types.rs
 - simplified-schema/lib/src/simplified/grammar.rs
@@ -111,6 +131,18 @@ skills_files_updated_during_phase_8:
 - .claude/skills/darkmatter/schema.md
 - .claude/skills/darkmatter/dmls.md
 - .claude/skills/darkmatter/cli.md
+docs_updated_during_phase_1:
+- simplified-schema/docs/topics/language/slots.md
+- simplified-schema/lib/tests/fixtures/dynamic_slots/README.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- claudine/docs/topics/completions/shell-completions.md
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/execution-flow.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/darkmatter/schema.md
 ---
 
 # Template types — implementation plan
@@ -631,20 +663,20 @@ Each rule is a decision followed by its evidence. They bind every later phase.
 
 ### Wave 1 — Rename (parallel; disjoint files)
 
-- [ ] **Rename simplified-schema** — apply R1 across code, tests, fixtures, docs, skill
+- [x] **Rename simplified-schema** — apply R1 across code, tests, fixtures, docs, skill
     - `ValueSlotKind` → `TemplateConstraintKind`, `Constraint::DynamicValue` → `Constraint::TemplateConstraint` in every file listed under R1 (also `lib.rs` re-exports).
     - `git mv` `lib/tests/fixtures/dynamic_slots/value-positions.yaml` → `template-constraints.yaml`; fix every reference (`rg value-positions`), including `fixtures/dynamic_slots/README.md`.
     - Rename test functions in `grammar/slot_tests.rs` and `lib/tests/l1/*.rs` whose names or messages contain "value slot", "value position", "whole type".
     - In `docs/topics/language/slots.md`: replace the vocabulary ("value slot", "value-position slot", "A value slot is the whole argument") with **template constraint**; rewrite the section "Whole Types (Planned)" to **Template Types** and keep it marked **planned** (Phase 8 removes the marker); update the intro paragraph to name both kinds.
     - `.claude/skills/simplified-schema/SKILL.md` and `.claude/skills/darkmatter/schema.md`: same vocabulary change.
     - Risk: "value position" also appears in unrelated prose; only the schema-slot sense is renamed — read each hit.
-- [ ] **Rename darkmatter and claudine** — apply R1 (docs only) and R2
+- [x] **Rename darkmatter and claudine** — apply R1 (docs only) and R2
     - Darkmatter docs: `darkmatter/docs/topics/schemas/schema-slots.md`, `authoring-schemas.md`, `dmls-schema-support.md`, `darkmatter/dmls/docs/autocomplete.md`, `.claude/skills/darkmatter/dmls.md`; test names and comments in `darkmatter/dmls/tests/l1/recursive_schema_editor.rs`, `darkmatter/cli/tests/l1/hash_kind_save_diff.rs`, `schema_union_matrix.rs`, and `darkmatter/lib/tests/dynamic_slots_fixtures/mod.rs` / `l1/dynamic_slots_fixture_repos.rs` where the old terms occur.
     - Claudine: apply R2 to every listed site; rename test identifiers (`engine/tests.rs`, `partition/tests.rs`) that embed "value slot".
 
 ### Wave 2 — Validate the rename
 
-- [ ] **Rename guard** — nothing banned remains
+- [x] **Rename guard** — nothing banned remains
     - Run `rg -n -i "value[ -_]slot|value[ -_]position|whole[ -_]type[ -_]slot|ValueSlotKind|DynamicValue" --glob '!**/_completed/**' --glob '!darkmatter/features/2026-11-08-template-types/**'`; the only permitted hit is none. Add the one command to the implementation log.
     - Run `just test` and `just lint` in `simplified-schema`, `darkmatter`, `claudine`; run `just test-minimal` in `simplified-schema`.
 
