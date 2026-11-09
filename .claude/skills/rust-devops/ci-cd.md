@@ -106,7 +106,14 @@ local and hosted runs. Its package policy is deliberately narrow:
   the package there is not compile-checked again. The reused cell links that
   receipt with no test counts; a version-1 whole-environment note never
   satisfies it, and the cell that compiles unchanged dependents is never
-  reusable.
+  reusable. That dependents-only cell exists only when the event schedules
+  `DEPENDENTS_ENVIRONMENT` (`ubuntu-latest`): a push proven by its pull
+  request, and the nightly (where Linux is a producer only), plan none.
+- `schema.validate_resolved_plan` refuses (`malformed-receipt:`) any cell
+  naming an environment outside the plan's cell-bearing environments: one
+  absent from `environments`, or one listed in `producing_environments`.
+  `calculate_scope` runs that validation before returning, so the planner CLI
+  exits nonzero and writes neither `--plan-out` nor stdout for such a plan.
   `_wsl-ci.yml` declares no archive selector at all — it takes one row and
   resolves that cell's build record from the plan through `cell_contract.py` —
   so a check selector has nowhere to
@@ -500,7 +507,10 @@ schedule nothing while keeping its audit, its slice, and its gap publisher.
 runner}` and nothing else; every other value the job needs comes from
 `scripts/ci/cell_contract.py`, the one reader, which joins the row back to its
 cell in `ci-resolved-plan` and refuses an unknown, duplicated, non-executing,
-or mismatched row with a `cell-contract-*` code before anything runs. **No job
+or mismatched row with a `cell-contract-*` code before anything runs. Every
+upload whose name comes from `steps.cell.outputs.*` (status, JUnit, WSL2
+observation) also carries a `!= ''` check on that output, so a refused
+contract shows only its own error, not a second invalid-artifact-name one. **No job
 reads `environments.json`, a Cargo manifest, or a package policy block**, and
 no reader-facing workflow declares an environment-list input any more.
 
@@ -1318,15 +1328,94 @@ every remaining OS continues before the final verdict fails.
 
 ## Release contract
 
-Release-plz is the sole version/tag/changelog authority:
+Release-plz is the sole version/tag/changelog authority. `docs/releases.md` is
+the operational guide (App setup, cutting, recovery, dry run); this is the
+contract it defines. Every event decision is made by
+`scripts/ci/release_path.py` reading `GITHUB_EVENT_PATH`; the job `if:` guards
+are a coarse filter, not the authority.
 
-1. A successful `ci` run on `main` triggers a non-canceling release-plz job for
-   that exact validated commit. It opens or updates a draft release PR.
-2. Merging a PR labeled `release` triggers publication. Ordinary pushes do not
-   publish releases.
-3. `publish = false` means no crate is published to crates.io. Git tags and
-   GitHub releases are the current package release channel; the specialized
-   integration workflow may attach its own cross-compiled release assets.
+1. **Preparation** (`release-plz-pr`, `workflow_run`, concurrency
+   `release-plz-pr`, non-canceling): only a completed, successful `ci` *push*
+   run on `main` in the canonical repository. It checks out the `main` branch
+   (not the SHA: release-plz needs `@{upstream}`) and stands down with a notice
+   if HEAD is no longer `workflow_run.head_sha`. It opens or updates the draft
+   proposal (labels `release`, `automated`; branch `release-plz-*`).
+2. **Writes use only a release App installation token**, minted per job just
+   before use, scoped to this repository with contents and pull-requests write.
+   Configuration is `RELEASE_APP_ID` (variable), `RELEASE_APP_PRIVATE_KEY`
+   (secret), and `RELEASE_APP_BOT_LOGIN` (variable, exact login with `[bot]`).
+   Missing configuration is a named error before any token; there is never a
+   `GITHUB_TOKEN` fallback (its events would not trigger `ci` on the proposal
+   or `release: published` downstream). Workflow default is `contents: read`;
+   checkouts set `persist-credentials: false`; release-plz gets the token as
+   `GIT_TOKEN` plus a credential helper injected through `GIT_CONFIG_COUNT`
+   in its own environment, so nothing is written to disk or Git config.
+3. **Review**: CI runs on the draft unchanged (no `ready_for_review` trigger);
+   a human marks it ready; `ci-gate` is required; it must be merged with a
+   merge commit.
+4. **Publication** (`release-plz-release`, PR `closed`, concurrency
+   `release-plz-release`): checks out `merge_commit_sha`, never current `main`.
+   Before any token it requires merged into `main`, `release` label,
+   `release-plz-` branch, canonical base/head repositories, author type `Bot`
+   with login `RELEASE_APP_BOT_LOGIN`, and a two-parent merge whose second
+   parent is `pull_request.head.sha`. Squash and rebase merges are refused.
+   Candidates are the packages whose version changed from the merge base of
+   (first parent, proposal head) to the proposal head; tags
+   `{package}-v{version}` target the proposal head, never the merge SHA.
+5. **Inventory and recovery**: every candidate's remote tag (peeled) and
+   Release is classified before any write: `new`, `recovery` (correct tag,
+   no Release), `complete`; a tag at another commit, a Release without its
+   tag, a draft Release, or any non-404 API error refuses publication
+   outright. One release-plz process per package in a fresh clone detached at
+   the proposal head; recovery deletes the tag only from that clone and sets
+   `git_tag_enable = false`, so release-plz creates the Release and the remote
+   tag is never moved. The first failing exit status is kept and the
+   inventory is uploaded as `release-publication-{run_id}-{attempt}`. The
+   supported recovery is re-running the original run; never
+   `gh release create`.
+6. **Dry run** (`release-dry-run`, `workflow_dispatch` from any branch) is the
+   only branch-runnable calculation: read-only, no App credentials, and its
+   failure stays red while `release-dry-run-{run_id}-{attempt}` keeps the
+   diagnostics. All three jobs get release-plz and the `rust-toolchain.toml`
+   toolchain through `.github/actions/setup-release-plz`, which builds 0.4.3
+   from the upstream tag archive (SHA-256 pinned in the action) with the
+   in-repo `release-plz-0.4.3-historical-manifest-path.patch`, runs the
+   patch's upstream unit tests, `cargo build --locked`, checks the version,
+   and only then saves the binary with `actions/cache/save` (key: version,
+   archive SHA, `hashFiles` of the patch, toolchain, runner OS/arch). No
+   binstall, prebuilt, or unpatched fallback exists.
+   The dry run (`release_path.py update`) and `release-pr` calculate in one
+   environment, `calculation_env`: a temporary `core.attributesFile` with the
+   `.gitattributes` `*.ps1 text eol=crlf` rule, so release-plz's history walk
+   back past the commit that added `.gitattributes` keeps `scripts/init.ps1`
+   clean. Never call `release-plz update`/`release-pr` directly from a job.
+   Why the patch: git-only reconstruction looks every workspace package
+   (eligible or not) up by its current name at its newest tag, and the
+   `-v0.1.0` tags of the three packages renamed on 2026-10-03
+   (`sniff-detection-cli`, `git-wt-cli`, `darkmatter-lsp`) point at
+   `907cd6e`, where they are `sniff-cli`, `worktree-cli`, `dmls`. Published
+   tags are never moved, so the patch falls back to the member with the same
+   workspace-relative manifest path (current name first; neither is still an
+   error), keys the result by the current name, and does the same in the
+   `Cargo.lock` comparison. It touches only `next_ver.rs`,
+   `registry_packages.rs`, `lock_compare.rs`, never publication;
+   `the_release_tool_is_built_from_verified_source_with_the_in_repo_patch`
+   holds that. Drop it by deleting the patch and the build steps once an
+   upstream release resolves renamed packages.
+   Tag-only recovery relies on 0.4.3's local-only `git tag -l` skip and
+   separate tag/Release switches;
+   `tag_only_recovery_relies_on_the_release_plz_version_it_was_verified_against`
+   fails on a pin change until those are re-read upstream.
+7. **Temporary allowlist**: `[workspace].release = false` with only
+   `sniff-detection-cli` and `git-wt-cli` enabled, mirrored by
+   `APPROVED_RELEASE_SET`; a proposal must bump exactly that set. Widening it
+   is a separate change after the first release is verified, editing both.
+8. `publish = false` means no crate is published to crates.io. Git tags and
+   GitHub Releases are the current package release channel.
+   `build-integrations.yml` builds and attaches an archive only for the one
+   integration (`arcam-amp-integration`, `eversolo-integration`,
+   `sony-receiver-integration`) its exact `{package}-v{semver}` tag names,
+   from that tag's commit; any other Release builds nothing.
 
 Do not introduce a second version authority, publish from a feature branch, or
 silently turn on crates.io. A new registry, installer generator, signing path,

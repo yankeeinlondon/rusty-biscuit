@@ -3242,9 +3242,11 @@ def package_cells(
 
     `dependents` are the unchanged direct reverse dependencies this package
     compiles inside its `DEPENDENTS_ENVIRONMENT` check cell (Open Question 1,
-    Option B). They give a package that check cell even when no target kind of
-    its own needs one; the other native environments' check cells still exist
-    only for uncovered kinds.
+    Option B). When no target kind of its own needs a check, they give the
+    package a dependents-only check cell, but only if `environments` schedules
+    `DEPENDENTS_ENVIRONMENT`: an event that does not (a push its pull request
+    already proved) plans no such cell. The other native environments' check
+    cells exist only for uncovered kinds.
     """
     package = record["package"]
     cells: list[dict[str, Any]] = []
@@ -3386,9 +3388,13 @@ def package_cells(
                 reusable=not hosts_seam,
                 compiled_dependents=seam if hosts_seam else (),
             )
-    elif seam:
+    elif seam and any(
+        environment["name"] == DEPENDENTS_ENVIRONMENT for environment in environments
+    ):
         # No kind of its own needs a check, so this cell compiles nothing of
         # the package (`target_kinds` is empty) and exists for the seam alone.
+        # It exists only where the event schedules its host; a proven or
+        # producer-only environment is absent from `environments`.
         add(
             DEPENDENTS_ENVIRONMENT,
             "check",
@@ -4272,8 +4278,9 @@ def calculate_scope(
     One document answers every downstream question: which areas were selected
     and why, which packages contribute to each, and what will happen to each
     `{package, environment, gate}` cell — execute, reuse verified evidence, or
-    stand as a governed policy gap. `schema.validate_resolved_plan` is its
-    contract.
+    stand as a governed policy gap. The plan is checked against
+    `schema.validate_resolved_plan` before it is returned; an invalid plan
+    raises ``RuntimeError`` instead.
 
     `accepted_cells` is the verified per-cell result set, not an environment
     name. Evidence from macOS and from a prior WSL run therefore combine, and
@@ -4755,6 +4762,12 @@ def calculate_scope(
             coverage_anchors, key=lambda entry: entry["environment"]
         )
     plan["rows"] = attach_rows(plan)
+    # Refused here, before the CLI writes `--plan-out` or prints a projection:
+    # a cell naming an environment the event did not schedule would otherwise
+    # surface only when its cell contract fails to resolve in CI.
+    problems = schema.validate_resolved_plan(plan)
+    if problems:
+        raise RuntimeError(f"the calculated plan is invalid: {problems[0]}")
     return plan
 
 

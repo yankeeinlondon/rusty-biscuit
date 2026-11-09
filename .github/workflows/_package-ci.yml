@@ -340,8 +340,11 @@ jobs:
             '{package: $package, job: $job, environment: $environment, result: $result, dependents: $dependents}
              + (if $detail == "" then {} else {detail: $detail} end)' \
             >"$RUNNER_TEMP/status/status.json"
+      # Named by the cell contract, so skipped when it never resolved: an empty
+      # name would add a second, misleading error, and the failed resolution
+      # step already blocks the gate.
       - name: Upload producer status
-        if: ${{ always() }}
+        if: ${{ always() && steps.cell.outputs.status_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cell.outputs.status_artifact }}
@@ -928,7 +931,7 @@ jobs:
       # its {package, environment, gate} identity. It also carries this cell's
       # `expected-<gate>.json`, which is what `completion.py` compares against.
       - name: Upload JUnit
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.cell.outputs.junit_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cell.outputs.junit_artifact }}
@@ -1014,8 +1017,11 @@ jobs:
                 else {build: {key: $key, producer: $producer, digest: $digest}} end)
              + (if $timings == {} then {} else {timings: $timings} end)' \
             >"$RUNNER_TEMP/status/status.json"
+      # Named by the cell contract, so skipped when it never resolved: an empty
+      # name would add a second, misleading error, and the failed resolution
+      # step already blocks the gate.
       - name: Upload producer status
-        if: ${{ always() }}
+        if: ${{ always() && steps.cell.outputs.status_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cell.outputs.status_artifact }}
@@ -1466,8 +1472,11 @@ jobs:
              + (if $duration == "" then {} else {duration_s: ($duration | tonumber)} end)
              + (if ($companions | length) == 0 then {} else {companions: $companions} end)' \
             >"$RUNNER_TEMP/status/status.json"
+      # Named by the cell contract, so skipped when it never resolved: an empty
+      # name would add a second, misleading error, and the failed resolution
+      # step already blocks the gate.
       - name: Upload producer status
-        if: ${{ always() }}
+        if: ${{ always() && steps.cell.outputs.status_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cell.outputs.status_artifact }}

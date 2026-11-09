@@ -46,7 +46,10 @@
   which it compiles inside that cell. An unchanged reverse dependency is
   reported by name and scheduled nowhere. The package's passing local L1 on
   an environment satisfies its check cell there, so the pushing host's OS is
-  not compile-checked again; a check cell that compiles dependents always runs.
+  not compile-checked again; a *scheduled* check cell that compiles dependents
+  always runs, because no local L1 receipt compiles the unchanged consumers;
+  an environment the event does not schedule (a push proven by its pull
+  request) plans no such cell.
 - **A changed file schedules the code that reads it, and nothing more.** A
   non-source change selects no package, except where compiled code names the
   path: embedded into shipped code it is that package's source; read by a

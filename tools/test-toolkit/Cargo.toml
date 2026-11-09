@@ -90,8 +90,13 @@ companion-suites = ["archive-path-guard", "test-audit-typecheck", "test-audit-vi
 # and not merely a compiled archive. Environments without one render a
 # governed ACCEPTED GAP instead of a red cell.
 requires-toolchain = true
-# The kache contract suites execute these `repo-deps` scripts. Source is
+# The kache and release contract suites execute these scripts. Source is
 # otherwise left out of the planner's test-input scan, so without this a
 # script-only change would run none of them; with it, the change adds one
 # narrowed L1 cell naming the tests that spell each path.
-source-inputs = ["scripts/kache-config-merge.py", "scripts/kache-host.sh"]
+source-inputs = [
+    "scripts/kache-config-merge.py",
+    "scripts/kache-host.sh",
+    "scripts/ci/release_path.py",
+    "scripts/ci/integration_release.py",
+]

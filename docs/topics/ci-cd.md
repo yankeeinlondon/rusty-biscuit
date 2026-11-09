@@ -119,7 +119,12 @@ cannot pass for a tested cell. An L2 cell is `partial` unless a backend it requi
 a test — an absent backend makes the suite *skip*, and nextest prints PASS in about 0.02 s.
 `lint` stages no test report and remains CI-origin. A `check` cell can reuse the package's
 verified, unfiltered L1 on the same environment; it links that evidence without claiming test
-counts as a check measurement. A check that compiles unchanged dependents always executes.
+counts as a check measurement. A scheduled check that compiles unchanged dependents always
+executes and never reuses a local receipt. A push whose pull request already proved Linux plans no
+Linux cells at all, dependents check included, and the planner refuses any plan whose cell names an
+environment it did not schedule. For example, a change to a library with an unchanged direct
+consumer gets one Linux dependents check on the pull request; the push that merges it, already
+proven by that pull request, plans no cells.
 
 CI reads **every** note on every environment's notes ref from the merge base (included) to the
 outgoing head, so a macOS receipt from this push and a prior `cross-check` WSL receipt combine in

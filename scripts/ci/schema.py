@@ -719,8 +719,10 @@ PACKAGE_FIELDS: dict[str, bool] = {
     #: The unchanged direct reverse dependencies compiled inside this package's
     #: own `ubuntu-latest` check cell (Open Question 1, Option B): the sorted
     #: `dependents` names and the explicit `check_args` that compile them.
-    #: Present exactly when at least one is attributed; never names a package
-    #: the plan also selects.
+    #: Present exactly when at least one is attributed, even when the event
+    #: schedules no `ubuntu-latest` and so plans no check cell to compile them
+    #: (a push its pull request proved); never names a package the plan also
+    #: selects.
     "dependent_seam": False,
     #: A package declaring `unimplemented`: `{reason, tests_found}`. While
     #: `tests_found` is false the package has no test tier and no test cell;
@@ -1603,7 +1605,14 @@ def _rows(value: Any, areas: set[str]) -> list[str]:
                 problems += _member(
                     f"resolved plan rows {area} {name} gate", row["gate"], GATES, "unknown-gate"
                 )
+                if not isinstance(row["package"], str):
+                    problems.append(
+                        f"malformed-receipt: resolved plan rows {area} {name} package is "
+                        f"{row['package']!r}, not a package name"
+                    )
                 key = (row["package"], row["environment"], row["gate"])
+                if not all(isinstance(part, str) for part in key):
+                    continue
                 if key in seen:
                     problems.append(
                         f"conflicting-evidence: resolved plan rows dispatch "
@@ -1637,6 +1646,9 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
     `today` is the date an approval's expiry is judged against, defaulting to
     the current date. A caller that validates a stored document as of some
     other day passes it explicitly.
+
+    Every cell, reused and omitted ones included, must name an environment in
+    the plan's `environments` that is not a `producing_environments` entry.
 
     ## Returns
 
@@ -1676,6 +1688,11 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
     for entry in document["areas"]:
         problems += _keys("area record", entry, AREA_FIELDS)
         if isinstance(entry, dict) and "area" in entry:
+            if not isinstance(entry["area"], str):
+                problems.append(
+                    f"malformed-receipt: area record area is {entry['area']!r}, not an area name"
+                )
+                continue
             areas[entry["area"]] = entry
             if not entry.get("selection_reason"):
                 problems.append(
@@ -1694,8 +1711,14 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
         problems += _keys("package record", entry, PACKAGE_FIELDS)
         if not isinstance(entry, dict) or "package" not in entry:
             continue
+        if not isinstance(entry["package"], str):
+            problems.append(
+                f"malformed-receipt: package record package is {entry['package']!r}, "
+                "not a package name"
+            )
+            continue
         packages[entry["package"]] = entry
-        if entry.get("area") not in areas:
+        if not isinstance(entry.get("area"), str) or entry["area"] not in areas:
             problems.append(
                 f"unknown-package: package {entry['package']!r} names area "
                 f"{entry.get('area')!r}, which the plan does not select"
@@ -1761,7 +1784,7 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
             f"unknown-package: {name!r} is reported as an unchanged reverse "
             "dependency and must not also hold a package record"
             for name in document["reverse_dependencies"]
-            if name in packages
+            if isinstance(name, str) and name in packages
         ]
     for name, entry in packages.items():
         seam = entry.get("dependent_seam")
@@ -1772,7 +1795,7 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
                 f"unknown-package: {dependent!r} is compiled as a dependent of "
                 f"{name!r} and must not also hold a package record"
                 for dependent in seam["dependents"]
-                if dependent in packages
+                if isinstance(dependent, str) and dependent in packages
             ]
 
     for entry in document["cells"]:
@@ -1786,15 +1809,16 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
         problems += _member(f"{label} origin", entry.get("origin"), ORIGINS, "malformed-receipt")
         problems += _member(f"{label} state", entry.get("state"), CELL_STATES, "malformed-receipt")
         problems += _str_list(f"{label} target_kinds", entry.get("target_kinds"), TARGET_KINDS)
-        if entry["package"] not in packages:
+        package = packages.get(entry["package"]) if isinstance(entry["package"], str) else None
+        if package is None:
             problems.append(
                 f"unknown-package: {label} has no package record; package is the "
                 "stored identity and every cell must carry one"
             )
-        elif entry.get("area") != packages[entry["package"]].get("area"):
+        elif entry.get("area") != package.get("area"):
             problems.append(
                 f"malformed-receipt: {label} claims area {entry.get('area')!r} but its "
-                f"package record says {packages[entry['package']].get('area')!r}; area is "
+                f"package record says {package.get('area')!r}; area is "
                 "derived from package, never independently assigned"
             )
         if not entry.get("selection_reason"):
@@ -1806,7 +1830,7 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
                     f"malformed-receipt: {label} carries dependents but only a check "
                     "cell compiles them"
                 )
-        problems += _cell_backends(label, entry, packages.get(entry["package"]))
+        problems += _cell_backends(label, entry, package)
         problems += _cell_consistency(label, entry)
 
     problems += _build_records(document, packages)
@@ -1816,7 +1840,7 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
             (entry["package"], entry["environment"], entry["gate"])
             for entry in document["cells"]
             if isinstance(entry, dict)
-            and {"package", "environment", "gate"} <= set(entry)
+            and all(isinstance(entry.get(key), str) for key in ("package", "environment", "gate"))
         },
         judged,
     )
@@ -1832,10 +1856,10 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
     if "event" in document:
         problems += _member("resolved plan event", document["event"], EVENTS, "malformed-receipt")
     scheduled = {
-        environment.get("name")
+        environment["name"]
         for environment in document["environments"]
-        if isinstance(environment, dict)
-    }
+        if isinstance(environment, dict) and isinstance(environment.get("name"), str)
+    } if isinstance(document["environments"], list) else set()
     for field, key in (("deferred_environments", "events"), ("proven_environments", "event")):
         if field not in document:
             continue
@@ -1851,7 +1875,7 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
                 )
                 continue
             problems += _member(f"resolved plan {field} name", entry["name"], ENVIRONMENTS, "unknown-environment")
-            if entry["name"] in scheduled:
+            if isinstance(entry["name"], str) and entry["name"] in scheduled:
                 problems.append(
                     f"malformed-receipt: resolved plan {field} names {entry['name']!r}, "
                     "which the plan also schedules"
@@ -1879,7 +1903,7 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
                 )
                 # A producer is in the table — its owner job and preflight
                 # runner come from there — and its guests are scheduled ones.
-                if entry["name"] not in scheduled:
+                if isinstance(entry["name"], str) and entry["name"] not in scheduled:
                     problems.append(
                         f"malformed-receipt: resolved plan producing_environments names "
                         f"{entry['name']!r}, which is not in the plan's environment table"
@@ -1893,6 +1917,40 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
                         f"malformed-receipt: resolved plan producing_environments entry "
                         f"{entry['name']!r} must name scheduled guests it produces for"
                     )
+    # A cell, whatever its state, belongs to a scheduled environment that owns
+    # cells. A producer is in the table only to build a guest's archives, so a
+    # cell naming it is as wrong as one naming an environment the plan dropped.
+    producers = {
+        entry["name"]: entry["for"]
+        for entry in document.get("producing_environments") or []
+        if isinstance(entry, dict)
+        and set(entry) == {"name", "for"}
+        and isinstance(entry["name"], str)
+    } if isinstance(document.get("producing_environments"), list) else {}
+    for entry in document["cells"]:
+        if not isinstance(entry, dict) or not all(
+            isinstance(entry.get(key), str) for key in ("package", "environment", "gate")
+        ):
+            continue
+        name = entry["environment"]
+        label = f"cell {entry['package']}/{name}/{entry['gate']}"
+        if name not in scheduled:
+            problems.append(
+                f"malformed-receipt: {label} names environment {name!r}, which the "
+                "plan's environment table does not carry"
+            )
+        elif name in producers:
+            guests = producers[name]
+            guests = (
+                ", ".join(guests)
+                if isinstance(guests, list) and all(isinstance(guest, str) for guest in guests)
+                else repr(guests)
+            )
+            problems.append(
+                f"malformed-receipt: {label} names environment {name!r}, which the "
+                f"plan keeps only as a producer of archives for {guests}; a producer "
+                "owns no cells"
+            )
     if "coverage_anchors" in document:
         entries = document["coverage_anchors"]
         if not isinstance(entries, list) or not entries:
@@ -2228,11 +2286,12 @@ def _build_records(document: dict[str, Any], packages: dict[str, Any]) -> list[s
 
     problems: list[str] = []
     by_key: dict[str, dict[str, Any]] = {}
+    environments = document.get("environments")
     environment_names = {
-        environment.get("name")
-        for environment in document.get("environments", [])
-        if isinstance(environment, dict)
-    }
+        environment["name"]
+        for environment in environments
+        if isinstance(environment, dict) and isinstance(environment.get("name"), str)
+    } if isinstance(environments, list) else set()
 
     for entry in builds:
         problems += _keys("build record", entry, BUILD_FIELDS)
@@ -2245,6 +2304,8 @@ def _build_records(document: dict[str, Any], packages: dict[str, Any]) -> list[s
                 f"malformed-receipt: {label} key is not a 16-digit hex build key; the "
                 "key is computed only through `ci-build key`"
             )
+            if not isinstance(key, str):
+                continue
         if key in by_key:
             problems.append(
                 f"malformed-receipt: build key {key} has two owners, "
@@ -2254,7 +2315,7 @@ def _build_records(document: dict[str, Any], packages: dict[str, Any]) -> list[s
             continue
         by_key[key] = entry
 
-        if entry.get("package") not in packages:
+        if not isinstance(entry.get("package"), str) or entry["package"] not in packages:
             problems.append(
                 f"unknown-package: {label} names a package the plan does not select"
             )
@@ -2264,7 +2325,7 @@ def _build_records(document: dict[str, Any], packages: dict[str, Any]) -> list[s
             ENVIRONMENTS,
         )
         compatible = entry.get("compatible_environments")
-        if isinstance(compatible, list):
+        if isinstance(compatible, list) and all(isinstance(name, str) for name in compatible):
             if compatible != sorted(set(compatible)):
                 problems.append(
                     f"malformed-receipt: {label} compatible_environments must be sorted "
@@ -2275,7 +2336,7 @@ def _build_records(document: dict[str, Any], packages: dict[str, Any]) -> list[s
                     f"malformed-receipt: {label} producer is not among its own "
                     "compatible_environments"
                 )
-        if entry.get("producer") not in environment_names:
+        if not isinstance(entry.get("producer"), str) or entry["producer"] not in environment_names:
             problems.append(
                 f"unknown-environment: {label} names producer "
                 f"{entry.get('producer')!r}, which is not in the plan's environment table"
@@ -2330,7 +2391,9 @@ def _build_consumers(
                 "not declare compatible"
             )
         seen.append((consumer.get("environment"), consumer.get("gate")))
-    if seen != sorted(set(seen), key=lambda pair: (str(pair[0]), str(pair[1]))):
+    # `_member` above already refused a non-name; only names can be ordered.
+    names = all(isinstance(part, str) for pair in seen for part in pair)
+    if names and seen != sorted(set(seen), key=lambda pair: (str(pair[0]), str(pair[1]))):
         problems.append(
             f"malformed-receipt: {label} consumers must be sorted by "
             "{environment, gate} and free of duplicates"
@@ -2396,7 +2459,7 @@ def _build_references(
                 "executing L1, L2, or browser cell consumes one"
             )
             continue
-        record = by_key.get(reference)
+        record = by_key.get(reference) if isinstance(reference, str) else None
         if record is None:
             problems.append(
                 f"malformed-receipt: {label} references build {reference!r}, which the "
