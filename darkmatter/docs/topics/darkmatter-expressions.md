@@ -928,8 +928,11 @@ missing file or a remote transport failure counts. The decision is made from
 the kind of failure, never from the function's name or the message text, and a
 kind of failure that is not on the left is not recovered.
 
-A source whose extension names no readable format fails with
-`dm.data.unsupported_format` even when the file is missing, so
+A request that is invalid for the format it asks for fails the same way
+when the file is missing: an extension that names no readable format
+(`dm.data.unsupported_format`), options that cannot apply to the format
+(`dm.data.invalid_options`), and a contract that cannot describe CSV or TSV
+rows (`dm.data.row_shape_conflict`). So
 `try(load_data("optional.xyz", "string[]"), [])` is still an error. Name the
 format to make a missing file an ordinary miss; see
 [Loading Data](./loading-data.md#files-that-may-be-missing).

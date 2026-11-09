@@ -76,7 +76,9 @@ Freshness modes:
 
 - `fallback` (the default) revalidates stale artifacts but serves the stale
   cached body on network or HTTP failure, keeping CI/offline builds resilient.
-  A `no-cache` body is never served stale.
+  A `no-cache` body is never served stale, and a refused request is never
+  covered: if revalidation is redirected to a host the run does not allow,
+  the read fails even though a cached body exists.
 - `strict` revalidates stale remote artifacts and fails when revalidation fails.
 - `optimistic` serves an existing cached body without revalidation, except a
   `no-cache` body.

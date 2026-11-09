@@ -175,7 +175,8 @@ can each be read as any format.
 Any other extension, or no extension, fails with `dm.data.unsupported_format`
 unless the call names a `format`. This holds whether or not the file exists:
 `load_data("notes.txt", "string[]")` reports `dm.data.unsupported_format`, not
-a missing file, so `try` never mistakes the bad request for an absent source.
+a missing file, so `try` never mistakes the bad request for an absent source
+(see [Files that may be missing](#files-that-may-be-missing)).
 
 ```md
 {{ load_data("events.ndjson", "{ id: number, ok: boolean }[]") }}
@@ -472,15 +473,32 @@ options, a missing or invalid imported contract, and a denied host. The full
 list is in
 [Recovering from read failures](./darkmatter-expressions.md#which-failures-try-recovers).
 
-An extension that names no format is a mistake in the request, not a missing
-file: it fails with `dm.data.unsupported_format` whether or not the file
-exists (see [Formats](#formats)), so `try` does not recover it. Name the
-format, and a missing file becomes an ordinary miss:
+A mistake in the request fails whether or not the file exists, so `try`
+never mistakes it for an absent source. `load_data` judges a missing file's
+request by the extension it was asked for (or the `format` option) before it
+reports the miss. The extension is read after `{{VAR}}` environment
+placeholders are expanded, so `%{{DATA_FILE}}` with `DATA_FILE=optional.yaml`
+is judged as YAML, exactly as it would be read once the file exists:
+
+- an extension that names no format fails with `dm.data.unsupported_format`
+  (see [Formats](#formats)), for a `%` search too;
+- options that cannot apply to the format, such as a `delimiter` on YAML or a
+  `;` on TSV, fail with `dm.data.invalid_options`;
+- a CSV or TSV contract that cannot describe rows, or object rows with
+  `header: false`, fails with `dm.data.row_shape_conflict`.
+
+This holds when the file name, contract, or options come from frontmatter,
+which only composition can judge. Name a format the request suits, and a
+missing file becomes an ordinary miss:
 
 ```md
 {{ try(load_data("optional.xyz", "string[]"), []) }}                    <!-- fails: dm.data.unsupported_format -->
+{{ try(load_data("optional.yaml", "string[]", {delimiter: ";"}), []) }} <!-- fails: dm.data.invalid_options -->
 {{ try(load_data("optional.xyz", "string[]", {format: "json"}), []) }}  <!-- []: the file is missing -->
 ```
+
+When a reference could resolve to files of several formats, the missing
+file is a miss as long as any of them would accept the request.
 
 A file that a frontmatter `$( … )` command creates needs the same care.
 Before composition, `md compose` runs a reference check that evaluates

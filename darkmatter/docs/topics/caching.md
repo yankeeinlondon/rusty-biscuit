@@ -363,8 +363,12 @@ lifetime is:
 found entry:
 
 - `Fallback` (default): serve within the lifetime; past it, revalidate with a
-  conditional GET, and serve the stale body if revalidation fails on the
-  network.
+  conditional GET, and serve the stale body if the revalidation request fails
+  in transport (the server cannot be reached or answers with an HTTP error
+  status). Any other revalidation failure is returned, not covered: a refusal
+  by host policy (for example, a redirect to a host the run does not allow),
+  an unsupported redirect scheme, a client that cannot be built, or a new
+  `200` whose body is not UTF-8.
 - `Strict`: serve within the lifetime; past it, revalidate, and fail if
   revalidation fails.
 - `Optimistic`: serve the cached body without revalidation, even when stale.
@@ -375,8 +379,17 @@ previously returned `ETag` or `Last-Modified`. A `304` keeps the cached body
 and refreshes the manifest from the `304`'s headers.
 
 Serving stale data is never an implicit consequence of configuring a cache
-root: it happens only under `Fallback`, only after a failed revalidation, and
-never for `no-cache`.
+root: it happens only under `Fallback`, only after a revalidation that failed
+in transport, and never for `no-cache`.
+
+```bash
+# First run: 127.0.0.1 answers 200 with `max-age=0`; the body is cached.
+md compose doc.md --allow host=127.0.0.1 --cache-root .
+# Second run, same cache: the server now answers 500. The stale body is used.
+# If it instead redirects to `localhost`, a host this run does not allow, the
+# read fails ("blocked by fetch policy") and the cached body is not used.
+md compose doc.md --allow host=127.0.0.1 --cache-root .
+```
 
 ### Cache-Control precedence
 

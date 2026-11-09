@@ -62,10 +62,13 @@ read failure (see
 Only the selected argument is evaluated and bound against the signature, so
 `try(load_data(f, "string[]"), [])` never builds the `[]` when the file loads.
 A call path that holds only argument values, not their expressions, cannot
-run a lazy function: it returns an error saying the function is called only
-by the evaluator. A host function cannot be registered as lazy, and the name
-`try` is reserved. `map` and `filter` instead bind the iterable once
-and evaluate the callback serially for each item. A callback is an argument,
+run a lazy function: it rejects the call as a contract violation
+(`ExpressionError::ContractViolation`) saying the function is called only by
+the evaluator. That error is fatal on every surface and `try` never recovers
+it. A host function cannot be registered as lazy, and the name `try` is
+reserved. `map` and `filter` instead bind the iterable once and evaluate the
+callback serially for each item; a value-only call of either, such as
+`map(items, 1)` with no inline callback, is rejected the same way. A callback is an argument,
 never a stored or returned value. Neither callback function is a lifecycle verb;
 use it inside an expression operand or condition.
 

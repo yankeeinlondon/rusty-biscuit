@@ -31,7 +31,10 @@ Detail behind the "Remote and cache safety" section of [SKILL.md](SKILL.md).
   refresh, and TTL flags. Response `Cache-Control` outranks all of them:
   `no-store` is never written (an on-disk `no-store` entry is purged), and
   `no-cache` is revalidated before every reuse, even under `Optimistic`, with
-  no stale serve under `Fallback`. The write path accepts only
+  no stale serve under `Fallback`. `Fallback` serves stale only when the
+  revalidation's `RemoteFetchFailure::kind` is `Transport`; a policy refusal
+  (denied redirect), invalid reference, or infrastructure failure is returned
+  so its kind reaches the readers' typed adapter. The write path accepts only
   `StorableDirectives`, so a TTL override structurally cannot store a
   `no-store` response; keep it that way.
 - Transport-cache I/O failures (write or purge) are non-fatal. They flow

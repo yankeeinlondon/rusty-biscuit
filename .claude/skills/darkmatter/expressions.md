@@ -474,14 +474,18 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
 - **Call order** (`load.rs`): a `null` file returns `null` before anything
   else (options included); read the options (`options.rs::DataOptions`,
   aliases `yml`/`ndjson` normalized there); prepare the contract; resolve the
-  file (a miss with no `format` option whose every resolution candidate has an
-  unreadable extension is `unsupported_format`, not a miss, so `try` never
-  absorbs it: `load.rs::unreadable_candidates`), run the slot gate, record it
-  in the read set; pick the effective
+  file, run the slot gate, record it in the read set; then the request
+  checks in `load.rs::plan_read`, the one helper both a present and a missing
+  source use: pick the effective
   format (`options.format`, else `load.rs::data_format_of` on the extension,
   a URL's path included, shared with the call check); `check_applicability`
   (`delimiter`/`header` only on CSV/TSV, TSV tab only); pick the CSV/TSV row
-  mode and, for `header: false`, `require_positional_rows`; fetch a URL
+  mode and, for `header: false`, `require_positional_rows`. A local miss runs
+  `plan_read` first (`check_absent_request`) against every resolution
+  candidate's extension (a `%` search: the authored text's) and reports the
+  first refusal unless some candidate accepts, so an invalid request is never
+  a miss `try` absorbs; it reads, probes, and canonicalizes nothing extra.
+  Then fetch a URL
   through `fetch_remote_text` (host policy before any memo layer); then the
   raw, parse, and bind memo layers. Observe the read once per call after the
   parse layer (the raw entry's hash, `None` on a read or parse failure).
