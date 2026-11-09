@@ -1,14 +1,17 @@
 ---
 total_phases: 8
 created: 2026-11-09
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: true
 packages:
 - simplified-schema
 - darkmatter
 - darkmatter-cli
+- darkmatter-lsp
+- claudine
 - claudine-cli
+- claudine-gen
 source_files_during_phase_1:
 - simplified-schema/lib/src/lib.rs
 - simplified-schema/lib/src/resolve.rs
@@ -43,45 +46,58 @@ source_files_during_phase_1:
 - claudine/cli/tests/l1/completion_ownership.rs
 - claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap
 source_files_during_phase_2:
-- simplified-schema/lib/src/simplified/types.rs
-- simplified-schema/lib/src/simplified/grammar.rs
-- simplified-schema/lib/src/simplified/mod.rs
-- simplified-schema/lib/src/simplified/source.rs
-- simplified-schema/lib/src/simplified/serialize.rs
-- simplified-schema/lib/src/simplified/convert.rs
-- simplified-schema/lib/src/simplified/query.rs
-- simplified-schema/lib/src/simplified/subtype.rs
-- simplified-schema/lib/src/simplified/narrowing.rs
-- simplified-schema/lib/src/simplified/lint.rs
-- simplified-schema/lib/src/simplified/signature.rs
-- simplified-schema/lib/src/simplified/definitions.rs
-- simplified-schema/lib/src/slots.rs
+- claudine/gen/src/schema_compat.rs
+- claudine/lib/src/composition/schema/classify.rs
+- darkmatter/cli/src/commands/schema/assignment.rs
+- darkmatter/dmls/src/overlay/named_types.rs
+- darkmatter/dmls/src/overlay/suggestions.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/lib/src/lifecycle/schema_projection.rs
+- darkmatter/lib/src/markdown/compose/context/catalog.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/frontmatter.rs
+- darkmatter/lib/src/markdown/schemas/completion.rs
+- darkmatter/lib/src/markdown/schemas/detect.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+- simplified-schema/lib/src/completion.rs
+- simplified-schema/lib/src/envelope.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/file_match.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/frontmatter_shape.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/phase.rs
 - simplified-schema/lib/src/resolve.rs
 - simplified-schema/lib/src/resolve/graph.rs
 - simplified-schema/lib/src/resolve/recursive.rs
-- simplified-schema/lib/src/completion.rs
-- simplified-schema/lib/src/phase.rs
-- simplified-schema/lib/src/file_match.rs
-- simplified-schema/lib/src/frontmatter_shape.rs
-- simplified-schema/lib/src/errors.rs
-- darkmatter/lib/src/markdown/schemas/detect.rs
-- darkmatter/lib/src/markdown/schemas/completion.rs
-- darkmatter/lib/src/markdown/schemas/mod.rs
-- darkmatter/lib/src/markdown/schemas/catalog.rs
-- darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
-- darkmatter/lib/src/lifecycle/schema_projection.rs
-- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
-- darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
-- darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
-- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
-- darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
-- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
-- darkmatter/lib/src/markdown/compose/context/catalog.rs
-- darkmatter/cli/src/commands/schema/assignment.rs
-- darkmatter/dmls/src/providers/frontmatter.rs
-- darkmatter/dmls/src/overlay/suggestions.rs
-- claudine/lib/src/composition/schema/classify.rs
-- claudine/gen/src/schema_compat.rs
+- simplified-schema/lib/src/schema/mod.rs
+- simplified-schema/lib/src/schema/view.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/definitions.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/lint.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/narrowing.rs
+- simplified-schema/lib/src/simplified/query.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/src/simplified/subtype.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/slots.rs
+- simplified-schema/lib/src/slots/substitute.rs
+- simplified-schema/lib/tests/l1/dynamic_slots.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/src/slots/unquoted.rs
+- simplified-schema/lib/tests/fixtures/dynamic_slots/template-types/properties.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/template-types/status-type.yaml
+- simplified-schema/lib/tests/l1/quote_the_slot.rs
+- simplified-schema/lib/tests/l1/template_types_passive.rs
 source_files_during_phase_3:
 - simplified-schema/lib/src/slots.rs
 - simplified-schema/lib/src/slots/host.rs
@@ -91,9 +107,17 @@ source_files_during_phase_3:
 - simplified-schema/lib/src/slots/template_type.rs
 - simplified-schema/lib/src/resolve.rs
 - simplified-schema/lib/src/resolve/select.rs
-- simplified-schema/lib/src/resolve/buffers.rs
-- simplified-schema/lib/src/simplified/mod.rs
-- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/schema/mod.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/simplified/definitions.rs
+- simplified-schema/lib/src/simplified/query.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/dynamic_slots.rs
+- simplified-schema/lib/tests/l1/template_types_passive.rs
+- simplified-schema/lib/tests/l1/template_type_results.rs
+- simplified-schema/lib/tests/l1/template_type_imports.rs
+- simplified-schema/lib/tests/l1/template_type_refusals.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
 source_files_during_phase_4:
 - darkmatter/lib/src/markdown/schemas/slots/host.rs
 - darkmatter/lib/src/markdown/schemas/slots/session.rs
@@ -141,6 +165,21 @@ docs_updated_during_phase_1:
 - claudine/docs/topics/execution-flow.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/darkmatter/schema.md
+docs_updated_during_phase_2:
+- simplified-schema/docs/topics/language/slots.md
+- simplified-schema/lib/tests/fixtures/dynamic_slots/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/simplified-schema/SKILL.md
+docs_updated_during_phase_3:
+- simplified-schema/docs/topics/language/slots.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
 - .claude/skills/simplified-schema/SKILL.md
 - .claude/skills/darkmatter/schema.md
 ---
@@ -690,11 +729,11 @@ phase the whole workspace compiles.
 
 ### Wave 3 — The atom and the grammar (single agent; every later wave depends on `types.rs`)
 
-- [ ] **Add the atom** — `TypeExpr::Slot(Slot)` and helpers
+- [x] **Add the atom** — `TypeExpr::Slot(Slot)` and helpers
     - Add the variant (R3) with docs that state it is the pending type and never lowers; `PropertyAtom::is_pending_type`, `PropertyDef::has_pending_type`, `Requiredness` and `PropertyDef::requiredness()` (`Pending` when any atom is a slot at the top level of the definition; otherwise `is_required` → `Required`/`Optional`).
     - Extract `PropertyDef::check_union_invariants` and `TupleType::check_element` (R11); the parser keeps calling them; behavior of static schemas must not change (the whole existing suite is the proof).
     - Add the new `SlotResultKind` variants and the `SlotResult { property, related }` fields (R4) and the `SchemaError::SlotReadRefused` variant (R3/R16); update every constructor and the `miette`/`StatusBlock` rendering in `errors.rs` (`errors.rs:964–1000`).
-- [ ] **Parse and refuse** — R5, R6
+- [x] **Parse and refuse** — R5, R6
     - `parse_type_expr` slot branch with the suffix reader factored out of `parse_named_reference` (`grammar.rs:2147`) so both call one function.
     - `SlotPosition` and `slot_position_error`; set the position in `parse_tuple` (element vs spread), `parse_function` (parameters/returns), and the `property(...)` parser (`grammar.rs:3060–3085`); detect the non-grammar positions at the sites named in R6; reject `{{` in an import path (`read_fileref`).
     - Update the grammar doc comment (`grammar.rs:62`: `slot := "{{" expression "}}"` is now also a type atom).
@@ -703,25 +742,25 @@ phase the whole workspace compiles.
 
 ### Wave 4 — Readers (parallel; each agent owns disjoint files)
 
-- [ ] **Source and export** — spans, serialization, "quote the slot"
+- [x] **Source and export** — spans, serialization, "quote the slot"
     - `simplified/source.rs`: the slot atom's span through plain, `'…'`, `"…"`, `|`, `>` scalars, Markdown frontmatter and CRLF (reuse the machinery that positions template-constraint slots; add the atom position kind).
     - `simplified/serialize.rs`: write `{{ expression }}` plus suffix and description exactly as authored; exporting never evaluates.
     - R7: `slots::unquoted_slot_hint`, wired at both sites in `simplified/mod.rs` and `simplified/standalone.rs`; Darkmatter's frontmatter site is wired in Wave 5.
-- [ ] **Query-side readers** — pending answers per R26(A)
+- [x] **Query-side readers** — pending answers per R26(A)
     - `query.rs`, `subtype.rs`, `narrowing.rs`, `lint.rs`, `definitions.rs`, `signature.rs`, `completion.rs`, `phase.rs`, `file_match.rs`, `frontmatter_shape.rs`.
     - Rules to implement and unit-test in each file: pending atom suggests nothing and reports `pending: true`; `is_subtype` per R26; narrowing proves nothing from a pending atom; `phase`/`file_match`/`frontmatter_shape` treat a pending property as present-by-name with no shape facts.
-- [ ] **Resolver and lowering passthrough** — R26(C)
+- [x] **Resolver and lowering passthrough** — R26(C)
     - `resolve.rs` (`expand_atom` pass-through, `atom_has_imports`, `rehome_atom_examples`, `check_non_null_use`), `resolve/graph.rs` (`discover_atom` ignores `Slot`), `resolve/recursive.rs` (summaries skip `Slot`), `simplified/convert.rs` (defensive typed error), `simplified/mod.rs`.
     - Lowering, `validate_strict/soft`, and `layer_under/layer_over` must produce the typed `SchemaError::UnresolvedSlots` through the existing `reject_unresolved` guard: add tests per entry point.
 
 ### Wave 5 — Downstream compile and explicit answers (parallel by package)
 
-- [ ] **Darkmatter readers** — R26(B) and R27
+- [x] **Darkmatter readers** — R26(B) and R27
     - Files: `schemas/detect.rs`, `schemas/completion.rs`, `schemas/mod.rs`, `schemas/catalog.rs`, `schemas/triggers/matcher.rs`, `lifecycle/schema_projection.rs`, `compose/expression/data/contract.rs`, `scope/shape.rs`, `scope/iterable.rs`, `scope/projection.rs`, `call_binding/translate.rs`, `expression/catalog/mod.rs`, `context/catalog.rs`, `cli/src/commands/schema/assignment.rs` (resolved-only input: R26(C) outcome, plus a `debug_assert!`-free typed fall-through), `dmls/src/providers/frontmatter.rs`, `dmls/src/overlay/suggestions.rs` (compile-level pending arm: show nothing, claim nothing; Phase 6 does the views).
     - Wire the frontmatter YAML-decode "quote the slot" hint (R7 site b) and test it through frontmatter extraction.
-- [ ] **Claudine readers**
+- [x] **Claudine readers**
     - `claudine/lib/src/composition/schema/classify.rs` and `claudine/gen/src/schema_compat.rs` (a `Slot` is an unsupported shape for generation: return the existing "unsupported" outcome with a message naming a template type); `claudine/cli/.../schema_completion/keys.rs` keeps compiling (behavior is Phase 7).
-- [ ] **Passive tests** — simplified-schema `lib/tests/l1/dynamic_slots.rs` plus new `lib/tests/l1/template_types_passive.rs`
+- [x] **Passive tests** — simplified-schema `lib/tests/l1/dynamic_slots.rs` plus new `lib/tests/l1/template_types_passive.rs`
     - Fixtures: new `lib/tests/fixtures/dynamic_slots/template-types/` (schema files using template types at each allowed position with a plain data file).
     - Cover: string and list-form positions; property type, nested object property, named-type body, union arm (`|` and YAML list), tuple element; suffixes `[]`, `(required)`, `[](required)`, description; literal brace text in a quoted enum member and a default stays literal (no slot reported); passive `query`/`property`/`named_type`/`to_simplified_yaml` evaluate nothing (use a host that panics if called, never given); lowering / validate / layering entry points return typed `UnresolvedSlots`.
     - Refused positions (R6): one test per "No" row (root `$schema` scalar, root-union arm, property key, pattern key, import path, part of a type name, tuple spread, function parameter, function return, `property(...)`), each asserting the message names the position, lists the allowed positions, and carries the rewrite sentence only where R6 gives one.
@@ -736,16 +775,16 @@ adds the gated read boundary.
 
 ### Wave 6 — Boundary and plumbing (single agent)
 
-- [ ] **Host hooks** — R14
+- [x] **Host hooks** — R14
     - New `slots/reads.rs`: `TemplateReads`, `SchemaRead`, `SchemaReadKind`, `SchemaReadOutcome`, thread-local scope `with_template_reads` and the sticky-refusal recorder (R16). `SlotHost::template_reads` required; update the in-repo hosts: `lib/tests/l1/dynamic_slots.rs` helpers and the docs example. `DarkmatterSlotHost::template_reads` returns, in this wave, an object whose `admit` refuses every read with `SLOT_APPROVAL_REQUIRED_CODE` and whose `observe` does nothing (a safe default so the workspace compiles); Phase 4 replaces it with the real implementation of R18.
-- [ ] **Resolve plumbing** — R16, R17
+- [x] **Resolve plumbing** — R16, R17
     - `PendingSchema::resolve` installs the scope; `Attempt::Refused`; mapping of `SlotReadRefused` in `resolve_with`; `replay_with` under `buffers::with_reads_retained`.
     - `apply_active`/`apply_active_to_arm` signature with `ExpansionSite` and the `LateDependencies` return (R9), merged at the four call sites into `referenced_files`/`searched`.
     - `ImportEngine.template_slot` and the guarded paths of R15 (`resolve_namespace`, `select_schema_file`'s candidate pre-check via a new `select_schema_file_checked(…, &dyn Fn(&Path)->Result<(), SlotAdmissionError>)` used only by the guarded engine, `rehome_atom_examples`); with no scope installed the engine behaves exactly as before.
 
 ### Wave 7 — Substitution (single agent; the core)
 
-- [ ] **Template type substitution** — `slots/template_type.rs`, R8–R13
+- [x] **Template type substitution** — `slots/template_type.rs`, R8–R13
     - `definition_from_value` (R8 + R12 step 1), the synthetic-root double expansion (R10), checks 2–3 of R12, invariant re-check (R11), related information (R4), property path in every error.
     - Replace the pass-through arm in `Substitution::atom`; run type slots before constraint substitution (R9); handle a slot as a union arm, a tuple element, an array item, inside an inline object, inside a named type body, and inside a stored definition (`definitions.bodies_mut`).
     - Risk: shared/cyclic definitions: a returned definition importing a self-recursive type must produce `TypeExpr::Ref` to a published stored definition; test it (R10 evidence).
@@ -759,14 +798,14 @@ test host; no binary is spawned here. Every positive test asserts equivalence
 with the static schema (same `to_json_schema` and same validation of one valid
 and one invalid document).
 
-- [ ] **Result shapes** — `lib/tests/l1/template_type_results.rs` (R28 matrix)
+- [x] **Result shapes** — `lib/tests/l1/template_type_results.rs` (R28 matrix)
     - Control: `"enum(draft, published)"` equals the static `status`.
     - Exceptions-only table: JSON `null`, mapping, number, boolean → `NotATypeDefinition` naming slot and property; `[]` and `""` → ordinary definition errors; `["string", 123]` and `[123]` → error (never filtered or empty); `"null"` and `[null]` → valid null type; string-encoded list `"[string, number]"` → union; array result → union that flattens into the surrounding union and into the YAML list form; array suffix over a union; `(required)` over `"null"`, `"unknown"`, and a null-admitting union stays optional; nullable array item does not make the array nullable; conflicting default and constraint with the suffix → `SuffixConflict` naming the slot and the suffix as related; invalid `non-null` combination after expansion → `InvalidExpansion`; template-constraint slot in the suffix still resolves.
     - Suffix and data path: one control and one invalid shape each.
-- [ ] **Imports and reads** — `lib/tests/l1/template_type_imports.rs`
+- [x] **Imports and reads** — `lib/tests/l1/template_type_imports.rs`
     - Defining-file base: slot in the document, in a referenced schema file, and in a named type imported from a nested directory each resolve `Person@./types.yaml` against their own file, and a remote or other-directory data file never changes the base; local references inside an imported file (`Name@this` there) work; `Name@this` / bare `Name` in returned text → `LocalReference`; import cycle → `ImportCycle`, distinguishable from refusals; a returned definition importing a self-recursive type resolves; shared import read once per resolution (`work-counters`, `observed::Observed::opened`); recorded dependencies (`referenced_files`, `searched`) include imported files and missing candidates on success and on failure.
     - Guard: a host that refuses records the probe before anything is probed and before any open (assert no `opened` entry, memo untouched via `memo_holds`), the refusal keeps its code, a denial never yields a schema (including where discovery swallows the error), a static schema import's ability to read the same file does not authorize a slot-selected import, and an example reached by a returned import is gated.
-- [ ] **Slot and pattern refusals** — `lib/tests/l1/template_type_refusals.rs`
+- [x] **Slot and pattern refusals** — `lib/tests/l1/template_type_refusals.rs`
     - Nested active slot in returned text (template constraint inside) → `NestedSlot`; literal `{{ … }}` inside a quoted enum member and default stays literal and passes; slot reachable through an import: direct, transitive, and unused-slot-elsewhere (passes); a statically authored import of the same slot-bearing type still works; introduced patterns: 4096 bytes accepted, 4097 refused, lookaround, backreference, size-limit compile failure, directly through an import; a pattern written directly in the schema keeps its current rules; suffix patterns exempt.
 
 **Checkpoint 3:** `just test`, `just lint`, `just test-minimal` in `simplified-schema` pass; grep for the code smells of the robustness section over the new files returns no hit that affects a load-bearing field: `rg -n "serde\(default\)|filter_map\(.*as_str|unwrap_or_default\(\)|\.ok\(\)" simplified-schema/lib/src/slots/template_type.rs simplified-schema/lib/src/slots/reads.rs` (each hit justified in the log).
