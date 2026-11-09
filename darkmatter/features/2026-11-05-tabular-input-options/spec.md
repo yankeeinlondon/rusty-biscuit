@@ -27,8 +27,9 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-07
 clarified: false
-implemented: false
-review_iterations: 0
+implemented: true
+review_iterations: 2
+completed: true
 packages:
     - darkmatter
     - darkmatter-lsp
@@ -37,6 +38,7 @@ related:
 depends-on:
     - 2026-11-04-loading-data
     - 2026-11-05-dynamic-schema-types
+implemented_by: "claude/opus"
 ---
 
 # Tabular Input Options

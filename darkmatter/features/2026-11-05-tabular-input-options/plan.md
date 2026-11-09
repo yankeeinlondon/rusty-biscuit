@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 6
 created: 2026-11-08
-phase: 6
+phase: 7
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -49,6 +49,7 @@ packages:
 - darkmatter
 - darkmatter-lsp
 - claudine-cli
+- darkmatter-cli
 source_files_during_phase_3:
 - darkmatter/lib/tests/l1/load_data_options.rs
 - darkmatter/lib/tests/l1/load_data_options_passive.rs
@@ -94,6 +95,64 @@ skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/expressions.md
 - .claude/skills/darkmatter/requests.md
 - .claude/skills/darkmatter/testing.md
+source_files_during_phase_6:
+- darkmatter/cli/tests/l1/load_data.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+- darkmatter/lib/src/markdown/compose/expression/data/options.rs
+- darkmatter/lib/src/markdown/compose/expression/data/error.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/schemas/partials/lifecycle.yaml
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/load_data_options.rs
+- darkmatter/lib/tests/l1/load_data_options_passive.rs
+- darkmatter/lib/tests/l1/load_data_headerless.rs
+- darkmatter/lib/tests/l1/load_data_options_remote.rs
+- darkmatter/lib/tests/l1/load_data_options_slots.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/option_arguments.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+- claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+- darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/compose/expression/data/option_execution_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/dmls/src/providers/option_argument.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/type_definition_argument.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/tests/l1/call_check_agreement.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-headerless.csv
+- darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-semicolon.txt
+- darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-export
+- darkmatter/cli/tests/l1/load_data.rs
+documentation:
+- darkmatter/docs/functions/load-data.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/loading-data.md
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/requests.md
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/dmls/docs/diagnostics.md
+- .claude/skills/darkmatter/dmls.md
+- darkmatter/docs/topics/caching.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/errors/composition-problems.md
+- darkmatter/README.md
+- .claude/skills/darkmatter/testing.md
+completed_phase: 6
+implemented: true
 ---
 
 # Plan: Tabular Input Options for `load_data`
@@ -160,24 +219,24 @@ The work lands in five layers, in dependency order:
 
 - [x] Phase 1's rebase check passed or its failures were resolved by revising
   the affected rules, recorded in `implementation-log.md`.
-- [ ] Every acceptance criterion of the spec has the named passing test listed
+- [x] Every acceptance criterion of the spec has the named passing test listed
   in "Acceptance criteria → tests" below.
-- [ ] Every existing two-argument result, diagnostic field, read set, and
+- [x] Every existing two-argument result, diagnostic field, read set, and
   `DataRuntime::stats()` count is unchanged: the pre-existing `load_data_*`,
   `compose_read_set`, and dynamic-schema slot suites pass with no assertion
   changed (only `runtime.rs` in-file unit tests are rewritten for the new
   generics, keeping each assertion's intent).
-- [ ] The dynamic-schema guarantees hold over all three memo layers: a memo hit
+- [x] The dynamic-schema guarantees hold over all three memo layers: a memo hit
   at any layer re-records the observation (N17); the slot gate is consulted
   before the first data-source memo layer (N28); one invalidation advances the
   generation for all layers (N35); a three-argument call's target is collected
   passively and found by pre-fetch discovery (N20, N29).
-- [ ] Catalog examples pass the passive shipped-artifact corpus check; the
+- [x] Catalog examples pass the passive shipped-artifact corpus check; the
   generated function page and lifecycle types are regenerated, not hand-edited.
-- [ ] `docs/topics/loading-data.md`, `docs/topics/caching.md`,
+- [x] `docs/topics/loading-data.md`, `docs/topics/caching.md`,
   `docs/cli/data-contracts.md`, DMLS docs, and the Darkmatter skill describe the
   landed behavior.
-- [ ] `just test` and `just lint` pass in `darkmatter/`.
+- [x] `just test` and `just lint` pass in `darkmatter/`.
 
 Out of scope (settled by the spec): other CSV dialect settings, non-UTF-8
 encodings, content or `Content-Type` sniffing, a `columns` option, `bf`
@@ -980,7 +1039,7 @@ Depends on Phase 5.
 
 ### Wave 1 (parallel)
 
-- [ ] **CLI tests** — `cli/tests/l1/load_data.rs` (spawn `md` through
+- [x] **CLI tests** — `cli/tests/l1/load_data.rs` (spawn `md` through
   `CliProcessFixture`, `--output json`)
   - `compose_headerless_rows_json`:
     `{{ load_data("rows.csv", "tuple([string, number])[]", {header: false}) }}`
@@ -990,21 +1049,21 @@ Depends on Phase 5.
     argument, and the envelope validates strictly against the existing envelope
     schema (spell the schema path in this file per the `rust-testing` skill's
     read-form rule).
-- [ ] **Implementation log** — this feature's `implementation-log.md`
+- [x] **Implementation log** — this feature's `implementation-log.md`
   - Complete Departures (R25 and anything else that departed from the spec,
     including any R24 coercion difference) and Decisions applied. Leave
     `spec.md` untouched.
 
 ### Wave 2 — final verification
 
-- [ ] Re-read every changed `///`/`//!`/`//` comment for drift (`load.rs`,
+- [x] Re-read every changed `///`/`//!`/`//` comment for drift (`load.rs`,
   `runtime.rs`, `parse.rs`, `error.rs`, `locate.rs`, `contract.rs`,
   `options.rs`, `call_check.rs`, `data/mod.rs`, the DMLS modules).
-- [ ] `just lint` in `darkmatter/` is clean (no `cargo fmt`).
-- [ ] `just test` in `darkmatter/` is green end to end.
-- [ ] `git diff --stat -- '*Cargo.toml'` is empty; no doc links a feature or
+- [x] `just lint` in `darkmatter/` is clean (no `cargo fmt`).
+- [x] `just test` in `darkmatter/` is green end to end.
+- [x] `git diff --stat -- '*Cargo.toml'` is empty; no doc links a feature or
   fix; nothing was created under `_unscheduled`.
-- [ ] Tick the Definition of Done and state "implementation complete, ready for
+- [x] Tick the Definition of Done and state "implementation complete, ready for
   review". Do not move the feature or run `just complete`.
 
 ## Review decisions (2026-11-08)

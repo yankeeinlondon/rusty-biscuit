@@ -30,19 +30,7 @@ packages:
   - darkmatter
   - darkmatter-lsp
   - claudine-cli
-message_to_agent: |-
-  Phase 5 (catalog examples, docs, skill) is done; read "## Phase 5" in this log. Facts for
-  Phase 6: (1) a real `md compose doc.md --output json` for
-  `{{ load_data("rows.csv", "tuple([string, number])[]", {delimiter: ",,"}) }}` exits 1 with
-  one `dm.data.invalid_options` diagnostic whose `source` is line 1, column 55 (the `{` of
-  the options argument) and whose `span` is `null`, as for every call-check rejection; its
-  `read_set` is `[]` because the passive check rejects before any expression runs. So assert
-  the plan's "span covers the third argument" for `compose_invalid_option_json_envelope`
-  through `source.line`/`source.column`, and expect an empty read set, not `rows.csv`. (2)
-  `Ports: {{ load_data("rows.csv", "tuple([string, number])[]", {header: false}) }}`
-  composes to `Ports: [["web",8080],["db",5432]]`. (3) `docs/cli/data-contracts.md` "Option
-  errors" shows that envelope field by field; if a Phase 6 test pins different output, fix
-  the doc in the same change.
+  - darkmatter-cli
 decisions_for_review:
   - |-
     The rebase check found two shape differences from what the plan assumed, and the plan
@@ -229,6 +217,64 @@ skills_files_updated_during_phase_5:
   - .claude/skills/darkmatter/expressions.md
   - .claude/skills/darkmatter/requests.md
   - .claude/skills/darkmatter/testing.md
+source_files_during_phase_6:
+  - darkmatter/cli/tests/l1/load_data.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+  - darkmatter/lib/src/markdown/compose/expression/data/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/data/error.rs
+  - darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+  - darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+  - darkmatter/schemas/partials/functions.yaml
+  - darkmatter/schemas/partials/lifecycle.yaml
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/tests/l1/load_data_options.rs
+  - darkmatter/lib/tests/l1/load_data_options_passive.rs
+  - darkmatter/lib/tests/l1/load_data_headerless.rs
+  - darkmatter/lib/tests/l1/load_data_options_remote.rs
+  - darkmatter/lib/tests/l1/load_data_options_slots.rs
+  - darkmatter/dmls/tests/l1/main.rs
+  - darkmatter/dmls/tests/l1/option_arguments.rs
+  - darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+  - claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+  - darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
+  - darkmatter/lib/src/markdown/compose/expression/data/load.rs
+  - darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+  - darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+  - darkmatter/lib/src/markdown/compose/expression/data/option_execution_tests.rs
+  - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+  - darkmatter/dmls/src/providers/option_argument.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/type_definition_argument.rs
+  - darkmatter/dmls/src/diagnostics/codes.rs
+  - darkmatter/dmls/tests/l1/call_check_agreement.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-headerless.csv
+  - darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-semicolon.txt
+  - darkmatter/lib/src/markdown/compose/expression/catalog/example_data/fixture-export
+  - darkmatter/cli/tests/l1/load_data.rs
+documentation:
+  - darkmatter/docs/functions/load-data.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/docs/topics/loading-data.md
+  - .claude/skills/darkmatter/expressions.md
+  - .claude/skills/darkmatter/requests.md
+  - darkmatter/dmls/docs/autocomplete.md
+  - darkmatter/dmls/docs/hover.md
+  - darkmatter/dmls/docs/diagnostics.md
+  - .claude/skills/darkmatter/dmls.md
+  - darkmatter/docs/topics/caching.md
+  - darkmatter/docs/cli/data-contracts.md
+  - darkmatter/docs/errors/composition-problems.md
+  - darkmatter/README.md
+  - .claude/skills/darkmatter/testing.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-11-05-tabular-input-options (6 phases)
@@ -760,3 +806,119 @@ Phases 1–3).
   Windows checkout. No cross-check was run.
 - No subagents were used in this phase.
 - Phase 5 is complete; every Phase 5 checkbox in the plan is ticked.
+
+## Phase 6
+
+### Work done
+
+- **CLI tests** in `darkmatter/cli/tests/l1/load_data.rs`, new section 9.
+  Each test spawns `md compose doc.md --output json` once through
+  `CliProcessFixture` and checks the envelope strictly against
+  `include_str!("../../schemas/output/compose.yaml")`, which is spelled out
+  inside each `#[test]`:
+  - `compose_headerless_rows_json`: `rows.csv` = `web,8080\ndb,5432\n`, document
+    `Ports: {{ load_data("rows.csv", "tuple([string, number])[]", {header: false}) }}`.
+    Expected: exit 0, empty stderr, document
+    `Ports: [["web",8080],["db",5432]]`, no diagnostics, and a read set holding
+    only `rows.csv`.
+  - `compose_invalid_option_json_envelope`: `{delimiter: ",,"}`. Expected: exit 1,
+    empty stderr, `outcome: failure`, `document: null`, `summary: null`, and one
+    `dm.data.invalid_options` error. The test pins that error's message,
+    `expected_type`, and `actual_type`, and `source` line 1 / column 55
+    (`inserted: false`). The record has no `data_location`, and `read_set` is
+    `[]`. These values match the envelope that `docs/cli/data-contracts.md`
+    ("Option errors") shows field by field, so the doc needed no change.
+  - The module `//!` summary now names the options section.
+- **Comment drift pass** over this feature's changes only (`13f0f9fb4^..HEAD`,
+  which leaves out the branch's unrelated earlier work). Covered: `load.rs`,
+  `runtime.rs`, `parse.rs`, `error.rs`, `locate.rs`, `contract.rs`, `options.rs`,
+  `call_check.rs`, `data/mod.rs`, `dmls/src/providers/option_argument.rs`,
+  `type_definition_argument.rs`, and `diagnostics/codes.rs`. The pass compared
+  the step order in `load.rs`'s module doc with `load_data_fn` (null file →
+  options → contract → resolve/gate/record → format → applicability → row mode
+  → fetch → raw/parse/bind → observe), and the delimiter defaults in `parse.rs`
+  with their doc. It found no drift and changed nothing.
+- **Hygiene**: `git diff --stat 13f0f9fb4^ -- '*Cargo.toml'` is empty. Nothing
+  was created under `_unscheduled`. No changed doc links to or names a feature
+  or fix; the only `features/` text in `darkmatter-expressions.md` is the
+  pre-existing example path `/r/claudine/features/x/spec.md`, not a reference.
+
+### Requirement → test mapping (Phase 6)
+
+Boundary: the `md` binary's data-output path (process, stdout/stderr, exit
+code, envelope schema), fidelity F3, tier L1.
+
+| Requirement | Test |
+| --- | --- |
+| CLI headerless success: rows, exit 0, empty stderr, read set | `load_data::compose_headerless_rows_json` |
+| CLI option failure: exit 1, empty stderr, one `dm.data.invalid_options` at the options argument, strict envelope schema | `load_data::compose_invalid_option_json_envelope` |
+| R24 "one CLI test proves the output path" | `load_data::compose_invalid_option_json_envelope` |
+
+Input robustness matrix: Phases 1–3 covered the option loader's matrix in
+process. Per the matrix rules, the CLI adds only wiring: the control case
+(the headerless success) and one invalid shape (an invalid delimiter), with the
+error's location asserted in the rendered output. Nothing ran, which shows as
+an empty read set.
+
+### Departures (complete list)
+
+- **R25, where a computed-option failure is located.** The spec says
+  `dm.data.invalid_options` is located at the third argument. That holds
+  passively, in DMLS, and in composition for literal options. When the options
+  are computed, the failure surfaces only when the call runs. At that point the
+  evaluator has no per-argument positions, so the record is located at the call
+  expression and its message names the key. `docs/topics/loading-data.md` and
+  `docs/cli/data-contracts.md` say so.
+- **The CLI record for a literal option failure has `span: null`.** The plan
+  expected a span covering the third argument, and a read set that lists
+  `rows.csv`. The real envelope locates the error through `source.line` and
+  `source.column` (line 1, column 55, the options argument). Its `span` is
+  `null`, as for every call-check rejection. Its `read_set` is empty, because
+  the call check refuses the document before any expression resolves a file.
+  `compose_invalid_option_json_envelope` asserts the real output, and the doc
+  shows it (decision already recorded in `decisions_for_review`).
+- **`string[][]` is not offered as a list-row contract** (the spec names it).
+  The grammar has no nested arrays, so the message and the docs name only
+  `tuple([…])[]`. The spec is left as written.
+- **One headerless acceptance test was split into four.**
+  `headerless_later_row_multiline_multibyte_crlf_positions` became four
+  separately named tests, so each location shows its own failure (Phase 3).
+- **R24 coercion: no difference.** The shared engine bound `delimiter: 5` to
+  `"5"` and `header: "false"` to `false`, as the plan expected. Phase 3's
+  matrix asserts both, and no handler rule was added.
+
+### Decisions applied
+
+- R9/R10/R14 were revised by the Phase 1 rebase check: a hash on the raw entry
+  plus `observe_read`, and the gate stays right after resolution.
+- R2 was applied as written: one overload with a closed inline object.
+- The author's 2026-11-08 review decisions were applied: a computed-options
+  failure is located at the call; the TSV tab rule applies to the effective
+  format; DMLS completion offers `yml` and `ndjson`; the raw-source layer is
+  consulted on every call, so each call records its observation again.
+- Every other choice is in `decisions_for_review`.
+
+### Gates
+
+- Targeted: `cargo nextest run -p darkmatter-cli --test l1 -E
+  'test(compose_headerless_rows_json) | test(compose_invalid_option_json_envelope)'`
+  → 2 passed, both on the first run.
+- `just lint` in `darkmatter/`: clean, including the zed-dmls wasm32 check.
+- `just test` in `darkmatter/`, no subagent running: **15,864 passed, 0
+  failed, 10 skipped** in 159 s. That is Phase 5's 15,862 plus the 2 new tests.
+  No test was flagged slow.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Scope calculator (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `change_class: package`, `packages: [darkmatter-cli, test-toolkit,
+  darkmatter]`. The gates were required and were run.
+- Dependents: this phase changed only a test file in `darkmatter-cli`'s own
+  `l1` binary, which no other package compiles, so no dependent package was run.
+- Cross-OS: no path, process, or OS-specific code changed. The two tests use
+  the existing `read_entry` (`canonicalize_simplified` and a portable string)
+  helper for paths, like their neighbors, so no cross-check was run.
+- Darkmatter skill: no update needed. `testing.md` already lists the option
+  test files, and this phase changed no behavior.
+- No subagents were used in this phase.
+
+Implementation complete, ready for review.
