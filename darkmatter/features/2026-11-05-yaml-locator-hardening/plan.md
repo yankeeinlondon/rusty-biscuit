@@ -1,14 +1,23 @@
 ---
 total_phases: 3
 created: 2026-11-08
-phase: 1
+phase: 2
 agent: claude/sonnet
 yolo: true
 packages:
 - simplified-schema
 - darkmatter
-- darkmatter-cli
-- darkmatter-lsp
+source_files_during_phase_1:
+- simplified-schema/lib/src/mapping_orders.rs
+- simplified-schema/lib/src/positions.rs
+- simplified-schema/lib/tests/l1/alias_positions.rs
+- simplified-schema/lib/tests/l1/main.rs
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/schemas/tests/positions.rs
+- darkmatter/lib/tests/l1/load_data_diagnostics.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
 ---
 
 # YAML Locator Hardening: Implementation Plan
@@ -194,10 +203,10 @@ Each rule states the decision, then the evidence.
 
 ### Wave 1 (sequential; one agent)
 
-- [ ] **Orders iterator**
+- [x] **Orders iterator**
     - Add `pub(crate) fn pointers(&self) -> impl Iterator<Item = &str>` to
       `MappingOrders` (`mapping_orders.rs`), with a one-line doc.
-- [ ] **Projection rewrite**
+- [x] **Projection rewrite**
     - In `positions.rs`, change `matches_orders` to take `&mut SchemaValueNode`
       and a `&mut HashSet<String>` of boundaries; for a `Scalar` whose
       `alias_token(text, span.start)` is `Some(range)`: set `node.span = range`,
@@ -214,14 +223,14 @@ Each rule states the decision, then the evidence.
 
 ### Wave 2 (parallel; two agents, different files)
 
-- [ ] **Unit tests in positions.rs**
+- [x] **Unit tests in positions.rs**
     - Rewrite the two tests named in Rule 8, add the Rule 10 work test, and
       add: `a_projected_alias_leaf_spans_only_its_token` (block `one: *b # note`
       and flow `{k: *b }`: `byte_range` text is `*b`), and
       `a_trailing_comment_and_a_quoted_or_block_star_are_not_aliases`
       (`# *b`, `"*b"`, `|\n  *b` neither add boundaries nor change located
       ranges; the document stays projected).
-- [ ] **Public-API tests**
+- [x] **Public-API tests**
     - New file `simplified-schema/lib/tests/l1/alias_positions.rs`, registered
       with `mod alias_positions;` in `tests/l1/main.rs`. It uses only the public
       API: a schema parsed with `SimplifiedSchema`, `validate_soft`/
@@ -262,8 +271,8 @@ Each rule states the decision, then the evidence.
 
 ### Validation checkpoint 1
 
-- [ ] In `simplified-schema/`: `just test` and `just lint` pass.
-- [ ] Grep `simplified-schema/` for `"holds no alias"`, `contains an alias`,
+- [x] In `simplified-schema/`: `just test` and `just lint` pass.
+- [x] Grep `simplified-schema/` for `"holds no alias"`, `contains an alias`,
       `no scalar is an alias`: zero stale comment hits in `src/`.
 
 ## Phase 2: Darkmatter integration
