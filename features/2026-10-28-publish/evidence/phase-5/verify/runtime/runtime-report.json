@@ -1,0 +1,552 @@
+{
+  "schema_version": 1,
+  "package": "biscuit-hash-cli",
+  "command": "bh",
+  "version": "0.1.0",
+  "host": {
+    "os": "Darwin",
+    "arch": "aarch64",
+    "build_tools": [
+      "developer tools (/Library/Developer/CommandLineTools)",
+      "Homebrew (/opt/homebrew/bin/brew)"
+    ],
+    "wsl2": false,
+    "uname": "Darwin bolt.home 27.2.0 Darwin Kernel Version 27.2.0: Tue Sep 29 22:00:39 PDT 2026; root:xnu-13432.40.177.0.3~56/RELEASE_ARM64_T6000 arm64",
+    "macos_version": "27.2",
+    "cpu": "Apple M1 Max"
+  },
+  "docker_arch": "aarch64",
+  "artifacts": "/private/tmp/phase4-assets",
+  "downloads": {
+    "aarch64-apple-darwin": {
+      "file": "biscuit-hash-cli-aarch64-apple-darwin.tar.xz",
+      "size": 344728,
+      "sha256": "44bf4b3fc4f9ef0cc689e4a6d13704c8a3bf819c82d1437ae0c22abbb2b6f0cb",
+      "sha256_source": "biscuit-hash-cli-aarch64-apple-darwin.tar.xz.sha256",
+      "verified_with": "shasum -a 256 -c",
+      "shasum_check": "biscuit-hash-cli-aarch64-apple-darwin.tar.xz: OK\nshasum: WARNING: 1 line is improperly formatted",
+      "sha256_sum_entry": "44bf4b3fc4f9ef0cc689e4a6d13704c8a3bf819c82d1437ae0c22abbb2b6f0cb",
+      "installer_embedded_sha256": "44bf4b3fc4f9ef0cc689e4a6d13704c8a3bf819c82d1437ae0c22abbb2b6f0cb"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "file": "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz",
+      "size": 350416,
+      "sha256": "17a55aba61c14fac9cde1f23f5e76eb4bcc767e590456ecdfb0a18c635a8d4d4",
+      "sha256_source": "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz.sha256",
+      "verified_with": "shasum -a 256 -c",
+      "shasum_check": "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz: OK\nshasum: WARNING: 1 line is improperly formatted",
+      "sha256_sum_entry": "17a55aba61c14fac9cde1f23f5e76eb4bcc767e590456ecdfb0a18c635a8d4d4",
+      "installer_embedded_sha256": "17a55aba61c14fac9cde1f23f5e76eb4bcc767e590456ecdfb0a18c635a8d4d4"
+    }
+  },
+  "installer": {
+    "file": "biscuit-hash-cli-installer.sh",
+    "size": 62752
+  },
+  "summary": {
+    "result": "incomplete",
+    "passed": 5,
+    "failed": 0,
+    "pending": 10,
+    "disabled": 2
+  },
+  "checks": [
+    {
+      "target": "aarch64-apple-darwin",
+      "route": "archive",
+      "evidence_class": "native-build-host",
+      "status": "pass",
+      "reason": "",
+      "details": {
+        "installed": [
+          "biscuit-hash-cli-aarch64-apple-darwin",
+          "biscuit-hash-cli-aarch64-apple-darwin/LICENSE",
+          "biscuit-hash-cli-aarch64-apple-darwin/README.md",
+          "biscuit-hash-cli-aarch64-apple-darwin/SOURCE.txt",
+          "biscuit-hash-cli-aarch64-apple-darwin/THIRD-PARTY-NOTICES.md",
+          "biscuit-hash-cli-aarch64-apple-darwin/bh"
+        ],
+        "steps": [
+          {
+            "argv": "tar -xf biscuit-hash-cli-aarch64-apple-darwin.tar.xz",
+            "status": 0,
+            "output": ""
+          },
+          {
+            "argv": "bh --version",
+            "status": 0,
+            "output": "bh 0.1.0\n"
+          },
+          {
+            "argv": "bh --help",
+            "status": 0,
+            "output": "Hash content using various algorithms (xxHash, BLAKE3, Argon2id)\n\nUsage: bh [OPTIONS] [CONTENT]\n\nArguments:\n  [CONTENT]  Content to hash (use \"-\" with --password to read from stdin)\n\nOptions:\n  -f, --file <PATH>  Hash contents of a file instead of direct content\n  -c, --crypto       Use BLAKE3 cryptographic hash instead of xxHash\n  -p, --password     Password hashing mode (Argon2id). Use \"-\" as content to read from stdin\n  -h, --help         Print help\n  -V, --version      Print version\n\nSHELL COMPLETIONS:\n  Enable tab completions by adding one line to your shell config:\n\n  Bash (~/.bashrc):\n    source <(COMPLETE=bash bh)\n\n  Zsh (~/.zshrc):\n    source <(COMPLETE=zsh bh)\n\n  Fish (~/.config/fish/config.fish):\n    COMPLETE=fish bh | source\n\n  PowerShell ($PROFILE):\n    Invoke-Expression (& bh _complete powershell)\n\nEXAMPLES:\n  bh \"hello world\"              # xxHash of string\n  bh --file Cargo.toml           # xxHash of file contents\n  bh --crypto \"hello world\"     # BLAKE3 cryptographic hash\n  bh --password \"secret\"        # Argon2id password hash\n  echo \"secret\" | bh --password -  # Password from stdin\n"
+          },
+          {
+            "argv": "DYLD_PRINT_LIBRARIES=1 bh --version",
+            "status": 0,
+            "output": "/private/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/verify-runtime-d7uedm_y/aarch64-apple-darwin/archive/root/biscuit-hash-cli-aarch64-apple-darwin/bh\n/usr/lib/libiconv.2.dylib\n/usr/lib/libcharset.1.dylib\n/usr/lib/libSystem.B.dylib\n/usr/lib/system/libcache.dylib\n/usr/lib/system/libcommonCrypto.dylib\n/usr/lib/system/libcompiler_rt.dylib\n/usr/lib/system/libcopyfile.dylib\n/usr/lib/system/libcorecrypto.dylib\n/usr/lib/system/libdispatch.dylib\n/usr/lib/system/libdyld.dylib\n/usr/lib/system/libkeymgr.dylib\n/usr/lib/system/libmacho.dylib\n/usr/lib/system/libquarantine.dylib\n/usr/lib/system/libremovefile.dylib\n/usr/lib/system/libsystem_asl.dylib\n/usr/lib/system/libsystem_blocks.dylib\n/usr/lib/system/libsystem_c.dylib\n/usr/lib/system/libsystem_collections.dylib\n/usr/lib/system/libsystem_configuration.dylib\n/usr/lib/system/libsystem_containermanager.dylib\n/usr/lib/system/libsystem_coreservices.dylib\n/usr/lib/system/libsystem_darwin.dylib\n/usr/lib/system/libsystem_darwindirectory.dylib\n/usr/lib/system/libsystem_dnssd.dylib\n/usr/lib/system/libsystem_eligibility.dylib\n/usr/lib/system/libsystem_featureflags.dylib\n/usr/lib/system/libsystem_info.dylib\n/usr/lib/system/libsystem_m.dylib\n/usr/lib/system/libsystem_malloc.dylib\n/usr/lib/system/libsystem_networkextension.dylib\n/usr/lib/system/libsystem_notify.dylib\n/usr/lib/system/libsystem_sandbox.dylib\n/usr/lib/system/libsystem_sanitizers.dylib\n/usr/lib/system/libsystem_secinit.dylib\n/usr/lib/system/libsystem_kernel.dylib\n/usr/lib/system/libsystem_platform.dylib\n/usr/lib/system/libsystem_pthread.dylib\n/usr/lib/system/libsystem_symptoms.dylib\n/usr/lib/system/libsystem_trace.dylib\n/usr/lib/system/libsystem_trial.dylib\n/usr/lib/system/libunwind.dylib\n/usr/lib/system/libxpc.dylib\n/usr/lib/libc++abi.dylib\n/usr/lib/libobjc.A.dylib\n/usr/lib/objc/libobjcMsgSend.dylib\n/usr/lib/libRosetta.dylib\n/usr/lib/libc++.1.dylib\n/usr/lib/libsharedcache.dylib\n/usr/lib/objc/libobjcMsgSend1.dylib\n/usr/lib/objc/libobjcMsgSend2.dylib\n/usr/lib/objc/libobjcMsgSend3.dylib\n/usr/lib/objc/libobjcMsgSend4.dylib\n/usr/lib/objc/libobjcMsgSend5.dylib\n/usr/lib/objc/libobjcMsgSend6.dylib\n/usr/lib/objc/libobjcMsgSend7.dylib\n/usr/lib/objc/libobjcMsgSend8.dylib\n/usr/lib/objc/libobjcMsgSend9.dylib\n/usr/lib/objc/libobjcMsgSend10.dylib\n/usr/lib/objc/libobjcMsgSend11.dylib\n/usr/lib/objc/libobjcMsgSend12.dylib\n/usr/lib/objc/libobjcMsgSend13.dylib\n/usr/lib/objc/libobjcMsgSend14.dylib\n/usr/lib/objc/libobjcMsgSend15.dylib\n/usr/lib/objc/libobjcMsgSend16.dylib\n/usr/lib/objc/libobjcMsgSend17.dylib\n/usr/lib/objc/libobjcMsgSend18.dylib\n/usr/lib/objc/libobjcMsgSend19.dylib\n/usr/lib/objc/libobjcMsgSend20.dylib\n/usr/lib/objc/libobjcMsgSend21.dylib\n/usr/lib/objc/libobjcMsgSend22.dylib\n/usr/lib/objc/libobjcMsgSend23.dylib\n/usr/lib/objc/libobjcMsgSend24.dylib\n/usr/lib/objc/libobjcMsgSend25.dylib\n/usr/lib/objc/libobjcMsgSend26.dylib\n/usr/lib/objc/libobjcMsgSend27.dylib\n/usr/lib/objc/libobjcMsgSend28.dylib\n/usr/lib/objc/libobjcMsgSend29.dylib\n/usr/lib/objc/libobjcMsgSend30.dylib\n/usr/lib/objc/libobjcMsgSend31.dylib\n/usr/lib/objc/libobjcMsgSend32.dylib\n/usr/lib/objc/libobjcMsgSend33.dylib\n/usr/lib/objc/libobjcMsgSend34.dylib\n/usr/lib/objc/libobjcMsgSend35.dylib"
+          }
+        ],
+        "libraries": {
+          "dyld_loaded": [
+            "/private/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/verify-runtime-d7uedm_y/aarch64-apple-darwin/archive/root/biscuit-hash-cli-aarch64-apple-darwin/bh",
+            "/usr/lib/libiconv.2.dylib",
+            "/usr/lib/libcharset.1.dylib",
+            "/usr/lib/libSystem.B.dylib",
+            "/usr/lib/system/libcache.dylib",
+            "/usr/lib/system/libcommonCrypto.dylib",
+            "/usr/lib/system/libcompiler_rt.dylib",
+            "/usr/lib/system/libcopyfile.dylib",
+            "/usr/lib/system/libcorecrypto.dylib",
+            "/usr/lib/system/libdispatch.dylib",
+            "/usr/lib/system/libdyld.dylib",
+            "/usr/lib/system/libkeymgr.dylib",
+            "/usr/lib/system/libmacho.dylib",
+            "/usr/lib/system/libquarantine.dylib",
+            "/usr/lib/system/libremovefile.dylib",
+            "/usr/lib/system/libsystem_asl.dylib",
+            "/usr/lib/system/libsystem_blocks.dylib",
+            "/usr/lib/system/libsystem_c.dylib",
+            "/usr/lib/system/libsystem_collections.dylib",
+            "/usr/lib/system/libsystem_configuration.dylib",
+            "/usr/lib/system/libsystem_containermanager.dylib",
+            "/usr/lib/system/libsystem_coreservices.dylib",
+            "/usr/lib/system/libsystem_darwin.dylib",
+            "/usr/lib/system/libsystem_darwindirectory.dylib",
+            "/usr/lib/system/libsystem_dnssd.dylib",
+            "/usr/lib/system/libsystem_eligibility.dylib",
+            "/usr/lib/system/libsystem_featureflags.dylib",
+            "/usr/lib/system/libsystem_info.dylib",
+            "/usr/lib/system/libsystem_m.dylib",
+            "/usr/lib/system/libsystem_malloc.dylib",
+            "/usr/lib/system/libsystem_networkextension.dylib",
+            "/usr/lib/system/libsystem_notify.dylib",
+            "/usr/lib/system/libsystem_sandbox.dylib",
+            "/usr/lib/system/libsystem_sanitizers.dylib",
+            "/usr/lib/system/libsystem_secinit.dylib",
+            "/usr/lib/system/libsystem_kernel.dylib",
+            "/usr/lib/system/libsystem_platform.dylib",
+            "/usr/lib/system/libsystem_pthread.dylib",
+            "/usr/lib/system/libsystem_symptoms.dylib",
+            "/usr/lib/system/libsystem_trace.dylib",
+            "/usr/lib/system/libsystem_trial.dylib",
+            "/usr/lib/system/libunwind.dylib",
+            "/usr/lib/system/libxpc.dylib",
+            "/usr/lib/libc++abi.dylib",
+            "/usr/lib/libobjc.A.dylib",
+            "/usr/lib/objc/libobjcMsgSend.dylib",
+            "/usr/lib/libRosetta.dylib",
+            "/usr/lib/libc++.1.dylib",
+            "/usr/lib/libsharedcache.dylib",
+            "/usr/lib/objc/libobjcMsgSend1.dylib",
+            "/usr/lib/objc/libobjcMsgSend2.dylib",
+            "/usr/lib/objc/libobjcMsgSend3.dylib",
+            "/usr/lib/objc/libobjcMsgSend4.dylib",
+            "/usr/lib/objc/libobjcMsgSend5.dylib",
+            "/usr/lib/objc/libobjcMsgSend6.dylib",
+            "/usr/lib/objc/libobjcMsgSend7.dylib",
+            "/usr/lib/objc/libobjcMsgSend8.dylib",
+            "/usr/lib/objc/libobjcMsgSend9.dylib",
+            "/usr/lib/objc/libobjcMsgSend10.dylib",
+            "/usr/lib/objc/libobjcMsgSend11.dylib",
+            "/usr/lib/objc/libobjcMsgSend12.dylib",
+            "/usr/lib/objc/libobjcMsgSend13.dylib",
+            "/usr/lib/objc/libobjcMsgSend14.dylib",
+            "/usr/lib/objc/libobjcMsgSend15.dylib",
+            "/usr/lib/objc/libobjcMsgSend16.dylib",
+            "/usr/lib/objc/libobjcMsgSend17.dylib",
+            "/usr/lib/objc/libobjcMsgSend18.dylib",
+            "/usr/lib/objc/libobjcMsgSend19.dylib",
+            "/usr/lib/objc/libobjcMsgSend20.dylib",
+            "/usr/lib/objc/libobjcMsgSend21.dylib",
+            "/usr/lib/objc/libobjcMsgSend22.dylib",
+            "/usr/lib/objc/libobjcMsgSend23.dylib",
+            "/usr/lib/objc/libobjcMsgSend24.dylib",
+            "/usr/lib/objc/libobjcMsgSend25.dylib",
+            "/usr/lib/objc/libobjcMsgSend26.dylib",
+            "/usr/lib/objc/libobjcMsgSend27.dylib",
+            "/usr/lib/objc/libobjcMsgSend28.dylib",
+            "/usr/lib/objc/libobjcMsgSend29.dylib",
+            "/usr/lib/objc/libobjcMsgSend30.dylib",
+            "/usr/lib/objc/libobjcMsgSend31.dylib",
+            "/usr/lib/objc/libobjcMsgSend32.dylib",
+            "/usr/lib/objc/libobjcMsgSend33.dylib",
+            "/usr/lib/objc/libobjcMsgSend34.dylib",
+            "/usr/lib/objc/libobjcMsgSend35.dylib"
+          ]
+        },
+        "transcript": "aarch64-apple-darwin/archive.txt"
+      }
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "route": "installer",
+      "evidence_class": "native-build-host",
+      "status": "pass",
+      "reason": "",
+      "details": {
+        "installed": [
+          "bh"
+        ],
+        "tmp_left": [],
+        "dist_checksum_skipped": false,
+        "steps": [
+          {
+            "argv": "sh biscuit-hash-cli-installer.sh",
+            "status": 0,
+            "output": "downloading biscuit-hash-cli 0.1.0 aarch64-apple-darwin\ninstalling to /var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/verify-runtime-d7uedm_y/aarch64-apple-darwin/installer/root\n  bh\neverything's installed!\n"
+          },
+          {
+            "argv": "bh --version",
+            "status": 0,
+            "output": "bh 0.1.0\n"
+          },
+          {
+            "argv": "bh --help",
+            "status": 0,
+            "output": "Hash content using various algorithms (xxHash, BLAKE3, Argon2id)\n\nUsage: bh [OPTIONS] [CONTENT]\n\nArguments:\n  [CONTENT]  Content to hash (use \"-\" with --password to read from stdin)\n\nOptions:\n  -f, --file <PATH>  Hash contents of a file instead of direct content\n  -c, --crypto       Use BLAKE3 cryptographic hash instead of xxHash\n  -p, --password     Password hashing mode (Argon2id). Use \"-\" as content to read from stdin\n  -h, --help         Print help\n  -V, --version      Print version\n\nSHELL COMPLETIONS:\n  Enable tab completions by adding one line to your shell config:\n\n  Bash (~/.bashrc):\n    source <(COMPLETE=bash bh)\n\n  Zsh (~/.zshrc):\n    source <(COMPLETE=zsh bh)\n\n  Fish (~/.config/fish/config.fish):\n    COMPLETE=fish bh | source\n\n  PowerShell ($PROFILE):\n    Invoke-Expression (& bh _complete powershell)\n\nEXAMPLES:\n  bh \"hello world\"              # xxHash of string\n  bh --file Cargo.toml           # xxHash of file contents\n  bh --crypto \"hello world\"     # BLAKE3 cryptographic hash\n  bh --password \"secret\"        # Argon2id password hash\n  echo \"secret\" | bh --password -  # Password from stdin\n"
+          },
+          {
+            "argv": "DYLD_PRINT_LIBRARIES=1 bh --version",
+            "status": 0,
+            "output": "/private/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/verify-runtime-d7uedm_y/aarch64-apple-darwin/installer/root/bh\n/usr/lib/libiconv.2.dylib\n/usr/lib/libcharset.1.dylib\n/usr/lib/libSystem.B.dylib\n/usr/lib/system/libcache.dylib\n/usr/lib/system/libcommonCrypto.dylib\n/usr/lib/system/libcompiler_rt.dylib\n/usr/lib/system/libcopyfile.dylib\n/usr/lib/system/libcorecrypto.dylib\n/usr/lib/system/libdispatch.dylib\n/usr/lib/system/libdyld.dylib\n/usr/lib/system/libkeymgr.dylib\n/usr/lib/system/libmacho.dylib\n/usr/lib/system/libquarantine.dylib\n/usr/lib/system/libremovefile.dylib\n/usr/lib/system/libsystem_asl.dylib\n/usr/lib/system/libsystem_blocks.dylib\n/usr/lib/system/libsystem_c.dylib\n/usr/lib/system/libsystem_collections.dylib\n/usr/lib/system/libsystem_configuration.dylib\n/usr/lib/system/libsystem_containermanager.dylib\n/usr/lib/system/libsystem_coreservices.dylib\n/usr/lib/system/libsystem_darwin.dylib\n/usr/lib/system/libsystem_darwindirectory.dylib\n/usr/lib/system/libsystem_dnssd.dylib\n/usr/lib/system/libsystem_eligibility.dylib\n/usr/lib/system/libsystem_featureflags.dylib\n/usr/lib/system/libsystem_info.dylib\n/usr/lib/system/libsystem_m.dylib\n/usr/lib/system/libsystem_malloc.dylib\n/usr/lib/system/libsystem_networkextension.dylib\n/usr/lib/system/libsystem_notify.dylib\n/usr/lib/system/libsystem_sandbox.dylib\n/usr/lib/system/libsystem_sanitizers.dylib\n/usr/lib/system/libsystem_secinit.dylib\n/usr/lib/system/libsystem_kernel.dylib\n/usr/lib/system/libsystem_platform.dylib\n/usr/lib/system/libsystem_pthread.dylib\n/usr/lib/system/libsystem_symptoms.dylib\n/usr/lib/system/libsystem_trace.dylib\n/usr/lib/system/libsystem_trial.dylib\n/usr/lib/system/libunwind.dylib\n/usr/lib/system/libxpc.dylib\n/usr/lib/libc++abi.dylib\n/usr/lib/libobjc.A.dylib\n/usr/lib/objc/libobjcMsgSend.dylib\n/usr/lib/libRosetta.dylib\n/usr/lib/libc++.1.dylib\n/usr/lib/libsharedcache.dylib\n/usr/lib/objc/libobjcMsgSend1.dylib\n/usr/lib/objc/libobjcMsgSend2.dylib\n/usr/lib/objc/libobjcMsgSend3.dylib\n/usr/lib/objc/libobjcMsgSend4.dylib\n/usr/lib/objc/libobjcMsgSend5.dylib\n/usr/lib/objc/libobjcMsgSend6.dylib\n/usr/lib/objc/libobjcMsgSend7.dylib\n/usr/lib/objc/libobjcMsgSend8.dylib\n/usr/lib/objc/libobjcMsgSend9.dylib\n/usr/lib/objc/libobjcMsgSend10.dylib\n/usr/lib/objc/libobjcMsgSend11.dylib\n/usr/lib/objc/libobjcMsgSend12.dylib\n/usr/lib/objc/libobjcMsgSend13.dylib\n/usr/lib/objc/libobjcMsgSend14.dylib\n/usr/lib/objc/libobjcMsgSend15.dylib\n/usr/lib/objc/libobjcMsgSend16.dylib\n/usr/lib/objc/libobjcMsgSend17.dylib\n/usr/lib/objc/libobjcMsgSend18.dylib\n/usr/lib/objc/libobjcMsgSend19.dylib\n/usr/lib/objc/libobjcMsgSend20.dylib\n/usr/lib/objc/libobjcMsgSend21.dylib\n/usr/lib/objc/libobjcMsgSend22.dylib\n/usr/lib/objc/libobjcMsgSend23.dylib\n/usr/lib/objc/libobjcMsgSend24.dylib\n/usr/lib/objc/libobjcMsgSend25.dylib\n/usr/lib/objc/libobjcMsgSend26.dylib\n/usr/lib/objc/libobjcMsgSend27.dylib\n/usr/lib/objc/libobjcMsgSend28.dylib\n/usr/lib/objc/libobjcMsgSend29.dylib\n/usr/lib/objc/libobjcMsgSend30.dylib\n/usr/lib/objc/libobjcMsgSend31.dylib\n/usr/lib/objc/libobjcMsgSend32.dylib\n/usr/lib/objc/libobjcMsgSend33.dylib\n/usr/lib/objc/libobjcMsgSend34.dylib\n/usr/lib/objc/libobjcMsgSend35.dylib"
+          }
+        ],
+        "libraries": {
+          "dyld_loaded": [
+            "/private/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/verify-runtime-d7uedm_y/aarch64-apple-darwin/installer/root/bh",
+            "/usr/lib/libiconv.2.dylib",
+            "/usr/lib/libcharset.1.dylib",
+            "/usr/lib/libSystem.B.dylib",
+            "/usr/lib/system/libcache.dylib",
+            "/usr/lib/system/libcommonCrypto.dylib",
+            "/usr/lib/system/libcompiler_rt.dylib",
+            "/usr/lib/system/libcopyfile.dylib",
+            "/usr/lib/system/libcorecrypto.dylib",
+            "/usr/lib/system/libdispatch.dylib",
+            "/usr/lib/system/libdyld.dylib",
+            "/usr/lib/system/libkeymgr.dylib",
+            "/usr/lib/system/libmacho.dylib",
+            "/usr/lib/system/libquarantine.dylib",
+            "/usr/lib/system/libremovefile.dylib",
+            "/usr/lib/system/libsystem_asl.dylib",
+            "/usr/lib/system/libsystem_blocks.dylib",
+            "/usr/lib/system/libsystem_c.dylib",
+            "/usr/lib/system/libsystem_collections.dylib",
+            "/usr/lib/system/libsystem_configuration.dylib",
+            "/usr/lib/system/libsystem_containermanager.dylib",
+            "/usr/lib/system/libsystem_coreservices.dylib",
+            "/usr/lib/system/libsystem_darwin.dylib",
+            "/usr/lib/system/libsystem_darwindirectory.dylib",
+            "/usr/lib/system/libsystem_dnssd.dylib",
+            "/usr/lib/system/libsystem_eligibility.dylib",
+            "/usr/lib/system/libsystem_featureflags.dylib",
+            "/usr/lib/system/libsystem_info.dylib",
+            "/usr/lib/system/libsystem_m.dylib",
+            "/usr/lib/system/libsystem_malloc.dylib",
+            "/usr/lib/system/libsystem_networkextension.dylib",
+            "/usr/lib/system/libsystem_notify.dylib",
+            "/usr/lib/system/libsystem_sandbox.dylib",
+            "/usr/lib/system/libsystem_sanitizers.dylib",
+            "/usr/lib/system/libsystem_secinit.dylib",
+            "/usr/lib/system/libsystem_kernel.dylib",
+            "/usr/lib/system/libsystem_platform.dylib",
+            "/usr/lib/system/libsystem_pthread.dylib",
+            "/usr/lib/system/libsystem_symptoms.dylib",
+            "/usr/lib/system/libsystem_trace.dylib",
+            "/usr/lib/system/libsystem_trial.dylib",
+            "/usr/lib/system/libunwind.dylib",
+            "/usr/lib/system/libxpc.dylib",
+            "/usr/lib/libc++abi.dylib",
+            "/usr/lib/libobjc.A.dylib",
+            "/usr/lib/objc/libobjcMsgSend.dylib",
+            "/usr/lib/libRosetta.dylib",
+            "/usr/lib/libc++.1.dylib",
+            "/usr/lib/libsharedcache.dylib",
+            "/usr/lib/objc/libobjcMsgSend1.dylib",
+            "/usr/lib/objc/libobjcMsgSend2.dylib",
+            "/usr/lib/objc/libobjcMsgSend3.dylib",
+            "/usr/lib/objc/libobjcMsgSend4.dylib",
+            "/usr/lib/objc/libobjcMsgSend5.dylib",
+            "/usr/lib/objc/libobjcMsgSend6.dylib",
+            "/usr/lib/objc/libobjcMsgSend7.dylib",
+            "/usr/lib/objc/libobjcMsgSend8.dylib",
+            "/usr/lib/objc/libobjcMsgSend9.dylib",
+            "/usr/lib/objc/libobjcMsgSend10.dylib",
+            "/usr/lib/objc/libobjcMsgSend11.dylib",
+            "/usr/lib/objc/libobjcMsgSend12.dylib",
+            "/usr/lib/objc/libobjcMsgSend13.dylib",
+            "/usr/lib/objc/libobjcMsgSend14.dylib",
+            "/usr/lib/objc/libobjcMsgSend15.dylib",
+            "/usr/lib/objc/libobjcMsgSend16.dylib",
+            "/usr/lib/objc/libobjcMsgSend17.dylib",
+            "/usr/lib/objc/libobjcMsgSend18.dylib",
+            "/usr/lib/objc/libobjcMsgSend19.dylib",
+            "/usr/lib/objc/libobjcMsgSend20.dylib",
+            "/usr/lib/objc/libobjcMsgSend21.dylib",
+            "/usr/lib/objc/libobjcMsgSend22.dylib",
+            "/usr/lib/objc/libobjcMsgSend23.dylib",
+            "/usr/lib/objc/libobjcMsgSend24.dylib",
+            "/usr/lib/objc/libobjcMsgSend25.dylib",
+            "/usr/lib/objc/libobjcMsgSend26.dylib",
+            "/usr/lib/objc/libobjcMsgSend27.dylib",
+            "/usr/lib/objc/libobjcMsgSend28.dylib",
+            "/usr/lib/objc/libobjcMsgSend29.dylib",
+            "/usr/lib/objc/libobjcMsgSend30.dylib",
+            "/usr/lib/objc/libobjcMsgSend31.dylib",
+            "/usr/lib/objc/libobjcMsgSend32.dylib",
+            "/usr/lib/objc/libobjcMsgSend33.dylib",
+            "/usr/lib/objc/libobjcMsgSend34.dylib",
+            "/usr/lib/objc/libobjcMsgSend35.dylib"
+          ]
+        },
+        "transcript": "aarch64-apple-darwin/installer.txt"
+      }
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "route": "clean-runtime",
+      "evidence_class": "pending-infrastructure",
+      "status": "pending",
+      "reason": "no clean macOS 15 VM without developer tools or Homebrew is provisioned",
+      "details": {}
+    },
+    {
+      "target": "x86_64-apple-darwin",
+      "route": "archive",
+      "evidence_class": "pending-infrastructure",
+      "status": "pending",
+      "reason": "no native x86_64 macOS host (this host is aarch64; Rosetta would be emulation)",
+      "details": {}
+    },
+    {
+      "target": "x86_64-apple-darwin",
+      "route": "installer",
+      "evidence_class": "pending-infrastructure",
+      "status": "pending",
+      "reason": "no native x86_64 macOS host (this host is aarch64; Rosetta would be emulation)",
+      "details": {}
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "route": "glibc-refusal",
+      "evidence_class": "native-clean-runtime",
+      "status": "pass",
+      "reason": "",
+      "details": {
+        "image": "biscuit-verify-runtime:8feb4d8ca535-linux-arm64-curl_xz-utils",
+        "platform": "linux/arm64",
+        "base": "ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214",
+        "os": "$ uname -a\nLinux a14e61378431 6.18.38-arcbox #1 SMP Sun Sep 27 16:06:14 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux\n\n$ cat /etc/os-release\nNAME=\"Ubuntu\"\nVERSION=\"20.04.6 LTS (Focal Fossa)\"\nID=ubuntu\nID_LIKE=debian\nPRETTY_NAME=\"Ubuntu 20.04.6 LTS\"\nVERSION_ID=\"20.04\"\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nVERSION_CODENAME=focal\nUBUNTU_CODENAME=focal\n\n$ ldd --version\nldd (Ubuntu GLIBC 2.31-0ubuntu9.17) 2.31\n\n$ getconf GNU_LIBC_VERSION\nglibc 2.31\n\n$ dpkg-query (downloader packages)\ncurl 7.68.0-1ubuntu2.25\nxz-utils 5.2.4-1ubuntu1.1\n",
+        "steps": [
+          {
+            "argv": "sh biscuit-hash-cli-installer.sh",
+            "status": 1,
+            "output": "ERROR: biscuit-hash-cli 0.1.0 cannot be installed: requires glibc 2.35 or newer; found glibc 2.31\nSupported platforms: Linux aarch64/x86_64 with glibc 2.35+, macOS arm64/x86_64 15.0+\n"
+          }
+        ],
+        "transcript": "aarch64-unknown-linux-gnu/glibc-refusal.txt"
+      }
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "route": "archive",
+      "evidence_class": "native-clean-runtime",
+      "status": "pass",
+      "reason": "",
+      "details": {
+        "image": "ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11",
+        "platform": "linux/arm64",
+        "base": "ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11",
+        "os": "$ uname -a\nLinux 2cfddc7859f0 6.18.38-arcbox #1 SMP Sun Sep 27 16:06:14 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux\n\n$ cat /etc/os-release\nPRETTY_NAME=\"Ubuntu 22.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nVERSION=\"22.04.5 LTS (Jammy Jellyfish)\"\nVERSION_CODENAME=jammy\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=jammy\n\n$ ldd --version\nldd (Ubuntu GLIBC 2.35-0ubuntu3.15) 2.35\n\n$ getconf GNU_LIBC_VERSION\nglibc 2.35\n\n$ dpkg-query (downloader packages)\nxz-utils \n",
+        "libraries": {
+          "ldd": [
+            {
+              "name": "linux-vdso.so.1",
+              "path": "linux-vdso.so.1",
+              "found": "true"
+            },
+            {
+              "name": "libc.so.6",
+              "path": "/lib/aarch64-linux-gnu/libc.so.6",
+              "found": "true"
+            },
+            {
+              "name": "ld-linux-aarch64.so.1",
+              "path": "/lib/ld-linux-aarch64.so.1",
+              "found": "true"
+            },
+            {
+              "name": "libgcc_s.so.1",
+              "path": "/lib/aarch64-linux-gnu/libgcc_s.so.1",
+              "found": "true"
+            }
+          ]
+        },
+        "installed": [
+          "biscuit-hash-cli-aarch64-unknown-linux-gnu",
+          "biscuit-hash-cli-aarch64-unknown-linux-gnu/LICENSE",
+          "biscuit-hash-cli-aarch64-unknown-linux-gnu/README.md",
+          "biscuit-hash-cli-aarch64-unknown-linux-gnu/SOURCE.txt",
+          "biscuit-hash-cli-aarch64-unknown-linux-gnu/THIRD-PARTY-NOTICES.md",
+          "biscuit-hash-cli-aarch64-unknown-linux-gnu/bh"
+        ],
+        "steps": [
+          {
+            "argv": "bh --version",
+            "status": 0,
+            "output": "bh 0.1.0\n"
+          },
+          {
+            "argv": "bh --help",
+            "status": 0,
+            "output": "Hash content using various algorithms (xxHash, BLAKE3, Argon2id)\n\nUsage: bh [OPTIONS] [CONTENT]\n\nArguments:\n  [CONTENT]  Content to hash (use \"-\" with --password to read from stdin)\n\nOptions:\n  -f, --file <PATH>  Hash contents of a file instead of direct content\n  -c, --crypto       Use BLAKE3 cryptographic hash instead of xxHash\n  -p, --password     Password hashing mode (Argon2id). Use \"-\" as content to read from stdin\n  -h, --help         Print help\n  -V, --version      Print version\n\nSHELL COMPLETIONS:\n  Enable tab completions by adding one line to your shell config:\n\n  Bash (~/.bashrc):\n    source <(COMPLETE=bash bh)\n\n  Zsh (~/.zshrc):\n    source <(COMPLETE=zsh bh)\n\n  Fish (~/.config/fish/config.fish):\n    COMPLETE=fish bh | source\n\n  PowerShell ($PROFILE):\n    Invoke-Expression (& bh _complete powershell)\n\nEXAMPLES:\n  bh \"hello world\"              # xxHash of string\n  bh --file Cargo.toml           # xxHash of file contents\n  bh --crypto \"hello world\"     # BLAKE3 cryptographic hash\n  bh --password \"secret\"        # Argon2id password hash\n  echo \"secret\" | bh --password -  # Password from stdin\n"
+          },
+          {
+            "argv": "ldd bh",
+            "status": 0,
+            "output": "\tlinux-vdso.so.1 (0x0000ffffa4483000)\n\tlibc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000ffffa4190000)\n\t/lib/ld-linux-aarch64.so.1 (0x0000ffffa4440000)\n\tlibgcc_s.so.1 => /lib/aarch64-linux-gnu/libgcc_s.so.1 (0x0000ffffa4160000)\n"
+          }
+        ],
+        "transcript": "aarch64-unknown-linux-gnu/archive.txt"
+      }
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "route": "installer",
+      "evidence_class": "native-clean-runtime",
+      "status": "pass",
+      "reason": "",
+      "details": {
+        "image": "biscuit-verify-runtime:076e7bf82319-linux-arm64-curl_xz-utils",
+        "platform": "linux/arm64",
+        "base": "ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11",
+        "os": "$ uname -a\nLinux 4f17d52d0cc6 6.18.38-arcbox #1 SMP Sun Sep 27 16:06:14 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux\n\n$ cat /etc/os-release\nPRETTY_NAME=\"Ubuntu 22.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nVERSION=\"22.04.5 LTS (Jammy Jellyfish)\"\nVERSION_CODENAME=jammy\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=jammy\n\n$ ldd --version\nldd (Ubuntu GLIBC 2.35-0ubuntu3.15) 2.35\n\n$ getconf GNU_LIBC_VERSION\nglibc 2.35\n\n$ dpkg-query (downloader packages)\ncurl 7.81.0-1ubuntu1.30\nxz-utils 5.2.5-2ubuntu1.2\n",
+        "libraries": {
+          "ldd": [
+            {
+              "name": "linux-vdso.so.1",
+              "path": "linux-vdso.so.1",
+              "found": "true"
+            },
+            {
+              "name": "libc.so.6",
+              "path": "/lib/aarch64-linux-gnu/libc.so.6",
+              "found": "true"
+            },
+            {
+              "name": "ld-linux-aarch64.so.1",
+              "path": "/lib/ld-linux-aarch64.so.1",
+              "found": "true"
+            },
+            {
+              "name": "libgcc_s.so.1",
+              "path": "/lib/aarch64-linux-gnu/libgcc_s.so.1",
+              "found": "true"
+            }
+          ]
+        },
+        "installed": [
+          "bh"
+        ],
+        "tmp_left": [],
+        "steps": [
+          {
+            "argv": "sh biscuit-hash-cli-installer.sh",
+            "status": 0,
+            "output": "downloading biscuit-hash-cli 0.1.0 aarch64-unknown-linux-gnu\ninstalling to /scratch/root\n  bh\neverything's installed!\n"
+          },
+          {
+            "argv": "bh --version",
+            "status": 0,
+            "output": "bh 0.1.0\n"
+          },
+          {
+            "argv": "bh --help",
+            "status": 0,
+            "output": "Hash content using various algorithms (xxHash, BLAKE3, Argon2id)\n\nUsage: bh [OPTIONS] [CONTENT]\n\nArguments:\n  [CONTENT]  Content to hash (use \"-\" with --password to read from stdin)\n\nOptions:\n  -f, --file <PATH>  Hash contents of a file instead of direct content\n  -c, --crypto       Use BLAKE3 cryptographic hash instead of xxHash\n  -p, --password     Password hashing mode (Argon2id). Use \"-\" as content to read from stdin\n  -h, --help         Print help\n  -V, --version      Print version\n\nSHELL COMPLETIONS:\n  Enable tab completions by adding one line to your shell config:\n\n  Bash (~/.bashrc):\n    source <(COMPLETE=bash bh)\n\n  Zsh (~/.zshrc):\n    source <(COMPLETE=zsh bh)\n\n  Fish (~/.config/fish/config.fish):\n    COMPLETE=fish bh | source\n\n  PowerShell ($PROFILE):\n    Invoke-Expression (& bh _complete powershell)\n\nEXAMPLES:\n  bh \"hello world\"              # xxHash of string\n  bh --file Cargo.toml           # xxHash of file contents\n  bh --crypto \"hello world\"     # BLAKE3 cryptographic hash\n  bh --password \"secret\"        # Argon2id password hash\n  echo \"secret\" | bh --password -  # Password from stdin\n"
+          },
+          {
+            "argv": "ldd bh",
+            "status": 0,
+            "output": "\tlinux-vdso.so.1 (0x0000ffff83be4000)\n\tlibc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000ffff838f0000)\n\t/lib/ld-linux-aarch64.so.1 (0x0000ffff83ba0000)\n\tlibgcc_s.so.1 => /lib/aarch64-linux-gnu/libgcc_s.so.1 (0x0000ffff838c0000)\n"
+          }
+        ],
+        "transcript": "aarch64-unknown-linux-gnu/installer.txt"
+      }
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "route": "wsl2-archive",
+      "evidence_class": "pending-infrastructure",
+      "status": "pending",
+      "reason": "no WSL2 host to run the Linux artifact (WSL2 is not native Windows)",
+      "details": {}
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "route": "wsl2-installer",
+      "evidence_class": "pending-infrastructure",
+      "status": "pending",
+      "reason": "no WSL2 host to run the Linux artifact (WSL2 is not native Windows)",
+      "details": {}
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "route": "glibc-refusal",
+      "evidence_class": "pending-infrastructure",
+      "status": "pending",
+      "reason": "no native x86_64 Linux host (this Docker engine is aarch64; an emulated container is not runtime evidence)",
+      "details": {}
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "route": "archive",
+      "evidence_class": "pending-infrastructure",
+      "status": "pending",
+      "reason": "no native x86_64 Linux host (this Docker engine is aarch64; an emulated container is not runtime evidence)",
+      "details": {}
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "route": "installer",
+      "evidence_class": "pending-infrastructure",
+      "status": "pending",
+      "reason": "no native x86_64 Linux host (this Docker engine is aarch64; an emulated container is not runtime evidence)",
+      "details": {}
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "route": "wsl2-archive",
+      "evidence_class": "pending-infrastructure",
+      "status": "pending",
+      "reason": "no WSL2 host to run the Linux artifact (WSL2 is not native Windows)",
+      "details": {}
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "route": "wsl2-installer",
+      "evidence_class": "pending-infrastructure",
+      "status": "pending",
+      "reason": "no WSL2 host to run the Linux artifact (WSL2 is not native Windows)",
+      "details": {}
+    },
+    {
+      "target": "*",
+      "route": "channel:brew",
+      "evidence_class": "disabled",
+      "status": "disabled",
+      "reason": "docs/deployment.yaml: packages.biscuit-hash-cli.brew is not enabled",
+      "details": {}
+    },
+    {
+      "target": "*",
+      "route": "channel:binstall",
+      "evidence_class": "disabled",
+      "status": "disabled",
+      "reason": "docs/deployment.yaml: packages.biscuit-hash-cli.binstall is not enabled",
+      "details": {}
+    }
+  ]
+}

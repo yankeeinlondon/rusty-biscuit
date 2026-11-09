@@ -1,0 +1,140 @@
+uname: Darwin bolt.home 27.2.0 Darwin Kernel Version 27.2.0: Tue Sep 29 22:00:39 PDT 2026; root:xnu-13432.40.177.0.3~56/RELEASE_ARM64_T6000 arm64
+macos_version: 27.2
+cpu: Apple M1 Max
+build_tools: ['developer tools (/Library/Developer/CommandLineTools)', 'Homebrew (/opt/homebrew/bin/brew)']
+
+$ sh biscuit-hash-cli-installer.sh
+downloading biscuit-hash-cli 0.1.0 aarch64-apple-darwin
+installing to /var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/verify-runtime-d7uedm_y/aarch64-apple-darwin/installer/root
+  bh
+everything's installed!
+[exit 0]
+
+$ bh --version
+bh 0.1.0
+[exit 0]
+
+$ bh --help
+Hash content using various algorithms (xxHash, BLAKE3, Argon2id)
+
+Usage: bh [OPTIONS] [CONTENT]
+
+Arguments:
+  [CONTENT]  Content to hash (use "-" with --password to read from stdin)
+
+Options:
+  -f, --file <PATH>  Hash contents of a file instead of direct content
+  -c, --crypto       Use BLAKE3 cryptographic hash instead of xxHash
+  -p, --password     Password hashing mode (Argon2id). Use "-" as content to read from stdin
+  -h, --help         Print help
+  -V, --version      Print version
+
+SHELL COMPLETIONS:
+  Enable tab completions by adding one line to your shell config:
+
+  Bash (~/.bashrc):
+    source <(COMPLETE=bash bh)
+
+  Zsh (~/.zshrc):
+    source <(COMPLETE=zsh bh)
+
+  Fish (~/.config/fish/config.fish):
+    COMPLETE=fish bh | source
+
+  PowerShell ($PROFILE):
+    Invoke-Expression (& bh _complete powershell)
+
+EXAMPLES:
+  bh "hello world"              # xxHash of string
+  bh --file Cargo.toml           # xxHash of file contents
+  bh --crypto "hello world"     # BLAKE3 cryptographic hash
+  bh --password "secret"        # Argon2id password hash
+  echo "secret" | bh --password -  # Password from stdin
+[exit 0]
+
+$ DYLD_PRINT_LIBRARIES=1 bh --version
+/private/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/verify-runtime-d7uedm_y/aarch64-apple-darwin/installer/root/bh
+/usr/lib/libiconv.2.dylib
+/usr/lib/libcharset.1.dylib
+/usr/lib/libSystem.B.dylib
+/usr/lib/system/libcache.dylib
+/usr/lib/system/libcommonCrypto.dylib
+/usr/lib/system/libcompiler_rt.dylib
+/usr/lib/system/libcopyfile.dylib
+/usr/lib/system/libcorecrypto.dylib
+/usr/lib/system/libdispatch.dylib
+/usr/lib/system/libdyld.dylib
+/usr/lib/system/libkeymgr.dylib
+/usr/lib/system/libmacho.dylib
+/usr/lib/system/libquarantine.dylib
+/usr/lib/system/libremovefile.dylib
+/usr/lib/system/libsystem_asl.dylib
+/usr/lib/system/libsystem_blocks.dylib
+/usr/lib/system/libsystem_c.dylib
+/usr/lib/system/libsystem_collections.dylib
+/usr/lib/system/libsystem_configuration.dylib
+/usr/lib/system/libsystem_containermanager.dylib
+/usr/lib/system/libsystem_coreservices.dylib
+/usr/lib/system/libsystem_darwin.dylib
+/usr/lib/system/libsystem_darwindirectory.dylib
+/usr/lib/system/libsystem_dnssd.dylib
+/usr/lib/system/libsystem_eligibility.dylib
+/usr/lib/system/libsystem_featureflags.dylib
+/usr/lib/system/libsystem_info.dylib
+/usr/lib/system/libsystem_m.dylib
+/usr/lib/system/libsystem_malloc.dylib
+/usr/lib/system/libsystem_networkextension.dylib
+/usr/lib/system/libsystem_notify.dylib
+/usr/lib/system/libsystem_sandbox.dylib
+/usr/lib/system/libsystem_sanitizers.dylib
+/usr/lib/system/libsystem_secinit.dylib
+/usr/lib/system/libsystem_kernel.dylib
+/usr/lib/system/libsystem_platform.dylib
+/usr/lib/system/libsystem_pthread.dylib
+/usr/lib/system/libsystem_symptoms.dylib
+/usr/lib/system/libsystem_trace.dylib
+/usr/lib/system/libsystem_trial.dylib
+/usr/lib/system/libunwind.dylib
+/usr/lib/system/libxpc.dylib
+/usr/lib/libc++abi.dylib
+/usr/lib/libobjc.A.dylib
+/usr/lib/objc/libobjcMsgSend.dylib
+/usr/lib/libRosetta.dylib
+/usr/lib/libc++.1.dylib
+/usr/lib/libsharedcache.dylib
+/usr/lib/objc/libobjcMsgSend1.dylib
+/usr/lib/objc/libobjcMsgSend2.dylib
+/usr/lib/objc/libobjcMsgSend3.dylib
+/usr/lib/objc/libobjcMsgSend4.dylib
+/usr/lib/objc/libobjcMsgSend5.dylib
+/usr/lib/objc/libobjcMsgSend6.dylib
+/usr/lib/objc/libobjcMsgSend7.dylib
+/usr/lib/objc/libobjcMsgSend8.dylib
+/usr/lib/objc/libobjcMsgSend9.dylib
+/usr/lib/objc/libobjcMsgSend10.dylib
+/usr/lib/objc/libobjcMsgSend11.dylib
+/usr/lib/objc/libobjcMsgSend12.dylib
+/usr/lib/objc/libobjcMsgSend13.dylib
+/usr/lib/objc/libobjcMsgSend14.dylib
+/usr/lib/objc/libobjcMsgSend15.dylib
+/usr/lib/objc/libobjcMsgSend16.dylib
+/usr/lib/objc/libobjcMsgSend17.dylib
+/usr/lib/objc/libobjcMsgSend18.dylib
+/usr/lib/objc/libobjcMsgSend19.dylib
+/usr/lib/objc/libobjcMsgSend20.dylib
+/usr/lib/objc/libobjcMsgSend21.dylib
+/usr/lib/objc/libobjcMsgSend22.dylib
+/usr/lib/objc/libobjcMsgSend23.dylib
+/usr/lib/objc/libobjcMsgSend24.dylib
+/usr/lib/objc/libobjcMsgSend25.dylib
+/usr/lib/objc/libobjcMsgSend26.dylib
+/usr/lib/objc/libobjcMsgSend27.dylib
+/usr/lib/objc/libobjcMsgSend28.dylib
+/usr/lib/objc/libobjcMsgSend29.dylib
+/usr/lib/objc/libobjcMsgSend30.dylib
+/usr/lib/objc/libobjcMsgSend31.dylib
+/usr/lib/objc/libobjcMsgSend32.dylib
+/usr/lib/objc/libobjcMsgSend33.dylib
+/usr/lib/objc/libobjcMsgSend34.dylib
+/usr/lib/objc/libobjcMsgSend35.dylib
+[exit 0]

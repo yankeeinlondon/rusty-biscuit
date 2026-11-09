@@ -13,7 +13,8 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-08
 review_iterations: 0
-implemented: false
+implemented: true
+implemented_by: "claude/opus"
 needs_rulings: false
 rulings:
   - id: linux-glibc-floor

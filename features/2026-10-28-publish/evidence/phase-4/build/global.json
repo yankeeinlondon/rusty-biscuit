@@ -1,0 +1,302 @@
+{
+  "dist_version": "0.34.0",
+  "announcement_tag": "biscuit-hash-cli-v0.1.0",
+  "announcement_tag_is_implicit": false,
+  "announcement_is_prerelease": false,
+  "announcement_title": "biscuit-hash-cli-v0.1.0",
+  "announcement_github_body": "## Install biscuit-hash-cli 0.1.0\n\n### Install prebuilt binaries via shell script\n\n```sh\ncurl --proto '=https' --tlsv1.2 -LsSf https://github.com/yankeeinlondon/rusty-biscuit/releases/download/biscuit-hash-cli-v0.1.0/biscuit-hash-cli-installer.sh | sh\n```\n\n## Download biscuit-hash-cli 0.1.0\n\n|  File  | Platform | Checksum |\n|--------|----------|----------|\n| [biscuit-hash-cli-aarch64-apple-darwin.tar.xz](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/biscuit-hash-cli-v0.1.0/biscuit-hash-cli-aarch64-apple-darwin.tar.xz) | Apple Silicon macOS | [checksum](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/biscuit-hash-cli-v0.1.0/biscuit-hash-cli-aarch64-apple-darwin.tar.xz.sha256) |\n| [biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/biscuit-hash-cli-v0.1.0/biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz) | ARM64 Linux | [checksum](https://github.com/yankeeinlondon/rusty-biscuit/releases/download/biscuit-hash-cli-v0.1.0/biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz.sha256) |\n\n",
+  "releases": [
+    {
+      "app_name": "biscuit-hash-cli",
+      "app_version": "0.1.0",
+      "env": {
+        "install_dir_env_var": "BISCUIT_HASH_CLI_INSTALL_DIR",
+        "unmanaged_dir_env_var": "BISCUIT_HASH_CLI_UNMANAGED_INSTALL",
+        "disable_update_env_var": "BISCUIT_HASH_CLI_DISABLE_UPDATE",
+        "no_modify_path_env_var": "BISCUIT_HASH_CLI_NO_MODIFY_PATH",
+        "print_quiet_env_var": "BISCUIT_HASH_CLI_PRINT_QUIET",
+        "print_verbose_env_var": "BISCUIT_HASH_CLI_PRINT_VERBOSE",
+        "download_url_env_var": "BISCUIT_HASH_CLI_DOWNLOAD_URL",
+        "github_base_url_env_var": "BISCUIT_HASH_CLI_INSTALLER_GITHUB_BASE_URL",
+        "ghe_base_url_env_var": "BISCUIT_HASH_CLI_INSTALLER_GHE_BASE_URL",
+        "github_token_env_var": "BISCUIT_HASH_CLI_GITHUB_TOKEN"
+      },
+      "display_name": "biscuit-hash-cli",
+      "display": true,
+      "artifacts": [
+        "biscuit-hash-cli-aarch64-apple-darwin.tar.xz",
+        "biscuit-hash-cli-aarch64-apple-darwin.tar.xz.sha256",
+        "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz",
+        "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz.sha256",
+        "biscuit-hash-cli-installer.sh",
+        "sha256.sum"
+      ],
+      "hosting": {
+        "github": {
+          "artifact_base_url": "https://github.com",
+          "artifact_download_path": "/yankeeinlondon/rusty-biscuit/releases/download/biscuit-hash-cli-v0.1.0",
+          "owner": "yankeeinlondon",
+          "repo": "rusty-biscuit"
+        }
+      }
+    }
+  ],
+  "artifacts": {
+    "biscuit-hash-cli-aarch64-apple-darwin.tar.xz": {
+      "name": "biscuit-hash-cli-aarch64-apple-darwin.tar.xz",
+      "kind": "executable-zip",
+      "target_triples": [
+        "aarch64-apple-darwin"
+      ],
+      "path": "/private/tmp/dist-stage/target/distrib/biscuit-hash-cli-aarch64-apple-darwin.tar.xz",
+      "assets": [
+        {
+          "name": "LICENSE",
+          "path": "LICENSE",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "SOURCE.txt",
+          "path": "SOURCE.txt",
+          "kind": "unknown"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.md",
+          "path": "THIRD-PARTY-NOTICES.md",
+          "kind": "unknown"
+        },
+        {
+          "id": "biscuit-hash-cli-aarch64-apple-darwin-exe-bh",
+          "name": "bh",
+          "path": "bh",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "biscuit-hash-cli-aarch64-apple-darwin.tar.xz.sha256",
+      "checksums": {
+        "sha256": "44bf4b3fc4f9ef0cc689e4a6d13704c8a3bf819c82d1437ae0c22abbb2b6f0cb"
+      }
+    },
+    "biscuit-hash-cli-aarch64-apple-darwin.tar.xz.sha256": {
+      "name": "biscuit-hash-cli-aarch64-apple-darwin.tar.xz.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "aarch64-apple-darwin"
+      ],
+      "path": "/private/tmp/dist-stage/target/distrib/biscuit-hash-cli-aarch64-apple-darwin.tar.xz.sha256"
+    },
+    "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz": {
+      "name": "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz",
+      "kind": "executable-zip",
+      "target_triples": [
+        "aarch64-unknown-linux-gnu"
+      ],
+      "path": "/work/target/distrib/biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz",
+      "assets": [
+        {
+          "name": "LICENSE",
+          "path": "LICENSE",
+          "kind": "license"
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "readme"
+        },
+        {
+          "name": "SOURCE.txt",
+          "path": "SOURCE.txt",
+          "kind": "unknown"
+        },
+        {
+          "name": "THIRD-PARTY-NOTICES.md",
+          "path": "THIRD-PARTY-NOTICES.md",
+          "kind": "unknown"
+        },
+        {
+          "id": "biscuit-hash-cli-aarch64-unknown-linux-gnu-exe-bh",
+          "name": "bh",
+          "path": "bh",
+          "kind": "executable"
+        }
+      ],
+      "checksum": "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz.sha256",
+      "checksums": {
+        "sha256": "17a55aba61c14fac9cde1f23f5e76eb4bcc767e590456ecdfb0a18c635a8d4d4"
+      }
+    },
+    "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz.sha256": {
+      "name": "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz.sha256",
+      "kind": "checksum",
+      "target_triples": [
+        "aarch64-unknown-linux-gnu"
+      ],
+      "path": "/work/target/distrib/biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz.sha256"
+    },
+    "biscuit-hash-cli-installer.sh": {
+      "name": "biscuit-hash-cli-installer.sh",
+      "kind": "installer",
+      "target_triples": [
+        "aarch64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "path": "/private/tmp/dist-stage/target/distrib/biscuit-hash-cli-installer.sh",
+      "install_hint": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/yankeeinlondon/rusty-biscuit/releases/download/biscuit-hash-cli-v0.1.0/biscuit-hash-cli-installer.sh | sh",
+      "description": "Install prebuilt binaries via shell script"
+    },
+    "sha256.sum": {
+      "name": "sha256.sum",
+      "kind": "unified-checksum",
+      "path": "/private/tmp/dist-stage/target/distrib/sha256.sum"
+    }
+  },
+  "systems": {
+    "build:global:": {
+      "id": "build:global:",
+      "cargo_version_line": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+      "build_environment": {
+        "macos": {
+          "os_version": "27.2"
+        }
+      }
+    },
+    "build:local:aarch64-apple-darwin": {
+      "id": "build:local:aarch64-apple-darwin",
+      "cargo_version_line": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+      "build_environment": {
+        "macos": {
+          "os_version": "27.2"
+        }
+      }
+    },
+    "build:local:aarch64-unknown-linux-gnu": {
+      "id": "build:local:aarch64-unknown-linux-gnu",
+      "cargo_version_line": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+      "build_environment": {
+        "linux": {
+          "glibc_version": {
+            "major": 2,
+            "series": 35
+          }
+        }
+      }
+    }
+  },
+  "assets": {
+    "biscuit-hash-cli-aarch64-apple-darwin-exe-bh": {
+      "id": "biscuit-hash-cli-aarch64-apple-darwin-exe-bh",
+      "name": "bh",
+      "system": "build:local:aarch64-apple-darwin",
+      "target_triples": [
+        "aarch64-apple-darwin"
+      ],
+      "linkage": {
+        "system": [
+          {
+            "path": "/usr/lib/libSystem.B.dylib",
+            "package_manager": null
+          },
+          {
+            "path": "/usr/lib/libiconv.2.dylib",
+            "package_manager": null
+          }
+        ]
+      }
+    },
+    "biscuit-hash-cli-aarch64-unknown-linux-gnu-exe-bh": {
+      "id": "biscuit-hash-cli-aarch64-unknown-linux-gnu-exe-bh",
+      "name": "bh",
+      "system": "build:local:aarch64-unknown-linux-gnu",
+      "target_triples": [
+        "aarch64-unknown-linux-gnu"
+      ],
+      "linkage": {
+        "system": [
+          {
+            "path": "/usr/lib/aarch64-linux-gnu/libc.so.6",
+            "package_manager": null
+          },
+          {
+            "path": "/usr/lib/aarch64-linux-gnu/libgcc_s.so.1",
+            "package_manager": null
+          }
+        ]
+      }
+    }
+  },
+  "publish_prereleases": false,
+  "force_latest": false,
+  "ci": {
+    "github": {
+      "artifacts_matrix": {
+        "include": [
+          {
+            "runner": "macos-15",
+            "host": "aarch64-apple-darwin",
+            "install_dist": {
+              "shell": "sh",
+              "run": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0/cargo-dist-installer.sh | sh"
+            },
+            "dist_args": "--artifacts=local --target=aarch64-apple-darwin",
+            "targets": [
+              "aarch64-apple-darwin"
+            ],
+            "cache_provider": "github"
+          },
+          {
+            "runner": "ubuntu-22.04-arm",
+            "host": "aarch64-unknown-linux-gnu",
+            "install_dist": {
+              "shell": "sh",
+              "run": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0/cargo-dist-installer.sh | sh"
+            },
+            "dist_args": "--artifacts=local --target=aarch64-unknown-linux-gnu",
+            "targets": [
+              "aarch64-unknown-linux-gnu"
+            ],
+            "cache_provider": "github"
+          },
+          {
+            "runner": "macos-15-intel",
+            "host": "x86_64-apple-darwin",
+            "install_dist": {
+              "shell": "sh",
+              "run": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0/cargo-dist-installer.sh | sh"
+            },
+            "dist_args": "--artifacts=local --target=x86_64-apple-darwin",
+            "targets": [
+              "x86_64-apple-darwin"
+            ],
+            "cache_provider": "github"
+          },
+          {
+            "runner": "ubuntu-22.04",
+            "host": "x86_64-unknown-linux-gnu",
+            "install_dist": {
+              "shell": "sh",
+              "run": "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0/cargo-dist-installer.sh | sh"
+            },
+            "dist_args": "--artifacts=local --target=x86_64-unknown-linux-gnu",
+            "targets": [
+              "x86_64-unknown-linux-gnu"
+            ],
+            "cache_provider": "github"
+          }
+        ]
+      },
+      "pr_run_mode": "skip"
+    }
+  },
+  "linkage": [],
+  "upload_files": [
+    "/private/tmp/dist-stage/target/distrib/biscuit-hash-cli-installer.sh",
+    "/private/tmp/dist-stage/target/distrib/sha256.sum"
+  ]
+}

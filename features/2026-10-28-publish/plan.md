@@ -2,9 +2,231 @@
 kind: plan
 total_phases: 5
 created: 2026-11-08
-phase: 1
+phase: 6
 agent: codex/gpt-6.1-sol
-yolo: "true"
+yolo: 'true'
+source_files_during_phase_1:
+- scripts/ci/distribution.py
+- scripts/ci/test_distribution.py
+- scripts/ci/requirements-distribution.txt
+- dist-workspace.toml
+- Cargo.toml
+- biscuit-hash/cli/Cargo.toml
+- biscuit-file/cli/Cargo.toml
+- tree-hugger/cli/Cargo.toml
+- worktree/cli/Cargo.toml
+- sniff/cli/Cargo.toml
+- darkmatter/cli/Cargo.toml
+- darkmatter/dmls/Cargo.toml
+- claudine/cli/Cargo.toml
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+- biscuit-hash-cli
+- biscuit-file-cli
+- tree-hugger-cli
+- git-wt-cli
+- sniff-detection-cli
+- darkmatter-cli
+- darkmatter-lsp
+- claudine-cli
+- repo-deps
+- test-toolkit
+source_files_during_phase_2:
+- scripts/ci/distribution.py
+- scripts/ci/test_distribution.py
+- scripts/ci/fixtures/distribution/dist-plan-biscuit-hash-cli.json
+- scripts/ci/fixtures/distribution/dist-plan-darkmatter-cli-brew.json
+- dist-workspace.toml
+- about.toml
+- .github/distribution/build-images.json
+- scripts/distribution/about.hbs
+- scripts/distribution/build.sh
+- scripts/distribution/inspect_archive.py
+- scripts/distribution/installers.py
+- scripts/distribution/licenses.sh
+- scripts/distribution/native_notices.py
+- scripts/distribution/test_inspect.py
+- scripts/distribution/test_installers.py
+- scripts/distribution/test_licenses.py
+- scripts/distribution/fixtures/biscuit-hash-cli-installer.sh
+- scripts/distribution/fixtures/dist-sha256.sum
+- scripts/distribution/fixtures/notices/header.md
+- scripts/distribution/fixtures/otool-libraries-bh-aarch64-apple-darwin.txt
+- scripts/distribution/fixtures/otool-load-commands-bh-aarch64-apple-darwin.txt
+- scripts/distribution/fixtures/readelf-bh-aarch64-unknown-linux-gnu.txt
+docs_updated_during_phase_2: []
+docs_created_during_phase_2:
+- features/2026-10-28-publish/evidence/phase-2/README.md
+- features/2026-10-28-publish/evidence/phase-2/license-review.md
+skills_files_updated_during_phase_2:
+- .claude/skills/rust-devops/deployment-platforms.md
+- .claude/skills/os/macos.md
+source_files_during_phase_3:
+- .github/workflows/distribute-binaries.yml
+- .github/actions/setup-dist/action.yml
+- scripts/ci/distribution.py
+- scripts/ci/test_distribution.py
+- scripts/distribution/install_check.sh
+- scripts/distribution/tap.py
+- scripts/distribution/publish-tap.sh
+- scripts/distribution/test_tap.py
+- scripts/distribution/github-web-flow.gpg
+- scripts/distribution/fixtures/formula/darkmatter-cli.rb
+- scripts/distribution/verify_binstall.py
+- scripts/distribution/test_verify_binstall.py
+- scripts/distribution/fixtures/binstall/Cargo.toml.in
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+- justfile
+- just/distribution.just
+- scripts/Cargo.toml
+- scripts/ci/affected_scope.py
+- scripts/ci/test_affected_scope.py
+- scripts/ci/distribution.py
+- scripts/ci/test_distribution.py
+- scripts/distribution/run_suites.py
+- scripts/distribution/pinned-python.sh
+- scripts/distribution/verify.sh
+- scripts/distribution/verify_runtime.py
+- scripts/distribution/test_verify_runtime.py
+- scripts/distribution/inspect_archive.py
+- scripts/distribution/installers.py
+- scripts/distribution/licenses.sh
+- scripts/distribution/native_notices.py
+- scripts/distribution/tap.py
+- scripts/distribution/verify_binstall.py
+- scripts/distribution/test_inspect.py
+- scripts/distribution/test_installers.py
+- scripts/distribution/test_licenses.py
+- scripts/distribution/test_tap.py
+- scripts/distribution/test_verify_binstall.py
+- tools/test-toolkit/Cargo.toml
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_4:
+- .github/ci/README.md
+docs_created_during_phase_4:
+- features/2026-10-28-publish/evidence/phase-4/README.md
+- features/2026-10-28-publish/evidence/phase-4/verify/README.md
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+- .github/workflows/distribute-binaries.yml
+- .github/distribution/rollout.json
+- scripts/ci/distribution.py
+- scripts/ci/test_distribution.py
+- scripts/ci/affected_scope.py
+- scripts/ci/test_affected_scope.py
+- scripts/ci/fixtures/distribution/dist-plan-sniff-detection-cli-brew.json
+- scripts/distribution/inspect_archive.py
+- scripts/distribution/test_inspect.py
+- scripts/distribution/installers.py
+- scripts/distribution/native_notices.py
+- scripts/distribution/test_licenses.py
+- scripts/distribution/verify.sh
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_5:
+- docs/releases.md
+- docs/topics/ci-cd.md
+- .github/ci/README.md
+- biscuit-hash/README.md
+- biscuit-file/README.md
+- tree-hugger/README.md
+- worktree/README.md
+- sniff/README.md
+- darkmatter/README.md
+- claudine/README.md
+docs_created_during_phase_5:
+- docs/distribution.md
+- features/2026-10-28-publish/evidence/phase-5/plans/README.md
+- features/2026-10-28-publish/evidence/phase-5/verify/README.md
+skills_files_updated_during_phase_5:
+- .claude/skills/rust-devops/SKILL.md
+- .claude/skills/rust-devops/deployment-platforms.md
+source_code:
+- scripts/ci/distribution.py
+- scripts/ci/test_distribution.py
+- scripts/ci/requirements-distribution.txt
+- dist-workspace.toml
+- Cargo.toml
+- biscuit-hash/cli/Cargo.toml
+- biscuit-file/cli/Cargo.toml
+- tree-hugger/cli/Cargo.toml
+- worktree/cli/Cargo.toml
+- sniff/cli/Cargo.toml
+- darkmatter/cli/Cargo.toml
+- darkmatter/dmls/Cargo.toml
+- claudine/cli/Cargo.toml
+- scripts/ci/fixtures/distribution/dist-plan-biscuit-hash-cli.json
+- scripts/ci/fixtures/distribution/dist-plan-darkmatter-cli-brew.json
+- about.toml
+- .github/distribution/build-images.json
+- scripts/distribution/about.hbs
+- scripts/distribution/build.sh
+- scripts/distribution/inspect_archive.py
+- scripts/distribution/installers.py
+- scripts/distribution/licenses.sh
+- scripts/distribution/native_notices.py
+- scripts/distribution/test_inspect.py
+- scripts/distribution/test_installers.py
+- scripts/distribution/test_licenses.py
+- scripts/distribution/fixtures/biscuit-hash-cli-installer.sh
+- scripts/distribution/fixtures/dist-sha256.sum
+- scripts/distribution/fixtures/notices/header.md
+- scripts/distribution/fixtures/otool-libraries-bh-aarch64-apple-darwin.txt
+- scripts/distribution/fixtures/otool-load-commands-bh-aarch64-apple-darwin.txt
+- scripts/distribution/fixtures/readelf-bh-aarch64-unknown-linux-gnu.txt
+- .github/workflows/distribute-binaries.yml
+- .github/actions/setup-dist/action.yml
+- scripts/distribution/install_check.sh
+- scripts/distribution/tap.py
+- scripts/distribution/publish-tap.sh
+- scripts/distribution/test_tap.py
+- scripts/distribution/github-web-flow.gpg
+- scripts/distribution/fixtures/formula/darkmatter-cli.rb
+- scripts/distribution/verify_binstall.py
+- scripts/distribution/test_verify_binstall.py
+- scripts/distribution/fixtures/binstall/Cargo.toml.in
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+- justfile
+- just/distribution.just
+- scripts/Cargo.toml
+- scripts/ci/affected_scope.py
+- scripts/ci/test_affected_scope.py
+- scripts/distribution/run_suites.py
+- scripts/distribution/pinned-python.sh
+- scripts/distribution/verify.sh
+- scripts/distribution/verify_runtime.py
+- scripts/distribution/test_verify_runtime.py
+- tools/test-toolkit/Cargo.toml
+- .github/distribution/rollout.json
+- scripts/ci/fixtures/distribution/dist-plan-sniff-detection-cli-brew.json
+documentation:
+- features/2026-10-28-publish/evidence/phase-2/README.md
+- features/2026-10-28-publish/evidence/phase-2/license-review.md
+- features/2026-10-28-publish/evidence/phase-4/README.md
+- features/2026-10-28-publish/evidence/phase-4/verify/README.md
+- docs/distribution.md
+- features/2026-10-28-publish/evidence/phase-5/plans/README.md
+- features/2026-10-28-publish/evidence/phase-5/verify/README.md
+- .github/ci/README.md
+- docs/releases.md
+- docs/topics/ci-cd.md
+- biscuit-hash/README.md
+- biscuit-file/README.md
+- tree-hugger/README.md
+- worktree/README.md
+- sniff/README.md
+- darkmatter/README.md
+- claudine/README.md
+- .claude/skills/rust-devops/deployment-platforms.md
+- .claude/skills/os/macos.md
+- .claude/skills/rust-devops/SKILL.md
+completed_phase: 5
+implemented: true
 ---
 
 # Binary distribution implementation plan
@@ -47,12 +269,12 @@ Stay in the starting worktree and branch; preserve unrelated changes. Do not com
 
 ### Wave 1 — Policy foundation
 
-- [ ] **Implement policy preflight**
+- [x] **Implement policy preflight**
   - Own `scripts/ci/distribution.py`, its dependency pin, and its policy/event fixtures. Implement rules 2–5 and 9 with no network or subprocess side effects during parsing/selection; inject forge and command adapters at the execution boundary.
   - Expose CLI subcommands `preflight`, `config`, `validate-plan`, `reconcile-assets`, and `tap-update`. Pin Python `semver==3.0.4` alongside PyYAML and use `semver.Version.parse` for complete version validation and comparisons, rather than writing a partial parser. JSON output is the machine contract; errors go to stderr with document/field location and nonzero status. Build and upload functions cannot be reached without a successful preflight result.
   - Produce a selected record with package, command, resolved manifest path, exact version/tag/commit, effective channels, four targets, and tool pins. An ignored result has an empty matrix and explicit reason. Retain byte-preserved current/tagged policy snapshots as provenance; no policy digest implementation is introduced.
 
-- [ ] **Prepare package metadata**
+- [x] **Prepare package metadata**
   - Own the eight CLI manifests, root profile, checked-in dist base configuration, and package overview snippets. Apply rules 5–7 and 15; preserve test features and all fixture callers. Keep every actual deployment approval and channel value unchanged.
   - Add explicit disabled binstall metadata and canonical repository metadata; supply descriptions and readme paths pointing to each area's overview. Include source/license notices through generated distribution staging, not a duplicated monorepo README in every archive.
   - Update comments whose claims about default fixture distribution become inaccurate. Record the S1 departure in the implementation log; do not edit its historical measurement report.
@@ -63,12 +285,12 @@ Checkpoint: the untouched real deployment document is a valid all-disabled contr
 
 ### Wave 2 — Configuration and build machinery
 
-- [ ] **Generate dist inputs**
+- [x] **Generate dist inputs**
   - Own config/provenance generation in `distribution.py`, after Wave 1. Copy the complete tagged checkout into temporary distribution staging, preserving embedded files and path dependencies; apply generated dist metadata there only. The original checkout remains byte-clean.
   - Generate installer/channel settings from the effective selection, binary overrides for all four targets, and `min-glibc-version` 2.35 for the two GNU targets. No PowerShell output is generated. Require exact plan release/package/version, four target set, one shipping binary, production features, immutable download prefix, and enabled-channel correspondence.
   - Generate provenance deterministically in sorted target/asset order; obtain checksums from dist outputs, not new digest code. Archive all generated configuration, dist JSON plans, original policy snapshots, and command logs as workflow artifacts. The approval overlay changes distribution metadata only; compare staged production source and lockfile bytes against the original tagged checkout before building, and retain the overlay diff.
 
-- [ ] **Build target jobs**
+- [x] **Build target jobs**
   - Own `scripts/distribution/build.sh`, `scripts/distribution/inspect.py`, and `.github/distribution/build-images.json`. Encode rules 11–13 in checked-in data. Shell scripts use non-interactive one-shot commands with bounded timeouts; no background processes, signing dialogs, or terminal focus changes.
   - Build each target separately from the selected tagged commit using dist local artifacts, `--locked` Cargo invocations, stripped thin LTO, and static PCRE2. Inspect the actual build command/log for exact package selection and absence of workspace/all-features builds.
   - Inspect archive paths for traversal, absolute paths, symlink escapes, extra executables, wrong CPU/format, and missing notices/source URL. Inspect ELF `GLIBC_` version requirements and reject anything newer than 2.35; retain `readelf`/`ldd` evidence. Inspect Mach-O deployment version, architecture, rpaths, and `otool -L` output; reject non-system dependencies and build-host paths.
@@ -76,12 +298,12 @@ Checkpoint: the untouched real deployment document is a valid all-disabled contr
 
 ### Wave 3 — Installer and license outputs
 
-- [ ] **Harden generated installers**
+- [x] **Harden generated installers**
   - Own `scripts/distribution/installers.py` and installer fixtures. Run after Wave 2's config contract. Retain dist-generated versioned download URLs and checksums. Add a checked, single-match transformation to the pinned shell template to perform a glibc 2.35 preflight before downloading/installing on Linux. Template drift is an error, never an unchecked text replacement.
   - Compare numeric glibc components; report required/found versions and exit before writes for 2.34, musl, missing/unparseable detection, and unsupported architectures. Accept 2.35 and newer; macOS follows the 15.0 floor. Preserve installer arguments/environment documented by the pinned template, including isolated installation-directory support and no PATH mutation during tests.
   - Leave archive bytes and their dist-generated SHA-256 sidecars/unified checksum output untouched. Dist 0.34.0 adds checksums to executable archives in `add_variant`; the generated shell script is a global installer, not one of those archives. Validate every checksum entry against its referenced immutable output and refuse a stale checksum; do not invent a dist checksum subcommand. The final shell installer is protected by HTTPS and the same immutable byte-comparison retry contract. Generate it once per package after collecting every target's metadata; never let target jobs race to create differing global assets.
 
-- [ ] **Bundle license notices**
+- [x] **Bundle license notices**
   - Own `about.toml`, `scripts/distribution/licenses.sh`, and archive notice fixtures. Pin `cargo-about` 0.8.4; produce notices for each selected package's locked production dependency closure and all target-specific dependencies. Bundle native-library notices not covered by crate metadata, including PCRE2's vendored license.
   - Include root AGPL license, third-party notices, and `SOURCE.txt` with exact tag and commit URLs. Check that archive inclusion is configured before dist packages binaries, and validate the resulting archives rather than just checking the staging directory.
 
@@ -91,25 +313,25 @@ Checkpoint: pinned dist plans for `bh` and `md` select exactly one shipping comm
 
 ### Wave 4 — Workflow and asset reconciliation
 
-- [ ] **Wire release workflow**
+- [x] **Wire release workflow**
   - Own `.github/workflows/distribute-binaries.yml` and a small `.github/actions/setup-dist/action.yml`. Use rules 8–12. Separate preflight, local builds, global packaging, runtime verification, upload, and tap publication jobs with explicit dependencies. Concurrency is keyed on selected package, `cancel-in-progress: false`; never key only on a changing run ID.
   - Default workflow and build jobs to contents read, checkout with persisted credentials disabled, and no App/tap secrets. Grant contents write only to upload, and expose the tap token only to its publisher. Treat event fields as data passed through environment/arguments, never interpolate them into executable shell code.
   - Provide a nonpublishing manual verification mode for current implementation revisions and fixture approvals, storing workflow artifacts only. Production mode accepts only approved existing tags; verification mode cannot reach upload or tap jobs, even with forged fixture fields. Handwritten workflow contracts must prove this boundary.
   - Preserve integration workflow selection/assets and prerequisite release ownership. Missing release-proof/App evidence fails a selected production preflight with its setup instruction; it must not trigger a fallback release path.
 
-- [ ] **Implement immutable upload**
+- [x] **Implement immutable upload**
   - Own forge adapters and retry fixtures in `distribution.py`. Enumerate and compare the complete expected asset set before uploading any new asset. Existing identical bytes are reused; missing names are uploaded; a conflicting name fails with no replacement/deletion. An unavailable download or truncated body is an error.
   - Persist a verified complete build bundle as a workflow artifact before uploads. Manual recovery supports an explicit existing distribution-run ID for that tag; validate its successful build result, selected revision, target set, configuration, and bundle before reuse. A fresh rebuild is allowed only for a release with no distribution assets; any partial release requires its original bundle. This avoids nondeterministic rebuilds poisoning immutable releases.
   - Recheck tag/proposal identity and current policy immediately before mutation; reject races and revoked channels. Retain unrelated existing release assets. Do not modify release body, draft/published state, latest setting, or tags.
 
 ### Wave 5 — Channel adapters
 
-- [ ] **Publish tap formula**
+- [x] **Publish tap formula**
   - Own `scripts/distribution/publish-tap.sh`, formula validation, and tap adapter tests. Follow rule 16. Use GitHub GraphQL `createCommitOnBranch` with `expectedHeadOid` and only the changed formula path, authenticated as the author through `HOMEBREW_TAP_TOKEN`. GitHub signs these commits server-side; this avoids introducing an undisclosed signing-key secret ([GitHub commit API](https://docs.github.com/en/graphql/reference/commits)). Require the credential owner to be the configured author, no attribution trailers, and a valid returned signature. Fetch the resulting commit into a temporary checkout and run `git verify-commit` using GitHub's published web-flow signing key in an isolated GPG home. A signature failure fails once; never bypass signing. Do not execute a real tap mutation during this implementation.
   - Add one tap-wide concurrency group around version-check/update. Fetch before the final version comparison; `expectedHeadOid` rejects a concurrent branch change. A branch-head conflict fails the publisher and is recovered by rerunning the same validated tag; no internal speculative retry or force update is used. Preserve unrelated formulas. Compare stable versions through the existing Python SemVer validator used by preflight, including numeric ordering tests such as 0.9 versus 0.10.
   - Validate `brew audit`, formula syntax, binary-only install behavior, glibc floor declaration, and claudine's Linux ALSA dependency. Download and verify every referenced asset before generating a tap commit.
 
-- [ ] **Verify binstall wiring**
+- [x] **Verify binstall wiring**
   - Own a nonpublishing binstall verification driver and fixtures. Pin 1.26.2. Exercise `--git https://github.com/yankeeinlondon/rusty-biscuit <package>` for the current manifest version with compile fallback disabled, isolated Cargo home/root, exact target, and retained logs showing package/version and release URL.
   - Exercise historical version installation from the exact tagged checkout using `--manifest-path` and the resolved manifest path; require its manifest version to equal the tag before invocation. Disabled channels fail before network downloads. Worktree's missing feature-required helper is tolerated while `wt` remains required.
   - Fixture tests use a local forge/archive server and real pinned binstall to prove extraction and optional-helper handling without live publication. Keep network-dependent tool compatibility checks separate from fast parser tests; retain them as explicit nonpublishing acceptance commands, not full-workspace CI cells.
@@ -130,12 +352,12 @@ Every invalid document or load-bearing field shape produces a located error befo
 
 ### Wave 6 — Regression and runtime coverage
 
-- [ ] **Add focused contracts**
+- [x] **Add focused contracts**
   - Own the test-toolkit bridge in `tools/test-toolkit/tests/ci_workflow_contracts.rs`, dependency setup recipes, and focused Python suites. Add literal repository file reads and declare new source inputs in `tools/test-toolkit/Cargo.toml` so automation-only edits schedule the exact owning contracts. Reuse existing package-keyed CI planning; introduce no distribution test scheduler or full-workspace run.
   - Add `just distribution-check` and `just distribution-verify` recipes in `just/distribution.just`, imported at root. The first provisions a temporary pinned Python environment, runs policy/fixture and workflow checks through the existing test-toolkit contract path; the second runs the real pinned-tool compatibility and installation checks and retains a report. Do not permit absent Python/PyYAML/tools to make selected tests silently skip.
   - Cover approved/unapproved and channel combinations, duplicate names, foreign/library/integration tags, wrong versions/revisions, exact binary and feature selection, policy revocation, prerelease handling, first/identical/partial/conflicting retries, missing build bundle, missing credentials, tap equal/newer/older versions, unsafe archive paths, glibc detection, and installer template drift. Assert no effects after invalid input.
 
-- [ ] **Verify clean installs**
+- [x] **Verify clean installs**
   - Own runtime verification scripts and evidence reports. Install actual generated archives and shell installers into isolated temporary roots for each of the four targets; run `--version` and `--help` and verify only the intended command was installed. Exercise the Linux artifact under WSL2 separately without claiming native Windows evidence. Never invoke playback, interactive provider flows, or an LSP server loop.
   - Use native clean macOS 15 runtime VMs without developer tools/Homebrew libraries and the pinned Ubuntu 22.04 runtime containers without compiler packages; retain OS/CPU, dynamic library observations, exact download identity, exit status, and command output. Use the `os` skill's host contract to locate native hosts; no cross-compile substitutes for runtime evidence. Missing clean macOS VM provisioning is pending infrastructure, never a successful clean-runtime claim. Hosted build-host smoke tests remain useful but are labeled separately.
   - For enabled Homebrew formulas, verify an isolated brew prefix on each supported macOS/Linux CPU target, then run the installed command. Homebrew's own platform support constrains this check; do not call an untested target complete. For disabled channels, record disabled rather than skipped-success. PowerShell/native Windows are explicitly outside the enabled target set.
@@ -147,20 +369,20 @@ Checkpoint: public-result robustness coverage is complete, retries and denied ch
 
 ### Wave 7 — Current documentation
 
-- [ ] **Document distribution operations**
+- [x] **Document distribution operations**
   - Own `docs/releases.md`, new `docs/distribution.md`, relevant area README links, and `.claude/skills/rust-devops/SKILL.md` distribution contract. Explain package versus command names, four targets, macOS 15 and glibc 2.35 floors, excluded glibc 2.34 distributions, and WSL2's Linux route. Give claudine runtime commands: Debian/Ubuntu `apt-get install libasound2`, Fedora `dnf install alsa-lib`; Homebrew formulas declare their Linux dependency.
   - Explain published-but-assets-pending state, workflow run links, explicit tag recovery with retained build bundle, immutable conflict failures, monthly build-image refresh, exact source/licenses/checksums, no downgrade, credential scope, and approval changes through reviewed release proposals. Include a Mermaid lifecycle diagram. Keep current docs free of dated feature/fix references.
   - Include concrete command syntax, but advertise a channel as available only with actual tested version-specific URLs. Until live acceptance exists, label channel examples planned and omit runnable placeholder download URLs. Document Git default-HEAD binstall behavior and exact-tag manifest installation separately. README content stays an overview with links to topic guides.
 
 ### Wave 8 — Final validation and evidence
 
-- [ ] **Run scoped validation**
+- [x] **Run scoped validation**
   - Run `just distribution-check` and `just test test-toolkit` once after integration; during development filter the changed contract slice through Nextest. Run `cargo clippy -p test-toolkit --all-targets -- -D warnings`. Do not run `just lint`, which includes formatting, or `cargo fmt`.
   - Validate the new workflow and composite-action references with actionlint 1.7.12, installed from checksum-verified upstream release assets. Run `just distribution-verify` for available native hosts and report missing infrastructure explicitly. Validate generated dist JSON plans for all eight capability packages under fixture approvals, including all helper-bearing packages, without changing real approvals.
   - Run worktree's focused affected L1 checks and `just test-l2` for its `level2_dirty_tree` slice through the package-area recipe, keeping windows unfocused; this verifies the explicit fixture gate did not strand its existing test. Reuse qualifying other package evidence because their source behavior did not change. Build the shipping commands through artifact validation, rather than rerunning eight unrelated test suites to inspect archive layouts.
   - Review final diffs for accidental policy enablement, broadened release-plz eligibility, integration changes, secrets, unsigned-publication bypasses, unbounded subprocesses, mutable latest URLs, unlocated parser errors, and configuration defaults that hide malformed data. Repair findings in the owning task and rerun only affected checks.
 
-- [ ] **Record rollout evidence**
+- [x] **Record rollout evidence**
   - Create `implementation-log.md` with rules implemented, S1 binary-override departure, exact commands/results, generated plans, artifact/runtime reports, license output, source revisions, and external setup status. Never rewrite the historical spec or move it to completed.
   - Read existing authorized release/proposal/run/tap evidence without causing publication. Populate the live ledger for `bh` first; keep every other rollout pending until that full chain succeeds and its own approval/artifact/install evidence exists. The automation must reject widening without a verified first-`bh` ledger entry tied to the successful distribution run. Store this rollout evidence in `.github/distribution/rollout.json`, validated by the same JSON loader, containing the successful package/tag/commit/run and target/channel results; entries are evidence, not substitutes for deployment approvals. The first `bh` run creates its ledger candidate as a workflow artifact; a subsequent reviewed repository change carries it into the durable ledger.
   - Missing approvals, App proof, tap repository/token, clean-runtime provisioning, or live-release authorization produce named pending ledger entries and an honest final acceptance report. Do not ask questions or wait. Finish all independent implementation tasks; do not mark a pending live target/channel as complete or enable another package to bypass the first-`bh` requirement.

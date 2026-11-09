@@ -1,0 +1,117 @@
+--- a/biscuit-hash-cli-installer.sh
++++ b/biscuit-hash-cli-installer.sh
+@@ -205,6 +205,7 @@
+         esac
+     done
+ 
++    biscuit_distribution_preflight
+     get_architecture || return 1
+     local _true_arch="$RETVAL"
+     assert_nz "$_true_arch" "arch"
+@@ -1721,6 +1722,106 @@
+             want: $_checksum_value
+             got:  $_calculated_checksum"
+     fi
++}
++
++# >>> biscuit-distribution installer preflight (scripts/distribution/installers.py)
++# Refuses an unsupported platform before anything is downloaded or written.
++# Messages go to stderr even with --quiet: a refusal must always explain itself.
++biscuit_preflight_refuse() {
++    echo "ERROR: $APP_NAME $APP_VERSION cannot be installed: $1" >&2
++    echo "Supported platforms: Linux aarch64/x86_64 with glibc 2.35+, macOS arm64/x86_64 15.0+" >&2
++    exit 1
++}
++
++# Sets _bp_major/_bp_minor from a dotted version ("15" means 15.0); fails
++# unless both are decimal numbers short enough for `test` arithmetic.
++biscuit_preflight_split() {
++    _bp_major="${1%%.*}"
++    case "$1" in
++        *.*) _bp_minor="${1#*.}" ;;
++        *) _bp_minor=0 ;;
++    esac
++    _bp_minor="${_bp_minor%%.*}"
++    case "$_bp_major" in
++        ''|*[!0-9]*|???????*) return 1 ;;
++    esac
++    case "$_bp_minor" in
++        ''|*[!0-9]*|???????*) return 1 ;;
++    esac
+ }
+ 
++# Numeric comparison: major first, then minor (2.100 is newer than 2.35).
++biscuit_preflight_at_least() {
++    [ "$_bp_major" -gt "$1" ] || { [ "$_bp_major" -eq "$1" ] && [ "$_bp_minor" -ge "$2" ]; }
++}
++
++biscuit_preflight_glibc() {
++    local _found=""
++    local _ldd=""
++    if command -v getconf > /dev/null 2>&1; then
++        _found="$(getconf GNU_LIBC_VERSION 2> /dev/null)" || _found=""
++        case "$_found" in
++            "glibc "*) _found="${_found#glibc }" ;;
++            *) _found="" ;;
++        esac
++    fi
++    if [ -z "$_found" ] && command -v ldd > /dev/null 2>&1; then
++        # musl's ldd prints its banner to stderr and exits 1.
++        _ldd="$(ldd --version 2>&1)" || true
++        case "$_ldd" in
++            *musl*) biscuit_preflight_refuse "requires glibc 2.35 or newer; found musl libc" ;;
++        esac
++        _ldd="$(printf '%s\n' "$_ldd" | head -n 1)"
++        case "$_ldd" in
++            *GLIBC*|*glibc*|*"GNU libc"*) _found="${_ldd##* }" ;;
++        esac
++    fi
++    if [ -z "$_found" ] || ! biscuit_preflight_split "$_found"; then
++        biscuit_preflight_refuse "unable to detect the glibc version (required: glibc 2.35 or newer; found: '${_found:-$_ldd}' from getconf GNU_LIBC_VERSION and ldd --version)"
++    fi
++    if ! biscuit_preflight_at_least 2 35; then
++        biscuit_preflight_refuse "requires glibc 2.35 or newer; found glibc $_found"
++    fi
++}
++
++biscuit_preflight_macos() {
++    local _found=""
++    if command -v sw_vers > /dev/null 2>&1; then
++        _found="$(sw_vers -productVersion 2> /dev/null)" || _found=""
++    fi
++    if [ -z "$_found" ] || ! biscuit_preflight_split "$_found"; then
++        biscuit_preflight_refuse "unable to detect the macOS version (required: macOS 15.0 or newer; found: '$_found' from sw_vers -productVersion)"
++    fi
++    if ! biscuit_preflight_at_least 15 0; then
++        biscuit_preflight_refuse "requires macOS 15.0 or newer; found macOS $_found"
++    fi
++}
++
++biscuit_distribution_preflight() {
++    local _os
++    local _cpu
++    _os="$(uname -s 2> /dev/null)" || _os=""
++    _cpu="$(uname -m 2> /dev/null)" || _cpu=""
++    case "$_os" in
++        Linux)
++            case "$_cpu" in
++                aarch64|x86_64) ;;
++                *) biscuit_preflight_refuse "unsupported architecture: Linux ${_cpu:-unknown}" ;;
++            esac
++            biscuit_preflight_glibc
++            ;;
++        Darwin)
++            case "$_cpu" in
++                arm64|x86_64) ;;
++                *) biscuit_preflight_refuse "unsupported architecture: macOS ${_cpu:-unknown}" ;;
++            esac
++            biscuit_preflight_macos
++            ;;
++        *)
++            biscuit_preflight_refuse "unsupported operating system: ${_os:-unknown} ${_cpu:-unknown}"
++            ;;
++    esac
++}
++# <<< biscuit-distribution installer preflight
++
+ download_binary_and_run_installer "$@" || exit 1
