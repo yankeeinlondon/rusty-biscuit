@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 6
 created: 2026-11-08
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -28,10 +28,36 @@ docs_updated_during_phase_1:
 - darkmatter/docs/topics/darkmatter-expressions.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/compose/expression/data/error.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/option_execution_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+docs_updated_during_phase_2:
+- darkmatter/docs/topics/loading-data.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/requests.md
 packages:
 - darkmatter
 - darkmatter-lsp
 - claudine-cli
+source_files_during_phase_3:
+- darkmatter/lib/tests/l1/load_data_options.rs
+- darkmatter/lib/tests/l1/load_data_options_passive.rs
+- darkmatter/lib/tests/l1/load_data_headerless.rs
+- darkmatter/lib/tests/l1/load_data_options_remote.rs
+- darkmatter/lib/tests/l1/load_data_options_slots.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Plan: Tabular Input Options for `load_data`
@@ -661,7 +687,7 @@ Depends on Phase 1. Wave 1 tasks touch disjoint files.
 
 ### Wave 1 (parallel)
 
-- [ ] **Memo layers** (R7–R12) — `<Data module>/runtime.rs`
+- [x] **Memo layers** (R7–R12) — `<Data module>/runtime.rs`
   - Add `RawSource`, `RawEntry`, `SourceKey`, `BindKey`; `DataMemo<R, S, B>`;
     `load_raw` (counts `reads`), `load_source(&SourceKey, &RawEntry, …)` (counts
     `source_hits`), `bind(…, header, …)`; `Generation::new` creates all four
@@ -680,7 +706,7 @@ Depends on Phase 1. Wave 1 tasks touch disjoint files.
     `a_parse_from_an_older_raw_generation_is_not_memoized`,
     `concurrent_callers_share_one_raw_load_and_one_parse`,
     `memo_generation_advances_once_per_invalidation`.
-- [ ] **Parse and row view** (R13, R15) — `<Data module>/parse.rs`, `error.rs`
+- [x] **Parse and row view** (R13, R15) — `<Data module>/parse.rs`, `error.rs`
   (`TabularSource` only), `locate.rs`
   - `decode_bytes`, `utf8_failure`, `decode_local` over them; `parse_text` with
     the delimiter; module and function docs updated (CSV/TSV sentences).
@@ -691,7 +717,7 @@ Depends on Phase 1. Wave 1 tasks touch disjoint files.
     `headerless_view_includes_the_first_record`, and in `locate.rs`
     `headerless_root_and_rows_use_the_logical_view` (`/0/1` → line 1, column 3
     for `"a,b\n1,2\n"`; header-skipping behavior unchanged for `header: true`).
-- [ ] **Passive check and typing** (R17–R19, R25, R26) —
+- [x] **Passive check and typing** (R17–R19, R25, R26) —
   `lib/src/markdown/compose/expression/call_check.rs`
   - `ArgumentType::PartialObject`; a private `OptionsView`
     (`Closed(literals)`, `Partial { literals, computed }`, `Unknown`) built from
@@ -704,7 +730,7 @@ Depends on Phase 1. Wave 1 tasks touch disjoint files.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Execution flow** (R9, R10, R14, R16, R22, R27) — `<Data module>/load.rs`,
+- [x] **Execution flow** (R9, R10, R14, R16, R22, R27) — `<Data module>/load.rs`,
   plus only the file(s) the rebase check named under A6/A7, if any
   - Rewrite `load_data_fn` in the R14 order; the raw loader holds the read
     (`buffers::read` per A3) and the observation; the parse loader turns the
@@ -722,10 +748,10 @@ Depends on Phase 1. Wave 1 tasks touch disjoint files.
 
 ### Checkpoint 2
 
-- [ ] `cargo nextest run -p darkmatter -E 'test(load_data) | test(compose_read_set) | test(design_time_call_check) | test(flow_sensitive_narrowing) | test(variable_type_projection) | test(slot)'`
+- [x] `cargo nextest run -p darkmatter -E 'test(load_data) | test(compose_read_set) | test(design_time_call_check) | test(flow_sensitive_narrowing) | test(variable_type_projection) | test(slot)'`
   passes with no existing test modified except `runtime.rs`'s in-file unit
   tests.
-- [ ] Smell grep of R24 is clean.
+- [x] Smell grep of R24 is clean.
 
 ## Phase 3 — Library tests
 
@@ -734,7 +760,7 @@ parallel.
 
 ### Wave 1 (parallel)
 
-- [ ] **Passive tests** — `lib/tests/l1/load_data_options_passive.rs`
+- [x] **Passive tests** — `lib/tests/l1/load_data_options_passive.rs`
   - Through `check_expression_calls` / `expression_call_diagnostics` /
     `expression_type` with `TypeScope::unguarded` (no filesystem): the P tests
     in the acceptance table, plus: `{header: null}` on a JSON file accepted;
@@ -746,7 +772,7 @@ parallel.
     `map(load_data(…, {header: false}), r => r.…)` is unchanged.
   - `passive_and_execution_messages_are_identical` compares the passive message
     with `DataError::InvalidOptions`'s `Display` from the same inputs.
-- [ ] **Options matrix, execution, and memo reuse** — `lib/tests/l1/load_data_options.rs`
+- [x] **Options matrix, execution, and memo reuse** — `lib/tests/l1/load_data_options.rs`
   - R24 matrix (`option_matrix_control_row`, `option_matrix_invalid_cells_read_nothing`,
     `option_matrix_null_and_absent_cells_use_defaults`,
     `option_matrix_coercion_exceptions`, two wiring cells through
@@ -769,7 +795,7 @@ parallel.
     set is unchanged; `concurrent_identical_option_calls_read_once` uses
     threads over one `DataRuntime`; `null_file_with_options_reads_and_imports_nothing`
     asserts `reads == 0`, `contract_preparations == 0`, empty read set.
-- [ ] **Headerless table and positions** — `lib/tests/l1/load_data_headerless.rs`
+- [x] **Headerless table and positions** — `lib/tests/l1/load_data_headerless.rs`
   - One test per row of the spec's headerless table and the H tests in the
     acceptance table. Positions assert line and character column so a one-row
     shift fails: first record `/0/1`; a later row; a quoted multiline field
@@ -778,7 +804,7 @@ parallel.
     is the control. `header_false_then_true_share_one_parse` loads one file both
     ways in both orders: correct independent results, `parses == 1`,
     `binds == 2`.
-- [ ] **Remote** — `lib/tests/l1/load_data_options_remote.rs`
+- [x] **Remote** — `lib/tests/l1/load_data_options_remote.rs`
   - `wiremock` local mock following `load_data_runtime.rs`'s `RemoteReadConfig`
     usage; no live endpoint. The W tests in the acceptance table: `GET
     /export?id=7` returning JSON loads with `{format: "json"}` and the read-set
@@ -789,7 +815,7 @@ parallel.
     reference check without remote permission defers (not cached) and a later
     composition with permission reads; a redirect to a denied host fails with
     an explicit `format`.
-- [ ] **Dynamic-schema integration** — `lib/tests/l1/load_data_options_slots.rs`
+- [x] **Dynamic-schema integration** — `lib/tests/l1/load_data_options_slots.rs`
   - Using the observation, gate, and collector APIs the rebase check recorded:
     `memo_hits_at_every_layer_rerecord_the_observation` (three calls answered by
     the raw, parse, and bind layers each add the observation to
@@ -803,7 +829,7 @@ parallel.
 
 ### Checkpoint 3
 
-- [ ] `just test` in `darkmatter/` is green for `lib`; fix every failure at its
+- [x] `just test` in `darkmatter/` is green for `lib`; fix every failure at its
   cause and never weaken an existing assertion.
 
 ## Phase 4 — DMLS
