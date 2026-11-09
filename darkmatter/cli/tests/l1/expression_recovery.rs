@@ -194,6 +194,16 @@ keeps_invalid_requests_fatal! {
         ),
         code "dm.data.invalid_options",
         detail |error| error["message"].as_str().unwrap().contains("option `delimiter` is invalid");
+    // The data file is absent, but no file it could be would accept a
+    // delimiter, so the request fails rather than selecting the fallback.
+    computed_invalid_options_for_missing_source:
+        files &[],
+        call (
+            "---\n$schema:\n  delim: string(required)\ndelim: \";\"\n---\n",
+            "load_data(\"optional.yaml\", \"string[]\", {delimiter: delim})",
+        ),
+        code "dm.data.invalid_options",
+        detail |error| error["message"].as_str().unwrap().contains("applies only to CSV and TSV data");
     // The data file is present, so the only miss is the contract's.
     missing_contract_import:
         files &[("optional.yaml", "- a\n")],
@@ -238,6 +248,34 @@ fn recovered_cause_emits_no_diagnostic() {
     schema.validate_strict(&control).unwrap_or_else(|failure| panic!("{failure:?}\n{control:#}"));
     assert_eq!(errors(&control).len(), 1, "{control:#}");
     assert_eq!(errors(&control)[0]["reference"], "optional.yaml", "{control:#}");
+}
+
+/// A recursive reference whose filename comes from the environment is judged
+/// by the name it expands to: missing, it recovers like `%optional.yaml`
+/// rather than failing as an extensionless request; present, it loads.
+#[test]
+fn recursive_env_reference_recovers_only_a_miss() {
+    for (case, data, document) in [("missing", None, "[]"), ("present", Some("- loaded\n"), "[\"loaded\"]")] {
+        let fixture = CliProcessFixture::named(&format!("er_recursive_env_{case}"));
+        if let Some(data) = data {
+            fixture.write_file("cwd/optional.yaml", data);
+        }
+        let doc = fixture.write_file("cwd/doc.md", "{{ as_json(try(load_data(\"%{{DATA_FILE}}\", \"string[]\"), [])) }}\n");
+
+        let output = fixture
+            .command()
+            .env("DATA_FILE", "optional.yaml")
+            .arg("compose")
+            .arg(&doc)
+            .args(["--output", "json"])
+            .output()
+            .unwrap();
+
+        assert_eq!(output.status.code(), Some(0), "{case}: {}", stderr_of(&output));
+        let report = envelope(&output);
+        assert_eq!(report["diagnostics"], json!([]), "{case}: {report:#}");
+        assert_eq!(report["document"].as_str().map(str::trim_end), Some(document), "{case}: {report:#}");
+    }
 }
 
 /// `try` is not an absence guard: an undeclared read beside a recovered call

@@ -51,8 +51,9 @@ pub enum RemoteFreshness {
     /// Serve within the freshness lifetime; past it, revalidate with a
     /// conditional GET and fail if revalidation fails.
     Strict,
-    /// Like `strict`, but serve the stale body when revalidation fails on the
-    /// network, except for `no-cache` responses (the default).
+    /// Like `strict`, but serve the stale body when revalidation fails in
+    /// transport (network error or HTTP error status), except for `no-cache`
+    /// responses; a refused request still fails (the default).
     Fallback,
 }
 

@@ -62,6 +62,8 @@ pub fn md_file(content: &str) -> tempfile::NamedTempFile {
 
 pub struct MockHttpResponse {
     pub status: u16,
+    /// The response body; for a `302`, the `Location` header instead (the
+    /// body is then empty).
     pub body: &'static str,
     pub cache_control: Option<&'static str>,
 }
@@ -166,22 +168,28 @@ pub fn mock_http_server(responses: Vec<MockHttpResponse>) -> MockHttpServer {
 
             let status_text = match response.status {
                 200 => "OK",
+                302 => "Found",
                 304 => "Not Modified",
                 500 => "Internal Server Error",
                 _ => "OK",
             };
+            let (body, location) =
+                if response.status == 302 { ("", Some(response.body)) } else { (response.body, None) };
             let mut headers = format!(
                 "HTTP/1.1 {} {}\r\nContent-Length: {}\r\n",
                 response.status,
                 status_text,
-                response.body.len()
+                body.len()
             );
+            if let Some(location) = location {
+                headers.push_str(&format!("Location: {location}\r\n"));
+            }
             if let Some(cache_control) = response.cache_control {
                 headers.push_str(&format!("Cache-Control: {cache_control}\r\n"));
             }
             headers.push_str("\r\n");
             let _ = stream.write_all(headers.as_bytes());
-            let _ = stream.write_all(response.body.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
         }
     });
 

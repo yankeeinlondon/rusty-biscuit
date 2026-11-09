@@ -11,7 +11,9 @@
 //! - [`RemoteFreshnessMode::Strict`] — serve within TTL without network;
 //!   revalidate with a conditional GET past TTL.
 //! - [`RemoteFreshnessMode::Fallback`] — like `Strict`, but serve the stale
-//!   cached body when revalidation fails on the network.
+//!   cached body when revalidation fails in transport (a network error or an
+//!   HTTP error status). A refused request (a denied host or redirect) still
+//!   fails.
 //!
 //! `refresh` forces a conditional GET even when the cached body is fresh.
 //!
@@ -33,6 +35,7 @@ use url::Url;
 use super::manifest::{CACHE_VERSION, RemoteUrlManifest, RemoteUrlManifestHeader, redact_url};
 use super::store::FileStore;
 use super::types::ArtifactClass;
+use crate::markdown::compose::expression::RemoteReadKind;
 use crate::markdown::compose::remote::RemoteFreshnessMode;
 use crate::markdown::compose::remote_fetch::RemoteFetchFailure;
 
@@ -401,7 +404,8 @@ fn write_cached(
 /// usable cached body is available under the active freshness mode, or when
 /// the response body is not valid UTF-8 (a transport failure). A `no-cache`
 /// entry whose revalidation fails is an error even under
-/// [`RemoteFreshnessMode::Fallback`].
+/// [`RemoteFreshnessMode::Fallback`], as is any revalidation failure whose
+/// kind is not [`RemoteReadKind::Transport`].
 pub(crate) async fn fetch_with_cache(
     store: Option<&FileStore>,
     client: &PolicyClient,
@@ -506,16 +510,26 @@ pub(crate) async fn fetch_with_cache(
                         revalidated: true,
                     })
                 }
-                // RFC 9111 §5.2.2.4 forbids reusing a no-cache response
-                // without successful validation, so Fallback cannot serve it.
-                Err(_) if cfg.mode == RemoteFreshnessMode::Fallback && !directives.no_cache => {
-                    Ok(RemoteFetchOutcome {
-                        body: cached_body,
-                        event: RemoteOutcomeEvent::StaleServed,
-                        revalidated: true,
-                    })
+                Err(err) => {
+                    let failure = RemoteFetchFailure::from(err);
+                    // Only a transport failure is an outage the stale body may
+                    // cover; a refusal (denied host or redirect), an invalid
+                    // reference, or an infrastructure failure must reach the
+                    // reader. RFC 9111 §5.2.2.4 forbids reusing a no-cache
+                    // response without successful validation.
+                    if failure.kind == RemoteReadKind::Transport
+                        && cfg.mode == RemoteFreshnessMode::Fallback
+                        && !directives.no_cache
+                    {
+                        Ok(RemoteFetchOutcome {
+                            body: cached_body,
+                            event: RemoteOutcomeEvent::StaleServed,
+                            revalidated: true,
+                        })
+                    } else {
+                        Err(failure)
+                    }
                 }
-                Err(err) => Err(err.into()),
             }
         }
         CacheAction::FetchFresh => {

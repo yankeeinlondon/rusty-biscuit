@@ -12,6 +12,11 @@
 //! contract with the effective header through the bind memo. Only a fully
 //! converted value is returned.
 //!
+//! A local file that resolves to nothing is judged by the same request checks
+//! ([`plan_read`]) before its miss is returned, against the extension of every
+//! file it could have been, so an invalid request fails alike whether or not
+//! the file exists and never reaches `try` as a recoverable miss.
+//!
 //! Every outcome is observed in the data runtime's log: a missing file's
 //! probed candidates, and once per call a read with the hash of the bytes
 //! read (`None` when the read, or the parse in this call's format, failed).
@@ -59,12 +64,15 @@ pub(super) const FUNCTION: &str = "load_data";
 /// - The file-reference family for a missing, unreadable, not-yet-fetchable,
 ///   or policy-denied source, and [`ExpressionError::RemoteRead`] (worded as
 ///   a plain evaluation failure, typed by its kind) for a failed fetch.
-/// - [`ExpressionError::Data`] for every `dm.data.*` failure (including
-///   `dm.data.unsupported_format` for a missing source, with no `format`
-///   option, that no candidate extension could read), an invalid contract, a contract import that cannot be read
+/// - [`ExpressionError::Data`] for every `dm.data.*` failure, an invalid
+///   contract, a contract import that cannot be read
 ///   ([`DataError::ContractImport`], projected like a file reference), and
 ///   options that cannot apply (`dm.data.invalid_options`, located at the
-///   call: execution keeps no per-argument position).
+///   call: execution keeps no per-argument position). A missing local source
+///   fails with the request's `dm.data.unsupported_format`,
+///   `dm.data.invalid_options`, or `dm.data.row_shape_conflict` instead of a
+///   miss when no file it could resolve to would accept the request (see
+///   [`check_absent_request`]).
 #[tracing::instrument(
     level = "debug",
     name = "load_data",
@@ -98,13 +106,9 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
         _ => {
             let file_ref = parse_file_ref(FUNCTION, raw, ctx)?;
             let Some(path) = resolve_arg(FUNCTION, raw, ctx)? else {
-                // A request no format can read is invalid whether or not the
-                // file exists, so it must not reach `try` as a miss.
-                if options.format.is_none()
-                    && let Some(error) = unreadable_candidates(&file_ref, ctx)
-                {
-                    return Err(fail(error));
-                }
+                // An invalid request is invalid whether or not the file
+                // exists, so it must not reach `try` as a miss.
+                check_absent_request(&file_ref, &options, &contract, ctx).map_err(fail)?;
                 // Creating any probed candidate would change the answer.
                 record_probed_candidates(&file_ref, ctx);
                 return Err(file_reference_error(FUNCTION, raw, ctx, FileRefFailure::NotFound, None));
@@ -131,33 +135,17 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
     let span = tracing::Span::current();
     span.record("identity", tracing::field::display(&identity));
 
-    // An explicit format skips the extension entirely, so an extensionless
-    // URL or an unsupported extension reads as the format chosen.
-    let format = match options.format {
-        Some(format) => format,
-        None => format_of(&identity).map_err(fail).map_err(unread)?,
-    };
+    let ReadPlan { format, delimiter, header, row_mode } = plan_read(&options, &contract, extension_format(&identity))
+        .map_err(|refusal| refusal.into_error(|| identity.clone()))
+        .map_err(fail)
+        .map_err(unread)?;
     span.record("format", tracing::field::debug(format));
-    options.check_applicability(format).map_err(fail).map_err(unread)?;
-    let delimiter = effective_delimiter(format, options.delimiter);
-    let header = effective_header(format, options.header);
     if let Some(delimiter) = delimiter {
         span.record("delimiter", tracing::field::debug(char::from(delimiter)));
     }
     if let Some(header) = header {
         span.record("header", header);
     }
-    let row_shape = |conflict| fail(DataError::RowShapeConflict { written: contract.written.clone(), conflict });
-    let row_mode = match header {
-        Some(header) => {
-            let mode = contract.row_mode().map_err(row_shape).map_err(unread)?;
-            if !header {
-                require_positional_rows(RowClassification::Known(mode)).map_err(row_shape).map_err(unread)?;
-            }
-            Some(mode)
-        }
-        None => None,
-    };
 
     // The fetch enforces host policy and is single-flight and cached by the
     // remote runtime itself, so authorization precedes every memo layer.
@@ -231,34 +219,172 @@ fn fail(error: DataError) -> ExpressionError {
     ExpressionError::from(Arc::new(error))
 }
 
-/// `dm.data.unsupported_format` for a missing source when no file it could
-/// resolve to has an extension `load_data` reads; `None` when some candidate
-/// does, or when the candidates cannot be listed.
-fn unreadable_candidates(file_ref: &biscuit_file::FileReference, ctx: &ResolutionContext) -> Option<DataError> {
-    if file_ref.class().recursive {
-        return None;
+/// How a request reads its source once the request checks pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReadPlan {
+    format: DataFormat,
+    delimiter: Option<u8>,
+    header: Option<bool>,
+    /// The CSV/TSV row mode; `None` for a format that is not tabular.
+    row_mode: Option<RowMode>,
+}
+
+/// Why [`plan_read`] refused a request.
+#[derive(Debug)]
+enum Refusal {
+    /// No `format` option, and the source's extension names no data format.
+    /// The error is built by the caller, which alone knows what to name.
+    UnsupportedExtension(Option<String>),
+    /// The options or contract cannot apply to the effective format.
+    Invalid(DataError),
+}
+
+impl Refusal {
+    /// The error this refusal reports, naming `identity` when the extension
+    /// was the problem.
+    fn into_error(self, identity: impl FnOnce() -> DataSourceIdentity) -> DataError {
+        match self {
+            Self::UnsupportedExtension(extension) => DataError::UnsupportedFormat { identity: identity(), extension },
+            Self::Invalid(error) => error,
+        }
     }
-    let candidates = file_ref
-        .candidate_plan_with_order(&ctx.file_context(), biscuit_file::CandidatePlanOrder::Resolution)
-        .ok()?;
-    let first = candidates.first()?.path().to_path_buf();
-    if candidates.iter().any(|candidate| data_format_of(candidate.path()).is_some()) {
-        return None;
+}
+
+/// The request checks every `load_data` read passes before its source is
+/// read, and that a missing source passes before its miss is reported:
+/// choose the effective format (the `format` option, else `extension`'s),
+/// check that the options apply to it, and for CSV/TSV choose the row mode
+/// and, without a header, require positional rows. It reads nothing, so a
+/// present and an absent source are judged alike.
+///
+/// `extension` is the source's extension and the format it names (`Err`
+/// carrying the unreadable extension); it is ignored when a `format` option
+/// is given.
+fn plan_read(
+    options: &DataOptions,
+    contract: &PreparedContract,
+    extension: Result<DataFormat, Option<String>>,
+) -> Result<ReadPlan, Refusal> {
+    // An explicit format skips the extension entirely, so an extensionless
+    // URL or an unsupported extension reads as the format chosen.
+    let format = match options.format {
+        Some(format) => format,
+        None => extension.map_err(Refusal::UnsupportedExtension)?,
+    };
+    options.check_applicability(format).map_err(Refusal::Invalid)?;
+    let delimiter = effective_delimiter(format, options.delimiter);
+    let header = effective_header(format, options.header);
+    let row_shape = |conflict| Refusal::Invalid(DataError::RowShapeConflict { written: contract.written.clone(), conflict });
+    let row_mode = match header {
+        Some(header) => {
+            let mode = contract.row_mode().map_err(row_shape)?;
+            if !header {
+                require_positional_rows(RowClassification::Known(mode)).map_err(row_shape)?;
+            }
+            Some(mode)
+        }
+        None => None,
+    };
+    Ok(ReadPlan { format, delimiter, header, row_mode })
+}
+
+/// Judges the request of a local source that resolved to nothing by every
+/// file it could have resolved to ([`absent_candidates`]): `Ok` when any of
+/// them would accept the request, so creating that file would load it and
+/// the miss is the honest answer; otherwise the first candidate's refusal,
+/// in resolution order. Nothing is read, probed, or canonicalized except to
+/// name the file in a `dm.data.unsupported_format` error.
+///
+/// ## Errors
+///
+/// `dm.data.unsupported_format`, `dm.data.invalid_options`, or
+/// `dm.data.row_shape_conflict`, as [`plan_read`] reports them.
+fn check_absent_request(
+    file_ref: &biscuit_file::FileReference,
+    options: &DataOptions,
+    contract: &PreparedContract,
+    ctx: &ResolutionContext,
+) -> Result<(), DataError> {
+    judge_absent(absent_candidates(file_ref, ctx), options, contract)
+}
+
+/// [`check_absent_request`]'s verdict over `candidates`.
+fn judge_absent(candidates: Vec<AbsentCandidate>, options: &DataOptions, contract: &PreparedContract) -> Result<(), DataError> {
+    let mut first_refusal = None;
+    for candidate in candidates {
+        match plan_read(options, contract, data_format_of(&candidate.path).ok_or_else(|| extension_text(&candidate.path))) {
+            Ok(_) => return Ok(()),
+            Err(refusal) => {
+                first_refusal.get_or_insert((candidate, refusal));
+            }
+        }
     }
-    format_of(&DataSourceIdentity::local(&first)).err()
+    match first_refusal {
+        None => Ok(()),
+        Some((candidate, refusal)) => Err(refusal.into_error(|| candidate.identity())),
+    }
+}
+
+/// A file a missing source could have been.
+struct AbsentCandidate {
+    /// The path whose extension names the format the file would be read as.
+    path: std::path::PathBuf,
+    /// The authored reference, when `path` is not a resolution-plan path.
+    authored: Option<String>,
+}
+
+impl AbsentCandidate {
+    /// The identity an unsupported-format error names: a planned path's,
+    /// or the authored reference itself, which a search has not placed at
+    /// any path (never an invented resolved one).
+    fn identity(&self) -> DataSourceIdentity {
+        match &self.authored {
+            Some(authored) => DataSourceIdentity::Local(std::path::PathBuf::from(authored)),
+            None => DataSourceIdentity::local(&self.path),
+        }
+    }
+}
+
+/// The files a missing local source could have been: every path of a
+/// nonrecursive reference's resolution plan, in resolution order. A
+/// recursive (`%`) reference's plan holds search roots rather than files, so
+/// it, like a reference whose plan cannot be listed, is judged by its
+/// payload after environment interpolation (the relative path any match
+/// would end in, so its extension is that match's) and named by its authored
+/// text. Never empty.
+fn absent_candidates(file_ref: &biscuit_file::FileReference, ctx: &ResolutionContext) -> Vec<AbsentCandidate> {
+    let file_context = ctx.file_context();
+    let planned = (!file_ref.class().recursive)
+        .then(|| file_ref.candidate_plan_with_order(&file_context, biscuit_file::CandidatePlanOrder::Resolution).ok())
+        .flatten()
+        .filter(|candidates| !candidates.is_empty());
+    match planned {
+        Some(candidates) => candidates
+            .into_iter()
+            .map(|candidate| AbsentCandidate { path: candidate.path().to_path_buf(), authored: None })
+            .collect(),
+        None => {
+            // An interpolation failure already failed resolution with its own
+            // error before a miss could reach here, so the authored text is
+            // only a defensive stand-in.
+            let payload = file_ref.interpolated_payload(&file_context).unwrap_or_else(|_| file_ref.raw().to_string());
+            vec![AbsentCandidate { path: payload.into(), authored: Some(file_ref.raw().to_string()) }]
+        }
+    }
 }
 
 /// The format named by the extension of a local path or of a URL's path (its
-/// query and fragment ignored), compared case-insensitively.
-fn format_of(identity: &DataSourceIdentity) -> Result<DataFormat, DataError> {
+/// query and fragment ignored), or the unreadable extension it has.
+fn extension_format(identity: &DataSourceIdentity) -> Result<DataFormat, Option<String>> {
     let path = match identity {
         DataSourceIdentity::Local(path) => Cow::Borrowed(path.as_path()),
         DataSourceIdentity::Remote(url) => Cow::Owned(Path::new(url.path()).to_path_buf()),
     };
-    data_format_of(&path).ok_or_else(|| DataError::UnsupportedFormat {
-        identity: identity.clone(),
-        extension: path.extension().map(|extension| extension.to_string_lossy().into_owned()),
-    })
+    data_format_of(&path).ok_or_else(|| extension_text(&path))
+}
+
+fn extension_text(path: &Path) -> Option<String> {
+    path.extension().map(|extension| extension.to_string_lossy().into_owned())
 }
 
 /// The data format `path`'s extension names, compared case-insensitively;
@@ -435,6 +561,61 @@ mod tests {
             ExpressionError::Data(data) => data.code(),
             other => panic!("not a data error: {other}"),
         }
+    }
+
+    fn contract(written: &str) -> PreparedContract {
+        let dir = tempfile::TempDir::new().unwrap();
+        super::super::contract::prepare_contract(written, &biscuit_file::FileResolutionContext::new(dir.path())).unwrap()
+    }
+
+    fn planned(paths: &[&str]) -> Vec<AbsentCandidate> {
+        paths.iter().map(|path| AbsentCandidate { path: path.into(), authored: None }).collect()
+    }
+
+    fn semicolon() -> DataOptions {
+        DataOptions { delimiter: Some(b';'), ..DataOptions::default() }
+    }
+
+    /// Creating `b.csv` would load it, so the miss is the honest answer even
+    /// though `a.yaml` would refuse the delimiter.
+    #[test]
+    fn an_absent_source_is_a_miss_when_any_candidate_accepts_the_request() {
+        let verdict = judge_absent(planned(&["/d/a.yaml", "/d/b.csv"]), &semicolon(), &contract("tuple([string, string])[]"));
+        assert!(verdict.is_ok(), "{verdict:?}");
+        let unreadable_first = judge_absent(planned(&["/d/a.xyz", "/d/b.yaml"]), &DataOptions::default(), &contract("string[]"));
+        assert!(unreadable_first.is_ok(), "{unreadable_first:?}");
+    }
+
+    #[test]
+    fn an_absent_source_reports_the_first_refusal_when_every_candidate_refuses() {
+        let error = judge_absent(planned(&["/d/a.xyz", "/d/b.json"]), &semicolon(), &contract("string[]")).unwrap_err();
+        match error {
+            DataError::UnsupportedFormat { identity, extension } => {
+                assert_eq!(extension.as_deref(), Some("xyz"));
+                assert!(identity.to_string().ends_with("a.xyz"), "{identity}");
+            }
+            other => panic!("unsupported format first: {other:?}"),
+        }
+        let error = judge_absent(planned(&["/d/a.json", "/d/b.xyz"]), &semicolon(), &contract("string[]")).unwrap_err();
+        assert_eq!(error.code(), Some("dm.data.invalid_options"));
+    }
+
+    /// The authored text of a recursive reference is named as written, never
+    /// as an invented resolved path.
+    #[test]
+    fn an_authored_candidate_names_the_reference_as_written() {
+        let candidates = vec![AbsentCandidate { path: "optional.xyz".into(), authored: Some("%optional.xyz".to_string()) }];
+        match judge_absent(candidates, &DataOptions::default(), &contract("string[]")).unwrap_err() {
+            DataError::UnsupportedFormat { identity, .. } => assert_eq!(identity.to_string(), "%optional.xyz"),
+            other => panic!("unsupported format: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_format_option_judges_every_candidate_by_that_format() {
+        let options = DataOptions { format: Some(DataFormat::Yaml), ..semicolon() };
+        let error = judge_absent(planned(&["/d/a.csv", "/d/b.xyz"]), &options, &contract("string[]")).unwrap_err();
+        assert_eq!(error.code(), Some("dm.data.invalid_options"));
     }
 
     #[test]

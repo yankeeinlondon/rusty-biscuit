@@ -90,8 +90,10 @@ pub enum RemoteFreshnessMode {
     /// Serve within the freshness lifetime; past it, revalidate with a
     /// conditional GET, and fail if revalidation fails.
     Strict,
-    /// Serve stale on network failure, except a `no-cache` response, whose
-    /// failed revalidation is an error. The default: the spec's
+    /// Serve stale on a transport failure (network error or HTTP error
+    /// status), except a `no-cache` response, whose failed revalidation is an
+    /// error. A refused revalidation (denied host or redirect) is always an
+    /// error. The default: the spec's
     /// "TTL → conditional → stale-on-failure" behavior keeps CI/offline builds
     /// resilient when a remote dependency is briefly unreachable.
     #[default]

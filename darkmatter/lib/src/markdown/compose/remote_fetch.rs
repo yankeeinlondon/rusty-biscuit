@@ -2194,6 +2194,46 @@ mod persistent_cache_tests {
         assert_eq!(conditional_hits.load(Ordering::SeqCst), 1);
     }
 
+    /// Fallback serves a stale body only over a transport failure. A
+    /// revalidation refused by policy (a redirect to a host the run does not
+    /// allow) fails with its policy kind; an HTTP 500 on the same seeded entry
+    /// is the transport control and is served stale.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fallback_serves_stale_only_over_a_transport_failure() {
+        let refused = MockServer::start().await;
+        let location = format!("http://localhost:{}/doc.md", refused.address().port());
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", location.as_str()))
+            .mount(&refused)
+            .await;
+        let failing = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(500)).mount(&failing).await;
+        let cfg = config(None, true, RemoteFreshnessMode::Fallback);
+
+        for (server, expected) in [(&refused, Err(RemoteReadKind::Policy)), (&failing, Ok("seeded"))] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = temp_store(&dir);
+            let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+            seed_entry(&store, &url, "seeded", "max-age=3600");
+
+            let rt = run_once(&store, cfg, &url);
+            let read = rt.get_content_typed(&url);
+            let stats = rt.stats();
+            match expected {
+                Err(kind) => {
+                    let failure = read.expect_err("a refused revalidation is not served stale");
+                    assert_eq!(failure.kind, kind, "{failure}");
+                    assert!(failure.message.contains("blocked by fetch policy"), "{failure}");
+                    assert_eq!((stats.failures, stats.stale_served), (1, 0));
+                }
+                Ok(body) => {
+                    assert_eq!(read.unwrap().as_deref(), Some(body));
+                    assert_eq!((stats.failures, stats.stale_served), (0, 1));
+                }
+            }
+        }
+    }
+
     /// A revalidation answered with `no-store` (as a `304` or a new `200`)
     /// stops the old entry from being refreshed or kept: it is purged.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

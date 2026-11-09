@@ -9,18 +9,20 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::data::DataError;
-use darkmatter::markdown::compose::expression::{ExpressionError, FileRefFailure};
+use darkmatter::markdown::compose::expression::{ExpressionError, FileRefFailure, RemoteReadKind};
 use darkmatter::markdown::compose::remote::RemoteReadConfig;
 use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
 use darkmatter::markdown::compose::shell_expansion::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionOptions,
 };
 use darkmatter::markdown::compose::{
-    CacheAccessMode, ComposeFailure, ComposeOptions, ComposeReport, DataRuntime, ShellExpansionError,
+    CacheAccessMode, ComposeFailure, ComposeOptions, ComposeReport, ComposeRequest, DataRuntime, RequestSnapshot,
+    ShellExpansionError,
 };
 use darkmatter::markdown::reference::ReferenceGraphOptions;
 use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
@@ -351,6 +353,204 @@ fn this_import_is_not_recovered() {
     let dir = fixture();
     write(dir.path(), "os.yaml", OS_YAML);
     assert_not_recovered(dir.path(), "t: Os@this", "load_data('os.yaml', t)", Some("dm.data.this_import_rejected"));
+}
+
+// ── Request checks do not depend on the source existing ─────────────────────
+
+/// The call every case below makes. Its inputs come from frontmatter, so the
+/// passive call check cannot judge them and only execution does.
+const COMPUTED_CALL: &str = "load_data(src, contract, opts)";
+
+/// Frontmatter declaring and setting the computed inputs of [`COMPUTED_CALL`].
+fn computed_request(src: &str, contract: &str, opts: &str) -> String {
+    format!("$schema:\n  src: string\n  contract: string\n  opts: unknown\nsrc: {src:?}\ncontract: {contract:?}\nopts: {opts}")
+}
+
+/// Asserts the computed request for `src` fails with `code` under `try`,
+/// exactly as unguarded, with `file` (where `src` finds it) present and
+/// holding `body`, or missing.
+fn assert_request_refused(src: &str, file: &str, body: Option<&str>, contract: &str, opts: &str, code: &str) {
+    let dir = fixture();
+    if let Some(body) = body {
+        write(dir.path(), file, body);
+    }
+    assert_not_recovered(dir.path(), &computed_request(src, contract, opts), COMPUTED_CALL, Some(code));
+    assert_eq!(dir.path().join(file).exists(), body.is_some(), "nothing created {file}");
+}
+
+/// One `missing` and one `present` test per invalid request: each fails with
+/// the same code whether or not its file exists. The format aliases share one
+/// applicability check, so one case per canonical format proves the wiring.
+macro_rules! invalid_request_fails_whether_or_not_present {
+    ($($case:ident: $src:literal at $file:literal = $body:expr, as $contract:literal, opts $opts:literal => $code:literal;)*) => {
+        mod invalid_request_fails_whether_or_not_present {
+            use super::*;
+            $(
+                mod $case {
+                    use super::*;
+
+                    #[test]
+                    fn missing() {
+                        assert_request_refused($src, $file, None, $contract, $opts, $code);
+                    }
+
+                    #[test]
+                    fn present() {
+                        assert_request_refused($src, $file, Some($body), $contract, $opts, $code);
+                    }
+                }
+            )*
+        }
+    };
+}
+
+invalid_request_fails_whether_or_not_present! {
+    yaml_delimiter: "data.yaml" at "data.yaml" = OS_YAML, as "string[]", opts "{delimiter: \";\"}" => "dm.data.invalid_options";
+    json_delimiter: "data.json" at "data.json" = "[\"a\"]", as "string[]", opts "{delimiter: \";\"}" => "dm.data.invalid_options";
+    jsonl_delimiter: "data.jsonl" at "data.jsonl" = "\"a\"\n", as "string[]", opts "{delimiter: \";\"}" => "dm.data.invalid_options";
+    json5_delimiter: "data.json5" at "data.json5" = "['a']", as "string[]", opts "{delimiter: \";\"}" => "dm.data.invalid_options";
+    toml_delimiter: "data.toml" at "data.toml" = "a = \"b\"\n", as "{a: string}", opts "{delimiter: \";\"}" => "dm.data.invalid_options";
+    yaml_header: "data.yaml" at "data.yaml" = OS_YAML, as "string[]", opts "{header: false}" => "dm.data.invalid_options";
+    tsv_semicolon: "rows.tsv" at "rows.tsv" = "a\tb\n1\t2\n", as "tuple([string, string])[]", opts "{delimiter: \";\"}" => "dm.data.invalid_options";
+    csv_headerless_object_rows: "rows.csv" at "rows.csv" = "name,port\nweb,8080\n", as "{name: string, port: string}[]", opts "{header: false}" => "dm.data.row_shape_conflict";
+    csv_string_rows: "rows.csv" at "rows.csv" = "a,b\n1,2\n", as "string[]", opts "{}" => "dm.data.row_shape_conflict";
+    tsv_string_rows: "rows.tsv" at "rows.tsv" = "a\tb\n1\t2\n", as "string[]", opts "{}" => "dm.data.row_shape_conflict";
+    explicit_format: "data.xyz" at "data.xyz" = OS_YAML, as "string[]", opts "{format: yaml, delimiter: \";\"}" => "dm.data.invalid_options";
+    recursive_unsupported_extension: "%optional.xyz" at "nested/optional.xyz" = OS_YAML, as "string[]", opts "{}" => "dm.data.unsupported_format";
+}
+
+/// The valid counterparts: a missing file selects the fallback, a present
+/// one loads.
+macro_rules! valid_request_recovers_only_a_miss {
+    ($($case:ident: $src:literal at $file:literal = $body:expr, as $contract:literal, opts $opts:literal => $loaded:expr;)*) => {
+        mod valid_request_recovers_only_a_miss {
+            use super::*;
+            $(
+                mod $case {
+                    use super::*;
+
+                    #[test]
+                    fn missing() {
+                        let dir = fixture();
+                        let frontmatter = computed_request($src, $contract, $opts);
+                        let (value, report) = value_in(dir.path(), &DataRuntime::new(), &frontmatter, &guarded(COMPUTED_CALL, FALLBACK));
+                        assert_recovered(dir.path(), &value, &report);
+                    }
+
+                    #[test]
+                    fn present() {
+                        let dir = fixture();
+                        write(dir.path(), $file, $body);
+                        let frontmatter = computed_request($src, $contract, $opts);
+                        let (value, report) = value_in(dir.path(), &DataRuntime::new(), &frontmatter, &guarded(COMPUTED_CALL, FALLBACK));
+                        assert_eq!(value, $loaded);
+                        assert!(!report.read_set.contains(&entry(dir.path(), "fallback.json")), "{:?}", report.read_set);
+                    }
+                }
+            )*
+        }
+    };
+}
+
+valid_request_recovers_only_a_miss! {
+    yaml_list: "data.yaml" at "data.yaml" = OS_YAML, as "string[]", opts "{}" => json!(["macOS", "Linux", "Windows"]);
+    csv_tuple_rows: "rows.csv" at "rows.csv" = "a;b\n1;2\n", as "tuple([string, string])[]", opts "{delimiter: \";\"}" => json!([["1", "2"]]);
+    explicit_format: "data.xyz" at "data.xyz" = OS_YAML, as "string[]", opts "{format: yaml}" => json!(["macOS", "Linux", "Windows"]);
+    recursive_supported_extension: "%optional.yaml" at "nested/optional.yaml" = OS_YAML, as "string[]", opts "{}" => json!(["macOS", "Linux", "Windows"]);
+}
+
+// ── Environment-interpolated references ─────────────────────────────────────
+
+/// The captured environment the requests below resolve `{{VAR}}` through.
+fn reference_env() -> std::collections::HashMap<String, String> {
+    std::collections::HashMap::from([
+        ("DATA_FILE".to_string(), "optional.yaml".to_string()),
+        ("DATA_EXT".to_string(), "yaml".to_string()),
+        ("DATA_DIR".to_string(), "nested".to_string()),
+    ])
+}
+
+/// Composes `expression` in `dir` under [`reference_env`], captured by the
+/// request rather than read from the process.
+fn compose_with_env(dir: &Path, expression: &str) -> Composed {
+    let doc = write(dir, "doc.md", document("", expression));
+    let snapshot = RequestSnapshot::new(dir).with_home(biscuit_file::home_dir()).with_env(reference_env());
+    let request = ComposeRequest::prepare(ComposeOptions::new().with_source_file(&doc), &snapshot).expect("request");
+    Markdown::try_from(doc.as_path()).expect("document loads").compose_with_warnings(&request)
+}
+
+/// The literal call `load_data("<src>", "string[]", <opts>)`: a literal
+/// argument reaches `FileReference` with its placeholders unexpanded.
+fn env_call(src: &str, opts: &str) -> String {
+    format!("load_data(\"{src}\", 'string[]', {opts})")
+}
+
+/// One `missing` and one `present` test per reference whose filename,
+/// extension, or directory comes from the captured environment: a valid
+/// request recovers only a miss, an invalid one fails either way.
+macro_rules! env_reference_missing_and_present {
+    ($($case:ident: $src:literal at $file:literal, opts $opts:literal => $expect:expr;)*) => {
+        mod env_reference_missing_and_present {
+            use super::*;
+
+            /// `Ok(loaded)` for a valid request, `Err(code)` for an invalid one.
+            fn check(src: &str, file: &str, opts: &str, present: bool, expect: Result<Value, &str>) {
+                let dir = fixture();
+                if present {
+                    write(dir.path(), file, "- loaded\n");
+                }
+                let call = env_call(src, opts);
+                let guarded_call = guarded(&call, FALLBACK);
+                match (expect, compose_with_env(dir.path(), &guarded_call)) {
+                    (Ok(loaded), Ok((composed, report))) => {
+                        let text = composed.content().trim().to_string();
+                        let value = serde_json::from_str::<Value>(&text).unwrap_or_else(|e| panic!("{text:?}: {e}"))[0].clone();
+                        if present {
+                            assert_eq!(value, loaded);
+                            assert!(!report.read_set.contains(&entry(dir.path(), "fallback.json")), "{:?}", report.read_set);
+                        } else {
+                            assert_recovered(dir.path(), &value, &report);
+                        }
+                    }
+                    (Err(code), Err(failure)) => {
+                        assert_eq!(data_error(&failure).code(), Some(code), "{}", failure.error);
+                        let control = compose_with_env(dir.path(), &call).expect_err("unguarded call fails");
+                        assert_eq!(codes(&failure), codes(&control), "{}", failure.error);
+                        assert!(!failure.read_set.contains(&entry(dir.path(), "fallback.json")), "{:?}", failure.read_set);
+                    }
+                    (Ok(_), Err(failure)) => panic!("{guarded_call} failed: {}", failure.error),
+                    (Err(code), Ok((composed, _))) => panic!("{guarded_call} composed instead of {code}: {}", composed.content()),
+                }
+                assert_eq!(dir.path().join(file).exists(), present, "nothing created {file}");
+            }
+
+            $(
+                mod $case {
+                    use super::*;
+
+                    #[test]
+                    fn missing() {
+                        check($src, $file, $opts, false, $expect);
+                    }
+
+                    #[test]
+                    fn present() {
+                        check($src, $file, $opts, true, $expect);
+                    }
+                }
+            )*
+        }
+    };
+}
+
+env_reference_missing_and_present! {
+    recursive_env_file: "%{{DATA_FILE}}" at "nested/optional.yaml", opts "{}" => Ok(json!(["loaded"]));
+    recursive_env_extension: "%optional.{{DATA_EXT}}" at "nested/optional.yaml", opts "{}" => Ok(json!(["loaded"]));
+    recursive_env_file_delimiter: "%{{DATA_FILE}}" at "nested/optional.yaml", opts "{delimiter: ';'}" => Err("dm.data.invalid_options");
+    recursive_env_dir: "%{{DATA_DIR}}/optional.yaml" at "nested/optional.yaml", opts "{}" => Ok(json!(["loaded"]));
+    env_file: "{{DATA_FILE}}" at "optional.yaml", opts "{}" => Ok(json!(["loaded"]));
+    env_extension: "optional.{{DATA_EXT}}" at "optional.yaml", opts "{}" => Ok(json!(["loaded"]));
+    recursive_env_file_explicit_format: "%{{DATA_FILE}}" at "nested/optional.yaml", opts "{format: 'yaml'}" => Ok(json!(["loaded"]));
 }
 
 // ── The data memo ───────────────────────────────────────────────────────────
@@ -742,6 +942,82 @@ async fn redirect_to_denied_host_is_fatal() {
     assert!(message.contains("blocked by fetch policy"), "{message}");
     assert_eq!(requests(&target).await, 0, "the redirect was not followed");
     assert_eq!(failure.read_set, vec![url], "the fallback never ran");
+}
+
+/// Serves `first` to the first request on `route` and `then` to every later one.
+async fn serve_then(route: &str, first: ResponseTemplate, then: ResponseTemplate) -> MockServer {
+    let server = MockServer::start().await;
+    let hits = AtomicUsize::new(0);
+    let responder = move |_: &wiremock::Request| {
+        if hits.fetch_add(1, Ordering::SeqCst) == 0 { first.clone() } else { then.clone() }
+    };
+    Mock::given(method("GET")).and(path(route)).respond_with(responder).mount(&server).await;
+    server
+}
+
+/// Loopback allowed, reading through the transport cache at `cache` under the
+/// default (fallback) freshness mode.
+fn through_cache(cache: &Path) -> ComposeOptions {
+    allowing_loopback().with_cache_root(cache).with_cache_access_mode(CacheAccessMode::ReadWrite)
+}
+
+/// A stale cached body covers only a transport failure: a revalidation that
+/// is refused (a redirect to a host the run does not allow) is a policy
+/// error, so `try` propagates it and the cached value is never published.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn warm_cache_never_hides_a_refused_redirect() {
+    let target = serve("/data.json", json_body("[\"target\"]")).await;
+    let target_url = format!("http://localhost:{}/data.json", target.address().port());
+    let origin = serve_then(
+        "/data.json",
+        ResponseTemplate::new(200).insert_header("cache-control", "max-age=0").set_body_string("[\"loaded\"]"),
+        ResponseTemplate::new(302).insert_header("location", target_url.as_str()),
+    )
+    .await;
+    let dir = fixture();
+    let cache = TempDir::new().unwrap();
+    let url = format!("{}/data.json", origin.uri());
+    let doc = remote_doc(dir.path(), &url);
+
+    let (seeded, _) = compose_blocking(doc.clone(), through_cache(cache.path())).await.unwrap();
+    assert_eq!(seeded.content().trim(), "[[\"loaded\"]]", "the warm-up control loaded and cached the body");
+
+    let failure = compose_blocking(doc, through_cache(cache.path())).await.unwrap_err();
+    let kinds: Vec<RemoteReadKind> = expression_errors(&failure)
+        .into_iter()
+        .filter_map(|error| match error {
+            ExpressionError::RemoteRead { kind, .. } => Some(*kind),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kinds.first(), Some(&RemoteReadKind::Policy), "{}", failure.error);
+    assert!(failure.error.to_string().contains("blocked by fetch policy"), "{}", failure.error);
+    assert_eq!(requests(&origin).await, 2, "the stale entry was revalidated");
+    assert_eq!(requests(&target).await, 0, "the redirect was not followed");
+    assert_eq!(failure.read_set, vec![url], "the fallback never ran");
+}
+
+/// The transport control for `warm_cache_never_hides_a_refused_redirect`: an
+/// HTTP 500 on revalidation still serves the stale cached body.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn warm_cache_covers_a_transport_failure() {
+    let origin = serve_then(
+        "/data.json",
+        ResponseTemplate::new(200).insert_header("cache-control", "max-age=0").set_body_string("[\"loaded\"]"),
+        ResponseTemplate::new(500),
+    )
+    .await;
+    let dir = fixture();
+    let cache = TempDir::new().unwrap();
+    let url = format!("{}/data.json", origin.uri());
+    let doc = remote_doc(dir.path(), &url);
+
+    compose_blocking(doc.clone(), through_cache(cache.path())).await.unwrap();
+    let (stale, report) =
+        compose_blocking(doc, through_cache(cache.path())).await.unwrap_or_else(|failure| panic!("{}", failure.error));
+    assert_eq!(stale.content().trim(), "[[\"loaded\"]]", "the stale body was served");
+    assert_eq!(requests(&origin).await, 2, "the stale entry was revalidated");
+    assert!(!report.read_set.contains(&entry(dir.path(), "fallback.json")), "{:?}", report.read_set);
 }
 
 /// As in `md compose`, the check runs before host permission is wired: it

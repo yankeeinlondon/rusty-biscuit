@@ -978,10 +978,12 @@ fn call_error(error: CallBindingError) -> ExpressionError {
 ///
 /// ## Errors
 ///
-/// [`ExpressionError::Call`] when the call does not bind (the handler is
-/// never entered) or the handler's result breaks its declared return type;
-/// a pure handler's domain failure as [`ExpressionError::Other`]; a context
-/// handler's own error as returned.
+/// [`ExpressionError::ContractViolation`] for an evaluator-owned function
+/// (lazy, such as `try`, `and`, and `or`, or callback-taking, such as `map`),
+/// which supplied values cannot invoke; [`ExpressionError::Call`] when the
+/// call does not bind (the handler is never entered) or the handler's result
+/// breaks its declared return type; a pure handler's domain failure as
+/// [`ExpressionError::Other`]; a context handler's own error as returned.
 pub(crate) fn call_function(
     name: &str,
     args: &[Value],
@@ -1049,9 +1051,12 @@ fn call_entry(
     ctx: Option<&ResolutionContext>,
 ) -> Result<Value, ExpressionError> {
     let canonical = entry.binding.canonical;
+    // Supplied values cannot stand in for unevaluated operands or a callback
+    // body, so this is a broken call contract, never a handler failure that
+    // a lenient surface could demote or `try` could recover.
     let Some(handler) = entry.binding.handler else {
-        return Err(ExpressionError::Other {
-            function: name.to_string(),
+        return Err(ExpressionError::ContractViolation {
+            function: canonical.to_string(),
             message: if entry.binding.evaluation == EvaluationMode::Lazy {
                 format!("{canonical}() evaluates its arguments lazily and is called only by the evaluator")
             } else {
@@ -2296,10 +2301,33 @@ mod registration_tests {
         // call never runs the recovery rule.
         let error = call_function("try", &[Value::Null, serde_json::json!(7)], None).expect("registered").unwrap_err();
         assert!(
-            matches!(&error, ExpressionError::Other { message, .. } if message.contains("evaluates its arguments lazily")),
+            matches!(&error, ExpressionError::ContractViolation { function, message }
+                if function == "try" && message.contains("evaluates its arguments lazily")),
             "{error:?}"
         );
         assert!(!error.is_recoverable_read_failure());
+        assert!(error.is_authoring_fatal());
+    }
+
+    /// Every evaluator-owned function shares the value-only rejection:
+    /// the other lazy functions and the callback-taking ones.
+    #[test]
+    fn direct_value_call_of_evaluator_owned_functions_is_a_contract_violation() {
+        let cases = [
+            ("and", vec![serde_json::json!(true), serde_json::json!(false)], "evaluates its arguments lazily"),
+            ("or", vec![serde_json::json!(false), serde_json::json!(true)], "evaluates its arguments lazily"),
+            ("map", vec![serde_json::json!([1, 2]), serde_json::json!(1)], "requires evaluator-owned callback evaluation"),
+            ("filter", vec![serde_json::json!([1, 2]), serde_json::json!(true)], "requires evaluator-owned callback evaluation"),
+        ];
+        for (name, args, explanation) in cases {
+            let error = call_function(name, &args, None).expect("registered").unwrap_err();
+            assert!(
+                matches!(&error, ExpressionError::ContractViolation { function, message }
+                    if function == name && message.contains(explanation)),
+                "{name}: {error:?}"
+            );
+            assert!(!error.is_recoverable_read_failure(), "{name}");
+        }
     }
 
     #[test]

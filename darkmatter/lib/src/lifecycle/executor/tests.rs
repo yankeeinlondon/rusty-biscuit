@@ -416,6 +416,16 @@ fn try_action_returns_the_selected_value_not_a_boolean() {
     assert_eq!(action_call("try", fm, vec![operand(MISSING_DATA), operand("['x']")]).unwrap(), json!(["x"]));
 }
 
+/// A template operand sends the call down the value-only path, which cannot
+/// run a callback function: the rejection is a contract violation.
+#[test]
+fn callback_function_with_template_operand_is_a_contract_violation() {
+    let template = Expr::StringLiteral("{{ fm.count }}".to_string());
+    let error = action_call("map", json!({ "items": [1], "count": 3 }), vec![operand("fm.items"), template]).unwrap_err();
+    let LifecycleExprError::Evaluate(error) = error else { panic!("an evaluation error: {error:?}") };
+    assert!(matches!(*error, ExpressionError::ContractViolation { ref function, .. } if function == "map"), "{error:?}");
+}
+
 #[test]
 fn try_template_operand_fallback_is_interpolated() {
     let template = Expr::StringLiteral("n={{ fm.count }}".to_string());

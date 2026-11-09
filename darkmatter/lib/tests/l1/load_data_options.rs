@@ -698,14 +698,25 @@ fn computed_format_overrides_a_literal_extension() {
     assert_eq!(rows, json!([{"name": "web", "port": 8080}]));
 }
 
-/// Resolution failures outrank format-dependent checks at execution. A
-/// fully literal call is the passive check's, which judges the options from
-/// the literal format and never looks for the file.
+/// Options that cannot apply to the chosen format are an invalid request
+/// whether or not the file exists, so a missing file reports them rather than
+/// a miss `try` would recover. A fully literal call is the passive check's,
+/// which judges the options from the literal format and never looks for the
+/// file. A valid request for a missing file is still a miss.
 #[test]
-fn missing_file_keeps_precedence_over_applicability() {
+fn applicability_outranks_a_missing_file() {
     let dir = TempDir::new().unwrap();
     let runtime = DataRuntime::new();
     let failure = failed(dir.path(), &runtime, "d: \";\"", "load_data(\"missing.json\", \"string[]\", {format: \"json\", delimiter: d})");
+    assert_eq!(codes(&failure), [INVALID_OPTIONS], "{}", failure.error);
+    assert_eq!(runtime.stats().reads, 0);
+
+    let literal = DataRuntime::new();
+    let failure = failed(dir.path(), &literal, "", "load_data(\"missing.json\", \"string[]\", {format: \"json\", delimiter: \";\"})");
+    assert_eq!(codes(&failure), [INVALID_OPTIONS], "{}", failure.error);
+
+    let valid = DataRuntime::new();
+    let failure = failed(dir.path(), &valid, "d: \",\"", "load_data(\"missing.csv\", \"tuple([string])[]\", {delimiter: d})");
     assert_eq!(codes(&failure), [EVALUATION_FAILURE]);
     let kind = expression_errors(&failure).into_iter().find_map(|error| match error {
         ExpressionError::FileReference(diagnostic) => Some(diagnostic.kind),
@@ -716,11 +727,6 @@ fn missing_file_keeps_precedence_over_applicability() {
         _ => None,
     });
     assert_eq!(kind, Some(FileRefFailure::NotFound), "{}", failure.error);
-    assert_eq!(runtime.stats().reads, 0);
-
-    let literal = DataRuntime::new();
-    let failure = failed(dir.path(), &literal, "", "load_data(\"missing.json\", \"string[]\", {format: \"json\", delimiter: \";\"})");
-    assert_eq!(codes(&failure), [INVALID_OPTIONS], "{}", failure.error);
 }
 
 // ── `null` ──────────────────────────────────────────────────────────────────

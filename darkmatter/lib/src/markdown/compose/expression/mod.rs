@@ -1199,6 +1199,19 @@ mod tests {
             assert!(err.contains("no signature takes 0 arguments"), "{err}");
             assert!(err.contains("length("), "error should include function signature: {err}");
         }
+
+        /// A callback function written without an inline callback parses as
+        /// an ordinary call and reaches the value-only path; that path
+        /// rejects it as a contract violation, not a handler failure.
+        #[test]
+        fn callback_function_without_inline_callback_is_a_contract_violation() {
+            let err = evaluate(&parse("map([1], 1)").unwrap(), &lookup(json!({}))).unwrap_err();
+            assert!(
+                matches!(&err, ExpressionError::ContractViolation { function, .. } if function == "map"),
+                "{err:?}"
+            );
+            assert!(err.is_authoring_fatal());
+        }
     }
 
     mod parity {
