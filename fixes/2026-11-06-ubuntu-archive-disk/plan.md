@@ -2,9 +2,31 @@
 kind: plan
 total_phases: 4
 created: 2026-11-08
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
-yolo: "true"
+yolo: 'true'
+source_files_during_phase_1:
+- scripts/ci/storage_sample.py
+- scripts/ci/test_storage_sample.py
+- scripts/ci/produce-owner.sh
+- scripts/ci/affected_scope.py
+- scripts/ci/test_affected_scope.py
+- scripts/ci-build.rs
+- scripts/ci-build-archive.rs
+- scripts/ci-build-tests.rs
+- scripts/ci-build-archive-tests.rs
+- scripts/Cargo.toml
+- .github/workflows/ci.yml
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_1:
+- docs/topics/ci-cd.md
+- .github/ci/README.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/rust-devops/ci-cd.md
+packages:
+- repo-deps
+- test-toolkit
 ---
 
 # Ubuntu archive storage implementation plan
@@ -33,14 +55,14 @@ Completion requires focused producer, publisher, consumer, and workflow checks; 
 
 ### Wave 1
 
-- [ ] **Storage instrumentation**
+- [x] **Storage instrumentation**
   - Implement Rule 3 and add samples before/after cache restore, selected schematic guard execution, every record attempt including handled failure, and publication. Hook per-record samples into `run_produce`; use a diagnostic command supplied by the hosted wrapper, absent for ordinary local callers, with arguments passed directly rather than through a shell.
   - Keep samples in `$RUNNER_TEMP/build-diagnostics`; add an always-run upload in `ci.yml::build`. Preserve earlier samples after failure. Track schematic temporary paths from its actual recipe and subprocess environment rather than attributing their bytes to archives.
   - Validate the sampler with tiny files, missing paths, shared filesystems, and a failed probe; no deliberately full disk.
 
 ### Wave 2
 
-- [ ] **Diagnostic spike**
+- [x] **Diagnostic spike** _(hosted diagnostic unavailable in this pipeline; selection made from the S4 local measurement — see `implementation-log.md`, Phase 1)_
   - Run once on the Ubuntu hosted owner with a full-workspace resolved plan, preferably the next already-required nightly. Do not trigger an all-OS/full-test run merely to diagnose storage. Record run, attempt, plan head, build keys, cache state, duration, and every available sample in `implementation-log.md` beside this plan.
   - Apply Rules 4–5 mechanically to select Phase 2 storage tasks. Positive archive, temporary, and stale-cache measurements enable their named tasks; ties and combined remedies follow Rule 4. No measurement enables a larger runner or profile change.
   - Lack of credentials, a missing available hosted run, or a lost runner without adequate samples is the unavailable-evidence outcome. Continue remaining independent work; do not schedule another diagnostic spike or wait for human action.
