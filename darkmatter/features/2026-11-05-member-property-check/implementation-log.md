@@ -7,7 +7,41 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/expression/member_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/tests/l1/dynamic_schema_slots.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/member_check.rs
+    - darkmatter/cli/src/args/policy.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/providers/collections.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/undeclared_member.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+    - darkmatter
+    - darkmatter-cli
+    - darkmatter-lsp
 decisions_for_review:
     - |-
         Library compositions are never run without a slot session: the pipeline
@@ -37,26 +71,83 @@ decisions_for_review:
         alone, which cannot cover a document whose own schema is concrete but
         whose trigger payload is pending. Choosing (a) would change only the
         overlay assembly and the SiteSchema enum shape (Phase 2/3 code).
+    - |-
+        The member check types the base of a selector a little more widely than
+        the plan's rule. The plan typed a postfix or bracket base with the
+        shared expression typer, which knows nothing about a constant index or
+        member applied to a function result, so
+        load_data("h.yaml", "{ name: string }[]")[0].nmae was never reported.
+        I added a small local rule in the member check: a constant index or
+        member on a value with no stable variable path follows the same
+        member/item projection a variable path uses. The shared expression
+        typer (and so the call check) is unchanged. Alternative: put the rule
+        into the shared typer, so the call check would also type
+        load_data(...)[0] arguments; that changes call-check verdicts and was
+        out of scope. If the reviewer prefers the shared typer, move base_type
+        from member_check.rs into call_check.rs::expression_type.
+    - |-
+        The plan asked for a test that a value outside the literal members of
+        a pending enum(...) is not rejected by the call check. The call check
+        never compares enum members at all (a host parameter typed
+        enum(macOS, Linux) accepts an enum(Windows) argument), so no input is
+        rejected for that reason even with a concrete schema. The test instead
+        shows the rule that matters: with the concrete enum(Windows) the call
+        check judges the argument as a string (upper(os) compatible,
+        min(os, 1) uncertain), and with the pending enum(Windows, {{ 123 }})
+        every such call is "type unknown", never judged from the literal
+        written beside the slot. Nothing else would change if the reviewer
+        wants a different assertion.
+    - |-
+        SiteSchema keeps the plan's shape, Effective(Option<EffectiveSchema>)
+        holding the resolved schema by value, with a clippy
+        large_enum_variant allowance. Boxing it would save stack space when a
+        template is returned, but adds an allocation on the common path and
+        changes the signature every later phase uses. Switching to a box only
+        touches SiteSchema, DeclaredTypes::for_site, and their callers.
+    - |-
+        The editor's pending-template test holds the slot job (the server's
+        background schema resolution) rather than the registry gate the plan
+        named. Holding the slot job is what keeps the first resolved schema
+        from being published, and it is how the existing slot tests observe
+        that state; holding the registry gate delays trigger discovery,
+        which this document does not use. The test also proves that no slot
+        was evaluated while it ran. Alternative: also add a registry-gate
+        variant; it would add a test without covering a different state.
+    - |-
+        The editor keeps the pending document template itself, not the
+        library's whole site-schema answer, so the library gained a small
+        constructor, DeclaredTypes::for_template, and its for_site uses it for
+        the template case. The plan had the editor call for_site; that would
+        mean storing the slot error a second time beside the template. If the
+        reviewer prefers for_site, the editor's slot record would hold a
+        SiteSchema instead of the template; only the overlay and
+        declared_types change.
+    - |-
+        Lifecycle stacks stay without member warnings in the editor, as the
+        plan says. The shared frontmatter check served both ordinary values
+        and lifecycle-stack expressions, so it now has two entry points: one
+        with member warnings and one (for lifecycle stacks, including an
+        expression-typed value inside a stack) with call findings only.
+        Alternative: report members in lifecycle stacks too; composition does
+        not observe those reads, so the editor and composition would then
+        differ on another surface.
 message_to_agent: |-
-    Phase 1 changed no source. The R0 check revised three rules in plan.md;
-    read the revised D5, D7, E4, M5 and M12 text before coding:
-    - M5: SiteSchema::Template is now a struct variant,
-      `Template { template: Option<DocumentTemplate>, unresolved: Box<UnresolvedSlots> }`.
-      Get the pending template with
-      `unresolved.pending.as_ref().and_then(|p| p.template())`, which returns
-      borrows (clone the SchemaRoot and the Arc<DefinitionTable>).
-    - M12 (Phase 3): SchemaOutcome has only Ready/Failed. Put the template in a
-      new `SlotStatus.template` field (dmls/src/overlay/mod.rs:241). In the
-      same change, fix the doc comment on `SlotStatus::template_shape`, which
-      wrongly says the shape excludes slots.
-    - D5 (Phase 5): a library composition with no session attaches a resolving
-      SessionMode::Full session (compose/pipeline/mod.rs:79-82). Use a caller
-      SessionMode::Passive session for the "without resolution" AC3 case.
-    - E4: `try` evaluates through evaluate_recovery
-      (compose/expression/mod.rs:1026), not evaluate_lazy_function.
-    - Shared slot fixtures: darkmatter/lib/tests/dynamic_slots_fixtures/mod.rs.
-      Slot work counter: Work::SlotResolution (counted per slot evaluated).
-    Baseline before any change: just test 16118 passed / 10 skipped; just lint clean.
+    Phase 3 wired the member check into DMLS. What Phase 4+ needs to know:
+    - Library: DeclaredTypes::for_template(Option<&DocumentTemplate>) is new;
+      for_site's template arm delegates to it.
+    - DMLS: call_check::call_diagnostics(expr, text, site, strict) carries
+      member warnings; call_check::stack_call_diagnostics is call-only and is
+      used for every lifecycle-stack expression (FrontmatterCalls::check_stack).
+      The overlay's SlotStatus.template holds the pending document template
+      (from overlay/schema.rs::assemble's AssemblyError), and
+      declared_types falls back to it when no bundle is served.
+    - Tests: dmls/tests/l1/undeclared_member.rs covers every editor surface
+      (Phase 5 AC7 parity tests can reuse its every_surface document shape).
+    - member_check.rs's expr_nodes still carries the
+      cfg_attr(not(test), expect(dead_code)) attribute: remove it when the
+      composition observer (M14) calls it.
+    - Gates after Phase 3: see the Phase 3 close in the log.
+
 ---
 
 # Implementation Log for 2026-11-05-member-property-check (7 phases)
@@ -202,3 +293,240 @@ phase.
   phase's empty list would lose that. This log's `packages` is `[]`.
 - Darkmatter skill: no change needed (no behavior changed).
 - Status: Phase 1 complete; ready for Phase 2.
+
+## Phase 2
+
+### Wave 3 — Declaration verdict, absence member reads, code and registry (2026-11-09)
+
+- **M1**: `UNDECLARED_MEMBER_CODE` (`dm.expression.undeclared_member`) in
+  `expression/diagnostics.rs`, re-exported from `expression/mod.rs`.
+- **M3**: one row in `COMPOSE_DIAGNOSTIC_CODES` after the undeclared-property
+  row; `cli/src/args/policy.rs` test
+  `the_undeclared_member_code_is_deniable_on_compose_only` (Compose `--deny`
+  parses it as `PolicySelector::Code`, the long help lists it, Render
+  rejects it).
+- **M4**: `MemberDeclaration` + `declares_member` in `scope/projection.rs`
+  (private `arms_declare`/`arm_declares` walk, alias budget as
+  `arm_member`); `member_shape` is now `pub(crate)`; both re-exported from
+  `scope/mod.rs`. Tests: `scope::tests::member_declarations` (every type-table
+  row, optional member, pattern-key, array arm, bare `object`, `unknown`,
+  passive `Imported`; a recursive `Ref` declared/undeclared and unknown with a
+  missing table) and `scope::projection::tests::an_exhausted_alias_budget_is_unknown`
+  (a present definition with a spent budget is unknown). A real alias *cycle*
+  cannot be built: the resolver rejects alias cycles, so the budget test calls
+  the private walk with budget 0 on a real table.
+- **M7**: `walk_static` now writes into a private `StaticReads` sink
+  (`variables` + `members`); `static_variable_reads*` and
+  `static_callback_reads` return `variables` exactly as before. New
+  `StaticMemberRead`, `static_member_reads`, `variable_root_segments`, and
+  `AbsenceScope::handles_expr`. One record per selector: each variable
+  segment after its binding (`fm.<key>` / `local.<name>` take two segments),
+  each postfix name segment (prefix-precise `handles_expr` per segment), and a
+  string-literal bracket key. Module doc updated. Tests:
+  `absence::tests::member_reads::*` (8 tests: every absence-table row,
+  postfix/bracket forms, sibling vs descendant facts, default gate scope,
+  `try` operands, namespace wrappers, callback members, and a
+  variable-inventory corpus with spans). The plan's
+  `AbsenceScope::handles_absence()` accessor was not needed:
+  `handles_expr` includes the direct-position flag like `handles` does.
+
+### Wave 4 — Findings and template declarations (2026-11-09)
+
+- **M2/M6/M8/M9/M10**: new `expression/member_check.rs`: `MemberFinding`
+  (`message`, `diagnostic`), `expression_member_findings`,
+  `expression_member_diagnostics`, and the crate-private `spanned_nodes` /
+  `expr_nodes` enumerators. Records of one node are taken together, the base
+  typed under `branch_scope` at the node, stopping at the first undeclared or
+  unknown step. `expr_nodes` is unused outside tests until composition wires
+  it, so it carries `#[cfg_attr(not(test), expect(dead_code, …))]`, which
+  turns into an error once it is used and must then be removed.
+- **M5**: `DocumentTemplate`, `SiteSchema`, `DarkmatterSchemas::site_schema_for`
+  in `schemas/mod.rs`. `effective_for_with_override` now delegates to the
+  private `site_schema_with_override` and turns `Template { unresolved, .. }`
+  back into `Err(SchemaError::UnresolvedSlots(unresolved))`, so its behavior
+  is unchanged and the work happens once. `Template` is returned at exactly
+  two points: the document `$schema` resolution (template = the pending
+  template's root and definitions) and the trigger-layer resolution (template
+  = the concrete document layer's SimplifiedSchema root, or `None`).
+  `DeclaredTypes::for_site` in `scope/projection.rs`.
+  `SiteSchema` carries `#[allow(clippy::large_enum_variant)]` (the
+  `Effective` variant holds an `EffectiveSchema` by value, as the plan's
+  signature and `effective_for` do).
+- Tests: `l1/dynamic_schema_slots.rs::site_schemas::*`:
+  `a_pending_document_schema_types_its_sites_from_the_template` (pending
+  inline `$schema` → `Template { template: Some(..) }`, `server` is a closed
+  object, `server.nmae` reports; `Work::SlotResolution` unchanged under
+  `work-counters`; `effective_for` still `Err(UnresolvedSlots)`; concrete →
+  `Effective(Some)`; no schema → `Effective(None)`) and
+  `a_pending_enum_is_not_judged_by_its_literal_members` (see decision below).
+
+### Wave 5 — Library classifier tests (2026-11-09)
+
+`lib/tests/l1/member_check.rs` (declared in `l1/main.rs`), 13 tests through the
+public API: `type_table_rows`, `access_forms`, `a_typed_function_return`,
+`paths_and_keys`, `namespaces_and_host_globals_are_not_checked`,
+`contracts`, `named_references_in_the_site_definitions`, `try_typing`,
+`narrowing`, `shadowing`, `spans`, `diagnostic_fields`, `absence_table`.
+`ordinals_mirror_erase` lives as a unit test in `member_check.rs` because the
+enumerators are crate-private; it compares the erased `spanned_nodes` sequence
+with `expr_nodes` node for node over a corpus covering every node kind.
+
+Findings while writing them:
+
+- A string-literal index node's span already includes its quotes
+  (`server["nmae"]` → 7..13), as M2 wanted.
+- `expression_type` gives `unknown` for a constant index or member on a
+  value with no stable subject (`load_data(…)[0]`), so
+  `load_data("h.yaml", "{ name: string }[]")[0].nmae` was silent. The
+  member check now types such bases with a local `base_type` that follows
+  constant steps through `member_shape` (see decisions).
+- No built-in expression function returns a closed object (`http_post` is a
+  lifecycle mutation, not dispatchable), so the typed-return case uses a
+  host registration, as the plan allowed.
+- A "cyclic alias" contract cannot be authored (the resolver rejects alias
+  cycles); the bounded-alias behavior is covered by the unit test above.
+
+### Requirement-to-test mapping
+
+| Behavior | Test(s) |
+| --- | --- |
+| Type table (M4) | `scope::tests::member_declarations::the_type_table_decides_each_verdict`; `l1 member_check::type_table_rows` |
+| Named references, missing table, budget (M4) | `scope::tests::member_declarations::a_reference_is_checked_through_its_definition`; `scope::projection::tests::an_exhausted_alias_budget_is_unknown`; `l1 member_check::named_references_in_the_site_definitions` |
+| Absence table (M7) | `absence::tests::member_reads::member_reads_follow_the_absence_table`; `l1 member_check::absence_table` |
+| Facts: siblings, descendants, gates, `try` (M7, E3) | `absence::tests::member_reads::{a_fact_covers_its_descendants_and_never_a_sibling, a_gate_scope_handles_nothing, try_arguments_are_ordinary_reads}` |
+| Variable inventory unchanged (M7) | `absence::tests::member_reads::static_variable_reads_are_unchanged_by_member_records` + every pre-existing `absence` test |
+| Access forms, eligible bases (M6) | `l1 member_check::{access_forms, a_typed_function_return, namespaces_and_host_globals_are_not_checked}` |
+| No cascade, keys, computed keys, indexes (M8) | `l1 member_check::paths_and_keys` |
+| Contracts and `try` typing (M8, E2, E5) | `l1 member_check::{contracts, try_typing}` |
+| Narrowing and invalidation | `l1 member_check::narrowing` |
+| Callback shadowing, node ordinals per site | `l1 member_check::shadowing` |
+| Spans (M2) | `l1 member_check::spans` |
+| Diagnostic fields and message (M1, M9) | `l1 member_check::diagnostic_fields` |
+| Ordinal parity (M10) | `member_check::tests::ordinals_mirror_erase` |
+| Registry and `--deny` (M3) | `cli args::policy::tests::the_undeclared_member_code_is_deniable_on_compose_only` |
+| Template declarations, passivity (M5) | `l1 dynamic_schema_slots::site_schemas::*` |
+
+Fidelity: everything here is library-internal and passive (no CLI, file
+write, or terminal boundary in this phase), so F1 L1 tests at the public API
+are the right rung; the DMLS and composition surfaces get their end-to-end
+tests in Phases 3–5.
+
+### Phase 2 close (2026-11-09)
+
+- Gate-skip check (repository root, after all edits):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter, darkmatter-cli, test-toolkit]`,
+  `change_class: package`. Gates are not skippable; both were run.
+- `just lint` (darkmatter/): pass, after two fixes it reported
+  (`clippy::large_enum_variant` on `SiteSchema`, allowed with a reason;
+  `iter_cloned_collect` in a test).
+- `just test` (darkmatter/): pass, 16146 run, 16146 passed, 10 skipped
+  (baseline 16118; +28 new tests). Two DMLS L1 tests were reported SLOW
+  (5.14 s / 5.23 s):
+  `claudine_editor_parity::the_shared_corpus_valid_depth_fixtures_raise_no_schema_diagnostic`
+  and `content_policy_baseline::every_shared_declaration_publishes_the_baseline_verdict_at_its_anchor`.
+  Rerun alone they take 2.35 s and 2.41 s; neither touches code changed in
+  this phase (DMLS does not call the member check yet). Recorded as
+  load-sensitive, not changed.
+- The existing `undeclared_property` and `static_variable_reads` tests pass
+  unchanged.
+- Dependent packages (targeted, serially): `claudine` tests matching
+  prewarm/bindings/type_scope_ownership/lifecycle_call/host_catalog/
+  collection_host_compat (the consumers of `static_variable_reads`): 160
+  passed; `claudine-gen` input/schema tests (the consumer of
+  `effective_for_with_override`): 15 passed.
+- Cross-OS: not run. The phase adds no path, process, or OS-specific code;
+  the new tests build paths from temp dirs through
+  `biscuit_file::canonicalize_simplified`.
+- Darkmatter skill: not changed in this phase. Phase 6 owns the skill and
+  docs updates for this feature (expressions.md, compose.md, dmls.md).
+- No pre-existing failures.
+- Status: Phase 2 complete; ready for Phase 3.
+
+## Phase 3
+
+### Wave 6 — Choke point, code, and template layer (2026-11-09)
+
+- **M12 (template layer)**: `dmls/src/overlay/schema.rs::assemble` now calls
+  `DarkmatterSchemas::site_schema_for` instead of `effective_for` and returns
+  `Result<Option<SchemaBundle>, AssemblyError>`. `AssemblyError { error,
+  template }` (with `From<SchemaError>`, so every `?` in `assemble` is
+  unchanged) carries the document template beside the rewrapped
+  `SchemaError::UnresolvedSlots(unresolved)`. The overlay
+  (`overlay/mod.rs`) keeps its slot handling exactly as before
+  (`find_unresolved`, `template_shape`, job demand) and stores the template in
+  the new `SlotStatus.template: Option<Arc<DocumentTemplate>>`. The slot
+  worker's `resolve_slot_templates` maps the failure back to its
+  `SchemaError`. `SchemaOutcome` gains no variant.
+- **`call_check::declared_types`**: the bundle's effective schema (fresh or
+  last-good) when a bundle exists, else `SlotStatus.template`, else untyped.
+  The template arm needs a `DeclaredTypes` borrowed from an
+  `Arc<DocumentTemplate>` (no `SiteSchema` is kept), so the library gained
+  `DeclaredTypes::for_template(Option<&DocumentTemplate>)`, and
+  `DeclaredTypes::for_site`'s template arm now delegates to it (one rule, two
+  holders).
+- **M11**: `call_diagnostics(expr, text, site, strict)` appends
+  `expression_member_diagnostics(expr, text, site)` after the call findings,
+  independent of `strict`. Callers: `providers/dsl.rs` (body interpolation:
+  `interpolation.text`; directive `when=`: `value.value`),
+  `providers/collections.rs` (`authored.site.text`), and
+  `diagnostics/frontmatter.rs` (`FrontmatterCalls::check(expr, text)` for
+  interpolations and `expression`-typed values).
+- **Lifecycle stacks stay call-only.** `FrontmatterCalls::check` was also the
+  unguarded path for lifecycle-stack expressions
+  (`stack_expression_diagnostics`) and for an `expression`-typed value inside a
+  stack that has no guarded surface. Both now use the new
+  `FrontmatterCalls::check_stack` → `call_check::stack_call_diagnostics`
+  (call findings only); the `expression`-typed path picks it when
+  `lifecycle.stack_event(&path)` is set. Module doc updated.
+- **M13**: `code::EXPRESSION_UNDECLARED_MEMBER` delegating to
+  `UNDECLARED_MEMBER_CODE`, and a `WARNING` row in `codes.rs`'s severity
+  ladder table.
+
+### Wave 7 — DMLS tests (2026-11-09)
+
+New `dmls/tests/l1/undeclared_member.rs` (declared in `l1/main.rs`), F2/L1
+through the in-memory LSP session; each asserts line, start, end, source,
+severity, message, and null `data` types:
+
+| Plan item | Test |
+| --- | --- |
+| `reports_on_every_surface` (7 surfaces, control with `name` first) | `reports_on_every_surface` |
+| `ac1_editor` (three rows, `[]`, declared control, computed contract) | `ac1_editor` |
+| `all_branches` (unchosen ternary, callback over a `[]` value) | `all_branches` |
+| `positions` (UTF-16: `é` = 1 unit, `😀` = 2; body edit shifts lines) | `positions` |
+| `strict_independent` (identical member warnings; control: strict changes call findings) | `strict_independent` |
+| `pending_template` (AC3, slot job held, `slot_pending` shown, no slot run) | `pending_template` |
+| refresh with last-good snapshot, reported once | `pending_template_refresh_reports_once` |
+| `lifecycle_unchanged` (stack value silent, value outside the stack warns) | `lifecycle_unchanged` |
+| `no_side_effects` | `diagnostics::call_check::tests::member_diagnostics_never_read_data_or_enter_a_handler` (beside `diagnostics_never_enter_a_handler`, `effects-instrumentation`) |
+
+- Mutation check: with `declared_types` reverted to bundle-only,
+  `pending_template` fails at the template assertion; restored.
+- The M21 schema (slot inside the inline object string) works as written.
+- `pending_template` holds the slot job (`start_with_slot_gate`), not the
+  registry gate: the slot job is what publishes the first snapshot, and the
+  held job is how the existing slot tests observe "before any snapshot is
+  published" (see decisions).
+
+### Phase 3 close (2026-11-09)
+
+- Gate-skip check (repository root, after all edits):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit]`,
+  `change_class: package`. Gates are not skippable; both were run.
+- `just lint` (darkmatter/): pass, first run.
+- `just test` (darkmatter/): pass, 16155 run, 16155 passed, 10 skipped
+  (Phase 2 close: 16146; +9 new tests). No SLOW or flaky test this run.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Dependent packages: none to run. No package outside `darkmatter/` depends
+  on `darkmatter-lsp`, and the only library change is the additive
+  `DeclaredTypes::for_template` (with `for_site` delegating to it, same
+  result); no code outside the area names either symbol.
+- Cross-OS: not run. No path, process, or OS-specific code changed; the new
+  tests build paths from temp dirs through `biscuit_file::canonicalize_simplified`
+  and `url::Url::from_file_path`.
+- Docs and the Darkmatter skill: unchanged in this phase; Phase 6 owns
+  `dmls/docs/diagnostics.md` and the skill for this feature.
+- No pre-existing failures.
+- Status: Phase 3 complete; ready for Phase 4.

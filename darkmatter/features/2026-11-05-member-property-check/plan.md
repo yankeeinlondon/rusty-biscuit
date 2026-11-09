@@ -1,7 +1,7 @@
 ---
 kind: plan
 created: 2026-11-08
-phase: 2
+phase: 4
 total_phases: 7
 agent: claude/sonnet
 yolo: true
@@ -15,6 +15,37 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/member_check.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slots.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/member_check.rs
+- darkmatter/cli/src/args/policy.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+- darkmatter/dmls/src/diagnostics/call_check.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/providers/collections.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/undeclared_member.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Plan: Member Property Check
@@ -605,13 +636,13 @@ its template.
 
 ### Wave 3 (parallel; disjoint files)
 
-- [ ] **Declaration verdict** — M4 in `scope/projection.rs`, re-exports in
+- [x] **Declaration verdict** — M4 in `scope/projection.rs`, re-exports in
   `scope/mod.rs`. Unit tests in `scope/tests.rs`: `{name}`/`nmae`; optional
   member; `{name}|null`; null-only; two-object union declared/undeclared;
   `{name}|string`; `unknown`; bare `object`; pattern-key dictionary; array arm;
   `Ref` to a closed definition (declared, undeclared); missing `Ref`; a
   self-referential alias chain (exhausted budget); `Imported`.
-- [ ] **Absence member reads** — M7 in `absence.rs`; update its module doc to say
+- [x] **Absence member reads** — M7 in `absence.rs`; update its module doc to say
   members use the same rules. Tests in its test module, one row per spec absence
   table row (`server.nmae`; `|| "none"`; ternary condition; `is_null`;
   `min(…, 5)`; `is_empty(trim(…))`; comparison operand; true-branch proof;
@@ -619,13 +650,13 @@ its template.
   descendant; `when`-style default scope does not handle; `try(server.nmae,
   "x")` is ordinary (E3); `static_variable_reads` results unchanged for a corpus
   of existing cases.
-- [ ] **Code and registry** — M1 in `diagnostics.rs` and `expression/mod.rs`; M3
+- [x] **Code and registry** — M1 in `diagnostics.rs` and `expression/mod.rs`; M3
   in `compose/policy.rs` and the `cli/src/args/policy.rs` unit test.
 
 ### Wave 4 (after Wave 3)
 
-- [ ] **Findings** — `member_check.rs` per M2, M6, M8, M9, M10.
-- [ ] **Template declarations** — M5 in `schemas/mod.rs` (`DocumentTemplate`,
+- [x] **Findings** — `member_check.rs` per M2, M6, M8, M9, M10.
+- [x] **Template declarations** — M5 in `schemas/mod.rs` (`DocumentTemplate`,
   `SiteSchema`, `site_schema_for`, shared private helper) and
   `DeclaredTypes::for_site` in `scope/projection.rs`. Unit test beside
   `effective_for`'s tests: a pending document `$schema` gives
@@ -635,7 +666,7 @@ its template.
 
 ### Wave 5 (after Wave 4)
 
-- [ ] **Library classifier tests** — `lib/tests/l1/member_check.rs` through the
+- [x] **Library classifier tests** — `lib/tests/l1/member_check.rs` through the
   public `expression_member_findings` / `expression_member_diagnostics`:
   - `type_table_rows`: every spec type-table row (control `server.name` first);
   - `access_forms`: `server.nmae`, `(server).nmae`, `server["nmae"]`,
@@ -670,7 +701,7 @@ its template.
 
 ### Validation checkpoint (end of Phase 2)
 
-- [ ] `just test` and `just lint` in `darkmatter/` pass; the existing
+- [x] `just test` and `just lint` in `darkmatter/` pass; the existing
   `undeclared_property` and `static_variable_reads` tests pass untouched.
 
 ## Phase 3 — DMLS diagnostics
@@ -680,10 +711,10 @@ diagnostics, including documents whose schema is still a template.
 
 ### Wave 6 (disjoint files; template layer first)
 
-- [ ] **Choke point and code** — M11 in `diagnostics/call_check.rs` and its three
+- [x] **Choke point and code** — M11 in `diagnostics/call_check.rs` and its three
   callers (`providers/dsl.rs`, `providers/collections.rs`,
   `diagnostics/frontmatter.rs`); M13 in `diagnostics/codes.rs`.
-- [ ] **Template layer** — the overlay half of M12 in `overlay/schema.rs` and
+- [x] **Template layer** — the overlay half of M12 in `overlay/schema.rs` and
   `overlay/mod.rs` (the `site_schema_for` call, the pending outcome's template
   field, and a `DocumentOverlay::template()` accessor). The choke-point task
   owns `diagnostics/call_check.rs`, so the `declared_types` change waits for
@@ -691,7 +722,7 @@ diagnostics, including documents whose schema is still a template.
 
 ### Wave 7 (after Wave 6)
 
-- [ ] **DMLS tests** — `dmls/tests/l1/undeclared_member.rs`, modeled on
+- [x] **DMLS tests** — `dmls/tests/l1/undeclared_member.rs`, modeled on
   `dmls/tests/l1/undeclared_property.rs` and `expression_call_diagnostics.rs`:
   - `reports_on_every_surface`: body interpolation, multiline frontmatter
     interpolation, `expression`-typed frontmatter value, `::block when`,
@@ -715,7 +746,7 @@ diagnostics, including documents whose schema is still a template.
 
 ### Validation checkpoint (end of Phase 3)
 
-- [ ] `just test` and `just lint` in `darkmatter/` pass.
+- [x] `just test` and `just lint` in `darkmatter/` pass.
 
 ## Phase 4 — Composition transport
 
