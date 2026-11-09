@@ -74,6 +74,27 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/providers/collections.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+docs_updated_during_phase_6:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/loading-data.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/fm-interpolation.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/SKILL.md
 packages:
     - darkmatter
     - darkmatter-cli
@@ -257,23 +278,95 @@ decisions_for_review:
         frontmatter leaf is evaluated by both interpolation passes today (pass 2
         only takes the keys pass 1 held back), so pass_repetition covers a
         held-back leaf and asserts one warning. Nothing to redo.
-message_to_agent: |-
-    Phase 5 added acceptance tests only; no library, CLI, or DMLS source changed.
-    Facts Phase 6's docs must state (see decisions_for_review for detail):
-    - Composition warns only for reached selectors; DMLS warns on every branch.
-      Beyond that documented difference, DMLS does NOT check members inside a
-      frontmatter $( ... ) ternary condition/value branch (only the {{ }} inside
-      it); composition does. Document this as a current limitation.
-    - A schema with pending slots: DMLS reports from the template; composition
-      always resolves the schema first, so a passive (non-resolving) session
-      fails with dm.schema.slot_pending before any member warning exists.
-    - Operands of && and || are never flagged (and/or accept unknown|null).
-    - Terminal stderr form: "Member 'nmae' is not declared by the known object
-      type of 'server' at <file>:6." (location before the final period); JSON
-      carries code, severity "warning", source.line/column (1-based characters,
-      column at the member name; for server["nmae"] at the opening quote).
-    - `md compose --help` lists the code (tested in cli l1
-      compose_member_warnings::compose_help_lists_the_code).
+    - |-
+        Phase 6 documented the right-hand side of `||` as checked
+        (`title || server.nmae` warns when the right side runs), following the
+        library tests, although the Phase 5 handoff said no `||` operand is
+        ever flagged. Only the `||` primary and `&&` operands are silent. If
+        the reviewer wants `||` right-hand sides silent too, that is a
+        classifier change in absence.rs plus the docs' absence tables.
+    - |-
+        Phase 6 updated more pages than the plan's four: docs that list the
+        expression diagnostic codes (docs/lsp/features.md,
+        docs/topics/schemas/dmls-schema-support.md), the two interpolation
+        pages that explain the root advisory, and docs/topics/loading-data.md,
+        whose "Misspelled members are not reported" was now false. Leaving
+        them would leave docs describing behavior that no longer exists.
+        Nothing to redo if the reviewer prefers fewer cross-links; the extra
+        sentences can simply be dropped.
+    - |-
+        The editor's gap for frontmatter $( ... ) ternary conditions and value
+        branches (composition checks them, DMLS checks only the {{ }} inside)
+        is documented as current behavior in the expressions topic, the DMLS
+        diagnostics page, and the skill, not fixed. Closing it would add a DMLS
+        surface (parse the ternary like the composition precheck does) and
+        an agreement-test row; the docs' "does not check" sentences would then
+        be removed.
+source_files_during_phase_7:
+    - darkmatter/dmls/src/overlay/mod.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+source_code:
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/expression/member_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/tests/l1/dynamic_schema_slots.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/member_check.rs
+    - darkmatter/cli/src/args/policy.rs
+    - darkmatter/dmls/src/diagnostics/call_check.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/providers/collections.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/undeclared_member.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/collection_blocks/engine.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+    - darkmatter/lib/src/markdown/compose/inline/collection_blocks.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/inline/page_blocks.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/member_sites.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/tests/l1/compose_member_warnings.rs
+    - darkmatter/cli/tests/l1/compose_member_warnings.rs
+    - darkmatter/cli/tests/l1/main.rs
+documentation:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/loading-data.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/fm-interpolation.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/SKILL.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-11-05-member-property-check (7 phases)
@@ -895,3 +988,207 @@ workspace. No new input-format parser, so no Input Robustness Matrix applies.
   existing `uri` helper).
 - No pre-existing failures; none skipped.
 - Status: Phase 5 complete; ready for Phase 6.
+
+## Phase 6
+
+### Wave 12 — Documentation and skills (2026-11-09)
+
+Docs, the Darkmatter skill, and a comment-only drift sweep. No behavior changed.
+
+- **Expressions topic** (`docs/topics/darkmatter-expressions.md`): new
+  `### Misspelled members` after Bracket Access. It covers what is reported (the example
+  document and the terminal message form), the union rule with the spec's type
+  table, where base types come from, access forms (dot, parenthesized, `fm.`,
+  constant bracket, dotted bracket key, index on a typed array, no cascade,
+  computed key, undeclared root), the absence table, composition-vs-editor
+  reachability with a Mermaid flow, the surfaces each consumer covers and does
+  not, one warning per authored site, and template declarations for pending
+  schemas. The root-only bullet in "How Parsing Works" and the root diagram
+  now point to the member check, and "never stops composition" is now "stops only
+  when `--deny` selects it". The "never stops composition" text was drift
+  that predates this phase: `--deny` already blocked the root advisory.
+- **DMLS diagnostics** (`dmls/docs/diagnostics.md`): rows in the frontmatter
+  code table, the body code table, and the severity table, plus the
+  per-surface severity sentence. Each row covers every branch, both
+  `expressions.strict` settings, the template before a snapshot, no lifecycle
+  stacks, and no `$( … )` ternary pieces.
+- **CLI policy** (`docs/cli/policy.md`): the code is named beside
+  `undeclared_property`. A new bullet explains when a member warning blocks
+  (where it is read: the next expression, condition, or stage; a `when=` child
+  is not composed; `$( … )` runs no command; callbacks block at the next gate
+  or at the end; an unreached read never blocks). There is a new
+  `--deny dm.expression.undeclared_member` example with its outcome, the
+  message, and the JSON and stderr contract.
+- **Additional drift**: `docs/topics/loading-data.md` said "Misspelled members are
+  not reported". That is false now, so the line was replaced. `docs/inline/interpolation.md`
+  (Missing Variables) and `docs/inline/fm-interpolation.md` point to the
+  member advisory. `docs/lsp/features.md` and
+  `docs/topics/schemas/dmls-schema-support.md` list the code.
+- **Correction to the Phase 5 handoff**: it said `&&`/`||` operands are never
+  flagged. `lib/tests/l1/member_check.rs::diagnostic_fields` shows that
+  `server.nmae || fm.server.nmae` reports the right-hand side. The docs state
+  the tested behavior: the `||` primary and `&&` operands are silent, and the
+  right side of `||` warns when it is reached. This is recorded in
+  `decisions_for_review`.
+- **Skill**: `expressions.md` gained the "Undeclared member check" paragraph
+  (classifier, `expression_member_findings`, `base_type`, `declares_member`,
+  absence, `DeclaredTypes::for_site`/`for_template`, the template rule, tests).
+  `compose.md` gained `### Undeclared members` (candidates, reach,
+  `member_sites.rs` join and keys, per-surface routing, what is not covered,
+  pending schemas, and the known limit on warnings lost in the same stage).
+  `dmls.md` names the choke point. Its "Types" bullet had drifted from
+  `DeclaredTypes::new` to `declared_types(ctx)` with `for_schema`/`for_template`,
+  so that was fixed. `SKILL.md` adds "undeclared-member" to the
+  expressions.md pointer (one word, no new line of content).
+- **Drift sweep** (one subagent, comment-only, verified with `git diff` that
+  only `//` lines changed). The `call_precheck.rs` module doc said "effective
+  schema"; it now says "schema", because the check takes a `SiteSchema`, which can be the template. DMLS
+  `frontmatter.rs` (two docs), `dsl.rs`, and `collections.rs` now name the member
+  check beside the call check. In `overlay/schema.rs::assemble`, the `## Errors` section now points to
+  `AssemblyError::error`. No drift was found in the other edited files or in
+  `unknown_identifiers.rs`.
+
+### Requirement-to-test mapping (Phase 6)
+
+This phase changed no behavior, so it added no tests. The behaviors the docs
+describe are pinned by the earlier phases' tests, which back each claim:
+
+| Documented claim | Test(s) |
+| --- | --- |
+| Type table, access forms, absence table (including the `\|\|` right side) | lib `member_check::*` (`absence_table`, `diagnostic_fields`) |
+| Message text, terminal `at file:line.` form, JSON fields, `--deny` code and `all`, `--help` lists the code | cli `compose_member_warnings::*` |
+| Surfaces covered in composition, reachability, once per site, pending schema with a passive session | lib `compose_member_warnings::*` |
+| Editor: every branch, strict-independent, template before snapshot, no lifecycle stacks, `$( … )` exclusion | dmls `undeclared_member::*` |
+
+### Phase 6 close (2026-11-09)
+
+- Gate-skip check (repository root, after all edits including frontmatter):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter, darkmatter-lsp, test-toolkit, darkmatter-cli]`,
+  `change_class: package`. The gates could not be skipped, so both ran.
+- `just lint` (darkmatter/): pass.
+- `just test` (darkmatter/): 16208 run, 16208 passed, 10 skipped (140 s);
+  none at or above 5 s.
+- Dependent packages: not run. The only source changes are doc comments, so
+  no symbol a dependent (Claudine) uses changed.
+- Cross-OS: not run. The changes are documentation and comments, with no OS risk.
+- No pre-existing failures, and no tests were skipped beyond the suite's standing 10.
+- Status: Phase 6 complete; ready for Phase 7.
+
+## Phase 7
+
+### Wave 13 — Final verification (2026-11-09)
+
+#### File scope
+
+`git diff --name-only ba7b4c2ad HEAD` (the commit before this feature's first
+commit) plus the uncommitted tree lists 58 files. Every one is named in the
+plan or in this log's per-phase `source_files_*`/`docs_*`/`skills_*` lists,
+except this log itself. Nothing outside the feature's scope changed. The
+branch also carries other features' commits (expression-recovery,
+tabular-input-options); those are not part of this check.
+
+#### Definition of Done check
+
+The first item ("every row of the spec's type table and absence table is
+pinned through `expression_member_findings`") was still unchecked from Phase 2.
+`lib/tests/l1/member_check.rs::type_table_rows` covers each of the spec's
+eight type-table rows (`unknown`, `any`, bare `object`, and a dictionary are
+split into separate cases), plus the optional-unset member. `absence_table`
+covers all nine absence-table rows, and both tests call
+`expression_member_findings`. I checked the item off.
+
+#### Drift fixed
+
+Phase 1 found drift in the `SlotStatus::template_shape` doc
+(`dmls/src/overlay/mod.rs`) and handed it to Phase 3, but it was never fixed.
+The doc said the shape keeps "every constraint that is not a slot", while
+`slot_jobs::template_shape` clones the root shape with its slot constraints
+still in place. Following the code, the doc now says that. This was a
+comment-only change.
+
+#### Departures from the spec
+
+The spec was not edited. Each departure is also in `decisions_for_review`.
+
+1. **The editor does not check frontmatter `$( … )` ternary pieces.** The spec
+   says DMLS checks authored expressions in all branches and lists
+   shell-template holes as a surface. Composition checks a ternary's
+   condition and its value branches. DMLS checks only the `{{ }}`
+   placeholders inside a `$( … )`. The docs (expressions topic, DMLS
+   diagnostics, skill) describe this gap as current behavior.
+2. **Expression-typed frontmatter is checked in DMLS only.** The spec lists
+   it among composition surfaces. The author approved this reading in the
+   plan's review decisions (2026-11-08).
+3. **Some member warnings are lost when a later site in the same stage
+   fails.** Spec AC8 asks that earlier warnings survive a failure. That holds
+   across stages (tested). Within one body or frontmatter interpolation
+   pass, sites are evaluated from the end of the text backward, and the
+   stage's collected warnings are dropped when a site fails. So a member
+   authored *after* the failing site, and read before it, loses its warning.
+   `--deny` still blocks on it. Every warning family already behaves this
+   way, and the fix (carrying warnings on the stage's error type) was left
+   for review.
+4. **`--deny` for callback member reads stops at the next gate.** In
+   map/filter/sort/while/until callbacks, a denied member read stops at the
+   next gate or at the end of the stage, not between items. Callbacks run
+   behind a shared borrow, so their warnings are held and added before the
+   next policy check.
+5. **The call precheck also uses the template while slots are pending.**
+   Typing pending documents through `DeclaredTypes::for_site` changed call
+   checks as well as member checks: they were untyped before. Ruling B
+   approved this, and no existing test changed.
+6. **Member base typing is a little wider than the plan's rule.** A
+   constant index or member on a function result follows the same projection
+   as a variable path, so `load_data(…, "{ name: string }[]")[0].nmae`
+   reports. This is within the spec (AC2/AC5); it departs from the plan, not
+   the spec.
+
+#### R0 revisions (collected)
+
+- **D5** was revised twice. Phase 1 found that a library composition is never
+  sessionless and changed the "without resolution" case to a `Passive`
+  slot session, expecting the member warning among the failure's earlier
+  warnings. Phase 5 found that composition fails with
+  `dm.schema.slot_pending` before any site is reached. The test therefore
+  asserts the failure and *no* member warning. This matches the spec's AC3
+  ("composition … reports it after resolution").
+- **D7**: the overlay shape differed from the plan's M12. As a result,
+  `SiteSchema::Template` carries `{ template, unresolved }`, the overlay keeps
+  `SchemaOutcome::Failed(UnresolvedSlots)`, and the template is stored in
+  `SlotStatus.template`. The editor builds types through the new
+  `DeclaredTypes::for_template`.
+- **E4**: `try` is evaluated by `evaluate_recovery`, not
+  `evaluate_lazy_function`. M14's citation was updated.
+- The other R0 rows (D1–D4, D6, D8, E1–E3, E5) held as written. Some line
+  numbers moved, and the plan was corrected in Phase 1.
+
+#### Requirement-to-test mapping (whole feature)
+
+| Requirement | Tests |
+| --- | --- |
+| Type table, absence table, access forms, paths/keys, try typing, narrowing, shadowing, spans, message fields | lib `member_check::{type_table_rows, absence_table, access_forms, a_typed_function_return, paths_and_keys, contracts, named_references_in_the_site_definitions, try_typing, narrowing, shadowing, spans, diagnostic_fields}`; `scope::tests::member_declarations`; `absence::tests::member_reads::*` |
+| AC1, AC3, AC6, AC7: composition surfaces, reachability, once per site, include dedup, pending schemas | lib `compose_member_warnings::*`, `dynamic_schema_slots` |
+| AC1, AC3, AC7 in the editor: every branch, template before snapshot, agreement with composition | dmls `undeclared_member::*` |
+| AC8: default success, `--deny` code/`all`, JSON diagnostic with clean stderr, later failure keeps warnings | cli `compose_member_warnings::*`, cli `args::policy` `the_undeclared_member_code_is_deniable_on_compose_only` |
+
+### Phase 7 close (2026-11-09)
+
+- Gate-skip check (repository root, after all edits including frontmatter):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter, darkmatter-lsp, test-toolkit, darkmatter-cli]`,
+  `change_class: package`. The gates could not be skipped, so both ran.
+- `just lint` (darkmatter/): pass. It ran before the work, and again after the
+  `overlay/mod.rs` doc edit.
+- `just test` (darkmatter/): 16208 run, 16208 passed, 10 skipped (150.9 s).
+  No test took 5 s or longer, and there were no failures or retries. The
+  `overlay/mod.rs` doc edit landed while this run was going; it is
+  comment-only, and the lint rerun compiled it.
+- Dependent packages: not rerun. This phase changed one doc comment. Phases 4
+  and 5 already ran Claudine's targeted tests against the library changes.
+- Cross-OS: not run. This phase changed one doc comment and has no OS risk.
+- Skill: no change. Phase 6 already describes the feature, and this phase
+  changed no behavior.
+- No pre-existing failures. Nothing was skipped beyond the suite's standing 10.
+- Terminal state: **implementation complete, ready for review.** The feature
+  directory was not moved.

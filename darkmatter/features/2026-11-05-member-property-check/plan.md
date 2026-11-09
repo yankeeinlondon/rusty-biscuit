@@ -1,7 +1,7 @@
 ---
 kind: plan
 created: 2026-11-08
-phase: 6
+phase: 8
 total_phases: 7
 agent: claude/sonnet
 yolo: true
@@ -82,6 +82,92 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/providers/collections.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+docs_updated_during_phase_6:
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/inline/interpolation.md
+- darkmatter/docs/inline/fm-interpolation.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_7:
+- darkmatter/dmls/src/overlay/mod.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+source_code:
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/member_check.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slots.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/member_check.rs
+- darkmatter/cli/src/args/policy.rs
+- darkmatter/dmls/src/diagnostics/call_check.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/providers/collections.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/undeclared_member.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+- darkmatter/lib/src/markdown/compose/inline/collection_blocks.rs
+- darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+- darkmatter/lib/src/markdown/compose/inline/page_blocks.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/member_sites.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/tests/l1/compose_member_warnings.rs
+- darkmatter/cli/tests/l1/compose_member_warnings.rs
+- darkmatter/cli/tests/l1/main.rs
+documentation:
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/loading-data.md
+- darkmatter/docs/inline/interpolation.md
+- darkmatter/docs/inline/fm-interpolation.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/dmls/docs/diagnostics.md
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/SKILL.md
+completed_phase: 7
+implemented: true
 ---
 
 # Plan: Member Property Check
@@ -163,7 +249,7 @@ checkpoints.
 
 Each item has a named test in the phase that delivers it.
 
-- [ ] Every row of the spec's type table and absence table is pinned through
+- [x] Every row of the spec's type table and absence table is pinned through
   `expression_member_findings` (Phase 2).
 - [x] AC1: the `map(load_data(...), h => h.nmae)` document composes under the
   default policy with exactly one warning at `nmae` for three rows, none for
@@ -186,10 +272,10 @@ Each item has a named test in the phase that delivers it.
   unobserved-evaluator tests pass unchanged (Phase 5).
 - [x] `try(...)` typing feeds member checks: `try(load_data(..., "{ a: string }[]"), [])`
   items are checked; `try` is not an absence guard (Phases 2, 5).
-- [ ] AC9: `docs/topics/darkmatter-expressions.md`, `dmls/docs/diagnostics.md`,
+- [x] AC9: `docs/topics/darkmatter-expressions.md`, `dmls/docs/diagnostics.md`,
   `docs/cli/policy.md`, and the Darkmatter skill describe current behavior with
   examples and never name a feature or spec (Phase 6).
-- [ ] `just test` and `just lint` pass in `darkmatter/` (Phase 7).
+- [x] `just test` and `just lint` pass in `darkmatter/` (Phase 7).
 
 **Not in this plan.** No performance spike (spec non-goal; the join costs a
 hash lookup per reached access node in a candidate expression). No new test
@@ -903,37 +989,37 @@ Goal: current-behavior docs describe the feature (M22).
 
 ### Wave 12 (parallel; disjoint files)
 
-- [ ] **Expressions topic** — `docs/topics/darkmatter-expressions.md`: a section
+- [x] **Expressions topic** — `docs/topics/darkmatter-expressions.md`: a section
   "Misspelled members" after "Variable Access" (`### Bracket Access`): what is
   reported, the union rule with the type table as examples, access forms,
   absence table, one warning per authored site, template declarations for
   schemas with unresolved slots, runtime vs editor reachability, the Mermaid
   flow. Update the root-only sentence at `:114` and the diagram node at `:172`
   so they no longer imply roots are the only reported reads.
-- [ ] **DMLS diagnostics** — `dmls/docs/diagnostics.md`: add the code to the
+- [x] **DMLS diagnostics** — `dmls/docs/diagnostics.md`: add the code to the
   code tables near `:233`, `:361`, `:400`, with editor behavior (all branches,
   independent of `expressions.strict`, works before a schema snapshot exists,
   lifecycle stacks not covered).
-- [ ] **CLI policy** — `docs/cli/policy.md`: name the code beside
+- [x] **CLI policy** — `docs/cli/policy.md`: name the code beside
   `dm.expression.undeclared_property` (`:116`) and add a `--deny
   dm.expression.undeclared_member` example with its outcome.
-- [ ] **Darkmatter skill** — `.claude/skills/darkmatter/expressions.md` (the
+- [x] **Darkmatter skill** — `.claude/skills/darkmatter/expressions.md` (the
   classifier, `expression_member_findings`, `DeclaredTypes::for_site`, the
   template rule), `compose.md` (the candidate/reach join, `member_sites.rs`,
   routing per surface, not-covered list, next to "Undeclared properties"), and
   `dmls.md` (the choke point). Keep `SKILL.md` within its size limit; add one
   line to its CLI paragraph only if the registry sentence needs it.
-- [ ] **Drift sweep** — re-read every `///`/`//!` in files this plan edited and
+- [x] **Drift sweep** — re-read every `///`/`//!` in files this plan edited and
   fix drift in place.
 
 ## Phase 7 — Final verification
 
 ### Wave 13 (serial)
 
-- [ ] `just lint` and `just test` in `darkmatter/` pass.
-- [ ] `git status` shows only files this plan names plus the new tests and the
+- [x] `just lint` and `just test` in `darkmatter/` pass.
+- [x] `git status` shows only files this plan names plus the new tests and the
   log.
-- [ ] Record every departure from the spec and every R0 revision in
+- [x] Record every departure from the spec and every R0 revision in
   `implementation-log.md` (the spec is not edited). Report the terminal state
   **"implementation complete, ready for review"**; do not move the feature.
 

@@ -27,7 +27,7 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-08
 clarified: false
-implemented: false
+implemented: true
 review_iterations: 0
 packages:
     - darkmatter
@@ -38,6 +38,7 @@ depends-on:
     - 2026-11-04-loading-data
     - 2026-11-05-dynamic-schema-types
     - 2026-11-05-expression-recovery
+implemented_by: "claude/opus"
 ---
 
 # Member Property Check
