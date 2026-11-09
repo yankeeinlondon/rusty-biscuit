@@ -631,6 +631,31 @@ jobs:
           pnpm install --frozen-lockfile
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
+      # The owner's per-record outcome, before its archive is touched. This
+      # download alone may fail: an absent status is a finding the check below
+      # reports as `producer outcome unknown`, not a broken download.
+      - name: Download this cell's build status
+        id: build_status_download
+        if: ${{ steps.cell.outputs.consumes_archive == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: build-status-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.build_producer }}-${{ steps.cell.outputs.build_key }}
+          path: ${{ runner.temp }}/build-status
+      # Only a valid `success` status for exactly this record lets the archive
+      # download run; a failed, cancelled, absent, or malformed status fails
+      # here, so no archive is fetched and no test starts.
+      - name: Check this cell's build status
+        id: build_status
+        if: ${{ steps.cell.outputs.consumes_archive == 'true' }}
+        shell: bash
+        run: |
+          python3 scripts/ci/build_status.py \
+            --status "$RUNNER_TEMP/build-status/build-status.json" \
+            --package '${{ steps.cell.outputs.package }}' \
+            --key '${{ steps.cell.outputs.build_key }}' \
+            --producer '${{ steps.cell.outputs.build_producer }}' \
+            --artifact '${{ steps.cell.outputs.build_artifact }}'
       # Transfer clock. An artifact download is an action, not a command, so
       # its cost can only be observed between two steps; the verifier closes the
       # window and reports `download_seconds`. Transfer is reported apart from

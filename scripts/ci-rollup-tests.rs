@@ -5706,7 +5706,8 @@ fn a_cell_whose_build_failed_is_missing_and_names_the_build() {
     assert!(
         cell.reasons
             .iter()
-            .any(|reason| reason.contains("blocked by build abc0123456789def")
+            .any(|reason| reason.starts_with("not run: producer failed")
+                && reason.contains("build abc0123456789def")
                 && reason.contains("ubuntu-latest")
                 && reason.contains("compile")),
         "the cell must name the build, its producer, and where it stopped: {:?}",
@@ -5736,7 +5737,10 @@ fn a_cancelled_or_unuploaded_build_blocks_its_cells_just_as_a_failed_one_does() 
             "a `{result}` build at the {stage} stage leaves no archive to run"
         );
         assert!(
-            cell.reasons.iter().any(|reason| reason.contains(stage)),
+            cell.reasons
+                .iter()
+                .any(|reason| reason.starts_with("not run: producer failed")
+                    && reason.contains(stage)),
             "the stage must reach the reader: {:?}",
             cell.reasons
         );
@@ -5760,7 +5764,7 @@ fn a_successful_build_leaves_its_consumers_exactly_as_they_were() {
     for cell in &cells {
         assert_eq!(cell.state, CellState::Pass);
         assert!(
-            !cell.reasons.iter().any(|reason| reason.contains("blocked by")),
+            !cell.reasons.iter().any(|reason| reason.contains("producer failed")),
             "a delivered build adds nothing to its consumers: {:?}",
             cell.reasons
         );
@@ -5801,24 +5805,25 @@ fn a_real_test_result_outranks_the_build_diagnostic() {
     ));
     assert_eq!(cell.state, CellState::Fail);
     assert!(
-        cell.reasons.iter().any(|reason| reason.contains("blocked by build")),
-        "the plumbing diagnostic is still reported: {:?}",
+        cell.reasons
+            .iter()
+            .any(|reason| reason.starts_with("producer failed; build 8888999900001111")),
+        "the plumbing diagnostic is still reported, without claiming the cell did not run: {:?}",
         cell.reasons
     );
 }
 
 #[test]
 fn a_cell_whose_build_published_no_status_is_not_inferred_to_be_blocked() {
-    // Producers whose consumers have not been cut over still compile in place.
-    // Their cells reference a record no owner job was scheduled for, and
-    // inferring a block from that absence would fail every one of them.
+    // An absent status does not prove the record failed to compile or that its
+    // archive is missing, so it never overrides the cell's own evidence.
     let cell = only_cell(classify_with_builds(
         &[consuming("messenger", "macos-latest", Tier::L1, "aaaabbbbccccdddd")],
         &[passing_record("messenger", "macos-latest", Tier::L1)],
         &[],
     ));
     assert_eq!(cell.state, CellState::Pass);
-    assert!(!cell.reasons.iter().any(|reason| reason.contains("blocked by")));
+    assert!(!cell.reasons.iter().any(|reason| reason.contains("producer failed")));
 }
 
 #[test]

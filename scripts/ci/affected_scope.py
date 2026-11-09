@@ -258,6 +258,7 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
         for suite in (
             "test_affected_scope.py",
             "test_build_key.py",
+            "test_build_status.py",
             "test_ci_local.py",
             "test_completion.py",
             "test_constraints.py",

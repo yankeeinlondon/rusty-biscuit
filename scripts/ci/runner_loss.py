@@ -424,10 +424,13 @@ def synthesize_build_status(
                         "result": "failure",
                         "stage": "produce",
                         "consumers": build.get("consumers", []),
+                        # A lost owner may have published this record's
+                        # archive before it died; only the status is missing.
                         "detail": (
                             f"the hosted runner lost communication with the server during "
-                            f"`{step}`; GitHub terminated the build owner and no archive "
-                            f"was uploaded (job {record['id']})"
+                            f"`{step}`; GitHub terminated the build owner before it reported "
+                            f"this record, so its per-record production/publication outcome "
+                            f"is unknown (job {record['id']})"
                         ),
                     },
                     indent=2,

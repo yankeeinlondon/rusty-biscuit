@@ -4442,6 +4442,7 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
         "homelab-frontend": "homelab-server",
         "test_affected_scope.py": "repo-deps",
         "test_build_key.py": "repo-deps",
+        "test_build_status.py": "repo-deps",
         "test_ci_local.py": "repo-deps",
         "test_completion.py": "repo-deps",
         "test_constraints.py": "repo-deps",

@@ -811,8 +811,9 @@ fn the_json_report_is_a_versioned_document_a_status_artifact_can_embed() {
 
 /// The report document this tool serializes is what `ci-build produce` stores
 /// as a manifest's `compiler_work`, and what the JavaScript publisher
-/// (`scripts/ci/artifacts/publish.cjs`) aggregates field by field into each
-/// owner's measurement artifact. Node cannot see this struct, so its test
+/// (`scripts/ci/artifacts/publish.cjs`) aggregates field by field into the
+/// owner's separate measurement artifact, published once after every record.
+/// Node cannot see this struct, so its test
 /// asserts against a fixture generated here rather than a hand-copied shape: a
 /// renamed or dropped field fails this test before it can silently zero the
 /// owner totals AC8 is read from.

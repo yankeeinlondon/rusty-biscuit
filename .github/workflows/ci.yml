@@ -796,13 +796,27 @@ jobs:
           name: fresh-output-schematic-gen-${{ matrix.build }}
           path: target/nextest/ci/test-results.xml
           if-no-files-found: error
-      - name: Produce the archives
+      # One `produce-owner.sh` child per record, in `ci-build`'s order,
+      # all sharing one target tree; each record's archive is uploaded and its
+      # local copy released before the next record starts, so completed
+      # archives do not accumulate on the runner's disk. A JavaScript action
+      # because the artifact client needs the runtime token GitHub gives only
+      # to those. Not `always()`: a failed guard skips production and the job
+      # stays failed.
+      - name: Produce and publish the archives
         id: produce
-        shell: bash
+        uses: actions/github-script@v8
         env:
           MEASURE: ${{ inputs.measure-compiler-work && 'true' || 'false' }}
           PRODUCER: ${{ matrix.build }}
-        run: bash scripts/ci/produce-owner.sh
+          PLAN_EPOCH: ${{ needs.scope.outputs.plan_epoch }}
+          JOB_EPOCH: ${{ steps.job_start.outputs.epoch }}
+        with:
+          script: |
+            const owner = require(`${process.env.GITHUB_WORKSPACE}/scripts/ci/artifacts/produce.cjs`);
+            if (!await owner.produceOwner(owner.hostedOptions())) {
+              core.setFailed('One or more package builds failed or could not be published');
+            }
       - name: Sample storage before publication
         if: ${{ always() && env.BUILD_DIAGNOSTICS != '' }}
         shell: bash
@@ -810,33 +824,26 @@ jobs:
           python3 scripts/ci/storage_sample.py --out "$BUILD_DIAGNOSTICS/storage.jsonl"
           --target "$GITHUB_WORKSPACE/target" --output "$RUNNER_TEMP/build"
           --label before-publication || true
+      # Whatever production left unpublished: statuses for records it never
+      # reached, uploads that did not complete, and the owner's compiler-work
+      # measurement. The local ledger keeps it from uploading anything twice.
       - name: Publish package builds and statuses
         if: ${{ always() }}
         uses: actions/github-script@v8
         env:
+          MEASURE: ${{ inputs.measure-compiler-work && 'true' || 'false' }}
           PRODUCER: ${{ matrix.build }}
           JOB_STATUS: ${{ job.status }}
           PLAN_EPOCH: ${{ needs.scope.outputs.plan_epoch }}
           JOB_EPOCH: ${{ steps.job_start.outputs.epoch }}
         with:
           script: |
-            const path = require('node:path');
-            const fs = require('node:fs');
             const root = process.env.GITHUB_WORKSPACE;
-            const {DefaultArtifactClient} = require(path.join(root, 'scripts/ci/artifacts/node_modules/@actions/artifact'));
-            const {publish} = require(path.join(root, 'scripts/ci/artifacts/publish.cjs'));
-            const client = new DefaultArtifactClient();
-            const ok = await publish({
-              plan: JSON.parse(fs.readFileSync('ci-artifacts/ci-resolved-plan/resolved-plan.json', 'utf8')),
-              producer: process.env.PRODUCER,
-              out: path.join(process.env.RUNNER_TEMP, 'build'),
-              verifier: path.join(root, 'target/release/ci-build' + (process.platform === 'win32' ? '.exe' : '')),
-              jobStatus: process.env.JOB_STATUS,
-              queueSeconds: process.env.PLAN_EPOCH && process.env.JOB_EPOCH
-                ? Number(process.env.JOB_EPOCH) - Number(process.env.PLAN_EPOCH) : undefined,
-              upload: (...args) => client.uploadArtifact(...args),
-            });
-            if (!ok) core.setFailed('One or more package builds could not be published');
+            const {hostedOptions} = require(`${root}/scripts/ci/artifacts/produce.cjs`);
+            const {finalizeOwner} = require(`${root}/scripts/ci/artifacts/publish.cjs`);
+            if (!await finalizeOwner(hostedOptions())) {
+              core.setFailed('One or more package builds could not be published');
+            }
       - name: Sample storage after publication
         if: ${{ always() && env.BUILD_DIAGNOSTICS != '' }}
         shell: bash

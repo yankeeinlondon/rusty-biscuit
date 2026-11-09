@@ -134,6 +134,33 @@ jobs:
             --row "$ROW" \
             --head '${{ inputs.tested-revision }}' \
             --github-output "$GITHUB_OUTPUT"
+      # The owner's per-record outcome, on the HOST and before the guest exists,
+      # so a build that failed or never reported costs no provisioning. This
+      # download alone may fail: an absent status is a finding the check below
+      # reports as `producer outcome unknown`, not a broken download. Not gated
+      # on `consumes_archive`, like the archive download below: every WSL2 cell
+      # consumes one, and a contract without a build is refused by the check.
+      - name: Download this cell's build status
+        id: build_status_download
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: build-status-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.build_producer }}-${{ steps.cell.outputs.build_key }}
+          path: ${{ github.workspace }}/ci-build-status
+      # Only a valid `success` status for exactly this record lets the archive
+      # download run; a failed, cancelled, absent, or malformed status fails
+      # here, so no archive is fetched, no guest is provisioned, and no test
+      # starts.
+      - name: Check this cell's build status
+        id: build_status
+        shell: bash
+        run: |
+          python3 scripts/ci/build_status.py \
+            --status ci-build-status/build-status.json \
+            --package '${{ steps.cell.outputs.package }}' \
+            --key '${{ steps.cell.outputs.build_key }}' \
+            --producer '${{ steps.cell.outputs.build_producer }}' \
+            --artifact '${{ steps.cell.outputs.build_artifact }}'
       # Transfer clock. An artifact download is an action, not a command, so its
       # cost can only be observed between two steps; the manifest read below
       # closes the window.
@@ -764,6 +791,7 @@ jobs:
           L1: ${{ steps.l1.outcome }}
           STAGED: ${{ steps.stage_junit.outcome }}
           VERIFIED: ${{ steps.verified.outcome }}
+          BUILD_STATUS: ${{ steps.build_status.outcome }}
           BUILD_KEY: ${{ steps.cell.outputs.build_key }}
           BUILD_PRODUCER: ${{ steps.cell.outputs.build_producer }}
           BUILD_DIGEST: ${{ steps.manifest.outputs.digest }}
@@ -790,7 +818,11 @@ jobs:
           # A failing TEST needs no detail: the guest stays healthy, staging
           # succeeds, and the report the rollup reads is uploaded normally.
           detail=""
-          if [ "$PROVISION" != "success" ]; then
+          # First: a refused build status skips provisioning, which must not
+          # then be reported as a guest that failed to provision.
+          if [ "$BUILD_STATUS" = "failure" ]; then
+            detail="build ${BUILD_KEY} produced on ${BUILD_PRODUCER} has no successful build status; the guest was not provisioned and no test was started"
+          elif [ "$PROVISION" != "success" ]; then
             detail="the WSL2 guest failed to provision (attempt 1: ${PROVISION_FIRST}, attempt 2: ${PROVISION}); no test could run"
           elif [ "$VERIFIED" != "success" ]; then
             detail="build ${BUILD_KEY} produced on ${BUILD_PRODUCER} was refused by the guest's verification (${VERIFIED}); no test was started and nothing was compiled to replace it"

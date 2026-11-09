@@ -1029,7 +1029,7 @@ fn the_build_owner_runs_the_schematic_fresh_output_guard_before_archiving() {
         .find("just -f schematic/justfile test-fresh-output")
         .expect("the build owner must run the schematic fresh-output guard");
     let produce = build
-        .find("bash scripts/ci/produce-owner.sh")
+        .find("scripts/ci/artifacts/produce.cjs")
         .expect("the build owner produces the archives");
     assert!(guard < produce, "the guard must run before the archive is produced");
     assert!(
@@ -3505,10 +3505,18 @@ fn only_recovery_and_diagnostic_steps_ignore_errors() {
     // never change a cell's verdict, and it refuses (with an annotation) rather
     // than invent proof. Its upload is NOT hidden: a lost observation is a
     // failed producer.
+    // It also tolerates its build-status download, and only that download: an
+    // absent status is what the following check reports as an unknown outcome.
     assert_eq!(
         normalized("_package-ci.yml", "  test:"),
-        [measurement.clone(), vec!["Record this cell's observation".to_owned()]].concat(),
-        "_package-ci.yml: `test` may hide the measurement steps and the observation recorder only"
+        [
+            vec!["Download this cell's build status".to_owned()],
+            measurement.clone(),
+            vec!["Record this cell's observation".to_owned()],
+        ]
+        .concat(),
+        "_package-ci.yml: `test` may hide the build-status download, the measurement steps, \
+         and the observation recorder only"
     );
     // `ci.yml`'s build owner hides nothing: a failed produce, a failed upload,
     // and a lost runner must all reach the fold and the dependent cells.
@@ -3517,19 +3525,22 @@ fn only_recovery_and_diagnostic_steps_ignore_errors() {
         Vec::<String>::new(),
         "ci.yml: the build owner may not hide any step failure"
     );
-    // The WSL leg ignores only its first provisioning attempt (so the bounded
-    // retry is reachable) and diagnostics that must not overwrite a test result.
+    // The WSL leg ignores only its build-status download (the check after it
+    // reports an absent status), its first provisioning attempt (so the bounded
+    // retry is reachable), and diagnostics that must not overwrite a test result.
     assert_eq!(
         normalized("_wsl-ci.yml", "  wsl:"),
         vec![
+            "Download this cell's build status",
             "Provision the WSL2 guest",
             "Census the Windows host before extraction",
             "Guest post-mortem",
             "Host post-mortem",
             "Record this cell's observation",
         ],
-        "_wsl-ci.yml: `wsl` may ignore only the first provisioning attempt, \
-         diagnostics, and the observation recorder — never tests, staging, or upload"
+        "_wsl-ci.yml: `wsl` may ignore only the build-status download, the first \
+         provisioning attempt, diagnostics, and the observation recorder — never \
+         tests, staging, or upload"
     );
     // The audit tool's own exit 2 is normalized so its enforcement step can
     // explain a coverage block; `package-ci` is a `uses:` job with no steps.
@@ -6966,6 +6977,38 @@ fn the_ci_documentation_states_the_implemented_behavior() {
             "exactly six top-level jobs",
             "`ci.yml` defines ten top-level jobs",
         ),
+        // fixes/2026-11-06-ubuntu-archive-disk: a consumer refuses before the
+        // download, and the owner publishes one record at a time.
+        (
+            "docs/topics/ci-cd.md",
+            "blocked by build",
+            "a blocked consumer reads `not run: producer failed` or `not run: producer outcome unknown`",
+        ),
+        (
+            ".github/ci/README.md",
+            "blocked by build",
+            "a blocked consumer reads `not run: producer failed` or `not run: producer outcome unknown`",
+        ),
+        (
+            ".claude/skills/rust-devops/ci-cd.md",
+            "blocked by build",
+            "a blocked consumer reads `not run: producer failed` or `not run: producer outcome unknown`",
+        ),
+        (
+            ".claude/skills/rust-testing/ci-execution.md",
+            "blocked by build",
+            "a blocked consumer reads `not run: producer failed` or `not run: producer outcome unknown`",
+        ),
+        (
+            ".claude/skills/rust-devops/ci-cd.md",
+            "invokes the producer once without",
+            "the coordinator runs `produce-owner.sh --key` once per record",
+        ),
+        (
+            ".github/ci/README.md",
+            "it still needs a\n`SUITE_REGISTRY` entry",
+            "`artifact-publisher` is registered in `SUITE_REGISTRY`",
+        ),
     ];
     for (file, phrase, why) in RETIRED {
         let source = read(file);
@@ -7004,6 +7047,15 @@ fn the_ci_documentation_states_the_implemented_behavior() {
             "Attaching a console inside a nextest process",
         ),
         ("docs/dependencies.md", "root Cargo workspace member"),
+        // fixes/2026-11-06-ubuntu-archive-disk.
+        ("docs/topics/ci-cd.md", "publication-ledger.json"),
+        ("docs/topics/ci-cd.md", "PRODUCE_MODE=record"),
+        ("docs/topics/ci-cd.md", "compiler-work-owner-<producer>"),
+        ("docs/topics/ci-cd.md", "not run: producer failed"),
+        ("docs/topics/ci-cd.md", "not run: producer outcome unknown"),
+        (".github/ci/README.md", "not run: producer outcome unknown"),
+        (".claude/skills/rust-devops/ci-cd.md", "publication-ledger.json"),
+        (".claude/skills/rust-devops/ci-cd.md", "not run: producer outcome unknown"),
     ];
     for (file, phrase) in REQUIRED {
         let source = read(file);
@@ -7215,10 +7267,24 @@ fn the_build_owner_expands_one_leg_per_producer() {
         build.contains("runs-on: ${{ fromJSON(needs.scope.outputs.build_owner_runners)[matrix.build] }}"),
         "the runner must come from the projection, never from a hardcoded label"
     );
+    // One leg produces every record its owner holds, one `--key` child at a
+    // time through the coordinator; the workflow itself names no key.
+    let build_steps = steps(&build);
+    let produce = step_with_id(&build_steps, "produce").expect("the owner produces its records");
     assert!(
-        build.contains("run: bash scripts/ci/produce-owner.sh")
+        produce.contains("uses: actions/github-script@")
+            && produce.contains("scripts/ci/artifacts/produce.cjs")
+            && produce.contains("produceOwner(owner.hostedOptions())")
             && !build.contains("--key"),
-        "a leg must produce all of its owner's records in one invocation"
+        "a leg must produce all of its owner's records through the coordinator: {produce}"
+    );
+    let coordinator = read("scripts/ci/artifacts/produce.cjs");
+    assert!(
+        coordinator.contains(".sort(byPackageThenKey)")
+            && coordinator.contains("'scripts/ci/produce-owner.sh'")
+            && coordinator.contains("[script, '--key', record.key, ...extraArgs]")
+            && coordinator.contains("PRODUCE_MODE: 'record'"),
+        "the coordinator runs the wrapper once per sorted record, in record mode"
     );
     // The plan is the scheduling authority: the owner reads its projection and
     // recalculates nothing.
@@ -7238,7 +7304,26 @@ fn every_build_publishes_a_keyed_artifact_and_a_status_for_any_outcome() {
     let publish = step_named(&build_steps, "Publish package builds and statuses")
         .expect("the owner must publish every package's archive and status");
     assert!(publish.contains("if: ${{ always() }}"));
-    assert!(publish.contains("scripts/ci/artifacts/publish.cjs"));
+    assert!(
+        publish.contains("scripts/ci/artifacts/publish.cjs")
+            && publish.contains("finalizeOwner(hostedOptions())")
+            && publish.contains("JOB_STATUS: ${{ job.status }}"),
+        "the always-run finalizer publishes what production left outstanding: {publish}"
+    );
+    // Production publishes each record as it finishes, but only under the
+    // default condition: a failed schematic guard skips it, and nothing after
+    // it turns the job green again.
+    let produce = step_with_id(&build_steps, "produce").expect("the owner produces its records");
+    assert!(
+        !produce.contains("if:") && !produce.contains("continue-on-error"),
+        "production must not run after a failed guard or hide its own failure: {produce}"
+    );
+    assert!(
+        produce.contains("core.setFailed(") && publish.contains("core.setFailed("),
+        "a failed record or upload fails the owner"
+    );
+    let position = |step: &String| build_steps.iter().position(|candidate| candidate == step);
+    assert!(position(produce) < position(publish), "the finalizer runs after production");
     // A build never creates a result cell: no `status-<package>-<tier>-<env>`
     // artifact, no JUnit, no manifest record.
     let executable = executable_lines(&build);
@@ -7283,9 +7368,9 @@ fn the_ubuntu_build_owner_samples_storage_at_every_boundary_without_deciding_the
         "--label before-schematic-guard",
         "just -f schematic/justfile test-fresh-output",
         "--label after-schematic-guard",
-        "bash scripts/ci/produce-owner.sh",
+        "produceOwner(owner.hostedOptions())",
         "--label before-publication",
-        "scripts/ci/artifacts/publish.cjs",
+        "finalizeOwner(hostedOptions())",
         "--label after-publication",
         "name: build-diagnostics-${{ matrix.build }}",
     ];
@@ -7422,6 +7507,120 @@ fn an_archive_consumer_verifies_first_and_never_reaches_a_compiler() {
     }
 }
 
+/// Every archive consumer reads its build record's status before it downloads
+/// the archive. Only that status download may fail: an absent status is the
+/// check's `producer outcome unknown` finding, and a failed, cancelled, absent,
+/// or malformed status stops the cell before any archive, guest, or test.
+#[test]
+fn an_archive_consumer_checks_its_build_status_before_downloading() {
+    let status_name = "name: build-status-${{ steps.cell.outputs.package }}-\
+                       ${{ steps.cell.outputs.build_producer }}-${{ steps.cell.outputs.build_key }}";
+    let consumes = "if: ${{ steps.cell.outputs.consumes_archive == 'true' }}";
+    for (file, header) in [("_package-ci.yml", "  test:"), ("_wsl-ci.yml", "  wsl:")] {
+        let all = steps(&job_block(file, header));
+        let position = |name: &str| {
+            all.iter()
+                .position(|step| step.starts_with(&format!("      - name: {name}\n")))
+                .unwrap_or_else(|| panic!("{file} {header} must define `{name}`"))
+        };
+        let download = &all[position("Download this cell's build status")];
+        let check = &all[position("Check this cell's build status")];
+        assert!(
+            download.contains("uses: actions/download-artifact@") && download.contains(status_name),
+            "{file}: the status download must name exactly the cell's build-status artifact"
+        );
+        assert!(
+            executable_lines(download).contains("continue-on-error: true"),
+            "{file}: an absent status is reported by the check, not by the download"
+        );
+        let check_lines = executable_lines(check);
+        assert!(
+            check_lines.contains("python3 scripts/ci/build_status.py")
+                && check_lines.contains("--package '${{ steps.cell.outputs.package }}'")
+                && check_lines.contains("--key '${{ steps.cell.outputs.build_key }}'")
+                && check_lines.contains("--producer '${{ steps.cell.outputs.build_producer }}'")
+                && check_lines.contains("--artifact '${{ steps.cell.outputs.build_artifact }}'"),
+            "{file}: the check must judge the status against the resolved cell's record"
+        );
+        assert!(
+            !check_lines.contains("continue-on-error")
+                && !check_lines.contains("always()")
+                && !check_lines.contains("cancelled()"),
+            "{file}: a refused status must fail the job"
+        );
+        assert!(
+            position("Download this cell's build status") < position("Check this cell's build status")
+                && position("Check this cell's build status") < position("Download this cell's build"),
+            "{file}: status download, then check, then the archive download"
+        );
+        if file == "_package-ci.yml" {
+            assert!(
+                download.contains(consumes) && check.contains(consumes),
+                "{file}: the status steps run exactly where the archive download does"
+            );
+        }
+
+        // A refused check leaves an ordinary failure status and no completion:
+        // the status steps still run, and certification does not.
+        assert!(
+            all[position("Record producer status")].contains("if: ${{ always() }}")
+                && all[position("Upload producer status")].contains("if: ${{ always() && "),
+            "{file}: a blocked cell must still publish its failure status"
+        );
+        let mut after_check = vec![
+            "Download this cell's build",
+            "List this cell's expected tests",
+            "Certify this cell's completeness",
+        ];
+        if file == "_wsl-ci.yml" {
+            // Resolved on the Windows host before the guest exists, so a
+            // refusal costs no provisioning.
+            after_check.extend([
+                "Provision the WSL2 guest",
+                "Provision the WSL2 guest (second attempt)",
+                "Boot the guest and verify it is WSL2",
+                "Install guest packages",
+                "Create the unprivileged test user",
+                "Place the source and the build in the guest",
+                "Install just and cargo-nextest in the guest",
+                "Install native prerequisites in the guest",
+                "Verify the build in the guest",
+                "L1 tests from the archive",
+            ]);
+        } else {
+            after_check.extend(["Verify this cell's build", "Tests"]);
+        }
+        for name in after_check {
+            let step = executable_lines(&all[position(name)]);
+            assert!(
+                position("Check this cell's build status") < position(name)
+                    && !step.contains("always()")
+                    && !step.contains("cancelled()"),
+                "{file}: `{name}` must follow the check and never run after a refusal"
+            );
+        }
+    }
+
+    // The WSL status names the refusal instead of reporting the provisioning
+    // it skipped as a provisioning failure.
+    let wsl = steps(&job_block("_wsl-ci.yml", "  wsl:"));
+    let status = step_named(&wsl, "Record producer status").expect("the WSL leg records a status");
+    assert!(
+        step_env(status)
+            .iter()
+            .any(|(key, value)| key == "BUILD_STATUS"
+                && value == "${{ steps.build_status.outcome }}"),
+        "_wsl-ci.yml: the status step must see the build-status check's outcome"
+    );
+    let refused = status
+        .find("if [ \"$BUILD_STATUS\" = \"failure\" ]")
+        .expect("_wsl-ci.yml: a refused build status must have its own detail");
+    let provision = status
+        .find("[ \"$PROVISION\" != \"success\" ]")
+        .expect("_wsl-ci.yml: the provisioning detail remains");
+    assert!(refused < provision, "_wsl-ci.yml: the refusal is reported before provisioning");
+}
+
 /// An artifact that is missing, corrupt, or refused must stop the cell — never
 /// silently start a build that produces a second, unverified set of binaries.
 #[test]
@@ -7440,9 +7639,12 @@ fn an_archive_miss_never_enters_a_fallback_build() {
     }
     // The verifier the consumer runs is the one the producer shipped with the
     // archive, so a guest with no Cargo can still refuse a bad one.
+    // `hostedOptions` is the build job's one source of publication arguments.
     let build = job_block("ci.yml", "  build:");
     assert!(
-        build.contains("verifier: path.join(root, 'target/release/ci-build'"),
+        build.contains("hostedOptions()")
+            && read("scripts/ci/artifacts/produce.cjs")
+                .contains("verifier: path.join(root, 'target/release/ci-build'"),
         "the producer must ship the verifier inside the artifact it produced"
     );
 }

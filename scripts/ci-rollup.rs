@@ -2757,9 +2757,11 @@ fn classify_one(
     // skip baseline, which only judges skipped test identities.
     //
     // A build with no status at all is deliberately NOT treated as blocking:
-    // the producers whose consumers have not been cut over still compile in
-    // place, their cells reference a record no owner job was scheduled for, and
-    // inferring a block from an absence would fail every one of them.
+    // an absent status says nothing about whether the record compiled or its
+    // archive was published. A runner-lost owner is attributed by the status
+    // `runner_loss.py` synthesizes before this reads; any other absence fails
+    // the consumer's own pre-download check, and the area audit reports the
+    // completion record that cell never wrote.
     let blocking_build = expectation
         .and_then(|cell| cell.build.as_deref())
         .and_then(|key| inputs.builds.get(key))
@@ -2877,9 +2879,8 @@ fn classify_one(
     // A real test result outranks plumbing diagnostics: when the cell produced
     // failing or passing tests, that evidence is what it reports, and the build
     // note is added as context. Only a cell with nothing to show is *blocked*
-    // by its build.
+    // by its build, and only that cell says it did not run.
     if let Some(build) = blocking_build {
-        reasons.push(format!("blocked by {}", build.describe()));
         if matches!(
             state,
             CellState::Missing | CellState::NothingToRun | CellState::Skip | CellState::Pass
@@ -2887,6 +2888,9 @@ fn classify_one(
             && counts.passed == 0
         {
             state = CellState::Missing;
+            reasons.push(format!("not run: producer failed; {}", build.describe()));
+        } else {
+            reasons.push(format!("producer failed; {}", build.describe()));
         }
     }
 

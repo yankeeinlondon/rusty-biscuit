@@ -754,6 +754,11 @@ class BuildOwnerAttributionTests(unittest.TestCase):
         self.assertEqual("abc0123456789def", document["key"])
         self.assertIn("lost communication", document["detail"])
         self.assertIn("Produce the archive", document["detail"])
+        # A missing status does not prove a missing archive.
+        self.assertIn(
+            "per-record production/publication outcome is unknown", document["detail"]
+        )
+        self.assertNotIn("no archive was uploaded", document["detail"])
         self.assertEqual(
             [
                 {"environment": "ubuntu-latest", "gate": "L1"},

@@ -53,7 +53,13 @@ async function publishMeasured({works, ownerTiming}) {
     const index = upload.files.indexOf(`${artifact}.compiler-work.json`);
     return index === -1 ? undefined : JSON.parse(upload.bodies[index]);
   };
-  return {out, ok, records, uploads, measurement};
+  // The owner aggregate is final only after every record, so it travels in its
+  // own artifact rather than beside any one record's archive.
+  const ownerUpload = () => {
+    const upload = uploads.find(u => u.name === 'compiler-work-owner-linux');
+    return upload && JSON.parse(upload.bodies[upload.files.indexOf('owner-compiler-work.json')]);
+  };
+  return {out, ok, records, uploads, measurement, ownerUpload};
 }
 
 test('partial owners retain package identities, isolate uploads, and account for every key', async () => {
@@ -129,7 +135,7 @@ test('a declared sidecar is uploaded beside the archive, read from the manifest 
 });
 
 test("the owner aggregate is the sum of its records' producer-written compiler work", async () => {
-  const {out, ok, records, measurement} = await publishMeasured({
+  const {out, ok, records, uploads, measurement, ownerUpload} = await publishMeasured({
     works: [documents.alpha, documents.beta, null],
     ownerTiming: {produce_wall_seconds: 41}
   });
@@ -143,18 +149,26 @@ test("the owner aggregate is the sum of its records' producer-written compiler w
       compiler_ms: documents.alpha.compiler_ms + documents.beta.compiler_ms,
       produce_wall_seconds: 41
     };
-    const first = measurement(records[0].artifact);
-    assert.deepEqual(first.record, documents.alpha, "the record block is the manifest's document verbatim");
-    assert.deepEqual(first.owner, owner);
-    assertOwnerMeasuredSomething(first.owner);
-    // Compilation is per owner, so every measured record republishes the same
-    // aggregate beside its own counts.
-    const second = measurement(records[1].artifact);
-    assert.deepEqual(second.record, documents.beta);
-    assert.deepEqual(second.owner, owner);
+    assert.deepEqual(ownerUpload(), owner);
+    assertOwnerMeasuredSomething(ownerUpload());
+    assert.equal(uploads.filter(u => u.name === 'compiler-work-owner-linux').length, 1,
+      'the owner aggregate is published exactly once');
+    // A record's own artifact carries only its own counts: published before
+    // later records ran, it cannot hold a final owner total.
+    assert.deepEqual(measurement(records[0].artifact), {record: documents.alpha},
+      "the record block is the manifest's document verbatim");
+    assert.deepEqual(measurement(records[1].artifact), {record: documents.beta});
     // An unmeasured record publishes no measurement, which is what holds
     // `measured_records` below `requested_records`.
     assert.equal(measurement(records[2].artifact), undefined);
+  } finally { await fs.rm(out, {recursive: true, force: true}); }
+});
+
+test('an owner with no measured record publishes no owner measurement', async () => {
+  const {out, ok, uploads} = await publishMeasured({works: [null, null], ownerTiming: {produce_wall_seconds: 3}});
+  try {
+    assert.equal(ok, true);
+    assert(!uploads.some(u => u.name.startsWith('compiler-work-owner-')), JSON.stringify(uploads.map(u => u.name)));
   } finally { await fs.rm(out, {recursive: true, force: true}); }
 });
 
@@ -174,13 +188,143 @@ test('a measurement that counts nothing cannot pass for compile-once evidence', 
       refusal: /owner timing was not merged/}
   ];
   for (const scenario of scenarios) {
-    const {out, records, measurement} = await publishMeasured({works: scenario.works, ownerTiming: scenario.timing});
+    const {out, records, measurement, ownerUpload} = await publishMeasured({works: scenario.works, ownerTiming: scenario.timing});
     try {
-      const published = measurement(records[0].artifact);
-      assert.deepEqual(published.record, scenario.works[0], `${scenario.name}: the record block is published verbatim`);
-      assert.equal(published.owner.measured_records, scenario.works.length,
+      assert.deepEqual(measurement(records[0].artifact), {record: scenario.works[0]},
+        `${scenario.name}: the record block is published verbatim`);
+      const owner = ownerUpload();
+      assert.equal(owner.measured_records, scenario.works.length,
         `${scenario.name}: a present but empty document is still a measured record`);
-      assert.throws(() => assertOwnerMeasuredSomething(published.owner), scenario.refusal, scenario.name);
+      assert.throws(() => assertOwnerMeasuredSomething(owner), scenario.refusal, scenario.name);
     } finally { await fs.rm(out, {recursive: true, force: true}); }
+  }
+});
+
+// A finished producer leg: every record has a successful status, a manifest, an
+// archive, and a record-owned copied-sidecar directory.
+async function producedOwner(packages) {
+  const out = await fs.mkdtemp(path.join(os.tmpdir(), 'ci-artifacts-'));
+  const verifier = path.join(out, 'ci-build');
+  await fs.writeFile(verifier, 'verifier');
+  const records = packages.map(pkg => ({
+    package: pkg, producer: 'linux', key: pkg, artifact: `build-${pkg}-linux-${pkg}`, consumers: []
+  }));
+  for (const r of records) {
+    const sidecar = {name: 'md', file: `${r.artifact}-sidecars/md`, bytes: 7, blake3: 'digest'};
+    await fs.mkdir(path.join(out, `${r.artifact}-sidecars`));
+    await fs.writeFile(path.join(out, sidecar.file), 'sidecar');
+    await fs.writeFile(path.join(out, `${r.artifact}.status.json`), JSON.stringify({...r, result: 'success'}));
+    await fs.writeFile(path.join(out, `${r.artifact}.manifest.json`),
+      JSON.stringify({archive: {file: `${r.artifact}.tar.zst`}, sidecars: [sidecar]}));
+    await fs.writeFile(path.join(out, `${r.artifact}.tar.zst`), 'archive');
+  }
+  return {out, verifier, records, plan: {builds: records}};
+}
+
+const exists = file => fs.access(file).then(() => true, () => false);
+
+test('a failed status upload is retried alone: the immutable archive is never uploaded twice', async () => {
+  const {out, verifier, records, plan} = await producedOwner(['alpha']);
+  const [record] = records;
+  try {
+    const names = [];
+    let refuseStatus = true;
+    const upload = async name => {
+      if (name.startsWith('build-status-') && refuseStatus) throw new Error('status upload interrupted');
+      names.push(name);
+    };
+    assert.equal(await publish({plan, producer: 'linux', out, verifier, upload, jobStatus: 'success'}), false);
+    assert.deepEqual(names, [record.artifact]);
+    const ledger = JSON.parse(await fs.readFile(path.join(out, 'publication-ledger.json'), 'utf8'));
+    assert.deepEqual(ledger.records[record.artifact], {archive: true});
+
+    refuseStatus = false;
+    assert.equal(await publish({plan, producer: 'linux', out, verifier, upload, jobStatus: 'success'}), true);
+    assert.deepEqual(names, [record.artifact, `build-status-alpha-linux-alpha`],
+      'the retry uploads only the outstanding status');
+    const status = JSON.parse(await fs.readFile(path.join(out, 'build-status-alpha-linux-alpha', 'build-status.json'), 'utf8'));
+    assert.equal(status.result, 'success');
+  } finally { await fs.rm(out, {recursive: true, force: true}); }
+});
+
+test('replaying the finalizer after a complete publication uploads nothing', async () => {
+  const {out, verifier, records, plan} = await producedOwner(['alpha', 'beta']);
+  try {
+    const names = [];
+    const upload = async name => { names.push(name); };
+    assert.equal(await publish({plan, producer: 'linux', out, verifier, upload, jobStatus: 'success'}), true);
+    assert.equal(names.length, 4);
+    assert.equal(await publish({plan, producer: 'linux', out, verifier, upload, jobStatus: 'success'}), true);
+    assert.equal(names.length, 4, `nothing is published twice: ${JSON.stringify(names)}`);
+    // What a consumer or a later diagnosis reads stays on disk; only the
+    // uploaded payload is released.
+    for (const r of records) {
+      assert(await exists(path.join(out, `${r.artifact}.manifest.json`)));
+      assert(await exists(path.join(out, `${r.artifact}.status.json`)));
+      assert(!await exists(path.join(out, `${r.artifact}.tar.zst`)));
+      assert(!await exists(path.join(out, `${r.artifact}-sidecars`)));
+    }
+    assert(await exists(path.join(out, 'tools', 'ci-build')), 'the staged verifier is kept');
+    assert(await exists(verifier), 'the verifier itself is never touched');
+  } finally { await fs.rm(out, {recursive: true, force: true}); }
+});
+
+test('a failed archive upload keeps its payload and publishes an upload failure beside a successful sibling', async () => {
+  const {out, verifier, records, plan} = await producedOwner(['alpha', 'beta']);
+  const [alpha, beta] = records;
+  try {
+    const statuses = {};
+    const upload = async (name, files) => {
+      if (name === alpha.artifact) throw new Error('upload interrupted');
+      if (name.startsWith('build-status-')) statuses[name] = JSON.parse(await fs.readFile(files[0], 'utf8'));
+    };
+    assert.equal(await publish({plan, producer: 'linux', out, verifier, upload, jobStatus: 'success'}), false);
+    assert.equal(statuses['build-status-alpha-linux-alpha'].stage, 'upload');
+    assert.match(statuses['build-status-alpha-linux-alpha'].detail, /upload interrupted/);
+    assert.equal(statuses['build-status-beta-linux-beta'].result, 'success');
+    assert(await exists(path.join(out, `${alpha.artifact}.tar.zst`)), 'a payload that was not uploaded is kept');
+    assert(await exists(path.join(out, `${alpha.artifact}-sidecars`, 'md')));
+    assert(!await exists(path.join(out, `${beta.artifact}.tar.zst`)));
+  } finally { await fs.rm(out, {recursive: true, force: true}); }
+});
+
+test('an uploaded payload outside the output directory or behind a symbolic link is not deleted', async () => {
+  const {out, verifier, records, plan} = await producedOwner(['alpha', 'beta', 'gamma']);
+  const [alpha, beta, gamma] = records;
+  const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), 'ci-artifacts-elsewhere-'));
+  try {
+    // alpha's manifest names an archive beside `out`, not in it.
+    const escaped = path.join(elsewhere, 'escaped.tar.zst');
+    await fs.writeFile(escaped, 'archive');
+    await fs.writeFile(path.join(out, `${alpha.artifact}.manifest.json`), JSON.stringify(
+      {archive: {file: path.relative(out, escaped)}, sidecars: []}));
+    // beta's archive is a link to a file outside `out`.
+    const target = path.join(elsewhere, 'linked.tar.zst');
+    await fs.writeFile(target, 'archive');
+    const link = path.join(out, `${beta.artifact}.tar.zst`);
+    await fs.rm(link);
+    let linked = true;
+    try { await fs.symlink(target, link, 'file'); }
+    catch (error) { if (error.code !== 'EPERM') throw error; linked = false; } // unprivileged Windows
+    // gamma's archive sits under a directory that links outside `out`.
+    const parked = path.join(elsewhere, 'parked');
+    await fs.mkdir(parked);
+    await fs.writeFile(path.join(parked, 'gamma.tar.zst'), 'archive');
+    if (linked) {
+      await fs.symlink(parked, path.join(out, 'parked'), 'junction');
+      await fs.writeFile(path.join(out, `${gamma.artifact}.manifest.json`), JSON.stringify(
+        {archive: {file: path.join('parked', 'gamma.tar.zst')}, sidecars: []}));
+    }
+    const ok = await publish({plan, producer: 'linux', out, verifier, upload: async () => {}, jobStatus: 'success'});
+    assert.equal(ok, true, 'a refused deletion does not change the record outcome');
+    assert(await exists(escaped), 'a path outside the output directory is never deleted');
+    if (linked) {
+      assert(await exists(link), 'a symbolic link is not deleted');
+      assert(await exists(target), 'nor is what it points at');
+      assert(await exists(path.join(parked, 'gamma.tar.zst')), 'a path that resolves outside through a parent is kept');
+    }
+  } finally {
+    await fs.rm(out, {recursive: true, force: true});
+    await fs.rm(elsewhere, {recursive: true, force: true});
   }
 });

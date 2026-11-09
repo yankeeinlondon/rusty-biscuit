@@ -2058,6 +2058,42 @@ fn the_hosted_wrapper_samples_each_record_through_the_shipped_sampler() {
     );
 }
 
+/// The wrapper's two modes: local (unset) writes the owner timing itself;
+/// `record`, one child of the hosted coordinator, leaves it to the coordinator
+/// that spans every record. Any other mode is refused before producing.
+#[test]
+fn the_owner_wrapper_leaves_owner_timing_to_the_coordinator_in_record_mode() {
+    let dir = Scratch::new("wrapper-modes");
+    let bash = which("bash").expect("bash must be on PATH");
+    let run = |mode: Option<&str>| {
+        let mut command = Command::new(&bash);
+        command
+            .arg(repo_root().join("scripts/ci/produce-owner.sh"))
+            // A stand-in producer: this test is about the wrapper, not `ci-build`.
+            .env("CI_BUILD_BIN", "true")
+            .env("PRODUCER", "local-host")
+            .env("RUNNER_TEMP", dir.path())
+            .env("MEASURE", "true")
+            .env_remove("BUILD_DIAGNOSTICS")
+            .env_remove("CI_BUILD_OUT")
+            .env_remove("PRODUCE_MODE");
+        if let Some(mode) = mode {
+            command.env("PRODUCE_MODE", mode);
+        }
+        command.output().expect("running the owner wrapper")
+    };
+    let timing = dir.path().join("build").join("owner-timing.json");
+
+    assert!(run(Some("record")).status.success());
+    assert!(!timing.exists(), "a record child must not write the owner's timing");
+    assert!(run(None).status.success());
+    assert!(timing.exists(), "the local mode times the owner itself");
+
+    let refused = run(Some("upload"));
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("unknown PRODUCE_MODE 'upload'"));
+}
+
 /// A sampler that cannot even start is reported and ignored: an owner with no
 /// records still succeeds. Runs on every platform, unlike the recorder above.
 #[test]
@@ -2300,6 +2336,7 @@ fn empty_sidecars(dir: &Path) -> PathBuf {
 
 struct SharedDeps {
     out: PathBuf,
+    uploaded: PathBuf,
     counters: PathBuf,
     target: PathBuf,
 }
@@ -2314,30 +2351,43 @@ impl SharedDeps {
         .expect("the producer's own manifest must parse")
     }
 
+    /// The archive as the fake artifact transport received it. The local copy
+    /// is released once its upload is recorded.
     fn archive(&self, package: &str, key: &str) -> PathBuf {
-        self.out
-            .join(format!("{}.tar.zst", shared_deps_artifact(package, key)))
+        let artifact = shared_deps_artifact(package, key);
+        self.uploaded.join(&artifact).join(format!("{artifact}.tar.zst"))
     }
 }
 
-/// Produce both fixture records, measured, into one owner target tree.
+/// Produce both fixture records, measured, into one owner target tree through
+/// the hosted coordinator: one `produce-owner.sh --key` child per record, each
+/// published to a directory standing in for the artifact service before the
+/// next starts.
 fn produce_shared_deps(dir: &Path) -> SharedDeps {
     let binary = crate::tests::shipped_wrapper();
     let plan = shared_deps_plan(dir, &host_triple());
     let out = dir.join("build");
+    let uploaded = dir.join("uploaded");
     let counters = dir.join("build-counters");
     let target = dir.join("owner-target");
 
-    // From PATH, not a bare `bash`: Windows' `Command` searches System32
-    // first, and on the hosted runner that holds the WSL launcher.
-    let bash = which("bash").expect("bash must be on PATH");
-    let output = Command::new(bash)
-        .arg(repo_root().join("scripts/ci/produce-owner.sh"))
-        .env("CI_BUILD_BIN", &binary)
-        .env("CI_BUILD_PLAN", &plan)
-        .env("PRODUCER", "local-host")
-        .env("RUNNER_TEMP", dir)
-        .env("MEASURE", "true")
+    let node = which("node").unwrap_or_else(|| {
+        panic!("node must be on PATH: the owner's records are produced by scripts/ci/artifacts/produce.cjs")
+    });
+    let output = Command::new(node)
+        .arg(repo_root().join("scripts/ci/artifacts/produce.cjs"))
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--producer")
+        .arg("local-host")
+        .arg("--out")
+        .arg(&out)
+        .arg("--verifier")
+        .arg(&binary)
+        .arg("--upload-dir")
+        .arg(&uploaded)
+        .arg("--measure")
+        .arg("--")
         .arg("--workspace")
         .arg(dir.join("workspace"))
         .arg("--target-dir")
@@ -2345,8 +2395,10 @@ fn produce_shared_deps(dir: &Path) -> SharedDeps {
         .arg("--sidecars")
         .arg(empty_sidecars(dir))
         .arg("--json")
+        .env("CI_BUILD_BIN", &binary)
+        .env("RUNNER_TEMP", dir)
         .output()
-        .expect("running ci-build produce");
+        .expect("running the hosted coordinator");
     assert!(
         output.status.success(),
         "producing both fixture records failed: {}",
@@ -2354,6 +2406,7 @@ fn produce_shared_deps(dir: &Path) -> SharedDeps {
     );
     SharedDeps {
         out,
+        uploaded,
         counters,
         target,
     }
@@ -2494,6 +2547,20 @@ fn one_owner_tree_shares_a_dependency_compile_without_unifying_features() {
         produced.target.is_dir(),
         "both records compiled into one owner target tree"
     );
+    for (package, key) in [
+        ("shared-deps-alpha", ALPHA_KEY),
+        ("shared-deps-beta", BETA_KEY),
+    ] {
+        let artifact = shared_deps_artifact(package, key);
+        assert!(
+            !produced.out.join(format!("{artifact}.tar.zst")).exists(),
+            "{package}'s archive is released locally once it is published"
+        );
+        assert!(
+            produced.uploaded.join(format!("build-status-{package}-local-host-{key}")).is_dir(),
+            "{package}'s status is published"
+        );
+    }
 }
 
 /// The producer keeps one Cargo invocation per package because a combined one
