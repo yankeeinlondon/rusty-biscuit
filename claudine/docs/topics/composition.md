@@ -717,8 +717,8 @@ plans the save, and writes `hash` and the UTC `last_updated` in one step.
 - **`last_updated`** — auto-updated by Claudine on each successful write
 - **`hash`** — auto-stamped Darkmatter `Simple` content hash on each successful write (see [`hash` property (auto-stamped)](#hash-property-auto-stamped))
 - **`agent`** — optional provider hint (see Provider Selection)
-- **`policy`** — content freshness policy (coming soon)
-- **`blast_radius`** — list of source files that trigger re-generation when changed
+- **`policy`** — content freshness policy (**planned**; not read today)
+- **`blast_radius`** — list of source files that trigger re-generation when changed (**planned**; not read today)
 
 ### Inline-Compose / Sequence Mismatch
 
@@ -901,7 +901,7 @@ Provider selection behaves differently in **TTY** (interactive terminal) and **n
 
 When stdout is a terminal and no explicit `--<provider>` flag is given:
 
-1. **Interactive picker** — a `biscuit-tui` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
+1. **Interactive picker** — a `biscuit-tui` one-shot picker shows all installed providers. Frontmatter `agent` and the config's favorite agent (`preferred_agent`) only influence the **default index** and **row ordering**; they do not bypass the picker.
 
 The picker renders **inline**, directly below the cursor, sized to its rows (at most 8 terminal rows), like the schema choosers. It never switches to the alternate screen, so earlier output stays in scrollback. `Esc` keeps the initial selection; `Ctrl-C` cancels.
 
@@ -914,7 +914,7 @@ When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict c
 1. **Explicit flag** (`--provider <slug>`, or the catalog-derived shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`, `--kilo`, `--pi`, `--antigravity`) — highest priority
 2. **Singular frontmatter `agent`** — a single provider name in the effective (composed) frontmatter, fuzzy-matched against known providers
 3. **List-valued frontmatter `agent`** — an ordered list of provider names; the first installed provider in the list is chosen
-4. **Config favorite** — `favorite_agent` from `~/.claudine/config.json`
+4. **Config favorite** — `preferred_agent` from `~/.claudine/config.json` (the older key `favorite_agent` is still read; set it with `claudine config set favorite-agent <slug>`)
 5. **Hard error** — if none of the above resolve, the command fails with a structured error
 
 The old "single installed" auto-selection shortcut has been removed. Even when only one provider is installed, non-TTY sessions still require an explicit signal (flag, frontmatter, or favorite).
@@ -1079,7 +1079,7 @@ start:
 `claudine compose` of this document fails launch validation at
 `/start/0/shell`, and no provider is launched. The report names the action's
 path and echoes the offending value (`{"cmd":"git status"}`); it does not yet
-single out the unknown key. [Schemas](schemas.md) describes the seven schema
+single out the unknown key. [Schemas](schemas.md) describes the eight schema
 files, what they check, and how a document reaches them.
 
 The rules:
@@ -1147,7 +1147,7 @@ flowchart LR
     V -- valid --> S["start → provider"]
 ```
 
-The `claudine` binary embeds the seven schema files, so this holds for an
+The `claudine` binary embeds the eight schema files, so this holds for an
 installed binary with no checkout. A schema file on disk with the same name
 wins over the embedded copy; see
 [How a Document Reaches the Schemas](schemas.md#how-a-document-reaches-the-schemas).

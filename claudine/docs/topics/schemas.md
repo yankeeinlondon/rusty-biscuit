@@ -62,9 +62,9 @@ used together.
 
 A schema can also apply to documents that never mention it. Darkmatter looks
 for **trigger schemas** (files with `kind: schema-trigger`) in five schema
-locations: the document's package `schemas/`, its package area's `schemas/`,
-the repository root's `schemas/`, the folder `SCHEMAS_DIR` names, and
-`~/schemas`. A trigger has a `match:` condition over the frontmatter and a
+locations, in this order: the folder `SCHEMAS_DIR` names, the document's
+package `schemas/`, its package area's `schemas/`, the repository root's
+`schemas/`, and `~/schemas`. A trigger has a `match:` condition over the frontmatter and a
 `$schema` payload that applies whenever the condition holds. See
 [Repository Trigger Schemas](../../../darkmatter/docs/topics/schemas/definition.md#repository-trigger-schemas).
 Claudine's own schemas, described next, are delivered this way.
@@ -983,9 +983,9 @@ the CLI carries a built-in copy.
 
 ```mermaid
 flowchart TD
-    D["document frontmatter"] --> R["disk discovery: the five schema locations<br/>package, package area, repository root,<br/>SCHEMAS_DIR, ~/schemas"]
+    D["document frontmatter"] --> R["disk discovery: the five schema locations<br/>SCHEMAS_DIR, package, package area,<br/>repository root, ~/schemas"]
     R --> S{"same file name in<br/>several locations?"}
-    S -- yes --> N["the nearest file wins;<br/>later ones are never read"]
+    S -- yes --> N["the first file in that order wins;<br/>later ones are never read"]
     S -- no --> M
     N --> M{"claudine CLI: is a trigger name<br/>missing from every location?"}
     M -- yes --> E["add the embedded copy of that trigger"]

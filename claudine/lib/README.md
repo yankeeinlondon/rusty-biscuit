@@ -173,7 +173,7 @@ Cross-provider resource synchronization via symlinks and format-converted derive
 5. **Compatibility classification** — parse canonical frontmatter, apply deterministic upgrades (alias duplication, name derivation), check required properties per target provider
 6. **Apply** — create symlinks (absolute for user scope, relative for repo scope) or generate format-converted derived artifacts; never overwrites real directories
 
-**Provider skill paths** (all 7 providers):
+**Provider skill paths** (all 10 providers):
 
 | Provider | User scope | Repo scope | Also reads from |
 |----------|-----------|------------|-----------------|
@@ -184,6 +184,9 @@ Cross-provider resource synchronization via symlinks and format-converted derive
 | KimiCode | `~/.config/agents/skills/` | `.kimi/skills/` | `.claude/skills`, `.agents/skills`, `.codex/skills` |
 | OpenCode | `~/.config/opencode/skills/` | `.opencode/skills/` | `.claude/skills`, `.agents/skills` |
 | QwenCode | `~/.qwen/skills/` | `.qwen/skills/` | -- |
+| Kilo | `~/.config/kilo/skills/` | `.kilo/skills/` | `.claude/skills`, `.agents/skills` |
+| Pi | `~/.pi/agent/skills/` | `.pi/skills/` | `.agents/skills` |
+| Antigravity | `~/.gemini/config/skills/` | `.agents/skills/` | -- |
 
 Additional sub-modules: `canonical` (canonical provider selection), `capabilities` (provider resource support metadata with required/optional property schemas), `compatibility` (candidate/reference classification with alias duplication and name derivation), `conflict` (sync status analysis with also-reads-from awareness), `detector` (per-resource-type detectors via `LinkDetector` trait), `discovery` (legacy skill and command discovery), `execution` (analyze and apply resource links with derived artifact generation), `hashing` (xxHash content dedup with symlink resolution), `model` (data types including `ResourceReference` 9-variant state machine), `paths` (provider path resolution with repo-root awareness), `report` (link report types), `symlink` (symlink creation with relative path support).
 
@@ -205,7 +208,7 @@ Current runtime injection is intentionally narrower than import/export: Claude, 
 
 Provider-native structured stream parsing for wrapped non-interactive sessions. Each provider's structured output (stream-json, JSONL, or NDJSON) is parsed live, extracting clean assistant text for stdout and metadata for stderr summaries and JSONL reporting.
 
-**Provider parsers** (6):
+**Provider parsers** (8; Kilo, an OpenCode fork, uses the `opencode` parser):
 
 | Parser | Format | Summary source |
 |--------|--------|----------------|
@@ -215,10 +218,12 @@ Provider-native structured stream parsing for wrapped non-interactive sessions. 
 | `kimi` | stream-json | Latest `StatusUpdate` snapshot (no aggregate result) |
 | `opencode` | NDJSON (`json`) | Accumulated per-step usage/cost |
 | `qwen` | stream-json | Final result/usage event |
+| `pi` | NDJSON (`--mode json` / `--mode rpc`) | Per-line `type`-tagged events |
+| `antigravity` | one buffered JSON envelope (`agy --print --output-format json`) | The envelope, parsed after the run completes |
 
 **Typed protocol models** (`stream::protocol`):
 
-Each of the 6 supported providers has a serde-derived event model in `stream/protocol/<provider>.rs`. Every module exports a tagged `*Event` enum (`#[serde(tag = "type")]`) plus one struct per variant payload. Shared design rules:
+Each of the 8 parsed providers has a serde-derived event model in `stream/protocol/<provider>.rs`. Every module exports a tagged `*Event` enum (`#[serde(tag = "type")]`) plus one struct per variant payload. Shared design rules:
 
 - **Every field is optional** with `#[serde(default)]` so provider format evolution never breaks deserialization. There is no `#[serde(deny_unknown_fields)]` anywhere in `protocol/`.
 - **No unknown-variant fallback** — when a provider emits an event whose `type` string isn't listed in the enum, `serde_json::from_value::<*Event>` returns `Err(_)` and the parser silently skips the line, matching the legacy `_ => Ok(None)` arm.

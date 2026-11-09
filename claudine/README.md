@@ -38,7 +38,7 @@ Like any standard hook based event system, you can attach your own custom action
 
 In addition to the two actions above, Claudine provides two _services_ which are **cross-event** in nature:
 
-- **Logging** - Claudine logs what it sees. This includes hook events (as well as _wrapped execution_ or _composition_ when that is used). Logging can be turned off and we ask you whether you'd like this on the first time you run a `claudine` command, which starts a short setup interview.
+- **Logging** - Claudine logs what it sees. This includes hook events (as well as _wrapped execution_ or _composition_ when that is used). Logging is on by default and can be turned off with `claudine config`.
 - **Protect** - We provide a _protection_ service which will analyze hook events for dangerous commands and either block these commands or require explicit user approval.
 
 ### Agentic Execution Wrapping

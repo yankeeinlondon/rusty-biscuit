@@ -11,6 +11,10 @@ The wrapper sanitizes the parent environment and injects the following variables
 | `AGENT` | Provider name (e.g., `codex`, `claude`) |
 | `YOLO` | `true` or `false` — whether auto-approval mode is active |
 | `INTERACTIVE` | `true` or `false` — whether the session is interactive |
+| `CLAUDINE_INTERACTIVE` | `1` or `0` — the same fact, read by Claudine's own hook handler |
+| `AGENT_CWD` | the absolute directory Claudine was launched from (the wrapper itself starts the provider at the repository root) |
+| `MODEL` | the resolved model, when one is chosen |
+| `OPERATION` | the value of `--operation`/`--op`, when given |
 | `AGENT_PARAMS` | JSON array of provider-specific argv tokens |
 | `CLAUDINE_SESSION_ID` | UUID for the current wrapped session |
 | `CLAUDINE_PID` | Claudine's own process ID at wrapper startup |
