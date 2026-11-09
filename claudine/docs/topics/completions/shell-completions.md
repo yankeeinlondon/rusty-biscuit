@@ -702,6 +702,59 @@ property-value completion merge the inline arms rather than declining:
 There is no authored property-order hint for a root union, so names come
 out in arm declaration order.
 
+### Template schemas
+
+A schema can be a **template**: a `{{ … }}` slot fills part of a
+definition when the prompt is composed. A slot inside a constraint is a
+*template constraint* (`enum({{ load_data("./os.yaml", "string[]") }})`);
+a slot standing for a whole type is a *template type*
+(`'{{ load_data("./status.yaml", "{ type: string }").type }}'`).
+Completion treats name and value requests differently:
+
+| You press Tab on | What completion does |
+|------------------|----------------------|
+| a setter name (`stat<TAB>`) | Lists names from the template as written. No slot runs. |
+| the value of a property with no slot (`kind=<TAB>`) | Completes from the written declaration. No slot runs. |
+| the value of a property holding a slot (`os=<TAB>`, `status=<TAB>`) | Resolves the template, then completes from the resolved type. |
+
+```text
+claudine compose doc.md stat<TAB>     → status=
+claudine compose doc.md status=<TAB>  → status='draft'  status='published'
+claudine compose doc.md kind=<TAB>    → kind='a'  kind='b'    # kind: enum(a, b)
+```
+
+Resolving a template reads files, so completion uses only the read
+permissions that never need a question:
+
+- the **automatic grant**: a file in the prompt's repository whose
+  content is exactly what Git has committed;
+- **saved grants** in your grant store
+  (`~/.config/darkmatter/schema-read-policy`), including saved denials.
+
+A Tab never asks and never prints. When a read is not covered (an
+uncommitted or edited file, a file outside the repository with no saved
+grant, a URL), or the template fails to resolve, the property gets no
+schema candidates and the shell's own completion takes over.
+`claudine compose` itself still asks for approval when you run it.
+
+The template resolves as a whole. If any slot in it cannot resolve, every
+property that holds a slot offers nothing, while properties with no slot
+keep completing from their declarations.
+
+```mermaid
+flowchart TD
+    T["property=&lt;TAB&gt;"] --> S{"does the property hold a slot?"}
+    S -->|no| D["complete from the written declaration"]
+    S -->|yes| R["resolve the template with the automatic grant and saved grants only"]
+    R -->|resolved| V["complete from the resolved type"]
+    R -->|"read not granted, or failed"| F["no schema candidates: the shell falls back"]
+```
+
+Names are ordered without resolving anything. A template type's place in
+the required-first order comes from its written suffix:
+`'{{ … }}(required)'` sorts with the required properties, a bare
+`'{{ … }}'` with the optional ones.
+
 ### When the schema is unavailable
 
 If `$schema` cannot be loaded (missing file, unparseable schema, raw

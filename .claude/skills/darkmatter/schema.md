@@ -32,7 +32,9 @@ Path shorthand in this file:
   `coercion/`, `phase.rs`, `file_match.rs`, `json_shape.rs`, `completion.rs`
   (the passive helpers; Darkmatter's `schemas/completion.rs` re-exports them
   and adds `for_list_item`/`for_property_value`/`for_path` over an
-  `EffectiveSchema`), `positions.rs` (`PositionMap`, `build_position_map`),
+  `EffectiveSchema`; `for_root_property(root, definitions, name)` is
+  `for_property` over any `DefinitionLookup`, which Claudine uses to complete
+  a pending template's slot-free properties without resolving it), `positions.rs` (`PositionMap`, `build_position_map`),
   `timings.rs`, `errors.rs`
   (`SchemaError`), `pending.rs` (re-exported as
   `darkmatter::markdown::literal_token`).

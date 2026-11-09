@@ -81,7 +81,14 @@ every `<TAB>`. The supplement engine applies these rules in order:
     declares `$schema` (property names before `=`; enum members and
     `file`-glob paths after `=`). Without a schema, the setter value still
     supports `@`-gated file completion; plain string/number values yield
-    no candidates so shell default behavior kicks in. See
+    no candidates so shell default behavior kicks in. In a template
+    schema (`{{ … }}` slots), names and the values of slot-free properties
+    come from the authored template with nothing evaluated; a value request
+    for a slot-bearing property resolves the whole template through a
+    Darkmatter `SlotSession` in `SessionMode::ReferenceCheck` with no handler
+    (automatic and persisted grants only, never a prompt or a printed line;
+    `schema_completion::setter_value_candidates`), and an ungranted or failed
+    resolution offers nothing. See
     [Shell Completions](completions/shell-completions.md).
 
 Install with `claudine completions <shell>` — regenerate and reinstall

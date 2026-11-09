@@ -260,18 +260,16 @@ pub(crate) fn run_with_context(
 ///
 /// When `file_arg` is known, first try schema-aware completion: enum members
 /// for `enum` properties, filesystem paths for `file(match(...))` properties.
-/// If the schema does not contribute candidates (string / number / unknown
-/// property / no `$schema`), fall back to the existing `@`-gated path so the
-/// historical `spec=@docs/...` behavior remains intact.
+/// In a template schema a property holding a slot resolves the template
+/// first, with non-prompting grants only. If the schema does not contribute
+/// candidates (string / number / unknown property / no `$schema` / an
+/// ungranted or failed resolution), fall back to the existing `@`-gated path
+/// so the historical `spec=@docs/...` behavior remains intact.
 fn run_setter_value(token: &str, file_arg: Option<&str>, ctx: &ScopeContext) -> Vec<String> {
-    // A template's slot-dependent values are pending (completion never
-    // evaluates a slot), so its values fall back like an untyped property.
     if let Some(file_arg) = file_arg
-        && let Some(schema) = schema_completion::load_prompt_schema(file_arg, ctx)
-        && let Some(effective) = schema.resolved()
         && let Some((name, value)) = split_setter(token)
     {
-        let schema_candidates = schema_completion::property_value(effective, name, value, ctx);
+        let schema_candidates = schema_completion::setter_value_candidates(file_arg, name, value, ctx);
         if !schema_candidates.is_empty() {
             return schema_candidates;
         }
@@ -284,7 +282,8 @@ fn run_setter_value(token: &str, file_arg: Option<&str>, ctx: &ScopeContext) -> 
 /// Loads the schema for `file_arg`, collects names already supplied in
 /// argv, and asks the schema-aware completer for ordered candidates
 /// (required first, then optional, both in declaration order). A template
-/// schema still names its properties, though its slots are not resolved.
+/// schema names its properties from its authored declarations; nothing is
+/// evaluated.
 fn run_setter_name(
     partial: &str,
     file_arg: &str,

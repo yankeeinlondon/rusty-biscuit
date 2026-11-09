@@ -9,7 +9,7 @@ use biscuit_file::{FileReference, YamlValue};
 
 #[cfg(test)]
 use darkmatter::markdown::schemas::EffectiveSchema;
-use simplified_schema::{PropertyDef, SchemaArm, SchemaRoot};
+use simplified_schema::{PropertyDef, Requiredness, SchemaArm, SchemaRoot};
 
 use crate::completion::fuzzy;
 use crate::completion::scopes::ScopeContext;
@@ -283,6 +283,13 @@ fn collect_property_defs(declarations: Option<&SchemaRoot>) -> Vec<(&String, &Pr
     }
 }
 
+/// Whether `def` sorts with the required properties. A template type's
+/// presence is pending until it resolves, and names never resolve, so its
+/// authored `(required)` suffix alone decides the order.
 fn is_required(def: &PropertyDef) -> bool {
-    def.is_required()
+    match def.requiredness() {
+        Requiredness::Required => true,
+        Requiredness::Optional => false,
+        Requiredness::Pending => def.is_required(),
+    }
 }

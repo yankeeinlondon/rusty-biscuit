@@ -263,3 +263,166 @@ fn committed_prompt_directory_walks_the_launch_directory_first() {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// Template schemas: names never evaluate; a slot-bearing property's value
+// resolves the template with non-prompting grants only
+// ---------------------------------------------------------------------
+
+/// The template schema: `os` holds a template constraint, `status` a
+/// template type, and `kind` is static.
+const TEMPLATE_SCHEMA: &str = concat!(
+    "$schema:\n",
+    "  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }}; required)\n",
+    "  status: '{{ load_data(\"./status.yaml\", \"{ type: string }\").type }}'\n",
+    "  kind: enum(a, b)\n",
+);
+
+/// A repository holding a prompt whose `$schema` file is [`TEMPLATE_SCHEMA`].
+struct TemplatePrompt {
+    fixture: CliProcessFixture,
+}
+
+/// What one `claudine __complete` printed.
+struct Completed {
+    candidates: Vec<String>,
+    stderr: String,
+}
+
+impl TemplatePrompt {
+    fn create(name: &str, schema: &str) -> Self {
+        let fixture = CliProcessFixture::named(name);
+        let cwd = fixture.cwd();
+        write_file(&cwd.join("os.yaml"), "- macOS\n- Linux\n");
+        write_file(&cwd.join("status.yaml"), "type: enum(draft, published)\n");
+        write_file(&cwd.join("prompt.schema.yaml"), schema);
+        write_file(&cwd.join("prompt.md"), "---\n$schema: ./prompt.schema.yaml\n---\nBody\n");
+        Self { fixture }
+    }
+
+    /// Commits every file, so the automatic grant covers the slots' reads.
+    fn commit(&self) {
+        for args in [&["init", "-q"][..], &["add", "-A"][..], &["commit", "-q", "-m", "fixture"][..]] {
+            let output = common::helper_command("git")
+                .arg("-C")
+                .arg(self.fixture.cwd())
+                .args(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .output()
+                .expect("run git in the fixture");
+            assert!(output.status.success(), "git {args:?}: {output:?}");
+        }
+    }
+
+    fn write_grants(&self, lines: &str) {
+        write_file(&self.fixture.home().join(".config/darkmatter/schema-read-policy"), lines);
+    }
+
+    /// The canonical spelling of a fixture file, as a grant names it.
+    fn canonical(&self, relative: &str) -> String {
+        biscuit_file::canonicalize_simplified(&self.fixture.cwd().join(relative))
+            .expect("fixture file exists")
+            .display()
+            .to_string()
+    }
+
+    /// `claudine __complete` with the cursor on the last element of `words`.
+    fn complete(&self, words: &[&str]) -> Completed {
+        let output = self
+            .fixture
+            .command_builder()
+            // The prompt and its schema live in the fixture repository.
+            .ambient_context(self.fixture.cwd())
+            .build()
+            .args(["__complete", "--current", &words.len().to_string(), "--", "claudine"])
+            .args(words)
+            .output()
+            .expect("run claudine __complete");
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(output.status.success(), "completion failed for {words:?}: {stderr}");
+        let candidates = String::from_utf8(output.stdout)
+            .expect("completion stdout is UTF-8")
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect();
+        Completed { candidates, stderr }
+    }
+
+    fn values(&self, setter: &str) -> Vec<String> {
+        let completed = self.complete(&["compose", "prompt.md", setter]);
+        assert_eq!(completed.stderr, "", "a Tab never writes to the terminal");
+        completed.candidates
+    }
+}
+
+#[test]
+fn template_names_complete_from_the_authored_template() {
+    let prompt = TemplatePrompt::create("template-schema-names", TEMPLATE_SCHEMA);
+    // No repository: no slot could resolve, and names still complete.
+    let completed = prompt.complete(&["compose", "prompt.md", "stat"]);
+    assert_eq!(completed.candidates, ["status="]);
+    assert_eq!(completed.stderr, "");
+}
+
+#[test]
+fn template_constraint_value_resolves_on_a_clean_commit() {
+    let prompt = TemplatePrompt::create("template-schema-constraint", TEMPLATE_SCHEMA);
+    prompt.commit();
+    assert_eq!(prompt.values("os="), ["os='macOS'", "os='Linux'"]);
+}
+
+#[test]
+fn template_type_value_resolves_on_a_clean_commit() {
+    let prompt = TemplatePrompt::create("template-schema-type", TEMPLATE_SCHEMA);
+    prompt.commit();
+    assert_eq!(prompt.values("status="), ["status='draft'", "status='published'"]);
+}
+
+#[test]
+fn an_ungranted_template_offers_nothing_and_prints_nothing() {
+    let prompt = TemplatePrompt::create("template-schema-ungranted", TEMPLATE_SCHEMA);
+    prompt.commit();
+    // Dirty after the commit: outside the automatic grant, and no persisted
+    // grant covers it.
+    write_file(&prompt.fixture.cwd().join("os.yaml"), "- macOS\n- Linux\n- Windows\n");
+    assert!(prompt.values("os=").is_empty());
+    // The template resolves as a whole: the other slot's property offers
+    // nothing either.
+    assert!(prompt.values("status=").is_empty());
+}
+
+#[test]
+fn a_static_property_of_a_template_completes_without_evaluation() {
+    let prompt = TemplatePrompt::create("template-schema-static", TEMPLATE_SCHEMA);
+    // No repository and no grant: resolving would fail, so offered values
+    // prove the static declaration answered alone.
+    assert_eq!(prompt.values("kind="), ["kind='a'", "kind='b'"]);
+}
+
+#[test]
+fn a_persisted_user_grant_is_honored() {
+    let prompt = TemplatePrompt::create("template-schema-persisted", TEMPLATE_SCHEMA);
+    assert!(prompt.values("os=").is_empty(), "control: nothing grants the reads yet");
+    prompt.write_grants(&format!(
+        "allow file {}\nallow file {}\n",
+        prompt.canonical("os.yaml"),
+        prompt.canonical("status.yaml"),
+    ));
+    assert_eq!(prompt.values("os=L"), ["os='Linux'"]);
+    assert_eq!(prompt.values("status="), ["status='draft'", "status='published'"]);
+}
+
+#[test]
+fn a_url_reading_template_offers_nothing_even_when_its_site_is_granted() {
+    let schema = concat!(
+        "$schema:\n",
+        "  os: enum({{ load_data(\"https://schemas.example.invalid/os.yaml\", \"string[]\") }})\n",
+        "  kind: enum(a, b)\n",
+    );
+    let prompt = TemplatePrompt::create("template-schema-url", schema);
+    prompt.commit();
+    prompt.write_grants("allow site https://schemas.example.invalid\n");
+    assert!(prompt.values("os=").is_empty(), "completion has no remote runtime and fetches nothing");
+    assert_eq!(prompt.values("kind="), ["kind='a'", "kind='b'"]);
+}

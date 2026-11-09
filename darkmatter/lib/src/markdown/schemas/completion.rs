@@ -130,12 +130,23 @@ pub enum CompletionKind {
 /// of its arms' candidates; otherwise the first completable arm wins. See
 /// [`suggestion_from_union`].
 pub fn for_property(effective: &EffectiveSchema, property: &str) -> Option<CompletionSuggestion> {
-    match effective.simplified.as_ref()? {
+    for_root_property(effective.simplified.as_ref()?, effective, property)
+}
+
+/// [`for_property`] over declarations that are not an effective schema, such
+/// as a pending template's, with references read through `definitions`.
+/// Passive: a property whose type or values are pending (a template type or
+/// a template constraint) yields what its authored text alone declares.
+pub fn for_root_property<L>(root: &SchemaRoot, definitions: &L, property: &str) -> Option<CompletionSuggestion>
+where
+    L: DefinitionLookup + ?Sized,
+{
+    match root {
         SchemaRoot::Single(shape) => {
             let def = shape.properties.get(property)?;
-            suggestion_from_def(property, def, effective)
+            suggestion_from_def(property, def, definitions)
         }
-        SchemaRoot::Union(arms) => suggestion_from_union(property, arms, effective),
+        SchemaRoot::Union(arms) => suggestion_from_union(property, arms, definitions),
     }
 }
 
@@ -188,11 +199,14 @@ fn completable_in_shape(shape: &SchemaShape, definitions: &EffectiveSchema) -> V
 /// Otherwise the first contributing atom wins, matching the single-shape
 /// "first completable arm" rule. Unresolved [`SchemaArm::FileRef`] arms are
 /// skipped.
-fn suggestion_from_union<'a>(
+fn suggestion_from_union<'a, L>(
     property: &str,
     arms: &'a [SchemaArm],
-    definitions: &'a EffectiveSchema,
-) -> Option<CompletionSuggestion> {
+    definitions: &'a L,
+) -> Option<CompletionSuggestion>
+where
+    L: DefinitionLookup + ?Sized,
+{
     let alternatives: Vec<Alternative<'a>> = arms
         .iter()
         .filter_map(|arm| match arm {
@@ -236,11 +250,10 @@ fn suggestion_from_union<'a>(
     })
 }
 
-fn suggestion_from_def(
-    property: &str,
-    def: &PropertyDef,
-    definitions: &EffectiveSchema,
-) -> Option<CompletionSuggestion> {
+fn suggestion_from_def<L>(property: &str, def: &PropertyDef, definitions: &L) -> Option<CompletionSuggestion>
+where
+    L: DefinitionLookup + ?Sized,
+{
     let alternative = first_completable_atom(def, definitions)?;
     let atom = alternative.atom;
     let kind = kind_for_atom(atom)?;
@@ -257,7 +270,10 @@ fn suggestion_from_def(
 /// union-typed reference so `U(required)` and `U[]` complete like the
 /// property-level union `U` expands to, and through a recursive reference to
 /// its definition's alternatives.
-fn first_completable_atom<'a>(def: &'a PropertyDef, definitions: &'a EffectiveSchema) -> Option<Alternative<'a>> {
+fn first_completable_atom<'a, L>(def: &'a PropertyDef, definitions: &'a L) -> Option<Alternative<'a>>
+where
+    L: DefinitionLookup + ?Sized,
+{
     resolved_alternatives(def, definitions)
         .into_iter()
         .find(|alternative| is_completable(&alternative.atom.ty))
@@ -1089,6 +1105,31 @@ mod tests {
         assert_eq!(words(PathCommand::Render, "style.page."), ["style.page.mode="]);
         assert_eq!(words(PathCommand::Render, "style.page.mode=l"), ["style.page.mode=light"]);
         assert!(words(PathCommand::Render, "title=").is_empty(), "a key outside `style` has no value");
+    }
+
+    /// A pending template completes its static properties from the authored
+    /// declarations; a template type or template constraint offers nothing
+    /// until the template resolves.
+    #[test]
+    fn root_property_of_a_pending_template_completes_only_its_static_properties() {
+        let md: Markdown = concat!(
+            "---\n$schema:\n",
+            "  kind: enum(a, b)\n",
+            "  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }})\n",
+            "  status: '{{ load_data(\"./status.yaml\", \"string\") }}'\n",
+            "---\nbody\n",
+        )
+        .into();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
+        let Err(simplified_schema::SchemaError::UnresolvedSlots(unresolved)) = api.effective_for(&md) else {
+            panic!("a schema with slots stays a template without a session");
+        };
+        let pending = unresolved.pending.expect("the template is kept");
+        let (root, definitions) = pending.template().expect("the expanded template");
+        let kind = for_root_property(root, definitions.as_ref(), "kind").expect("kind is static");
+        assert_eq!(kind.kind, CompletionKind::Enum { members: vec!["a".into(), "b".into()] });
+        assert!(for_root_property(root, definitions.as_ref(), "status").is_none(), "a template type is pending");
+        assert!(for_root_property(root, definitions.as_ref(), "missing").is_none());
     }
 
     #[test]
