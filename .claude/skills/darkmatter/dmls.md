@@ -547,6 +547,21 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   frontmatter-claimed cursor so items are not duplicated. Callback members
   after `h.` come from `scoped_completion_candidates`' local-member step,
   typed only by `TypeScope`.
+- Declared-shape object arguments (`providers/option_argument.rs`):
+  an object literal that is a whole argument of a call whose catalog
+  parameter (after dropping `null`) is an inline object (`load_data`'s
+  `options`) completes its keys (not yet written, inserting `key: `), its
+  `enum` members (quoted; bare inside an open quote), and `true`/`false`
+  for a `boolean`; any other value returns `None` so expression completion
+  runs. Keys and members come from `TypeExpr::InlineObject(shape)`, never a
+  list; plain `object` parameters (`pr_list`) are unclaimed. The frame is
+  recovered from `lex_spanned` tokens up to the cursor's partial (not a
+  parse), over the same analyzed text as type-definition arguments
+  (`type_definition_argument::expression_text`, which carries the
+  Expression-typed value's synthetic-opener `shift`). Dispatched right after
+  the type-definition check at both sites. Option diagnostics need no DMLS
+  code: the library ranges `dm.data.invalid_options` and a binder refusal on
+  argument 2.
 - Hover/documentation from typed descriptor catalogs.
 - Hover shows the local narrowed type ("Type here") at body sites and
   inside expressions: `providers/dsl.rs::with_site_scope` builds

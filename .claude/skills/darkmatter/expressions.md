@@ -414,9 +414,23 @@ greps the handler sources.
 
 ## `load_data` (data files)
 
-`load_data(file: file | null, as: type-definition(container))` reads YAML,
-JSON, JSONL/NDJSON, CSV, TSV, TOML, or JSON5 and returns the value fully
-converted to `as`, or fails; a partial value is never returned. User docs:
+`load_data(file: file | null, as: type-definition(container), options?:
+{format, delimiter, header} | null)` reads YAML, JSON, JSONL/NDJSON, CSV, TSV,
+TOML, or JSON5 and returns the value fully converted to `as`, or fails; a
+partial value is never returned. `options` is a closed inline object in the
+catalog (`schemas/partials/functions.yaml`): `format` is an `enum` of the
+seven names plus the aliases `yml`/`ndjson` (normalized to `yaml`/`jsonl` in
+`options.rs::format_from_name`, so they share memo entries and messages name
+the canonical format); `delimiter` is one ASCII byte other than `"`, CR, LF
+(`delimiter_byte`); TSV accepts only a tab, and a tab on CSV stays CSV;
+`delimiter`/`header` (even `header: true`) on a non-tabular format is
+`dm.data.invalid_options`. Unknown keys, wrong value types, and bad format
+names are the binder's `dm.expression.incompatible_call` at argument 2.
+A computed options value's `invalid_options` is located at the whole call
+(execution keeps no per-argument position); a literal one is always caught
+passively first, at argument 2. Catalog examples read
+`catalog/example_data/` (`EXAMPLE_DATA_FILES`), which now includes an
+extensionless `fixture-export` (fenced as `text` on the generated page). User docs:
 `darkmatter/docs/topics/loading-data.md` (behavior) and
 `docs/cli/data-contracts.md` (`data_location`, `read_set`, the `dm.data.*`
 codes). Code: `compose/expression/data/` (`load.rs` is the function;
@@ -473,7 +487,11 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   every non-null arm and array/tuple element must agree; object/dictionary
   elements read rows by header, list/tuple elements by position (header row
   skipped); anything else, or a tuple with no elements, is
-  `dm.data.row_shape_conflict`. The first row is always a header. Rows are
+  `dm.data.row_shape_conflict`. The first row is a header unless
+`header: false`, which reads every record as a list row (an object-row
+contract is `RowShapeConflict::HeaderlessObjectRows`, same code; the logical
+row view in `error.rs::TabularSource` keeps pointers and positions counted
+from the first record). Rows are
   built per contract at bind time from the memoized table, so the
   object-mode duplicate/empty-header error is per contract.
 - **Numbers and formats** (`parse.rs`): JSON/JSONL through
@@ -487,7 +505,8 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
 - **Codes** (`data/error.rs`, `DATA_DIAGNOSTIC_CODES`, all errors and
   authoring-fatal, never in the warning-only `COMPOSE_DIAGNOSTIC_CODES`):
   `dm.data.not_a_container`, `row_shape_conflict`, `this_import_rejected`,
-  `unsupported_format`, `malformed`, `contract_mismatch`. File failures stay
+  `unsupported_format`, `malformed`, `contract_mismatch`, `invalid_options`
+  (never has a `data_location`: it is decided before any read). File failures stay
   `dm.expression.evaluation_failure` with the file-reference fields (a failed
   allowed-host fetch is `ExpressionError::RemoteRead`: `unreachable`/`io`). A literal
   file plus literal contract is checked passively (`CallCheck::data_problem`).

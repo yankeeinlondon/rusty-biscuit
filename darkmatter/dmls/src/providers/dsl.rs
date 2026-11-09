@@ -40,6 +40,7 @@ use super::DocumentContext;
 use super::collections as collections_provider;
 use super::frontmatter;
 use super::location::line_range;
+use super::option_argument;
 use super::type_definition_argument::{self, Site};
 use crate::diagnostics::call_check;
 use crate::diagnostics::codes::{code, source};
@@ -58,6 +59,14 @@ pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
         return items;
     }
     if type_definition_argument::claims(ctx, offset, Site::Frontmatter) {
+        return Vec::new();
+    }
+    // A declared-shape object argument completes its keys and enumerated
+    // values; in frontmatter the frontmatter provider offers those items.
+    if let Some(items) = option_argument::completion(ctx, offset, Site::Body) {
+        return items;
+    }
+    if option_argument::claims(ctx, offset, Site::Frontmatter) {
         return Vec::new();
     }
     let line_start = ctx.text[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);

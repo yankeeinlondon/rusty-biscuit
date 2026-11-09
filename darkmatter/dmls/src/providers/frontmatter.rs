@@ -37,6 +37,7 @@ use lsp_types::{
 };
 
 use super::DocumentContext;
+use super::option_argument;
 use super::type_definition_argument::{self, Site};
 use crate::overlay::{
     FmEntry, FmEntryRole, FmPathSegment, FmValueKind, FrontmatterAst, SchemaAuthoringState,
@@ -73,6 +74,9 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
 /// SimplifiedSchema grammar, never from a resolution, and are left as they are.
 pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
     if let Some(items) = type_definition_argument::completion(ctx, offset, Site::Frontmatter) {
+        return items;
+    }
+    if let Some(items) = option_argument::completion(ctx, offset, Site::Frontmatter) {
         return items;
     }
     let mut items = meta_schema_completion(ctx, offset).unwrap_or_default();

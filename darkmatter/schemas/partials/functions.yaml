@@ -802,6 +802,9 @@ types:
             example(load_data("fixture.tsv", "tuple([string, number])[]") => [["web", 8080], ["db", 5432]]);
             example(load_data("fixture.toml", "{package: {name: string, version: string}}") => {package: {name: "demo", version: "1.0.0"}});
             example(load_data("fixture.json5", "{hosts: string[]}") => {hosts: ["alpha", "beta"]});
+            example(load_data("fixture-headerless.csv", "tuple([string, number])[]", {header: false}) => [["web", 8080], ["db", 5432]]);
+            example(load_data("fixture-semicolon.txt", "{name: string, port: number}[]", {format: "csv", delimiter: ";"}) => [{name: "web", port: 8080}, {name: "db", port: 5432}]);
+            example(load_data("fixture-export", "{name: string, tags: string[]}", {format: "json"}) => {name: "Ada", tags: ["math", "engines"]});
             example(load_data(null, "string[]") => null);
         ) -> Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file and returns its data converted to the container type `as` describes, or fails naming where the data breaks that type. CSV and TSV rows become objects keyed by the header, or lists of cells, as `as`'s element type says. The optional `options` object chooses how the file is read: `format` (`yaml`, `json`, `jsonl`, `csv`, `tsv`, `toml`, `json5`, or the aliases `yml` and `ndjson`) overrides the extension; `delimiter`, one ASCII character other than a double quote, CR, or LF, separates CSV cells (default a comma; TSV accepts only a tab); `header: false` reads every CSV or TSV record as a row by position, which needs a list-row contract (default `true`). `delimiter` or `header` on a non-tabular format is an error. Null passes through without reading anything.
     markdown_body_empty: |-

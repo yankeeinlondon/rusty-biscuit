@@ -614,6 +614,32 @@ fn load_data_function_page_shows_every_format_family() {
     }
 }
 
+/// The generated `load_data` page shows the three-argument examples (a
+/// headerless CSV, a custom delimiter on a `.txt` file, an explicit format on
+/// an extensionless file), each one's input file, and the `options` parameter.
+#[test]
+fn load_data_function_page_shows_option_examples() {
+    let page = generate_expression_function_page("load_data").expect("load_data is cataloged");
+    let executable = partition_call_examples().executable;
+    for (file, option, language) in [
+        ("fixture-headerless.csv", "{header: false}", "csv"),
+        ("fixture-semicolon.txt", "{format: \"csv\", delimiter: \";\"}", "text"),
+        ("fixture-export", "{format: \"json\"}", "text"),
+    ] {
+        let call = executable
+            .iter()
+            .map(|(call, _)| *call)
+            .find(|call| call.starts_with("load_data(") && call.contains(&format!("\"{file}\"")))
+            .unwrap_or_else(|| panic!("no executable load_data example reads `{file}`"));
+        assert!(call.contains(option), "`{call}` passes `{option}`");
+        assert!(page.contains(call), "the page shows `{call}`");
+        assert!(page.contains(&format!("`{file}`:\n\n```{language}\n")), "the page shows `{file}` fenced as {language}");
+    }
+    assert!(page.contains("web,8080\ndb,5432"), "the headerless input has no header row");
+    assert!(page.contains("name;port"), "the semicolon input is shown");
+    assert!(page.contains("options"), "the page names the third parameter");
+}
+
 #[test]
 fn function_pages_render_only_cataloged_functions() {
     assert!(generate_expression_function_page("no_such_function").is_none());

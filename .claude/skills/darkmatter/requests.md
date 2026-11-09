@@ -98,8 +98,8 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
 
 - **Observation log** (`runtime.rs::Observation`, `ObservationKind::{File,
   Url, Exists, MissingProbe, Listing, Glob}`): every input-reading function
-  observes what it read, hashed at read with BLAKE3 (`LoadedSource::hash`
-  keeps it in the memo entry, so a memo hit observes again; a contract's
+  observes what it read, hashed at read with BLAKE3 (`RawSource::hash`
+  keeps it on the raw memo entry, so a memo hit observes again; a contract's
   observations are kept per memo key). `observe` also adds the entry to the
   read set, except a `Glob` (a `find_files` pattern is not a path). A failed
   read observes `hash: None`. `capture_observations(f)` is a thread-local

@@ -93,20 +93,20 @@ pub(crate) fn hover(ctx: &DocumentContext, offset: usize, site: Site) -> Option<
 /// The analyzed text an expression is read in, and how it maps to document
 /// bytes: the document itself in the body, a scalar's projection in
 /// frontmatter.
-struct Analyzed<'t> {
-    text: Cow<'t, str>,
+pub(crate) struct Analyzed<'t> {
+    pub(crate) text: Cow<'t, str>,
     projection: Option<ScalarProjection>,
 }
 
 impl Analyzed<'_> {
-    fn project(&self, range: Range<usize>) -> Option<SourceSpan> {
+    pub(crate) fn project(&self, range: Range<usize>) -> Option<SourceSpan> {
         match &self.projection {
             None => Some(range),
             Some(projection) => projection.project(range),
         }
     }
 
-    fn encode(&self, text: &str) -> Option<String> {
+    pub(crate) fn encode(&self, text: &str) -> Option<String> {
         match &self.projection {
             None => Some(text.to_string()),
             Some(projection) => projection.encode_fragment(text),
@@ -162,20 +162,41 @@ impl TypeArgument<'_> {
 }
 
 fn locate<'c>(ctx: &DocumentContext<'c>, offset: usize, site: Site) -> Option<TypeArgument<'c>> {
+    let ExpressionText { analyzed, from, cursor, shift } = expression_text(ctx, offset, site)?;
+    argument_in(analyzed, from, cursor).map(|mut argument| {
+        argument.raw.iter_mut().for_each(|raw| *raw -= shift);
+        argument.literal = argument.literal.map(|literal| literal.start - shift..literal.end - shift);
+        argument
+    })
+}
+
+/// The analyzed text holding the cursor at `site`, the offset its
+/// expressions' openers start at or after, and the cursor in it.
+pub(crate) struct ExpressionText<'t> {
+    pub(crate) analyzed: Analyzed<'t>,
+    pub(crate) from: usize,
+    pub(crate) cursor: usize,
+    /// Bytes of synthetic opener in front of `analyzed`'s own text: an
+    /// analyzed offset `o` is `o - shift` in the projected text.
+    pub(crate) shift: usize,
+}
+
+/// The expression text holding `offset` at `site`: the document body, the
+/// whole value of an Expression-typed frontmatter property, or a `{{ … }}`
+/// span in a frontmatter string scalar.
+pub(crate) fn expression_text<'c>(ctx: &DocumentContext<'c>, offset: usize, site: Site) -> Option<ExpressionText<'c>> {
     match site {
-        Site::Body => body_argument(ctx, offset),
-        Site::Frontmatter => frontmatter_argument(ctx, offset),
+        Site::Body => Some(ExpressionText {
+            analyzed: Analyzed { text: Cow::Borrowed(ctx.text), projection: None },
+            from: body_base(ctx.text),
+            cursor: offset,
+            shift: 0,
+        }),
+        Site::Frontmatter => frontmatter_text(ctx, offset),
     }
 }
 
-fn body_argument<'c>(ctx: &DocumentContext<'c>, offset: usize) -> Option<TypeArgument<'c>> {
-    let analyzed = Analyzed { text: Cow::Borrowed(ctx.text), projection: None };
-    argument_in(analyzed, body_base(ctx.text), offset)
-}
-
-/// The argument in the frontmatter scalar holding `offset`: the whole value
-/// of an Expression-typed property, else a `{{ … }}` span in a string scalar.
-fn frontmatter_argument<'c>(ctx: &DocumentContext<'c>, offset: usize) -> Option<TypeArgument<'c>> {
+fn frontmatter_text<'c>(ctx: &DocumentContext<'c>, offset: usize) -> Option<ExpressionText<'c>> {
     let ast = ctx.overlay?.ast.as_deref()?;
     if !ast.contains_offset(offset) {
         return None;
@@ -191,15 +212,16 @@ fn frontmatter_argument<'c>(ctx: &DocumentContext<'c>, offset: usize) -> Option<
             text: Cow::Owned(format!("{{{{{}", value.expression())),
             projection: Some(value.projection().clone()),
         };
-        return argument_in(analyzed, 0, cursor + 2).map(|mut argument| {
-            argument.raw.iter_mut().for_each(|raw| *raw -= 2);
-            argument.literal = argument.literal.map(|literal| literal.start - 2..literal.end - 2);
-            argument
-        });
+        return Some(ExpressionText { analyzed, from: 0, cursor: cursor + 2, shift: 2 });
     }
     let (projection, text, scan_from) = expressions::interpolation_text(&ast.entries()[index], ctx.text)?;
     let cursor = projection.analyzed_offset(offset)?;
-    argument_in(Analyzed { text: Cow::Owned(text), projection: Some(projection) }, scan_from, cursor)
+    Some(ExpressionText {
+        analyzed: Analyzed { text: Cow::Owned(text), projection: Some(projection) },
+        from: scan_from,
+        cursor,
+        shift: 0,
+    })
 }
 
 /// The qualifying argument holding analyzed offset `cursor`, in an

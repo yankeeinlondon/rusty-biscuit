@@ -150,21 +150,57 @@ command, not one compose run: for `md compose`, the reference check,
 pre-flight, lifecycle events, and composition share it (see
 [Compose Requests](./compose-requests.md#one-data-runtime-per-command)).
 
-It has two levels:
+It has three layers, each keyed by what changes its answer and nothing more:
 
-- **parsed source**, keyed by the resolved file (canonical path) or
-  normalized URL: the read, decoded, and parsed document;
-- **bound result**, keyed by that source and the resolved contract: the value
-  converted to `as`.
+```mermaid
+flowchart LR
+    R["raw source<br/>key: file or URL"] --> P["parsed source<br/>key: raw source + format + delimiter"]
+    P --> B["bound result<br/>key: parsed source + contract + header"]
+```
 
-So `load_data(f, "a[]")` and `load_data(f, "b[]")` read and parse `f` once and
-validate it twice. A relative named import in `as` is keyed by the schema
-file it resolves to, not by its text. Each entry is single-flight: concurrent
-calls for one key wait for the first caller's result. A typed failure
-(malformed data, a contract mismatch) is kept too, but without a call-site
-location, so every call that reuses it reports its own document and line. A
+| Layer | Holds | Key |
+| --- | --- | --- |
+| raw source | the text read, with any byte-order mark removed (or a fetched body), or the offset of its first invalid UTF-8 byte | the resolved file (canonical path) or normalized URL |
+| parsed source | the parsed document | the raw source, the effective format, and the effective delimiter (CSV and TSV only) |
+| bound result | the value converted to `as` | the parsed source, the resolved contract, and the effective header (CSV and TSV only) |
+
+The keys use **effective** values: the `format` option or else the format the
+extension names, a delimiter of `,` for CSV and a tab for TSV unless one is
+given, and `header: true` unless `false` is given. So calls that spell the
+same read differently share every layer: no options, `{}`, `null` options,
+`{format: "csv"}` on a `.csv` file, `{delimiter: ","}`, and `{header: true}`
+are one entry, and the aliases `yml` and `ndjson` share entries with `yaml`
+and `jsonl`. A JSON, YAML, TOML, or JSON5 key carries no delimiter or header,
+because those options are refused for such a format before the memo is
+consulted.
+
+| Calls over `f.csv` | `reads` | `parses` | `binds` |
+| --- | --- | --- | --- |
+| `load_data(f, "a[]")` and `load_data(f, "b[]")` | 1 | 1 | 2 |
+| `{delimiter: ","}` and `{delimiter: ";"}` | 1 | 2 | 2 |
+| `{header: true}` and `{header: false}` over a list-row contract | 1 | 1 | 2 |
+| `{format: "csv"}` and `{format: "tsv"}` | 1 | 2 | 2 |
+
+`DataRuntime::stats()` counts the work: `reads` is raw loaders run (a file
+read or a fetched body taken), `parses` documents parsed, `binds` contracts
+validated, and `source_hits` and `bind_hits` the parse and bind lookups the
+memo answered. A raw lookup the memo answers counts nothing, so raw reuse
+shows as `reads` staying flat. A relative named import in `as` is keyed by
+the schema file it resolves to, not by its text.
+
+Each entry is single-flight: concurrent calls for one key wait for the first
+caller's result. A typed failure (malformed data, a contract mismatch) is
+kept too, under its own key and without a call-site location, so every call
+that reuses it reports its own document and line, and a failure under one
+format, delimiter, or header choice never answers a call with another. A
 result that only means "not possible yet" is never kept, so a later call
 tries again.
+
+Every call is observed in the command's
+[observation log](./compose-requests.md#observations), with the hash of the
+bytes its raw source holds, whichever layer answered it. A call inside a
+schema slot passes the slot's read gate before any layer is consulted, so a
+file a document already loaded is never handed to an unapproved slot.
 
 The memo holds in **every** `CacheAccessMode`, `Off` and `Refresh` included.
 Those modes govern the composed-result cache above; repeating a read within
@@ -179,7 +215,8 @@ whether it succeeded or failed), before the next expression evaluates. A
 lifecycle step that did not run, such as one its `when:` guard turned off,
 leaves the memo alone. A shell command answered from
 shell command memoization ran nothing and leaves the memo alone. Emptying the
-memo never removes an entry from the command's read set. A load already in
+memo clears all three layers at once and advances the memo generation once;
+it never removes an entry from the command's read set. A load already in
 flight when the memo is emptied finishes for its own caller but is not kept
 for later ones. A body read that follows a command is evaluated only after
 that command ran, so it reads the file again rather than keeping a value from
@@ -190,7 +227,7 @@ The memo persists nothing and does not replace the transport cache. A URL's
 body still comes from the [remote transport cache](#remote-transport-cache),
 under the same host policy, freshness rules, and
 [Cache-Control precedence](#cache-control-precedence); the memo only keeps
-what was parsed from that body. Emptying the memo does not fetch a URL
+the body's text and what was parsed from it. Emptying the memo does not fetch a URL
 again within the same command.
 
 ### Reference analysis

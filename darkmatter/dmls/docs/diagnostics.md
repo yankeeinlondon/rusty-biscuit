@@ -525,6 +525,32 @@ suppress its code; the category number stays visible in the message.
 | Strict warning, category 2 | `min(maybe, 5)` with `maybe: number` | Make the property required (`maybe: number(required)`), or guard the call: `maybe != null ? min(maybe, 5) : 5`. |
 | Strict warning, category 4 | `min(untyped_var, 5)` | Declare the variable in `$schema`: `untyped_var: number(required)`. |
 
+#### `load_data` data diagnostics
+
+`load_data(file, as, options?)` gets the same call check, plus a few
+data-specific errors. Each one is proven from literal arguments alone, and
+`md compose` rejects the document with the same code before it reads anything:
+
+| Code | When | Ranged at |
+|------|------|-----------|
+| `dm.data.not_a_container`, `dm.data.this_import_rejected` | The literal `as` contract is not an object or list type, or names a `@this` import. | `as` |
+| `dm.data.row_shape_conflict` | The file is CSV or TSV and `as` cannot describe its rows (it mixes object and list rows, or its elements are not rows), or the options say `header: false`, which reads rows by position, and `as` asks for object rows. The format is known from a literal `format` option or a literal file extension. | `as` |
+| `dm.data.invalid_options` | A literal options value is wrong for the format: a `delimiter` that is not one ASCII character, is a double quote, CR, or LF, or is not a tab on TSV; or a `delimiter` or `header` on a non-tabular format. | the options argument |
+
+```markdown
+{{ load_data("rows.csv", "{ name: string }[]", {header: false}) }}   row_shape_conflict at "{ name: string }[]"
+{{ load_data("rows.tsv", "string[]", {delimiter: ","}) }}           invalid_options at {delimiter: ","}
+{{ load_data("hosts.json", "string[]", {header: false}) }}          invalid_options at {header: false}
+```
+
+An unknown option key, a value of the wrong type (`{header: [1]}`), or a
+format name the catalog does not declare (`{format: "CSV"}`) is an
+`incompatible_call` error on the options argument. Anything computed defers
+the check to composition: a variable or call as the options value, a computed
+`format` (which might change the format the extension implies), or a
+computed `file` with no literal `format`. So
+`{{ load_data(name, "string[]", opts) }}` shows nothing.
+
 ## Ranging
 
 For supported YAML nodes, a diagnostic starts at the same source byte as the

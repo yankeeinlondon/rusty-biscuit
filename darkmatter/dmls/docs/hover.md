@@ -104,6 +104,21 @@ A named reference such as `"Hosts@./types.yaml"` hovers as written; the
 schema file is not opened. A string that is not a valid definition falls
 back to the expression hover.
 
+### Function signatures with an options object
+
+Hovering a function name shows its typed signature and catalog description.
+For `load_data`, the signature shows the optional third parameter in
+brackets with its declared keys, and the description gives each key's
+default:
+
+```markdown
+load_data(file: file | null, as: type-definition(container), [options: {format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean} | null]) -> unknown | null | error
+```
+
+The description says that `format` overrides the file extension, that
+`delimiter` defaults to a comma (TSV accepts only a tab), and that `header`
+defaults to `true`.
+
 ### Union-typed properties and list items
 
 A property typed by a reference to a union-typed named type with a postfix

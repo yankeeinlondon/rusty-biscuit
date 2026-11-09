@@ -4,9 +4,11 @@ kind: canonical-documentation
 
 # Loading Data
 
-`load_data(file, as)` reads a data file into an expression. The file can be
-YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5, and `as` says what shape the
-data must have. The result is the parsed data, converted to that shape, or a
+`load_data(file, as, options)` reads a data file into an expression. The file
+can be YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5, `as` says what shape
+the data must have, and the optional [`options`](#options) object says how to
+read it when the file's extension is not enough: a format, a CSV delimiter, or
+a CSV file with no header row. The result is the parsed data, converted to that shape, or a
 failure that names the place in the file where the data breaks it. A partly
 valid file never produces a partial value.
 
@@ -41,24 +43,25 @@ the passive [call check](../inline/call-check.md) rejects a call whose
 literal arguments prove it can never work, such as a contract that is not a
 container. It reads no file to do so. When the call later executes, it goes
 through the steps below. A failure at any step stops there, so it never
-depends on work a later step would have done.
+depends on work a later step would have done. In particular, every problem
+with the options is found before the file is read.
 
 ```mermaid
 flowchart TD
     A["passive call check<br/>(literal arguments, before anything runs)"] --> B{file is null?}
     B -->|yes| N[returns null, reads nothing]
-    B -->|no| C["prepare the contract<br/>(resolve named imports)"]
+    B -->|no| O["read the options<br/>(dm.data.invalid_options)"]
+    O --> C["prepare the contract<br/>(resolve named imports)"]
     C --> D["resolve the file or URL<br/>and record it in the read set"]
-    D --> E["choose the format from the extension<br/>(CSV/TSV: choose the row shape)"]
-    E --> F{"URL?"}
+    D --> E["choose the format:<br/>the format option, else the extension"]
+    E --> P["check the options apply to that format<br/>(dm.data.invalid_options)"]
+    P --> R["CSV/TSV: choose the row shape<br/>(header: false needs list rows)"]
+    R --> F{"URL?"}
     F -->|yes| G["check host policy, then fetch<br/>(remote runtime and transport cache)"]
     F -->|no| H
-    G --> H{"parsed source<br/>in the memo?"}
-    H -->|no| I["read, decode, parse"]
-    H -->|yes| J
-    I --> J{"bound result<br/>in the memo?"}
-    J -->|no| K["convert and validate against as"]
-    J -->|yes| OK
+    G --> H["read and decode the source<br/>(raw memo)"]
+    H --> I["parse in the format and delimiter<br/>(parse memo)"]
+    I --> K["convert and validate against as,<br/>with or without a header (bind memo)"]
     K -->|fits| OK[returns the converted value]
     K -->|does not fit| X["fails with dm.data.contract_mismatch<br/>located in the data file"]
     I -->|cannot parse| M["fails with dm.data.malformed<br/>located in the data file"]
@@ -148,8 +151,16 @@ types:
 The format comes from the file's extension, or from the extension of a URL's
 path (its `?query` and `#fragment` are ignored). Matching ignores letter
 case, so `DATA.JSON` is JSON. Neither the file's content nor an HTTP
-`Content-Type` header is consulted, and there is no way to override the
-choice.
+`Content-Type` header is consulted.
+
+A [`format` option](#options) replaces the extension entirely: the extension
+is not looked at, so a `.txt` file, an extensionless file, or a `.json` file
+can each be read as any format.
+
+```md
+{{ load_data("export", "{ name: string }", {format: "json"}) }}
+{{ load_data("hosts.txt", "{ name: string }[]", {format: "csv"}) }}
+```
 
 | Extension | Read as |
 | --- | --- |
@@ -161,7 +172,8 @@ choice.
 | `.toml` | one TOML document, always a table |
 | `.json5` | one JSON5 value, any top-level shape |
 
-Any other extension fails with `dm.data.unsupported_format`.
+Any other extension, or no extension, fails with `dm.data.unsupported_format`
+unless the call names a `format`.
 
 ```md
 {{ load_data("events.ndjson", "{ id: number, ok: boolean }[]") }}
@@ -202,8 +214,9 @@ Loaded values are data. A string in the file that contains `{{ … }}`,
 
 ## CSV and TSV
 
-CSV and TSV rows carry no types. The **first row is always a header**, and
-the element type of `as` decides what each row becomes:
+CSV and TSV rows carry no types. By default the **first row is a header**
+(see [Files without a header row](#files-without-a-header-row) to turn that
+off), and the element type of `as` decides what each row becomes:
 
 - an **object** element turns each row into an object keyed by the header;
 - a **tuple or array** element turns each row into a list of cells, and the
@@ -267,8 +280,8 @@ and reports the conflict before anything runs.
 | text between a closing quote and the next delimiter (`"ab"c`) | malformed |
 
 Cells and headers are never trimmed: `name, port` has a header named
-` port`. A file without a header row is not supported; its first row is
-read as the header.
+` port`. A file without a header row needs `{header: false}`; without it, the
+first row is read as the header.
 
 ### How cell text converts
 
@@ -287,6 +300,127 @@ a YAML 1.1 style vocabulary, which can surprise a CSV author: `1` reads as
 | empty | fails | fails | `""` |
 | `1,000`, `NaN`, `0x10` | fails | fails | kept |
 | `9007199254740993` | fails (not exactly representable) | fails | kept |
+
+## Options
+
+The third argument is an object with up to three keys. Each key is optional,
+and leaving it out, or writing `null`, means its default. Omitting the whole
+object, or passing `null` or `{}`, reads the file exactly as a two-argument
+call does.
+
+| Key | Values | Default | Applies to |
+| --- | --- | --- | --- |
+| `format` | `yaml`, `json`, `jsonl`, `csv`, `tsv`, `toml`, `json5`, and the aliases `yml` (for `yaml`) and `ndjson` (for `jsonl`) | chosen from the extension | every call |
+| `delimiter` | one ASCII character other than a double quote, CR, or LF | `,` for CSV, a tab for TSV | CSV and TSV only |
+| `header` | `true` or `false` | `true` | CSV and TSV only |
+
+Format names are exact and lowercase: `"CSV"`, `" csv"`, and `"text"` are
+errors. An alias is the same format, not a variant: `{format: "yml"}` reads
+exactly as `{format: "yaml"}` does, and a message about it names `YAML`.
+
+The options object is closed. A key other than these three, or a value of the
+wrong type (`{header: "false"}`, `{delimiter: 5}`), is refused like any other
+argument of the wrong type, before anything runs.
+
+### Files without a header row
+
+`{header: false}` reads every CSV or TSV record as a row, the first included.
+Rows are then lists of cells, so `as` must describe list rows, such as
+`"tuple([string, number])[]"`.
+
+Given `ports.csv`:
+
+```text
+web,8080
+db,5432
+```
+
+```md
+{{ load_data("ports.csv", "tuple([string, number])[]", {header: false}) }}
+```
+
+```text
+[["web", 8080], ["db", 5432]]
+```
+
+An object-row contract has no header names to use as keys, so
+`load_data("ports.csv", "{ name: string, port: number }[]", {header: false})`
+fails with `dm.data.row_shape_conflict`. When `as` is a literal, the call
+check reports it before anything runs, at `as`; a contract that imports a
+type from a file is checked when the call runs, before the data file is read.
+
+Without a header, the first record sets the number of cells every other
+record must have, a file with no records (empty, or only blank lines) is `[]`,
+and positions count from the first record: in the file above, a bad `8080`
+is `/0/1` on line 1. The other [strict rules](#the-strict-rules) still apply.
+
+### Another delimiter
+
+`delimiter` changes the character that separates CSV cells. Quoting works the
+same way: a quoted cell may contain the delimiter.
+
+Given `hosts.txt`:
+
+```text
+name;port
+web;8080
+db;5432
+```
+
+```md
+{{ load_data("hosts.txt", "{ name: string, port: number }[]", {format: "csv", delimiter: ";"}) }}
+{{ load_data("hosts.psv", "{ name: string }[]", {format: "csv", delimiter: "|"}) }}
+```
+
+Write a tab as `"\t"`. A CSV call with a tab delimiter stays CSV; it does not
+become TSV.
+
+TSV is tab-separated by definition, so a TSV read accepts only a tab:
+`{format: "tsv", delimiter: ","}` fails, and so does `{delimiter: ";"}` on a
+`.tsv` file. To read data separated by another character, use
+`{format: "csv", delimiter: …}`. `{delimiter: "\t"}` on a TSV read is
+accepted.
+
+### Options that cannot apply
+
+`delimiter` and `header` only mean something for CSV and TSV. Either one on
+any other format fails with `dm.data.invalid_options`, even when its value is
+the default:
+
+```md
+{{ load_data("config.json", "{ hosts: string[] }", {header: true}) }}
+```
+
+```text
+load_data(): option `header` is invalid: applies only to CSV and TSV data, but this call reads JSON; remove it or select a tabular format
+```
+
+The format a call reads is decided first (the `format` option, else the
+extension), and the options are checked against that format, so
+`{format: "csv", header: false}` on `data.json` is valid.
+
+Every invalid delimiter fails the same way, naming the key:
+
+| Call | Why it fails |
+| --- | --- |
+| `{delimiter: ""}`, `{delimiter: ",,"}` | not exactly one character |
+| `{delimiter: "é"}` | not ASCII |
+| `{delimiter: "\""}`, `{delimiter: "\n"}` | a quote or a line break cannot separate cells |
+| `{format: "tsv", delimiter: ","}` | TSV accepts only a tab |
+| `{format: "json", delimiter: ";"}` | `delimiter` does not apply to JSON |
+
+### When options are computed
+
+Options may be computed, as a whole (`load_data(f, t, opts)`) or member by
+member (`{format: fmt, header: false}`). The call check judges only what it
+can prove from the literal parts: a literal `delimiter` is always checked; the
+format checks run only when no computed value can change the format. A
+computed value is checked when the call runs, with the same message. See
+[When loading fails](#when-loading-fails) for where each failure is located.
+
+A `null` file still returns `null` without reading anything, and its computed
+options are not checked; a literal mistake in its options is still refused
+before anything runs.
 
 ## Files that may be missing
 
@@ -367,7 +501,11 @@ md compose doc.md --allow host=data.example.com
 ```
 
 - The format comes from the URL path's extension, so `?v=2` above is
-  ignored and the response is read as JSON.
+  ignored and the response is read as JSON. An address with no extension,
+  such as `https://data.example.com/export?id=7`, needs a `format` option:
+  `load_data("https://data.example.com/export?id=7", "{ name: string }[]", {format: "json"})`.
+- `format` only says how to read the response. It grants no network access
+  and changes nothing about host policy or redirects.
 - Host policy is checked before any memo or transport-cache lookup. A denied
   host fails without a network request, even when an earlier run cached the
   response.
@@ -383,11 +521,24 @@ md compose doc.md --allow host=data.example.com
 
 ## Reading a file once per command
 
-Within one command, a file is read and parsed once, and validated once per
-contract, however many calls name it. For `md compose` this covers the
-reference check, the pre-flight walk, lifecycle events, and composition, so
-a `{{ load_data(…) }}` inside a 100-item `::map` reads its file once. Two
-different contracts over one file read it once and validate it twice. This
+Within one command, a file is read once, parsed once per format and
+delimiter, and validated once per contract and header choice, however many
+calls name it. For `md compose` this covers the reference check, the
+pre-flight walk, lifecycle events, and composition, so a
+`{{ load_data(…) }}` inside a 100-item `::map` reads its file once.
+
+| Calls over one file | Reads | Parses | Validations |
+| --- | --- | --- | --- |
+| two different contracts | 1 | 1 | 2 |
+| `{delimiter: ","}` and `{delimiter: ";"}` | 1 | 2 | 2 |
+| `{header: true}` and `{header: false}`, both list rows | 1 | 1 | 2 |
+| no options, `{}`, `{format: "csv"}` on `a.csv`, `{delimiter: ","}` | 1 | 1 | 1 |
+| `{format: "yml"}` and `{format: "yaml"}` | 1 | 1 | 1 |
+
+Options that mean the same thing share the work, because the memo is keyed
+by the effective format, delimiter, and header rather than by how the call
+spelled them. A failure is kept with its key too: a header-name failure under
+object rows does not affect a `header: false` call over the same file. This
 holds in every cache access mode, `Off` and `Refresh` included: those modes
 govern the composed-result cache, not this memo. Nothing is persisted.
 
@@ -443,7 +594,7 @@ before any body command runs. See
 
 There is no file-size limit. The `::map` iteration limits bound how many
 items a region visits and how much it writes, not how many bytes a file may
-hold. Details of the two memo levels are in
+hold. Details of the three memo layers are in
 [Caching](./caching.md#the-load_data-memo).
 
 ## The read set
@@ -489,11 +640,25 @@ Each problem has its own code:
 | Code | Meaning |
 | --- | --- |
 | `dm.data.not_a_container` | `as` is not a container |
-| `dm.data.row_shape_conflict` | `as` cannot choose a CSV/TSV row shape |
+| `dm.data.row_shape_conflict` | `as` cannot choose a CSV/TSV row shape, or describes object rows with `header: false` |
+| `dm.data.invalid_options` | an option value is not usable (a bad delimiter), or an option does not apply to the format read |
 | `dm.data.this_import_rejected` | `as` uses `Name@this` |
-| `dm.data.unsupported_format` | the extension names no supported format |
+| `dm.data.unsupported_format` | the extension names no supported format, and no `format` option was given |
 | `dm.data.malformed` | the file cannot be parsed under its format's rules |
 | `dm.data.contract_mismatch` | the parsed data does not fit `as` |
+
+A `dm.data.invalid_options` message names the key and the fix, for example
+``load_data(): option `delimiter` is invalid: must be one ASCII character
+other than a double quote, CR, or LF (write a tab as "\t")``. When the
+options are literal, the call check reports it before anything runs, located
+at the options argument; DMLS underlines the same range. When a computed
+value is wrong, the call fails when it runs, located at the whole call,
+because a running call keeps no position for each argument. Either way no
+file is read, and the record has no `data_location`.
+
+An unknown key, a value of the wrong type, or a format name that is not in
+the list is an argument of the wrong type, reported before anything runs as
+`dm.expression.incompatible_call` at the options argument.
 
 A file that cannot be found or read, or a URL that cannot be fetched, keeps
 the general code `dm.expression.evaluation_failure`. When the file is
@@ -600,7 +765,7 @@ is reported at the slot. The full rules are in
 ## See also
 
 - [`load_data` function page](../functions/load-data.md): signature and
-  catalog examples
+  catalog examples, including the three-argument forms
 - [Darkmatter Expressions](./darkmatter-expressions.md): the expression
   language and the other read-side functions
 - [Container types](schemas/definition.md#container-types): which type

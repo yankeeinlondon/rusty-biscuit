@@ -214,6 +214,34 @@ hosts: '{{ load_data(''hosts.yaml'', ''{ name: str|'') }}'
 - Which arguments qualify comes from the function catalog's parameter type,
   so the file argument of `load_data` is completed as an expression.
 
+### Keys and values of an options object
+
+An object written as an argument whose catalog parameter declares its keys,
+such as the `options` of `load_data`, completes from that declaration:
+
+```markdown
+{{ load_data("rows.txt", "string[]", {|            offers `format`, `delimiter`, `header`
+{{ load_data("rows.txt", "string[]", {format: "csv", |   offers `delimiter`, `header`
+{{ load_data("rows.txt", "string[]", {format: |    offers `"yaml"`, `"yml"`, `"json"`, ... (all nine)
+{{ load_data("rows.txt", "string[]", {format: "cs| offers `"csv"`
+{{ load_data("rows.txt", "string[]", {header: |    offers `true`, `false`
+```
+
+- At a key position (after `{` or `,`), every declared key not already
+  written is offered; choosing one inserts `key: `.
+- At the start of an `enum` value, every declared member is offered,
+  quoted; inside an open quote, the member replaces what you typed inside
+  it. `format` offers all nine names, including the aliases `yml` and
+  `ndjson`.
+- At the start of a `boolean` value, `true` and `false` are offered.
+- Any other value position, such as `delimiter:`, gets ordinary expression
+  completion, so a variable or call can be written there.
+- It works in the body and in frontmatter, and the inserted text is escaped
+  for the YAML quoting around a frontmatter value.
+- The keys and members come from the function catalog, never from a list in
+  the editor. A parameter typed plain `object`, such as the filter of
+  `pr_list`, declares no keys and gets ordinary completion.
+
 ## Shell suffix completion (`$( … )::`)
 
 After the closing `)` of a frontmatter `$( … )` value, completion offers the

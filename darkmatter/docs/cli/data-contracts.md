@@ -340,7 +340,7 @@ classified by what failed:
 | `dm.expression.parse_failure` | an expression does not parse |
 | `dm.expression.evaluation_failure` | an expression fails to evaluate; located when the expression is authored in the file |
 | `dm.expression.unknown_function` | an expression calls a function that does not exist |
-| `dm.data.*` | a `load_data` call fails on its data or its contract (`malformed`, `contract_mismatch`, `not_a_container`, `row_shape_conflict`, `unsupported_format`, `this_import_rejected`); a missing or unreadable data file is `dm.expression.evaluation_failure`, as for any read-side function; see [Data errors](#data-errors) |
+| `dm.data.*` | a `load_data` call fails on its data or its contract (`malformed`, `contract_mismatch`, `not_a_container`, `row_shape_conflict`, `unsupported_format`, `this_import_rejected`, `invalid_options`); a missing or unreadable data file is `dm.expression.evaluation_failure`, as for any read-side function; see [Data errors](#data-errors) |
 | `dm.directive.parse_failure` | a `::` directive does not parse |
 | `dm.collection.*` | a `::map` or `::filter` fails (`malformed`, `untyped_map_source`, `untyped_filter_source`, `invalid_source`, `pattern_mismatch`, `invalid_sort_key`, `callback_failed`), located at the directive opener or the failing callback; a static defect is reported once, with `iteration_path: []` |
 | `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | a request ran past `--max-iteration-visits` or `--max-expansion-bytes`; located at the authored text whose work was being paid for: the collection opener for a visit, the copied body text, or the `{{ }}`, `::shell`, `::shell-block`, or `::file` whose output was being inserted (a cached child that is included again is located at the including `::file`) |
@@ -523,20 +523,27 @@ discovers it, once per invocation, and not in the later files' records.
 
 ## Data errors
 
-[`load_data(file, as)`](../functions/load-data.md) reads a data file and checks
-it against the contract `as`. When the call fails, its diagnostic tells a script
-which part failed: the contract, the data, or the file itself. This section lists
+[`load_data(file, as, options)`](../functions/load-data.md) reads a data file
+and checks it against the contract `as`; the optional
+[options](../topics/loading-data.md#options) choose the format, the CSV
+delimiter, and whether a CSV file has a header row. When the call fails, its
+diagnostic tells a script which part failed: the options, the contract, the
+data, or the file itself. This section lists
 every case, what each record carries, and how many records one failure produces.
 Every case is an error. None is a warning, so `--allow` and `--deny` do not
 apply to them.
 
 ```mermaid
 flowchart TD
-    C["load_data(file, as)"] --> K{"is as a container<br/>contract?"}
+    C["load_data(file, as, options)"] --> O{"are the option<br/>values usable?"}
+    O -->|no| OE["dm.data.invalid_options"]
+    O -->|yes| K{"is as a container<br/>contract?"}
     K -->|no| KE["contract errors"]
     K -->|yes| F{"can the file be found,<br/>read, or fetched?"}
     F -->|no| FE["dm.expression.evaluation_failure<br/>with reference fields"]
-    F -->|yes| P{"supported format,<br/>and does it parse?"}
+    F -->|yes| A{"do the options apply<br/>to the format read?"}
+    A -->|no| OE
+    A -->|yes| P{"supported format,<br/>and does it parse?"}
     P -->|no| PE["dm.data.unsupported_format<br/>dm.data.malformed"]
     P -->|yes| M{"does the data<br/>fit as?"}
     M -->|no| ME["dm.data.contract_mismatch,<br/>one record per violation"]
@@ -547,8 +554,9 @@ flowchart TD
 |---|---|---|
 | `dm.data.not_a_container` | `as` does not describe a [container](../topics/schemas/definition.md#container-types): a scalar such as `"string"`, `"unknown"` or `"null"` alone, a union with a scalar arm, or a named import that resolves to a scalar | no |
 | `dm.data.this_import_rejected` | `as` names a type of the calling document (`Os@this`, or a bare name such as `Os`). An inline contract has no types of its own, so import the type from a file (`Os@./types.yaml`). A misspelled type keyword reads as a bare name: `"strng[]"` fails here | no |
-| `dm.data.row_shape_conflict` | the file is CSV or TSV and `as` cannot choose one row shape: one arm reads rows as objects and another as lists, or an element is not a row | no |
-| `dm.data.unsupported_format` | the file's extension names none of the [supported formats](../topics/loading-data.md#formats) (`.txt`, `.md`, no extension) | no |
+| `dm.data.row_shape_conflict` | the file is CSV or TSV and `as` cannot choose one row shape: one arm reads rows as objects and another as lists, or an element is not a row; or `header: false` is given and `as` describes object rows | no |
+| `dm.data.unsupported_format` | no `format` option is given and the file's extension names none of the [supported formats](../topics/loading-data.md#formats) (`.txt`, `.md`, no extension) | no |
+| `dm.data.invalid_options` | an [option](../topics/loading-data.md#options) value cannot be used (a `delimiter` that is not one ASCII character other than a double quote, CR, or LF), a TSV read is given a delimiter other than a tab, or `delimiter` or `header` is given for a format other than CSV and TSV. The message names the key | no |
 | `dm.data.malformed` | the content does not parse under its format's rules: invalid syntax, trailing text, an empty JSON or JSON5 file, a number the format cannot hold exactly, several YAML documents, a YAML duplicate key, non-string key, or tag, a TOML duplicate key, a CSV or TSV quote error or ragged row, or a local file that is not valid UTF-8 | yes |
 | `dm.data.contract_mismatch` | the data parsed but does not fit `as` | yes, on each record but the overflow record |
 
@@ -565,8 +573,9 @@ written in the call or computed:
   The record is located at the expression, with `null` types.
 
 `dm.data.row_shape_conflict` needs the format as well, so it is found before
-anything runs only when `file` is a literal too. `dm.data.unsupported_format`
-is always found when the call runs.
+anything runs only when the format is provable: a literal `format` option, or
+a literal `file` and no computed value that could set `format`.
+`dm.data.unsupported_format` is always found when the call runs.
 
 ```json
 { "code": "dm.data.not_a_container",
@@ -590,6 +599,78 @@ Two contract problems keep a general code:
 { "code": "dm.expression.evaluation_failure",
   "message": "interpolation of `load_data(\"os.yaml\", \"Nope@./types.yaml\")` failed: load_data(): the contract `Nope@./types.yaml` is invalid: as: unknown named type `Nope` in `/work/types.yaml`",
   "source": { "file": "/work/doc.md", "line": 1, "column": 3, "inserted": false } }
+```
+
+### Option errors
+
+An options problem is found before the data file is read, so its record never
+has a `data_location`. Like a contract problem, where it is reported depends
+on whether the options are written in the call:
+
+- **Literal options** are judged by the call check before anything runs. The
+  record is located at the options argument, and `expected_type` and
+  `actual_type` name the parameter and the argument.
+- **Computed options**, such as `load_data(f, t, opts)` with `opts` from
+  frontmatter, are judged when the call runs. The record is located at the
+  call expression, with `null` types.
+
+A key that is not an option, a value of the wrong type, or a format name that
+is not in the list is not `dm.data.invalid_options`: the argument does not fit
+the parameter at all, so it is `dm.expression.incompatible_call` at the
+options argument.
+
+Given `rows.csv` and this document, `doc.md`:
+
+```md
+{{ load_data("rows.csv", "tuple([string, number])[]", {delimiter: ",,"}) }}
+```
+
+`md compose doc.md --output json` exits with status 1, writes nothing to
+stderr, and prints:
+
+```json
+{
+  "file": "doc.md",
+  "outcome": "failure",
+  "document": null,
+  "diagnostics": [
+    {
+      "code": "dm.data.invalid_options",
+      "severity": "error",
+      "message": "load_data(): option `delimiter` is invalid: must be one ASCII character other than a double quote, CR, or LF (write a tab as \"\\t\")",
+      "source": { "file": "/work/doc.md", "line": 1, "column": 55, "inserted": false },
+      "expected_type": "{format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean} | null",
+      "actual_type": "literal {\"delimiter\":\",,\"}",
+      "span": null,
+      "iteration_path": []
+    }
+  ],
+  "summary": null,
+  "lifecycle_output": [],
+  "read_set": []
+}
+```
+
+Field by field:
+
+- `code` and `severity`: an error, which `--allow` cannot recover.
+- `message`: names the key (`delimiter`) and what a valid value is.
+- `source`: line 1, column 55, the `{` that opens the options argument.
+- `expected_type` and `actual_type`: the declared options parameter and the
+  literal that was passed.
+- no `data_location`: no data file was read.
+- `read_set` is empty: the call check rejected the document before any
+  expression ran, so `rows.csv` was never resolved.
+
+Given the same `rows.csv` (`web,8080` and `db,5432`, no header row), a
+headerless read succeeds:
+
+```md
+Ports: {{ load_data("rows.csv", "tuple([string, number])[]", {header: false}) }}
+```
+
+```text
+Ports: [["web",8080],["db",5432]]
 ```
 
 ### Malformed data and contract mismatches

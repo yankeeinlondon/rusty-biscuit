@@ -85,6 +85,27 @@ version = "1.0.0"
 }
 ```
 
+`fixture-headerless.csv`:
+
+```csv
+web,8080
+db,5432
+```
+
+`fixture-semicolon.txt`:
+
+```text
+name;port
+web;8080
+db;5432
+```
+
+`fixture-export`:
+
+```text
+{"name": "Ada", "tags": ["math", "engines"]}
+```
+
 ## Examples
 
 ```text
@@ -120,6 +141,21 @@ load_data("fixture.toml", "{package: {name: string, version: string}}")
 ```text
 load_data("fixture.json5", "{hosts: string[]}")
 ⇒ {hosts: ["alpha", "beta"]}
+```
+
+```text
+load_data("fixture-headerless.csv", "tuple([string, number])[]", {header: false})
+⇒ [["web", 8080], ["db", 5432]]
+```
+
+```text
+load_data("fixture-semicolon.txt", "{name: string, port: number}[]", {format: "csv", delimiter: ";"})
+⇒ [{name: "web", port: 8080}, {name: "db", port: 5432}]
+```
+
+```text
+load_data("fixture-export", "{name: string, tags: string[]}", {format: "json"})
+⇒ {name: "Ada", tags: ["math", "engines"]}
 ```
 
 ```text

@@ -242,7 +242,16 @@ sentinel" alone passes for the wrong reason. `cli/tests/l1/path_completion.rs` i
   fields), `load_data_passive.rs` (passive verdicts and static typing; no
   filesystem context, so nothing can be read), and `load_data_runtime.rs`
   (one runtime across passes, the memo-emptying rule, remote policy, every
-  surface's read set). CLI: `cli/tests/l1/load_data.rs` (one route per
+  surface's read set). The options suites: `load_data_options_passive.rs`
+  (passive option verdicts and their ranges), `load_data_options.rs`
+  (execution matrix, aliases, memo counts per layer), `load_data_headerless.rs`
+  (`header: false` rows and positions), `load_data_options_remote.rs`
+  (extensionless URL with `format`, host policy over a warmed memo),
+  `load_data_options_slots.rs` (observations, slot gate, generation over all
+  three layers), and DMLS `dmls/tests/l1/option_arguments.rs` (option key and
+  value completion, ranged diagnostics). The catalog's option examples are
+  pinned by `catalog/tests.rs::load_data_function_page_shows_option_examples`.
+  CLI: `cli/tests/l1/load_data.rs` (one route per
   loader family and the envelopes); read-set and mismatch conformance lives
   in `output_envelope.rs`, not repeated there.
 - Every fixture is a temporary directory and every request is anchored

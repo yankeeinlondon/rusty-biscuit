@@ -188,7 +188,7 @@ What each family reports:
 | Problem | `source` |
 | --- | --- |
 | A schema problem | the file, at its [location](../topics/schemas/definition.md#problem-locations) when it has one; a schema that could not be prepared has the file alone |
-| A `load_data` failure | the call, or its `as` argument for a contract the call check rejects; a position inside the data file is in [`data_location`](../cli/data-contracts.md#data-location) |
+| A `load_data` failure | the call; its `as` argument for a contract the call check rejects; its options argument for options the call check rejects; a position inside the data file is in [`data_location`](../cli/data-contracts.md#data-location) |
 | A `when=` condition on `::block` or `::file` that fails or warns | the directive's opener, unless a stage rewrote it (then the file alone) |
 | A `$( … )` frontmatter command | the file and the line of its key; the column is `null` |
 | A `::file` directive that does not parse, or a malformed `::block` | the file |

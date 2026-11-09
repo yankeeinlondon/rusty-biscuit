@@ -90,7 +90,7 @@ host OS input and take focus.
 - Other topics you may be interested in:
     - [What is Composition?](./docs/topics/what-is-composition.md)
     - [Transclusion](./docs/topics/transclusion.md)
-    - [Loading Data](./docs/topics/loading-data.md) — `load_data(file, as)`: formats, CSV rows, optional files, and failures that point into the data file
+    - [Loading Data](./docs/topics/loading-data.md) — `load_data(file, as, options)`: formats, read options (format, delimiter, headerless CSV), CSV rows, optional files, and failures that point into the data file
     - [Frontmatter](./docs/topics/frontmatter.md) and [Frontmatter and Recursion](./docs/topics/frontmatter-recursion.md) — parsing, key order, merges, and what a transcluded child inherits
     - [Lifecycle Events](./docs/topics/lifecycle/index.md) and [Lifecycle Error Handling](./docs/topics/lifecycle/error-handling.md) — the frontmatter stacks `md compose` runs before and after composition, and how failures, cleanup, and Ctrl-C route
     - [Rendering Output Formats](./docs/topics/output-formats.md)

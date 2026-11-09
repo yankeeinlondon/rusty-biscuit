@@ -76,6 +76,9 @@ pub(crate) const EXAMPLE_DATA_FILES: &[(&str, &str)] = &[
     ("fixture.tsv", include_str!("example_data/fixture.tsv")),
     ("fixture.toml", include_str!("example_data/fixture.toml")),
     ("fixture.json5", include_str!("example_data/fixture.json5")),
+    ("fixture-headerless.csv", include_str!("example_data/fixture-headerless.csv")),
+    ("fixture-semicolon.txt", include_str!("example_data/fixture-semicolon.txt")),
+    ("fixture-export", include_str!("example_data/fixture-export")),
 ];
 
 /// One entry of the catalog's `categories:` list.
