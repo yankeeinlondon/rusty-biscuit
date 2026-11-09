@@ -1190,6 +1190,19 @@ pub(crate) fn candidate_plan(
     }
 }
 
+/// The payload text [`resolve_core`] interpolates for `kind`: a URL's lenient
+/// form (an unset variable kept verbatim) or a local path's strict one.
+pub(crate) fn interpolated_payload(
+    kind: &ReferenceKind,
+    ctx: &ResolutionContext,
+) -> Result<String, FileReferenceError> {
+    #[cfg(feature = "url")]
+    if matches!(kind, ReferenceKind::Url(_)) {
+        return interpolated_url_string(kind, ctx);
+    }
+    interpolate(kind.template(), ctx)
+}
+
 /// Interpolate template segments using the resolution context's env vars.
 fn interpolate(
     template: &PathTemplate,

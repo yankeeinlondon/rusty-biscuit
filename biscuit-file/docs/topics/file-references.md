@@ -928,6 +928,7 @@ process CWD or `cwd` respectively.
 | `raw()` | The authored string |
 | `class()` | `FileReferenceClass { kind, recursive }` — branch on typed kind, not prefixes |
 | `payload()` | Authored text after `%`, the sigil, and its optional `/` (`@/@x.md` → `@x.md`); name a reference in diagnostics with this, not prefix trimming |
+| `interpolated_payload(ctx)` | `payload()` with `{{VAR}}` expanded from the context's environment snapshot, no filesystem access; judge a reference's filename or extension by this, not the authored text. An unset variable is `MissingEnvironmentVariable` (a URL keeps it verbatim) |
 | `add_magic_path(path, position)` | Add an ambient-path magic root |
 | `add_vault(path)` | Add an ambient-path vault root |
 | `resolve()` / `resolve_from(cwd)` | Resolve through the ambient compatibility APIs |

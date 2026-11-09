@@ -23,7 +23,10 @@ contract, see [the topic doc](../../../../biscuit-file/docs/topics/file-referenc
 `FileReference::class()` returns `FileReferenceClass { kind, recursive }`.
 `FileReference::payload()` returns the authored text after `%`, the sigil,
 and its optional `/` (`%@/@x.md` → `@x.md`); diagnostics use it instead of
-trimming prefixes.
+trimming prefixes. `interpolated_payload(ctx)` is that payload with `{{VAR}}`
+expanded from the context's environment snapshot, without touching the
+filesystem; judge a filename or extension by it, since a variable can supply
+either (`%{{DATA_FILE}}`).
 Recursive `%` is a modifier, not another kind. It is `GlobReference`'s
 `take_first` on `**/<escaped payload>` under the same ordered roots (an
 absolute payload searches below its own directory), so it returns the most

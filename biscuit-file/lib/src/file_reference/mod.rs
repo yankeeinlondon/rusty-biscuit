@@ -893,6 +893,38 @@ impl FileReference {
         )
     }
 
+    /// The [`payload`](Self::payload) with its `{{VAR}}` placeholders expanded
+    /// from `ctx`'s environment snapshot: the text resolution itself searches
+    /// for, read without touching the filesystem.
+    ///
+    /// A caller that judges a reference by its filename or extension before
+    /// resolving it (or after it resolves to nothing) reads this rather than
+    /// the authored text, whose placeholders may supply either. For a
+    /// recursive (`%`) reference it is the relative path every match ends in.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use std::collections::HashMap;
+    /// use biscuit_file::{FileReference, FileResolutionContext};
+    ///
+    /// let env = HashMap::from([("DATA_EXT".to_string(), "yaml".to_string())]);
+    /// let ctx = FileResolutionContext::from_snapshot("/work", None, env);
+    /// let reference = FileReference::new("%data/optional.{{DATA_EXT}}")?;
+    /// assert_eq!(reference.interpolated_payload(&ctx)?, "data/optional.yaml");
+    /// # Ok::<(), biscuit_file::FileReferenceError>(())
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// `MissingEnvironmentVariable` when a placeholder names a variable the
+    /// snapshot lacks, as resolution would report it. A URL keeps such a
+    /// placeholder verbatim instead, as its resolution does.
+    pub fn interpolated_payload(&self, ctx: &FileResolutionContext) -> Result<String, FileReferenceError> {
+        let internal = context::ResolutionContext::from_context(ctx);
+        resolve::interpolated_payload(&self.parsed.kind, &internal)
+    }
+
     /// Build an unprobed candidate plan with an explicit ordering policy.
     ///
     /// [`CandidatePlanOrder::AuthoringBaseFirst`] is intended for callers that
