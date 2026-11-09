@@ -1324,6 +1324,21 @@ impl OverlayCache {
                     };
                     (outcome, true, shape, template)
                 }
+                // The installed resolution failed: its failure is shown, and
+                // the template's literal parts are still offered, read from
+                // a passive assembly that evaluates nothing.
+                None if crate::slot_jobs::is_slot_failure(&error) => {
+                    let passive = validation_timing::part(|| {
+                        schema::assemble(path, text, config, workspace_roots, job_registry.clone(), context, schema::SlotUse::None)
+                    });
+                    let (shape, template) = match passive {
+                        Err(schema::AssemblyError { error: passive, template }) => {
+                            (crate::slot_jobs::find_unresolved(&passive).and_then(crate::slot_jobs::template_shape), template)
+                        }
+                        Ok(_) => (None, None),
+                    };
+                    (SchemaOutcome::Failed(Arc::new(error)), false, shape, template)
+                }
                 None => (SchemaOutcome::Failed(Arc::new(error)), false, None, None),
             },
         };

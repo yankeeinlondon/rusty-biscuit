@@ -127,6 +127,17 @@ or not, the object's keys are offered (marked `(required)` where they are),
 as they are for an object that has no keys yet. See
 [Recursive types](../../docs/topics/schemas/dmls-schema-support.md#recursive-types).
 
+### Properties whose type is pending
+
+While a schema slot that supplies a property's whole type (a *template
+type*) is unresolved, key completion offers the property with the detail
+`type pending` instead of `(required)`, and its value completion offers
+nothing: no member, `true`/`false`, or file path is guessed. A static arm
+of the same union (`"{{ … }} | boolean"`) and every static sibling property
+still complete as usual. Once the slot resolves, the resolved type's keys
+and values are offered. See
+[Schema Slots: In the editor](../../docs/topics/schemas/schema-slots.md#in-the-editor).
+
 ### Only the cursor's path is typed
 
 Completion resolves the schema along the cursor's own path and reads the

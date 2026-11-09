@@ -614,6 +614,32 @@ What you see while you work:
 | a read needs approval | `dm.schema.slot_approval_required` (warning) at the slot, with quick fixes | the template's literal parts, said to be pending |
 | a slot failed | the slot's own code (see [Failures](#failures)) at the slot | the template's literal parts, said to be pending |
 
+**A property whose whole type is a slot.** When a slot supplies a
+property's type (a template type, `status: "{{ … }}"`), the literal parts
+know only the property's name. Until the slot resolves (and again after it
+fails), the editor says exactly that and claims nothing else:
+
+```yaml
+$schema:
+  status: "{{ load_data('./status.yaml', '{ type: string }').type }}(required)"
+  kind: enum(note, task)
+```
+
+| Where | While `status`'s type is pending | Once it resolves to `enum(draft, published)` |
+| --- | --- | --- |
+| Hover on `status` | `Type: **type pending**`, no *Required*, values, or default | the resolved type, *Required*, `_draft_`, `_published_` |
+| Key completion | `status` with the detail `type pending`, never `(required)` | `status` with `(required)` |
+| Value completion for `status:` | nothing | `draft`, `published` |
+| `kind` (no slot) | `note`, `task`, as always | `note`, `task` |
+
+A `(required)` written after the slot does not make the key required
+while the type is pending, because the returned type may admit null. In a
+union such as `status: "{{ … }} | boolean"`, the static arm keeps
+offering `true` and `false`, and the hover lists both arms with the
+pending one as *type pending*. The imports a returned definition names
+are read under the same grants as the slot's own reads and are watched
+like any other read (see below).
+
 A completion candidate says so in its detail line, after anything it
 already showed; its label and the text it inserts are unchanged:
 
@@ -648,7 +674,9 @@ and so does a configuration change (`workspace/didChangeConfiguration`),
 because a slot may read the environment, which no file event reports.
 
 **What refreshes a resolution.** The worker records every path a resolution
-read: data files, files probed and found missing, folders listed, and, when
+read: data files, the files a returned type definition imports, files
+probed and found missing (a missing import candidate among them), folders
+listed, and, when
 any of those lies in a Git repository, that repository's `.git/index` and
 `HEAD` (an automatic grant depends on what they record). DMLS watches each
 path itself, whatever its extension, so saving a data file, creating a

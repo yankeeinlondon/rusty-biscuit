@@ -724,7 +724,10 @@ Code: `dmls/src/slot_jobs.rs`, `overlay/mod.rs::schema_for`,
   resolved for this base key, or stale); the router drains them after every
   message (`dispatch_slot_jobs`); `install` drops an older `seq` or a canceled
   job. A pins miss with an installed failure keeps showing that failure.
-  The view's `generation` is part of the schema cache key.
+  An installed slot **failure** still serves the template's literal parts:
+  `schema_for` runs one passive `assemble(.., SlotUse::None)` to recover
+  `template_shape`/`template` (the failed session's error carries no
+  `PendingSchema`). The view's `generation` is part of the schema cache key.
 - Invalidation: `note_schema_buffer` (open/change/close of any path),
   watched changes, saves (`recheck_stats` in `ServerRescan` or the schema
   watch fallback), grants, `dmls.refreshSchemaSlots`, and
@@ -741,6 +744,18 @@ Code: `dmls/src/slot_jobs.rs`, `overlay/mod.rs::schema_for`,
   into `Command` quick fixes (`dmls.grantSlotRead`). Completion reads
   `SlotStatus::template_shape` (literal members of `Constraint::Dynamic`)
   until a snapshot serves.
+- Template types (`TypeExpr::Slot`, a property whose whole type is a slot)
+  are pending in that literal shape: `providers/frontmatter.rs` reads
+  presence through `PropertyDef::requiredness()` (never `is_required`, which
+  would trust a `(required)` suffix), so key completion's detail is
+  `TYPE_PENDING`; `schema_hover_details` hands a pending definition to
+  `pending_hover_details` (no Required/values/default; union arms listed);
+  `def_value_completions` skips pending atoms; `suggestion_completions`
+  returns `None` when no arm has `suggest(...)`, because
+  `suggestions_for_def` answers a pending type with an empty pending query
+  that would otherwise hide static arms. Worker and watches needed no
+  change: returned imports are `Observation`s (`slot_reads`). Tests:
+  `schema_slots_editor::template_types`, `slot_jobs::tests::a_template_type_job_*`.
 - Stale/pending status: `providers/frontmatter.rs::slot_note` is the one
   source of the note. Every response projected from the served schema
   carries it: `frontmatter::completion` appends it to each ordinary

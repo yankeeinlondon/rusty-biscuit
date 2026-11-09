@@ -694,6 +694,48 @@ mod tests {
             .expect("within the command allowance");
     }
 
+    /// A template type's returned import is one of the job's watched reads,
+    /// read under the same grants as the slot's own reads.
+    #[test]
+    fn a_template_type_job_watches_the_import_its_returned_definition_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        std::fs::write(dir.join("types.yaml"), "kind: schema\ntypes:\n  Person:\n    role: enum(admin)\n").unwrap();
+        let text = "---\n$schema:\n  owner: \"{{ 'Person@./types.yaml' }}\"\nowner:\n  role: admin\n---\n";
+        let result = run_job(granted_job(&dir, text));
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert!(result.reads.iter().any(|read| read.path == SourceBuffers::key(&dir.join("types.yaml"))), "{:?}", result.reads);
+    }
+
+    /// A returned import that does not exist fails the job, and its missing
+    /// candidate is still watched, so creating it re-resolves.
+    #[test]
+    fn a_template_type_job_with_a_missing_import_fails_and_watches_the_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        let text = "---\n$schema:\n  owner: \"{{ 'Person@./types.yaml' }}\"\nowner:\n  role: admin\n---\n";
+        let result = run_job(granted_job(&dir, text));
+        assert!(result.error.as_deref().is_some_and(is_slot_failure), "{:?}", result.error);
+        let candidate = result.reads.iter().find(|read| read.path == SourceBuffers::key(&dir.join("types.yaml")));
+        assert_eq!(candidate.map(|read| read.stat), Some(None), "the missing candidate is watched: {:?}", result.reads);
+    }
+
+    /// Without a grant the returned import is refused before it is read:
+    /// the job fails with approval required and nothing was read.
+    #[test]
+    fn a_template_type_job_without_a_grant_needs_approval_and_reads_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        std::fs::write(dir.join("types.yaml"), "kind: schema\ntypes:\n  Person:\n    role: enum(admin)\n").unwrap();
+        let text = "---\n$schema:\n  owner: \"{{ 'Person@./types.yaml' }}\"\nowner:\n  role: admin\n---\n";
+        let store = SlotSnapshots::default();
+        let doc = dir.join("doc.md");
+        store.demand(&doc, 1, true, || JobInputs { text: text.to_string(), ..inputs(&dir) });
+        let result = run_job(store.take_demands().pop().unwrap());
+        assert_eq!(failure_codes(&result), [darkmatter::markdown::schemas::slots::codes::SLOT_APPROVAL_REQUIRED_CODE], "{:?}", result.error);
+        assert!(result.reads.is_empty(), "nothing was read: {:?}", result.reads);
+    }
+
     #[test]
     fn a_once_grant_changes_every_view_generation() {
         let dir = tempfile::tempdir().unwrap();

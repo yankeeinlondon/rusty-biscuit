@@ -22,7 +22,7 @@ use darkmatter::markdown::schemas::{
     block_constraint_descriptors, schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors,
 };
 use simplified_schema::{
-    Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
+    Constraint, JsonPointer, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
     SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, DecodedScalar, decode_plain_scalar_node, decode_scalar,
     locate_schema_declaration_cursor, locate_schema_declaration_cursor_in_scalar, mapping_separator,
     locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, parse_type_definition_value,
@@ -881,8 +881,14 @@ fn block_constraint_key_completions(
     )
 }
 
+/// The words every editor view uses for a property whose template type has
+/// not resolved.
+const TYPE_PENDING: &str = "type pending";
+
 /// A shape's not-yet-present property keys, filtered by `partial` and marked
-/// `(required)`, as `FIELD` completions with an eager `key: ` text edit.
+/// `(required)` (or [`TYPE_PENDING`], whose presence is not known until its
+/// template type resolves), as `FIELD` completions with an eager `key: `
+/// text edit.
 fn shape_key_completions(
     ctx: &DocumentContext,
     offset: usize,
@@ -896,8 +902,11 @@ fn shape_key_completions(
         .iter()
         .filter(|(name, _)| name.starts_with(partial) && !present.contains(&name.as_str()))
         .filter_map(|(name, def)| {
-            let required = is_required(def);
-            let detail = required.then(|| "(required)".to_string());
+            let detail = match def.requiredness() {
+                Requiredness::Required => Some("(required)".to_string()),
+                Requiredness::Pending => Some(TYPE_PENDING.to_string()),
+                Requiredness::Optional => None,
+            };
             item(
                 ctx,
                 start,
@@ -977,7 +986,12 @@ fn def_value_completions(
     // Each authored `literal(x)` value, preselected, with YAML insertion text
     // matching the value's scalar type. A union-typed reference contributes
     // its arms, and a recursive reference its definition's.
-    let alternatives = resolved_alternatives(def, definitions(ctx));
+    // A pending template type offers nothing until it resolves; static
+    // sibling arms still offer theirs.
+    let alternatives: Vec<_> = resolved_alternatives(def, definitions(ctx))
+        .into_iter()
+        .filter(|alternative| !alternative.atom.is_pending_type())
+        .collect();
     for atom in alternatives.iter().map(|alternative| alternative.atom) {
         if let Some(value) = atom.literal_value() {
             let insert = yaml_scalar_literal(value);
@@ -1475,6 +1489,12 @@ fn suggestion_completions(
     let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
     let def = memo.def_at(&segments)?;
     let query = suggestions_for_def(leaf, def)?;
+    // A pending template type with no `suggest(...)` anywhere in `def` has no
+    // candidates yet: the static arms' values are offered instead.
+    let suggests = flattened_alternatives(def).iter().any(|alternative| alternative.atom.suggestion_candidates().is_some());
+    if !suggests {
+        return None;
+    }
     let items: Vec<CompletionItem> = query
         .items
         .iter()
@@ -1946,7 +1966,7 @@ pub(crate) fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) ->
             TypeExpr::Function(_) => "function".to_string(),
             TypeExpr::Ref(key) => key.name.clone(),
             // A template type's definition is not known until it resolves.
-            TypeExpr::Slot(_) => "type pending".to_string(),
+            TypeExpr::Slot(_) => TYPE_PENDING.to_string(),
         };
         if atom.is_array && !matches!(atom.ty, TypeExpr::Imported { .. }) {
             name.push_str("[]");
@@ -2185,7 +2205,7 @@ fn alternative_line(alternative: &PropertyAtom, definitions: &dyn DefinitionLook
         TypeExpr::Tuple(_) => "- **tuple".to_string(),
         TypeExpr::Function(_) => "- **function".to_string(),
         TypeExpr::Ref(key) => format!("- **{}", key.name),
-        TypeExpr::Slot(_) => "- **type pending".to_string(),
+        TypeExpr::Slot(_) => format!("- **{TYPE_PENDING}"),
     };
     if alternative.is_array && !matches!(alternative.ty, TypeExpr::Imported { .. }) {
         line.push_str("[]");
@@ -2262,6 +2282,9 @@ fn stored_union_type_line(atom: &PropertyAtom, definitions: &dyn DefinitionLooku
 /// interpolation hover's `**Expression**` block) use this to avoid repeating
 /// the name.
 pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn DefinitionLookup) -> Option<String> {
+    if def.has_pending_type() {
+        return Some(pending_hover_details(def, definitions));
+    }
     let atom = primary_atom(def)?;
     let mut lines = Vec::new();
 
@@ -2277,8 +2300,8 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
             format!("Type: **{}{}**", ty.as_keyword(), suffix)
         }
         TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
-        // A template type claims nothing about its shape until it resolves.
-        TypeExpr::Slot(_) => "Type: **type pending**".to_string(),
+        // Answered by `pending_hover_details` above.
+        TypeExpr::Slot(_) => format!("Type: **{TYPE_PENDING}**"),
         TypeExpr::Tuple(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
             let spelled = simplified_schema::simplified::serialize_property_atom(&PropertyAtom {
                 description: None,
@@ -2336,6 +2359,30 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
         lines.push(description.clone());
     }
     Some(lines.join("\n\n"))
+}
+
+/// The hover details of a property whose template type has not resolved:
+/// [`TYPE_PENDING`], each static sibling arm of a property-level union, and
+/// what the author wrote beside the slot (`eager`, a description). No
+/// requiredness, values, or default are claimed, since the returned type
+/// decides them.
+fn pending_hover_details(def: &PropertyDef, definitions: &dyn DefinitionLookup) -> String {
+    let mut lines = match def {
+        PropertyDef::Single(atom) => {
+            let suffix = if atom.is_array { "[]" } else { "" };
+            vec![format!("Type: **{TYPE_PENDING}{suffix}**")]
+        }
+        PropertyDef::Union(atoms) => {
+            let alternatives: Vec<&PropertyAtom> = atoms.iter().collect();
+            vec![format!("Type: one of:\n{}", alternative_lines(&alternatives, definitions))]
+        }
+    };
+    lines.extend(eager_hover_line(def));
+    if let PropertyDef::Single(PropertyAtom { description: Some(description), .. }) = def {
+        lines.push(String::new());
+        lines.push(description.clone());
+    }
+    lines.join("\n\n")
 }
 
 /// Hover content for a `ctx.*` generated key (read-only, Darkmatter-owned).
@@ -3025,9 +3072,10 @@ fn declares_constraint(def: &PropertyDef, predicate: fn(&Constraint) -> bool) ->
 }
 
 /// Whether a property is required, by the library's shared presence
-/// calculation: a null-admitting whole value is never required.
+/// calculation: a null-admitting whole value is never required, and a
+/// pending template type is not known to be until it resolves.
 fn is_required(def: &PropertyDef) -> bool {
-    def.is_required()
+    def.requiredness() == Requiredness::Required
 }
 
 /// Whether any arm of a property declares `eager`, at item or array level.

@@ -1180,3 +1180,302 @@ mod captured_functions {
         has_command: "boolean(default({{ has_command('git') }}))";
     }
 }
+
+/// Template types in the editor: a slot that supplies a property's whole
+/// type (`status: "{{ … }}"`) is pending until the slot worker resolves it.
+/// While it is, hover and completion name the property and say its type is
+/// pending, claiming no requiredness, values, or nested keys, and the
+/// frontmatter gets no verdict; static siblings keep everything they offer.
+/// The returned definition's own reads (its imports, and an import's missing
+/// candidate) are watched like any slot read, so an unsaved edit or a
+/// created file re-resolves the document.
+mod template_types {
+    use super::*;
+
+    /// `status` is a template type read from `status.yaml` (an object whose
+    /// `type` is the definition), marked `(required)`; `kind` is static.
+    const TEMPLATE_DOC: &str = "---\n$schema:\n  status: \"{{ load_data('./status.yaml', '{ type: string }').type }}(required)\"\n  kind: enum(note, task)\nstatus: bogus\nkind: \n---\n";
+    /// The line of `status: bogus` and of `kind: `.
+    const STATUS_LINE: u32 = 4;
+    const KIND_LINE: u32 = 5;
+
+    /// A workspace whose `status.yaml` returns `definition`, with its folder
+    /// granted in the persisted store; returns the canonical root.
+    fn granted_workspace(workspace: &LspWorkspace, definition: &str) -> PathBuf {
+        let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+        write_type(&root, definition);
+        allow_dir_persisted(&root);
+        root
+    }
+
+    fn write_type(root: &Path, definition: &str) {
+        std::fs::write(root.join("status.yaml"), format!("type: \"{definition}\"\n")).unwrap();
+    }
+
+    fn allow_dir_persisted(root: &Path) {
+        let store = grant_store(root);
+        std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+        std::fs::write(&store, format!("allow dir {}\n", root.display())).unwrap();
+    }
+
+    fn hover_text(fixture: &mut LspFixture, doc: &Path, line: u32, character: u32) -> String {
+        let hover = fixture.request(
+            "textDocument/hover",
+            json!({ "textDocument": { "uri": uri(doc) }, "position": { "line": line, "character": character } }),
+        );
+        hover.result.expect("hover")["contents"]["value"].as_str().unwrap_or_default().to_string()
+    }
+
+    /// The diagnostic on the value at `pointer`, if any: a verdict on it.
+    fn verdict_at<'d>(diagnostics: &'d [Value], pointer: &str) -> Option<&'d Value> {
+        diagnostics.iter().find(|diagnostic| diagnostic["data"]["instance_path"] == json!(pointer))
+    }
+
+    #[test]
+    fn a_pending_template_type_claims_nothing_and_the_resolved_type_replaces_it() {
+        let workspace = LspWorkspace::new();
+        let root = granted_workspace(&workspace, "enum(draft, published)");
+        let doc = root.join("doc.md");
+        let mut fixture = LspFixture::start_with_slot_gate(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        open(&fixture, &doc, TEMPLATE_DOC, 1);
+        fixture.wait_for_event(dmls::StartupEvent::SlotPreparing);
+
+        // Pending: the property, "type pending", nothing else claimed.
+        let hover = hover_text(&mut fixture, &doc, STATUS_LINE, 1);
+        assert!(hover.contains("**`status`**") && hover.contains("type pending"), "{hover}");
+        assert!(!hover.contains("Required") && !hover.contains("Values") && !hover.contains("Default"), "{hover}");
+        assert!(hover.contains(PENDING_NOTE), "{hover}");
+        let values = completion_items(&mut fixture, &doc, STATUS_LINE, 8);
+        assert!(values.is_empty(), "no value is invented for a pending type: {values:#?}");
+        // A static sibling is unaffected.
+        let kinds = completion_items(&mut fixture, &doc, KIND_LINE, 6);
+        assert_eq!(labels(&kinds), ["note", "task"], "{kinds:#?}");
+        let kind_hover = hover_text(&mut fixture, &doc, KIND_LINE, 1);
+        assert!(kind_hover.contains("_note_") && kind_hover.contains("_task_"), "{kind_hover}");
+        let pending = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(!with_code(&pending, "dm.schema.slot_pending").is_empty(), "{pending:#?}");
+        assert!(verdict_at(&pending, "/status").is_none(), "no verdict while pending: {pending:#?}");
+        assert!(verdict_at(&pending, "/kind").is_none(), "nothing is judged while pending: {pending:#?}");
+
+        fixture.release_slot_job();
+        assert!(fixture.wait_for_slot_prepared());
+        fixture.flush_server();
+        let resolved = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(with_code(&resolved, "dm.schema.slot_pending").is_empty(), "{resolved:#?}");
+        let message = verdict_at(&resolved, "/status")
+            .and_then(|diagnostic| diagnostic["message"].as_str())
+            .unwrap_or_else(|| panic!("bogus is judged by the resolved type: {resolved:#?}"));
+        assert!(message.contains("draft") && message.contains("published"), "{message}");
+        let hover = hover_text(&mut fixture, &doc, STATUS_LINE, 1);
+        assert!(!hover.contains("type pending") && !hover.contains(PENDING_NOTE), "{hover}");
+        assert!(hover.contains("Required") && hover.contains("_draft_"), "{hover}");
+        let values = completion_items(&mut fixture, &doc, STATUS_LINE, 8);
+        assert_eq!(labels(&values), ["draft", "published"], "{values:#?}");
+    }
+
+    #[test]
+    fn key_completion_marks_a_pending_template_type_and_never_its_suffix_requiredness() {
+        let workspace = LspWorkspace::new();
+        let root = granted_workspace(&workspace, "enum(draft, published)");
+        let doc = root.join("doc.md");
+        // No `status` key yet; the cursor is on the empty last line.
+        let text = TEMPLATE_DOC.replace("status: bogus\nkind: \n", "kind: note\n\n");
+        let mut fixture = LspFixture::start_with_slot_gate(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        open(&fixture, &doc, &text, 1);
+        fixture.wait_for_event(dmls::StartupEvent::SlotPreparing);
+
+        let keys = completion_items(&mut fixture, &doc, 5, 0);
+        let status = keys.iter().find(|item| item["label"] == json!("status")).unwrap_or_else(|| panic!("{keys:#?}"));
+        let detail = status["detail"].as_str().unwrap_or_default();
+        assert!(detail.contains("type pending") && !detail.contains("(required)"), "{status:#?}");
+
+        fixture.release_slot_job();
+        assert!(fixture.wait_for_slot_prepared());
+        fixture.flush_server();
+        let keys = completion_items(&mut fixture, &doc, 5, 0);
+        let status = keys.iter().find(|item| item["label"] == json!("status")).unwrap_or_else(|| panic!("{keys:#?}"));
+        assert_eq!(status["detail"], json!("(required)"), "control: resolved: {status:#?}");
+    }
+
+    /// A pending arm of a property-level union hides nothing its static arm
+    /// offers.
+    #[test]
+    fn a_static_union_arm_beside_a_pending_template_type_keeps_its_values_and_hover() {
+        let workspace = LspWorkspace::new();
+        let root = granted_workspace(&workspace, "enum(draft, published)");
+        let doc = root.join("doc.md");
+        let text = "---\n$schema:\n  status: \"{{ load_data('./status.yaml', '{ type: string }').type }} | boolean\"\nstatus: \n---\n";
+        let mut fixture = LspFixture::start_with_slot_gate(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        open(&fixture, &doc, text, 1);
+        fixture.wait_for_event(dmls::StartupEvent::SlotPreparing);
+
+        let values = completion_items(&mut fixture, &doc, 3, 8);
+        assert_eq!(labels(&values), ["true", "false"], "{values:#?}");
+        let hover = hover_text(&mut fixture, &doc, 3, 1);
+        assert!(hover.contains("type pending") && hover.contains("**boolean**"), "{hover}");
+
+        fixture.release_slot_job();
+        assert!(fixture.wait_for_slot_prepared());
+        fixture.flush_server();
+        let values = labels(&completion_items(&mut fixture, &doc, 3, 8));
+        for expected in ["draft", "published", "true", "false"] {
+            assert!(values.contains(&expected.to_string()), "{expected} once resolved: {values:?}");
+        }
+    }
+
+    #[test]
+    fn a_newer_edit_cancels_the_template_type_job_in_flight() {
+        let workspace = LspWorkspace::new();
+        let root = granted_workspace(&workspace, "enum(draft, published)");
+        std::fs::write(root.join("other.yaml"), "type: \"enum(bogus)\"\n").unwrap();
+        let doc = root.join("doc.md");
+        let mut fixture = LspFixture::start_with_slot_gate(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        open(&fixture, &doc, TEMPLATE_DOC, 1);
+        fixture.wait_for_event(dmls::StartupEvent::SlotPreparing);
+
+        change(&fixture, &doc, &TEMPLATE_DOC.replace("./status.yaml", "./other.yaml"), 2);
+        fixture.round_trip();
+        fixture.release_slot_job();
+        assert!(!fixture.wait_for_slot_prepared(), "the superseded job publishes nothing");
+        fixture.release_slot_job();
+        assert!(fixture.wait_for_slot_prepared(), "the newer job is installed");
+        fixture.flush_server();
+        let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")), "{diagnostics:#?}");
+        assert!(verdict_at(&diagnostics, "/status").is_none(), "bogus is a member of other.yaml's type: {diagnostics:#?}");
+    }
+
+    /// A failed refresh first serves the last-good resolution marked stale,
+    /// then the failure: an error at the slot, no verdict, and the template's
+    /// literal parts with the type pending again.
+    #[test]
+    fn a_failed_refresh_serves_the_last_good_type_marked_stale_then_the_failure() {
+        let workspace = LspWorkspace::new();
+        let root = granted_workspace(&workspace, "enum(draft, published)");
+        let doc = root.join("doc.md");
+        let mut fixture = LspFixture::start_with_slot_gate(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        open(&fixture, &doc, TEMPLATE_DOC, 1);
+        fixture.release_slot_job();
+        assert!(fixture.wait_for_slot_prepared());
+        fixture.flush_server();
+        let first = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(verdict_at(&first, "/status").is_some(), "{first:#?}");
+
+        write_type(&root, "enum(");
+        watched_change(&fixture, &root.join("status.yaml"), 2);
+        fixture.wait_for_event(dmls::StartupEvent::SlotPreparing);
+        fixture.round_trip();
+        let held = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(verdict_at(&held, "/status").is_some(), "the last-good verdict is kept: {held:#?}");
+        assert_eq!(with_code(&held, "dm.schema.slot_pending").len(), 1, "marked stale: {held:#?}");
+        let hover = hover_text(&mut fixture, &doc, STATUS_LINE, 1);
+        assert!(hover.contains("_draft_") && hover.contains(STALE_NOTE), "{hover}");
+        let stale = completion_items(&mut fixture, &doc, STATUS_LINE, 8);
+        assert!(
+            !stale.is_empty() && stale.iter().all(|item| item["detail"].as_str().is_some_and(|detail| detail.contains(STALE_NOTE))),
+            "{stale:#?}"
+        );
+
+        fixture.release_slot_job();
+        assert!(fixture.wait_for_slot_prepared());
+        fixture.flush_server();
+        let failed = fixture.wait_for_diagnostics(&uri(&doc));
+        let errors = with_code(&failed, "dm.schema.slot_not_a_type");
+        assert_eq!(errors.len(), 1, "{failed:#?}");
+        assert_eq!(errors[0]["severity"], json!(1), "{failed:#?}");
+        assert!(verdict_at(&failed, "/status").is_none(), "nothing is judged against a failed type: {failed:#?}");
+        // The failed template offers its literal parts again: the type is
+        // pending, and nothing of the last-good type is left.
+        let hover = hover_text(&mut fixture, &doc, STATUS_LINE, 1);
+        assert!(hover.contains("type pending") && hover.contains(PENDING_NOTE), "{hover}");
+        assert!(!hover.contains("_draft_") && !hover.contains("Required"), "{hover}");
+        let values = completion_items(&mut fixture, &doc, STATUS_LINE, 8);
+        assert!(values.is_empty(), "{values:#?}");
+        let kinds = completion_items(&mut fixture, &doc, KIND_LINE, 6);
+        assert_eq!(labels(&kinds), ["note", "task"], "the static sibling is kept: {kinds:#?}");
+    }
+
+    /// `owner`'s type is `Person`, imported by the returned definition from
+    /// `types.yaml`; `role` admits only what that file lists.
+    const IMPORT_DOC: &str = "---\n$schema:\n  owner: \"{{ 'Person@./types.yaml' }}\"\nowner:\n  role: guest\n---\n";
+
+    fn types_file(roles: &str) -> String {
+        format!("kind: schema\ntypes:\n  Person:\n    role: enum({roles})\n")
+    }
+
+    #[test]
+    fn an_unsaved_edit_to_a_returned_import_re_resolves_the_document() {
+        let workspace = LspWorkspace::new();
+        let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+        let types = root.join("types.yaml");
+        let disk = types_file("admin");
+        std::fs::write(&types, &disk).unwrap();
+        allow_dir_persisted(&root);
+        let doc = root.join("doc.md");
+        let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        let diagnostics = open_and_resolve(&mut fixture, &doc, IMPORT_DOC);
+        assert!(verdict_at(&diagnostics, "/owner/role").is_some(), "guest is not on disk: {diagnostics:#?}");
+
+        open(&fixture, &types, &disk, 1);
+        assert!(fixture.wait_for_slot_prepared(), "opening the import refreshes the document");
+        change(&fixture, &types, &types_file("admin, guest"), 2);
+        assert!(fixture.wait_for_slot_prepared(), "the unsaved edit refreshes the document");
+        fixture.flush_server();
+        let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")), "{diagnostics:#?}");
+        assert!(verdict_at(&diagnostics, "/owner/role").is_none(), "the unsaved import is read: {diagnostics:#?}");
+        assert_eq!(std::fs::read_to_string(&types).unwrap(), disk, "the disk file is untouched");
+    }
+
+    #[test]
+    fn creating_a_missing_returned_import_re_resolves_the_document() {
+        let workspace = LspWorkspace::new();
+        let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+        allow_dir_persisted(&root);
+        let doc = root.join("doc.md");
+        let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        let missing = open_and_resolve(&mut fixture, &doc, IMPORT_DOC);
+        let failures: Vec<&Value> = missing.iter().filter(|diagnostic| diagnostic["severity"] == json!(1)).collect();
+        assert!(!failures.is_empty(), "a missing import fails the type: {missing:#?}");
+        assert!(verdict_at(&missing, "/owner/role").is_none(), "{missing:#?}");
+
+        let types = root.join("types.yaml");
+        std::fs::write(&types, types_file("admin")).unwrap();
+        watched_change(&fixture, &types, 1);
+        assert!(fixture.wait_for_slot_prepared(), "the created candidate refreshes the document");
+        fixture.flush_server();
+        let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")), "{diagnostics:#?}");
+        let message = verdict_at(&diagnostics, "/owner/role")
+            .and_then(|diagnostic| diagnostic["message"].as_str())
+            .unwrap_or_else(|| panic!("guest is judged by the created import: {diagnostics:#?}"));
+        assert!(message.contains("admin"), "{message}");
+    }
+}
+/// A slot whose resolution failed still offers the template's literal
+/// parts (said to be pending), never the failed list and never nothing.
+#[test]
+fn a_failed_slot_still_offers_the_template_literal_members() {
+    let workspace = LspWorkspace::new();
+    let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+    let data = root.join("os.yaml");
+    std::fs::write(&data, "a: [\n").unwrap();
+    allow_file_persisted(&root, &data);
+    let doc = root.join("doc.md");
+    let text = "---\n$schema:\n  os: enum(Haiku, {{ load_data(\"./os.yaml\", \"string[]\") }})\nos: \n---\n";
+    let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+    fixture.initialize(params(&root));
+    let diagnostics = open_and_resolve(&mut fixture, &doc, text);
+    let errors: Vec<&Value> = diagnostics.iter().filter(|diagnostic| diagnostic["severity"] == json!(1)).collect();
+    assert_eq!(codes(&errors.into_iter().cloned().collect::<Vec<_>>()), ["dm.data.malformed"], "{diagnostics:#?}");
+    let items = completion_items(&mut fixture, &doc, 3, 4);
+    assert_eq!(labels(&items), ["Haiku"], "{items:#?}");
+    assert!(items.iter().all(|item| item["detail"].as_str().is_some_and(|detail| detail.contains(PENDING_NOTE))), "{items:#?}");
+}

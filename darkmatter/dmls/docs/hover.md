@@ -181,6 +181,29 @@ inlined union would, listing its alternatives as described under
 so the item line ("matches alternative N of M") numbers the same list
 whether the union was stored or copied.
 
+### Properties whose type is pending
+
+A property whose whole type comes from a schema slot (a *template type*,
+`status: "{{ … }}(required)"`) has no known type until the slot worker
+resolves it. Its hover says so and claims nothing the returned type will
+decide: no *Required* line (even with a `(required)` suffix, since the
+returned type may admit null), no values, and no default. A `-> description`
+written after the slot is still shown, and a property-level union lists its
+static arms beside the pending one:
+
+```markdown
+**`status`**
+
+Type: one of:
+- **type pending**
+- **boolean**
+
+_Schema slots pending: only the schema's literal parts are known._
+```
+
+Once the slot resolves, the hover is the resolved type's, as for any
+property. See [Schema Slots: In the editor](../../docs/topics/schemas/schema-slots.md#in-the-editor).
+
 ## Value versus key hover
 
 In frontmatter, the key and the value of the same line answer different

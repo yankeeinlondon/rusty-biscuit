@@ -888,6 +888,10 @@ fn meta_schema_kinds(definition: &PropertyDef, definitions: &dyn DefinitionLooku
         let kind = match atom.ty {
             TypeExpr::Primitive(SimplifiedType::TypeDefinition) => MetaSchemaKind::TypeDefinition,
             TypeExpr::Primitive(SimplifiedType::Schema) => MetaSchemaKind::Schema,
+            // A pending template type activates no schema authoring: whether
+            // it returns `type-definition` or `schema` is unknown until it
+            // resolves, and a resolved schema serves the returned type.
+            TypeExpr::Slot(_) => continue,
             _ => continue,
         };
         if !kinds.contains(&kind) {
