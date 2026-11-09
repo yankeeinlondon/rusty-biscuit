@@ -1,16 +1,20 @@
 ---
 kind: plan
 created: 2026-11-08
-phase: 1
+phase: 2
 total_phases: 7
 agent: claude/sonnet
 yolo: true
 spec: 2026-11-05-member-property-check
 area: darkmatter
 packages:
-    - darkmatter
-    - darkmatter-cli
-    - darkmatter-lsp
+- darkmatter
+- darkmatter-cli
+- darkmatter-lsp
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
 ---
 
 # Plan: Member Property Check
@@ -149,16 +153,16 @@ decision, and prove the starting state is green.
   | --- | --- | --- | --- |
   | D1 | A slot lives only in a property's constraints (`Constraint::Dynamic`, `Constraint::DynamicValue`); a template's `SchemaShape.properties`, `pattern_keys`, `TypeExpr::InlineObject` bodies, and `DefinitionTable` are complete and unchanged by resolution | N3, N4 | M4, M5 |
   | D2 | `SchemaError::UnresolvedSlots(Box<UnresolvedSlots { slots, pending: Option<PendingSchema> }>)` exists and `PendingSchema` exposes `template: Option<(SchemaRoot, Arc<DefinitionTable>)>` without resolving | N10 | M5 |
-  | D3 | Without a slot session, `DarkmatterSchemas::effective_for` returns `Err(UnresolvedSlots)` for a template document layer or a matched pending trigger payload, and `PreparedSchemas::effective_for` (`compose/schema_validation.rs:235`) maps that to `None`; with a session it returns a concrete `EffectiveSchema` holding no `Constraint::Dynamic` | N12a, N31, N34 | M5 |
-  | D4 | With a session, slot resolution happens inside `schema_validation::prepare_schemas` / `effective_for`, before `run_call_precheck` (`pipeline/mod.rs:439`), so the precheck sees the resolved schema | N31 (Wave 14) | M5, M13 |
-  | D5 | What a library composition with no slot session does once the schema is pending: it fails at schema validation with `dm.schema.slot_pending`, or it composes with validation deferred. Either is acceptable; the log records which, and the AC3 "without resolution" test (Phase 5) asserts the landed behavior | N31, N37 | Phase 5 AC3 test |
+  | D3 | Without a slot session, `DarkmatterSchemas::effective_for` returns `Err(UnresolvedSlots)` for a template document layer or a matched pending trigger payload, and `PreparedSchemas::effective_for` (`compose/schema_validation.rs:241`) maps that to `None`; with a session it returns a concrete `EffectiveSchema` holding no `Constraint::Dynamic` | N12a, N31, N34 | M5 |
+  | D4 | With a session, slot resolution happens inside `schema_validation::prepare_schemas` / `effective_for`, before `run_call_precheck` (`pipeline/mod.rs:445`), so the precheck sees the resolved schema | N31 (Wave 14) | M5, M13 |
+  | D5 | What a library composition with no slot session does once the schema is pending: it fails at schema validation with `dm.schema.slot_pending`, or it composes with validation deferred. Either is acceptable; the log records which, and the AC3 "without resolution" test (Phase 5) asserts the landed behavior. **Revised in Phase 1 (differs):** a library composition always has a session: `run_root_pipeline_collecting` attaches `SlotSession::for_request` in `SessionMode::Full` when none is set (`pipeline/mod.rs:79-82`), so a pure-literal pending schema resolves. A template stays unresolved in composition only under a caller-attached `SessionMode::Passive` session (validation fails, `dm.schema.slot_pending` via `report_diagnostics.rs:341-352`), a `ReferenceCheck` session, or a pins-only discovery pass (both defer, `schema_validation.rs:795-802`). The AC3 "without resolution" test attaches a `Passive` session | N31, N37 | Phase 5 AC3 test |
   | D6 | `Shape::from_definition` / `Shape::of_type` on an atom carrying `Constraint::Dynamic` yields its primitive family (`enum` → string family) with no finite member list (`shape.rs:577` `enum_members` finds no `Members`), and neither the call check nor narrowing panics on it | N3 | M5 |
-  | D7 | DMLS serves a fresh or last-good (stale) snapshot as a `SchemaBundle` whose `effective` is concrete; before the first publish the overlay's `SchemaOutcome` (`overlay/mod.rs:201`) holds the unresolved result, and no request performs I/O or evaluation. `DocumentOverlay::stale` (`overlay/mod.rs:198`) still means "last-good frontmatter tree", not snapshot staleness | N39 | M5, M12 |
+  | D7 | DMLS serves a fresh or last-good (stale) snapshot as a `SchemaBundle` whose `effective` is concrete; before the first publish the overlay's `SchemaOutcome` (`overlay/mod.rs:201`) holds the unresolved result, and no request performs I/O or evaluation. `DocumentOverlay::stale` (`overlay/mod.rs:198`) still means "last-good frontmatter tree", not snapshot staleness. **Phase 1 finding (holds, shape differs from M12's guess):** `SchemaOutcome` is `Ready(Option<Arc<SchemaBundle>>) \| Failed(Arc<SchemaError>)` (`overlay/mod.rs:74`); the pending state is `Failed(UnresolvedSlots)` plus `DocumentOverlay.slots: Option<SlotStatus>`, whose `SlotStatus { refreshing, unresolved, template_shape }` (`overlay/mod.rs:241`) carries only the template's root shape (no definitions). Assembly calls `schemas.effective_for(&md)?` at `overlay/schema.rs:1048` under `SlotUse::{None, Pins, Resolve}` (`:962`); `declared_types` (`diagnostics/call_check.rs:59`) types only `Ready(Some)` | N39 | M5, M12 |
   | D8 | A pure literal slot (`enum({{ ["web", "db"] }}; required)`) resolves with no approval prompt or grant, so a library test can resolve it with a plain `SlotSession` | N14, N20, N31 | Phase 5 AC3 test |
   | E1 | `try(expr, fallback)` is an ordinary `FunctionCall { name: "try", args }` (no new AST node, no new token); every static walk (`walk_static`, `branch_scope`, `check_expression_calls`) sees both arguments | ER/"Syntax and evaluation" | M7, M8 |
-  | E2 | `expression_type` (`call_check.rs:157`) types `try(a, b)` as `Shape::union` of both branches, keeping successful `null`, with an authored `[]` fallback adding no alternative when the other branch admits the empty array | ER/"Static types and editor behavior" | M8 |
+  | E2 | `expression_type` (`call_check.rs:204`) types `try(a, b)` as `Shape::union` of both branches, keeping successful `null`, with an authored `[]` fallback adding no alternative when the other branch admits the empty array | ER/"Static types and editor behavior" | M8 |
   | E3 | `try` handles no absence: `AbsenceScope::call_argument("try", i, 2)` does not set `handles_absence`, so `try(server.nmae, "x")` is an ordinary read, and `try` declares no narrowing | ER/"Reporting…" ("`try` is not an absence guard") | M7 |
-  | E4 | The lazy evaluation path (`evaluate_lazy_function`, `expression/mod.rs:976`) passes the observer through each selected argument, and a recovered failure does not discard observations made before it | ER/"Syntax and evaluation" (no undo) | M14 |
+  | E4 | **(Holds; the path is `evaluate_recovery`, `expression/mod.rs:1026-1046`, not `evaluate_lazy_function`, `:984`, which is `unreachable!` for `try`.)** The lazy evaluation path passes the observer through each selected argument, and a recovered failure does not discard observations made before it | ER/"Syntax and evaluation" (no undo) | M14 |
   | E5 | Callback item typing for `map(try(...), h => ...)` takes the source argument's type from `expression_type`, so `h` gets the union's item type | ER/"Static types…" (callback item typing) | M8 |
 
 **Library classifier**
@@ -168,7 +172,7 @@ decision, and prove the starting state is green.
   `lib/src/markdown/compose/expression/diagnostics.rs` next to
   `INCOMPATIBLE_CALL_CODE` (`diagnostics.rs:39`) and `UNCERTAIN_CALL_CODE`
   (`:44`), re-exported from `expression/mod.rs` in the `pub use diagnostics::{…}`
-  list (`mod.rs:127`). Severity is always `Severity::Warning`; no API takes a
+  list (`mod.rs:130-134`). Severity is always `Severity::Warning`; no API takes a
   strict flag. Evidence: spec "Report one warning per authored access site".
 - **M2. No `simplified-schema` change; spans are derived.** A postfix
   `MemberAccess` node's span ends at its name token
@@ -183,15 +187,15 @@ decision, and prove the starting state is green.
   - constant bracket key: the span of the `StringLiteral` index node, quotes
     included ("the key's string token").
   All byte offsets are UTF-8, relative to the parsed text. Evidence: spec
-  "Range the offending member name"; `ast.rs:119-136` (`Index`, `MemberAccess`).
+  "Range the offending member name"; `ast.rs:119`/`:132` (`Index`, `MemberAccess`; spanned kinds `:308`/`:315`).
 - **M3. Registry.** Add `(super::expression::UNDECLARED_MEMBER_CODE, "a member
   read the known object type does not declare")` to `COMPOSE_DIAGNOSTIC_CODES`
   (`lib/src/markdown/compose/policy.rs:78`), directly after the
   `UNDECLARED_PROPERTY_CODE` row (`:83`). That array is the compose policy
-  registry: `cli/src/args/policy.rs:61` (`PolicyCommand::deny_codes`) reads it
+  registry: `cli/src/args/policy.rs:59` (`PolicyCommand::deny_codes`) reads it
   for `--deny` parsing, help, and completion, so no CLI-side table changes. Add
   one unit test to the `cli/src/args/policy.rs` test module (beside
-  `link_title_codes_are_deniable_on_compose_and_render_only`, `:629`):
+  `link_title_codes_are_deniable_on_compose_and_render_only`, `:630`):
   `parse_selector(Compose, PolicyVerb::Deny, UNDECLARED_MEMBER_CODE)` is
   `PolicySelector::Code`, `long_help(Compose, Deny)` contains it, and `Render`
   rejects it. No new recovery and no new flag. Evidence: darkmatter skill "A new
@@ -199,7 +203,7 @@ decision, and prove the starting state is green.
   introduce new policy flags".
 - **M4. Declaration verdict.** In
   `lib/src/markdown/compose/expression/scope/projection.rs`, beside
-  `member_shape`/`arm_member` (`:521-570`):
+  `member_shape`/`arm_member` (`:622-673`):
 
   ```rust
   pub(crate) enum MemberDeclaration { Declared, Undeclared, Unknown }
@@ -212,50 +216,57 @@ decision, and prove the starting state is green.
     with non-empty `s.pattern_keys` → `Unknown`; otherwise closed, declaring
     `name` iff `s.properties.contains_key(name)` (optional members are in
     `properties`); `TypeExpr::Ref(key)` with alias budget left (start at
-    `definitions.len()`, decrement per hop, as `arm_member` does at `:556`) and a
+    `definitions.len()`, decrement per hop, as `arm_member` does at `:628`/`:659`) and a
     definition present → classify the body's arms recursively; missing
     definition, exhausted budget, `TypeExpr::Imported` → `Unknown`; every other
     `TypeExpr` (`Primitive` incl. bare `object` and `enum`, `Tuple`, `Function`)
     → `Unknown`.
   - Verdict: any `Unknown` arm → `Unknown`; else any arm declares → `Declared`;
     else `Undeclared`.
-  Make `member_shape` `pub(crate)` (it is private at `:525`) and re-export both
+  Make `member_shape` `pub(crate)` (it is private at `:622`) and re-export both
   through `scope/mod.rs` as `pub(crate)`. Evidence: spec type table; "An open
   object, pattern-key object, unresolved reference, or any unknown alternative
-  prevents a warning"; `unresolved_as_unknown` (`call_check.rs:257`) already
+  prevents a warning"; `unresolved_as_unknown` (`call_check.rs:344`) already
   makes a literal `load_data` contract's references unknown.
 - **M5. Declarations without a resolved schema come from the template.**
   - Add to `lib/src/markdown/schemas/mod.rs`:
 
     ```rust
     pub struct DocumentTemplate { pub root: SchemaRoot, pub definitions: Arc<DefinitionTable> }
-    pub enum SiteSchema { Effective(Option<EffectiveSchema>), Template(Option<DocumentTemplate>) }
+    pub enum SiteSchema {
+        Effective(Option<EffectiveSchema>),
+        Template { template: Option<DocumentTemplate>, unresolved: Box<UnresolvedSlots> },
+    }
     impl DarkmatterSchemas {
         pub fn site_schema_for(&self, source: &Markdown) -> Result<SiteSchema, SchemaError>;
     }
     ```
 
     `site_schema_for` shares the body of `effective_for_with_override`
-    (`mod.rs:688`): extract the document-layer resolution and trigger-layer
+    (`mod.rs:838`): extract the document-layer resolution and trigger-layer
     steps into a private helper so the work happens once. When the result would
-    be `Err(SchemaError::UnresolvedSlots(u))` it returns `Template(..)` instead,
-    holding the **document layer's** root: the pending template's
+    be `Err(SchemaError::UnresolvedSlots(u))` it returns `Template { template,
+    unresolved: u }` instead (the error is kept so a caller that reports slot
+    state, M12, rewraps it as `SchemaError::UnresolvedSlots(unresolved)`; revised
+    in Phase 1), `template` holding the **document layer's** root: the pending template's
     `(SchemaRoot, definitions)` when the document `$schema` itself is pending
     (D2), or the concrete document layer's `simplified` root and definitions
-    when only a trigger payload is pending; `Template(None)` when the document
-    layer has no SimplifiedSchema root. Every other error propagates as today.
+    when only a trigger payload is pending; `template: None` when the document
+    layer has no SimplifiedSchema root. The pending template is read through
+    `PendingSchema::template()` (`simplified-schema` `slots/pending.rs:217`, returns
+    borrowed `(&SchemaRoot, &Arc<DefinitionTable>)`; clone both). Every other error propagates as today.
     It never resolves a slot and reads nothing `effective_for` would not read
     (D3). `effective_for` keeps its signature and behavior.
   - The site's declared layer is built by one helper,
     `DeclaredTypes::for_site(schema: &SiteSchema) -> DeclaredTypes<'_>` in
     `scope/projection.rs`: `Effective(e)` → `for_schema(e.as_ref())` (`:214`);
-    `Template(Some(t))` → `DeclaredTypes::new(Some(&t.root)).with_definitions(&t.definitions)`
-    (existing `:197`, `:228`); `Template(None)` → `for_schema(None)`. The
+    `Template { template: Some(t), .. }` → `DeclaredTypes::new(Some(&t.root)).with_definitions(&t.definitions)`
+    (existing `:197`, `:230`); `Template { template: None, .. }` → `for_schema(None)`. The
     template path has no trigger or baseline layer: a property only those
-    layers declare is `Declaration::Undeclared` (`projection.rs:412`), its type
+    layers declare is `Declaration::Undeclared` (`projection.rs:415`), its type
     is unknown, and members on it stay silent. That is conservative and correct
     because the document layer wins a shared property anyway (`declaration`,
-    `:395-416`).
+    `:395-417`).
   - **Decision (approved by the author 2026-11-08, spec Ruling B):** the template-backed layer is the site's
     one declared layer, so the call check at that site sees the template types
     too. Building a second member-only `TypeScope` at every composition and DMLS
@@ -275,7 +286,7 @@ decision, and prove the starting state is green.
   Evidence: spec "Unresolved schema templates"; AC3.
 - **M6. Eligible bases.** A selector is checked only when its base is a value
   the projection can type: a document property (bare, `fm.x`, or
-  `fm["x"]` via `literal_index_key`, `projection.rs:298`), a lexical local (bare
+  `fm["x"]` via `literal_index_key`, `fm_namespace.rs:61`, called at `projection.rs:307`), a lexical local (bare
   or `local.x`, `TypeScope::resolves_to_local`, `scope/mod.rs:221`), or any
   postfix/bracket base expression (call result, literal object or array,
   parenthesized expression). Never checked: a selector directly on `fm` or
@@ -286,11 +297,11 @@ decision, and prove the starting state is green.
   namespace and host-global diagnostics"; `ctx` already has
   `dm.expression.unknown_context_variable`.
 - **M7. Absence handling extends the existing walker.** In
-  `expression/absence.rs`, `walk_static` (`:493`) and `callback_reads` (`:220`)
+  `expression/absence.rs`, `walk_static` (`:503`) and `callback_reads` (`:230`)
   write into a private sink `struct StaticReads<'e> { variables: Vec<StaticVariableRead<'e>>, members: Vec<StaticMemberRead<'e>> }`.
   The public `static_variable_reads*` functions keep their signatures and
   results (they return `sink.variables`, still dropping lexical variable reads,
-  `:240`). Add:
+  `:238-245`). Add:
 
   ```rust
   pub(crate) struct StaticMemberRead<'e> {
@@ -311,24 +322,24 @@ decision, and prove the starting state is green.
   postfix/bracket node, a new `AbsenceScope::handles_expr(&Expr)` that asks
   `facts.subject(expr)` then `guards_path_or_ancestor`, mirroring `handles`.
   Because `walk_static` already passes `scope` unchanged into `Index`/
-  `MemberAccess` bases (`:528-532`), direct-position, nullable-parameter,
+  `MemberAccess` bases (`:537-541`), direct-position, nullable-parameter,
   overload, consumed-by-call, and branch-fact rules apply to members with no new
   rule. Gates (`when=`, `$()` ternary conditions) are walked with
   `AbsenceScope::default()`, so `when="server.nmae"` is an ordinary read.
   `try` arguments follow E3. Evidence: spec "Preserve intentional absence
-  handling"; module docs `absence.rs:1-46`.
+  handling"; module docs `absence.rs:1-52`.
 - **M8. Typing the base.** For a record, `site_at = branch_scope(expr,
-  &node.span, site.clone())` (`absence.rs:417`). Base type of step 0: for a
+  &node.span, site.clone())` (`absence.rs:427`). Base type of step 0: for a
   dotted `Variable`, `site_at.type_of_expr(&Expr::Variable(prefix))` with the
   prefix up to the step's base; for `MemberAccess`/`Index`,
-  `expression_type(base, &site_at)` (`call_check.rs:157`). Step *k*+1's base is
+  `expression_type(base, &site_at)` (`call_check.rs:204`). Step *k*+1's base is
   `member_shape(base_k, Member::Field(name_k), site_at.definitions())`. Stop at
   the first step whose verdict is `Undeclared` (one finding) or `Unknown` (none):
   no cascade. Because the base goes through `expression_type`, `try(a, b)` bases
   and `map(try(...), h => h.x)` item types follow E2/E5 with no member-specific
   code. Evidence: spec "Once a missing step projects to unknown … do not emit
   cascading warnings"; `member_shape` already yields unknown for an undeclared
-  member (`projection.rs:546`).
+  member (`projection.rs:526`).
 - **M9. Findings API and message.** New file
   `lib/src/markdown/compose/expression/member_check.rs`, declared and
   re-exported from `expression/mod.rs`:
@@ -354,10 +365,10 @@ decision, and prove the starting state is green.
   known object type of '{subject}'.` The diagnostic: `code:
   UNDECLARED_MEMBER_CODE`, `Severity::Warning`, `expected_type: None`,
   `actual_type: None`, `span` = the member span. Precedent:
-  `expression_call_diagnostics` (`diagnostics.rs:304`), `ExpressionDiagnostic`
+  `expression_call_diagnostics` (`diagnostics.rs:340`), `ExpressionDiagnostic`
   (`:80`).
 - **M10. Node ordinals.** The evaluator runs the span-erased `Expr`;
-  `SpannedExpr::erase` mirrors node for node (`ast.rs:381-410`). Define in
+  `SpannedExpr::erase` mirrors node for node (`ast.rs:379-437`). Define in
   `member_check.rs` two pre-order enumerators with one child order:
   `spanned_nodes(&SpannedExpr)` and `expr_nodes(&Expr)`. Order: `ArrayLiteral`
   items; `ObjectLiteral` values; `Paren`/`UnaryNot`/`UnaryMinus` inner;
@@ -373,35 +384,39 @@ decision, and prove the starting state is green.
   (`:66`) gains `text: &str` and appends `expression_member_diagnostics(expr,
   text, site)` after the call diagnostics, independent of `strict`. Its three
   callers pass the text their `SpannedExpr` was parsed from:
-  `providers/dsl.rs:1080` (body `{{ }}` and directive `when=`),
+  `providers/dsl.rs:1094` (body `{{ }}` and directive `when=`),
   `providers/collections.rs:72` (`::map`/`::filter` gates and callbacks,
-  `authored.site.text`), `diagnostics/frontmatter.rs:1191`
+  `authored.site.text`), `diagnostics/frontmatter.rs:1199`
   (`FrontmatterCalls::check`: frontmatter interpolations and `expression`-typed
   values outside lifecycle stacks). Lifecycle stacks
-  (`check_diagnostics`, `:79`, fed by `lifecycle_call_checks`) are not extended
+  (`check_diagnostics`, `:80`, fed by `lifecycle_call_checks`) are not extended
   (spec: hosts are not required to change). The LSP record is built by the
-  existing `lsp_diagnostic` (`:42`); its `data` carries null expected/actual
+  existing `lsp_diagnostic` (`:41`); its `data` carries null expected/actual
   types. Update the module doc (`:1-18`): the entry point also carries member
   diagnostics.
 - **M12. DMLS declared layer.** `call_check::declared_types(ctx)` (`:59`) returns
   `DeclaredTypes::for_site(..)` (M5): the bundle's `effective` when a bundle
   exists (fresh or last-good, D7), else the overlay's document template, else
-  untyped. The overlay assembly (`overlay/schema.rs:1027`, `schemas.effective_for(&md)?`)
-  calls `site_schema_for` instead and keeps `SiteSchema::Template` in the
-  overlay's pending outcome (the `SchemaOutcome` variant dynamic-schema-types
-  landed for a pending schema; add a `template: Option<DocumentTemplate>` field
-  to it if it has none). Hover and completion (`providers/dsl.rs:538`) are not
-  changed.
+  untyped. **Revised in Phase 1** to the landed overlay (D7): the assembly
+  (`overlay/schema.rs:1048`, `schemas.effective_for(&md)?`) calls
+  `site_schema_for` instead; `Effective(e)` becomes the bundle as today, and
+  `Template { template, unresolved }` becomes the existing
+  `SchemaOutcome::Failed(Arc::new(SchemaError::UnresolvedSlots(unresolved)))`
+  (so slot diagnostics, `slot_jobs::template_shape`, and job demand at
+  `overlay/mod.rs:1309-1350` are unchanged) with `template` stored in a new
+  `SlotStatus.template: Option<Arc<DocumentTemplate>>` field beside
+  `template_shape` (`overlay/mod.rs:241-252`). `SchemaOutcome` gains no
+  variant. Hover and completion (`providers/dsl.rs:~542`) are not changed.
 - **M13. DMLS code constant.** `dmls/src/diagnostics/codes.rs`:
   `pub const EXPRESSION_UNDECLARED_MEMBER: &str =
   darkmatter::markdown::compose::expression::UNDECLARED_MEMBER_CODE;` beside
-  `EXPRESSION_UNKNOWN_FUNCTION` (`:165`, same delegation style). Add the code to
+  `EXPRESSION_UNKNOWN_FUNCTION` (`:166`, same delegation style). Add the code to
   any per-code severity table in `codes.rs` as Warning.
 
 **Composition**
 
 - **M14. Runtime reach record.** In `expression/absence.rs`, the observer trait
-  (`:585`) gains provided items:
+  (`MissingRootObserver`, `:595`) gains provided items:
 
   ```rust
   const OBSERVES_MEMBERS: bool = false;
@@ -410,12 +425,12 @@ decision, and prove the starting state is green.
   ```
 
   `()` and `Vec<MissingRoot>` keep the defaults, so unobserved evaluators and
-  unmigrated surfaces behave as today. `evaluate_expr` (`expression/mod.rs:599`)
+  unmigrated surfaces behave as today. `evaluate_expr` (`expression/mod.rs:602`)
   calls `observer.member_read(expr as *const Expr as usize)` when
   `O::OBSERVES_MEMBERS` and the node is a dotted `Expr::Variable`, an
   `Expr::MemberAccess`, or an `Expr::Index` whose index is `StringLiteral`
   (record at node entry, before evaluating the base, so a read reached before
-  a failure is kept). `evaluate_observed` (`:556`) calls `observer.finish_expression(expr)`
+  a failure is kept). `evaluate_observed` (`:559`) calls `observer.finish_expression(expr)`
   after evaluation on success and on error. A new
   `pub(crate) struct Observation { pub(crate) roots: Vec<MissingRoot>, reached: Vec<usize>, addresses: Vec<usize> }`
   implements the trait with `OBSERVES_MEMBERS = true`; `finish_expression`
@@ -423,7 +438,7 @@ decision, and prove the starting state is green.
   deduplicated per expression evaluation, and exposes
   `take_reached() -> Vec<usize>`. Per-iteration callback visits cost one push
   per node visit; the walk runs once per expression. Lazy calls (and `try`, E4)
-  already thread the observer (`mod.rs:916-917`).
+  already thread the observer (`mod.rs:913-925`; `try` through `evaluate_recovery`, `:1026-1046`).
 - **M15. Candidates and site keys.** New file
   `lib/src/markdown/compose/member_sites.rs`:
 
@@ -463,9 +478,9 @@ decision, and prove the starting state is green.
   (`frontmatter_shell_expansion.rs:146`) and records candidates for its ternary
   condition and `Value` branches (member findings only; the call check's
   coverage is unchanged). `check_document` returns the candidates beside its
-  warnings; `run_call_precheck` (`pipeline/mod.rs:1038`) uses
+  warnings; `run_call_precheck` (`pipeline/mod.rs:1049`) uses
   `prepared_schemas.site_schema_for(markdown)` (new, wrapping M5 as
-  `effective_for` wraps today, `schema_validation.rs:235`) and stores the
+  `effective_for` wraps today, `schema_validation.rs:241`) and stores the
   candidates on the report as `member_candidates: Arc<MemberCandidates>`. The
   existing call warnings and rejection order are unchanged. Because candidates
   are fixed under the schema the precheck used (resolved per D4, else the
@@ -479,7 +494,7 @@ decision, and prove the starting state is green.
   helper rather than copying it): `source = ComposeWarning::EXPRESSION_SOURCE`,
   `code = UNDECLARED_MEMBER_CODE`, `diagnostic = Some(finding.diagnostic().at(file,
   position))` with the authored member-name position (`one_based_position`,
-  `diagnostics.rs:228`, character columns), `identity = WarningSubject::Expression
+  `diagnostics.rs:264`, character columns), `identity = WarningSubject::Expression
   { document: None, scope, origin: ExpressionOrigin::Authored(authored
   member-name range) }` (`context/report.rs:718-745`; the document is stamped at
   merge), and the surface's stage name. Message: the library message with its
@@ -501,7 +516,7 @@ decision, and prove the starting state is green.
     `interpolate_text_selected` (`interpolation/rewrite.rs:273`) calls it right
     after `evaluator.eval(&expr)` (`:370`) and appends the result to `warnings`
     exactly as it handles the context warnings at `:365-367`, so the next
-    `before_eval` (`blocking_guard`, `pipeline/mod.rs:896`) and the stage's final
+    `before_eval` (`blocking_guard`, `pipeline/mod.rs:907`) and the stage's final
     check judge them. The bare-variable fast path in `Evaluator::eval`
     (`evaluator.rs:294-320`) records ordinal 0 for a dotted name. The directive
     target pass keeps `drop(evaluator.take_missing_roots())`
@@ -512,12 +527,12 @@ decision, and prove the starting state is green.
     `&mut Observation`; the engine turns its reached ordinals into warnings with
     the candidate table and adds them where it adds the condition's other
     warnings, before the existing `ReportWatch` / `stop` check
-    (`pipeline/mod.rs:948`).
+    (`pipeline/mod.rs:959`, stop at `:1001`).
   - `$()` ternary conditions and value branches
-    (`frontmatter_shell_expansion.rs:1791`, `:2029`): the local `Vec<MissingRoot>`
+    (`frontmatter_shell_expansion.rs:1791`, `:2027-2029`): the local `Vec<MissingRoot>`
     becomes `Observation`; reached ordinals become warnings returned with the
     stage report and added before `stop_if_blocked` before frontmatter shell
-    expansion continues (`pipeline/mod.rs:604-607`).
+    expansion continues (`pipeline/mod.rs:580`).
   `member_candidates` is per document and is not merged from a child report
   (unlike `unknown_root_candidates`, which are, `report.rs:565`); a child's
   member *warnings* merge with their document through `attribute_to`. Blocking
@@ -531,7 +546,7 @@ decision, and prove the starting state is green.
   `frontmatter_shell_expansion.rs:1780-1810`). Covered in DMLS: every surface of
   M11, including `expression`-typed frontmatter values. Not covered: lifecycle
   surfaces; body `::shell` command-template holes, which evaluate through the
-  unobserved `HoleEvaluator` (`shell_expansion/template/fill.rs:24-71`) and
+  unobserved `HoleEvaluator` (`shell_expansion/template/fill.rs:37-73`) and
   refuse a `null` value already; `expression`-typed values in composition, which
   composition never evaluates (passive format) — in DMLS they are checked, which
   is part of the documented reachability difference. Standalone unobserved
@@ -566,7 +581,7 @@ decision, and prove the starting state is green.
 
 ### Wave 1 (serial)
 
-- [ ] **Rebase verification (R0)** — for each row of R0, find the landed code
+- [x] **Rebase verification (R0)** — for each row of R0, find the landed code
   (`rg` for `UnresolvedSlots`, `PendingSchema`, `SlotSession`, `site_schema_for`
   collisions, `SchemaOutcome`, `"try"` in the catalog and `absence.rs`) and write
   one log entry per assumption: holds / differs (with `path:line`). For each
@@ -578,7 +593,7 @@ decision, and prove the starting state is green.
 
 ### Wave 2 (serial)
 
-- [ ] **Baseline** — run `just test` and `just lint` in `darkmatter/` before any
+- [x] **Baseline** — run `just test` and `just lint` in `darkmatter/` before any
   change; record pass/fail in the log. A pre-existing failure is reported to the
   author in the log and not fixed here.
 
@@ -614,7 +629,7 @@ its template.
   `SiteSchema`, `site_schema_for`, shared private helper) and
   `DeclaredTypes::for_site` in `scope/projection.rs`. Unit test beside
   `effective_for`'s tests: a pending document `$schema` gives
-  `Template(Some(root))` whose `server` shape is a closed object; a concrete one
+  `Template { template: Some(root), .. }` whose `server` shape is a closed object; a concrete one
   gives `Effective(Some)`; no slot evaluator runs (use the work counter
   dynamic-schema-types added for slot runs, else a host stub that panics).
 
@@ -772,10 +787,11 @@ in-process; spawn `md` only to prove CLI wiring.
     function return, literal object; `server.name` silent with `name` declared
     optional and unset;
   - `ac3_pending_template`: with resolution (a `SlotSession` resolving the pure
-    slot, D8) → the warning and success; without a session → the warning appears
-    in the success report or in the failure's earlier warnings, per the landed
-    behavior recorded for D5 (the frontmatter interpolation site is evaluated
-    before schema validation, so it is reached in either case);
+    slot, D8) → the warning and success; without resolution (a caller-attached
+    `SessionMode::Passive` session, revised D5) → the composition fails with
+    `dm.schema.slot_pending` and the failure's earlier warnings carry the member
+    warning (the frontmatter interpolation site is evaluated before schema
+    validation, so it is reached);
   - `ac5_paths`: nested missing step, `server["a.b"]`, computed key with an
     undeclared root (root warning only), `hosts[0].nmae`, no cascade;
   - `ac6_identity`: two authored callbacks → two warnings; many iterations →
@@ -863,4 +879,5 @@ plan's readings: "shell-template holes" means frontmatter `$()`;
 expression-typed frontmatter is checked in DMLS only; the code is registered in
 the library's table (`policy.rs`); typed host globals are skipped. Spec
 acceptance criterion 3 now says composition reports the warning after
-resolution; the D5 test still records the library's no-session behavior.
+resolution; the D5 test records the library's unresolved (`Passive` session) behavior,
+since a library composition with no session attaches a resolving one.
