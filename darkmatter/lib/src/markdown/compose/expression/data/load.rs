@@ -59,8 +59,9 @@ pub(super) const FUNCTION: &str = "load_data";
 /// - The file-reference family for a missing, unreadable, not-yet-fetchable,
 ///   or policy-denied source, and [`ExpressionError::RemoteRead`] (worded as
 ///   a plain evaluation failure, typed by its kind) for a failed fetch.
-/// - [`ExpressionError::Data`] for every `dm.data.*` failure, an invalid
-///   contract, a contract import that cannot be read
+/// - [`ExpressionError::Data`] for every `dm.data.*` failure (including
+///   `dm.data.unsupported_format` for a missing source, with no `format`
+///   option, that no candidate extension could read), an invalid contract, a contract import that cannot be read
 ///   ([`DataError::ContractImport`], projected like a file reference), and
 ///   options that cannot apply (`dm.data.invalid_options`, located at the
 ///   call: execution keeps no per-argument position).
@@ -97,6 +98,13 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
         _ => {
             let file_ref = parse_file_ref(FUNCTION, raw, ctx)?;
             let Some(path) = resolve_arg(FUNCTION, raw, ctx)? else {
+                // A request no format can read is invalid whether or not the
+                // file exists, so it must not reach `try` as a miss.
+                if options.format.is_none()
+                    && let Some(error) = unreadable_candidates(&file_ref, ctx)
+                {
+                    return Err(fail(error));
+                }
                 // Creating any probed candidate would change the answer.
                 record_probed_candidates(&file_ref, ctx);
                 return Err(file_reference_error(FUNCTION, raw, ctx, FileRefFailure::NotFound, None));
@@ -221,6 +229,23 @@ enum Origin<'a> {
 
 fn fail(error: DataError) -> ExpressionError {
     ExpressionError::from(Arc::new(error))
+}
+
+/// `dm.data.unsupported_format` for a missing source when no file it could
+/// resolve to has an extension `load_data` reads; `None` when some candidate
+/// does, or when the candidates cannot be listed.
+fn unreadable_candidates(file_ref: &biscuit_file::FileReference, ctx: &ResolutionContext) -> Option<DataError> {
+    if file_ref.class().recursive {
+        return None;
+    }
+    let candidates = file_ref
+        .candidate_plan_with_order(&ctx.file_context(), biscuit_file::CandidatePlanOrder::Resolution)
+        .ok()?;
+    let first = candidates.first()?.path().to_path_buf();
+    if candidates.iter().any(|candidate| data_format_of(candidate.path()).is_some()) {
+        return None;
+    }
+    format_of(&DataSourceIdentity::local(&first)).err()
 }
 
 /// The format named by the extension of a local path or of a URL's path (its
