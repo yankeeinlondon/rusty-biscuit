@@ -89,6 +89,18 @@ human_review_items:
   - "Slot failures are governed by read grants rather than general recovery flags; retain the documented security boundary."
   - "Host allowances match exact case-insensitive hostnames, without wildcard or network-range matching; retain existing host semantics, with IPv6 verification not claimed."
   - "Unrelated proposed language-server commands were left outside the slot documentation changes; retain surgical documentation scope."
+  - "Repair R1-F1: `$schema` is now excluded from every frontmatter interpolation pass (matching pre-flight), so other keys can no longer read `$schema` during interpolation; the alternative was passing it raw while still skipping evaluation."
+  - "Repair R1-F1: schema imports opened inside a slot (data contracts, `validate_schema`) are judged as content reads under the calling function's name, and listings need a folder grant on the pattern root or the indexed file's folder; listing a missing folder stays an existence probe (Q21)."
+  - "Repair R1-F1: nested template slots inside a contract are judged only by their own gates, and a refused contract preparation is not memoized; the alternative applied the outer slot's guard to them, changing per-file automatic grants."
+  - "Repair R1-F2: precedence pruning happens inside the library replay (`PendingSchema::without_properties`), and a root-union layer replaces a lower property only when every arm declares it, matching the existing merge."
+  - "Repair R1-F2: a root-union template document's declared properties are computed passively across all arms, including referenced arms read without evaluation, so pre-flight and runtime prune identically."
+  - "Repair R1-F3: slot spans are projected in the library at parse time and attached only when the located `$schema` text matches the parsed value node for node; otherwise positions stay null. Document slots keep no defining-file origin, so they still evaluate in the request context."
+  - "Repair R1-F3: DMLS uses the library's slot span only when the failure was resolved from the buffer's current text, otherwise the `$schema` value range; a refused read written through a YAML escape reports the whole expression rather than a second sub-span mapping."
+  - "Repair R1-F3: a contract-template slot failure publishes the inner failure's code (cycle, then grant problems, then work limits, then first failure) at the outer slot's position; no secondary-location field was added because it would change all 17 output schemas."
+  - "`validate_schema` naming a page whose schema is a template keeps failing closed as unresolved instead of resolving through the active slot session; resolving there would add a new effectful entry point with grant consequences."
+  - "Repair R1-F4: DMLS records every open buffer in one shared buffer set (trigger and kind routing keep their own path checks), and a read served from a buffer records no file `stat` so closing the buffer forces a rehash; the alternatives were a slot-only buffer map or clearing the cache on close."
+  - "Outside R1-F4's class and retained: a slot-free Markdown `$schema` still assembles its imports from disk, and a data file existing only as a never-saved buffer is not found by `load_data`, because path resolution checks disk first."
+  - "Repair R1-F5: the stale or pending note goes in the completion item's `detail` (appended after any existing detail) for every ordinary frontmatter candidate, keys included; schema-authoring grammar candidates stay undecorated, and a quick-fix title is marked only when it inserts a slot-supplied literal."
 human_in_the_loop: null
 has_blocked_findings: false
 blocked: false
@@ -96,9 +108,12 @@ recurrence: false
 reviewed_by: codex/gpt-6.1-sol
 created: "2026-11-08T11:38:58-08:00"
 spec: "2026-11-05-dynamic-schema-types/spec.md"
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-11-05-dynamic-schema-types/spec.md`"
 feature: "2026-11-05-dynamic-schema-types/review-1.md"
+next: "2026-11-05-dynamic-schema-types/review-2.md"
+log: "/Volumes/coding/wt/rusty-biscuit/feat-better-research/darkmatter/features/2026-11-05-dynamic-schema-types/log.md"
+implemented_by: claude/opus
 ---
 # Review 1: Dynamic Schema Types
 

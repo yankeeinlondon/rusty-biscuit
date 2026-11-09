@@ -30,7 +30,8 @@ reviewed_on: 2026-11-07
 clarified: true
 implemented: true
 implemented_by: "claude/opus"
-review_iterations: 1
+review_iterations: 4
+completed: true
 related:
     - 2026-10-28-extract-simplified-schema
     - 2026-11-04-composition-errors
