@@ -42,6 +42,13 @@ flowchart LR
     B --> C[publish to channels]
 ```
 
+**Merge policy (2026-11-08, recorded in `2026-11-06-any-host-evidence`):** a
+pull request merges when Linux and macOS are proven; Windows and WSL2 evidence
+on a pull request never blocks it. Windows and WSL2 are proven after merge,
+and a failing OS gets its own fix pull request. Where the authored prelude
+below says a pull request must not merge unless every tested OS passes, this
+replaces it.
+
 This keeps everything in the authored process, including the human review and AI
 notes, and removes the need for any exception to PR-only `main`. That exception was
 the part flagged as a security concern.
