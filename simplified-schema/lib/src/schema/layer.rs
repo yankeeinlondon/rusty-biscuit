@@ -405,7 +405,13 @@ fn resolve_authored(
             shipped,
             &mut BTreeSet::new(),
         )?;
-        let lowered = lower_expanded(&mut expansion.schema, &mut expansion.definitions);
+        let site = crate::slots::ExpansionSite {
+            base_dir: Path::new(""),
+            schema_roots: &[],
+            request_context: &context,
+            shipped,
+        };
+        let lowered = lower_expanded(&mut expansion.schema, &mut expansion.definitions, &site, &mut provenance);
         return Ok(Layer {
             authored: Authored::Simplified(Box::new(authored)),
             typed: Some(Typed { root: expansion.schema, definitions: expansion.definitions }),
@@ -514,7 +520,9 @@ fn resolve_authored(
         shipped,
         &mut searched,
     )?;
-    let lowered = match lower_expanded(&mut expansion.schema, &mut expansion.definitions) {
+    provenance.imports = expansion.imports;
+    let site = crate::slots::ExpansionSite { base_dir, schema_roots: &[], request_context: context, shipped };
+    let lowered = match lower_expanded(&mut expansion.schema, &mut expansion.definitions, &site, &mut provenance) {
         Ok(json) => {
             let mut json = Arc::unwrap_or_clone(json);
             provenance.examples =
@@ -523,7 +531,7 @@ fn resolve_authored(
         }
         Err(error) => Err(error),
     };
-    provenance.imports = expansion.imports;
+    searched.extend(std::mem::take(&mut provenance.searched));
     provenance.searched = searched.into_iter().collect();
     Ok(Layer {
         authored: Authored::Simplified(Box::new(authored)),
@@ -539,9 +547,22 @@ fn resolve_authored(
 /// slot-value scope is running (a rebuild). A lowering failure is kept, not
 /// raised: a template's is [`SchemaError::UnresolvedSlots`], a refused slot
 /// value's [`SchemaError::SlotResult`].
-fn lower_expanded(root: &mut SchemaRoot, definitions: &mut Arc<DefinitionTable>) -> Result<Arc<Value>, Arc<SchemaError>> {
+///
+/// A template type's returned definition expands from `site`; the files it
+/// read and probed are added to `provenance`.
+fn lower_expanded(
+    root: &mut SchemaRoot,
+    definitions: &mut Arc<DefinitionTable>,
+    site: &crate::slots::ExpansionSite<'_>,
+    provenance: &mut SchemaProvenance,
+) -> Result<Arc<Value>, Arc<SchemaError>> {
     if crate::slots::has_dynamic(root, definitions) {
-        crate::slots::apply_active(root, Arc::make_mut(definitions)).map_err(Arc::new)?;
+        let late = crate::slots::apply_active(root, Arc::make_mut(definitions), site).map_err(Arc::new)?;
+        let mut searched: BTreeSet<PathBuf> = std::mem::take(&mut provenance.searched).into_iter().collect();
+        let mut examples = std::mem::take(&mut provenance.examples);
+        late.merge_into(&mut provenance.imports, &mut examples, &mut searched);
+        provenance.examples = examples;
+        provenance.searched = searched.into_iter().collect();
     }
     to_json_schema_with_definitions(root, definitions).map(Arc::new).map_err(Arc::new)
 }
@@ -689,19 +710,30 @@ impl Layer {
                 (expansion.schema, expansion.definitions)
             }
         };
+        let mut provenance = self.provenance.clone();
         let lowered = match &self.lowered {
             // An unpreparable source stays unpreparable for the same reason.
             Err(error) if self.binding.is_none() && !matches!(error.as_ref(), SchemaError::UnresolvedSlots(_)) => {
                 Err(Arc::clone(error))
             }
-            _ => lower_expanded(&mut root, &mut definitions),
+            _ => {
+                let context = self.binding.as_ref().map_or_else(content_context, |binding| binding.context.clone());
+                let base_dir = self.binding.as_ref().map_or_else(PathBuf::new, |binding| binding.base_dir.clone());
+                let site = crate::slots::ExpansionSite {
+                    base_dir: &base_dir,
+                    schema_roots: &[],
+                    request_context: &context,
+                    shipped: ShippedSources::NONE,
+                };
+                lower_expanded(&mut root, &mut definitions, &site, &mut provenance)
+            }
         };
         let mut layer = Self {
             authored: Authored::Simplified(Box::new(selected)),
             typed: Some(Typed { root, definitions }),
             lowered,
             binding: self.binding.clone(),
-            provenance: self.provenance.clone(),
+            provenance,
             rebuild: None,
         };
         // A selection from a template rebuilds its source, then selects.

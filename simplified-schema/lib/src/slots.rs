@@ -2,7 +2,8 @@
 //! through a host.
 //!
 //! A schema whose `enum(...)`/`suggest(...)` lists or constraint arguments hold
-//! a slot is a **template**. Finding slots is passive: it reads the typed
+//! a slot (template constraints), or whose type atoms are one (template
+//! types, [`TypeExpr::Slot`]), is a **template**. Finding slots is passive: it reads the typed
 //! declaration and never evaluates an expression or reads a file. Lowering a
 //! template fails with [`SchemaError::UnresolvedSlots`], which lists the
 //! slots [`collect_slots`] finds and, from a resolution entry point, carries
@@ -19,15 +20,21 @@
 
 mod host;
 pub(crate) mod pending;
+pub(crate) mod reads;
 mod substitute;
+mod template_type;
+mod unquoted;
 
 pub use host::{SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, SlotResolutionError, SlotRunRequest};
 pub use pending::{PendingSchema, Template};
+pub use reads::{RefuseTemplateReads, SchemaRead, SchemaReadKind, SchemaReadOutcome, TemplateReads, with_template_reads};
 pub(crate) use pending::{Attempt, Replay, resolve_with};
 pub use substitute::{
     MAX_SLOT_PATTERN_BYTES, SlotKey, SlotValues, active_values, check_slot_pattern, substitute, with_values,
 };
-pub(crate) use substitute::{apply_active, apply_active_to_arm, omitting};
+pub(crate) use substitute::{ExpansionSite, apply_active, apply_active_to_arm, omitting};
+pub use unquoted::{decode_error_slot, quote_the_slot_message, unquoted_slot_hint};
+pub(crate) use unquoted::{quote_slots, unquoted_slot_spans};
 
 use std::path::Path;
 
@@ -143,7 +150,8 @@ fn atom_refs(atom: &PropertyAtom, out: &mut Vec<DefKey>) {
             function.parameters.as_slice().iter().for_each(|parameter| def_refs(&parameter.def, out));
             def_refs(&function.returns, out);
         }
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => {}
+        // A template type names no stored definition until it resolves.
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Slot(_) => {}
     }
 }
 
@@ -204,9 +212,13 @@ fn def_slots(def: &PropertyDef, slots: &mut Vec<Slot>) {
 }
 
 fn atom_slots(atom: &PropertyAtom, slots: &mut Vec<Slot>) {
+    // A template type's slot is written before its suffix's constraints.
+    if let TypeExpr::Slot(slot) = &atom.ty {
+        push_unique(slots, slot);
+    }
     constraint_slots(&atom.constraints, slots);
     match &atom.ty {
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {}
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {}
         TypeExpr::InlineObject(shape) => shape_slots(shape, slots),
         TypeExpr::Union(atoms) => atoms.iter().for_each(|atom| atom_slots(atom, slots)),
         TypeExpr::Tuple(tuple) => {
@@ -288,9 +300,12 @@ fn visit_def_slots_mut(def: &mut PropertyDef, visit: &mut dyn FnMut(&mut Slot)) 
 }
 
 fn visit_atom_slots_mut(atom: &mut PropertyAtom, visit: &mut dyn FnMut(&mut Slot)) {
+    if let TypeExpr::Slot(slot) = &mut atom.ty {
+        visit(slot);
+    }
     visit_constraint_slots_mut(&mut atom.constraints, visit);
     match &mut atom.ty {
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {}
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {}
         TypeExpr::InlineObject(shape) => visit_shape_slots_mut(shape, visit),
         TypeExpr::Union(atoms) => atoms.iter_mut().for_each(|atom| visit_atom_slots_mut(atom, visit)),
         TypeExpr::Tuple(tuple) => {

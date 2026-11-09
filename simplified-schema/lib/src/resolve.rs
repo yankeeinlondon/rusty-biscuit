@@ -60,7 +60,7 @@ use super::{
         grammar::{is_suggestion_list, suggestion_list_span},
         types::{
             Constraint, DynamicKind, TemplateConstraintKind, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType,
-            TypeExpr,
+            Slot, TypeExpr,
         },
     },
 };
@@ -498,12 +498,13 @@ fn resolve_inline_mapping(
         &mut definitions,
         shipped,
     )?;
-    crate::slots::apply_active(&mut schema, &mut definitions)?;
+    let site = crate::slots::ExpansionSite { base_dir, schema_roots, request_context, shipped };
+    let late = crate::slots::apply_active(&mut schema, &mut definitions, &site)?;
     let mut json = to_json_schema_with_definitions(&schema, &definitions)?;
     // Inline `$schema` mappings have no on-disk path, so `this` example
     // references have no target here (the acceptance driver references
     // examples from a schema *file*, resolved in `parse_yaml_referenced_file`).
-    let examples = resolve_document_examples(
+    let mut examples = resolve_document_examples(
         &mut json,
         base_dir,
         None,
@@ -511,6 +512,8 @@ fn resolve_inline_mapping(
         request_context,
         &mut searched,
     )?;
+    let mut imports = imports;
+    late.merge_into(&mut imports, &mut examples, &mut searched);
     Ok(ResolvedSchema {
         simplified: Some(schema),
         definitions: Arc::new(definitions),
@@ -782,9 +785,17 @@ pub(crate) fn resolve_root_union(
                         shipped,
                     )?;
                 imports.extend(arm_imports);
-                if let Err(error) = crate::slots::apply_active_to_arm(&mut arm_schema, &mut definitions) {
-                    let later = document_union_arm_names(&items[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
-                    return Err(pending_union_arm(error, &any_of, later));
+                let site = crate::slots::ExpansionSite { base_dir, schema_roots, request_context, shipped };
+                match crate::slots::apply_active_to_arm(&mut arm_schema, &mut definitions, &site) {
+                    Ok(late) => {
+                        imports.extend(late.imports);
+                        examples.extend(late.examples);
+                        searched.extend(late.searched);
+                    }
+                    Err(error) => {
+                        let later = document_union_arm_names(&items[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
+                        return Err(pending_union_arm(error, &any_of, later));
+                    }
                 }
                 let mut arm_json = to_json_schema_with_definitions(&arm_schema, &definitions)?;
                 examples.extend(resolve_document_examples(
@@ -1442,9 +1453,10 @@ fn resolve_standalone_schema(
                 &mut definitions,
                 shipped,
             )?;
-            crate::slots::apply_active(&mut schema, &mut definitions)?;
+            let site = crate::slots::ExpansionSite { base_dir: file_dir, schema_roots, request_context, shipped };
+            let late = crate::slots::apply_active(&mut schema, &mut definitions, &site)?;
             let mut json_schema = to_json_schema_with_definitions(&schema, &definitions)?;
-            let examples = resolve_document_examples(
+            let mut examples = resolve_document_examples(
                 &mut json_schema,
                 file_dir,
                 Some(path),
@@ -1452,6 +1464,8 @@ fn resolve_standalone_schema(
                 request_context,
                 &mut searched,
             )?;
+            let mut imports = imports;
+            late.merge_into(&mut imports, &mut examples, &mut searched);
             Ok(ResolvedSchema {
                 simplified: Some(schema),
                 definitions: Arc::new(definitions),
@@ -1959,9 +1973,17 @@ pub(crate) fn resolve_standalone_root_union(
                     shipped,
                 )?;
                 imports.extend(arm_imports);
-                if let Err(error) = crate::slots::apply_active_to_arm(&mut schema, &mut definitions) {
-                    let later = standalone_union_arm_names(&arms[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
-                    return Err(pending_union_arm(error, &any_of, later));
+                let site = crate::slots::ExpansionSite { base_dir, schema_roots, request_context, shipped };
+                match crate::slots::apply_active_to_arm(&mut schema, &mut definitions, &site) {
+                    Ok(late) => {
+                        imports.extend(late.imports);
+                        examples.extend(late.examples);
+                        searched.extend(late.searched);
+                    }
+                    Err(error) => {
+                        let later = standalone_union_arm_names(&arms[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
+                        return Err(pending_union_arm(error, &any_of, later));
+                    }
                 }
                 let SchemaRoot::Single(shape) = schema else {
                     unreachable!("single root-union arm remains single")
@@ -2213,6 +2235,10 @@ struct ImportEngine<'a> {
     /// Set just before expanding a definition's top-level atom that must not
     /// become a reference to a shared definition; taken by that expansion.
     force_inline: bool,
+    /// The template type whose returned definition this engine expands, with
+    /// the host's read hooks: every probe and read is admitted before it
+    /// happens. `None` for every other expansion, which reads as it always has.
+    template_gate: Option<crate::slots::reads::ReadGate>,
 }
 
 /// Where an expansion reads the namespaces its imports name. This is all that
@@ -2255,6 +2281,7 @@ impl<'a> ImportEngine<'a> {
             forced_cache: HashMap::new(),
             arm_use: false,
             force_inline: false,
+            template_gate: crate::slots::reads::current_gate(),
         }
     }
 }
@@ -2442,7 +2469,7 @@ fn dollar_constraints_key(constraint: &Constraint) -> &'static str {
 
 /// The mapping key a pattern property is authored under, which is its
 /// segment in a [`SchemaSourcePath`].
-fn pattern_key_source_name(key: &PatternKey) -> String {
+pub(crate) fn pattern_key_source_name(key: &PatternKey) -> String {
     match key {
         PatternKey::CatchAll => "<string>".to_string(),
         PatternKey::Starting(prefix) => format!("<starting::{prefix}>"),
@@ -2486,6 +2513,119 @@ fn expand_document_imports(
     };
     let root = if local_types.is_some() { SchemaSourcePath::root().property("$schema").join(root) } else { root.clone() };
     expand_imports(schema, local_types, base_dir, key, &root, source, Sharing::Automatic, searched, definitions, shipped)
+}
+
+/// The name a template type's returned definition takes in the namespace its
+/// expansion builds. It is never written, stored, or reported: the namespace
+/// holds nothing else, and a returned definition cannot name a local type.
+pub(crate) const TEMPLATE_TYPE_NAME: &str = "{{ template type }}";
+
+/// One expansion of a template type's returned definition.
+pub(crate) struct TemplateExpansion {
+    /// The definition, as the slot's position takes it: for an arm, the arms
+    /// to splice (a `Union`, or a `Single` non-array union atom holding the
+    /// property markers its postfix hoisted), else the property definition.
+    pub(crate) def: PropertyDef,
+    /// Files its imports read.
+    pub(crate) imports: Vec<PathBuf>,
+    /// Locations probed to select them.
+    pub(crate) searched: BTreeSet<PathBuf>,
+}
+
+/// Expands `returned`, the definition the template type `use_site` (a
+/// [`TypeExpr::Slot`] atom) returned, as a named type of the slot's defining
+/// file (its namespace, never the data file's) used once at the slot's
+/// position: with the written suffix merged by the named-type rules, or
+/// `bare` without it. `as_arm` uses it as a union alternative, so a returned
+/// union flattens into the surrounding one.
+///
+/// Runs inside [`crate::slots::reads::expanding`] for `slot`, so with a
+/// host's read hooks installed every probe and read of its imports is
+/// admitted first. Stored definitions it reaches are added to `definitions`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn expand_template_definition(
+    returned: &PropertyDef,
+    use_site: &PropertyAtom,
+    bare: bool,
+    as_arm: bool,
+    slot: &Slot,
+    site: &crate::slots::ExpansionSite<'_>,
+    definitions: &mut DefinitionTable,
+) -> Result<TemplateExpansion, SchemaError> {
+    let (base_dir, key) = match slot.origin.as_deref() {
+        Some(origin) => (
+            origin.parent().unwrap_or(site.base_dir).to_path_buf(),
+            DefNamespace::File(canonical_path(origin)),
+        ),
+        None => (site.base_dir.to_path_buf(), DefNamespace::InlineRoot),
+    };
+    let mut types = SchemaShape::default();
+    types.properties.insert(TEMPLATE_TYPE_NAME.to_string(), returned.clone());
+    let atom = if bare {
+        PropertyAtom {
+            ty: TypeExpr::local(TEMPLATE_TYPE_NAME),
+            is_array: false,
+            constraints: Vec::new(),
+            array_constraints: Vec::new(),
+            description: None,
+        }
+    } else {
+        PropertyAtom { ty: TypeExpr::local(TEMPLATE_TYPE_NAME), ..use_site.clone() }
+    };
+    let def = if as_arm { PropertyDef::Union(vec![atom]) } else { PropertyDef::Single(atom) };
+    let mut shape = SchemaShape::default();
+    shape.properties.insert(TEMPLATE_TYPE_NAME.to_string(), def);
+    let mut searched = BTreeSet::new();
+    let source = NamespaceSource::Files {
+        schema_roots: site.schema_roots.to_vec(),
+        context: Box::new(site.request_context.clone()),
+    };
+    let (root, imports) = crate::slots::reads::expanding(slot, || {
+        expand_imports(
+            SchemaRoot::Single(shape),
+            Some(&types),
+            &base_dir,
+            key,
+            &SchemaSourcePath::root(),
+            source,
+            Sharing::Automatic,
+            &mut searched,
+            definitions,
+            site.shipped,
+        )
+    })?;
+    let SchemaRoot::Single(mut shape) = root else {
+        unreachable!("a single root stays single")
+    };
+    let def = shape.properties.swap_remove(TEMPLATE_TYPE_NAME).expect("the expansion keeps its one property");
+    Ok(TemplateExpansion { def, imports, searched })
+}
+
+/// Pins the `example(...)` references of `returned`, a definition the
+/// template type `slot` returned, when the slot has no defining file: its
+/// expansion's namespace is then no file, so nothing else rehomes them, and
+/// the read must still pass `slot`'s gate. A slot written in a file has them
+/// rehomed by its expansion.
+pub(crate) fn rehome_returned_examples(
+    returned: &mut PropertyDef,
+    slot: &Slot,
+    site: &crate::slots::ExpansionSite<'_>,
+    searched: &mut BTreeSet<PathBuf>,
+) -> Result<(), SchemaError> {
+    if slot.origin.is_some() {
+        return Ok(());
+    }
+    crate::slots::reads::expanding(slot, || {
+        let gate = crate::slots::reads::current_gate();
+        let atoms: &mut [PropertyAtom] = match returned {
+            PropertyDef::Single(atom) => std::slice::from_mut(atom),
+            PropertyDef::Union(arms) => arms,
+        };
+        for atom in atoms {
+            rehome_atom_examples(atom, site.base_dir, None, site.schema_roots, site.request_context, searched, gate.as_ref())?;
+        }
+        Ok(())
+    })
 }
 
 /// Whether an expansion stores repeated acyclic structured definitions once.
@@ -2766,6 +2906,9 @@ impl ImportEngine<'_> {
             })?),
             TypeExpr::Function(function) => TypeExpr::Function(function),
             TypeExpr::Ref(key) => TypeExpr::Ref(key),
+            // A template type stays pending through expansion, its written
+            // suffix kept for resolution to merge with the returned type.
+            TypeExpr::Slot(slot) => TypeExpr::Slot(slot),
         };
         let mut atom = PropertyAtom {
             ty,
@@ -2980,9 +3123,10 @@ impl ImportEngine<'_> {
             unreachable!("a file namespace is only loaded from the file source")
         };
         let searched = &mut self.searched;
+        let gate = self.template_gate.as_ref();
         let base_dir = file.parent().unwrap_or_else(|| Path::new("."));
         let mut rehome = |atom: &mut PropertyAtom| {
-            rehome_atom_examples(atom, base_dir, file, schema_roots, context, searched)
+            rehome_atom_examples(atom, base_dir, Some(file), schema_roots, context, searched, gate)
         };
         Ok(match base {
             ExpandedDef::Single(mut atom, provenance) => {
@@ -3050,7 +3194,10 @@ impl ImportEngine<'_> {
                     (selected.path.clone(), selected.canonical.clone())
                 } else {
                     let mut probed = BTreeSet::new();
-                    let selected = named_type_file_path(reference, &current.base_dir, schema_roots, context, &mut probed);
+                    let selected = match &self.template_gate {
+                        Some(gate) => gated_schema_file_path(gate, reference, &current.base_dir, schema_roots, context, &mut probed),
+                        None => named_type_file_path(reference, &current.base_dir, schema_roots, context, &mut probed),
+                    };
                     self.searched.extend(probed.iter().cloned());
                     let path = selected?;
                     let canonical = canonical_path(&path);
@@ -3075,6 +3222,17 @@ impl ImportEngine<'_> {
         };
 
         self.dependencies.insert(canonical.clone());
+        // A returned definition's import is admitted before its text is used
+        // from anywhere: this engine's cache, the process memo, a buffer, or
+        // the disk. Its bytes are read, and reported, here.
+        let gated_bytes = match &self.template_gate {
+            Some(gate) if !self.namespace_cache.contains_key(&canonical) => Some(gate.read(&path)?),
+            Some(gate) => {
+                gate.admit(&path, crate::slots::SchemaReadKind::Content)?;
+                None
+            }
+            None => None,
+        };
         // Reuse an already-loaded namespace for this file: multiple import sites
         // targeting the same file (`A@types.yaml`, `B@types.yaml`, …) otherwise
         // re-read and re-parse it once each.
@@ -3085,7 +3243,10 @@ impl ImportEngine<'_> {
                 named_types: Arc::clone(&cached.named_types),
             });
         }
-        let named_types = load_named_types(&path)?;
+        let named_types = match gated_bytes {
+            Some(bytes) => load_named_types_from(&path, Ok(bytes))?,
+            None => load_named_types(&path)?,
+        };
         let base_dir = path
             .parent()
             .map(Path::to_path_buf)
@@ -3238,17 +3399,50 @@ fn named_type_file_path(
     selection.into_result()
 }
 
+/// [`named_type_file_path`] for a template type's returned definition: every
+/// location the selection may probe is admitted by `gate` first, and each
+/// probe is reported to it, found or not.
+fn gated_schema_file_path(
+    gate: &crate::slots::reads::ReadGate,
+    reference: &str,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    searched: &mut BTreeSet<PathBuf>,
+) -> Result<PathBuf, SchemaError> {
+    let admit = |path: &Path| gate.admit(path, crate::slots::SchemaReadKind::Probe);
+    let selection = select::select_schema_file_checked(reference, base_dir, schema_roots, request_context, &admit)?;
+    let found = match &selection.outcome {
+        SelectionOutcome::Found(path) => Some(path.as_path()),
+        SelectionOutcome::SiblingOnly { sibling, .. } => Some(sibling.as_path()),
+        SelectionOutcome::Missing { .. } | SelectionOutcome::Failed(_) => None,
+    };
+    for probed in &selection.attempted {
+        gate.observe(probed, crate::slots::SchemaReadKind::Probe, None, Some(probed.as_path()) == found);
+    }
+    if let SelectionOutcome::SiblingOnly { sibling, .. } = &selection.outcome {
+        gate.observe(sibling, crate::slots::SchemaReadKind::Probe, None, true);
+    }
+    searched.extend(selection.attempted.iter().cloned());
+    selection.into_result()
+}
+
 /// Rewrites every `example(...)` reference in `atom`, including those of
 /// nested inline-object properties and union arms, to the path it resolves to from
 /// `base_dir` (see [`ImportEngine::rehome_examples`]). A path that is not
 /// valid UTF-8 cannot be spelled as a reference and is left as authored.
-fn rehome_atom_examples(
+///
+/// With a `gate` (a template type's returned definition), every location the
+/// selection may probe and the selected file are admitted first, and the
+/// file is read and reported here; the read at lowering is the same path.
+pub(crate) fn rehome_atom_examples(
     atom: &mut PropertyAtom,
     base_dir: &Path,
-    this_file: &Path,
+    this_file: Option<&Path>,
     schema_roots: &[PathBuf],
     request_context: &FileResolutionContext,
     searched: &mut BTreeSet<PathBuf>,
+    gate: Option<&crate::slots::reads::ReadGate>,
 ) -> Result<(), SchemaError> {
     for constraint in atom
         .constraints
@@ -3257,25 +3451,29 @@ fn rehome_atom_examples(
     {
         if let Constraint::Example(references) = constraint {
             for reference in references.iter_mut() {
-                let path = resolve_example_path(
-                    reference,
-                    base_dir,
-                    Some(this_file),
-                    schema_roots,
-                    request_context,
-                    searched,
-                )?;
+                let path = match gate {
+                    Some(gate) if reference.trim() != "this" => {
+                        let path =
+                            gated_schema_file_path(gate, reference, base_dir, schema_roots, request_context, searched)?;
+                        gate.read(&path)?;
+                        path
+                    }
+                    _ => resolve_example_path(reference, base_dir, this_file, schema_roots, request_context, searched)?,
+                };
                 if let Some(resolved) = path.to_str() {
                     *reference = resolved.to_string();
                 }
             }
         }
     }
+    let mut rehome = |atom: &mut PropertyAtom| {
+        rehome_atom_examples(atom, base_dir, this_file, schema_roots, request_context, searched, gate)
+    };
     if let TypeExpr::Union(arms) = &mut atom.ty {
         // An arm inlined from another file was already rehomed there; its
         // absolute paths resolve to themselves.
         for arm in arms {
-            rehome_atom_examples(arm, base_dir, this_file, schema_roots, request_context, searched)?;
+            rehome(arm)?;
         }
     }
     if let TypeExpr::InlineObject(shape) = &mut atom.ty {
@@ -3285,26 +3483,10 @@ fn rehome_atom_examples(
             .chain(shape.pattern_keys.iter_mut().map(|pattern| &mut pattern.def));
         for def in defs {
             match def {
-                PropertyDef::Single(inner) => {
-                    rehome_atom_examples(
-                        inner,
-                        base_dir,
-                        this_file,
-                        schema_roots,
-                        request_context,
-                        searched,
-                    )?;
-                }
+                PropertyDef::Single(inner) => rehome(inner)?,
                 PropertyDef::Union(arms) => {
                     for inner in arms {
-                        rehome_atom_examples(
-                            inner,
-                            base_dir,
-                            this_file,
-                            schema_roots,
-                            request_context,
-                            searched,
-                        )?;
+                        rehome(inner)?;
                     }
                 }
             }
@@ -3330,7 +3512,16 @@ pub fn canonical_path(path: &Path) -> PathBuf {
 /// UTF-8 — imports are only defined among a file's named types, so a raw
 /// JSON Schema has none to offer.
 fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
-    let loaded = read_named_types(path);
+    let bytes = buffers::read(path).map_err(|source| SchemaError::Io {
+        path: path.to_path_buf(),
+        source,
+    });
+    load_named_types_from(path, bytes)
+}
+
+/// [`load_named_types`] over `path`'s bytes, already read.
+fn load_named_types_from(path: &Path, bytes: Result<Vec<u8>, SchemaError>) -> Result<Arc<NamedTypes>, SchemaError> {
+    let loaded = bytes.and_then(|bytes| read_named_types(path, &bytes));
     if loaded.is_err() {
         // The path's latest revision failed: drop its entry so the memo only
         // ever holds a table the file parsed to when last read.
@@ -3341,19 +3532,15 @@ fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
 
 /// Reads and hashes `path`, reusing its memo entry when the hash matches and
 /// otherwise parsing and replacing the entry.
-fn read_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
-    let bytes = buffers::read(path).map_err(|source| SchemaError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+fn read_named_types(path: &Path, bytes: &[u8]) -> Result<Arc<NamedTypes>, SchemaError> {
     observed::read(path);
-    let text = std::str::from_utf8(&bytes).map_err(|error| SchemaError::SchemaDocument {
+    let text = std::str::from_utf8(bytes).map_err(|error| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
         message: format!("not UTF-8 text: {error}"),
         source: None,
         span: None,
     })?;
-    let hash = biscuit_hash::xx_hash_bytes(&bytes);
+    let hash = biscuit_hash::xx_hash_bytes(bytes);
     if let Some(entry) = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").get(path)
         && entry.hash == hash
     {
@@ -4298,7 +4485,8 @@ fn atom_has_imports(atom: &PropertyAtom) -> bool {
         TypeExpr::InlineObject(shape) => shape_has_imports(shape),
         TypeExpr::Union(arms) => arms.iter().any(atom_has_imports),
         TypeExpr::Tuple(tuple) => tuple.any_atom(atom_has_imports),
-        TypeExpr::Primitive(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => false,
+        // A template type's imports are unknown until it resolves.
+        TypeExpr::Primitive(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) | TypeExpr::Slot(_) => false,
     }
 }
 
@@ -7217,5 +7405,69 @@ mod named_type_file_memo {
         std::fs::remove_file(&path).unwrap();
         assert!(matches!(load_named_types(&path), Err(SchemaError::Io { .. })));
         assert!(!memo_holds(&path));
+    }
+
+    /// A template type's import that the host refuses is never parsed into
+    /// the memo, nor served from it: the gate is asked before the memo is
+    /// consulted. The same import, admitted, reaches the memo.
+    #[cfg(feature = "file")]
+    #[test]
+    fn a_refused_template_type_import_never_reaches_the_memo() {
+        use crate::slots::{SchemaRead, SchemaReadOutcome, SlotAdmissionError, TemplateReads};
+
+        struct Gate(bool);
+        impl TemplateReads for Gate {
+            fn admit(&self, _: &Slot, _: &SchemaRead<'_>) -> Result<(), SlotAdmissionError> {
+                if self.0 { Ok(()) } else { Err(SlotAdmissionError { code: Some("test.denied"), message: "denied".into(), span: None }) }
+            }
+            fn observe(&self, _: &Slot, _: &SchemaReadOutcome<'_>) {}
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("types.yaml");
+        // The memo keys on the path as selected; either spelling counts.
+        let held = || memo_holds(&path) || memo_holds(&canonical_path(&path));
+        std::fs::write(&path, "kind: schema\ntypes:\n  name: string\n").unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        let site = crate::slots::ExpansionSite {
+            base_dir: dir.path(),
+            schema_roots: &[],
+            request_context: &context,
+            shipped: ShippedSources::NONE,
+        };
+        let slot = Slot { expression: "t".into(), span: 0..7, expression_span: 3..4, origin: None };
+        let returned = crate::simplified::parse_property_definition(
+            "status",
+            &YamlValue::String("name@./types.yaml".into()),
+        )
+        .unwrap();
+        let use_site = PropertyAtom {
+            ty: TypeExpr::Slot(slot.clone()),
+            is_array: false,
+            constraints: Vec::new(),
+            array_constraints: Vec::new(),
+            description: None,
+        };
+        let expand = |allow: bool| {
+            crate::slots::with_template_reads(std::rc::Rc::new(Gate(allow)), || {
+                expand_template_definition(&returned, &use_site, true, false, &slot, &site, &mut DefinitionTable::default())
+                    .map(|expansion| expansion.def)
+            })
+        };
+
+        let (refused, refusal) = expand(false);
+        assert!(matches!(refused, Err(SchemaError::SlotReadRefused { .. })), "{refused:?}");
+        assert_eq!(refusal.map(|(_, refusal)| refusal.code), Some(Some("test.denied")));
+        assert!(!held(), "a refused import is never parsed into the memo");
+
+        let (admitted, refusal) = expand(true);
+        assert!(admitted.is_ok() && refusal.is_none(), "{admitted:?}");
+        assert!(held(), "the admitted import is parsed as any import is");
+
+        let (refused_again, _) = expand(false);
+        assert!(
+            matches!(refused_again, Err(SchemaError::SlotReadRefused { .. })),
+            "a memo entry never authorizes a refused read: {refused_again:?}"
+        );
     }
 }

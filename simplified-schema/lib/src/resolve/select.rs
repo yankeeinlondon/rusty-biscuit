@@ -131,6 +131,81 @@ pub fn select_schema_file(
     }
 }
 
+/// [`select_schema_file`], with `admit` asked for every location the
+/// selection may probe before any is probed: each candidate the reference
+/// plans, for a bare name each schema root's entry and the sibling beside
+/// the referencing document. Only the import engine expanding a template
+/// type's returned definition selects this way.
+///
+/// ## Errors
+///
+/// The first error `admit` returns, and [`SchemaError::Unresolved`] for a
+/// reference whose candidates cannot be planned; nothing is probed then.
+pub(crate) fn select_schema_file_checked(
+    reference: &str,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &FileResolutionContext,
+    admit: &dyn Fn(&Path) -> Result<(), SchemaError>,
+) -> Result<SchemaFileSelection, SchemaError> {
+    let trimmed = reference.trim();
+    let planned = planned_probes(trimmed, base_dir, schema_roots, request_context)
+        .map_err(|source| SchemaError::Unresolved { reference: trimmed.to_string(), source })?;
+    for candidate in planned {
+        admit(&candidate)?;
+    }
+    let selection = select_schema_file(reference, base_dir, schema_roots, request_context);
+    // The plan and the probes agree; a location probed off the plan is
+    // judged now, so its result cannot be used if it was not allowed.
+    for probed in &selection.attempted {
+        admit(probed)?;
+    }
+    Ok(selection)
+}
+
+/// Every location [`select`] may probe for `trimmed`, without probing. A
+/// URL plans none: it is refused without a probe.
+fn planned_probes(
+    trimmed: &str,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &FileResolutionContext,
+) -> Result<Vec<PathBuf>, FileReferenceError> {
+    let file_ref = FileReference::new(trimmed)?;
+    if file_ref.class().kind == FileReferenceKind::Url {
+        return Ok(Vec::new());
+    }
+    #[cfg(not(feature = "file"))]
+    {
+        let _ = (base_dir, schema_roots, request_context);
+        Ok(Vec::new())
+    }
+    #[cfg(feature = "file")]
+    {
+        let plan = |file_ref: &FileReference, context: &FileResolutionContext, anchor: &Path| {
+            let plan = file_ref.candidate_plan_with_order(context, biscuit_file::CandidatePlanOrder::Resolution)?;
+            Ok::<_, FileReferenceError>(
+                plan.into_iter()
+                    .map(|candidate| {
+                        let path = candidate.path();
+                        if path.is_absolute() { path.to_path_buf() } else { anchor.join(path) }
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        if !schema_roots.is_empty() && is_bare_name(&file_ref) {
+            let explicit = FileReference::new(&format!("./{}", file_ref.raw()))?;
+            let mut planned = Vec::new();
+            for root in schema_roots {
+                planned.extend(plan(&explicit, &request_context.for_trusted_external_cwd(root), root)?);
+            }
+            planned.push(base_dir.join(trimmed));
+            return Ok(planned);
+        }
+        plan(&file_ref, &request_context.for_cwd(base_dir), base_dir)
+    }
+}
+
 fn select(
     trimmed: &str,
     base_dir: &Path,

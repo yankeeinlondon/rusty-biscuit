@@ -247,7 +247,7 @@ fn collect_atom_refs(atom: &PropertyAtom, path: &str, out: &mut IndexMap<DefKey,
         }
         // A function type fails conversion where it is met; an unresolved
         // import does too.
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => {}
     }
 }
 
@@ -531,7 +531,7 @@ impl MatchCopies {
                     self.collect_atom(spread, property, in_copy, defs);
                 }
             }
-            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => {}
         }
     }
 
@@ -569,7 +569,7 @@ fn atom_reaches_match(atom: &PropertyAtom, defs: &DefinitionTable, seen: &mut st
             tuple.elements.iter().any(|element| def_reaches(&element.def, seen))
                 || tuple.spread.as_deref().is_some_and(|spread| atom_reaches_match(spread, defs, seen))
         }
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => false,
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => false,
     }
 }
 
@@ -606,7 +606,7 @@ fn reaches_enforced_reference(
                 tuple.elements.iter().any(|element| reaches_enforced_reference(&element.def, defs, cyclic, seen))
                     || tuple.spread.as_deref().is_some_and(|spread| atom_reaches(spread, defs, cyclic, seen))
             }
-            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => false,
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => false,
         }
     }
     match def {
@@ -1047,12 +1047,13 @@ fn atom_fragment_without_null_wrap(
     // The entry points reject a template before lowering anything; this
     // keeps every other route into an atom's lowering just as closed, rather
     // than letting a fragment read a dynamic list as no members.
-    let slots: Vec<Slot> = atom
-        .constraints
-        .iter()
-        .chain(&atom.array_constraints)
-        .flat_map(Constraint::slots)
-        .cloned()
+    let template_type = match &atom.ty {
+        TypeExpr::Slot(slot) => Some(slot.clone()),
+        _ => None,
+    };
+    let slots: Vec<Slot> = template_type
+        .into_iter()
+        .chain(atom.constraints.iter().chain(&atom.array_constraints).flat_map(Constraint::slots).cloned())
         .collect();
     if !slots.is_empty() {
         return Err(SchemaError::UnresolvedSlots(Box::new(crate::errors::UnresolvedSlots::new(slots))));
@@ -1122,6 +1123,10 @@ fn atom_fragment_without_null_wrap(
                           cannot type a value in a document schema"
                     .into(),
             });
+        }
+        // The guard above has already refused it; kept closed, never lowered.
+        TypeExpr::Slot(slot) => {
+            return Err(SchemaError::UnresolvedSlots(Box::new(crate::errors::UnresolvedSlots::new(vec![slot.clone()]))));
         }
         // The alternatives of each item (with `is_array`) or of a union
         // nested as an arm. Items get no `null` wrapper or empty-file arm,

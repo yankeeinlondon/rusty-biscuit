@@ -17,7 +17,8 @@ use serde_yaml_ng::Value as YamlValue;
 use simplified_schema::embedded::{EmbeddedDocument, ShippedSources};
 use simplified_schema::resolve::{InlineOwner, ResolvedSchema, resolve_yaml_schema, resolve_yaml_schema_owned_by};
 use simplified_schema::slots::{
-    PendingSchema, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, SlotResolutionError, SlotRunRequest,
+    PendingSchema, RefuseTemplateReads, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, SlotResolutionError,
+    SlotRunRequest, TemplateReads,
 };
 use simplified_schema::{SchemaError, SimplifiedSchema, SimplifiedSchemaError, Slot, SlotResultKind};
 
@@ -84,6 +85,10 @@ impl SlotHost for StubHost {
         Ok(serde_json::to_value(yaml).expect("stub data is JSON-shaped"))
     }
 
+    fn template_reads(&self) -> std::rc::Rc<dyn TemplateReads> {
+        std::rc::Rc::new(RefuseTemplateReads)
+    }
+
     fn is_canceled(&self) -> bool {
         let checks = self.checks.get() + 1;
         self.checks.set(checks);
@@ -121,7 +126,7 @@ fn resolve(pending: &PendingSchema, host: &StubHost, dir: &Path) -> Result<Resol
 fn slot_error(error: SlotResolutionError) -> (Slot, SlotResultKind) {
     match error {
         SlotResolutionError::Schema(error) => match *error {
-            SchemaError::SlotResult { slot, kind } => (*slot, kind),
+            SchemaError::SlotResult { slot, kind, .. } => (*slot, kind),
             other => panic!("expected a slot result error, got {other}"),
         },
         other => panic!("expected a schema error, got {other}"),

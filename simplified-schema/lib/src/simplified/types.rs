@@ -210,6 +210,49 @@ impl PropertyDef {
         }
     }
 
+    /// Checks the invariants of this definition's options that the parser
+    /// checks for an authored definition: at most one `suggest`, distinct
+    /// `function` overloads, valid `narrows` clauses, and no `non-null` over
+    /// a value that admits null. Template-type resolution repeats them on a
+    /// definition a returned type was substituted into.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::Grammar`](crate::SchemaError::Grammar) for `property`,
+    /// located where the problem records a span.
+    pub fn check_union_invariants(&self, property: &str) -> Result<(), crate::SchemaError> {
+        let arms = match self {
+            Self::Single(atom) => std::slice::from_ref(atom),
+            Self::Union(atoms) => atoms.as_slice(),
+        };
+        match super::grammar::union_invariant_problem(arms, true) {
+            Some(problem) => Err(problem.into_error(property)),
+            None => Ok(()),
+        }
+    }
+
+    /// Whether a top-level atom of this definition (the single atom or any
+    /// property-level union arm) is a template type, so its type is pending.
+    pub fn has_pending_type(&self) -> bool {
+        match self {
+            Self::Single(atom) => atom.is_pending_type(),
+            Self::Union(atoms) => atoms.iter().any(PropertyAtom::is_pending_type),
+        }
+    }
+
+    /// The property's presence for consumers that may receive an
+    /// unresolved template: [`Requiredness::Pending`] while a top-level atom
+    /// is a template type, otherwise [`Self::is_required`]'s answer.
+    pub fn requiredness(&self) -> Requiredness {
+        if self.has_pending_type() {
+            Requiredness::Pending
+        } else if self.is_required() {
+            Requiredness::Required
+        } else {
+            Requiredness::Optional
+        }
+    }
+
     /// The property-level alternatives of this definition, however they were
     /// written.
     ///
@@ -291,6 +334,30 @@ pub enum TypeExpr {
     /// in the table carries none. With `is_array` the atom is a list whose
     /// items are the definition.
     Ref(super::DefKey),
+    /// A template type: a `{{ … }}` slot whose result supplies the whole
+    /// type definition of this position (a property's type, a property-level
+    /// union arm, or a tuple element).
+    ///
+    /// This is the **pending** type. Parsing records it and evaluates
+    /// nothing; it never lowers, validates, or converts, so every consumer
+    /// answers it explicitly (it is not `unknown`, an empty object, or an
+    /// optional property). Resolution replaces the atom with the returned
+    /// definition, merged with the atom's written suffix (`[]`,
+    /// `(constraints)`, `-> description`) by the named-type merge rules.
+    Slot(Slot),
+}
+
+/// The presence of a property that may hold a template type, answered
+/// without guessing: see [`PropertyDef::requiredness`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Requiredness {
+    /// The property must be present (and its value is not nullable).
+    Required,
+    /// The property may be omitted or null.
+    Optional,
+    /// Unknown until a template type resolves: a written `(required)` alone
+    /// cannot decide it, because the returned type may admit null.
+    Pending,
 }
 
 /// The positions of a `tuple([...])` type.
@@ -309,6 +376,31 @@ pub struct TupleType {
 }
 
 impl TupleType {
+    /// Checks that `def` can be one positional element: a tuple position
+    /// takes a type without a description (the tuple's own `-> description`
+    /// describes it) and with valid union invariants
+    /// ([`PropertyDef::check_union_invariants`]). Template-type resolution
+    /// checks an element a returned type was substituted into; an authored
+    /// element cannot carry a description, and its other invariants are
+    /// judged where they always were.
+    ///
+    /// ## Errors
+    ///
+    /// A message for the first problem found.
+    pub fn check_element(def: &PropertyDef) -> Result<(), String> {
+        let arms = match def {
+            PropertyDef::Single(atom) => std::slice::from_ref(atom),
+            PropertyDef::Union(atoms) => atoms.as_slice(),
+        };
+        if arms.iter().any(|atom| atom.description.is_some()) {
+            return Err("a tuple element takes no `-> description`; describe the tuple instead".to_string());
+        }
+        def.check_union_invariants("<tuple element>").map_err(|error| match error {
+            crate::SchemaError::Grammar { message, .. } => message,
+            other => other.to_string(),
+        })
+    }
+
     /// How many leading positions must be present.
     pub fn required_len(&self) -> usize {
         self.elements.iter().filter(|element| !element.optional).count()
@@ -486,7 +578,9 @@ fn named_reference_in(atom: &PropertyAtom) -> Option<String> {
         PropertyDef::Union(arms) => arms.iter().find_map(named_reference_in),
     };
     match &atom.ty {
-        TypeExpr::Primitive(_) => None,
+        // A template type names nothing until it resolves; the grammar
+        // refuses one inside a `function(...)` signature anyway.
+        TypeExpr::Primitive(_) | TypeExpr::Slot(_) => None,
         TypeExpr::Imported { name, reference } if reference == LOCAL_REFERENCE => Some(name.clone()),
         TypeExpr::Imported { name, reference } => Some(format!("{name}@{reference}")),
         TypeExpr::Ref(key) => Some(key.name.clone()),
@@ -667,6 +761,12 @@ impl PropertyAtom {
                 Constraint::Dynamic(_) | Constraint::TemplateConstraint { kind: TemplateConstraintKind::Literal, .. }
             )
         })
+    }
+
+    /// Whether this atom is a template type ([`TypeExpr::Slot`]): its type
+    /// is pending until resolution, and no concrete-type helper describes it.
+    pub fn is_pending_type(&self) -> bool {
+        matches!(self.ty, TypeExpr::Slot(_))
     }
 
     /// Convenience constructor for a bare-typed atom with no constraints.

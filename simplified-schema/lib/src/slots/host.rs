@@ -8,6 +8,7 @@
 use std::error::Error;
 use std::fmt;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
@@ -34,6 +35,13 @@ pub trait SlotHost {
     ///
     /// The host's typed failure.
     fn resolve(&self, request: &SlotRequest<'_>) -> Result<Value, SlotFailure>;
+
+    /// The hooks that judge and record every read a template type's
+    /// returned definition causes (its imports, their examples, and the
+    /// locations probed to select them), installed for the length of one
+    /// resolution. A host that never lets returned data read a file returns
+    /// [`RefuseTemplateReads`](super::RefuseTemplateReads).
+    fn template_reads(&self) -> Rc<dyn super::TemplateReads>;
 
     /// Checked before each slot is evaluated and before a result is
     /// published; `true` stops the resolution with

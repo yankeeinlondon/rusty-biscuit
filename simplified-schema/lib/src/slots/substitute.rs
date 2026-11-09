@@ -109,34 +109,103 @@ pub fn active_values() -> Option<SlotValues> {
     ACTIVE.with_borrow(Clone::clone)
 }
 
+/// Where a lowering site expanded its schema: what a template type's returned
+/// definition needs to expand its own imports the way the site's did.
+#[derive(Clone, Copy)]
+pub(crate) struct ExpansionSite<'a> {
+    /// The directory the site's schema was written in: the import base of a
+    /// slot with no [`Slot::origin`].
+    pub(crate) base_dir: &'a std::path::Path,
+    /// The schema roots bare names are looked up in.
+    pub(crate) schema_roots: &'a [PathBuf],
+    /// The request context imports resolve in.
+    pub(crate) request_context: &'a biscuit_file::FileResolutionContext,
+    /// The host's shipped schema documents.
+    pub(crate) shipped: crate::embedded::ShippedSources,
+}
+
+/// What substituting template types read beyond the site's own expansion:
+/// dependency edges a site adds to its [`crate::resolve::ResolvedSchema`],
+/// on top of what its first expansion found.
+#[derive(Debug, Default)]
+pub(crate) struct LateDependencies {
+    /// Files imported by returned definitions (and transitively by them).
+    pub(crate) imports: std::collections::BTreeSet<PathBuf>,
+    /// Example files returned definitions name.
+    pub(crate) examples: std::collections::BTreeSet<PathBuf>,
+    /// Every location probed to select them, found or not.
+    pub(crate) searched: std::collections::BTreeSet<PathBuf>,
+}
+
+impl LateDependencies {
+    /// Adds the late imports and examples to a site's sorted, deduplicated
+    /// lists, and the probes to its `searched`.
+    pub(crate) fn merge_into(
+        self,
+        imports: &mut Vec<PathBuf>,
+        examples: &mut Vec<PathBuf>,
+        searched: &mut std::collections::BTreeSet<PathBuf>,
+    ) {
+        for (list, late) in [(imports, self.imports), (examples, self.examples)] {
+            if !late.is_empty() {
+                let mut merged: std::collections::BTreeSet<PathBuf> = std::mem::take(list).into_iter().collect();
+                merged.extend(late);
+                *list = merged.into_iter().collect();
+            }
+        }
+        searched.extend(self.searched);
+    }
+}
+
 /// What a lowering site runs after import expansion: inside a
-/// [`with_values`] scope, [`substitute`]; outside one, a template is
+/// [`with_values`] scope, the template types are replaced by the definitions
+/// their slots returned (expanded from `site`), then [`substitute`] fills
+/// the template constraints; outside one, a template is
 /// [`SchemaError::UnresolvedSlots`] carrying its expanded form.
 ///
 /// Inside an [`omitting`] scope, the first lowering takes the omitted
 /// properties out first: a resolution lowers its entry schema once, after
 /// every import is expanded, so that lowering is the replayed template's.
-pub(crate) fn apply_active(root: &mut SchemaRoot, definitions: &mut DefinitionTable) -> Result<(), SchemaError> {
+pub(crate) fn apply_active(
+    root: &mut SchemaRoot,
+    definitions: &mut DefinitionTable,
+    site: &ExpansionSite<'_>,
+) -> Result<LateDependencies, SchemaError> {
     if let Some(omitted) = OMITTED.with_borrow_mut(Option::take) {
         super::omit_properties(root, definitions, &omitted);
     }
-    apply_values(root, definitions)
+    apply_values(root, definitions, site)
 }
 
 /// [`apply_active`] for one arm of a root union, which an [`omitting`]
 /// scope never reaches. The union marks a template the arm reports as its
 /// arm ([`Template::mark_union_arm`]), once it knows what every arm declares.
-pub(crate) fn apply_active_to_arm(root: &mut SchemaRoot, definitions: &mut DefinitionTable) -> Result<(), SchemaError> {
-    apply_values(root, definitions)
+pub(crate) fn apply_active_to_arm(
+    root: &mut SchemaRoot,
+    definitions: &mut DefinitionTable,
+    site: &ExpansionSite<'_>,
+) -> Result<LateDependencies, SchemaError> {
+    apply_values(root, definitions, site)
 }
 
-fn apply_values(root: &mut SchemaRoot, definitions: &mut DefinitionTable) -> Result<(), SchemaError> {
+fn apply_values(
+    root: &mut SchemaRoot,
+    definitions: &mut DefinitionTable,
+    site: &ExpansionSite<'_>,
+) -> Result<LateDependencies, SchemaError> {
     let slots = collect_slots(root, definitions);
     if slots.is_empty() {
-        return Ok(());
+        return Ok(LateDependencies::default());
     }
     match active_values() {
-        Some(values) => substitute(root, definitions, &values),
+        Some(values) => {
+            // Type slots first: a returned definition merges with the
+            // suffix written after its slot, whose template constraints the
+            // constraint pass then fills like any other.
+            let late = super::template_type::substitute_types(root, definitions, &values, site)?;
+            substitute(root, definitions, &values)?;
+            Ok(late)
+        }
         None => Err(SchemaError::UnresolvedSlots(Box::new(UnresolvedSlots::with_template(
             slots,
             Template::new(root.clone(), Arc::new(definitions.clone())),
@@ -146,7 +215,9 @@ fn apply_values(root: &mut SchemaRoot, definitions: &mut DefinitionTable) -> Res
 
 /// Replaces every dynamic constraint whose slots all have a value in
 /// `values` with the concrete constraint it stands for; a constraint with a
-/// slot `values` lacks is left as it is, so lowering still reports it.
+/// slot `values` lacks is left as it is, so lowering still reports it. A
+/// template type ([`TypeExpr::Slot`]) is left too: replacing it expands
+/// imports, which a resolution's own lowering does.
 ///
 /// - an `enum(...)` slot yields an array of strings, a `suggest(...)` slot an
 ///   array of strings, numbers, booleans, and nulls (a number as its
@@ -248,7 +319,9 @@ impl Substitution<'_> {
     fn atom(&mut self, atom: &mut PropertyAtom) -> Result<Vec<(Slot, Value)>, SchemaError> {
         let mut defaults = Vec::new();
         match &mut atom.ty {
-            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {}
+            // A template type was replaced before this pass
+            // (`template_type::substitute_types`); one left has no value.
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {}
             TypeExpr::InlineObject(shape) => self.shape(shape)?,
             TypeExpr::Union(atoms) => {
                 for inner in atoms {
@@ -648,8 +721,8 @@ fn wrong_shape(slot: &Slot, expected: &'static str, found: &str) -> SchemaError 
     slot_error(slot.clone(), SlotResultKind::WrongShape { expected, found: found.to_string() })
 }
 
-fn slot_error(slot: Slot, kind: SlotResultKind) -> SchemaError {
-    SchemaError::SlotResult { slot: Box::new(slot), kind }
+pub(super) fn slot_error(slot: Slot, kind: SlotResultKind) -> SchemaError {
+    SchemaError::SlotResult { slot: Box::new(slot), kind, property: None, related: Vec::new() }
 }
 
 /// The JSON kind of `value`, as diagnostics name it.

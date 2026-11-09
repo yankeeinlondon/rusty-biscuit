@@ -195,12 +195,15 @@ impl SimplifiedSchema {
     /// ```
     /// use serde_json::{Value, json};
     /// use simplified_schema::{SimplifiedSchema, Slot};
-    /// use simplified_schema::slots::{SlotAdmissionError, SlotFailure, SlotHost, SlotRequest};
+    /// use simplified_schema::slots::{
+    ///     RefuseTemplateReads, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, TemplateReads,
+    /// };
     ///
     /// struct Fixed;
     /// impl SlotHost for Fixed {
     ///     fn admit(&self, _: &Slot) -> Result<(), SlotAdmissionError> { Ok(()) }
     ///     fn resolve(&self, _: &SlotRequest<'_>) -> Result<Value, SlotFailure> { Ok(json!(["macOS", "Linux"])) }
+    ///     fn template_reads(&self) -> std::rc::Rc<dyn TemplateReads> { std::rc::Rc::new(RefuseTemplateReads) }
     /// }
     ///
     /// let template = SimplifiedSchema::try_from("$schema:\n  os: enum(none, {{ os_list }})\n")?;
@@ -231,8 +234,16 @@ impl SimplifiedSchema {
         };
         let context = layer.binding.as_ref().map_or_else(layer::content_context, |binding| binding.context.clone());
         let source_name = layer.provenance.path.clone().unwrap_or_else(|| std::path::PathBuf::from(layer::CONTENT));
+        let reads = host.template_reads();
         let resolved = slots::resolve_with(host, &context, self.pending_slots().to_vec(), |values| {
-            let rebuilt = buffers::with(&rebuild.buffers, || slots::with_values(values, || (rebuild.build)()));
+            let (rebuilt, refusal) = slots::with_template_reads(std::rc::Rc::clone(&reads), || {
+                buffers::with(&rebuild.buffers, || {
+                    buffers::with_reads_retained(|| slots::with_values(values, || (rebuild.build)()))
+                })
+            });
+            if let Some(refused) = refusal {
+                return Attempt::Refused(vec![refused]);
+            }
             let layer = match rebuilt {
                 Ok(layer) => layer,
                 Err(SimplifiedSchemaError::Schema(error)) => return Attempt::Failed(error),
@@ -248,9 +259,12 @@ impl SimplifiedSchema {
             };
             let outcome = match layer.lowered.as_ref().err().map(Arc::as_ref) {
                 Some(SchemaError::UnresolvedSlots(unresolved)) => Some(Attempt::Unresolved(unresolved.slots.clone())),
-                Some(SchemaError::SlotResult { slot, kind }) => {
-                    Some(Attempt::Failed(SchemaError::SlotResult { slot: slot.clone(), kind: kind.clone() }))
-                }
+                Some(SchemaError::SlotResult { slot, kind, property, related }) => Some(Attempt::Failed(SchemaError::SlotResult {
+                    slot: slot.clone(),
+                    kind: kind.clone(),
+                    property: property.clone(),
+                    related: related.clone(),
+                })),
                 _ => None,
             };
             outcome.unwrap_or(Attempt::Done(layer))

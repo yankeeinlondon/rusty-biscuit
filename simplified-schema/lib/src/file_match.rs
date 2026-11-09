@@ -391,7 +391,8 @@ fn collect_reference_alternatives<'a>(
             | TypeExpr::InlineObject(_)
             | TypeExpr::Tuple(_)
             | TypeExpr::Function(_) => {}
-            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => return None,
+            // A pending template type may accept any string.
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Slot(_) => return None,
         }
     }
     Some(())
@@ -437,7 +438,8 @@ fn collect_file_alternatives<'a>(
             | TypeExpr::InlineObject(_)
             | TypeExpr::Tuple(_)
             | TypeExpr::Function(_) => {}
-            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => return None,
+            // A pending template type may accept any string.
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Slot(_) => return None,
         }
     }
     Some(())

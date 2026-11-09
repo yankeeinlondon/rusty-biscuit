@@ -4,11 +4,13 @@
 
 use std::fmt;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 
-use super::host::{SlotHost, SlotRequest, SlotResolutionError, SlotRunRequest};
+use super::host::{SlotAdmissionError, SlotHost, SlotRequest, SlotResolutionError, SlotRunRequest};
+use super::reads::with_template_reads;
 use super::substitute::{SlotValues, with_values};
 use crate::errors::{SchemaError, UnresolvedSlots};
 use crate::resolve::{AuthoredSchemaValue, ResolvedSchema};
@@ -199,9 +201,14 @@ impl PendingSchema {
 
     /// The recorded resolution, run again with `values` in force, the
     /// recorded schema texts served, and the omitted properties left out.
+    /// A file the replay reads that the first pass did not (an import a
+    /// template type's returned definition names) is read once, however many
+    /// properties use it.
     fn replay_with(&self, values: &SlotValues) -> Result<ResolvedSchema, SchemaError> {
         buffers::with(&self.buffers, || {
-            with_values(values, || super::omitting(&self.omitted, || (self.replay)()))
+            buffers::with_reads_retained(|| {
+                with_values(values, || super::omitting(&self.omitted, || (self.replay)()))
+            })
         })
     }
 
@@ -254,15 +261,21 @@ impl PendingSchema {
     ///
     /// ## Errors
     ///
-    /// [`SlotResolutionError`]: refused slots (none is evaluated), failed
-    /// evaluations (all attempted), a value that cannot fill its position
+    /// [`SlotResolutionError`]: refused slots (none is evaluated), a read a
+    /// template type's returned definition needs that `host`'s
+    /// [`SlotHost::template_reads`] refused, failed evaluations (all
+    /// attempted), a value that cannot fill its position
     /// ([`SchemaError::SlotResult`]), or cancellation.
     pub fn resolve(&self, host: &dyn SlotHost, request: &SlotRunRequest) -> Result<ResolvedSchema, SlotResolutionError> {
+        let reads = host.template_reads();
         resolve_with(host, &request.context, self.slots.clone(), |values| {
-            match self.replay_with(values) {
-                Ok(resolved) => Attempt::Done(resolved),
-                Err(SchemaError::UnresolvedSlots(unresolved)) => Attempt::Unresolved(unresolved.slots),
-                Err(error) => Attempt::Failed(error),
+            let (replayed, refusal) = with_template_reads(Rc::clone(&reads), || self.replay_with(values));
+            match (replayed, refusal) {
+                // A refusal outranks whatever the expansion made of it.
+                (_, Some(refused)) => Attempt::Refused(vec![refused]),
+                (Ok(resolved), None) => Attempt::Done(resolved),
+                (Err(SchemaError::UnresolvedSlots(unresolved)), None) => Attempt::Unresolved(unresolved.slots),
+                (Err(error), None) => Attempt::Failed(error),
             }
         })
     }
@@ -293,6 +306,8 @@ pub(crate) enum Attempt<T> {
     Unresolved(Vec<Slot>),
     /// The schema the values make is not valid.
     Failed(SchemaError),
+    /// The host refused a read a template type's returned definition needs.
+    Refused(Vec<(Slot, SlotAdmissionError)>),
 }
 
 /// The evaluation loop every resolution shares: admit the round's slots,
@@ -358,6 +373,7 @@ pub(crate) fn resolve_with<T>(
                 round = slots;
             }
             Attempt::Failed(error) => return Err(SlotResolutionError::Schema(Box::new(error))),
+            Attempt::Refused(refused) => return Err(SlotResolutionError::Refused(refused)),
         }
     }
 }

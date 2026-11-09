@@ -593,12 +593,13 @@ fn locate_keyed_failure(
         LocatedKind::Mapping(pairs) => pairs.iter().find(|pair| pair.key == key).map(|pair| &pair.value),
         _ => None,
     });
-    project_definition_failure(
+    let located = project_definition_failure(
         failure,
         located_value.map(|located| (located, value)),
         &SchemaSourcePath::root().property(key),
         source_offset,
-    )
+    );
+    quote_unquoted_slot(located, mapping_source, source_offset)
 }
 
 /// A projection error after a successful semantic parse: nothing was
@@ -623,12 +624,59 @@ fn locate_definition_failure(
     source_offset: usize,
 ) -> LocatedDefinitionFailure {
     let located = locate_yaml_value(yaml_source).ok();
-    project_definition_failure(
+    let located = project_definition_failure(
         failure,
         located.as_ref().map(|located| (located, value)),
         &SchemaSourcePath::root(),
         source_offset,
-    )
+    );
+    quote_unquoted_slot(located, yaml_source, source_offset)
+}
+
+/// `failure` with its non-string property name error replaced by the
+/// "quote the slot" hint when the rejected value is an unquoted `{{ … }}` in
+/// `source` (the text its path starts at and its spans index, before
+/// `source_offset`). Any other failure is returned unchanged.
+///
+/// YAML read the slot as a flow mapping with a mapping key, which neither
+/// the semantic error nor the located tree can represent. So the proof is
+/// structural: with every unquoted slot value single-quoted, the failure's
+/// path must lead to exactly one of them.
+fn quote_unquoted_slot(
+    mut failure: LocatedDefinitionFailure,
+    source: &str,
+    source_offset: usize,
+) -> LocatedDefinitionFailure {
+    let SchemaError::Grammar { property, message, .. } = &*failure.error else {
+        return failure;
+    };
+    if message != super::NON_STRING_PROPERTY_NAME {
+        return failure;
+    }
+    let slots = crate::slots::unquoted_slot_spans(source);
+    let (quoted, quoted_starts) = crate::slots::quote_slots(source, &slots);
+    let Ok(value) = serde_yaml_ng::from_str::<YamlValue>(&quoted) else {
+        return failure;
+    };
+    let Ok(located) = locate_yaml_value(&quoted) else {
+        return failure;
+    };
+    let Some(slot) = follow_path(&located, &value, &failure.path)
+        .and_then(|(node, _)| quoted_starts.iter().position(|start| *start == node.span.start))
+        .map(|index| slots[index].clone())
+    else {
+        return failure;
+    };
+    failure.error = Box::new(SchemaError::Grammar {
+        property: property.clone(),
+        message: crate::slots::quote_the_slot_message(source, &slot),
+        span: 0..0,
+        related: Vec::new(),
+    });
+    let located = offset_span(&slot, source_offset);
+    failure.authored_span = Some(located.clone());
+    failure.value_span = Some(located);
+    failure
 }
 
 /// Projects `failure` through `root`, the located tree paired with the YAML
@@ -2878,6 +2926,19 @@ impl Projector<'_> {
     }
 
     fn property(&mut self, def: &mut PropertyDef) -> Result<(), SchemaError> {
+        // A `|` union written in one scalar (`string | {{ … }}`) is matched
+        // as a whole; a list-form union's options are scalars of their own.
+        if let PropertyDef::Union(_) = def
+            && property_has_suggestions(def)
+            && let Some((scalar_index, scalar)) = self.scalars[self.next_scalar..]
+                .iter()
+                .enumerate()
+                .find(|(_, scalar)| scalar_matches_definition(scalar, def))
+                .map(|(relative, scalar)| (self.next_scalar + relative, scalar))
+        {
+            self.next_scalar = scalar_index + 1;
+            return project_property_suggestions(def, scalar, self.source_offset);
+        }
         match def {
             PropertyDef::Single(atom) => self.atom(atom),
             PropertyDef::Union(atoms) => {
@@ -2904,7 +2965,7 @@ impl Projector<'_> {
         if let TypeExpr::InlineObject(shape) = &mut atom.ty {
             self.shape(shape)?;
         }
-        if atom.constraints.iter().chain(&atom.array_constraints).any(carries_spans) {
+        if atom.is_pending_type() || atom.constraints.iter().chain(&atom.array_constraints).any(carries_spans) {
             return Err(projection_error());
         }
         Ok(())
@@ -2923,11 +2984,11 @@ fn atom_has_suggestions(atom: &PropertyAtom) -> bool {
             TypeExpr::InlineObject(shape) => shape.properties.values().any(property_has_suggestions)
                 || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def)),
             TypeExpr::Union(arms) => arms.iter().any(atom_has_suggestions),
-            TypeExpr::Primitive(_)
-            | TypeExpr::Imported { .. }
-            | TypeExpr::Tuple(_)
-            | TypeExpr::Function(_)
-            | TypeExpr::Ref(_) => false,
+            // A template type's slot is itself an authored span.
+            TypeExpr::Slot(_) => true,
+            // A tuple element may be a template type.
+            TypeExpr::Tuple(tuple) => tuple.any_atom(atom_has_suggestions),
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Ref(_) => false,
         }
 }
 
@@ -2941,6 +3002,10 @@ fn property_has_suggestions(def: &PropertyDef) -> bool {
 fn scalar_matches_atom(scalar: &DecodedScalar, expected: &PropertyAtom) -> bool {
     super::grammar::parse_type_expr("<source>", scalar.decoded())
         .is_ok_and(|actual| actual == *expected)
+}
+
+fn scalar_matches_definition(scalar: &DecodedScalar, expected: &PropertyDef) -> bool {
+    super::grammar::parse_type_definition("<source>", scalar.decoded()).is_ok_and(|actual| actual == *expected)
 }
 
 fn project_atom_suggestions(
@@ -2965,6 +3030,23 @@ fn project_atom_suggestions(
         project(&mut slot.span)?;
         project(&mut slot.expression_span)
     };
+    match &mut atom.ty {
+        TypeExpr::Slot(slot) => project_slot(slot)?,
+        TypeExpr::Union(arms) => {
+            for arm in arms {
+                project_atom_suggestions(arm, scalar, source_offset)?;
+            }
+        }
+        TypeExpr::Tuple(tuple) => {
+            for element in &mut tuple.elements {
+                project_property_suggestions(&mut element.def, scalar, source_offset)?;
+            }
+            if let Some(spread) = &mut tuple.spread {
+                project_atom_suggestions(spread, scalar, source_offset)?;
+            }
+        }
+        _ => {}
+    }
     for constraint in atom.constraints.iter_mut().chain(atom.array_constraints.iter_mut()) {
         match constraint {
             Constraint::Suggest(candidates) => {

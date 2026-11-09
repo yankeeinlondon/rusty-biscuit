@@ -182,6 +182,8 @@ fn lint_property(
             // passive lint never performs; linting the resolved schema judges its
             // candidates against the resolved target.
             TypeExpr::Imported { .. } => {}
+            // A pending template type has no candidates until it resolves.
+            TypeExpr::Slot(_) => {}
             // Flattening never yields a union atom; tuple positions and
             // function signatures carry no suggestions to lint.
             TypeExpr::Union(_) | TypeExpr::Tuple(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {}

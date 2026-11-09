@@ -49,7 +49,9 @@ use super::types::{Constraint, PropertyAtom, PropertyDef, SchemaShape, Simplifie
 /// - Every other pair, including an unresolved reference, is not. An `enum`
 ///   or `literal` whose members or value hold an unresolved `{{ … }}` slot
 ///   is never a subtype or supertype of anything but itself: its values are
-///   not known.
+///   not known. A pending template type ([`TypeExpr::Slot`]) is a subtype
+///   and supertype only of the identical slot; a union's static arms still
+///   prove what they prove.
 ///
 /// A recursive reference is compared only by identity here; use
 /// [`is_subtype_with_definitions`] to compare it through its definition.
@@ -388,7 +390,8 @@ fn is_always_text(atom: &PropertyAtom) -> bool {
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => false,
+        | TypeExpr::Ref(_)
+        | TypeExpr::Slot(_) => false,
     }
 }
 
@@ -424,7 +427,8 @@ fn identity(atom: &PropertyAtom) -> Identity<'_> {
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_)) => Identity::Structured(ty),
+        | TypeExpr::Ref(_)
+        | TypeExpr::Slot(_)) => Identity::Structured(ty),
     }
 }
 
@@ -578,6 +582,9 @@ impl<'t> Identities<'t> {
                         _ => false,
                     }
             }
+            // A pending template type is the same type only as the very same
+            // slot: its definition is unknown, so nothing else proves it.
+            (TypeExpr::Slot(left), TypeExpr::Slot(right)) => left == right,
             (TypeExpr::Function(left), TypeExpr::Function(right)) => {
                 let left_parameters = left.parameters.as_slice();
                 let right_parameters = right.parameters.as_slice();

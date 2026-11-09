@@ -175,7 +175,7 @@ pub(crate) fn admit_recognized(
             (&definitions.schema, SCHEMA_DEFINITION_PATH)
         }
     };
-    let mut document = document_json(recognized, path)?;
+    let mut document = document_json(recognized, path).map_err(|error| slot_key_error(source, path).unwrap_or(error))?;
     let informal = recognized.envelope == StandaloneSchemaEnvelope::Pure;
     if informal && let Value::Object(map) = &mut document {
         map.shift_insert(0, "kind".into(), Value::String("schema".into()));
@@ -199,6 +199,24 @@ pub(crate) fn admit_recognized(
 pub(crate) fn document_json(recognized: &RecognizedStandalone, path: &Path) -> Result<Value, SchemaError> {
     serde_json::to_value(recognized.mapping())
         .map_err(|error| document_error(path, format!("the envelope is not representable as a JSON object: {error}")))
+}
+
+/// The "quote the slot" error for a document [`document_json`] rejects when
+/// its non-string keys are unquoted `{{ … }}` values: YAML read each as a
+/// flow mapping keyed by a mapping. Proven by the same text with every such
+/// value single-quoted converting; located at the first of them.
+fn slot_key_error(source: &str, path: &Path) -> Option<SchemaError> {
+    let slots = crate::slots::unquoted_slot_spans(source);
+    let first = slots.first()?.clone();
+    let (quoted, _) = crate::slots::quote_slots(source, &slots);
+    let quoted: serde_yaml_ng::Value = serde_yaml_ng::from_str(&quoted).ok()?;
+    serde_json::to_value(&quoted).ok()?;
+    Some(SchemaError::SchemaDocument {
+        path: path.to_path_buf(),
+        message: crate::slots::quote_the_slot_message(source, &first),
+        source: None,
+        span: Some(first),
+    })
 }
 
 /// The two compiled definitions, prepared once.

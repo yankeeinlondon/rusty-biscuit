@@ -391,6 +391,9 @@ where
                 add_values(&mut completion.values, atom, arm, suggested);
                 completion.pending |= atom.has_pending_values();
             }
+            // A template type's shape is pending: it offers nothing yet and
+            // says so, rather than looking like a type with no values.
+            TypeExpr::Slot(_) => completion.pending = true,
             // An unresolved import has no shape to offer; flattening never
             // yields a union; a reference left here could not be opened.
             TypeExpr::Imported { .. }

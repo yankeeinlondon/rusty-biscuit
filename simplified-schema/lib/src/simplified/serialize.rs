@@ -233,6 +233,18 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
             write_function(&mut out, function, &atom.constraints);
             write_array_suffix(&mut out, atom);
         }
+        // A template type is written as authored, `{{ expression }}` plus the
+        // suffix a reference takes; exporting never evaluates it.
+        TypeExpr::Slot(slot) => {
+            write_slot(&mut out, slot);
+            let constraints = render_constraints(&atom.constraints, None);
+            if !constraints.is_empty() {
+                out.push('(');
+                out.push_str(&constraints);
+                out.push(')');
+            }
+            write_array_suffix(&mut out, atom);
+        }
     }
 
     if let Some(desc) = &atom.description {

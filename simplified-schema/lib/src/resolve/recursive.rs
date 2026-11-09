@@ -423,7 +423,7 @@ impl ImportEngine<'_> {
                 TypeExpr::Union(arms) => return (DefinitionOuter::Union, self.list_arm(arms)),
                 TypeExpr::InlineObject(_) => return (DefinitionOuter::Object, None),
                 TypeExpr::Tuple(_) => return (DefinitionOuter::Tuple, None),
-                TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => break,
+                TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => break,
             }
         }
         (DefinitionOuter::Other, None)
@@ -857,7 +857,7 @@ fn atom_refs(atom: &PropertyAtom, found: &mut impl FnMut(&DefKey)) {
                 atom_refs(spread, found);
             }
         }
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => {}
     }
 }
 

@@ -127,8 +127,10 @@ pub fn suggestions_for_path(
 /// `leaf` is the property's leaf key name, used only for target-schema error
 /// context while linting candidates.
 ///
-/// Returns `None` when no atom of `def` carries a `suggest(...)` constraint.
-/// Candidates from every suggest-bearing atom are combined in atom-declaration
+/// Returns `None` when no atom of `def` carries a `suggest(...)` constraint
+/// and none is a pending template type; a pending template type makes the
+/// answer `pending` (with no items of its own), since it may add candidates
+/// once resolved. Candidates from every suggest-bearing atom are combined in atom-declaration
 /// order — so a merged union carrying suggestions on more than one arm offers
 /// all of them. A candidate is judged against the whole of `def`, so one stored
 /// on a union arm is kept when any alternative at its insertion site accepts it
@@ -141,11 +143,18 @@ pub fn suggestions_for_path(
 /// or network access occurs.
 pub fn suggestions_for_def(leaf: &str, def: &PropertyDef) -> Option<SuggestionQuery> {
     let by_alternative = suggestions_by_alternative(leaf, def);
+    // A pending template type may contribute candidates once it resolves, so
+    // the known ones are never the whole answer while it is pending.
+    let template = flattened_alternatives(def)
+        .iter()
+        .find(|alternative| alternative.atom.is_pending_type())
+        .map(|alternative| alternative.is_array);
     if by_alternative.is_empty() {
-        return None;
+        return template.map(|is_array| SuggestionQuery { is_array, items: Vec::new(), pending: true });
     }
     let is_array = by_alternative.iter().any(|(alternative, _)| alternative.is_array);
-    let pending = by_alternative.iter().any(|(alternative, _)| alternative.atom.has_pending_suggestions());
+    let pending = template.is_some()
+        || by_alternative.iter().any(|(alternative, _)| alternative.atom.has_pending_suggestions());
     let items = by_alternative
         .into_iter()
         .flat_map(|(_, items)| items)
@@ -272,7 +281,9 @@ fn inline_object_shape(def: &PropertyDef) -> Option<&SchemaShape> {
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => None,
+        | TypeExpr::Ref(_)
+        // A pending template type has no shape to descend into yet.
+        | TypeExpr::Slot(_) => None,
     })
 }
 
@@ -542,7 +553,7 @@ where
     Some(hasher.finish())
 }
 
-pub(super) fn collect_def_refs(def: &PropertyDef, out: &mut Vec<DefKey>) {
+pub(crate) fn collect_def_refs(def: &PropertyDef, out: &mut Vec<DefKey>) {
     match def {
         PropertyDef::Single(atom) => collect_atom_refs(atom, out),
         PropertyDef::Union(atoms) => atoms.iter().for_each(|atom| collect_atom_refs(atom, out)),
@@ -569,7 +580,7 @@ fn collect_atom_refs(atom: &PropertyAtom, out: &mut Vec<DefKey>) {
                 collect_atom_refs(spread, out);
             }
         }
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => {}
     }
 }
 

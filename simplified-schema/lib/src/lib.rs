@@ -87,7 +87,7 @@ pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
 pub use claims::{ClaimCause, ClaimProblem, claimed_values};
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::{
-    CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,
+    CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError, SlotRelated, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,
 };
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, expression_atom, frontmatter_expression_values,
@@ -116,7 +116,7 @@ pub use simplified::{
     Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar,
     DynamicElement, DynamicKind, DynamicList, Slot, TemplateConstraintKind,
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, LocatedDefinitionFailure, LocatedRelated,
-    PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,
+    PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,
     SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
     SchemaReferenceSite, SchemaRoot, SchemaShape, SchemaSourceId, SchemaSourceMap, SchemaSourcePath,
     SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection, SchemaValueEntry, SchemaValueKind,

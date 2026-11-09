@@ -73,8 +73,17 @@ impl<'a> TypeDefinition<'a> {
     }
 
     /// Whether the property is effectively required ([`PropertyDef::is_required`]).
+    /// A template type's presence is not known until it resolves; such a
+    /// declaration answers `false` here, and [`Self::requiredness`] says it
+    /// is pending.
     pub fn is_required(&self) -> bool {
-        self.def.is_required()
+        !self.def.has_pending_type() && self.def.is_required()
+    }
+
+    /// The property's presence, [`Requiredness::Pending`](crate::Requiredness::Pending)
+    /// while a template type has not resolved ([`PropertyDef::requiredness`]).
+    pub fn requiredness(&self) -> crate::Requiredness {
+        self.def.requiredness()
     }
 
     /// The leaf alternatives at this site, with references opened one level

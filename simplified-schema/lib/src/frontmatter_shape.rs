@@ -354,12 +354,14 @@ fn arm_discriminant_json(atom: &PropertyAtom) -> Value {
         TypeExpr::InlineObject(shape) => shape_discriminant_json(shape),
         // `alternatives_of` has already replaced a union type with its arms
         // and a reference it could resolve with its body.
+        // A pending template type proves no discriminant.
         TypeExpr::Primitive(_)
         | TypeExpr::Imported { .. }
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => {
+        | TypeExpr::Ref(_)
+        | TypeExpr::Slot(_) => {
             serde_json::json!({})
         }
     }

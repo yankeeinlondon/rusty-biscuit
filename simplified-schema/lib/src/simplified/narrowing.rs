@@ -77,7 +77,8 @@ pub fn families(atom: &PropertyAtom) -> &'static [Family] {
         TypeExpr::Tuple(_) => &[Family::Array],
         // A recursive reference stays a named arm, so narrowing never expands
         // it; without its definition table a guard keeps it on both sides.
-        TypeExpr::Imported { .. } | TypeExpr::Union(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
+        // A pending template type may be any family: it proves no fact.
+        TypeExpr::Imported { .. } | TypeExpr::Union(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {
             ALL_FAMILIES
         }
     }
@@ -120,7 +121,8 @@ pub fn container_admission(def: &PropertyDef) -> ContainerAdmission {
             }
             // A recursive reference's body lives in a definition table this
             // text-only judgment does not consult.
-            TypeExpr::Imported { .. } | TypeExpr::Ref(_) => provisional = true,
+            // A pending template type's shape is not known either.
+            TypeExpr::Imported { .. } | TypeExpr::Ref(_) | TypeExpr::Slot(_) => provisional = true,
             _ => return ContainerAdmission::NotContainer,
         }
     }

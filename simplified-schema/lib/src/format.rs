@@ -749,7 +749,9 @@ fn alternative_form(atom: &PropertyAtom, forms: &[SimplifiedType]) -> FormVerdic
         return FormVerdict::OtherForm;
     }
     let ty = match &atom.ty {
-        TypeExpr::Imported { .. } => return FormVerdict::Admitted,
+        // A reference's or a pending template type's form is judged once it
+        // resolves.
+        TypeExpr::Imported { .. } | TypeExpr::Slot(_) => return FormVerdict::Admitted,
         TypeExpr::Primitive(ty) if forms.contains(ty) => *ty,
         _ => return FormVerdict::OtherForm,
     };

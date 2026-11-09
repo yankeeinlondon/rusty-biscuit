@@ -76,7 +76,7 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   Tests: `src/simplified/grammar/slot_tests.rs`,
   `tests/l1/{slot_spans,slot_templates}.rs`, `schema_object.rs::templates`.
 - **Resolution replays, never patches.** A host (`slots::SlotHost`: passive
-  `admit`, effectful `resolve`, `is_canceled`) supplies values; the
+  `admit`, effectful `resolve`, `template_reads`, `is_canceled`) supplies values; the
   library reruns the same resolution inside `slots::with_values`, and every
   lowering site calls `slots::apply_active` right after import expansion
   (`substitute`: result shapes, dedupe, stricter-bound/equal-default merge,
@@ -88,11 +88,32 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   `apply_active` too (`apply_active_to_arm` for a root-union arm, never
   pruned by `omitting`; the union then marks the arm's template
   `is_union_arm` with the names every arm declares, `resolve.rs::pending_union_arm`,
-  read by `declared_properties()`). Tests: `tests/l1/dynamic_slots.rs`. Template types (a
-  slot supplying a property's whole definition) are **planned**, not built: do
-  not widen the grammar to admit one ad hoc. The library never evaluates a
-  slot and never reads its targets; approval, caching, and evaluation are the
-  host's (Darkmatter's `schemas/slots/`).
+  read by `declared_properties()`). Tests: `tests/l1/dynamic_slots.rs`.
+- **A template type is the pending type.** A slot supplying a property's
+  whole definition parses to the atom `TypeExpr::Slot` (suffix read like a
+  reference's), allowed only as a property type, union arm, or tuple element;
+  every other position is refused by `grammar::SlotPosition` (one message
+  shape, rewrite sentence only for names/roots/paths). Readers answer it
+  explicitly, never through a `_ =>` arm: no shape facts, `pending` in queries
+  and completion, `PropertyDef::requiredness()` = `Pending` (the boolean
+  presence helpers assume a resolved definition). Resolution
+  (`slots/template_type.rs::substitute_types`, run by `apply_active` before
+  constraint substitution, so `apply_active` takes an `ExpansionSite` and
+  returns late `imports`/`searched`) parses the value once
+  (`definition_from_value`: string or array only; `NestedSlot`,
+  `LocalReference`), then expands it twice through `expand_imports` as the
+  named type `resolve::TEMPLATE_TYPE_NAME` of the slot's defining file
+  (`resolve::expand_template_definition`): bare, for `ReachableSlot`,
+  slot-pattern and lowering checks, then with the written suffix (merge
+  failures are `SuffixConflict`/`InvalidExpansion`). Arms are spliced like
+  `expand_union_arms` does. Every read the expansion causes passes
+  `SlotHost::template_reads` (`slots/reads.rs`: `ReadGate`, captured by
+  `ImportEngine::new` only inside `reads::expanding`; probes are admitted
+  through `select::select_schema_file_checked` before any is made; a refusal
+  is sticky and becomes `SlotResolutionError::Refused`). Tests:
+  `tests/l1/template_types_passive.rs`, `template_type_{results,imports,refusals}.rs`.
+  The library never evaluates a slot and never reads its targets; approval,
+  caching, and evaluation are the host's (Darkmatter's `schemas/slots/`).
 - **Layering is atomic.** Each `layer_under` / `layer_over` commits completely
   or not at all, with whole-property replacement.
 - **One implementation.** Darkmatter calls the library; it never redefines a

@@ -17,8 +17,8 @@ A slot comes in two kinds:
 - a **template constraint** fills part of a type the author wrote: a member
   of an `enum(...)` or `suggest(...)` list, or the whole argument of
   `literal(...)`, `default(...)`, `min(...)`, `max(...)`, or `pattern(...)`;
-- a **template type** supplies a property's whole type definition
-  (**planned**, see [Template Types](#template-types-planned)).
+- a **template type** supplies a property's whole type definition (see
+  [Template Types](#template-types)).
 
 A schema with at least one slot is a **template**. Reading, inspecting, and
 exporting a template never runs its expressions; only an explicit
@@ -186,12 +186,16 @@ anything: their `UnresolvedSlots` has `pending: None`. An embedded schema
 `SchemaError::SchemaDocument` "an embedded schema cannot contain `{{ … }}`
 slots".
 
-A host implements three methods:
+A host implements three methods, and may override a fourth:
 
 ```rust
+use std::rc::Rc;
+
 use serde_json::{Value, json};
 use simplified_schema::Slot;
-use simplified_schema::slots::{SlotAdmissionError, SlotFailure, SlotHost, SlotRequest};
+use simplified_schema::slots::{
+    RefuseTemplateReads, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, TemplateReads,
+};
 
 struct FixedValues;
 
@@ -203,6 +207,11 @@ impl SlotHost for FixedValues {
     // The one effectful step: compute the slot's value.
     fn resolve(&self, request: &SlotRequest<'_>) -> Result<Value, SlotFailure> {
         Ok(json!(["macOS", "Linux"]))
+    }
+    // Judges the files a template type's returned definition reads (see
+    // "Template Types"); this host lets it read none.
+    fn template_reads(&self) -> Rc<dyn TemplateReads> {
+        Rc::new(RefuseTemplateReads)
     }
     // Optional: return true to stop (an editor superseding a stale job).
     fn is_canceled(&self) -> bool {
@@ -373,21 +382,123 @@ never cause that switch, so a pattern from a slot is refused when it:
 `slots::check_slot_pattern` applies the same test. Authored patterns are
 unchanged.
 
-## Template Types (Planned)
+## Template Types
 
-> **Planned:** a **template type** is a slot that supplies a property's whole
-> type definition, for example
-> `status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`. It
-> accepts the same optional suffix an imported named type does (`[]`,
-> `(required)`, `-> description`). The returned definition is parsed by the
-> ordinary type parser, and imports in it resolve against the slot's
-> defining file. It is not accepted today.
+A **template type** is a slot that supplies a property's whole type
+definition. It takes the same optional suffix an imported named type does
+(`[]`, `(required)`, `-> description`):
+
+```yaml
+$schema:
+  status: "{{ load_data('./status-type.yaml', 'type-definition') }}"
+  owners: "{{ owner_type }}[](required)"
+  fallback:
+    - string
+    - "{{ fallback_type }}"
+```
+
+Resolved with the value `"enum(draft, published)"`, `status` is exactly the
+schema `status: enum(draft, published)` would be: the same JSON Schema and
+the same validation.
+
+**What the value must be.** A string holding a type definition (`"null"` is
+the null type, and `"[string, number]"` the union of its items), or an array
+of definitions, which is a union. `null`, a mapping, a number, or a boolean
+is refused, and so is text the type parser rejects (`""`, `[]`, an array
+holding a number); nothing is converted to text first. Each is a
+`SchemaError::SlotResult` whose `kind` is `NotATypeDefinition`, at the slot,
+with `property` naming the property.
+
+**How it is merged.** The returned definition is parsed once, expanded as if
+it were a named type defined in the slot's own schema file, and then the
+written suffix is applied by the named-type rules: a returned union joins a
+surrounding union, `[]` makes an array of it, and a default or constraint
+that disagrees with the suffix fails (`SuffixConflict`), as do invariants the
+merge breaks, such as `non-null` over a nullable type (`InvalidExpansion`).
+`(required)` over `"null"`, `"unknown"`, or a union with a nullable
+alternative stays optional.
+
+**What returned data may not do.** The rules keep returned data from running
+anything or bypassing a check:
+
+| Returned definition | Result |
+| --- | --- |
+| holds a `{{ … }}` slot (a template constraint included) | `NestedSlot` |
+| names a local type (`Name` or `Name@this`) | `LocalReference` |
+| imports a type that reaches a slot, directly or transitively | `ReachableSlot`, with the slot's file as related information |
+| introduces a pattern the [slot-pattern rules](#the-pattern-cap) refuse, directly or through an import | `PatternRejected` |
+
+A slot elsewhere in an imported file that the returned definition does not
+reach is fine, and a pattern written in the suffix keeps the authored rules.
+
+**Reads.** Imports in a returned definition (`Person@./types.yaml`) resolve
+against the slot's defining schema file, never against the data file that
+produced the value. Every read the returned definition causes belongs to its
+slot, and a host judges each one through `SlotHost::template_reads`:
+
+```mermaid
+sequenceDiagram
+    participant Library
+    participant Reads as TemplateReads
+    Library->>Reads: admit(slot, Probe of each candidate location)
+    Note over Library,Reads: before anything is probed
+    Library->>Reads: observe(slot, each probe: exists or not)
+    Library->>Reads: admit(slot, Content of the selected file)
+    Note over Library,Reads: before a buffer, memo, or the disk is used
+    Library->>Reads: observe(slot, bytes read, or the failure)
+```
+
+This covers imports, transitive imports, and example files. A refusal stops
+the resolution with `SlotResolutionError::Refused` carrying the host's code,
+and it can never turn into a schema, even where an import error would
+otherwise be skipped. A static import's ability to read a file does not
+authorize a returned definition to read it. `RefuseTemplateReads` refuses
+every read: with it, a returned definition that imports nothing still
+resolves. A file met only during resolution is read once per resolution,
+however many properties use it, and is listed in the result's `imports` and
+`searched`.
+
+### Quote a slot that starts a YAML value
+
+YAML reads an unquoted value that starts with `{{` as a flow mapping, not
+as text. `status: {{ x }}` becomes a mapping whose key is itself a mapping,
+and `status: {{ x }}(required)` is not valid YAML at all. Quote the value:
+
+```yaml
+$schema:
+  status: "{{ load_data('./status-type.yaml', 'type-definition') }}"
+```
+
+When the authored text proves that mistake, the error says so and points at
+the unquoted value, instead of the generic YAML or key error:
+
+```text
+quote the slot: write `status: "{{ … }}"`
+```
+
+The hint is given only with proof from the source:
+
+- a schema file, or a source-aware parse (`parse_schema_declaration_with_source`
+  and the other `*_with_source` entry points), whose non-string key turns out
+  to be an unquoted `{{ … }}` value: with every such value quoted, the
+  document converts;
+- a schema file that does not decode, when the failing line (or the line
+  before it) holds an unquoted `{{ … }}` value and quoting that value moves
+  the error past that line or removes it.
+
+A real non-string key, such as `obj: { [a]: string }`, and a YAML error that
+quoting the slot does not fix keep their original messages. A source-free
+parse (`parse_schema_declaration(&value)`) has no text to check and keeps the
+original error too. `slots::unquoted_slot_hint` and
+`slots::decode_error_slot` expose the same checks to hosts; Darkmatter
+frontmatter, whose fallback reads an unquoted `{{ … }}` value as text, uses
+them only when its fallback fails on the slot's line as well.
 
 ## Failures
 
 | Error | When |
 | --- | --- |
-| `SlotResolutionError::Refused` | the host's `admit` refused one or more slots; each with its `SlotAdmissionError` (code, message, optional span inside the expression) |
+| `SlotResolutionError::Refused` | the host's `admit` refused one or more slots, or its `template_reads` refused a read a template type's returned definition needs; each with its `SlotAdmissionError` (code, message, optional span inside the expression) |
 | `SlotResolutionError::Failed` | the host's `resolve` failed for one or more slots; each with its `SlotFailure` |
 | `SlotResolutionError::Schema` holding `SchemaError::SlotResult` | a value cannot fill its position; `slot.span` is where it is reported, in the text `slot_text(&slot)` names |
 | `SlotResolutionError::Schema` holding another `SchemaError` | the schema the values make fails as any schema would |
