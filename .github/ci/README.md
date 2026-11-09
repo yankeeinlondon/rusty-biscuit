@@ -862,12 +862,17 @@ resolved plan. The `build` matrix has one leg per native producer environment,
 derived from `build_owners`; its runner and union of native prerequisites come
 from that projection. An all-reused plan schedules no owner.
 
-Each owner invokes `scripts/ci/produce-owner.sh` once, without `--key`. Separate,
-deterministically ordered package invocations share one Cargo target directory.
-The artifact publisher uses the pinned `@actions/artifact` client to upload each
-`build-<package>-<producer>-<key>` independently, including that package's
-manifest, archive, sidecars, and verifier. A failed record or upload does not
-stop publication of unrelated records. No owner bundle replaces package keys.
+Each owner runs `scripts/ci/artifacts/produce.cjs`, which invokes
+`scripts/ci/produce-owner.sh --key` once per record in `(package, key)` order;
+every invocation shares one Cargo target directory. After each record it uses
+the pinned `@actions/artifact` client to upload
+`build-<package>-<producer>-<key>` (that package's manifest, archive, sidecars,
+and verifier) and its status, then deletes the uploaded archive and copied
+sidecars before the next record starts. A local publication ledger keeps any
+artifact from being uploaded twice; an always-run finalizer publishes whatever
+is still outstanding, including statuses for records never reached. A failed
+record or upload does not stop publication of unrelated records. No owner
+bundle replaces package keys.
 
 The Ubuntu owner writes storage samples (`scripts/ci/storage_sample.py`) around
 the cache restore, the schematic guard, every record attempt, and publication,
@@ -875,8 +880,9 @@ and always uploads them as `build-diagnostics-<producer>`; see
 `docs/topics/ci-cd.md` for the fields. A sample never changes a result.
 
 With `measure-compiler-work: true`, the owner script enables the counter for
-package compiles. Each package artifact carries its own compiler-work report
-and an owner aggregate, including measured record count and owner wall time.
+package compiles. Each package artifact carries its own compiler-work report;
+the owner aggregate, including measured record count and owner wall time, is
+published once by the finalizer as `compiler-work-owner-<producer>`.
 Ordinary CI does not enable the counter. Hosted cold/warm comparisons and the
 15% architecture decision remain required before rollout acceptance.
 
@@ -921,11 +927,27 @@ baselined. What it publishes is
 for success, compile failure, upload failure, and cancellation alike — with the
 realized digest and stage timings when the producer got far enough to have
 them. A runner-lost owner leaves none, and `runner_loss.py attribute --plan`
-synthesizes it from the plan's own record. `ci-rollup` reads those documents
-and renders a dependent cell as `MISSING — blocked by build <key> …`, which
-blocks and which the skip baseline (test identities only) can never excuse. An
-unrelated area or environment proceeds untouched, and a real test result
-outranks the plumbing diagnostic.
+synthesizes it from the plan's own record, saying the per-record production
+and publication outcome is unknown; a real status always wins.
+
+A consumer reads its record's status **before** downloading the archive:
+"Download this cell's build status" (the one `continue-on-error` step), then
+`scripts/ci/build_status.py`, then the archive download. Native cells do this
+when they consume an archive; WSL2 does it on the Windows host before any guest
+is provisioned. A `failure` or `cancelled` status stops the cell with `not run:
+producer failed: build <key> for <package> on <producer> concluded <result> at
+the <stage> stage`; no status stops it with `not run: producer outcome unknown`
+and names the owner job; a malformed or mismatched document stops it naming the
+file and field. A missing archive after a successful status is an
+artifact-publication failure. Nothing compiles in its place and no completion
+record is written, so the audit sees the cell as `MISSING`, which blocks and
+which the skip baseline (test identities only) can never excuse.
+
+`ci-rollup` renders a cell with no results as `not run: producer failed; build
+<key> (<package> on <producer>) concluded …`, and a cell that did run tests
+keeps its own result with `producer failed; build …` as context. An absent
+status is never read as a compilation failure. An unrelated area or environment
+proceeds untouched.
 
 **Consumers verify, then run.** A tier whose `{environment, gate}` appears in a
 record's `consumers` installs no toolchain (except the one a
@@ -1572,12 +1594,15 @@ dependencies and no dependent seam, and the owner's area reports
 No path selects the full workspace; `workflow_dispatch` / `--all` remains the
 only full-scope route.
 
-One suite is not yet in that table: the build owner's artifact publisher
-(`node --test 'scripts/ci/artifacts/*.test.cjs'`, the owner aggregate AC8 is
-read from). It is a Node module under `scripts/`, so a change to it already
-selects `repo-deps` by ordinary source ownership; it still needs a
-`SUITE_REGISTRY` entry — with the Node toolchain the `tools/test-audit` suites
-declare — before that selection schedules it.
+The build owner's artifact publisher is not in that table because it needs no
+row: it is a Node module under `scripts/`, so a change to it selects
+`repo-deps` by ordinary source ownership, and its `SUITE_REGISTRY` entry
+`artifact-publisher` (with the Node toolchain the `tools/test-audit` suites
+declare) is what schedules its suite, `node --test
+'scripts/ci/artifacts/*.test.cjs'`. That suite covers the per-record
+coordinator, the publication ledger, and the owner aggregate AC8 is read from.
+The consumer's build-status check is likewise a `repo-deps` companion,
+`test_build_status.py`, run through `scripts/ci/suite_runner.py`.
 
 ### CI helper runtime floors
 

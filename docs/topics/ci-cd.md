@@ -707,11 +707,70 @@ owner projection — one leg per producer environment — that installs the unio
 each package’s Nextest archive in a shared target tree with its manifest and declared sidecars, includes the verifier, and
 uploads `build-<package>-<producer>-<key>` with run-scoped retention.
 
+#### Each archive is uploaded, then released, before the next is built
+
+An owner leg builds many archives, and on the Ubuntu owner they used to accumulate on disk until
+the end of the job. Now the owner publishes **incrementally**: it builds one record, uploads it,
+deletes that record's archive, and only then builds the next one. The shared Cargo target
+directory is kept throughout, so a dependency compiled for one record is reused by the next.
+
+```mermaid
+flowchart TD
+    S[next record, in package then key order] --> P["produce-owner.sh --key (PRODUCE_MODE=record)"]
+    P --> U[upload build-&lt;package&gt;-&lt;producer&gt;-&lt;key&gt;]
+    U -->|upload succeeded| L[write publication-ledger.json]
+    L --> D[delete that archive and its copied sidecars]
+    U -->|upload failed| K[keep the payload; publish a failure status at the upload stage]
+    D --> T[upload build-status-…]
+    K --> T
+    T --> S
+    S -->|no records left| F["always-run finalizer: statuses for records never reached, owner measurement"]
+```
+
+The pieces, for a reader changing them:
+
+- **The coordinator** is `scripts/ci/artifacts/produce.cjs`. It runs inside the job's
+  `actions/github-script` step because GitHub hands the artifact-upload credentials only to
+  JavaScript actions, not to shell steps. It starts `scripts/ci/produce-owner.sh --key <key>`
+  once per record with `PRODUCE_MODE=record` and `CI_BUILD_OUT` naming the output directory, and
+  waits for that record's upload before starting the next. A failed record or upload is
+  remembered and the remaining records are still built.
+- **`produce-owner.sh` without `PRODUCE_MODE`** keeps its local behavior: one `ci-build produce`
+  over every record, nothing uploaded. Any other `PRODUCE_MODE` value is refused with exit 2.
+- **The publication ledger**, `<out>/publication-ledger.json`, records the archive upload and the
+  status upload of each record separately. It is written atomically (temporary file, then rename)
+  after each successful upload and before anything is deleted. Artifact names cannot be reused
+  within a run, so nothing the ledger holds is uploaded again: if only a status upload failed, a
+  later attempt retries the status and never the archive.
+- **Deletion** removes only the uploaded archive and its `<artifact>-sidecars` directory, and only
+  when the path is inside the output directory and is not reached through a symbolic link.
+  Manifests, statuses, the verifier copy, counters, and the shared target directory are never
+  deleted. A payload whose upload failed is kept.
+- **The finalizer** is the `always()` step "Publish package builds and statuses". It uploads only
+  what the ledger says is still outstanding, writes a `failure` status (`cancelled` when the job
+  was cancelled) at the `produce` stage for each record the coordinator never reached, and
+  publishes the owner's compiler-work total (see below). It does not hide a failed schematic
+  guard: the job still fails.
+
+Archives were chosen because they were the only removable storage measured when a
+full-workspace owner plan was replayed with CI's own steps: no cached target entry existed for the
+cache step to restore, and `ci-build produce` had already released its inventory scratch. The cache step and the shared target directory are unchanged. Whether
+incremental publication keeps a full-workspace Ubuntu owner inside its disk is not yet confirmed
+by a hosted run; the [storage samples](#storage-samples) below are where that evidence appears.
+
+With `measure-compiler-work: true`, each `build-…` artifact carries an `<artifact>.compiler-work.json` holding
+that record's counts alone. The owner's total — records requested and measured, compiler
+invocations and time, and owner wall time — is final only after every record has run, so the
+finalizer uploads it once as a separate artifact, `compiler-work-owner-<producer>`
+(`owner-compiler-work.json`), and only when at least one record was measured.
+
 When an owner builds `schematic-gen`, it first runs the package's fresh-output guard
 (`just -f schematic/justfile test-fresh-output`). Those slow L1 tests generate and compile client
 crates with child Cargo processes, so they run on the owner rather than archive consumers.
 The consumers' normal L1 filter excludes them from both execution and expected-test listings;
 the owner keeps the guard's reports and runs it before producing the archive.
+
+#### Storage samples
 
 The Ubuntu owner also records **storage samples**, because that is the owner whose disk fills.
 `scripts/ci/storage_sample.py` appends one JSON line to `$RUNNER_TEMP/build-diagnostics/storage.jsonl`
@@ -766,8 +825,32 @@ flowchart LR
 ```
 
 A build record is **plumbing, never a result cell**: no `{package, environment, tier}` identity, no
-JUnit, no baseline entry. A failed, cancelled, or unuploadable owner makes each dependent cell
-`MISSING — blocked by build <key>`, which blocks; unaffected areas and environments proceed.
+JUnit, no baseline entry. Every owner publishes `build-status-<package>-<producer>-<key>` for each
+of its records, whatever the outcome.
+
+#### A consumer checks its build's status before downloading the archive
+
+Before a consumer downloads its archive, it downloads that record's build status and runs
+`scripts/ci/build_status.py`. On native cells this happens only when the cell consumes an archive;
+the WSL2 job does it on the Windows host, before any guest is provisioned. Only the status
+download may fail without failing the step; the check that follows decides.
+
+| Status found | Consumer outcome |
+| ------------ | ---------------- |
+| valid, matching, `success` | continue to the archive download and `ci-build verify` |
+| `failure` or `cancelled` | stop: `not run: producer failed: build <key> for <package> on <producer> concluded <result> at the <stage> stage` |
+| none published | stop: `not run: producer outcome unknown: …`, naming the owner job that should have published it |
+| malformed, wrong identity, unknown result | stop, naming the file and the field at fault |
+
+A successful status whose archive is then missing is an artifact-publication failure, not a test
+result. Nothing compiles a replacement and no completion record is written, so the area's coverage
+audit reports the cell as `MISSING`, which blocks. In the area's rollup, a cell with no results
+reads `not run: producer failed; build <key> (<package> on <producer>) concluded …`, followed by
+the result, stage, realized digest, and detail; a cell that did run tests keeps its own result and adds `producer failed;
+build …` as context. An absent status never makes the rollup infer a compilation failure: when an
+owner's runner was lost, `runner_loss.py` synthesizes a status from the plan whose detail says the
+per-record production and publication outcome is unknown. Unaffected areas and environments
+proceed.
 
 Seven stages are reported separately — producer queue, compile+archive, and upload; consumer
 download, verify, extract, and execute — so no transfer or setup cost hides inside test time. Each

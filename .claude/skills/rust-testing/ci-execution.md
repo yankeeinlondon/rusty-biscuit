@@ -35,8 +35,11 @@ What that requires of a test:
   archive to the destination, hides the producer's target directory, and
   extracts to a different path, so a compile-time path assumption fails there.
 
-A cell that could not run is `MISSING — blocked by build <key>`: an
-infrastructure failure, never a test result and never baseline-eligible.
+A cell whose build did not arrive stops before the archive download with
+`not run: producer failed: …` (the owner reported failure or cancellation) or
+`not run: producer outcome unknown: …` (no status was published); the audit
+sees it as `MISSING`. Either is an infrastructure failure, never a test result
+and never baseline-eligible.
 
 ## A test that reads a repository file is scheduled by it
 

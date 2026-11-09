@@ -643,18 +643,64 @@ rustc, or linker on `PATH`.
 ### The owner job, and what it is not
 
 `ci.yml`'s `build` job uses one matrix leg per producer environment from
-`build_owners`. `scripts/ci/produce-owner.sh` invokes the producer once without
-`--key`, sharing its target tree across package invocations. The programmatic
-publisher in `scripts/ci/artifacts/` uploads separate package-keyed archives and
-statuses, including successful records when a sibling fails. Artifact transport
-must not change build ownership. Its Node dependencies are pinned by `npm ci`.
+`build_owners`. Publication is **incremental**: the `actions/github-script`
+step "Produce and publish the archives" runs `scripts/ci/artifacts/produce.cjs`,
+which starts `scripts/ci/produce-owner.sh --key <key>` once per record in Rust's
+`(package, key)` byte order, every child sharing one target tree, and publishes
+each record before starting the next. It lives in github-script because only
+JavaScript actions receive the artifact runtime token; exporting that token to
+shell steps would widen its exposure. A failed child or upload is remembered and
+later records are still attempted. Artifact transport must not change build
+ownership. Its Node dependencies are pinned by `npm ci`.
+
+```mermaid
+flowchart LR
+    C[produce.cjs] -->|PRODUCE_MODE=record, --key| W[produce-owner.sh]
+    W --> U[upload archive]
+    U -->|resolved| L[ledger write]
+    L --> D[delete archive + sidecars]
+    U -->|failed| K[keep payload, status stage=upload]
+    D --> S[upload status]
+    K --> S
+    S --> C
+    C -->|done| F[always() finalizer]
+```
+
+- `produce-owner.sh`: `PRODUCE_MODE` unset is the local, upload-free, single
+  `ci-build produce` run (it writes `owner-timing.json`); `record` is one child
+  of the coordinator, which owns owner timing; anything else exits 2.
+  `CI_BUILD_OUT` overrides the output directory (default `$RUNNER_TEMP/build`).
+- `publish.cjs` exports `publishRecord` and `finalizeOwner` (`publish` is an
+  alias of the latter). `<out>/publication-ledger.json` records `archive` and
+  `status` uploads separately, written by temp file + rename **after** the
+  awaited upload and **before** any deletion. Artifact names are immutable in a
+  run: a failed status upload retries the status alone, never the archive, and a
+  failed archive upload is not retried (its status already says `upload`). A
+  process lost between a remote upload and the ledger write is an
+  infrastructure failure, never papered over by overwriting.
+- Deletion releases only the uploaded archive and `<artifact>-sidecars`, after a
+  containment check (inside `out`, not a symlink, no realpath escape). Manifests,
+  statuses, the verifier copy, counters, and `target/` stay. A failed deletion is
+  logged and never fails the published record.
+- The `always()` step "Publish package builds and statuses" runs
+  `finalizeOwner`: it uploads only what the ledger lacks, synthesizes a
+  `failure`/`cancelled` status at stage `produce` for records never reached, and
+  publishes the owner compiler-work total. The coordinator step is not
+  `always()`, so a failed schematic guard skips production and still fails the
+  job.
+- Only incremental publication was enabled as a storage remedy. Deleting
+  inventory scratch and isolating the Ubuntu target cache were not: neither
+  measured any removable bytes. The guard's `target/schematic-fresh-output` is
+  live target output and is not deleted. Hosted confirmation that a
+  full-workspace Ubuntu owner now fits its disk is still outstanding.
 
 The Ubuntu owner alone samples storage: the job's first step exports
 `BUILD_DIAGNOSTICS` on Linux, workflow steps call `scripts/ci/storage_sample.py`
 around the cache restore, the schematic guard, and publication, and
 `produce-owner.sh` passes the same sampler to `ci-build produce
---sample-command '<json argv>'`, which runs it at owner start and after every
-record's status is written. Samples land in `build-diagnostics-<producer>`
+--sample-command '<json argv>'`, which runs it at producer start and after every
+record's status is written; under the coordinator each per-key child therefore
+adds a `produce-start` sample before its record. Samples land in `build-diagnostics-<producer>`
 (always uploaded). Every sample step ends in `|| true` — never
 `continue-on-error`, which the owner job may not carry — and the producer
 ignores the sampler's exit: a diagnostic never decides a result.
@@ -676,8 +722,10 @@ resolved again on the consumer; external library hashes/Mach-O UUIDs must match.
 This conservative compatibility rule can reject ABI-compatible library upgrades.
 `--source-tree` only asserts the observed Git tree; it cannot override it.
 The producer-scoped workflow entry point is covered by a real-Cargo shared-dependency
-fixture. Opt-in measurements include per-record counts and owner totals in each
-package artifact; hosted comparisons still decide the architecture's acceptance.
+fixture, which drives `produce.cjs`'s local command line with a fake directory
+upload. Opt-in measurements put each record's own counts in its package artifact
+and the owner total in `compiler-work-owner-<producer>`; hosted comparisons still
+decide the architecture's acceptance.
 
 Declaring `executes` in `environments.json` is what makes an environment a
 producer, and all three own the archive their consumers execute: Linux (with the
@@ -719,10 +767,27 @@ identity, publishes no JUnit or `status-…` artifact, and is never baselined. I
 publishes `build-status-<package>-<producer>-<key>/build-status.json` under
 `always()` — success, compile failure, upload failure, cancellation — and
 `runner_loss.py attribute --plan` synthesizes one from the plan when the owner's
-runner died. `ci-rollup` renders a dependent cell as
-`MISSING — blocked by build <key> …`, which blocks and which the skip baseline
-cannot excuse; an unrelated key proceeds, and a real test result outranks the
-diagnostic.
+runner died; its detail says the per-record production/publication outcome is
+unknown, and a real status always wins over a synthesized one.
+
+**Consumers check the status before the archive.** `_package-ci.yml` (gated on
+`consumes_archive`) and `_wsl-ci.yml` (on the Windows host, before guest
+provisioning) run "Download this cell's build status" — the only
+`continue-on-error` step allowed there, see
+`only_recovery_and_diagnostic_steps_ignore_errors` — then
+`scripts/ci/build_status.py`, then the archive download. The checker reads with
+`schema.loads_strict` and exits 0 only for a valid `success` status whose
+`package`/`key`/`producer`/`artifact` match the cell. `failure`/`cancelled`
+renders `not run: producer failed: build <key> for <package> on <producer>
+concluded <result> at the <stage> stage`; an absent file renders
+`not run: producer outcome unknown: …` naming the owner job; anything malformed names its
+file and field. No fallback compile and no completion record follow, so the
+audit sees the cell `MISSING`. `ci-rollup` renders a cell with no results as
+`not run: producer failed; build <key> (…) concluded …`, and a cell that did run
+tests keeps its result with `producer failed; build …` added as context. An
+absent status never blocks in the rollup — it cannot tell a missing status from
+a lost consumer report — and the skip baseline can never excuse a blocked cell;
+an unrelated key proceeds.
 
 The producer stages `ci-build` itself inside the artifact. A consumer with no
 Cargo — the WSL2 guest above all — cannot build a verifier, and shipping it
@@ -849,7 +914,8 @@ defaults false at every level of the chain.
 **The counter's report crosses into JavaScript.** `ci-build`'s `Report` is
 serialized into each manifest's `compiler_work`, and
 `scripts/ci/artifacts/publish.cjs` reads `compiler_invocations` and
-`compiler_ms` out of it by name to build the owner aggregate that AC8's
+`compiler_ms` out of it by name to build the owner aggregate
+(`compiler-work-owner-<producer>`, published once by the finalizer) that AC8's
 compile-once claim is read from. Node cannot see the Rust struct, so its test
 asserts against `scripts/fixtures/compiler-work/publisher-documents.json`,
 which `ci-build-tests.rs::the_javascript_publisher_reads_a_fixture_generated_from_this_report`
