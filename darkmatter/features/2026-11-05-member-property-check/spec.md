@@ -28,7 +28,8 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-08
 clarified: false
 implemented: true
-review_iterations: 0
+review_iterations: 2
+completed: true
 packages:
     - darkmatter
     - darkmatter-lsp
