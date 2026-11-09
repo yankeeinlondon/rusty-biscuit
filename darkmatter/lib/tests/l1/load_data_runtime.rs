@@ -1047,3 +1047,117 @@ async fn a_url_in_the_read_set_is_normalized() {
     assert_eq!(composed.content().trim(), "macOS");
     assert_eq!(report.read_set, vec![format!("http://{authority}/data.json?v=1")]);
 }
+
+// ── try(expr, fallback) in lifecycle steps ─────────────────────────────────
+
+/// `try` in `md` lifecycle steps: a missing optional file selects the
+/// fallback in both a `set` value and a `when:` guard, a nonrecoverable data
+/// error still stops the stack, and a side effect that creates the file ends
+/// the reuse of the recovered miss.
+mod lifecycle_recovery {
+    use super::*;
+
+    fn optional_count(key: &str, file: &str) -> Value {
+        json!({ "set": { key: format!("{{{{ length(try(load_data('{file}', 'string[]'), [])) }}}}") } })
+    }
+
+    fn guarded_flag(file: &str) -> Value {
+        json!({ "set": { "empty": true }, "when": format!("length(try(load_data('{file}', 'string[]'), [])) == 0") })
+    }
+
+    /// The message of the evaluation error that stopped the stack. A `set`
+    /// step's failure carries no typed cause, so the message is what the
+    /// outcome reports.
+    fn evaluation_message(outcome: &darkmatter::lifecycle::executor::LifecycleEventOutcome) -> &str {
+        &outcome.evaluation_error.as_ref().unwrap_or_else(|| panic!("an evaluation error: {outcome:?}")).msg
+    }
+
+    #[test]
+    fn lifecycle_guard_try_recovers_optional_data() {
+        let stack = |file: &str| json!({ "initialize": [optional_count("n", file), guarded_flag(file), { "set": { "done": true } }] });
+
+        let dir = TempDir::new().unwrap();
+        let runtime = DataRuntime::new();
+        let (request, doc) = lifecycle_request(dir.path(), &runtime);
+        let set = run_event(&request, &doc, LifecycleSignal::Initialize, stack("missing.yaml"));
+        assert_eq!(set, json!({ "n": 0, "empty": true, "done": true }));
+
+        // Control: the file present is loaded, and the guard is false.
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "present.yaml", "- a\n");
+        let runtime = DataRuntime::new();
+        let (request, doc) = lifecycle_request(dir.path(), &runtime);
+        let set = run_event(&request, &doc, LifecycleSignal::Initialize, stack("present.yaml"));
+        assert_eq!(set, json!({ "n": 1, "done": true }));
+
+        // Control: the same read unguarded stops the stack at that step.
+        let dir = TempDir::new().unwrap();
+        let runtime = DataRuntime::new();
+        let (request, doc) = lifecycle_request(dir.path(), &runtime);
+        let unguarded = json!({ "initialize": [count_into("n", "missing.yaml"), { "set": { "done": true } }] });
+        let (outcome, set) = evaluate_event(&request, &doc, LifecycleSignal::Initialize, unguarded);
+        assert!(outcome.evaluation_error.is_some(), "{outcome:?}");
+        assert_eq!(set, json!({}), "no later step ran");
+
+        // A nonrecoverable data error is not absorbed, and the fallback's
+        // later step never runs.
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "d.xyz", "a\n");
+        let runtime = DataRuntime::new();
+        let (request, doc) = lifecycle_request(dir.path(), &runtime);
+        let (outcome, set) = evaluate_event(
+            &request,
+            &doc,
+            LifecycleSignal::Initialize,
+            json!({ "initialize": [optional_count("n", "d.xyz"), { "set": { "done": true } }] }),
+        );
+        let message = evaluation_message(&outcome);
+        assert!(message.contains("has no supported data format (`.xyz`)"), "{message}");
+        assert_eq!(set, json!({}), "neither the fallback nor a later step ran");
+    }
+
+    /// A recovered malformed read is memoized like any failure, so a repeat
+    /// in the same event reuses it; the `append_line` that repairs the file
+    /// ends that reuse, and the next event loads the regenerated file.
+    #[test]
+    fn lifecycle_side_effect_invalidates_recovered_failure() {
+        let dir = TempDir::new().unwrap();
+        // An unterminated quoted scalar; the appended line closes it.
+        write(dir.path(), "d.yaml", "- \"a\n");
+        let runtime = DataRuntime::new();
+        let (request, doc) = lifecycle_request(dir.path(), &runtime);
+        let first = json!({ "initialize": [
+            optional_count("before", "d.yaml"),
+            optional_count("again", "d.yaml"),
+            { "append_line": ["d.yaml", "  b\""] },
+        ] });
+        let set = run_event(&request, &doc, LifecycleSignal::Initialize, first);
+        assert_eq!(set, json!({ "before": 0, "again": 0 }));
+        let stats = runtime.stats();
+        assert_eq!((stats.reads, stats.source_hits, stats.invalidations), (1, 1, 1), "the repeat reused the failure: {stats:?}");
+
+        let set = run_event(&request, &doc, LifecycleSignal::Start, json!({ "composed": [optional_count("after", "d.yaml")] }));
+        assert_eq!(set, json!({ "after": 1 }), "the next event loads the regenerated file, not the recovered failure");
+        assert_eq!(runtime.stats().reads, 2, "{:?}", runtime.stats());
+    }
+
+    /// A clean miss is not memoized; the file a side effect creates is
+    /// loaded by the next step and the next event.
+    #[test]
+    fn lifecycle_side_effect_creates_a_recovered_missing_file() {
+        let dir = TempDir::new().unwrap();
+        let runtime = DataRuntime::new();
+        let (request, doc) = lifecycle_request(dir.path(), &runtime);
+        let first = json!({ "initialize": [
+            optional_count("before", "d.yaml"),
+            { "append_line": ["d.yaml", "- a"] },
+            optional_count("written", "d.yaml"),
+        ] });
+        let set = run_event(&request, &doc, LifecycleSignal::Initialize, first);
+        assert_eq!(set, json!({ "before": 0, "written": 1 }));
+
+        let set = run_event(&request, &doc, LifecycleSignal::Start, json!({ "composed": [optional_count("after", "d.yaml")] }));
+        assert_eq!(set, json!({ "after": 1 }));
+        assert!(runtime.read_set().contains(&entry(dir.path(), "d.yaml")), "{:?}", runtime.read_set());
+    }
+}

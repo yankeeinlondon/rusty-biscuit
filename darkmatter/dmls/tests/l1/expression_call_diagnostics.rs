@@ -887,3 +887,79 @@ mod shared_fields {
         assert!(composed.iter().all(|diagnostic| diagnostic.severity == Severity::Warning && diagnostic.code == UNCERTAIN));
     }
 }
+
+/// `try(expr, fallback)` is an ordinary two-parameter call to the passive
+/// check: a wrong argument count or a callback where a value is expected is a
+/// proven error, and a call the catalog lacks is diagnosed inside the
+/// fallback exactly as anywhere else.
+mod try_calls {
+    use super::*;
+
+    /// `(code, start character)` of every error on `line`.
+    fn errors_on(diagnostics: &[Value], line: u64) -> Vec<(String, u64)> {
+        let mut found: Vec<(String, u64)> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["severity"] == json!(ERROR) && diagnostic["range"]["start"]["line"] == json!(line))
+            .map(|diagnostic| {
+                (
+                    diagnostic["code"].as_str().unwrap_or_default().to_string(),
+                    diagnostic["range"]["start"]["character"].as_u64().unwrap(),
+                )
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    fn open_body(body: &str) -> (Vec<Value>, String) {
+        let text = format!("---\ntitle: T\n---\n\n{body}");
+        let workspace = LspWorkspace::new();
+        let mut session = Session::open(&workspace, &text);
+        let diagnostics = session.diagnostics();
+        session.shutdown();
+        (diagnostics, text)
+    }
+
+    fn line_of(text: &str, needle: &str) -> u64 {
+        let offset = text.find(needle).unwrap_or_else(|| panic!("no `{needle}`"));
+        text[..offset].matches('\n').count() as u64
+    }
+
+    #[test]
+    fn try_wrong_arity_is_diagnosed() {
+        let (diagnostics, text) = open_body("a {{ try(1) }}\nb {{ try(1, 2, 3) }}\nc {{ try(1, 2) }}\n");
+        for row in ["a {{", "b {{"] {
+            let line = line_of(&text, row);
+            let codes: Vec<String> = errors_on(&diagnostics, line).into_iter().map(|(code, _)| code).collect();
+            assert_eq!(codes, [INCOMPATIBLE], "{row}: {diagnostics:#?}");
+        }
+        assert!(errors_on(&diagnostics, line_of(&text, "c {{")).is_empty(), "two arguments are fine: {diagnostics:#?}");
+    }
+
+    #[test]
+    fn try_callback_syntax_is_diagnosed() {
+        let (diagnostics, text) = open_body("a {{ try(x => x, 1) }}\nb {{ try(1, x => x) }}\nc {{ try(1, 2) }}\n");
+        // Each error starts at the callback itself.
+        for (row, column) in [("a {{", 9), ("b {{", 12)] {
+            assert_eq!(
+                errors_on(&diagnostics, line_of(&text, row)),
+                [("dm.expression.invalid_callback".to_string(), column)],
+                "{row}: {diagnostics:#?}"
+            );
+        }
+        assert!(errors_on(&diagnostics, line_of(&text, "c {{")).is_empty(), "{diagnostics:#?}");
+    }
+
+    #[test]
+    fn unknown_function_in_try_fallback_is_diagnosed() {
+        let (diagnostics, text) = open_body("a {{ try(1, mystery_fallback(2)) }}\nb {{ try(1, length(\"x\")) }}\n");
+        let line = line_of(&text, "a {{");
+        let column = (text.find("mystery_fallback").unwrap() - text.find("a {{").unwrap()) as u64;
+        assert_eq!(
+            errors_on(&diagnostics, line),
+            [("dm.expression.unknown_function".to_string(), column)],
+            "{diagnostics:#?}"
+        );
+        assert!(errors_on(&diagnostics, line_of(&text, "b {{")).is_empty(), "{diagnostics:#?}");
+    }
+}

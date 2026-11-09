@@ -327,4 +327,5 @@ mod set_shell_values;
 mod shell_templates;
 mod guarded_shell_sites;
 mod proxy_with_evaluation;
+mod recovery;
 mod retry_with_evaluation;

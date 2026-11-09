@@ -41,6 +41,7 @@ mod compose_dasherized_identifiers;
 mod compose_diagnostic_identity;
 mod compose_document_identity;
 mod compose_expression_failures;
+mod expression_recovery;
 mod compose_icmp;
 mod compose_interpolation;
 mod compose_layout;

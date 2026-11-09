@@ -738,3 +738,181 @@ fn a_direct_nullable_argument_is_handled_under_a_document_schema() {
     );
     session.shutdown();
 }
+
+// ── try(expr, fallback) in the editor ───────────────────────────────────
+
+/// Completion, hover, member completion, and passive analysis of
+/// `try(expr, fallback)`. Analysis never evaluates the protected read, so a
+/// nonexistent source or contract changes nothing the editor does.
+mod try_recovery {
+    use super::*;
+
+    fn completion(session: &mut Session<'_>, offset: usize) -> Vec<Value> {
+        let (line, character) = position(&session.text, offset);
+        let params = json!({ "textDocument": { "uri": session.uri }, "position": { "line": line, "character": character } });
+        match session.fixture.request("textDocument/completion", params).result {
+            Some(Value::Array(items)) => items,
+            Some(result) => result["items"].as_array().cloned().unwrap_or_default(),
+            None => Vec::new(),
+        }
+    }
+
+    fn end_of(text: &str, needle: &str) -> usize {
+        text.find(needle).unwrap_or_else(|| panic!("no `{needle}` in {text:?}")) + needle.len()
+    }
+
+    /// `(label, detail)` of every completion item whose label starts with
+    /// `prefix`.
+    fn members(items: &[Value], prefix: &str) -> Vec<(String, String)> {
+        items
+            .iter()
+            .filter_map(|item| {
+                let label = item["label"].as_str()?;
+                label
+                    .starts_with(prefix)
+                    .then(|| (label.to_string(), item["detail"].as_str().unwrap_or_default().to_string()))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn try_is_offered_in_completion() {
+        let text = "# Doc\n\nValue: {{ tr\n";
+        let workspace = LspWorkspace::new();
+        let mut session = Session::open(&workspace, text);
+        let items = completion(&mut session, end_of(text, "{{ tr"));
+        let offered = items
+            .iter()
+            .find(|item| item["textEdit"]["newText"] == json!("try"))
+            .unwrap_or_else(|| panic!("`tr` offers `try`: {items:#?}"));
+        assert_eq!(offered["label"], json!("try(expr, fallback)"));
+        assert_eq!(offered["detail"], json!("try(expr: unknown | null, fallback: unknown | null) -> unknown | null"));
+        // The prefix also matches other functions, so `try` is one candidate
+        // among the catalog's, not a special case.
+        assert!(items.iter().any(|item| item["textEdit"]["newText"] == json!("trim")), "{items:#?}");
+        session.shutdown();
+    }
+
+    #[test]
+    fn try_hover_shows_signature() {
+        let text = "# Doc\n\nA: {{ try(missing_value, 7) }}\n";
+        let workspace = LspWorkspace::new();
+        let mut session = Session::open(&workspace, text);
+        let hover = session.hover(end_of(text, "{{ tr"));
+        assert!(
+            hover.contains("**`try(expr: unknown | null, fallback: unknown | null) -> unknown | null`**"),
+            "{hover}"
+        );
+        let descriptor = dmls::overlay::expressions::function_descriptor("try").expect("`try` is in the catalog");
+        assert_eq!(&*descriptor.signature, "try(expr, fallback)");
+        assert!(hover.contains(&dmls::overlay::expressions::format_function_block(descriptor)), "{hover}");
+        session.shutdown();
+    }
+
+    /// The fallback `[]` adds no alternative, so the item keeps the
+    /// contract's members, exactly as the unguarded call does.
+    #[test]
+    fn callback_over_try_completes_item_members() {
+        let text = concat!(
+            "# Doc\n\n",
+            "A {{ map(try(load_data(\"x.yaml\", \"{ a: string }[]\"), []), item => item. }}\n\n",
+            "B {{ map(load_data(\"x.yaml\", \"{ a: string }[]\"), item => item. }}\n",
+        );
+        let workspace = LspWorkspace::new();
+        let mut session = Session::open(&workspace, text);
+        let guarded = members(&completion(&mut session, end_of(text, "[]), item => item.")), "item.");
+        let unguarded = members(&completion(&mut session, end_of(text, "\"), item => item.")), "item.");
+        assert_eq!(
+            guarded.iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>(),
+            ["item.a"],
+            "{guarded:?}"
+        );
+        assert!(guarded[0].1.contains("string"), "`.a` is typed string: {guarded:?}");
+        assert_eq!(guarded, unguarded);
+        session.shutdown();
+    }
+
+    /// Opening and querying a `try` over a nonexistent source and contract
+    /// reads, creates, and fetches nothing beyond what the same document
+    /// without the call does.
+    #[test]
+    fn try_analysis_reads_no_inputs() {
+        fn drive(text: &str) -> (dmls::work_counters::WorkCounts, Vec<Value>, Vec<String>) {
+            let workspace = LspWorkspace::new();
+            let listing = || {
+                let mut names: Vec<String> = std::fs::read_dir(workspace.path())
+                    .unwrap()
+                    .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                    .collect();
+                names.sort();
+                names
+            };
+            let before = dmls::work_counters::work_counts();
+            let mut session = Session::open(&workspace, text);
+            let files = listing();
+            if let Some(offset) = text.find("try(") {
+                session.hover(offset + 1);
+                completion(&mut session, end_of(text, "row => row."));
+            }
+            let diagnostics = session.diagnostics.clone();
+            session.shutdown();
+            assert_eq!(listing(), files, "analysis created or removed files");
+            (dmls::work_counters::work_counts().since(before), diagnostics, files)
+        }
+
+        #[cfg(feature = "effects-instrumentation")]
+        let effects_before = (darkmatter::effects::engine_build_count(), darkmatter::effects::network_attempt_count());
+
+        let guarded = concat!(
+            "# Doc\n\n",
+            "{{ map(try(load_data(\"no-such-source.yaml\", \"Row@./no-such-types.yaml[]\"), []), row => row. }}\n",
+        );
+        let (guarded_work, _, files) = drive(guarded);
+        assert!(!files.iter().any(|name| name.starts_with("no-such")), "{files:?}");
+        let (control_work, _, _) = drive("# Doc\n\n{{ 1 }}\n");
+        assert_eq!(guarded_work.reads, control_work.reads, "the protected source and contract were never read");
+
+        #[cfg(feature = "effects-instrumentation")]
+        assert_eq!(
+            (darkmatter::effects::engine_build_count(), darkmatter::effects::network_attempt_count()),
+            effects_before,
+            "analysis built an effect engine or attempted network access"
+        );
+    }
+
+    /// The static walk visits both operands, and `try` is not an absence
+    /// guard, so both undeclared reads are reported in the editor too.
+    #[test]
+    fn both_try_arguments_appear_in_static_reads() {
+        let inner = "try(load_data(source), backup)";
+        let expr = parse_spanned(inner).unwrap();
+        let reads: Vec<(&str, bool)> =
+            static_variable_reads(&expr).into_iter().map(|read| (read.path, read.handles_absence)).collect();
+        assert_eq!(reads, [("source", false), ("backup", false)]);
+
+        let text = format!("---\ntitle: T\n---\n\nA {{{{ {inner} }}}}\nB {{{{ or(source, backup) }}}}\n");
+        let workspace = LspWorkspace::new();
+        let session = Session::open(&workspace, &text);
+        let expected: Vec<(u64, u64)> = [offset_of(&text, "A {{", "source", 0), offset_of(&text, "A {{", "backup", 0)]
+            .into_iter()
+            .map(|offset| {
+                let (line, character) = position(&text, offset);
+                (u64::from(line), u64::from(character))
+            })
+            .collect();
+        // Control: `or` handles its left operand's absence, so only the
+        // guarded line reports `source`.
+        let (b_line, _) = position(&text, offset_of(&text, "B {{", "backup", 0));
+        let reported = session.ranges("dm.expression.undeclared_property");
+        let on_a: Vec<(u64, u64)> = reported.iter().copied().filter(|(line, _)| *line != u64::from(b_line)).collect();
+        assert_eq!(on_a, expected, "{:#?}", session.diagnostics);
+        assert!(
+            !reported.contains(&{
+                let (line, character) = position(&text, offset_of(&text, "B {{", "source", 0));
+                (u64::from(line), u64::from(character))
+            }),
+            "{reported:?}"
+        );
+        session.shutdown();
+    }
+}

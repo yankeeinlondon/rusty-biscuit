@@ -1051,3 +1051,40 @@ fn a_host_parameter_declaring_null_handles_a_missing_argument() {
         .collect();
     assert!(undeclared.is_empty(), "{undeclared:#?}");
 }
+
+/// The built-in `try` reserves its name case-insensitively against host
+/// functions, as every built-in does.
+mod try_reservation {
+    use super::*;
+
+    fn single(name: &str) -> HostFunctionCatalog {
+        HostFunctionCatalog::load(
+            &format!(
+                "kind: schema\ncategories:\n  - Logical\ntypes:\n  {name}: |-\n    function(parameters(a: unknown | null); returns(unknown | null); category(Logical))\n"
+            ),
+            "try.yaml",
+        )
+        .unwrap_or_else(|error| panic!("`{name}` catalog loads: {error}"))
+    }
+
+    fn build(name: &str, aliases: &[&str]) -> Result<HostFunctions, HostFunctionError> {
+        let handler: darkmatter::markdown::compose::expression::HostHandler = Arc::new(|_| Ok(json!(true)));
+        HostFunctions::builder(single(name)).function(name, aliases, |registration| registration, handler).build()
+    }
+
+    #[test]
+    fn host_catalog_rejects_try_collision() {
+        assert_eq!(build("try", &[]).err(), Some(HostFunctionError::BuiltinCollision { name: "try".into() }));
+        // Control: the same catalog under a free name registers.
+        assert!(build("attempt", &[]).is_ok());
+    }
+
+    #[test]
+    fn host_catalog_rejects_try_case_variant() {
+        for name in ["Try", "TRY"] {
+            assert_eq!(build(name, &[]).err(), Some(HostFunctionError::BuiltinCollision { name: name.into() }), "{name}");
+        }
+        assert_eq!(build("attempt", &["TRY"]).err(), Some(HostFunctionError::BuiltinCollision { name: "TRY".into() }));
+        assert!(build("attempt", &["tryish"]).is_ok());
+    }
+}
