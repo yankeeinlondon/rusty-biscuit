@@ -441,7 +441,10 @@ lands in `~/coding/personal/repo` when that exists, and whatever follows runs th
 on 2026-11-06 a probe's `git init` re-initialized that unrelated repository (harmless,
 but it rewrote `.git/config` and added a sample hook). The tell is `cd` printing a
 path. In a scratch script, use absolute paths, `git -C /abs/path`, or `cd ./repo`,
-which `CDPATH` never rewrites. The shell's aliases differ too: `c`, for one, is an
+which `CDPATH` never rewrites. In a worktree it also leaves the worktree: on
+2026-11-08 `cd darkmatter` issued from inside `<worktree>/darkmatter` landed in the
+main checkout's `darkmatter/`, so a `just test` there tested the wrong tree and
+passed. Check the test count, or `pwd`, before trusting a gate. The shell's aliases differ too: `c`, for one, is an
 alias, so a script that defines helper functions runs under `/bin/bash`.
 
 ## Diagnosing a slow host
