@@ -2,17 +2,78 @@
 kind: plan
 created: 2026-11-08
 total_phases: 5
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 packages:
 - darkmatter-lsp
+- darkmatter
+- claudine
+- claudine-cli
 source_files_during_phase_1:
 - darkmatter/dmls/tests/l1/validation_timing_log.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
 - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/error.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/provenance_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/nested.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch.rs
+- darkmatter/lib/src/markdown/compose/remote_fetch/error.rs
+- darkmatter/lib/src/markdown/compose/cache/remote_cache.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/tests/l1/load_data_diagnostics.rs
+- claudine/lib/src/composition/error/render/mod.rs
+- claudine/lib/src/composition/error/tests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/remote-cache.md
+- .claude/skills/darkmatter/requests.md
+source_files_during_phase_3:
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/tests/l1/load_data_passive.rs
+- darkmatter/lib/tests/l1/design_time_call_check.rs
+- claudine/schemas/action.yaml
+- claudine/schemas/lifecycle.yaml
+- claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+- darkmatter/lib/tests/l1/function_binding_registry.rs
+- darkmatter/schemas/partials/lifecycle.yaml
+- darkmatter/schemas/partials/md-lifecycle.yaml
+- darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+docs_updated_during_phase_3:
+- darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/os/macos.md
 ---
 
 # Plan: Expression Recovery (`try(expr, fallback)`)
@@ -569,7 +630,7 @@ byte-identical.
 
 ### Wave 3 (serial: the shared contract)
 
-- [ ] **Error model and classifier**
+- [x] **Error model and classifier**
   - Own `expression/error.rs`, `data/error.rs`, `data/contract.rs`, `nested.rs`,
     and the new `compose/remote_fetch/error.rs` (plus its `mod` line in
     `remote_fetch.rs`). Apply E3, E4, E5, the `RemoteReadKind`/`RemoteFetchFailure`
@@ -588,7 +649,7 @@ byte-identical.
 
 ### Wave 4 (parallel, disjoint files)
 
-- [ ] **Remote producers**
+- [x] **Remote producers**
   - Own `cache/remote_cache.rs`, `remote_fetch.rs` (except the `mod error;`
     line), `expression/resolve_ctx.rs`, and `functions/fs.rs`. Apply E7–E8.
   - Tests beside the code: each `FetchError` maps to its kind; the response
@@ -597,7 +658,7 @@ byte-identical.
     against the existing tests at `remote_fetch.rs:759-1775`, unchanged); a
     redirect to a denied host is `Policy`; a denied host never reaches
     `Transport`.
-- [ ] **Diagnostic projection**
+- [x] **Diagnostic projection**
   - Own `compose/report_diagnostics.rs`, `markdown/errors/blocks.rs`, and
     `claudine/lib/src/composition/error/render/mod.rs`. Apply E6 and the
     `data_failure` accessor from E5.
@@ -612,7 +673,7 @@ byte-identical.
 
 ### Validation checkpoint (end of Phase 2)
 
-- [ ] `just test` and `just lint` in `darkmatter/`; `just test-library` in
+- [x] `just test` and `just lint` in `darkmatter/`; `just test-library` in
   `claudine/`. No existing assertion changed except constructors that gained
   `kind`. Typed provenance survives memo reuse (a second unguarded call fails
   with the same variant).
@@ -624,7 +685,7 @@ surface wiring yet.
 
 ### Wave 5 (parallel, disjoint files)
 
-- [ ] **Runtime recovery**
+- [x] **Runtime recovery**
   - Own `schemas/partials/functions.yaml`, `functions/mod.rs`,
     `expression/mod.rs`, `call_binding/bind.rs`, `scope/facts.rs`, and
     `lifecycle/executor.rs` (with its `executor/tests.rs`). Apply E2, E9, E10,
@@ -650,7 +711,7 @@ surface wiring yet.
     `try_template_operand_fallback_is_interpolated`,
     `unused_template_operand_is_not_interpolated`, and
     `template_operand_compose_failure_is_not_recovered` (E11).
-- [ ] **Passive types**
+- [x] **Passive types**
   - Own `call_check.rs` and its unit tests, plus `lib/tests/l1/load_data_passive.rs`
     and `lib/tests/l1/design_time_call_check.rs`. Apply E13. Agree on the
     `LazyKind` name with the runtime task. This task does not edit
@@ -672,7 +733,7 @@ surface wiring yet.
 
 ### Validation checkpoint (end of Phase 3)
 
-- [ ] `just test` and `just lint` in `darkmatter/`. The existing `and`, `or`,
+- [x] `just test` and `just lint` in `darkmatter/`. The existing `and`, `or`,
   `||`, and ternary tests pass unmodified. The catalog parity test
   (`lib/tests/l1/function_catalog_parity.rs`) accepts the new entry, and its
   examples evaluate.
