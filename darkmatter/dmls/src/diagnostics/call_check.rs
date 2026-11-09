@@ -14,7 +14,8 @@
 //! branch and callback body of the expression, whatever
 //! `expressions.strict` says; their `data` types are `null`. Lifecycle
 //! stacks ([`stack_call_diagnostics`], [`check_diagnostics`]) get call
-//! findings only.
+//! findings only, and frontmatter `$( … )` ternary pieces
+//! ([`member_diagnostics`]) member findings only, as in composition.
 //!
 //! Every site's [`TypeScope`] is built over the declaration-only layer
 //! ([`DeclaredTypes::for_schema`]) of the document's effective schema, or of
@@ -86,6 +87,12 @@ pub(crate) fn call_diagnostics(expr: &SpannedExpr, text: &str, site: &TypeScope<
     let mut found = expression_call_diagnostics(expr, site, strict);
     found.extend(expression_member_diagnostics(expr, text, site));
     found
+}
+
+/// The undeclared-member warnings alone, for a frontmatter `$( … )`
+/// ternary piece, which composition member-checks but does not call-check.
+pub(crate) fn member_diagnostics(expr: &SpannedExpr, text: &str, site: &TypeScope<'_>) -> Vec<CallDiagnostic> {
+    expression_member_diagnostics(expr, text, site)
 }
 
 /// The call findings alone, for a lifecycle stack's expression, whose

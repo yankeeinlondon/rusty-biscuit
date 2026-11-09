@@ -712,14 +712,63 @@ Composition checks members in:
   region bodies;
 - the condition and the chosen value of a frontmatter `$( … )` ternary.
 
+A `{{ … }}` placeholder inside one of these expressions is checked as its own
+interpolation, and it does not hide the expression's other selectors. The
+frontmatter value and the body directive below each report `nmae` once, at
+the place it is written:
+
+```yaml
+pick: "$( server.nmae == '{{ expected }}' ? echo yes : '' )"
+```
+
+```markdown
+::file ./notes.md when="server.nmae != '{{ expected }}'"
+```
+
+This holds while the placeholder sits inside a quoted string and the text it
+fills in contains neither that quote nor a backslash. A placeholder that
+builds the expression itself, such as `server.{{ key }}`, is not checked for
+members.
+
 It does not check a whole-value `::file {{ … }}`, `::code`, or `::url` target
 (a `null` target already warns that the directive was skipped), lifecycle
 stacks, or `expression`-typed frontmatter values, which it stores without
 evaluating. The editor checks body and frontmatter `{{ … }}` spans,
-directive conditions, collection gates and callbacks, and `expression`-typed
-frontmatter values; it does not check lifecycle stacks, and in a frontmatter
-`$( … )` ternary it checks only the `{{ … }}` placeholders, not the condition
-or value branches themselves.
+directive conditions, collection gates and callbacks, `expression`-typed
+frontmatter values, and the condition and both value branches of a
+frontmatter `$( … )` ternary; it does not check lifecycle stacks. It never
+runs the command, so it reports a misspelled member in the branch a run
+would not choose too:
+
+```yaml
+# composition chooses `echo yes` and stays silent; the editor warns on `nmae`
+pick: "$( server.port > 0 ? echo yes : fm.server.nmae )"
+```
+
+Like composition, the editor skips a ternary piece whose placeholder builds
+the expression itself (`$( server.nmae == {{ expected }} ? … )`).
+
+#### When composition fails
+
+A member read before a failure is still reported with the failure. That holds
+when the failure is in the same expression, a later expression in the same
+text, a later frontmatter key, or a later stage. Here `nmae` is read before the
+data file turns out to be missing, so the failed composition carries one
+`dm.expression.undeclared_member` warning beside its error:
+
+```markdown
+::file ./notes.md when="[server.nmae, load_data('absent.yaml', 'string[]')]"
+```
+
+When a frontmatter `$( … )` ternary piece fails while composition prepares it,
+only that piece's members are reported. The run has not yet decided which
+branch it would choose.
+
+`md compose` checks references before it composes, and that check reports no
+member warnings. When the check is the first step to reach a failing
+expression (a body or frontmatter `{{ … }}`, or a `::block` condition), the
+run stops there and the member warning is not reported. Conditions on
+`::file` and `::code` are evaluated only during composition, so they keep it.
 
 #### One warning per place it is written
 

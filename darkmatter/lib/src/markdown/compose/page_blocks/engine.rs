@@ -115,7 +115,8 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
 
 /// Evaluates the `when` condition `expr` of the region at `span` (on
 /// one-based body `line`), adding the undeclared reads and the reached
-/// undeclared members it reported to `report`.
+/// undeclared members it reported to `report`, a failing condition's
+/// included.
 #[allow(clippy::too_many_arguments)]
 fn evaluate_when<L: EvaluationLookup>(
     content: &str,
@@ -128,7 +129,7 @@ fn evaluate_when<L: EvaluationLookup>(
     members: Option<&BodyMembers<'_>>,
 ) -> Result<bool, PageBlockError> {
     let mut observation = Observation::default();
-    let condition = site.evaluate(expr, state, &mut observation)?;
+    let condition = site.evaluate(expr, state, &mut observation);
     report.add_unknown_root_candidates("condition", std::mem::take(&mut observation.roots), |_| {
         CandidateLocus::BodyLine(line)
     });
@@ -136,7 +137,7 @@ fn evaluate_when<L: EvaluationLookup>(
         let start = condition_start(content, span.start, expr);
         report.add_warnings(members.warnings(start, expr, &mut observation));
     }
-    Ok(condition)
+    Ok(condition?)
 }
 
 fn removed(edits: &mut Vec<TextEdit>, range: Range<usize>) {

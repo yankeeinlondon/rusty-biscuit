@@ -8,7 +8,8 @@
 
 use std::path::Path;
 
-use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::policy::BlockingPolicy;
+use darkmatter::markdown::{Markdown, MarkdownError};
 use darkmatter::markdown::compose::{ComposeContext, ComposeFailure, ComposeOptions, ComposeReport, ComposeWarning};
 use tempfile::TempDir;
 
@@ -151,18 +152,21 @@ impl darkmatter::markdown::compose::shell_expansion::types::ShellApprovalHandler
 /// approved.
 fn shell_member_warnings(content: &str) -> Vec<(Option<usize>, Option<usize>, String)> {
     let dir = TempDir::new().unwrap();
-    let path = dir.path().join("doc.md");
-    std::fs::write(&path, content).unwrap();
-    let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir.path(), ""))
-        .with_source_file(path.clone())
-        .with_shell_policy_root(dir.path())
-        .with_shell_working_directory(dir.path())
-        .with_shell_approval_handler(std::sync::Arc::new(AllowAll));
-    let (_, report) = Markdown::try_from(path.as_path())
-        .unwrap()
-        .compose_with(&crate::request_support::request_at(dir.path(), options))
-        .unwrap_or_else(|error| panic!("{content:?} failed: {error}"));
+    let (_, report) = try_compose_in(dir.path(), content, approve_shell(dir.path()))
+        .unwrap_or_else(|failure| panic!("{content:?} failed: {}", failure.error));
     members(&report.warnings)
+}
+
+/// Options approving every shell command, with policy and working directory
+/// in `dir`.
+fn approve_shell(dir: &Path) -> impl FnOnce(ComposeOptions) -> ComposeOptions {
+    let dir = dir.to_path_buf();
+    move |options| {
+        options
+            .with_shell_policy_root(dir.clone())
+            .with_shell_working_directory(dir)
+            .with_shell_approval_handler(std::sync::Arc::new(AllowAll))
+    }
 }
 
 #[test]
@@ -182,6 +186,81 @@ fn a_placeholder_in_a_frontmatter_shell_value_is_a_frontmatter_interpolation_sit
     let shell = |value: &str| shell_member_warnings(&document(&format!("pick: \"{value}\"\n"), "{{ pick }}\n"));
     assert!(shell("$( echo {{ server.name }} )").is_empty());
     assert_eq!(shell("$( echo {{ server.nmae }} )"), [(Some(5), Some(26), message("nmae", "server"))]);
+}
+
+/// A document whose `pick` is `value`, beside an `expected` the shell
+/// pieces can interpolate.
+fn expected_document(value: &str) -> String {
+    document(&format!("expected: web\npick: \"{value}\"\n"), "{{ pick }}\n")
+}
+
+/// The condition, then value, and else value of a frontmatter `$( … )`
+/// ternary, each reading `server.nmae` beside `filler` (a placeholder or the
+/// literal it fills to), with the text right before `nmae`.
+fn shell_pieces(filler: &str) -> [(String, &'static str); 3] {
+    [
+        (format!("$( server.nmae == '{filler}' ? echo yes : '' )"), "$( server."),
+        (format!("$( server.name ? length([fm.server.nmae, '{filler}']) : echo no )"), "[fm.server."),
+        (format!("$( server.port < 0 ? echo no : length([fm.server.nmae, '{filler}']) )"), "[fm.server."),
+    ]
+}
+
+#[test]
+fn a_placeholder_does_not_hide_a_shell_piece_member() {
+    for filler in ["{{ expected }}", "web"] {
+        for (value, before) in shell_pieces(filler) {
+            let content = expected_document(&value);
+            let subject = if before == "$( server." { "server" } else { "fm.server" };
+            assert_eq!(shell_member_warnings(&content), [expect(&content, before, "nmae", subject)], "{value}");
+            let control = expected_document(&value.replace("nmae", "name"));
+            assert!(shell_member_warnings(&control).is_empty(), "{control}");
+        }
+    }
+    // Runtime reachability still decides: the unselected branch is not read.
+    let unselected = expected_document("$( server.name ? echo no : length([fm.server.nmae, '{{ expected }}']) )");
+    assert!(shell_member_warnings(&unselected).is_empty(), "{unselected}");
+}
+
+#[test]
+fn a_placeholder_does_not_bypass_member_denial() {
+    let deny = BlockingPolicy::default().deny_code(CODE);
+    for (value, _) in shell_pieces("{{ expected }}") {
+        let content = expected_document(&value);
+        let dir = TempDir::new().unwrap();
+        let approve = approve_shell(dir.path());
+        let failure = try_compose_in(dir.path(), &content, |options| approve(options).with_blocking_policy(deny.clone()))
+            .expect_err("the denied member stops composition");
+        assert!(matches!(failure.error, MarkdownError::BlockedDiagnostics { .. }), "{value}: {:?}", failure.error);
+    }
+}
+
+/// The body sites evaluating an expression that may hold a placeholder
+/// beside an ordinary member read: transclusion conditions are evaluated
+/// after body interpolation fills it; block conditions, collection gates,
+/// and callbacks before.
+#[test]
+fn a_placeholder_does_not_hide_a_condition_member() {
+    let dir = TempDir::new().unwrap();
+    write_files(dir.path(), &[("child.md", "child\n")]);
+    let front = "expected: web\n";
+    for filler in ["{{ expected }}", "web"] {
+        for body in [
+            format!("::file ./child.md when=\"server.nmae != '{filler}'\"\n"),
+            format!("::block when=\"server.nmae != '{filler}'\"\nin\n::end-block\n"),
+        ] {
+            let content = document(front, &body);
+            let (_, report) = compose_in(dir.path(), &content);
+            assert_eq!(members(&report.warnings), [expect(&content, "when=\"server.", "nmae", "server")], "{body}");
+            let (_, report) = compose_in(dir.path(), &content.replace("nmae", "name"));
+            assert!(members(&report.warnings).is_empty(), "{body}");
+        }
+        let gated = format!("::map hosts when=\"server.nmae != '{filler}'\"\n{{{{ i.name }}}}\n::end-map\n");
+        let content = hosts_document(2, &gated).replace("---\n$schema", &format!("---\n{front}$schema"));
+        assert_eq!(member_warnings(&content), [expect(&content, "when=\"server.", "nmae", "server")], "{gated}");
+        let filtered = format!("::filter hosts \"h => h.nmae != '{filler}'\"\n{{{{ h.name }}}}\n::end-filter\n");
+        let content = hosts_document(2, &filtered).replace("---\n$schema", &format!("---\n{front}$schema"));
+        assert_eq!(member_warnings(&content), [expect(&content, "h => h.", "nmae", "h")], "{filtered}");
+    }
 }
 
 type Located = (Option<usize>, Option<usize>, String);
@@ -564,3 +643,189 @@ fn pass_repetition() {
     assert_eq!(shell_member_warnings(&content), [expect(&content, "{{ server.", "nmae", "server")]);
 }
 
+
+/// The read that fails every R1-F2 row: `absent.yaml` is never written.
+const FAILING_READ: &str = "load_data('absent.yaml', 'string[]')";
+
+/// One evaluation site whose expression reads `server.nmae` before a read
+/// that fails: `content` builds the document given that read (the control
+/// passes `'ok'`), and the member warning is expected right after the first
+/// `before`, as a member of `subject`.
+struct FailingSite {
+    content: fn(&str) -> String,
+    before: &'static str,
+    subject: &'static str,
+    shell: bool,
+}
+
+/// Composes `content` in `dir` (writing a valid `child.md` beside it), with
+/// every shell command approved when `shell`.
+fn compose_site(dir: &Path, content: &str, shell: bool) -> Result<(Markdown, ComposeReport), Box<ComposeFailure>> {
+    write_files(dir, &[("child.md", "child\n")]);
+    if shell {
+        try_compose_in(dir, content, approve_shell(dir))
+    } else {
+        try_compose_in(dir, content, |options| options)
+    }
+}
+
+/// The failing composition keeps its original error and exactly the one
+/// member warning it reached before failing, at the authored position; the
+/// control composes with the same warning.
+#[track_caller]
+fn assert_kept_on_failure(site: FailingSite) {
+    let failing = (site.content)(FAILING_READ);
+    assert!(failing.contains(FAILING_READ), "guard: the row reads the failing call: {failing}");
+    let dir = TempDir::new().unwrap();
+    let failure = compose_site(dir.path(), &failing, site.shell).expect_err("the read fails");
+    assert!(failure.error.to_string().contains("absent.yaml"), "{failing}\n{}", failure.error);
+    assert_eq!(members(&failure.warnings), [expect(&failing, site.before, "nmae", site.subject)], "{failing}");
+
+    let control = (site.content)("'ok'");
+    let dir = TempDir::new().unwrap();
+    let (_, report) = compose_site(dir.path(), &control, site.shell)
+        .unwrap_or_else(|failure| panic!("{control} failed: {}", failure.error));
+    assert_eq!(members(&report.warnings), [expect(&control, site.before, "nmae", site.subject)], "{control}");
+}
+
+/// One `#[test]` per R1-F2 row, each asserting [`assert_kept_on_failure`].
+macro_rules! kept_on_failure {
+    ($($name:ident => $content:expr, $before:literal, $subject:literal, shell: $shell:literal;)*) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_kept_on_failure(FailingSite { content: $content, before: $before, subject: $subject, shell: $shell });
+            }
+        )*
+    };
+}
+
+kept_on_failure! {
+    ac8_same_stage_body_later_site => |read| document("", &format!("{{{{ {read} }}}} {{{{ server.nmae }}}}\n")),
+        "}} {{ server.", "server", shell: false;
+    ac8_same_stage_body_expression => |read| document("", &format!("{{{{ [server.nmae, {read}] }}}}\n")),
+        "[server.", "server", shell: false;
+    ac8_same_stage_frontmatter_mixed_scalar =>
+        |read| document(&format!("title: \"{{{{ {read} }}}} {{{{ server.nmae }}}}\"\n"), "body\n"),
+        "}} {{ server.", "server", shell: false;
+    ac8_same_stage_frontmatter_whole_value =>
+        |read| document(&format!("title: \"{{{{ [server.nmae, {read}] }}}}\"\n"), "body\n"),
+        "[server.", "server", shell: false;
+    ac8_same_stage_frontmatter_later_key =>
+        |read| document(&format!("a: \"{{{{ server.nmae }}}}\"\nb: \"{{{{ {read} }}}}\"\n"), "body\n"),
+        "{{ server.", "server", shell: false;
+    ac8_same_stage_frontmatter_later_item =>
+        |read| document(&format!("a: [\"{{{{ server.nmae }}}}\", \"{{{{ {read} }}}}\"]\n"), "body\n"),
+        "{{ server.", "server", shell: false;
+    ac8_same_stage_block_condition =>
+        |read| document("", &format!("::block when=\"[server.nmae, {read}]\"\nin\n::end-block\n")),
+        "[server.", "server", shell: false;
+    ac8_same_stage_nested_block_condition => |read| document(
+            "",
+            &format!("::block when=\"true\"\nout\n::block when=\"[server.nmae, {read}]\"\nin\n::end-block\n::end-block\n"),
+        ),
+        "[server.", "server", shell: false;
+    ac8_same_stage_collection_gate =>
+        |read| hosts_document(2, &format!("::map hosts when=\"[server.nmae, {read}]\"\n{{{{ i.name }}}}\n::end-map\n")),
+        "[server.", "server", shell: false;
+    ac8_same_stage_file_condition =>
+        |read| document("", &format!("::file ./child.md when=\"[server.nmae, {read}]\"\n")),
+        "[server.", "server", shell: false;
+    ac8_same_stage_code_condition =>
+        |read| document("", &format!("::code ./child.md when=\"[server.nmae, {read}]\"\n")),
+        "[server.", "server", shell: false;
+    ac8_same_stage_shell_condition =>
+        |read| document(&format!("pick: \"$( [server.nmae, {read}] ? echo yes : '' )\"\n"), "{{ pick }}\n"),
+        "[server.", "server", shell: true;
+    ac8_same_stage_shell_then_value => |read| document(
+            &format!("pick: \"$( server.name ? length([fm.server.nmae, {read}]) : echo no )\"\n"),
+            "{{ pick }}\n",
+        ),
+        "[fm.server.", "fm.server", shell: true;
+    ac8_same_stage_shell_else_value => |read| document(
+            &format!("pick: \"$( server.port < 0 ? echo no : length([fm.server.nmae, {read}]) )\"\n"),
+            "{{ pick }}\n",
+        ),
+        "[fm.server.", "fm.server", shell: true;
+    ac8_same_stage_shell_later_preparation => |read| document(
+            &format!("a: \"$( server.nmae ? echo yes : '' )\"\nb: \"$( server.name ? length([{read}]) : echo no )\"\n"),
+            "{{ a }}\n",
+        ),
+        "$( server.", "server", shell: true;
+    ac8_same_stage_map_callback =>
+        |read| hosts_document(2, &format!("::map hosts \"h => [server.nmae, {read}]\"\n{{{{ h }}}}\n::end-map\n")),
+        "[server.", "server", shell: false;
+    ac8_same_stage_filter_callback =>
+        |read| hosts_document(2, &format!("::filter hosts \"h => [server.nmae, {read}]\"\n{{{{ h.name }}}}\n::end-filter\n")),
+        "[server.", "server", shell: false;
+    ac8_same_stage_filter_option => |read| hosts_document(
+            2,
+            &format!("::map hosts filter=\"h => length([server.nmae, {read}])\"\n{{{{ i.name }}}}\n::end-map\n"),
+        ),
+        "[server.", "server", shell: false;
+    ac8_same_stage_sort_option => |read| hosts_document(
+            2,
+            &format!("::map hosts sort=\"h => length([server.nmae, {read}])\"\n{{{{ i.name }}}}\n::end-map\n"),
+        ),
+        "[server.", "server", shell: false;
+    ac8_same_stage_while_option => |read| hosts_document(
+            2,
+            &format!("::map hosts while=\"h => length([server.nmae, {read}])\"\n{{{{ i.name }}}}\n::end-map\n"),
+        ),
+        "[server.", "server", shell: false;
+    ac8_same_stage_until_option => |read| hosts_document(
+            2,
+            &format!("::map hosts until=\"h => length([server.nmae, {read}])\"\n{{{{ i.name }}}}\n::end-map\n"),
+        ),
+        "[server.", "server", shell: false;
+}
+
+/// A member a ternary reached survives a later key's command whose
+/// execution fails; the control's command succeeds.
+#[test]
+fn ac8_same_stage_shell_later_execution() {
+    for (command, fails) in [("dm-member-check-absent-command --run", true), ("echo ok", false)] {
+        let content = document(&format!("a: \"$( server.nmae ? echo yes : '' )\"\nb: \"$( {command} )\"\n"), "{{ a }}\n");
+        let dir = TempDir::new().unwrap();
+        let warnings = match try_compose_in(dir.path(), &content, approve_shell(dir.path())) {
+            Err(failure) if fails => {
+                assert!(failure.error.to_string().contains("dm-member-check-absent-command"), "{}", failure.error);
+                failure.warnings
+            }
+            Ok((_, report)) if !fails => report.warnings,
+            Err(failure) => panic!("{content}: {}", failure.error),
+            Ok(_) => panic!("{content}: the command should fail"),
+        };
+        assert_eq!(members(&warnings), [expect(&content, "$( server.", "nmae", "server")], "{content}");
+    }
+}
+
+/// A warning a directive-target rewrite reported (a later skipped nullable
+/// target, rewritten first) survives an earlier target whose read fails.
+#[test]
+fn ac8_same_stage_directive_target() {
+    let content = format!("::file {{{{ {FAILING_READ} }}}}\n\n::file {{{{ missing }}}}\n");
+    let dir = TempDir::new().unwrap();
+    let failure = try_compose_in(dir.path(), &content, |options| options).expect_err("the read fails");
+    assert!(failure.error.to_string().contains("absent.yaml"), "{}", failure.error);
+    assert!(
+        failure.warnings.iter().any(|warning| warning.message.contains("nullable target `missing`")),
+        "{:?}",
+        failure.warnings
+    );
+}
+
+/// Keeping the warnings does not change blocking: a denied member read first
+/// (rightmost) still stops the stage before the failing read runs, as a
+/// policy stop that carries the warning itself.
+#[test]
+fn ac8_same_stage_denial_still_blocks_first() {
+    let content = document("", &format!("{{{{ {FAILING_READ} }}}} {{{{ server.nmae }}}}\n"));
+    let dir = TempDir::new().unwrap();
+    let deny = BlockingPolicy::default().deny_code(CODE);
+    let failure = try_compose_in(dir.path(), &content, |options| options.with_blocking_policy(deny))
+        .expect_err("the denied member stops composition");
+    let blocking = failure.error.blocked_diagnostics().unwrap_or_else(|| panic!("{:?}", failure.error));
+    assert_eq!(members(blocking), [expect(&content, "}} {{ server.", "nmae", "server")]);
+    assert!(members(&failure.warnings).is_empty(), "the stop carries it once: {:?}", failure.warnings);
+}

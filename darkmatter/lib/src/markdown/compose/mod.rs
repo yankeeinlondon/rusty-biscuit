@@ -174,6 +174,7 @@ pub use frontmatter_shell_expansion::{
     execute_resolved_shell_values, execute_shell_values_with, expected_suffixes,
     parse_frontmatter_shell_suffixes, parse_frontmatter_shell_value_spanned,
 };
+pub use member_sites::{ShellPiece, placeholders_keep_expression_structure};
 pub use icmp::PlannedIcmpProbe;
 pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, ExtraShellSources, PreflightApprovalStats, collect_frontmatter_shell_commands, collect_shell_commands};
 pub use shell_blocks::ShellBlockError;

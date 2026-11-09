@@ -599,13 +599,14 @@ impl Markdown {
             // Member reads a ternary reached are judged before its command
             // runs; a discovery pass reports none.
             let member_candidates = std::sync::Arc::clone(&report.member_candidates);
+            let mut fse_warnings = Vec::new();
             let fse_report = {
                 let observed: &ComposeReport = report;
                 let mut check = |warnings: &[ComposeWarning]| stop_if_blocked_with(observed, options, None, warnings, &[]);
                 let members = (!options.defer_expression_failures && !member_candidates.is_empty()).then(|| {
                     frontmatter_shell_expansion::ShellMembers { candidates: &member_candidates, check: &mut check }
                 });
-                frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
+                frontmatter_shell_expansion::execute_frontmatter_shell_expansion_into(
                     self.frontmatter_mut(),
                     options,
                     runtime,
@@ -613,11 +614,19 @@ impl Markdown {
                     &fse_ctx,
                     fse_templates.as_ref(),
                     members,
-                )?
+                    &mut fse_warnings,
+                )
             };
+            // A failure keeps the warnings found before it, unless it is the
+            // policy stop that already carries them.
+            let fse_report = fse_report.inspect_err(|error| {
+                if error.blocked_diagnostics().is_none() {
+                    report.add_warnings(std::mem::take(&mut fse_warnings));
+                }
+            })?;
             report.frontmatter_shell_expansions_applied = fse_report.replacements;
             report.shell_approvals_used += fse_report.approvals_used;
-            report.add_warnings(fse_report.warnings);
+            report.add_warnings(fse_warnings);
             add_frontmatter_candidates(
                 report,
                 "frontmatter-shell-ternary",
@@ -1027,7 +1036,7 @@ fn interpolate_frontmatter_pass(
     markdown: &mut Markdown,
     provenance: &mut super::value_origin::FrontmatterProvenance,
     options: &crate::markdown::compose::ComposeRequest,
-    report: &ComposeReport,
+    report: &mut ComposeReport,
     pass: frontmatter_interpolation::FrontmatterPass<'_>,
 ) -> MarkdownResult<frontmatter_interpolation::FrontmatterInterpolationReport> {
     // Capture the on-disk locus before borrowing frontmatter so a failure can
@@ -1036,7 +1045,7 @@ fn interpolate_frontmatter_pass(
     let fm_source_ctx = markdown.full_source_context_for_errors();
     let fm_authored_ctx = markdown.loaded_source_context_for_errors();
     let mut guard = blocking_guard(report, options, None, None);
-    frontmatter_interpolation::interpolate_frontmatter_located(
+    let interpolated = frontmatter_interpolation::interpolate_frontmatter_located(
         markdown.frontmatter_mut(),
         provenance,
         options.context(),
@@ -1047,8 +1056,13 @@ fn interpolate_frontmatter_pass(
         &options.name_coercion_keys,
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
         (!options.defer_expression_failures).then(|| report.member_candidates.clone()),
-    )
-    .map_err(|failure| attribute_frontmatter_failure(failure, options, fm_authored_ctx, &fm_source_ctx))
+    );
+    drop(guard);
+    interpolated.map_err(|mut failure| {
+        // The failed document keeps what the pass reported before failing.
+        report.add_warnings(std::mem::take(&mut failure.warnings));
+        attribute_frontmatter_failure(failure, options, fm_authored_ctx, &fm_source_ctx)
+    })
 }
 
 /// Runs the passive call check and adds its warnings to `report`; the

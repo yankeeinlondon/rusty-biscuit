@@ -618,8 +618,10 @@ from the first record). Rows are
 - **Typed literal returns** (`call_check.rs::expression_type`): a literal
   `as` types the call as its bare shape (named references `unknown`, explicit
   null arms kept, `| null` added when `file` may be null, `null` for a literal
-  `null` file), which flows into `map`/`filter` callback locals. No member
-  misspelling check (`h.nmae` is silent), as for any typed value.
+  `null` file), which flows into `map`/`filter` callback locals. The
+  **Undeclared member check** above applies to these shapes as to any typed
+  value: `h.nmae` against `{ name: string }[]` elements warns; a named
+  reference (`unknown`) or a computed `as` stays silent.
 - Tests: `lib/tests/l1/load_data_{execution,diagnostics,passive,runtime}.rs`,
   `cli/tests/l1/load_data.rs`; biscuit-file's opt-in readers in its
   `l1-delimited` target.

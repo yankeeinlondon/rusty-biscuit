@@ -99,6 +99,30 @@ pub struct FrontmatterShellTernary {
     pub else_span: SourceSpan,
 }
 
+impl FrontmatterShellTernary {
+    /// The pieces, with their spans, whose undeclared member reads are
+    /// checked: the condition and both value branches, except a piece whose
+    /// `{{ … }}` placeholders change its structure once filled
+    /// ([`placeholders_keep_expression_structure`](super::placeholders_keep_expression_structure)).
+    /// `value` is the text this ternary was parsed from. Composition's
+    /// precheck and the editor both inventory shell pieces through this.
+    pub fn member_pieces(&self, value: &str) -> Vec<(ShellPiece, SourceSpan)> {
+        [
+            (ShellPiece::Condition, &self.condition_span),
+            (ShellPiece::Then, &self.then_span),
+            (ShellPiece::Else, &self.else_span),
+        ]
+        .into_iter()
+        .filter(|(_, span)| {
+            value
+                .get((*span).clone())
+                .is_some_and(super::member_sites::placeholders_keep_expression_structure)
+        })
+        .map(|(piece, span)| (piece, span.clone()))
+        .collect()
+    }
+}
+
 /// The parsed body of a spanned frontmatter `$(...)` value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FrontmatterShellBody {
@@ -337,6 +361,16 @@ pub(crate) enum Branch {
         /// `$(...)` body.
         original_text: String,
     },
+}
+
+impl Branch {
+    /// The expression a value branch evaluates; `None` for any other branch.
+    fn value_source(&self) -> Option<&str> {
+        match self {
+            Branch::Value { source } => Some(source),
+            Branch::Empty | Branch::Pipeline { .. } => None,
+        }
+    }
 }
 
 /// Which side of a ternary a parse error or validation diagnostic refers to.
@@ -1381,6 +1415,7 @@ pub(crate) struct ShellMembers<'a> {
 /// - Policy file I/O fails
 /// - Command execution fails (blacklisted, denied, execution error, etc.)
 /// - `members`' check refuses the member warnings (before any command runs)
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn execute_frontmatter_shell_expansion(
     frontmatter: &mut Frontmatter,
     options: &crate::markdown::compose::ComposeRequest,
@@ -1388,7 +1423,38 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     provenance: &mut FrontmatterProvenance,
     ctx: &SourceContext,
     templates: Option<&FrontmatterTemplates>,
+    members: Option<ShellMembers<'_>>,
+) -> MarkdownResult<FrontmatterShellExpansionReport> {
+    let mut warnings = Vec::new();
+    let mut report = execute_frontmatter_shell_expansion_into(
+        frontmatter,
+        options,
+        runtime,
+        provenance,
+        ctx,
+        templates,
+        members,
+        &mut warnings,
+    )?;
+    report.warnings = warnings;
+    Ok(report)
+}
+
+/// [`execute_frontmatter_shell_expansion`], reporting its warnings to
+/// `warnings` as it finds them rather than in its report, so a failure
+/// leaves the caller those found before it: the members each earlier key's
+/// ternary reached, the members a failing condition or value branch reached
+/// before failing, and earlier commands' warnings.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn execute_frontmatter_shell_expansion_into(
+    frontmatter: &mut Frontmatter,
+    options: &crate::markdown::compose::ComposeRequest,
+    runtime: &mut PipelineRuntime,
+    provenance: &mut FrontmatterProvenance,
+    ctx: &SourceContext,
+    templates: Option<&FrontmatterTemplates>,
     mut members: Option<ShellMembers<'_>>,
+    warnings: &mut Vec<ComposeWarning>,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {
     let candidates = scan_frontmatter(frontmatter, provenance, ctx, &options.exclude_keys)?;
 
@@ -1423,7 +1489,6 @@ pub(crate) fn execute_frontmatter_shell_expansion(
 
     let mut pending: Vec<(usize, String, Pending)> = Vec::with_capacity(candidates.len());
     let mut missing_roots = Vec::new();
-    let mut member_warnings = Vec::new();
 
     // Placeholders of a `$( … )` value are read from the frontmatter as it
     // stands now, after the first interpolation pass.
@@ -1506,6 +1571,10 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                 // allowlisted, so prepare BOTH branches before evaluating
                 // the condition. An unselected branch with an un-approved
                 // command still fails the entire directive.
+                // A piece that fails reports the members it reached
+                // before failing; which branch the condition selects is
+                // unknown then, so only the failing piece's.
+                let failing = FailingPiece { members: members.as_ref().map(|members| members.candidates), key: &candidate.key };
                 let mut then_missing = Observation::default();
                 let then_prepared = prepare_optional_branch(
                     then_branch,
@@ -1517,7 +1586,8 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     state,
                     BranchPosition::Then,
                     &mut then_missing,
-                )?;
+                );
+                let then_prepared = failing.keep(then_prepared, ShellPiece::Then, then_branch.value_source(), &mut then_missing, warnings)?;
                 let mut else_missing = Observation::default();
                 let else_prepared = prepare_optional_branch(
                     else_branch,
@@ -1529,7 +1599,8 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     state,
                     BranchPosition::Else,
                     &mut else_missing,
-                )?;
+                );
+                let else_prepared = failing.keep(else_prepared, ShellPiece::Else, else_branch.value_source(), &mut else_missing, warnings)?;
 
                 let mut condition_missing = Observation::default();
                 let pick_then = evaluate_ternary_condition(
@@ -1538,7 +1609,9 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     &candidate.key,
                     ctx,
                     &mut condition_missing,
-                )?;
+                );
+                let pick_then =
+                    failing.keep(pick_then, ShellPiece::Condition, Some(condition_source), &mut condition_missing, warnings)?;
 
                 let (mut branch_missing, branch, piece) = if pick_then {
                     (then_missing, then_branch, ShellPiece::Then)
@@ -1554,9 +1627,9 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                             &observation.take_reached(),
                         )
                     };
-                    member_warnings.extend(joined(ShellPiece::Condition, condition_source, &mut condition_missing));
+                    warnings.extend(joined(ShellPiece::Condition, condition_source, &mut condition_missing));
                     if let Branch::Value { source } = branch {
-                        member_warnings.extend(joined(piece, source, &mut branch_missing));
+                        warnings.extend(joined(piece, source, &mut branch_missing));
                     }
                 }
                 missing_roots.extend(
@@ -1579,9 +1652,9 @@ pub(crate) fn execute_frontmatter_shell_expansion(
 
     // A blocking member read stops the stage before any command runs.
     if let Some(members) = members.as_mut()
-        && !member_warnings.is_empty()
+        && !warnings.is_empty()
     {
-        (members.check)(&member_warnings)?;
+        (members.check)(warnings)?;
     }
 
     // Run executable preparations in parallel; value branches skip the shell
@@ -1603,7 +1676,6 @@ pub(crate) fn execute_frontmatter_shell_expansion(
 
     // Rewrite frontmatter values
     let fm_mut = frontmatter.as_map_mut();
-    let mut warnings = member_warnings;
     for (_, key, execution) in executions {
         let (value, exec_warnings) = execution?;
         warnings.extend(exec_warnings);
@@ -1622,7 +1694,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     Ok(FrontmatterShellExpansionReport {
         replacements: candidates.len(),
         approvals_used,
-        warnings,
+        warnings: Vec::new(),
         missing_roots,
         typed_keys: candidates
             .iter()
@@ -1630,6 +1702,33 @@ pub(crate) fn execute_frontmatter_shell_expansion(
             .map(|candidate| candidate.key.clone())
             .collect(),
     })
+}
+
+/// Keeps the members a failing ternary piece of `key` reached.
+struct FailingPiece<'a> {
+    members: Option<&'a MemberCandidates>,
+    key: &'a str,
+}
+
+impl FailingPiece<'_> {
+    /// `result` of evaluating `piece` (authored as `source`; `None` for a
+    /// command, which reads no member), reporting the members `observation`
+    /// recorded to `warnings` when it failed.
+    fn keep<T>(
+        &self,
+        result: Result<T, ShellExpansionError>,
+        piece: ShellPiece,
+        source: Option<&str>,
+        observation: &mut Observation,
+        warnings: &mut Vec<ComposeWarning>,
+    ) -> Result<T, ShellExpansionError> {
+        if result.is_err()
+            && let (Some(members), Some(source)) = (self.members, source)
+        {
+            warnings.extend(members.warnings(&MemberSiteKey::shell(self.key, piece), source, &observation.take_reached()));
+        }
+        result
+    }
 }
 
 /// One frontmatter shell value ready to expand: either "execute this prepared

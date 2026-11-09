@@ -680,8 +680,11 @@ reached that selector. Never emit from a static scan alone.
   `body` (offset projected through `BodyOrigin`, so `::map` copies and repeat
   includes share it), `leaf` (frontmatter key path + `{{` offset in the
   value), `shell` (a `$( … )` ternary piece by role). `MemberCandidates::warnings`
-  also requires the trimmed expression text to match, so rewritten text never
-  inherits a candidate. Warnings collapse by identity in the report: one per
+  also requires the evaluated text to match the candidate's
+  `AuthoredExpression`: the trimmed authored text, or that text with each
+  `{{ }}` placeholder lying inside one string literal filled by text free of
+  that quote and `\` (token structure, hence ordinals, unchanged). Any other
+  rewritten text never inherits a candidate. Warnings collapse by identity in the report: one per
   authored site, two same-spelled sites stay two.
 - **Routing per surface.** Interpolation: `Evaluator::with_member_sites(candidates,
   MemberFrame::Body | Leaf)` (`set_member_leaf` per frontmatter leaf), warnings
@@ -693,18 +696,31 @@ reached that selector. Never emit from a static scan alone.
   wait in a `RefCell` and are flushed before the next gate's stop and at the
   end (failure included). Frontmatter `$( … )`: `ShellMembers`; the condition
   and chosen value branch are joined, and the stage's check hook runs before
-  any command. A `$( … )` piece holding `{{ }}` gets no candidate (frontmatter
-  interpolation reports the placeholder).
+  any command. A `{{ }}` in a `$( … )` piece (or a `::file`/`::code` `when=`, filled
+  by body interpolation first) is its own interpolation site; the piece's
+  other selectors keep their candidates through the in-string match above.
+  The precheck lists a ternary's pieces with
+  `FrontmatterShellTernary::member_pieces`, which drops a piece whose
+  placeholder is outside a string; DMLS inventories through the same call.
 - **Not covered:** whole-value directive targets (nullable-target warning
   instead), lifecycle stacks, `expression`-typed frontmatter values (DMLS
   only), discovery passes, standalone unobserved evaluators.
 - **Pending schemas.** Composition resolves the schema before any expression;
   a passive `SlotSession` fails with `dm.schema.slot_pending` before any member
   warning exists. Only DMLS reports from an unresolved template.
-- **Known limit (all warning families).** An interpolation stage evaluates
-  `{{ }}` sites end-to-start and drops its collected warnings when a site
-  fails, so a member authored *after* the failing site loses its warning
-  (`--deny` still blocks on it). A failure in a later stage keeps them.
+- **A failure keeps what was read before it (all warning families).** A
+  stage that collects warnings hands them to the report before it propagates
+  an error: `LocatedInterpolationError::warnings` (body and frontmatter
+  `{{ }}`, directive targets; `LocatedFrontmatterError::warnings` across
+  leaves and keys) and `execute_frontmatter_shell_expansion_into`'s
+  `warnings` out-parameter; a condition (`::block`, collection gate,
+  `::file`/`::code` `when=`) records its observation before returning its
+  evaluation error. A failing ternary piece reports its own members (the
+  selected branch is unknown). A policy stop already carries its warnings,
+  so they are not added again. `md compose` runs a passive reference check
+  first, which reports no member warning: an expression failure it reaches
+  (a body or frontmatter `{{ }}`, a `::block` condition) fails the run
+  before composition, without them.
 
 ### Context Values (`ctx.*`)
 

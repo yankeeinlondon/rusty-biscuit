@@ -1181,6 +1181,55 @@ fn interpolation_call_diagnostics(
             calls.push(ctx, doc_span, found, out);
         }
     }
+    shell_member_diagnostics(ctx, ast, lifecycle, &calls, out);
+}
+
+/// The undeclared-member warnings of each top-level `$( … )` ternary's
+/// condition and both value branches, the pieces composition's precheck
+/// inventories ([`FrontmatterShellTernary::member_pieces`](darkmatter::markdown::compose::FrontmatterShellTernary::member_pieces)).
+/// Every piece is checked, although composition reaches only the selected
+/// branch. A piece's `{{ … }}` placeholders are frontmatter interpolation
+/// sites of their own, checked by [`interpolation_call_diagnostics`]; inside
+/// the piece they are string text. Composition call-checks no piece, so
+/// neither does this.
+fn shell_member_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    lifecycle: &crate::overlay::event_views::LifecycleHost,
+    calls: &FrontmatterCalls<'_>,
+    out: &mut Vec<Diagnostic>,
+) {
+    use darkmatter::markdown::compose::{FrontmatterShellBody, parse_frontmatter_shell_value_spanned};
+    for (index, entry) in ast.entries().iter().enumerate() {
+        let path = ast.path_at(index);
+        let [crate::overlay::FmPathSegment::Key(key)] = path.as_slice() else {
+            continue;
+        };
+        if *key == "$schema" || lifecycle.stack_event(&path).is_some() {
+            continue;
+        }
+        if !entry.scalar.as_deref().is_some_and(|scalar| scalar.contains("$(")) {
+            continue;
+        }
+        let Some((projection, value)) = crate::overlay::expressions::ScalarProjection::for_value(entry, ctx.text) else {
+            continue;
+        };
+        let Some(FrontmatterShellBody::Ternary(ternary)) =
+            parse_frontmatter_shell_value_spanned(&value).map(|parsed| parsed.body)
+        else {
+            continue;
+        };
+        for (_, span) in ternary.member_pieces(&value) {
+            let source = &value[span.clone()];
+            let Ok(parsed) = crate::overlay::expressions::parse(source) else {
+                continue;
+            };
+            for found in calls.check_members(&parsed, source) {
+                let doc_span = projection.range(span.start + found.span.start..span.start + found.span.end);
+                calls.push(ctx, doc_span, found, out);
+            }
+        }
+    }
 }
 
 /// The frontmatter's call-check site: unguarded over the declaration-only
@@ -1206,6 +1255,15 @@ impl<'d> FrontmatterCalls<'d> {
         text: &str,
     ) -> Vec<crate::diagnostics::call_check::CallDiagnostic> {
         crate::diagnostics::call_check::call_diagnostics(expr, text, &self.site, self.strict)
+    }
+
+    /// Member findings alone, for a shell ternary piece.
+    fn check_members(
+        &self,
+        expr: &darkmatter::markdown::compose::expression::SpannedExpr,
+        text: &str,
+    ) -> Vec<crate::diagnostics::call_check::CallDiagnostic> {
+        crate::diagnostics::call_check::member_diagnostics(expr, text, &self.site)
     }
 
     /// Call findings alone, for a lifecycle stack's expression.

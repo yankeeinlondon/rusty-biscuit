@@ -395,15 +395,15 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         let verdict = match scope {
             Some(scope) => site.evaluate(expression, &ScopedLookup::new(lookup, Arc::clone(scope)), &mut observation),
             None => site.evaluate(expression, lookup, &mut observation),
-        }
-        .map_err(|error| Halt::from(crate::markdown::compose::page_blocks::PageBlockError::from(error)))?;
+        };
+        // A failing gate still reports what it read before failing.
         self.report.add_unknown_root_candidates("condition", std::mem::take(&mut observation.roots), |_| {
             CandidateLocus::BodyLine(line)
         });
         if let Some(members) = &self.members {
             self.report.add_warnings(members.warnings(start, expression, &mut observation));
         }
-        Ok(verdict)
+        verdict.map_err(|error| Halt::from(crate::markdown::compose::page_blocks::PageBlockError::from(error)))
     }
 
     fn plan(&mut self, region: &CollectionRegion) -> Result<Rc<Plan>, Halt> {

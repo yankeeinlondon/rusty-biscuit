@@ -682,9 +682,9 @@ impl<'a> TransclusionEngine<'a> {
                     watch.check(report)?;
                 }
                 let mut observation = crate::markdown::compose::expression::absence::Observation::default();
-                let should_include = site
-                    .evaluate(expr, &lookup, &mut observation)
-                    .map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
+                // A failing condition still reports what it read before
+                // failing; its own error then outranks a policy stop.
+                let should_include = site.evaluate(expr, &lookup, &mut observation);
                 report.add_unknown_root_candidates("condition", std::mem::take(&mut observation.roots), |_| {
                     crate::markdown::compose::unknown_identifiers::directive_locus(
                         self.markdown,
@@ -702,10 +702,14 @@ impl<'a> TransclusionEngine<'a> {
                     report.add_warnings(members.warnings(start, expr, &mut observation));
                     // A blocking member read stops before the directive
                     // composes its target.
-                    if let Some(watch) = watch.as_deref_mut() {
+                    if should_include.is_ok()
+                        && let Some(watch) = watch.as_deref_mut()
+                    {
                         watch.check(report)?;
                     }
                 }
+                let should_include =
+                    should_include.map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
                 if !should_include {
                     let mut fixed_report = ComposeReport::new();
                     fixed_report.transclusions_skipped = 1;

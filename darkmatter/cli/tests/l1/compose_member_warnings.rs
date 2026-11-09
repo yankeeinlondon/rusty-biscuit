@@ -83,3 +83,68 @@ fn compose_help_lists_the_code() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert!(help.contains(CODE), "{help}");
 }
+
+/// A composition that fails after reading an undeclared member, in the same
+/// `::file` condition, still reports the member warning beside its error in
+/// the structured output, with nothing on stderr. (Only composition evaluates
+/// a transclusion condition; the reference check that runs first does not.)
+#[test]
+fn a_failed_composition_keeps_the_earlier_member_warning() {
+    let fixture = CliProcessFixture::named("compose_member_warnings_failure_json");
+    fixture.write_file("cwd/child.md", "child\n");
+    let document = fixture.write_file(
+        "cwd/doc.md",
+        &DOCUMENT.replace(
+            "x {{ server.nmae }}",
+            "::file ./child.md when=\"[server.nmae, load_data('absent.yaml', 'string[]')]\"",
+        ),
+    );
+
+    let output = fixture.command().args(["compose", "--output", "json"]).arg(&document).output().unwrap();
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(1), "{report}");
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+    let diagnostics = report["diagnostics"].as_array().unwrap();
+    let warnings: Vec<_> = diagnostics.iter().filter(|diagnostic| diagnostic["code"] == CODE).collect();
+    assert_eq!(warnings.len(), 1, "{report}");
+    assert_eq!(warnings[0]["severity"], "warning", "{report}");
+    // Line 6 is the body line; column 33 is the `nmae` segment after
+    // `::file ./child.md when="[server.`.
+    assert_eq!(warnings[0]["source"]["line"], 6, "{report}");
+    assert_eq!(warnings[0]["source"]["column"], 33, "{report}");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic["severity"] == "error"
+            && diagnostic["message"].as_str().is_some_and(|message| message.contains("absent.yaml"))),
+        "the original error names the absent file: {report}"
+    );
+}
+
+/// The reference check `md compose` runs before composition is passive
+/// discovery: it reports no member warning, so a body expression that fails
+/// there stops the run with its error alone. Composition never observed the
+/// read, so there is no earlier member warning to keep.
+#[test]
+fn a_reference_check_failure_reports_no_member_warning() {
+    let fixture = CliProcessFixture::named("compose_member_warnings_reference_check");
+    let document = fixture.write_file(
+        "cwd/doc.md",
+        &DOCUMENT.replace(
+            "x {{ server.nmae }}",
+            "x {{ [server.nmae, load_data('absent.yaml', 'string[]')] }}",
+        ),
+    );
+
+    let output = fixture.command().args(["compose", "--output", "json"]).arg(&document).output().unwrap();
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(1), "{report}");
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+    let diagnostics = report["diagnostics"].as_array().unwrap();
+    assert!(!diagnostics.iter().any(|diagnostic| diagnostic["code"] == CODE), "{report}");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic["severity"] == "error"
+            && diagnostic["message"].as_str().is_some_and(|message| message.contains("absent.yaml"))),
+        "the reference check's error names the absent file: {report}"
+    );
+}

@@ -343,7 +343,12 @@ fn rewrite_value<L: EvaluationLookup>(
                 "frontmatter-interpolation",
                 scoped.as_mut().map(|check| check as &mut dyn FnMut(&[ComposeWarning]) -> Result<(), MarkdownError>),
             )
-            .map_err(|failure| LocatedFrontmatterError::in_string(s, failure))?;
+            .map_err(|failure| {
+                let mut failure = LocatedFrontmatterError::in_string(s, failure);
+                failure.warnings =
+                    failure.warnings.drain(..).map(|warning| warning.in_scope(&scope.display)).collect();
+                failure
+            })?;
             let warnings =
                 warnings.into_iter().map(|warning| warning.in_scope(&scope.display)).collect();
             scope.scanned.push(scope.segments.clone());
@@ -360,8 +365,9 @@ fn rewrite_value<L: EvaluationLookup>(
                 let outcome = rewrite_value(item, evaluator, policy, scope);
                 scope.segments.pop();
                 scope.display = display;
-                let (new_val, count, warnings) =
-                    outcome.map_err(|failure| failure.within(ValuePathSegment::Index(index)))?;
+                let (new_val, count, warnings) = outcome.map_err(|failure| {
+                    failure.within(ValuePathSegment::Index(index)).after(std::mem::take(&mut all_warnings))
+                })?;
                 new_arr.push(new_val);
                 total_count += count;
                 all_warnings.extend(warnings);
@@ -379,8 +385,9 @@ fn rewrite_value<L: EvaluationLookup>(
                 let outcome = rewrite_value(val, evaluator, policy, scope);
                 scope.segments.pop();
                 scope.display = display;
-                let (new_val, count, warnings) = outcome
-                    .map_err(|failure| failure.within(ValuePathSegment::Key(key.clone())))?;
+                let (new_val, count, warnings) = outcome.map_err(|failure| {
+                    failure.within(ValuePathSegment::Key(key.clone())).after(std::mem::take(&mut all_warnings))
+                })?;
                 new_obj.insert(key.clone(), new_val);
                 total_count += count;
                 all_warnings.extend(warnings);
@@ -434,6 +441,7 @@ fn decode_authored_tokens(
                             scanned: s.clone(),
                             span,
                         }),
+                        warnings: Vec::new(),
                     });
                 }
             }
@@ -502,6 +510,10 @@ pub(crate) struct LocatedFrontmatterError {
     /// `None` for a failure that is not about one expression (a rejected
     /// dependency) or whose expression a rescan found in replacement output.
     pub location: Option<FrontmatterExpressionLocation>,
+    /// The warnings the pass had reported before it failed, as the pass's
+    /// report would carry them; the caller adds them to the failing
+    /// document's report. Empty for a policy stop, which carries its own.
+    pub warnings: Vec<ComposeWarning>,
 }
 
 /// The string value holding a failing `{{ … }}`, and the construct's span in
@@ -524,6 +536,7 @@ impl From<MarkdownError> for LocatedFrontmatterError {
         Self {
             error: Box::new(error),
             location: None,
+            warnings: Vec::new(),
         }
     }
 }
@@ -537,7 +550,18 @@ impl LocatedFrontmatterError {
                 scanned: scanned.to_string(),
                 span,
             }),
+            warnings: failure.warnings,
         }
+    }
+
+    /// This failure, after `earlier` were reported by the same pass (see
+    /// [`LocatedInterpolationError::after`]).
+    fn after(mut self, mut earlier: Vec<ComposeWarning>) -> Self {
+        if self.error.blocked_diagnostics().is_none() {
+            earlier.append(&mut self.warnings);
+            self.warnings = earlier;
+        }
+        self
     }
 
     fn within(mut self, segment: ValuePathSegment) -> Self {
@@ -684,11 +708,12 @@ fn key_scoped_error(key: &str, err: MarkdownError) -> MarkdownError {
 
 /// [`key_scoped_error`] for a located failure in the value of top-level `key`.
 fn key_scoped_failure(key: &str, failure: LocatedFrontmatterError) -> LocatedFrontmatterError {
-    let LocatedFrontmatterError { error, location } =
+    let LocatedFrontmatterError { error, location, warnings } =
         failure.within(ValuePathSegment::Key(key.to_string()));
     LocatedFrontmatterError {
         error: Box::new(key_scoped_error(key, *error)),
         location,
+        warnings,
     }
 }
 
@@ -1218,7 +1243,7 @@ fn interpolate_frontmatter_impl(
                     made_progress = true;
                     continue;
                 }
-                Err(e) => return Err(e),
+                Err(failure) => return Err(keyed_failure(key, failure, all_warnings)),
             };
 
             for w in &mut warnings {
@@ -1296,7 +1321,7 @@ fn interpolate_frontmatter_impl(
                 record_missing_runtime_context(&mut missing_runtime_context, *error.error);
                 continue;
             }
-            Err(e) => return Err(e),
+            Err(failure) => return Err(keyed_failure(key, failure, all_warnings)),
         };
 
         for w in &mut warnings {
@@ -1334,6 +1359,15 @@ fn interpolate_frontmatter_impl(
         deferred_keys,
         provisional_keys,
     })
+}
+
+/// `failure` of top-level `key`, after the `earlier` warnings of the keys
+/// before it, its own named for `key` as a success names them.
+fn keyed_failure(key: &str, mut failure: LocatedFrontmatterError, earlier: Vec<ComposeWarning>) -> LocatedFrontmatterError {
+    for warning in &mut failure.warnings {
+        warning.message = format!("key '{key}': {}", warning.message);
+    }
+    failure.after(earlier)
 }
 
 /// Computes the templated keys that transitively depend on a shell-pending

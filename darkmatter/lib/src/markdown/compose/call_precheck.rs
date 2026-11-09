@@ -132,8 +132,8 @@ struct Advisory {
 /// evaluator turns into a warning only if it reaches the selector.
 struct MemberAdvisory {
     site: MemberSiteKey,
-    /// The trimmed text the expression was parsed from.
-    expression: String,
+    /// The text the expression was parsed from.
+    expression: super::member_sites::AuthoredExpression,
     finding: MemberFinding,
     /// As for [`Advisory`].
     leaf: Option<(Vec<Segment>, String)>,
@@ -207,7 +207,7 @@ impl Advisories {
         for finding in expression_member_findings(expr, text, scope) {
             self.members.push(MemberAdvisory {
                 site: site.clone(),
-                expression: text.trim().to_string(),
+                expression: text.into(),
                 origin: origin_of(finding.span.clone()),
                 finding,
                 leaf: leaf.map(|(path, text)| (path.to_vec(), text.to_string())),
@@ -564,6 +564,7 @@ fn check_frontmatter_value(
                         scanned: text.clone(),
                         span: location.start..location.end,
                     }),
+                    warnings: Vec::new(),
                 },
             ))
         }
@@ -585,10 +586,11 @@ fn check_frontmatter_value(
 
 /// Records the undeclared members of each authored top-level `$( … )`
 /// ternary's condition and value branches: the expressions frontmatter shell
-/// expansion evaluates. A piece holding a `{{ … }}` placeholder is evaluated
-/// only after the placeholder is filled, so its text is not the authored
-/// text and it gets no candidate (the placeholder is a frontmatter
-/// interpolation site of its own).
+/// expansion evaluates, as [`FrontmatterShellTernary::member_pieces`](super::FrontmatterShellTernary::member_pieces)
+/// inventories them. A `{{ … }}` placeholder in a piece is a frontmatter
+/// interpolation site of its own, filled before the piece is evaluated; the
+/// piece's other selectors join only while filling leaves its structure
+/// intact ([`AuthoredExpression`](super::member_sites::AuthoredExpression)).
 fn record_shell_members(
     markdown: &Markdown,
     provenance: &FrontmatterProvenance,
@@ -597,7 +599,6 @@ fn record_shell_members(
     advisories: &mut Advisories,
 ) {
     use super::frontmatter_shell_expansion::{FrontmatterShellBody, parse_frontmatter_shell_value_spanned};
-    use super::member_sites::ShellPiece;
     for (key, value) in markdown.frontmatter().as_map() {
         let Value::String(text) = value else {
             continue;
@@ -611,12 +612,8 @@ fn record_shell_members(
             continue;
         };
         let path = [ValuePathSegment::Key(key.clone())];
-        for (piece, span) in [
-            (ShellPiece::Condition, ternary.condition_span),
-            (ShellPiece::Then, ternary.then_span),
-            (ShellPiece::Else, ternary.else_span),
-        ] {
-            let Some(source) = text.get(span.clone()).filter(|source| !source.contains("{{")) else {
+        for (piece, span) in ternary.member_pieces(text) {
+            let Some(source) = text.get(span.clone()) else {
                 continue;
             };
             let Ok(expr) = parse_spanned(source) else {

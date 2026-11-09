@@ -996,9 +996,13 @@ keep agreeing. User docs:
   every surface that shows call diagnostics (body spans, `when=`, collection
   gates/callbacks in `providers/collections.rs`, frontmatter `{{ }}` and
   expression-typed values) shows member warnings. Lifecycle stacks use
-  `stack_call_diagnostics` (calls only). Not checked: a frontmatter `$( … )`
-  ternary's condition and value branches (only `{{ }}` inside them), which
-  composition does check. Tests: `tests/l1/undeclared_member.rs`.
+  `stack_call_diagnostics` (calls only). A top-level frontmatter `$( … )`
+  ternary's pieces go through `call_check::member_diagnostics` (members only,
+  as composition does not call-check them) from
+  `diagnostics/frontmatter.rs::shell_member_diagnostics`, inventoried by the
+  library's `FrontmatterShellTernary::member_pieces` (the precheck uses the
+  same list, so both skip a piece whose placeholder is outside a string);
+  both value branches are checked. Tests: `tests/l1/undeclared_member.rs`.
 - **Setting.** `ExpressionsConfig { strict }` in `config/mod.rs`:
   `[expressions] strict` in `.dmls.toml`, `dmls.expressions.strict` from
   `didChangeConfiguration` (DMLS never pulls `workspace/configuration`).

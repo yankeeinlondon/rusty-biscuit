@@ -226,7 +226,7 @@ fn rewrite_body<L: EvaluationLookup>(
     };
     let mut guard =
         blocking_guard(report, options, Some(verdict), Some((evaluator.missing_root_mark(), &missing_roots)));
-    let mut result = interpolation::interpolate_text_selected(
+    let result = interpolation::interpolate_text_selected(
         input,
         Some(data),
         &evaluator,
@@ -236,9 +236,9 @@ fn rewrite_body<L: EvaluationLookup>(
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
         Some(&lookup),
         select,
-    )
-    .map_err(|failure| anchor_authored_failure(markdown, origin, scopes, failure))?;
+    );
     drop(guard);
+    let mut result = result.map_err(|failure| anchor_authored_failure(markdown, origin, scopes, report, failure))?;
     report.add_warnings(std::mem::take(&mut result.warnings));
     // The scanner evaluates spans end to start; restore document order so the
     // first authored read of a root is the one kept.
@@ -381,7 +381,7 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
     evaluator: &interpolation::Evaluator<'_, L>,
     origin: Option<&BodyOrigin>,
     ranges: &ScopeRanges,
-    report: &ComposeReport,
+    report: &mut ComposeReport,
     options: &crate::markdown::compose::ComposeRequest,
     verdict: FinalVerdict<'_>,
     site: Option<&dyn SiteHook>,
@@ -390,7 +390,7 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
     // A target's absent root is reported as a skipped target, never as an
     // undeclared read, so this pass judges warnings alone.
     let mut guard = blocking_guard(report, options, Some(verdict), None);
-    rewrite_directive_targets(
+    let rewrite = rewrite_directive_targets(
         markdown.content(),
         Some(data),
         evaluator,
@@ -398,12 +398,15 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
         site,
         select,
-    )
-    .map_err(|failure| anchor_authored_failure(markdown, origin, ranges, failure))
+    );
+    drop(guard);
+    rewrite.map_err(|failure| anchor_authored_failure(markdown, origin, ranges, report, failure))
 }
 
 /// Anchors a body failure to its authored span when `origin` proves one, and
-/// gives a failure inside a repeated copy (`ranges`) that copy's items.
+/// gives a failure inside a repeated copy (`ranges`) that copy's items. The
+/// warnings the rewrite reported before failing go to `report` first, so the
+/// failed document keeps them.
 ///
 /// `origin` maps the text the failing span indexes back to the loaded
 /// document. An expression inside text an earlier stage inserted (an authored
@@ -413,9 +416,11 @@ fn anchor_authored_failure(
     markdown: &Markdown,
     origin: Option<&BodyOrigin>,
     ranges: &ScopeRanges,
+    report: &mut ComposeReport,
     failure: interpolation::LocatedInterpolationError,
 ) -> MarkdownError {
-    let interpolation::LocatedInterpolationError { error, span } = failure;
+    let interpolation::LocatedInterpolationError { error, span, warnings } = failure;
+    report.add_warnings(warnings);
     let mut error = *error;
     if let Some(context) = markdown.loaded_source_context_for_errors()
         && let Some(authored) = span

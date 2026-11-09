@@ -300,97 +300,103 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
     let mut shown = 0;
     let mut edits = Vec::new();
 
-    for directive in scan_darkmatter_directives_in(source, data).into_iter().rev() {
-        if !matches!(directive.kind, DirectiveKind::File | DirectiveKind::Code | DirectiveKind::Url)
-        {
-            continue;
-        }
-        let Some(target) = directive.target else {
-            continue;
-        };
-        if data.is_some_and(|data| data.intersects(&target.span)) {
-            continue;
-        }
-        let raw = &source[target.span.clone()];
-        let Some(location) = whole_value_span(raw) else {
-            continue;
-        };
+    // Every failure below keeps the warnings reported before it.
+    let rewritten = (|| {
+        for directive in scan_darkmatter_directives_in(source, data).into_iter().rev() {
+            if !matches!(directive.kind, DirectiveKind::File | DirectiveKind::Code | DirectiveKind::Url)
+            {
+                continue;
+            }
+            let Some(target) = directive.target else {
+                continue;
+            };
+            if data.is_some_and(|data| data.intersects(&target.span)) {
+                continue;
+            }
+            let raw = &source[target.span.clone()];
+            let Some(location) = whole_value_span(raw) else {
+                continue;
+            };
 
-        if select.is_some_and(|select| !select(target.span.clone(), Some(&location.expression))) {
-            continue;
-        }
-        show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
-        if let Some(site) = site {
-            site.enter(target.span.start);
-        }
-        let expression = parse(&location.expression).ok();
-        let (value, count, target_warnings) = interpolate_value_guarded(
-            raw,
-            evaluator,
-            ExpressionFailurePolicy::Strict,
-            "interpolation",
-            reborrow(&mut before_eval),
-        )
-        .map_err(|failure| LocatedInterpolationError {
-            // A policy stop is about no one target.
-            span: (!matches!(*failure.error, crate::markdown::types::MarkdownError::BlockedDiagnostics { .. }))
-                .then(|| target.span.clone()),
-            error: failure.error,
-        })?;
-        replacements += count;
-        warnings.extend(target_warnings);
-        shown = warnings.len();
+            if select.is_some_and(|select| !select(target.span.clone(), Some(&location.expression))) {
+                continue;
+            }
+            show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
+            if let Some(site) = site {
+                site.enter(target.span.start);
+            }
+            let expression = parse(&location.expression).ok();
+            let (value, count, target_warnings) = interpolate_value_guarded(
+                raw,
+                evaluator,
+                ExpressionFailurePolicy::Strict,
+                "interpolation",
+                reborrow(&mut before_eval),
+            )
+            .map_err(|failure| LocatedInterpolationError {
+                // A policy stop is about no one target.
+                span: (!matches!(*failure.error, crate::markdown::types::MarkdownError::BlockedDiagnostics { .. }))
+                    .then(|| target.span.clone()),
+                ..failure
+            })?;
+            replacements += count;
+            warnings.extend(target_warnings);
+            shown = warnings.len();
 
-        let evaluated_target = match value {
-            serde_json::Value::Null => EvaluatedDirectiveTarget::Absent {
-                reason: AbsentTargetReason::Null,
-                root: expression.as_ref().and_then(expression_root),
-            },
-            serde_json::Value::String(ref value) if value.is_empty() => {
-                EvaluatedDirectiveTarget::Absent {
-                    reason: AbsentTargetReason::EmptyString,
+            let evaluated_target = match value {
+                serde_json::Value::Null => EvaluatedDirectiveTarget::Absent {
+                    reason: AbsentTargetReason::Null,
                     root: expression.as_ref().and_then(expression_root),
+                },
+                serde_json::Value::String(ref value) if value.is_empty() => {
+                    EvaluatedDirectiveTarget::Absent {
+                        reason: AbsentTargetReason::EmptyString,
+                        root: expression.as_ref().and_then(expression_root),
+                    }
+                }
+                value => EvaluatedDirectiveTarget::Concrete(scalar_string(&value)),
+            };
+            let evaluation = DirectiveTargetEvaluation {
+                kind: directive.kind,
+                span: target.span.clone(),
+                target: evaluated_target,
+            };
+
+            match &evaluation.target {
+                EvaluatedDirectiveTarget::Concrete(value) => {
+                    crate::markdown::compose::interpolation::rewrite::charge(
+                        site,
+                        evaluation.span.start,
+                        value.len(),
+                        Some(evaluation.span.clone()),
+                    )?;
+                    output.replace_range(evaluation.span.clone(), value);
+                    edits.push(TextEdit::data(evaluation.span.clone(), value.len()));
+                }
+                EvaluatedDirectiveTarget::Absent { reason, root } => {
+                    let expression_name = root.as_deref().unwrap_or(location.expression.trim());
+                    warnings.push(
+                        ComposeWarning::new(
+                            "interpolation",
+                            format!(
+                                "nullable target `{expression_name}` for {} evaluated to {}; directive skipped",
+                                evaluation.kind.keyword(),
+                                reason.description(),
+                            ),
+                        )
+                        .at_line(directive.line + line_offset),
+                    );
+                    let line = directive.span.start..line_end_including_terminator(source, directive.span.end);
+                    output.replace_range(line.clone(), "");
+                    edits.push(TextEdit::authored(line, 0));
                 }
             }
-            value => EvaluatedDirectiveTarget::Concrete(scalar_string(&value)),
-        };
-        let evaluation = DirectiveTargetEvaluation {
-            kind: directive.kind,
-            span: target.span.clone(),
-            target: evaluated_target,
-        };
-
-        match &evaluation.target {
-            EvaluatedDirectiveTarget::Concrete(value) => {
-                crate::markdown::compose::interpolation::rewrite::charge(
-                    site,
-                    evaluation.span.start,
-                    value.len(),
-                    Some(evaluation.span.clone()),
-                )?;
-                output.replace_range(evaluation.span.clone(), value);
-                edits.push(TextEdit::data(evaluation.span.clone(), value.len()));
-            }
-            EvaluatedDirectiveTarget::Absent { reason, root } => {
-                let expression_name = root.as_deref().unwrap_or(location.expression.trim());
-                warnings.push(
-                    ComposeWarning::new(
-                        "interpolation",
-                        format!(
-                            "nullable target `{expression_name}` for {} evaluated to {}; directive skipped",
-                            evaluation.kind.keyword(),
-                            reason.description(),
-                        ),
-                    )
-                    .at_line(directive.line + line_offset),
-                );
-                let line = directive.span.start..line_end_including_terminator(source, directive.span.end);
-                output.replace_range(line.clone(), "");
-                edits.push(TextEdit::authored(line, 0));
-            }
         }
+        show_new_warnings(&mut before_eval, &warnings, &mut shown)
+    })();
+    if let Err(failure) = rewritten {
+        return Err(failure.after(warnings));
     }
-    show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
     // Directives were rewritten end to start.
     edits.reverse();
 

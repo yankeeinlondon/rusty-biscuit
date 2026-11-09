@@ -9,7 +9,7 @@
 //! ```mermaid
 //! flowchart LR
 //!     P[precheck: member findings] -->|candidate per site and ordinal| C[MemberCandidates]
-//!     E[evaluator: reached ordinals] --> J{same site key<br/>same expression text?}
+//!     E[evaluator: reached ordinals] --> J{same site key<br/>same expression structure?}
 //!     C --> J
 //!     J -->|yes| W[warning, once per authored site]
 //!     J -->|no| N[nothing]
@@ -72,17 +72,134 @@ impl MemberSiteKey {
 /// A piece of a frontmatter `$( … )` ternary that is evaluated as an
 /// expression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShellPiece {
+pub enum ShellPiece {
+    /// The text before the top-level `?`.
     Condition = 0,
+    /// The value branch between `?` and `:`.
     Then = 1,
+    /// The value branch after `:`.
     Else = 2,
+}
+
+/// The trimmed text an authored expression was parsed from, and the
+/// `{{ … }}` placeholders in it that a stage fills before the expression is
+/// evaluated (frontmatter interpolation inside a `$( … )` piece, body
+/// interpolation inside a directive's `when`).
+///
+/// A placeholder counts only when it lies inside one quoted string literal.
+/// Filled with text holding neither that quote nor a backslash, the string
+/// literal keeps its extent, so the evaluated expression has the authored
+/// token structure and the same access-node ordinals. Any other filled text
+/// is not matched: an ordinal is never joined to a structure the precheck
+/// did not analyze.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AuthoredExpression {
+    text: String,
+    /// In-string placeholder ranges of `text`, in order, with the quote of
+    /// the string holding each.
+    holes: Vec<(Range<usize>, char)>,
+}
+
+impl AuthoredExpression {
+    pub(crate) fn new(text: &str) -> Self {
+        let text = text.trim();
+        Self {
+            text: text.to_string(),
+            holes: string_holes(text).unwrap_or_default(),
+        }
+    }
+
+    /// Whether `evaluated` is this text, or this text with each placeholder
+    /// filled as [`Self`] allows.
+    pub(crate) fn matches(&self, evaluated: &str) -> bool {
+        let evaluated = evaluated.trim();
+        evaluated == self.text || (!self.holes.is_empty() && fills(&self.text, &self.holes, 0, evaluated))
+    }
+}
+
+impl From<&str> for AuthoredExpression {
+    fn from(text: &str) -> Self {
+        Self::new(text)
+    }
+}
+
+/// Whether composition can attribute the member reads of the expression
+/// authored as `text` once a stage fills its `{{ … }}` placeholders: it has
+/// none, or every one lies inside a string literal (see
+/// [`AuthoredExpression`]). The design-time inventories of `$( … )` ternary
+/// pieces ([`FrontmatterShellTernary::member_pieces`](super::FrontmatterShellTernary::member_pieces))
+/// keep only such pieces, so composition and the editor check the same ones.
+pub fn placeholders_keep_expression_structure(text: &str) -> bool {
+    let text = text.trim();
+    !text.contains("{{") || placeholders(text).is_empty() || string_holes(text).is_some()
+}
+
+/// The `{{ … }}`, `{{{ … }}}`, and literal-token placeholder ranges of `text`.
+fn placeholders(text: &str) -> Vec<Range<usize>> {
+    let scan = super::expression::ExpressionFinder::scan_plain(text);
+    scan.expressions
+        .iter()
+        .map(|found| found.start..found.end)
+        .chain(scan.literals.iter().map(|found| found.start..found.end))
+        .chain(scan.tokens.iter().map(|found| found.start..found.end))
+        .collect()
+}
+
+/// The placeholders of `text`, when every one lies strictly inside a single
+/// string-literal token; `None` otherwise (or with none), leaving only an
+/// exact match.
+fn string_holes(text: &str) -> Option<Vec<(Range<usize>, char)>> {
+    use super::expression::{Token, lex_spanned};
+    if !text.contains("{{") {
+        return None;
+    }
+    let placeholders = placeholders(text);
+    if placeholders.is_empty() {
+        return None;
+    }
+    let tokens = lex_spanned(text).ok()?;
+    let mut holes = placeholders
+        .into_iter()
+        .map(|placeholder| {
+            let string = tokens.iter().find(|token| {
+                matches!(token.value, Token::StringLiteral(_))
+                    && token.span.start < placeholder.start
+                    && placeholder.end < token.span.end
+            })?;
+            let quote = text[string.span.start..].chars().next()?;
+            Some((placeholder, quote))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    holes.sort_by_key(|(range, _)| range.start);
+    Some(holes)
+}
+
+/// Whether `evaluated` is `text[from..]` with each of `holes` replaced by a
+/// run of characters holding neither its quote nor a backslash.
+fn fills(text: &str, holes: &[(Range<usize>, char)], from: usize, evaluated: &str) -> bool {
+    let Some(((hole, quote), rest)) = holes.split_first() else {
+        return evaluated == &text[from..];
+    };
+    let Some(after) = evaluated.strip_prefix(&text[from..hole.start]) else {
+        return false;
+    };
+    let mut end = 0;
+    loop {
+        if fills(text, rest, hole.end, &after[end..]) {
+            return true;
+        }
+        match after[end..].chars().next() {
+            Some(ch) if ch != *quote && ch != '\\' => end += ch.len_utf8(),
+            _ => return false,
+        }
+    }
 }
 
 /// One undeclared member the precheck found at an authored site.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MemberCandidate {
-    /// The trimmed text of the expression the finding was computed from.
-    pub(crate) expression: String,
+    /// The expression the finding was computed from.
+    pub(crate) expression: AuthoredExpression,
     /// The member name's offset in [`Self::expression`]; orders the warnings
     /// of one expression.
     pub(crate) order: usize,
@@ -108,18 +225,18 @@ impl MemberCandidates {
     }
 
     /// The warnings of the `reached` ordinals of the expression authored at
-    /// `key`, in authored order. A candidate whose recorded expression text
-    /// differs from `expression` (text a stage rewrote) yields nothing, so an
-    /// ordinal is never joined to another expression's finding.
+    /// `key`, in authored order. A candidate whose recorded expression
+    /// [does not match](AuthoredExpression::matches) `expression` (text a
+    /// stage rewrote beyond filling an in-string placeholder) yields nothing,
+    /// so an ordinal is never joined to another expression's finding.
     pub(crate) fn warnings(&self, key: &MemberSiteKey, expression: &str, reached: &[usize]) -> Vec<ComposeWarning> {
         if self.sites.is_empty() || reached.is_empty() {
             return Vec::new();
         }
-        let expression = expression.trim();
         let mut found: Vec<&MemberCandidate> = reached
             .iter()
             .filter_map(|ordinal| self.sites.get(&(key.clone(), *ordinal)))
-            .filter(|candidate| candidate.expression == expression)
+            .filter(|candidate| candidate.expression.matches(expression))
             .collect();
         found.sort_by_key(|candidate| candidate.order);
         found.into_iter().map(|candidate| candidate.warning.clone()).collect()
@@ -197,7 +314,7 @@ mod tests {
                 key.clone(),
                 ordinal,
                 MemberCandidate {
-                    expression: "[a.b, a.c]".to_string(),
+                    expression: "[a.b, a.c]".into(),
                     order,
                     warning: warning(message),
                 },
@@ -238,6 +355,26 @@ mod tests {
     }
 
     #[test]
+    fn an_in_string_placeholder_matches_its_filled_text() {
+        let authored = AuthoredExpression::new(" a.b == '{{ x }}' && \"p-{{ y }}-{{{ z }}}\" ");
+        assert!(authored.matches("a.b == '{{ x }}' && \"p-{{ y }}-{{{ z }}}\""), "unfilled");
+        assert!(authored.matches("a.b == 'web' && \"p--{{ z }}\""));
+        assert!(authored.matches("a.b == '' && \"p-it's-q\""), "the other quote is plain text");
+        assert!(!authored.matches("a.b == 'it's' && \"p--q\""), "the enclosing quote ends the string");
+        assert!(!authored.matches("a.b == '\\'' && \"p--q\""), "an escape is not a fill");
+        assert!(!authored.matches("a.c == 'web' && \"p--q\""), "text outside a placeholder");
+    }
+
+    #[test]
+    fn a_placeholder_outside_a_string_matches_only_unfilled() {
+        for text in ["a.b == {{ x }}", "a.b == '{{ x || 'y' }}'"] {
+            let authored = AuthoredExpression::new(text);
+            assert!(authored.matches(text), "{text}");
+            assert!(!authored.matches("a.b == 'web'"), "{text}");
+        }
+    }
+
+    #[test]
     fn repeated_reaches_of_one_site_collapse_in_a_report() {
         let key = MemberSiteKey::leaf("/title".to_string(), 0);
         let mut candidates = MemberCandidates::default();
@@ -245,7 +382,7 @@ mod tests {
             key.clone(),
             1,
             MemberCandidate {
-                expression: "a.b".to_string(),
+                expression: "a.b".into(),
                 order: 2,
                 warning: ComposeWarning {
                     source: Some(ComposeWarning::EXPRESSION_SOURCE.to_string()),

@@ -509,10 +509,6 @@ fn assert_agree(text: &str, files: &[(&str, &str)]) {
 
 /// Library/editor agreement (AC7): each surface holds one reached
 /// undeclared member, which composition and DMLS report identically.
-///
-/// A frontmatter `$( … )` ternary's condition and value branches are not
-/// here: composition reports a member there, but DMLS checks only the
-/// `{{ }}` placeholders inside a `$( … )` value (`shell_placeholder`).
 mod library_and_editor_agree {
     use super::assert_agree;
 
@@ -541,6 +537,8 @@ mod library_and_editor_agree {
         frontmatter_interpolation: "title: \"x {{ server.nmae }}\"\n", "{{ title }}\n", &[];
         block_condition: "", "::block when=\"server.nmae\"\ninside\n::end-block\n", &[];
         file_condition: "", "::file ./child.md when=\"server.nmae\"\n", &[("child.md", "Child.\n")];
+        file_condition_beside_placeholder: "expected: web\n",
+            "::file ./child.md when=\"server.nmae != '{{ expected }}'\"\n", &[("child.md", "Child.\n")];
         map_callback: "", "::map hosts \"h => h.nmae\"\n{{ h }}\n::end-map\n", &[];
         filter_callback: "", "::filter hosts \"h => h.nmae\"\n{{ h.name }}\n::end-filter\n", &[];
         map_region_body: "", "::map hosts\n{{ i.nmae }}\n::end-map\n", &[];
@@ -548,7 +546,54 @@ mod library_and_editor_agree {
             "H {{ map(load_data(\"hosts.yaml\", \"{ name: string }[]\"), h => h.nmae) }}\n",
             &[("hosts.yaml", NAMED_HOSTS)];
         shell_placeholder: "pick: \"$( echo {{ server.nmae }} )\"\n", "{{ pick }}\n", &[];
+        shell_condition: "pick: \"$( server.nmae == 'x' ? echo yes : '' )\"\n", "{{ pick }}\n", &[];
+        shell_then: "pick: \"$( server.name ? fm.server.nmae : echo no )\"\n", "{{ pick }}\n", &[];
+        shell_else: "pick: \"$( server.port < 0 ? echo no : fm.server.nmae )\"\n", "{{ pick }}\n", &[];
+        shell_condition_beside_placeholder:
+            "expected: web\npick: \"$( server.nmae == '{{ expected }}' ? echo yes : '' )\"\n", "{{ pick }}\n", &[];
+        shell_then_beside_placeholder:
+            "expected: web\npick: \"$( server.name ? length([fm.server.nmae, '{{ expected }}']) : echo no )\"\n",
+            "{{ pick }}\n", &[];
+        shell_else_beside_placeholder:
+            "expected: web\npick: \"$( server.port < 0 ? echo no : length([fm.server.nmae, '{{ expected }}']) )\"\n",
+            "{{ pick }}\n", &[];
+        // The read inside the placeholder is the placeholder's site alone;
+        // the piece sees it as string text.
+        shell_member_inside_piece_placeholder:
+            "pick: \"$( server.name == '{{ server.nmae }}' ? echo yes : '' )\"\n", "{{ pick }}\n", &[];
     }
+}
+
+/// The editor checks both value branches of a frontmatter `$( … )`
+/// ternary, whichever a run selects, without running a command; a piece
+/// whose placeholder lies outside a string is not checked, because filling
+/// it changes the expression composition evaluates.
+#[test]
+fn shell_ternary_pieces_in_the_editor() {
+    let doc = "---
+$schema:
+  server: \"{ name: string, port: number }\"
+server: { name: web, port: 80 }
+expected: web
+unselected_then: \"$( server.port < 0 ? fm.server.nmae : echo no )\"
+unselected_else: \"$( server.port > 0 ? echo yes : fm.server.nmae )\"
+unstructured: \"$( server.nmae == {{ expected }} ? echo yes : echo no )\"
+pipeline: \"$( echo server.nmae )\"
+---
+
+Body.
+";
+    let (found, diagnostics) = reported(doc, &[]);
+    assert_eq!(
+        found,
+        [
+            at(doc, "unselected_then:", "nmae", 0, FRONTMATTER, "fm.server"),
+            at(doc, "unselected_else:", "nmae", 0, FRONTMATTER, "fm.server"),
+        ],
+        "{diagnostics:#?}"
+    );
+    let (composed, _) = library_and_editor(doc, &[]);
+    assert!(composed.is_empty(), "composition reaches neither unselected branch: {composed:#?}");
 }
 
 /// An unchosen ternary branch is checked by the editor and never reached by
