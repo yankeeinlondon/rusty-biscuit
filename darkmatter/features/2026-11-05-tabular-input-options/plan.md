@@ -2,9 +2,36 @@
 kind: plan
 total_phases: 6
 created: 2026-11-08
-phase: 1
+phase: 2
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1:
+- darkmatter/lib/src/markdown/compose/expression/data/options.rs
+- darkmatter/lib/src/markdown/compose/expression/data/error.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/schemas/partials/lifecycle.yaml
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/load_data_options.rs
+- darkmatter/lib/tests/l1/load_data_options_passive.rs
+- darkmatter/lib/tests/l1/load_data_headerless.rs
+- darkmatter/lib/tests/l1/load_data_options_remote.rs
+- darkmatter/lib/tests/l1/load_data_options_slots.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/option_arguments.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+- claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap
+docs_updated_during_phase_1:
+- darkmatter/docs/functions/load-data.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+- darkmatter
+- darkmatter-lsp
+- claudine-cli
 ---
 
 # Plan: Tabular Input Options for `load_data`
@@ -69,7 +96,7 @@ The work lands in five layers, in dependency order:
 
 ### Definition of Done
 
-- [ ] Phase 1's rebase check passed or its failures were resolved by revising
+- [x] Phase 1's rebase check passed or its failures were resolved by revising
   the affected rules, recorded in `implementation-log.md`.
 - [ ] Every acceptance criterion of the spec has the named passing test listed
   in "Acceptance criteria → tests" below.
