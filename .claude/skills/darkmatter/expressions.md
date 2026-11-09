@@ -121,9 +121,22 @@ whole contract, and a handler that needs the caller's original form declares
 `ExpressionError::Call(CallBindingError)`; only `ImplementationContract` (a
 handler returning a value outside its declared `returns`, checked by
 `check_return` without conversion) is authoring-fatal. Null reaches a
-parameter only through an explicit `| null`. `and`/`or` are lazy
-(`LazyCall`): the precheck visits every argument, the runtime binds only the
-ones it evaluates. Callback registrations bind the source through the same
+parameter only through an explicit `| null`. `and`/`or`/`try` are lazy:
+the precheck visits every argument, the runtime binds only the ones it
+evaluates. Each lazy name maps explicitly to a `functions::LazyKind`
+(`All`, `Any`, `Recover`) with no default arm, so a new lazy binding must add
+its own kind. `and`/`or` bind through `LazyCall`; `try` (`Recover`) is
+`expression/mod.rs::evaluate_recovery` and, for lifecycle template operands,
+`lifecycle/executor.rs::call_recovery`: it binds only the selected operand
+(`bind_callback_value` at its index, then `check_lazy_return`), and only
+`is_recoverable_read_failure()` selects the fallback (a template operand's
+`Compose` failure propagates). `try` is not a guard (`scope/facts.rs`
+returns the scope unchanged) and its `unknown | null` operands do not handle
+absence (`absence.rs::is_recovery`), so undeclared-property warnings inside
+it remain. Its static type (`call_check.rs::try_type`) is the union of both
+operands, except that an authored `[]` adds nothing when the other operand's
+type provably accepts `[]` (`alternative_accepts_in` with the scope's
+definitions). Callback registrations bind the source through the same
 engine; the evaluator owns item frames and body execution, with no eager
 callback handler. User docs: "Function Calls: Bind, Then Compute" in
 `simplified-schema/docs/topics/conversion.md`.
@@ -437,6 +450,17 @@ codes). Code: `compose/expression/data/` (`load.rs` is the function;
 `contract.rs`, `parse.rs`, `locate.rs`, `runtime.rs`, `error.rs`). The
 command-scoped memo and read set are in [requests.md](requests.md#data-runtime-and-read-set).
 
+- **Recoverable read failures** (`error.rs::ExpressionError::is_recoverable_read_failure`):
+  the one classifier the `try(expr, fallback)` special form uses. True only for a
+  `FileReference` (or `Data(DataError::FileReference)`) miss that is
+  `NotFound`/`FoundElsewhere` with no cause or an `Io` cause,
+  `DataError::Malformed`, `DataError::ContractMismatch`, and `RemoteRead`
+  with `RemoteReadKind::Transport`. Everything else is false, including
+  `unsupported_format`, `invalid_options`, `ContractImport`, `NestedData`,
+  `SlotReadRefused`, tree escapes and missing anchors (also labeled
+  `NotFound`), and `Provider`. The match is exhaustive (no `_` arm), so a new
+  variant must be classified on purpose; it is independent of
+  `is_authoring_fatal`. Never recover by function name or message.
 - **Call order** (`load.rs`): a `null` file returns `null` before anything
   else (options included); read the options (`options.rs::DataOptions`,
   aliases `yml`/`ndjson` normalized there); prepare the contract; resolve the

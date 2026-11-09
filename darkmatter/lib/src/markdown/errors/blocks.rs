@@ -310,14 +310,16 @@ pub(crate) fn interpolation_block(
         None => "A document expression".to_string(),
     };
 
+    // A refused host was reported as a generic evaluation failure before it
+    // was typed, and still renders as one. A contract import renders like the
+    // data file it belongs to.
+    let file_reference = cause.file_reference_diagnostic().filter(|diagnostic| diagnostic.kind != FileRefFailure::RemoteDenied);
     match cause {
         ExpressionError::Callback { function, position, source: inner } => {
             interpolation_block(key, expression, source, inner)
                 .hint(format!("Callback: {function}[{position}]"))
         }
-        // A refused host was reported as a generic evaluation failure before
-        // it was typed, and still renders as one.
-        ExpressionError::FileReference(diagnostic) if diagnostic.kind != FileRefFailure::RemoteDenied => {
+        _ if let Some(diagnostic) = file_reference => {
             let headline = match diagnostic.kind {
                 FileRefFailure::RemoteNotEnabled => "remote reference not enabled",
                 _ => "invalid file path",

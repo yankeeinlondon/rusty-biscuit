@@ -27,6 +27,8 @@ pub mod runtime;
 mod observation_tests;
 #[cfg(test)]
 mod option_execution_tests;
+#[cfg(test)]
+mod provenance_tests;
 
 pub use contract::{
     PreparedContract, RowClassification, RowMode, RowShapeConflict, classify_rows, judge_written_contract, prepare_contract,

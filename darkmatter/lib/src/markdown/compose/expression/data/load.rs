@@ -57,11 +57,13 @@ pub(super) const FUNCTION: &str = "load_data";
 /// ## Errors
 ///
 /// - The file-reference family for a missing, unreadable, not-yet-fetchable,
-///   or policy-denied source, and a plain evaluation failure for a failed
-///   fetch.
+///   or policy-denied source, and [`ExpressionError::RemoteRead`] (worded as
+///   a plain evaluation failure, typed by its kind) for a failed fetch.
 /// - [`ExpressionError::Data`] for every `dm.data.*` failure, an invalid
-///   contract, and options that cannot apply (`dm.data.invalid_options`,
-///   located at the call: execution keeps no per-argument position).
+///   contract, a contract import that cannot be read
+///   ([`DataError::ContractImport`], projected like a file reference), and
+///   options that cannot apply (`dm.data.invalid_options`, located at the
+///   call: execution keeps no per-argument position).
 #[tracing::instrument(
     level = "debug",
     name = "load_data",

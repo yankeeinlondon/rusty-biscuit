@@ -20,8 +20,12 @@ use url::Url;
 use super::ComposeWarning;
 use super::cache::FileStore;
 use super::cache::remote_cache::{RemoteCacheConfig, RemoteOutcomeEvent, fetch_with_cache};
-use super::expression::ExpressionError;
+use super::expression::{ExpressionError, RemoteReadKind};
 use super::remote::{RemoteReadConfig, RemoteReadError};
+
+mod error;
+
+pub(crate) use error::RemoteFetchFailure;
 
 /// Default cache config for test constructors: no TTL override, no forced
 /// refresh, and the default (`Fallback`) freshness mode.
@@ -40,8 +44,8 @@ enum FetchSlot {
     InFlight,
     /// Fetch completed successfully with the response body as UTF-8 text.
     Ready { body: String },
-    /// Fetch failed — the error message is stored for all waiters.
-    Failed(String),
+    /// Fetch failed — the typed failure is stored for all waiters.
+    Failed(RemoteFetchFailure),
 }
 
 struct SlotGuard {
@@ -562,7 +566,7 @@ impl RemoteFetchRuntime {
 
         if let Err(err) = self.check_allowed(&url) {
             let slot = Arc::new(SlotGuard {
-                state: Mutex::new(FetchSlot::Failed(err.to_string())),
+                state: Mutex::new(FetchSlot::Failed(err.into())),
                 notify: Condvar::new(),
             });
             self.inner.slots.entry(key).or_insert(slot);
@@ -588,8 +592,10 @@ impl RemoteFetchRuntime {
                         let mut stats = inner.stats.lock().unwrap();
                         stats.failures += 1;
                     }
-                    *slot.state.lock().unwrap() =
-                        FetchSlot::Failed("failed to initialize remote fetch runtime".to_string());
+                    *slot.state.lock().unwrap() = FetchSlot::Failed(RemoteFetchFailure::new(
+                        RemoteReadKind::Infrastructure,
+                        "failed to initialize remote fetch runtime",
+                    ));
                     slot.notify.notify_all();
                     return;
                 };
@@ -615,7 +621,10 @@ impl RemoteFetchRuntime {
                             )
                             .await
                         }
-                        None => Err("failed to initialize remote fetch client".to_string()),
+                        None => Err(RemoteFetchFailure::new(
+                            RemoteReadKind::Infrastructure,
+                            "failed to initialize remote fetch client",
+                        )),
                     };
                     task_inner.in_flight.fetch_sub(1, Ordering::SeqCst);
                     if !cache_warnings.is_empty() {
@@ -669,9 +678,15 @@ impl RemoteFetchRuntime {
     /// Blocks the calling thread until the URL's fetch completes, then
     /// returns the body text.
     ///
-    /// Returns an error string if the fetch failed or was denied by policy.
-    /// Returns `None` if the URL was never registered.
+    /// Returns the failure's message if the fetch failed or was denied by
+    /// policy. Returns `None` if the URL was never registered.
     pub fn get_content(&self, url: &Url) -> Result<Option<String>, String> {
+        self.get_content_typed(url).map_err(|failure| failure.message)
+    }
+
+    /// [`get_content`](Self::get_content) with the failure kept typed, for
+    /// callers that classify it (expression reads).
+    pub(crate) fn get_content_typed(&self, url: &Url) -> Result<Option<String>, RemoteFetchFailure> {
         let key = url.to_string();
         let slot = match self.inner.slots.get(&key) {
             Some(s) => s,

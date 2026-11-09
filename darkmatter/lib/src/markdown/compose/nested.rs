@@ -329,9 +329,10 @@ impl NestedCompose {
                 let structural = is_structural(&error);
                 // Unless a structural failure replaces it, a data failure
                 // keeps its type, so the caller reports its `dm.data.*`
-                // records at the `as_markdown` call.
+                // records at the `as_markdown` call. It is marked as nested
+                // so `try` around the call never takes it for its own read.
                 if !structural && let Some(data) = data_failure(&error) {
-                    return Err(ExpressionError::Data(data));
+                    return Err(ExpressionError::NestedData(data));
                 }
                 let message = format!("nested composition failed: {error}");
                 if structural && outcome.restored.is_none() {
@@ -395,7 +396,7 @@ fn data_failure(error: &MarkdownError) -> Option<Arc<super::expression::data::Da
         let expression = cause
             .downcast_ref::<ExpressionError>()
             .or_else(|| cause.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref));
-        if let Some(ExpressionError::Data(data)) = expression.map(ExpressionError::without_callbacks) {
+        if let Some(data) = expression.and_then(ExpressionError::data_failure) {
             return Some(data.clone());
         }
         current = cause.source();

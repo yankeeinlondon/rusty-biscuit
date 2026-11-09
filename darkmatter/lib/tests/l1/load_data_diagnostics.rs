@@ -1040,3 +1040,84 @@ async fn validate_schema_with_a_remote_schema_target_reads_nothing_and_has_no_re
     );
     assert!(server.received_requests().await.unwrap_or_default().is_empty());
 }
+
+// ── Contract imports and nested data failures ───────────────────────────────
+
+/// A contract whose named type is imported from `./types.yaml` in the
+/// document's folder; `ports.yaml` holds data that would satisfy it.
+const IMPORTING: &str = "{ port: Port@./types.yaml }[]";
+
+fn importing_call() -> String {
+    format!("load_data(\"ports.yaml\", \"{IMPORTING}\")")
+}
+
+/// A missing contract import keeps the record it had while imports were
+/// reported as a plain file-reference failure: the evaluation-failure code,
+/// the import as the reference, the call site, and the message.
+#[test]
+fn a_missing_contract_import_keeps_its_file_reference_record() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "ports.yaml", "- port: 1\n");
+    let record = only(records(dir.path(), &format!("x {{{{ {} }}}}\n", importing_call())));
+    assert_eq!(record.code, EVALUATION_FAILURE, "{record:#?}");
+    assert_eq!(
+        reference_fields(&record),
+        (Some("file not found"), Some("load_data()"), Some("./types.yaml"), Some("no-match"))
+    );
+    assert!(record.reference_details.as_ref().unwrap().included_via.is_none());
+    assert_eq!(record.message, format!("interpolation of `{}` failed: invalid file path: ./types.yaml", importing_call()));
+    assert_eq!(record.source, Some(DiagnosticSource::at(Some(dir.path().join("doc.md")), 1, 3)), "the call site");
+    assert!(record.iteration_path.is_empty());
+    assert_eq!(record.data_location, None);
+}
+
+/// An import that exists but cannot be read (a read guard refuses it, a real
+/// I/O failure on every OS) is reported with the `io` class and its path.
+#[test]
+fn an_unreadable_contract_import_keeps_its_file_reference_record() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "ports.yaml", "- port: 1\n");
+    let types = write(dir.path(), "types.yaml", "types:\n  Port: number\n");
+    let doc = write(dir.path(), "doc.md", format!("x {{{{ {} }}}}\n", importing_call()));
+    let guard: simplified_schema::resolve::buffers::ReadGuard =
+        std::rc::Rc::new(|path: &Path| path.file_name() != Some(std::ffi::OsStr::new("types.yaml")));
+    let failure = simplified_schema::resolve::buffers::guarded(guard, || failure_with(&doc, ComposeOptions::new()));
+    let record = only(error_diagnostics(&failure.error));
+    assert_eq!(record.code, EVALUATION_FAILURE, "{record:#?}");
+    let (reason, construct, reference, failure) = reference_fields(&record);
+    assert_eq!((reason, construct, failure), (None, Some("load_data()"), Some("io")), "{record:#?}");
+    let reference = reference.expect("the unreadable path");
+    assert!(reference.ends_with("types.yaml"), "{reference}");
+    assert_eq!(record.message, format!("interpolation of `{}` failed: invalid file path: {reference}", importing_call()));
+    assert_eq!(record.source, Some(DiagnosticSource::at(Some(dir.path().join("doc.md")), 1, 3)));
+    assert!(types.exists());
+}
+
+/// Inside a callback the import failure keeps the callback's item position.
+#[test]
+fn a_missing_contract_import_in_a_callback_keeps_its_item_position() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "ports.yaml", "- port: 1\n");
+    let call = format!("map([1], n => {})", importing_call());
+    let record = only(records(dir.path(), &format!("x {{{{ {call} }}}}\n")));
+    assert_eq!(record.code, EVALUATION_FAILURE, "{record:#?}");
+    assert_eq!(reference_fields(&record).2, Some("./types.yaml"));
+    assert_eq!(record.iteration_path.to_string(), "map[0]", "{record:#?}");
+}
+
+/// A malformed data file read inside a nested composition reports its
+/// `dm.data.malformed` record at the `as_markdown` call, as a direct read
+/// would.
+#[test]
+fn a_malformed_file_inside_nested_composition_reports_its_data_code_at_the_call() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "broken.yaml", "a: [\n");
+    let nested = only(records(dir.path(), "x {{ as_markdown(\"{{ load_data('broken.yaml', 'any[]') }}\") }}\n"));
+    let direct = only(records(dir.path(), "x {{ load_data('broken.yaml', 'any[]') }}\n"));
+    assert_eq!(nested.code, "dm.data.malformed", "{nested:#?}");
+    assert_eq!(nested.code, direct.code);
+    assert_eq!(nested.data_location, direct.data_location);
+    assert_eq!(nested.data_location.as_ref().map(|location| location.file.clone()), Some(entry(dir.path(), "broken.yaml")));
+    assert_eq!(nested.source.as_ref().and_then(|source| source.line), Some(1));
+    assert!(nested.message.ends_with(direct.message.split_once("failed: ").unwrap().1), "{}\n{}", nested.message, direct.message);
+}

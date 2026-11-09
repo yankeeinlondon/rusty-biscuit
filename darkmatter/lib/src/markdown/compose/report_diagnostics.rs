@@ -374,16 +374,18 @@ fn expression_cause<'e>(error: &'e (dyn Error + 'static)) -> Option<&'e Expressi
 /// failure's code and data positions (several records for a contract
 /// mismatch). Every record keeps `record`'s `source` and `span`.
 fn with_expression_cause(record: Diagnostic, cause: Option<&ExpressionError>) -> Vec<Diagnostic> {
+    if let Some(data) = cause.and_then(ExpressionError::data_failure) {
+        return match crate::markdown::schemas::slots::host::contract_template_failure(data) {
+            Some(failure) => contract_template_records(record, failure),
+            None => data_records(record, data),
+        };
+    }
     match cause {
         Some(ExpressionError::FileReference(diagnostic)) => vec![with_file_reference(record, diagnostic)],
         Some(ExpressionError::RemoteRead { function, reference, .. }) => {
             vec![with_failed_fetch(record, function, reference)]
         }
         Some(ExpressionError::SchemaFileRead { file, .. }) => vec![with_file_reference(record, file)],
-        Some(ExpressionError::Data(data)) => match crate::markdown::schemas::slots::host::contract_template_failure(data) {
-            Some(failure) => contract_template_records(record, failure),
-            None => data_records(record, data),
-        },
         Some(ExpressionError::SlotReadRefused {
             refusal: crate::markdown::compose::expression::read_gate::GateRefusal::ApprovalRequired { needed },
             ..
@@ -462,7 +464,9 @@ fn file_reference_details(diagnostic: &FileReferenceDiagnostic) -> ReferenceDeta
 fn data_records(record: Diagnostic, error: &DataError) -> Vec<Diagnostic> {
     let Some(code) = error.code() else {
         return match error {
-            DataError::FileReference(diagnostic) => vec![with_file_reference(record, diagnostic)],
+            DataError::FileReference(diagnostic) | DataError::ContractImport(diagnostic) => {
+                vec![with_file_reference(record, diagnostic)]
+            }
             _ => vec![record],
         };
     };

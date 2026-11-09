@@ -257,22 +257,35 @@ impl FunctionBinding {
     }
 }
 
-/// How a lazy function ends early. Which operand value stops evaluation is
-/// the evaluator's domain logic (truthiness); this only names the side.
+/// How the evaluator computes a lazy function from its operands. Which
+/// operand value stops evaluation is the evaluator's domain logic
+/// (truthiness, recoverability); this only names the rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShortCircuit {
+pub(crate) enum LazyKind {
     /// Stop at the first falsy operand and return `false` (`and`).
-    OnFalsy,
+    All,
     /// Stop at the first truthy operand and return `true` (`or`).
-    OnTruthy,
+    Any,
+    /// Return the first operand's value; evaluate the second only after the
+    /// first fails with a recoverable read failure (`try`).
+    Recover,
 }
 
-const LAZY_BINDINGS: &[FunctionBinding] = &[FunctionBinding::lazy("and"), FunctionBinding::lazy("or")];
+const LAZY_BINDINGS: &[FunctionBinding] =
+    &[FunctionBinding::lazy("and"), FunctionBinding::lazy("or"), FunctionBinding::lazy("try")];
 
-fn short_circuit(canonical: &str) -> ShortCircuit {
+/// The kind of the lazy function `canonical` names. Mapped by name with no
+/// default arm: a lazy binding left unmapped would otherwise run as some
+/// other function's rule.
+fn lazy_kind(canonical: &str) -> Option<LazyKind> {
     match canonical {
-        "or" => ShortCircuit::OnTruthy,
-        _ => ShortCircuit::OnFalsy,
+        "and" => Some(LazyKind::All),
+        "or" => Some(LazyKind::Any),
+        "try" => Some(LazyKind::Recover),
+        _ => {
+            debug_assert!(false, "lazy function `{canonical}` has no LazyKind");
+            None
+        }
     }
 }
 
@@ -928,10 +941,10 @@ pub(crate) fn is_context_function(name: &str) -> bool {
     find_binding(name).is_some_and(|entry| entry.binding.evaluation == EvaluationMode::Context)
 }
 
-/// The registration and short-circuit side of the lazy function `name`
-/// names; `None` for an eager or unknown name. Test and host functions are
-/// always eager.
-pub(crate) fn lazy_function(name: &str) -> Option<(&'static FunctionRegistration, ShortCircuit)> {
+/// The registration and [`LazyKind`] of the lazy function `name` names;
+/// `None` for an eager or unknown name. Test and host functions are always
+/// eager.
+pub(crate) fn lazy_function(name: &str) -> Option<(&'static FunctionRegistration, LazyKind)> {
     #[cfg(any(test, feature = "effects-instrumentation"))]
     if test_hooks::lookup(&name.to_ascii_lowercase()).is_some() {
         return None;
@@ -940,8 +953,10 @@ pub(crate) fn lazy_function(name: &str) -> Option<(&'static FunctionRegistration
         return None;
     }
     let entry = find_binding(name)?;
-    (entry.binding.evaluation == EvaluationMode::Lazy)
-        .then(|| (&entry.registration, short_circuit(entry.binding.canonical)))
+    if entry.binding.evaluation != EvaluationMode::Lazy {
+        return None;
+    }
+    Some((&entry.registration, lazy_kind(entry.binding.canonical)?))
 }
 
 fn call_error(error: CallBindingError) -> ExpressionError {
@@ -2262,6 +2277,37 @@ mod registration_tests {
             assert_eq!(super::lazy_function(binding.canonical).is_some(), binding.evaluation == EvaluationMode::Lazy);
             assert_eq!(super::is_context_function(binding.canonical), binding.evaluation == EvaluationMode::Context);
         }
+    }
+
+    #[test]
+    fn every_lazy_function_maps_to_its_own_kind() {
+        let kind = |name: &str| super::lazy_function(name).map(|(_, kind)| kind);
+        assert_eq!(kind("and"), Some(super::LazyKind::All));
+        assert_eq!(kind("or"), Some(super::LazyKind::Any));
+        assert_eq!(kind("try"), Some(super::LazyKind::Recover));
+        assert_eq!(kind("TRY"), Some(super::LazyKind::Recover), "lookup is case-insensitive");
+        let lazy: Vec<_> = bindings().filter(|binding| binding.evaluation == EvaluationMode::Lazy).map(|b| b.canonical).collect();
+        assert_eq!(lazy, ["and", "or", "try"], "a new lazy binding needs its own LazyKind arm");
+    }
+
+    #[test]
+    fn direct_value_call_of_try_is_rejected() {
+        // Supplied values cannot represent an earlier failure, so a value
+        // call never runs the recovery rule.
+        let error = call_function("try", &[Value::Null, serde_json::json!(7)], None).expect("registered").unwrap_err();
+        assert!(
+            matches!(&error, ExpressionError::Other { message, .. } if message.contains("evaluates its arguments lazily")),
+            "{error:?}"
+        );
+        assert!(!error.is_recoverable_read_failure());
+    }
+
+    #[test]
+    fn try_is_pure_and_reads_nothing_of_its_own() {
+        let entry = find_binding("try").expect("try is registered");
+        assert_eq!(entry.binding.slot_class, Some(SlotClass::Pure));
+        assert!(entry.binding.reads.is_none());
+        assert!(entry.binding.aliases.is_empty());
     }
 
     /// The slot classes of the S4 classification: every binding declares

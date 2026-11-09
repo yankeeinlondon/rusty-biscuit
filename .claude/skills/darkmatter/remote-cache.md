@@ -53,5 +53,18 @@ Detail behind the "Remote and cache safety" section of [SKILL.md](SKILL.md).
   root never authorizes a host. `denied_host_never_reads_a_fresh_cached_entry`
   and the CLI `test_compose_denied_host_never_reads_a_seeded_cache_entry` pin
   this ordering.
+- A failed fetch is typed where it happens: `compose/remote_fetch/error.rs::RemoteFetchFailure`
+  (`kind: expression::RemoteReadKind`, `message`). `Transport` covers the
+  request, HTTP status, body read, header, and response UTF-8 failures;
+  `Policy` a policy denial or blocked redirect; `InvalidReference` an
+  unsupported scheme or unparsable URL; `Infrastructure` the runtime or client
+  failing to start, or a slot missing after registration. `FetchSlot::Failed`
+  and `fetch_with_cache` keep the typed failure; `get_content` stays the
+  string adapter (the message, byte for byte) for transclusion and preflight,
+  and `get_content_typed` feeds `ResolutionContext::fetch_remote_text`, whose
+  policy-derived `RemoteTextError::Denied` is checked first so a denied host is
+  never typed `Transport`. `ExpressionError::RemoteRead.kind` carries the kind;
+  only `Transport` is recoverable (see expressions.md). Never classify a fetch
+  by its message.
 - `absolute` and `relative` are local path transforms, never remote fetches.
 - `EffectEngine::http_post` uses the same host policy as remote reads.

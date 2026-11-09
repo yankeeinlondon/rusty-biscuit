@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::ExpressionError;
-use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+use super::{ExpressionError, RemoteReadKind};
+use crate::markdown::compose::remote_fetch::{RemoteFetchFailure, RemoteFetchRuntime};
 
 /// Caller-owned identity retained after a schema-selected file value is projected.
 #[derive(Clone, Debug)]
@@ -437,18 +437,26 @@ impl ResolutionContext {
         let Some(rf) = self.remote_fetch.as_ref() else {
             return Ok(None);
         };
-        let url = url::Url::parse(raw).map_err(|e| RemoteTextError::Failed(format!("invalid URL {raw:?}: {e}")))?;
-        if let Ok(Some(body)) = rf.get_content(&url) {
+        let url = url::Url::parse(raw).map_err(|e| {
+            RemoteTextError::Failed(RemoteFetchFailure::new(RemoteReadKind::InvalidReference, format!("invalid URL {raw:?}: {e}")))
+        })?;
+        if let Ok(Some(body)) = rf.get_content_typed(&url) {
             return Ok(Some(body));
         }
         // Not pre-registered (or a prior probe found no slot): register the
         // evaluated URL now and block on its fetch.
         rf.register_nested(url.clone());
-        match rf.get_content(&url) {
+        match rf.get_content_typed(&url) {
             Ok(Some(body)) => Ok(Some(body)),
-            Ok(None) => Err(RemoteTextError::Failed(format!("remote URL {raw:?} could not be fetched"))),
-            // The slot keeps only the runtime's text, and a host the policy
-            // refuses is never requested, so the policy itself classifies it.
+            // Registration always leaves a slot, so a missing one is the
+            // runtime's own failure, never the source's.
+            Ok(None) => Err(RemoteTextError::Failed(RemoteFetchFailure::new(
+                RemoteReadKind::Infrastructure,
+                format!("remote URL {raw:?} could not be fetched"),
+            ))),
+            // A host the policy refuses is never requested; checking the
+            // policy first keeps such a failure from ever being typed
+            // `Transport`.
             Err(_) if url.host_str().is_some_and(|host| !rf.policy().is_allowed(host)) => Err(RemoteTextError::Denied),
             Err(e) => Err(RemoteTextError::Failed(e)),
         }
@@ -460,8 +468,8 @@ impl ResolutionContext {
 pub(crate) enum RemoteTextError {
     /// The run's fetch policy does not allow the URL's host.
     Denied,
-    /// Any other failure, worded by the remote runtime.
-    Failed(String),
+    /// Any other failure, typed and worded by the remote runtime.
+    Failed(RemoteFetchFailure),
 }
 
 /// Returns `true` when the argument is an HTTP(S) URL (handled remotely rather
@@ -794,6 +802,74 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(result, Err(super::RemoteTextError::Denied));
+    }
+
+    /// A failed fetch from an allowed host keeps its typed kind through
+    /// `fetch_remote_text`, and its message is the runtime's string adapter's
+    /// text, unchanged.
+    #[tokio::test]
+    async fn fetch_remote_text_keeps_the_failed_fetch_kind() {
+        use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+        use biscuit_file::file_reference::fetch::FetchPolicy;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/broken.json"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/binary.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0xff, 0xfe, 0x00]))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/moved.json"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", "https://denied.example/x.json"))
+            .mount(&server)
+            .await;
+
+        let rt = RemoteFetchRuntime::with_policy(FetchPolicy::deny_all().allow_host("127.0.0.1"));
+        let ctx = ResolutionContext { remote_fetch: Some(rt.clone()), ..ResolutionContext::at("/tmp") };
+        let uri = server.uri();
+        let results = tokio::task::spawn_blocking(move || {
+            ["broken.json", "binary.json", "moved.json"]
+                .map(|name| {
+                    let raw = format!("{uri}/{name}");
+                    let typed = ctx.fetch_remote_text(&raw);
+                    let text = rt.get_content(&url::Url::parse(&raw).unwrap());
+                    (name, typed, text)
+                })
+        })
+        .await
+        .unwrap();
+
+        for (name, typed, text) in results {
+            let Err(super::RemoteTextError::Failed(failure)) = typed else { panic!("{name}: {typed:?}") };
+            let expected = match name {
+                "moved.json" => RemoteReadKind::Policy,
+                _ => RemoteReadKind::Transport,
+            };
+            assert_eq!(failure.kind, expected, "{name}: {failure}");
+            assert_eq!(text, Err(failure.message.clone()), "{name}: the string adapter is unchanged");
+        }
+    }
+
+    /// A URL that does not parse is an invalid reference, never transport.
+    #[test]
+    fn fetch_remote_text_types_an_unparsable_url_as_an_invalid_reference() {
+        use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+        use biscuit_file::file_reference::fetch::FetchPolicy;
+
+        let rt = RemoteFetchRuntime::with_policy(FetchPolicy::deny_all());
+        let ctx = ResolutionContext { remote_fetch: Some(rt), ..ResolutionContext::at("/tmp") };
+        let Err(super::RemoteTextError::Failed(failure)) = ctx.fetch_remote_text("https://[bad") else {
+            panic!("an unparsable URL must fail")
+        };
+        assert_eq!(failure.kind, RemoteReadKind::InvalidReference);
+        assert!(failure.message.starts_with("invalid URL \"https://[bad\""), "{failure}");
     }
 
     #[test]

@@ -126,13 +126,15 @@ impl SlotHost for DarkmatterSlotHost {
 /// budget's `dm.iteration.*` code, and [`SLOT_FAILED_CODE`] for any other
 /// failure (a missing file, a failed call), whose typed cause is still kept.
 pub(crate) fn failure_code(error: &ExpressionError) -> &'static str {
+    if let Some(data) = error.data_failure() {
+        return match contract_template_failure(data) {
+            Some(failure) => nested_resolution_code(&failure.error),
+            None => data.code().unwrap_or(SLOT_FAILED_CODE),
+        };
+    }
     match error.without_callbacks() {
         ExpressionError::SlotReadRefused { refusal: GateRefusal::Denied, .. } => SLOT_DENIED_CODE,
         ExpressionError::SlotReadRefused { .. } => SLOT_APPROVAL_REQUIRED_CODE,
-        ExpressionError::Data(data) => match contract_template_failure(data) {
-            Some(failure) => nested_resolution_code(&failure.error),
-            None => data.code().unwrap_or(SLOT_FAILED_CODE),
-        },
         ExpressionError::IterationLimit(limit) => limit.kind.code(),
         _ => SLOT_FAILED_CODE,
     }

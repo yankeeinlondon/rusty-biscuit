@@ -72,6 +72,7 @@ Date Arithmetic
 Logical
   and(...)
   or(...)
+  try(expr, fallback)
 Type Conversion
   number(x, [fallback])
 Filesystem

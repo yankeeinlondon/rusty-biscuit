@@ -350,6 +350,17 @@ impl FunctionRegistration {
         self.overloads[call.overload].check_return(value)
     }
 
+    /// Checks a lazy function's result against its single overload's
+    /// `returns(...)`, without converting it; a lazy call has no
+    /// [`BoundCall`] to select an overload.
+    ///
+    /// ## Errors
+    ///
+    /// [`CallBindingError::ImplementationContract`].
+    pub fn check_lazy_return(&self, value: &Value) -> Result<(), CallBindingError> {
+        self.overloads[0].check_return(value)
+    }
+
     fn failure(&self, candidates: Vec<CandidateFailure>, supplied: usize) -> CallBindingError {
         let function = self.name.clone();
         if candidates.iter().all(|candidate| matches!(candidate.problem, SignatureProblem::Arity { .. })) {

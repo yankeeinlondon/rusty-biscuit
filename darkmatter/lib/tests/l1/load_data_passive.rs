@@ -426,3 +426,157 @@ mod composition {
         assert!(failure.read_set.is_empty(), "{:?}", failure.read_set);
     }
 }
+
+/// `try(expr, fallback)` types as the union of its operands, with one
+/// exception: an authored `[]` adds nothing when the other operand's type
+/// provably accepts `[]`. Typing reads nothing and runs nothing.
+mod try_typing {
+    use super::*;
+    use biscuit_file::FileResolutionContext;
+    use darkmatter::markdown::compose::expression::static_variable_reads;
+    use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+    use serde_yaml_ng::Value as YamlValue;
+
+    /// The type of `[]` on its own: what an unabsorbed `[]` adds.
+    fn empty_array() -> String {
+        type_text("[]")
+    }
+
+    fn rows() -> String {
+        type_text(&call("\"h.yaml\"", "{ a: string }[]"))
+    }
+
+    #[test]
+    fn try_type_unions_both_branches() {
+        let strings = type_text(&call("\"h.yaml\"", "string[]"));
+        let unioned = type_text(&format!("try({}, 7)", call("\"h.yaml\"", "string[]")));
+        assert!(unioned.contains(&strings) && unioned.contains("literal(7"), "{unioned}");
+        assert_eq!(unioned, type_text(&format!("try(7, {})", call("\"h.yaml\"", "string[]"))), "order does not matter");
+        assert!(!unioned.contains("null") && !unioned.contains("unknown"), "{unioned}");
+    }
+
+    #[test]
+    fn try_type_keeps_null() {
+        let typed = type_text(&format!("try({}, null)", call("\"h.yaml\"", "string[]")));
+        assert_eq!(typed, format!("{} | null", type_text(&call("\"h.yaml\"", "string[]"))));
+        assert_eq!(type_text("try(null, null)"), "null");
+        // A protected operand that may be null keeps its null.
+        assert!(type_text(&format!("try({}, 'none')", call("f", "string[]"))).contains("null"));
+    }
+
+    #[test]
+    fn try_type_with_different_fallback_type() {
+        let typed = type_text(&format!("try({}, 'none')", call("\"h.yaml\"", "{ a: string }[]")));
+        assert!(typed.contains(&rows()) && typed.contains("none"), "{typed}");
+        assert_ne!(typed, rows(), "a different fallback type is not absorbed");
+    }
+
+    #[test]
+    fn try_type_unknown_contract_stays_unknown() {
+        assert_eq!(type_text("try(load_data(\"h.yaml\", t), [])"), "unknown");
+        assert_eq!(type_text(&format!("try({}, [])", call("\"h.yaml\"", "os-list@./schemas/os.yaml"))), "unknown");
+        assert_eq!(type_text("try(load_data(\"h.yaml\", t), 'x')"), "unknown", "unknown absorbs the union");
+    }
+
+    #[test]
+    fn empty_fallback_keeps_typed_array_items() {
+        let rows_call = call("\"h.yaml\"", "{ a: string }[]");
+        for source in
+            [format!("try({rows_call}, [])"), format!("try([], {rows_call})"), format!("try({rows_call}, ([]))"), format!("TRY({rows_call}, [])")]
+        {
+            assert_eq!(type_text(&source), rows(), "{source}");
+        }
+        // The callback item keeps its members.
+        assert_eq!(type_text(&format!("map(try({rows_call}, []), h => h.a)")), type_text(&format!("map({rows_call}, h => h.a)")));
+        // Control: without `try`, `[]` joined with the rows erases them.
+        assert!(type_text(&format!("true ? {rows_call} : []")).contains(&empty_array()));
+    }
+
+    #[test]
+    fn empty_fallback_kept_for_min_one_array() {
+        let typed = type_text(&format!("try({}, [])", call("\"h.yaml\"", "{ a: string }[](min(1))")));
+        assert!(typed.contains(&empty_array()), "a `min(1)` list never accepts []: {typed}");
+    }
+
+    #[test]
+    fn empty_fallback_kept_for_fixed_tuple() {
+        let typed = type_text(&format!("try({}, [])", call("\"h.yaml\"", "tuple([string, number])")));
+        assert!(typed.contains(&empty_array()), "{typed}");
+    }
+
+    #[test]
+    fn empty_fallback_kept_for_object() {
+        let typed = type_text(&format!("try({}, [])", call("\"h.yaml\"", "{ a: string }")));
+        assert!(typed.contains(&empty_array()) && typed.contains("a: string"), "{typed}");
+    }
+
+    #[test]
+    fn empty_admitting_tuple_drops_empty_fallback() {
+        let tuple = type_text(&call("\"h.yaml\"", "tuple([string?])"));
+        assert_eq!(type_text(&format!("try({}, [])", call("\"h.yaml\"", "tuple([string?])"))), tuple);
+    }
+
+    #[test]
+    fn empty_fallback_kept_for_unprovable_recursive_reference() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("types.yaml"),
+            "kind: schema\ntypes:\n  node: \"{ label: string(required), children: node[](required) }\"\n",
+        )
+        .unwrap();
+        let schema: YamlValue = serde_yaml_ng::from_str("forest: node[](required)@./types.yaml\n").unwrap();
+        let resolved = resolve_yaml_schema(&schema, dir.path(), &FileResolutionContext::new(dir.path())).unwrap();
+        let typed = |declared: &DeclaredTypes<'_>, source: &str| {
+            ArgumentType::Typed(expression_type(&parse_spanned(source).unwrap(), &TypeScope::unguarded(declared))).to_string()
+        };
+        // With its definitions in scope, a list of the recursive type
+        // provably accepts [].
+        let with_table = DeclaredTypes::new(resolved.simplified.as_ref()).with_definitions(&resolved.definitions);
+        assert_eq!(typed(&with_table, "try(forest, [])"), typed(&with_table, "forest"));
+        // Without them, nothing proves it, so the ordinary union stands.
+        let without = DeclaredTypes::new(resolved.simplified.as_ref());
+        assert!(typed(&without, "try(forest, [])").contains(&empty_array()), "{}", typed(&without, "try(forest, [])"));
+    }
+
+    #[test]
+    fn try_type_over_three_argument_load_data() {
+        let three = "load_data(\"h.csv\", \"{ a: string }[]\", { header: true })";
+        assert_eq!(type_text(&format!("try({three}, [])")), type_text(three));
+        assert_eq!(type_text(three), rows(), "options never change the type");
+    }
+
+    /// `try` is no guard: the operand after `try(n, null) &&` reads `n` as
+    /// if nothing guarded it, while a plain `n &&` narrows it.
+    #[test]
+    fn try_adds_no_guard_facts() {
+        let schema = simplified_schema::parse_yaml_schema(&serde_yaml_ng::from_str("n: number").unwrap()).unwrap();
+        let declared = DeclaredTypes::new(Some(&schema));
+        let category = |source: &str| {
+            let checks = check_expression_calls(&parse_spanned(source).unwrap(), &TypeScope::unguarded(&declared));
+            checks.into_iter().find(|check| check.function == "min").expect("a min call").category()
+        };
+        let unguarded = category("min(n, 1)");
+        assert_ne!(category("n && min(n, 1)"), unguarded, "control: a real guard narrows `n`");
+        assert_eq!(category("try(n, null) && min(n, 1)"), unguarded);
+        assert_eq!(category("try(min(n, 1), 0)"), unguarded, "an operand is checked in the call's own scope");
+    }
+
+    /// Recovering a failed read is not handling an absent value, so a read
+    /// inside `try` is never marked as handled, unlike a `null`-admitting
+    /// parameter of an ordinary function.
+    #[test]
+    fn try_operands_do_not_handle_absence() {
+        let handled = |source: &str| {
+            let expr = parse_spanned(source).unwrap();
+            static_variable_reads(&expr)
+                .iter()
+                .find(|read| read.path == "x" || read.path.starts_with("x."))
+                .expect("reads x")
+                .handles_absence
+        };
+        assert!(handled("is_null(x)"), "control: a null-admitting parameter handles it");
+        assert!(!handled("try(x, 1)"));
+        assert!(!handled("try(1, x)"));
+        assert!(!handled("TRY(x.y, [])"));
+    }
+}

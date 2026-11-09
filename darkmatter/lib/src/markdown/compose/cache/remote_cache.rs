@@ -34,6 +34,7 @@ use super::manifest::{CACHE_VERSION, RemoteUrlManifest, RemoteUrlManifestHeader,
 use super::store::FileStore;
 use super::types::ArtifactClass;
 use crate::markdown::compose::remote::RemoteFreshnessMode;
+use crate::markdown::compose::remote_fetch::RemoteFetchFailure;
 
 /// File extension used for remote response-body blobs.
 const REMOTE_BLOB_EXT: &str = "remote";
@@ -396,10 +397,11 @@ fn write_cached(
 ///
 /// ## Errors
 ///
-/// Returns an error string when the network fetch fails and no usable cached
-/// body is available under the active freshness mode, or when the response
-/// body is not valid UTF-8. A `no-cache` entry whose revalidation fails is an
-/// error even under [`RemoteFreshnessMode::Fallback`].
+/// Returns a [`RemoteFetchFailure`] when the network fetch fails and no
+/// usable cached body is available under the active freshness mode, or when
+/// the response body is not valid UTF-8 (a transport failure). A `no-cache`
+/// entry whose revalidation fails is an error even under
+/// [`RemoteFreshnessMode::Fallback`].
 pub(crate) async fn fetch_with_cache(
     store: Option<&FileStore>,
     client: &PolicyClient,
@@ -407,14 +409,14 @@ pub(crate) async fn fetch_with_cache(
     policy: &FetchPolicy,
     cfg: &RemoteCacheConfig,
     warnings: &mut Vec<String>,
-) -> Result<RemoteFetchOutcome, String> {
+) -> Result<RemoteFetchOutcome, RemoteFetchFailure> {
     // No persistent store: plain network fetch, no caching.
     let Some(store) = store else {
         let resp = fetch(client, url, policy, &Conditional::default())
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(RemoteFetchFailure::from)?;
         let body = String::from_utf8(resp.body.to_vec())
-            .map_err(|e| format!("invalid UTF-8 in response body: {e}"))?;
+            .map_err(RemoteFetchFailure::invalid_utf8)?;
         return Ok(RemoteFetchOutcome {
             body,
             event: RemoteOutcomeEvent::Fetched,
@@ -479,7 +481,7 @@ pub(crate) async fn fetch_with_cache(
                 Ok(resp) => {
                     // Fresh 200: replace the cached body and manifest.
                     let body = String::from_utf8(resp.body.to_vec())
-                        .map_err(|e| format!("invalid UTF-8 in response body: {e}"))?;
+                        .map_err(RemoteFetchFailure::invalid_utf8)?;
                     let content_hash = xx_hash(&body);
                     store_response(
                         store,
@@ -513,15 +515,15 @@ pub(crate) async fn fetch_with_cache(
                         revalidated: true,
                     })
                 }
-                Err(err) => Err(err.to_string()),
+                Err(err) => Err(err.into()),
             }
         }
         CacheAction::FetchFresh => {
             let resp = fetch(client, url, policy, &Conditional::default())
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(RemoteFetchFailure::from)?;
             let body = String::from_utf8(resp.body.to_vec())
-                .map_err(|e| format!("invalid UTF-8 in response body: {e}"))?;
+                .map_err(RemoteFetchFailure::invalid_utf8)?;
             let content_hash = xx_hash(&body);
             store_response(
                 store,

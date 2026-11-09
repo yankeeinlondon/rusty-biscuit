@@ -151,7 +151,7 @@ pub fn require_positional_rows(class: RowClassification) -> Result<(), RowShapeC
 ///   depth; an imported type may still recurse internally.
 /// - [`DataError::NotAContainer`] for a scalar, `unknown`, or `null` contract,
 ///   judged before any import is read when the text alone proves it.
-/// - [`DataError::FileReference`] for an import that is missing or unreadable.
+/// - [`DataError::ContractImport`] for an import that is missing or unreadable.
 pub fn prepare_contract(written: &str, document: &FileResolutionContext) -> Result<PreparedContract, Box<DataError>> {
     let schema_error = |source: SchemaError| {
         Box::new(DataError::ContractSchema { written: written.to_string(), source: Arc::new(source) })
@@ -277,11 +277,11 @@ fn contract_key(property: &PropertyDef, lowered: &serde_json::Value, imports: &[
     key
 }
 
-/// Keeps a missing or unreadable import in the file-reference family, naming
+/// A missing or unreadable import is a [`DataError::ContractImport`] naming
 /// the import reference; every other expansion failure is a schema failure.
 fn import_failure(written: &str, document: &FileResolutionContext, error: SchemaError) -> DataError {
     match FileReferenceDiagnostic::from_schema_read("load_data", document.cwd().to_path_buf(), error) {
-        Ok(diagnostic) => DataError::FileReference(diagnostic),
+        Ok(diagnostic) => DataError::ContractImport(diagnostic),
         Err(other) => DataError::ContractSchema { written: written.to_string(), source: Arc::new(other) },
     }
 }
@@ -815,9 +815,9 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_import_stays_a_file_reference_failure() {
+    fn a_missing_import_is_a_contract_import_failure() {
         let dir = tempfile::tempdir().unwrap();
         let error = prepare_contract("{ port: Port@./absent.yaml }[]", &document(dir.path())).unwrap_err();
-        assert!(matches!(*error, DataError::FileReference(_)), "{error:?}");
+        assert!(matches!(*error, DataError::ContractImport(_)), "{error:?}");
     }
 }

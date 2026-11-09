@@ -70,11 +70,18 @@ pub struct DataSourceLocation {
 /// A `load_data` failure, kept typed until diagnostic projection.
 #[derive(Debug, thiserror::Error)]
 pub enum DataError {
-    /// The data file (or a contract import) could not be resolved, read, or
-    /// fetched. Kept in the shared file-reference family so it projects like
-    /// every other read-side function's failure.
+    /// The data file could not be resolved, read, or fetched. Kept in the
+    /// shared file-reference family so it projects like every other
+    /// read-side function's failure.
     #[error("{}", ExpressionError::FileReference(.0.clone()))]
     FileReference(FileReferenceDiagnostic),
+
+    /// A named-type import of the contract could not be resolved or read.
+    /// Worded and projected like [`FileReference`](Self::FileReference), but
+    /// it is a failure of the contract, not of the data source, so `try`
+    /// never recovers it and it is never a deferral.
+    #[error("{}", ExpressionError::FileReference(.0.clone()))]
+    ContractImport(FileReferenceDiagnostic),
 
     /// The contract does not describe an array, tuple, object, or dictionary.
     #[error("load_data(): the contract `{written}` does not describe a container (an array, tuple, object, or dictionary)")]
@@ -231,7 +238,7 @@ impl DataError {
     }
 
     /// The `dm.data.*` code of this failure; `None` for the file-reference
-    /// family and an invalid contract schema, which stay
+    /// family (a contract import included) and an invalid contract schema, which stay
     /// `dm.expression.evaluation_failure`.
     pub fn code(&self) -> Option<&'static str> {
         match self {
@@ -242,7 +249,7 @@ impl DataError {
             Self::Malformed { .. } => Some(MALFORMED_CODE),
             Self::ContractMismatch { .. } => Some(CONTRACT_MISMATCH_CODE),
             Self::InvalidOptions { .. } => Some(INVALID_OPTIONS_CODE),
-            Self::FileReference(_) | Self::ContractSchema { .. } => None,
+            Self::FileReference(_) | Self::ContractImport(_) | Self::ContractSchema { .. } => None,
         }
     }
 
@@ -255,6 +262,7 @@ impl DataError {
             | Self::ContractMismatch { written, .. }
             | Self::ContractSchema { written, .. } => Some(written),
             Self::FileReference(_)
+            | Self::ContractImport(_)
             | Self::UnsupportedFormat { .. }
             | Self::Malformed { .. }
             | Self::InvalidOptions { .. } => None,
@@ -263,9 +271,9 @@ impl DataError {
 }
 
 impl From<Arc<DataError>> for ExpressionError {
-    /// A file-family failure stays [`ExpressionError::FileReference`], so its
-    /// fatality and projection match `frontmatter()`'s; every other failure
-    /// is [`ExpressionError::Data`].
+    /// A data-source file failure stays [`ExpressionError::FileReference`], so
+    /// its fatality and projection match `frontmatter()`'s; every other
+    /// failure, a contract import's included, is [`ExpressionError::Data`].
     fn from(error: Arc<DataError>) -> Self {
         match &*error {
             DataError::FileReference(diagnostic) => ExpressionError::FileReference(diagnostic.clone()),
@@ -334,6 +342,39 @@ mod tests {
         assert!(!error.is_deferral());
         assert_eq!(error.to_string(), "load_data(): option `delimiter` is invalid: must be one character");
         assert!(matches!(ExpressionError::from(Arc::new(error)), ExpressionError::Data(_)));
+    }
+
+    fn missing_import() -> FileReferenceDiagnostic {
+        FileReferenceDiagnostic {
+            function: "load_data",
+            reference: "./types.yaml".to_string(),
+            kind: FileRefFailure::NotFound,
+            cwd: PathBuf::from("/tmp"),
+            fallback_dir: None,
+            source: None,
+            caller: None,
+        }
+    }
+
+    #[test]
+    fn a_contract_import_reads_like_a_file_reference_but_has_its_own_identity() {
+        let import = DataError::ContractImport(missing_import());
+        let former = ExpressionError::FileReference(missing_import());
+        assert_eq!(import.to_string(), former.to_string());
+        assert_eq!(import.code(), None);
+        assert_eq!(import.written_contract(), None);
+        assert!(!import.is_deferral());
+        let remote = DataError::ContractImport(FileReferenceDiagnostic {
+            kind: FileRefFailure::RemoteNotEnabled,
+            ..missing_import()
+        });
+        assert!(!remote.is_deferral(), "an import is never a deferral");
+
+        let error = ExpressionError::from(Arc::new(import));
+        assert!(matches!(&error, ExpressionError::Data(data) if matches!(**data, DataError::ContractImport(_))));
+        assert_eq!(error.to_string(), former.to_string());
+        assert!(error.is_authoring_fatal(), "graded like the file-reference failure it was");
+        assert_eq!(error.file_reference_diagnostic().map(|d| d.reference.as_str()), Some("./types.yaml"));
     }
 
     #[test]

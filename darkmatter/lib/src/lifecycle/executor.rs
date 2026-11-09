@@ -1335,10 +1335,13 @@ impl<'a> StackExecutor<'a> {
     /// [`Self::evaluate_operand`], through the runtime registry and binder.
     fn call_with_operand_values(&self, function: &str, args: &[Expr], fm: &SharedFrontmatter) -> Result<Value, LifecycleExprError> {
         let call_error = |error| LifecycleExprError::Evaluate(Box::new(ExpressionError::Call(Box::new(error))));
-        if let Some((registration, short_circuit)) = functions::lazy_function(function) {
+        if let Some((registration, kind)) = functions::lazy_function(function) {
             registration.check_arity(args.len()).map_err(call_error)?;
+            if kind == functions::LazyKind::Recover {
+                return self.call_recovery(registration, args, fm);
+            }
             let mut call = registration.lazy_call().expect("a lazy registration starts a lazy call");
-            let stop_on_truthy = short_circuit == functions::ShortCircuit::OnTruthy;
+            let stop_on_truthy = kind == functions::LazyKind::Any;
             for arg in args {
                 let value = self.evaluate_operand(arg, fm)?;
                 if is_truthy(call.bind_next(value).map_err(call_error)?) == stop_on_truthy {
@@ -1356,6 +1359,31 @@ impl<'a> StackExecutor<'a> {
         functions::call_function(function, &values, Some(&context))
             .unwrap_or_else(|| Err(unknown_function_error(function)))
             .map_err(|error| LifecycleExprError::Evaluate(Box::new(error)))
+    }
+
+    /// `try(expr, fallback)` over [`Self::evaluate_operand`]: the fallback is
+    /// evaluated only when `expr` fails with a recoverable read failure, and
+    /// the result is the selected operand's value. A template operand whose
+    /// subtree composition fails (`Compose`), a context failure, and every
+    /// nonrecoverable expression failure propagate. The caller has checked
+    /// the arity.
+    fn call_recovery(
+        &self,
+        registration: &crate::markdown::compose::expression::call_binding::FunctionRegistration,
+        args: &[Expr],
+        fm: &SharedFrontmatter,
+    ) -> Result<Value, LifecycleExprError> {
+        let call_error = |error| LifecycleExprError::Evaluate(Box::new(ExpressionError::Call(Box::new(error))));
+        let (index, value) = match self.evaluate_operand(&args[0], fm) {
+            Ok(value) => (0, value),
+            Err(LifecycleExprError::Evaluate(error)) if error.is_recoverable_read_failure() => {
+                (1, self.evaluate_operand(&args[1], fm)?)
+            }
+            Err(error) => return Err(error),
+        };
+        let value = registration.bind_callback_value(index, value).map_err(call_error)?;
+        registration.check_lazy_return(&value).map_err(call_error)?;
+        Ok(value)
     }
 
     /// Resolve a parse-time [`LifecycleControlAction`] into a runtime

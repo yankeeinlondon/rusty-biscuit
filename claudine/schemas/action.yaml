@@ -477,6 +477,9 @@ types:
         trim:
             - trim-short@darkmatter:lifecycle
             - trim-long@darkmatter:lifecycle
+        try:
+            - try-short@darkmatter:lifecycle
+            - try-long@darkmatter:lifecycle
         try_frontmatter:
             - try_frontmatter-short@darkmatter:lifecycle
             - try_frontmatter-long@darkmatter:lifecycle
@@ -645,6 +648,7 @@ types:
         terminal: terminal-short@darkmatter:lifecycle
         title_case: title_case-short@darkmatter:lifecycle
         trim: trim-short@darkmatter:lifecycle
+        try: try-short@darkmatter:lifecycle
         try_frontmatter: try_frontmatter-short@darkmatter:lifecycle
         upper: upper-short@darkmatter:lifecycle
         validate_schema: validate_schema-short@darkmatter:lifecycle
@@ -798,6 +802,7 @@ types:
         terminal: terminal-short@darkmatter:lifecycle
         title_case: title_case-short@darkmatter:lifecycle
         trim: trim-short@darkmatter:lifecycle
+        try: try-short@darkmatter:lifecycle
         try_frontmatter: try_frontmatter-short@darkmatter:lifecycle
         upper: upper-short@darkmatter:lifecycle
         validate_schema: validate_schema-short@darkmatter:lifecycle
@@ -955,6 +960,7 @@ types:
         terminal: terminal-short@darkmatter:lifecycle
         title_case: title_case-short@darkmatter:lifecycle
         trim: trim-short@darkmatter:lifecycle
+        try: try-short@darkmatter:lifecycle
         try_frontmatter: try_frontmatter-short@darkmatter:lifecycle
         upper: upper-short@darkmatter:lifecycle
         validate_schema: validate_schema-short@darkmatter:lifecycle

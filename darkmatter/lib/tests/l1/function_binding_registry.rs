@@ -195,10 +195,10 @@ fn lookup_at(root: &Path) -> Lookup {
     Lookup { context: ResolutionContext::new(file_context) }
 }
 
-/// `and` and `or` are evaluated lazily by the evaluator, which binds each
-/// operand as it goes; they have no handler to enter.
+/// `and`, `or`, and `try` are evaluated lazily by the evaluator, which binds
+/// each operand it evaluates; they have no handler to enter.
 fn expected_entries(function: &str) -> usize {
-    if matches!(function, "and" | "or") { 0 } else { 1 }
+    if matches!(function, "and" | "or" | "try") { 0 } else { 1 }
 }
 
 fn run_case(function: &str, cell: &str, case: &Case, lookup: &Lookup) {
@@ -266,9 +266,11 @@ fn check(function: &str, row: Row) {
 
 /// One `#[test]` per registered canonical function, so the rows run in
 /// parallel, plus the list of names the guard compares with the registry.
+/// A keyword-named function (`try`) is written as a raw identifier
+/// (`r#try`); its row name drops the `r#`.
 macro_rules! registry_rows {
     ($($name:ident => $row:expr;)+) => {
-        const ROW_NAMES: &[&str] = &[$(stringify!($name)),+];
+        const ROW_NAMES: &[&str] = &[$(row_name(stringify!($name))),+];
 
         mod rows {
             use super::*;
@@ -276,11 +278,19 @@ macro_rules! registry_rows {
             $(
                 #[test]
                 fn $name() {
-                    check(stringify!($name), $row);
+                    check(row_name(stringify!($name)), $row);
                 }
             )+
         }
     };
+}
+
+/// `name` without a raw-identifier `r#` prefix.
+const fn row_name(name: &'static str) -> &'static str {
+    match name.as_bytes() {
+        [b'r', b'#', ..] => name.split_at(2).1,
+        _ => name,
+    }
 }
 
 registry_rows! {
@@ -416,7 +426,7 @@ registry_rows! {
         rejects_type(r#"older_than("2024-06-01", "2024-06-20", "fortnight")"#),
         unchanged(NO_DATE_TEXT, vec![type_error(r#"older_than("2024-06-01", "2024-06-20", true)"#)]));
 
-    // ── Logical (lazy: no handler; the evaluator binds each operand) ───────
+    // ── Logical (lazy: no handler; the evaluator binds what it evaluates) ──
     and => row(ok(r#"and(true, "x")"#, json!(true)),
         Rejected::Impossible {
             reason: "every value binds and every arity, including zero, is eligible",
@@ -432,6 +442,13 @@ registry_rows! {
         },
         unchanged("preservation-only `unknown | null` variadic: truthiness reads the original value", vec![
             ok(r#"or("false")"#, json!(true)), ok("or(0)", json!(false)),
+        ]));
+    // The fixture tree has no `absent.yaml`, so the protected read misses and
+    // the fallback is the result.
+    r#try => row(ok(r#"try(load_data("absent.yaml", "string[]"), "x")"#, json!("x")), rejects_arity("try(1)"),
+        unchanged("both parameters are preservation-only `unknown | null`: the selected operand is kept as is", vec![
+            ok(r#"try("4", 0)"#, json!("4")), ok("try(null, 7)", json!(null)),
+            ok(r#"try(load_data("absent.yaml", "string[]"), "0")"#, json!("0")),
         ]));
 
     // ── Git (an empty repository with no remote, deny-all remote policy) ───

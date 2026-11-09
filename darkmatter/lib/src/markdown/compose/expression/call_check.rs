@@ -184,6 +184,7 @@ fn partial_object(arg: &SpannedExpr) -> Option<(serde_json::Map<String, Value>, 
 /// | an array literal | an array of the union of its items' types |
 /// | a call | the union of the declared `returns` of every overload its argument count can select |
 /// | `load_data(file, '<contract>')`, with or without an options argument | the literal contract's type (named references `unknown`), with `null` when `file` may be null; `null` for a literal `null` file |
+/// | `try(expr, fallback)` | the union of both operands' types; an authored `[]` operand adds nothing when the other operand's type provably accepts `[]` |
 /// | `x \|\| y` | `x`'s type without `null`, joined with `y`'s type where `x` is falsy |
 /// | `c ? a : b` | `a`'s type where `c` holds, joined with `b`'s where it does not |
 /// | any other operator | `unknown` |
@@ -213,7 +214,9 @@ pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape 
                 .unwrap_or(ScopeShape::Unknown { non_null: false }),
         ),
         SpannedExprKind::FunctionCall { name, args } => {
-            load_data_type(name, args, scope).unwrap_or_else(|| call_returns(name, args.len()))
+            load_data_type(name, args, scope)
+                .or_else(|| try_type(name, args, scope))
+                .unwrap_or_else(|| call_returns(name, args.len()))
         }
         SpannedExprKind::CallbackCall { name, args } => {
             let Some(SpannedCallArgument::Callback(callback)) = args.get(1) else {
@@ -290,6 +293,51 @@ fn load_data_type(name: &str, args: &[SpannedExpr], scope: &TypeScope<'_>) -> Op
         file if file.admits_null() => denoted.union(&ScopeShape::of_literal(&Value::Null)),
         _ => denoted,
     })
+}
+
+/// The type a two-operand `try(expr, fallback)` call returns: either
+/// operand may be the result, so the union of their types, each read in the
+/// call's own scope (neither operand narrows the other). `None` for another
+/// function or argument count.
+///
+/// An authored `[]` operand (through parentheses) would add `unknown[]` and
+/// erase a typed array's items, so it contributes nothing when some
+/// alternative of the other operand's type provably accepts `[]`, judged
+/// with the scope's definitions. Otherwise (a `min(1)` array, a non-empty
+/// tuple, an object, a recursive reference that cannot be proven) the
+/// ordinary union stands. General array-literal typing is unchanged.
+fn try_type(name: &str, args: &[SpannedExpr], scope: &TypeScope<'_>) -> Option<ScopeShape> {
+    let [expr, fallback] = args else {
+        return None;
+    };
+    if !functions::inspect_registration(name, |registration| registration.name() == TRY).unwrap_or(false) {
+        return None;
+    }
+    let expr_type = expression_type(expr, scope);
+    let fallback_type = expression_type(fallback, scope);
+    let absorbs_empty = |other: &ScopeShape| match other {
+        ScopeShape::Unknown { .. } => true,
+        ScopeShape::Arms { arms, .. } => arms.iter().any(|arm| {
+            simplified_schema::completion::alternative_accepts_in(arm, &Value::Array(Vec::new()), scope.definitions())
+        }),
+    };
+    Some(match (is_empty_array_literal(expr), is_empty_array_literal(fallback)) {
+        (false, true) if absorbs_empty(&expr_type) => expr_type,
+        (true, false) if absorbs_empty(&fallback_type) => fallback_type,
+        _ => expr_type.union(&fallback_type),
+    })
+}
+
+/// The canonical name of the recovery form.
+const TRY: &str = "try";
+
+/// Whether `expr` is the literal `[]`, through parentheses.
+fn is_empty_array_literal(expr: &SpannedExpr) -> bool {
+    match &expr.kind {
+        SpannedExprKind::Paren(inner) => is_empty_array_literal(inner),
+        SpannedExprKind::ArrayLiteral(items) => items.is_empty(),
+        _ => false,
+    }
 }
 
 /// Rewrites every named-type reference in `def`, at any depth, to `unknown`.

@@ -140,6 +140,15 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
   lock; a memoized error gets the current call site only at projection. The
   memo holds in every `CacheAccessMode`. `RemoteNotEnabled` (the reference
   check has no remote permission) is never stored.
+- Failure identity survives the memo because the memo stores the typed
+  `Arc<DataError>`. A source miss is `DataError::FileReference` (flattened to
+  `ExpressionError::FileReference`); a contract import that cannot be read is
+  `DataError::ContractImport` (kept inside `ExpressionError::Data`, worded and
+  projected like a file reference, never a deferral); a data failure
+  re-raised by `as_markdown` is `ExpressionError::NestedData`. Read them only
+  through `ExpressionError::data_failure()` and `file_reference_diagnostic()`;
+  never rebuild an import as `ExpressionError::FileReference`, which would
+  make it recoverable (`provenance_tests.rs` beside `data/runtime.rs`).
 
 - Reads are recorded at the operation boundary, never in `resolve_arg`:
   `functions/fs.rs::load_markdown` (the five Markdown readers), `file_exists_fn`,

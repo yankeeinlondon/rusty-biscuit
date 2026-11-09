@@ -563,6 +563,14 @@ types:
             category(Logical);
             example(or(false, true) => true);
         ) -> Returns true when any argument is truthy, evaluating them in order and stopping at the first truthy one.
+    try: |-
+        function(
+            parameters(expr: unknown | null, fallback: unknown | null);
+            returns(unknown | null);
+            category(Logical);
+            example(try(null, 7) => null);
+            example(try(0, 7) => 0);
+        ) -> Returns the value of expr. Only when expr fails with a recoverable read failure (a missing or unreadable source, malformed or contract-mismatched data, or an allowed remote read that fails in transport) is fallback evaluated and returned instead; every other failure propagates. Any value expr produces, including a falsy one such as null, false, 0, or an empty string, list, or object, is a success.
 
     # Type Conversion
     number: |-

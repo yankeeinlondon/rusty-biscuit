@@ -840,6 +840,10 @@ types:
     trim-long:
         - "{text: string(deferred) | null}(min-keys(1);operands(trim-long))"
         - "{text: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(trim-long))"
+    try-short: "tuple([unknown | null, unknown | null]; operands(try-short))"
+    try-long:
+        - "{expr: unknown | null,fallback: unknown | null}(min-keys(2);operands(try-long))"
+        - "{expr: unknown | null,fallback: unknown | null,no_error: boolean(required)}(min-keys(3);operands(try-long))"
     try_frontmatter-short:
         - "file(deferred;operands(try_frontmatter-short))"
         - "tuple([file(deferred) | null]; operands(try_frontmatter-short))"
@@ -1329,6 +1333,9 @@ types:
         trim:
             - trim-short
             - trim-long
+        try:
+            - try-short
+            - try-long
         try_frontmatter:
             - try_frontmatter-short
             - try_frontmatter-long
@@ -1499,6 +1506,7 @@ types:
         terminal: terminal-short
         title_case: title_case-short
         trim: trim-short
+        try: try-short
         try_frontmatter: try_frontmatter-short
         upper: upper-short
         validate_schema: validate_schema-short
@@ -1654,6 +1662,7 @@ types:
         terminal: terminal-short
         title_case: title_case-short
         trim: trim-short
+        try: try-short
         try_frontmatter: try_frontmatter-short
         upper: upper-short
         validate_schema: validate_schema-short

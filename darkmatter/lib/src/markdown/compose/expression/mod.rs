@@ -143,7 +143,7 @@ pub use fm_namespace::{
 };
 pub use error::{
     CallerFileDiagnosticProvenance, ExpressionError, FileRefFailure,
-    FileReferenceDiagnostic, ProviderFailureKind,
+    FileReferenceDiagnostic, ProviderFailureKind, RemoteReadKind,
 };
 pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
 pub(crate) use path_projection::{
@@ -916,8 +916,13 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
         if O::OBSERVES { scope.call_argument(name, index, args.len()) } else { scope.operand() }
     };
     let name = name.to_ascii_lowercase();
-    if let Some((registration, short_circuit)) = functions::lazy_function(&name) {
-        return evaluate_lazy_function(registration, short_circuit, args, lookup, argument, observer, budget);
+    if let Some((registration, kind)) = functions::lazy_function(&name) {
+        return match kind {
+            functions::LazyKind::All | functions::LazyKind::Any => {
+                evaluate_lazy_function(registration, kind, args, lookup, argument, observer, budget)
+            }
+            functions::LazyKind::Recover => evaluate_recovery(registration, args, lookup, argument, observer, budget),
+        };
     }
     let mut caller_occurrence = None;
     let evaluated: Vec<Value> = if functions::is_context_function(&name) {
@@ -978,7 +983,7 @@ fn owned_call_context<L: EvaluationLookup>(
 /// evaluated; an operand after the short-circuit is never evaluated or bound.
 fn evaluate_lazy_function<'a, L: EvaluationLookup, O: MissingRootObserver>(
     registration: &call_binding::FunctionRegistration,
-    short_circuit: functions::ShortCircuit,
+    kind: functions::LazyKind,
     args: &[Expr],
     lookup: &L,
     argument: impl Fn(usize) -> AbsenceScope<'a>,
@@ -988,9 +993,10 @@ fn evaluate_lazy_function<'a, L: EvaluationLookup, O: MissingRootObserver>(
     let call_error = |error| ExpressionError::Call(Box::new(error));
     registration.check_arity(args.len()).map_err(call_error)?;
     let mut call = registration.lazy_call().expect("a lazy registration starts a lazy call");
-    let (stop_on_truthy, polarity) = match short_circuit {
-        functions::ShortCircuit::OnFalsy => (false, scope::Polarity::True),
-        functions::ShortCircuit::OnTruthy => (true, scope::Polarity::False),
+    let (stop_on_truthy, polarity) = match kind {
+        functions::LazyKind::All => (false, scope::Polarity::True),
+        functions::LazyKind::Any => (true, scope::Polarity::False),
+        functions::LazyKind::Recover => unreachable!("try is evaluated by evaluate_recovery"),
     };
     // Each operand reads under the facts the earlier operands established.
     let mut facts = argument(0).facts();
@@ -1006,6 +1012,38 @@ fn evaluate_lazy_function<'a, L: EvaluationLookup, O: MissingRootObserver>(
     }
     call.finish().map_err(call_error)?;
     Ok(Value::Bool(!stop_on_truthy))
+}
+
+/// Evaluates `try(expr, fallback)`: `expr` once, and `fallback` only when
+/// `expr` failed with a recoverable read failure
+/// ([`ExpressionError::is_recoverable_read_failure`]). Any value `expr`
+/// produces, falsy ones included, is the result. Every other failure, and a
+/// failure of `fallback` itself, propagates unchanged.
+///
+/// Both operands read under the call's own facts: neither learns anything
+/// from the other. Recovery shares `budget` and touches no memo or read
+/// set, so whatever `expr` read before failing stays recorded.
+fn evaluate_recovery<'a, L: EvaluationLookup, O: MissingRootObserver>(
+    registration: &call_binding::FunctionRegistration,
+    args: &[Expr],
+    lookup: &L,
+    argument: impl Fn(usize) -> AbsenceScope<'a>,
+    observer: &mut O,
+    budget: &iteration::IterationBudget,
+) -> Result<Value, ExpressionError> {
+    let call_error = |error| ExpressionError::Call(Box::new(error));
+    registration.check_arity(args.len()).map_err(call_error)?;
+    let selected = match evaluate_expr(&args[0], lookup, argument(0), observer, budget) {
+        Ok(value) => (0, value),
+        Err(error) if error.is_recoverable_read_failure() => {
+            (1, evaluate_expr(&args[1], lookup, argument(1), observer, budget)?)
+        }
+        Err(error) => return Err(error),
+    };
+    let (index, value) = selected;
+    let value = registration.bind_callback_value(index, value).map_err(call_error)?;
+    registration.check_lazy_return(&value).map_err(call_error)?;
+    Ok(value)
 }
 
 fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
@@ -1073,11 +1111,17 @@ mod tests {
 
     struct TestLookup {
         data: HashMap<String, Value>,
+        /// Present only for tests that call read-side functions.
+        context: Option<ResolutionContext>,
     }
 
     impl EvaluationLookup for TestLookup {
         fn get(&self, path: &str) -> Option<Value> {
             self.data.get(path).cloned()
+        }
+
+        fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+            self.context.as_ref()
         }
     }
 
@@ -1086,7 +1130,7 @@ mod tests {
             Value::Object(obj) => obj.into_iter().collect(),
             _ => HashMap::new(),
         };
-        TestLookup { data: map }
+        TestLookup { data: map, context: None }
     }
 
     mod output_rendering {
@@ -1913,6 +1957,188 @@ mod tests {
                 index: Box::new(Expr::StringLiteral("key".to_string())),
             };
             assert_eq!(evaluate(&expr, &state).unwrap(), json!("value"));
+        }
+    }
+
+    /// `try(expr, fallback)` on the expression evaluator. A recoverable
+    /// failure is a real `load_data` miss in a private temp directory; the
+    /// fallback is an instrumented test function, so its entries are counted.
+    mod recovery {
+        use super::*;
+        use crate::markdown::compose::expression::call_binding::FunctionRegistration;
+        use crate::markdown::compose::expression::function_test_hooks;
+        use std::num::NonZeroU64;
+        use std::sync::Arc;
+
+        const MISSING: &str = "load_data('absent.yaml', 'any[]')";
+
+        fn context_lookup(dir: &std::path::Path) -> TestLookup {
+            TestLookup {
+                data: HashMap::new(),
+                context: Some(ResolutionContext::new(biscuit_file::FileResolutionContext::new(dir))),
+            }
+        }
+
+        /// `probe(v)` returns `v` and counts its entries.
+        fn probe() -> function_test_hooks::TestFunctionGuard {
+            let registration = FunctionRegistration::builder(
+                "probe",
+                "function(parameters(value: unknown | null); returns(unknown | null))",
+            )
+            .build()
+            .unwrap();
+            let guard = function_test_hooks::register(registration, Arc::new(|call| Ok(call.args().get(0).cloned().unwrap_or(Value::Null))));
+            function_test_hooks::reset_handler_entries();
+            guard
+        }
+
+        /// `fails()` always fails with a generic handler error, which is not a
+        /// read failure.
+        fn fails() -> function_test_hooks::TestFunctionGuard {
+            let registration =
+                FunctionRegistration::builder("fails", "function(parameters(void); returns(unknown | null))").build().unwrap();
+            function_test_hooks::register(registration, Arc::new(|_| Err("handler refused".to_string())))
+        }
+
+        fn eval(source: &str, lookup: &TestLookup) -> Result<Value, ExpressionError> {
+            evaluate(&parse(source).unwrap(), lookup)
+        }
+
+        #[test]
+        fn fallback_not_evaluated_after_success() {
+            let _probe = probe();
+            let lookup = lookup(json!({}));
+            for (literal, expected) in [
+                ("null", json!(null)),
+                ("false", json!(false)),
+                ("0", json!(0)),
+                ("''", json!("")),
+                ("[]", json!([])),
+                ("{}", json!({})),
+                ("'kept'", json!("kept")),
+            ] {
+                function_test_hooks::reset_handler_entries();
+                let value = eval(&format!("try({literal}, probe('fallback'))"), &lookup).unwrap();
+                assert_eq!(value, expected, "{literal} is a success and is returned unchanged");
+                assert_eq!(function_test_hooks::handler_entries("probe"), 0, "{literal}: the fallback never ran");
+            }
+        }
+
+        #[test]
+        fn protected_runs_once() {
+            let _probe = probe();
+            let value = eval("try(probe([1, 2]), 'fallback')", &lookup(json!({}))).unwrap();
+            assert_eq!(value, json!([1, 2]));
+            assert_eq!(function_test_hooks::handler_entries("probe"), 1);
+        }
+
+        #[test]
+        fn fallback_runs_once_after_recoverable_failure() {
+            let dir = tempfile::tempdir().unwrap();
+            let _probe = probe();
+            let lookup = context_lookup(dir.path());
+            let value = eval(&format!("try({MISSING}, probe(['fallback']))"), &lookup).unwrap();
+            assert_eq!(value, json!(["fallback"]));
+            assert_eq!(function_test_hooks::handler_entries("probe"), 1);
+            assert_eq!(function_test_hooks::handler_entries("load_data"), 1, "the protected operand ran once");
+            // The miss stays the loader's: the same unguarded call still fails.
+            let unguarded = eval(MISSING, &lookup).unwrap_err();
+            assert!(unguarded.is_recoverable_read_failure(), "{unguarded:?}");
+        }
+
+        #[test]
+        fn nonrecoverable_failure_skips_fallback() {
+            let _probe = probe();
+            let _fails = fails();
+            let lookup = lookup(json!({}));
+            for protected in ["fails()", "min()", "1 / 0", "no_such_function()"] {
+                function_test_hooks::reset_handler_entries();
+                let unguarded = eval(protected, &lookup).unwrap_err();
+                let error = eval(&format!("try({protected}, probe(1))"), &lookup).unwrap_err();
+                assert_eq!(error.to_string(), unguarded.to_string(), "{protected}: the error escapes unchanged");
+                assert!(!error.is_recoverable_read_failure());
+                assert_eq!(function_test_hooks::handler_entries("probe"), 0, "{protected}: the fallback never ran");
+            }
+        }
+
+        #[test]
+        fn fallback_error_escapes_its_own_try() {
+            let dir = tempfile::tempdir().unwrap();
+            let _fails = fails();
+            let lookup = context_lookup(dir.path());
+            let error = eval(&format!("try({MISSING}, fails())"), &lookup).unwrap_err();
+            assert!(matches!(&error, ExpressionError::Other { message, .. } if message == "handler refused"), "{error:?}");
+            // A fallback that itself misses is the fallback's own miss, not
+            // a second chance for the same `try`.
+            let error = eval(&format!("try({MISSING}, load_data('other.yaml', 'any[]'))"), &lookup).unwrap_err();
+            assert!(error.to_string().contains("other.yaml"), "{error}");
+        }
+
+        #[test]
+        fn enclosing_try_catches_recoverable_fallback_failure() {
+            let dir = tempfile::tempdir().unwrap();
+            let lookup = context_lookup(dir.path());
+            let value = eval(&format!("try(try({MISSING}, load_data('other.yaml', 'any[]')), 'outer')"), &lookup).unwrap();
+            assert_eq!(value, json!("outer"));
+        }
+
+        #[test]
+        fn enclosing_try_rethrows_nonrecoverable_fallback_failure() {
+            let dir = tempfile::tempdir().unwrap();
+            let _probe = probe();
+            let _fails = fails();
+            let lookup = context_lookup(dir.path());
+            let error = eval(&format!("try(try({MISSING}, fails()), probe('outer'))"), &lookup).unwrap_err();
+            assert!(matches!(&error, ExpressionError::Other { message, .. } if message == "handler refused"), "{error:?}");
+            assert_eq!(function_test_hooks::handler_entries("probe"), 0);
+        }
+
+        #[test]
+        fn try_shares_the_iteration_budget() {
+            let dir = tempfile::tempdir().unwrap();
+            let limited = |visits: u64| {
+                let mut lookup = context_lookup(dir.path());
+                let context = lookup.context.as_mut().unwrap();
+                context.iteration = iteration::IterationBudget::new(iteration::IterationLimits::new(
+                    NonZeroU64::new(visits).unwrap(),
+                    NonZeroU64::MAX,
+                ));
+                lookup
+            };
+            let fallback = "map([1, 2], x => x)";
+            // Control: the fallback alone fits in two visits.
+            assert_eq!(eval(fallback, &limited(2)).unwrap(), json!([1, 2]));
+            // The protected operand spends one visit before its read fails;
+            // the fallback then has one left, not a fresh two.
+            let protected = "map([1], x => load_data('absent.yaml', 'any[]'))";
+            let error = eval(&format!("try({protected}, {fallback})"), &limited(2)).unwrap_err();
+            assert!(matches!(error, ExpressionError::IterationLimit(_)), "{error:?}");
+            assert_eq!(eval(&format!("try({protected}, {fallback})"), &limited(3)).unwrap(), json!([1, 2]));
+        }
+
+        #[test]
+        fn try_lookup_is_case_insensitive() {
+            let dir = tempfile::tempdir().unwrap();
+            let lookup = context_lookup(dir.path());
+            for spelling in ["TRY", "Try", "tRy"] {
+                assert_eq!(eval(&format!("{spelling}({MISSING}, 7)"), &lookup).unwrap(), json!(7), "{spelling}");
+                assert_eq!(eval(&format!("{spelling}(0, 7)"), &lookup).unwrap(), json!(0), "{spelling}");
+            }
+        }
+
+        #[test]
+        fn wrong_arity_fails_before_evaluation() {
+            let _probe = probe();
+            let lookup = lookup(json!({}));
+            for source in ["try()", "try(probe(1))", "try(probe(1), probe(2), probe(3))"] {
+                function_test_hooks::reset_handler_entries();
+                let error = eval(source, &lookup).unwrap_err();
+                assert!(
+                    matches!(&error, ExpressionError::Call(call) if matches!(**call, call_binding::CallBindingError::Arity { .. })),
+                    "{source}: {error:?}"
+                );
+                assert_eq!(function_test_hooks::handler_entries("probe"), 0, "{source}: nothing was evaluated");
+            }
         }
     }
 

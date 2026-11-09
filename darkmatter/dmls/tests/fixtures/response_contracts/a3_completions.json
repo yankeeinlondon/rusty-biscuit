@@ -3229,6 +3229,24 @@
         }
       },
       {
+        "label": "try(expr, fallback)",
+        "kind": 3,
+        "detail": "try(expr: unknown | null, fallback: unknown | null) -> unknown | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "try"
+        }
+      },
+      {
         "label": "number(x, [fallback])",
         "kind": 3,
         "detail": "number(x: numberlike, [fallback: number]) -> number",

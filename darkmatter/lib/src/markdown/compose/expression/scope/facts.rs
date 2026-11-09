@@ -17,7 +17,7 @@ use crate::markdown::compose::expression::binding::NULL_ROOT;
 use crate::markdown::compose::expression::call_binding::{FactKind, NarrowingFact};
 use crate::markdown::compose::expression::call_check::call_is_rejected;
 use crate::markdown::compose::expression::functions::{
-    ShortCircuit, accepts_call_arity, canonical_function_name, inspect_registration, lazy_function,
+    LazyKind, accepts_call_arity, canonical_function_name, inspect_registration, lazy_function,
 };
 use crate::markdown::compose::expression::{ComparisonOp, Expr, json_number, number_literal};
 
@@ -41,14 +41,17 @@ pub(super) fn assume<'d>(scope: &TypeScope<'d>, guard: &Expr, polarity: Polarity
         Expr::Comparison { left, op, right } => comparison(scope, left, *op, right, polarity, origin),
         Expr::FunctionCall { name, args } => {
             let args: Vec<&Expr> = args.iter().collect();
-            // `and`/`or` take `...values: unknown | null`, which binds any
+            // Lazy functions take `unknown | null` parameters, which bind any
             // value, so the arity check is their whole acceptance check.
-            if let Some((_, side)) = lazy_function(name)
+            if let Some((_, kind)) = lazy_function(name)
                 && canonical_function_name(name).is_some_and(|canonical| accepts_call_arity(canonical, args.len()))
             {
-                return match side {
-                    ShortCircuit::OnFalsy => conjunction(scope, &args, polarity, origin),
-                    ShortCircuit::OnTruthy => disjunction(scope, &args, polarity, origin),
+                return match kind {
+                    LazyKind::All => conjunction(scope, &args, polarity, origin),
+                    LazyKind::Any => disjunction(scope, &args, polarity, origin),
+                    // Either operand may be the result, and neither proves
+                    // anything about the other, so `try` is no guard.
+                    LazyKind::Recover => scope.clone(),
                 };
             }
             match inspect_registration(name, |registration| registration.narrowing_fact_for(args.len()).cloned()) {

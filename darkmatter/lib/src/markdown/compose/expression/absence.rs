@@ -120,7 +120,11 @@ impl<'a> AbsenceScope<'a> {
     pub(crate) fn call_argument(self, function: &str, index: usize, count: usize) -> Self {
         let logical = short_circuit_polarity(function).is_some();
         Self {
+            // `try` takes `unknown | null` only so that a null operand is a
+            // success; recovering from a failed read is not handling an
+            // absent value, so its operands still warn.
             handles_absence: (logical || !self.consumed_by_call)
+                && !is_recovery(function)
                 && super::functions::inspect_registration(function, |registration| {
                     registration.handles_absence_at(index, count)
                 })
@@ -146,6 +150,12 @@ impl<'a> AbsenceScope<'a> {
             facts: Some(facts),
         }
     }
+}
+
+/// Whether `name` is the lazy recovery form `try`, as the evaluator
+/// dispatches it.
+fn is_recovery(name: &str) -> bool {
+    super::functions::lazy_function(name).is_some_and(|(_, kind)| kind == super::functions::LazyKind::Recover)
 }
 
 /// Whether `name` is the lazy conjunction or disjunction, as the evaluator
