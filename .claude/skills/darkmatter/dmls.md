@@ -161,7 +161,13 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   server preparations overlap (one worker thread;
   `work_counters::peak_concurrent_registry_scans` proves it in tests). A
   `didChangeConfiguration` with an unchanged effective config invalidates no
-  registry and schedules nothing (`update_config`); `is_fresh` comparing the
+  registry and schedules nothing (`update_config`). A *changed* one drops
+  the cached contexts. An open document is then refreshed immediately and
+  again when its re-prepared registry installs, so under load one change
+  can log two validations. A test that counts per-change events must
+  `flush_server`, drain the buffered diagnostics, and judge every new
+  event, never "exactly one" (`validation_timing_log::settled_events`).
+  `is_fresh` comparing the
   context re-prepares a document whose context rebuilt differently. Test
   seams: `StartupHooks::registry_gate` holds each job,
   `registry_probe_gate` (`LspFixture::start_with_registry_probe_gate`,
