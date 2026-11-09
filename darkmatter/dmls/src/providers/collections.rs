@@ -44,8 +44,8 @@ pub(super) fn folds(ctx: &DocumentContext, folds: &mut Vec<FoldingRange>) {
 // ── Diagnostics ─────────────────────────────────────────────────────────────
 
 /// The static findings of every collection region: header, structural, and
-/// typing defects as the library reports them, then the call, unknown
-/// function, and gate checks of every callback under the scope it is
+/// typing defects as the library reports them, then the call, member,
+/// unknown function, and gate checks of every callback under the scope it is
 /// evaluated in.
 pub(super) fn diagnostics(
     ctx: &DocumentContext,

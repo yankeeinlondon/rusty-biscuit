@@ -1074,7 +1074,7 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
 /// A call to an unknown function is an `ERROR`: compose fails on it.
 ///
 /// Every call in a body interpolation or a directive's `when` condition also
-/// gets the design-time call check ([`call_check`]), typed at its site under
+/// gets the design-time call and member checks ([`call_check`]), typed at its site under
 /// the enclosing `::block when` guards.
 fn expression_diagnostics(
     ctx: &DocumentContext,

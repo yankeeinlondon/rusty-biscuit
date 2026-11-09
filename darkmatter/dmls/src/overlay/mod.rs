@@ -246,9 +246,9 @@ pub struct SlotStatus {
     /// resolution failed). [`Self::template_shape`] then offers the
     /// template's literal parts.
     pub unresolved: bool,
-    /// The template's literal shape (its declared properties and every
-    /// constraint that is not a slot), when the template is unresolved and
-    /// its root is one object shape.
+    /// The template's root shape, cloned with its slot constraints still in
+    /// place (readers use only the literal parts), when the template is
+    /// unresolved and its root is one object shape.
     pub template_shape: Option<Arc<simplified_schema::simplified::SchemaShape>>,
     /// The document layer of the unresolved template, which types expression
     /// sites (the call and member checks) while no snapshot is served; `None`

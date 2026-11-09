@@ -114,8 +114,13 @@ says. See
   block. See [When a style is rejected](./render.md#when-a-style-is-rejected).
 - **A recovery identifier**: that recovery does not apply, and its warning
   blocks.
-- **A diagnostic code**, such as `dm.expression.uncertain_call` or
-  `dm.expression.undeclared_property`: a warning with that code blocks.
+- **A diagnostic code**, such as `dm.expression.uncertain_call`,
+  `dm.expression.undeclared_property` (an unhandled read of a name nothing
+  declares), or `dm.expression.undeclared_member` (an unhandled read of a
+  member its value's known object type does not declare, such as
+  `server.nmae`; see
+  [Misspelled members](../topics/darkmatter-expressions.md#misspelled-members)):
+  a warning with that code blocks.
   `md compose --help` lists every code; `md render` takes
   `dm.link.malformed_structured_title`, `dm.link.legacy_structured_title`,
   `dm.style.unknown_key`, and `dm.style.deprecated`.
@@ -235,6 +240,14 @@ flowchart TD
   reads another waits for it), `::block` conditions, and `::file` `when=`
   conditions in document order. An expression evaluated before the warning
   is known still runs.
+- **A misspelled member is judged where it is read.** A
+  `dm.expression.undeclared_member` warning is known as soon as the read is
+  evaluated, so it stops the next expression, condition, or stage. A `when=`
+  condition that warns composes no child, and a frontmatter `$( … )` ternary
+  that warns runs no command. A read inside a callback (`map(…)`, a `::map`
+  or `::filter` callback) is judged at the collection's next gate or when the
+  collection finishes, not between items. A read that is never evaluated,
+  such as an unchosen ternary branch, never warns and never blocks.
 - **A frontmatter read is judged when the frontmatter is final**, after its
   `$( … )` commands and the schema that may declare the property. A blocking
   undeclared read in frontmatter therefore stops the body, not the frontmatter
@@ -255,6 +268,33 @@ md compose doc.md              # succeeds with the warning; creates marker
 printf '{{ as_markdown("::shell touch marker") }}\n\n{{ missing }}\n' > doc.md
 md compose doc.md --deny all   # fails on dm.expression.undeclared_property; no marker
 ```
+
+A misspelled member blocks only when you deny it; the same document
+composes, with the warning, under the default policy:
+
+```sh
+cat > doc.md <<'MD'
+---
+$schema:
+  server: "{ name: string, port: number }"
+server: { name: web, port: 80 }
+---
+{{ server.nmae }}
+
+::shell touch marker
+MD
+md compose doc.md                                          # succeeds; warns, creates marker
+md compose doc.md --deny dm.expression.undeclared_member   # exit 1; no marker
+```
+
+```text
+Member 'nmae' is not declared by the known object type of 'server' at doc.md:6.
+```
+
+The warning keeps its `warning` severity in either run; `--deny` changes only
+the outcome. With `--output json` it is one record in `diagnostics`, with
+`code`, `severity`, and `source.line`/`source.column` at the member name, and
+stderr stays empty.
 
 A failed command never writes the composed document to stdout, in any
 `--output` mode, and exits with status 1. With `--show`, a failed Markdown run opens

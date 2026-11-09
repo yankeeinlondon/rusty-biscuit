@@ -546,9 +546,12 @@ The typing has limits:
   `Name@darkmatter:<stem>` import, or a recursive type is `unknown` where it
   appears; inline structure around it keeps its type, so
   `"{ host: Host@./types.yaml, port: number }[]"` still knows `port`.
-- **Misspelled members are not reported.** `h.nmae` raises no warning; it is
-  `null` at run time. Only an undeclared top-level name is reported, as for
-  any frontmatter value.
+- **A misspelled member is a warning, not an error.** `h.nmae` against
+  `"{ name: string, port: number }[]"` reports
+  `dm.expression.undeclared_member` and still reads `null` at run time. A
+  member read through a computed contract or a named reference is never
+  reported, because its type is `unknown`. See
+  [Misspelled members](./darkmatter-expressions.md#misspelled-members).
 
 To type a `::map` region, load the data in frontmatter and declare the
 property in the document's schema; the region's item type comes from that

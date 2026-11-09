@@ -659,6 +659,53 @@ message). The moving parts:
 - Directive targets are not observed. A null `::file {{ x }}` target already
   warns as a skipped nullable target, and a second warning would duplicate it.
 
+### Undeclared members (`dm.expression.undeclared_member`)
+
+The verdict is the shared classifier ([expressions.md](expressions.md),
+"Undeclared member check"); composition adds only **reachability**: a
+warning exists where the precheck found a candidate *and* the evaluator
+reached that selector. Never emit from a static scan alone.
+
+- **Candidates.** `call_precheck.rs::check_document(&SiteSchema)` returns
+  `(warnings, MemberCandidates)`, computed once per document under the
+  prepared schema (template while slots are pending), at every surface it
+  call-checks. `ComposeReport.member_candidates: Arc<MemberCandidates>` is
+  per document, never merged from a child report.
+- **Reach.** A `MissingRootObserver` with `OBSERVES_MEMBERS` records each
+  selector node at entry (`member_read`); `absence::Observation { roots,
+  reached, addresses }` turns addresses into ordinals
+  (`member_check::reached_ordinals`, mirroring `spanned_nodes` on the
+  span-erased tree). The `()` and `Vec<MissingRoot>` observers are unchanged.
+- **Join** (`compose/member_sites.rs`). `MemberSiteKey` is the authored site:
+  `body` (offset projected through `BodyOrigin`, so `::map` copies and repeat
+  includes share it), `leaf` (frontmatter key path + `{{` offset in the
+  value), `shell` (a `$( … )` ternary piece by role). `MemberCandidates::warnings`
+  also requires the trimmed expression text to match, so rewritten text never
+  inherits a candidate. Warnings collapse by identity in the report: one per
+  authored site, two same-spelled sites stay two.
+- **Routing per surface.** Interpolation: `Evaluator::with_member_sites(candidates,
+  MemberFrame::Body | Leaf)` (`set_member_leaf` per frontmatter leaf), warnings
+  appended right after `eval` so the next `before_eval` sees them; the
+  discovery pass and the directive-target pass install none. Conditions
+  (`::block`, `::file`/`::code when=`): `BodyMembers`; a transclusion re-checks
+  its `ReportWatch` before composing the child. Collections:
+  `Execution::with_members`; callbacks run behind `&self`, so their warnings
+  wait in a `RefCell` and are flushed before the next gate's stop and at the
+  end (failure included). Frontmatter `$( … )`: `ShellMembers`; the condition
+  and chosen value branch are joined, and the stage's check hook runs before
+  any command. A `$( … )` piece holding `{{ }}` gets no candidate (frontmatter
+  interpolation reports the placeholder).
+- **Not covered:** whole-value directive targets (nullable-target warning
+  instead), lifecycle stacks, `expression`-typed frontmatter values (DMLS
+  only), discovery passes, standalone unobserved evaluators.
+- **Pending schemas.** Composition resolves the schema before any expression;
+  a passive `SlotSession` fails with `dm.schema.slot_pending` before any member
+  warning exists. Only DMLS reports from an unresolved template.
+- **Known limit (all warning families).** An interpolation stage evaluates
+  `{{ }}` sites end-to-start and drops its collected warnings when a site
+  fails, so a member authored *after* the failing site loses its warning
+  (`--deny` still blocks on it). A failure in a later stage keeps them.
+
 ### Context Values (`ctx.*`)
 
 Context is captured once per compose run and reused across the full document

@@ -322,6 +322,11 @@ That means:
   A candidate from pass 1 is only reported if the name is still unknown after
   schema validation and pass 2, so a key that shell expansion or the schema
   supplies never warns
+- a misspelled member of a typed value (`{{ server.nmae }}` when the schema
+  types `server` as `{ name: string }`) raises the advisory
+  `dm.expression.undeclared_member` once per authored site, judged against
+  the prepared schema, never a provisional one (see
+  [Misspelled members](../topics/darkmatter-expressions.md#misspelled-members))
 - fallbacks work: `{{ color || "unknown" }}`
 - ternaries work: `{{ enabled ? "yes" : "no" }}`
 - helper functions work: `{{ length(items) }}`

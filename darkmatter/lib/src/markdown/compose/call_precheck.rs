@@ -3,7 +3,7 @@
 //! any of its expressions is evaluated.
 //!
 //! The check is passive. It reads the document as prepared for composition,
-//! its effective schema's declared types (never its frontmatter values), and
+//! its schema's declared types (never its frontmatter values), and
 //! the enclosing `::block when` guards, and it runs no expression. It covers
 //! the syntax the enabled stages would evaluate, in every branch, including
 //! blocks whose condition is false:

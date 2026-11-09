@@ -114,6 +114,10 @@ The principles worth carrying around:
   the advisory `dm.expression.undeclared_property` once, unless the expression
   handles the absence (`x || "d"`, `x ? … : …`, `is_null(x)`). See
   [Interpolation § Missing Variables](../inline/interpolation.md#missing-variables).
+  A **member** that a value's known object type does not declare
+  (`server.nmae` when `server` is `{ name: string }`) is also `null`, with its
+  own advisory, `dm.expression.undeclared_member`; see
+  [Misspelled members](#misspelled-members).
 
 Full detail lives under [Parsing](./schemas/parsing/index.md):
 [scanning](./schemas/parsing/scanning.md), [lexing](./schemas/parsing/lexing.md), and
@@ -172,12 +176,16 @@ flowchart TD
     D -- no --> DN["null<br/>(advisory dm.expression.undeclared_property)"]
 ```
 
+The diagram classifies the **root** only. Each member selected after the root
+(`.name`, `["name"]`) is checked separately against the root's known type; see
+[Misspelled members](#misspelled-members).
+
 A missing document property is a valid lookup, not an error, so an optional
 input needs no `||` fallback to be legal: `{{ plan ? 'plan: ' + plan : '' }}`
 renders empty when `plan` is unset. Use a fallback only to choose a default
 (`{{ title || 'Untitled' }}`). Compose reports an unhandled read of a property
 nothing declares as the advisory `dm.expression.undeclared_property`; it is a
-warning and never stops composition.
+warning and stops composition only when `--deny` selects it.
 
 An expression is evaluated once, where it is written. Whatever it returns is
 **data**: if a value, a file read, or a shell command yields text that contains
@@ -541,6 +549,201 @@ access returns `null` and never errors.
 | `config["key"]` where `config` is a string | `null` |
 | `obj["missing"]` | `null` |
 | `obj[0]` where `obj` is an object | `null` |
+
+### Misspelled members
+
+When a value's type is known, Darkmatter checks each member you select from
+it. A name the type does not declare is almost always a typo, so composition
+and the editor (DMLS) report it as the advisory
+`dm.expression.undeclared_member`:
+
+```markdown
+---
+$schema:
+  server: "{ name: string, port: number }"
+server: { name: web, port: 80 }
+---
+{{ server.nmae }}
+```
+
+```text
+Member 'nmae' is not declared by the known object type of 'server' at docs/page.md:6.
+```
+
+The warning never changes the value: the lookup still returns `null`, and the
+span renders empty, exactly as it did before the check existed. The message
+says the **known type** does not declare the member; it does not promise the
+lookup always fails, because data supplied at run time can differ from its
+declared type. Under the default policy the warning never stops composition;
+`md compose --deny dm.expression.undeclared_member` (or `--deny all`) makes it
+block (see [Policy](../cli/policy.md#diagnostics---deny)).
+
+The same check covers every value with a known type, not only frontmatter:
+
+```markdown
+{{ map(load_data("hosts.yaml", "{ name: string, port: number }[]"), h => h.nmae) }}
+{{ map(try(load_data("hosts.yaml", "{ name: string }[]"), []), h => h.nmae) }}
+{{ { name: "web" }.nmae }}
+```
+
+Each line reports `nmae`. A `try(...)` result has the type of either of its
+arguments, so its items are checked; `try` is not an absence guard.
+
+#### When a member is reported
+
+Darkmatter looks at the type of the value the member is read from (its
+**base**) at the place it is read, after any guard has narrowed it. It
+ignores `null` alternatives, then reports the member only when all three hold:
+
+1. the base has at least one non-null alternative;
+2. every non-null alternative is an object whose property names are known and
+   closed;
+3. none of those objects declares the member.
+
+| Base type at the read | Member | Result |
+| --- | --- | --- |
+| `{ name: string }` | `nmae` | warning |
+| `{ name: string }` | `name` | silent, even when an optional `name` is unset |
+| `{ name: string } \| null` | `nmae` | warning |
+| `null` | `nmae` | silent: there is no object to check against |
+| `{ name: string } \| { port: number }` | `name` | silent: one alternative declares it |
+| `{ name: string } \| { port: number }` | `nmae` | warning |
+| `{ name: string } \| string` | `nmae` | silent: not every alternative is an object |
+| `unknown`, `any`, bare `object`, or a dictionary | any | silent |
+
+An open object, an object with pattern keys, or a named type that cannot be
+resolved is unknown, and an unknown alternative keeps the read silent. The
+check is about declarations, not data: a declared optional member is never
+reported, and nothing is evaluated or read to decide. Where the type comes
+from:
+
+| Base | Type used |
+| --- | --- |
+| a frontmatter property (`server`, `fm.server`) | the property's type in the effective schema |
+| a `load_data(file, as)` call with a literal `as` | the contract; a named import inside it (`Host@./types.yaml`) is unknown |
+| a `load_data` call with a computed `as` | unknown: never reported |
+| a callback parameter (`h` in `map(hosts, h => …)`) or a `::map`/`::filter` item | the source's element type |
+| a function result, a literal object | the function's declared return type, the literal's shape |
+| a `local.*` binding | the binding's type |
+| a host global (`seq`, `loop`, `err`), a reserved namespace (`ctx`, `env`, `current`) | never checked |
+
+`fm` and `local` are wrappers, not objects, so `fm.nmae` is a root read (see
+[Missing Variables](../inline/interpolation.md#missing-variables)); the value
+they select is checked, so `fm.server.nmae` reports `nmae`.
+
+#### Access forms
+
+Every way of selecting a constant member is checked the same way:
+
+| Expression | Reported member |
+| --- | --- |
+| `server.nmae`, `(server).nmae`, `fm.server.nmae` | `nmae` |
+| `server["nmae"]` | `nmae`, ranged at the quoted key |
+| `server["a.b"]` | the single key `a.b`: a bracket key is never split at its dots |
+| `hosts[0].nmae`, `load_data("h.yaml", "{ name: string }[]")[0].nmae` | `nmae`: an index on an array keeps its element type |
+| `server.nmae.length` | `nmae` only: after an undeclared step the type is unknown, so later names are not reported |
+| `server[key].nmae` | nothing for `server[key]` (a computed key is not checked); `key` itself is an ordinary read |
+| `sever.name` | only the root advisory `dm.expression.undeclared_property` for `sever` |
+
+#### Handled absence
+
+A member read follows the same absence rules as a root read (see
+[Missing Variables](../inline/interpolation.md#missing-variables)): a read
+that already handles a missing value stays silent. For
+`server: "{ name: string }"`:
+
+| Expression | Result |
+| --- | --- |
+| `server.nmae` | warning |
+| `server.nmae \|\| "none"` | silent: the primary of a fallback |
+| `title \|\| server.nmae` | warning when the right-hand side is evaluated |
+| `server.nmae && server.port` | silent: an `&&` operand is a direct argument to `and`, which accepts `null` |
+| `server.nmae ? 1 : 0` | silent: a ternary condition |
+| `is_null(server.nmae)` | silent: a direct argument to a parameter that accepts `null` |
+| `min(server.nmae, 5)` | warning: `min` does not accept `null` |
+| `is_empty(trim(server.nmae))` | warning: the read is an argument of a nested call |
+| `server.nmae == "x" ? 1 : 0` | warning: a comparison operand is an ordinary read |
+| `server.nmae ? server.nmae : "none"` | silent: the true branch is reached only when the member is present |
+| `server.nmae ? "some" : server.nmae` | warning for the false branch's read |
+| `::block when="server.nmae"` | warning: a directive condition is an ordinary read, since a misspelled gate silently hides content |
+
+Handling the absence only silences the warning; it does not declare the
+member.
+
+#### Composition reports what runs; the editor reports every branch
+
+Composition reports a member only when the expression actually reads it. A
+ternary branch that was not chosen, the right-hand side of a `||` whose left
+side held a value, and a callback over an empty list report nothing. The
+editor reports every authored read in every branch and callback body, because
+it runs nothing:
+
+```markdown
+{{ server.port > 0 ? server.name : server.nmae }}
+```
+
+`md compose` is silent here (the false branch never runs); DMLS underlines
+`nmae`. Both use the same classification, so whenever both report a read, the
+code, message, severity, and position agree.
+
+```mermaid
+flowchart TD
+    S["constant member selector,<br/>e.g. nmae in server.nmae"] --> T{"base type known at the read?<br/>(schema, contract, callback, literal)"}
+    T -- "no, or any alternative unknown" --> Q["silent"]
+    T -- yes --> O{"every non-null alternative<br/>a closed object?"}
+    O -- no --> Q
+    O -- yes --> D{"any alternative<br/>declares the member?"}
+    D -- yes --> Q
+    D -- no --> A{"absence handled?<br/>(fallback, condition, null-accepting argument, guard)"}
+    A -- yes --> Q
+    A -- no --> W{"who is checking?"}
+    W -- "DMLS" --> E["warning on every branch"]
+    W -- "md compose" --> R{"was the selector<br/>evaluated?"}
+    R -- yes --> C["warning, once per authored site"]
+    R -- no --> Q
+```
+
+Composition checks members in:
+
+- frontmatter and body `{{ … }}` interpolation, including inline callbacks
+  such as `map(hosts, h => h.nmae)`;
+- `::block` conditions and `::file`/`::code` `when=` conditions;
+- `::map`/`::filter` gates, callbacks (`sort=`, `while=`, `until=`, …), and
+  region bodies;
+- the condition and the chosen value of a frontmatter `$( … )` ternary.
+
+It does not check a whole-value `::file {{ … }}`, `::code`, or `::url` target
+(a `null` target already warns that the directive was skipped), lifecycle
+stacks, or `expression`-typed frontmatter values, which it stores without
+evaluating. The editor checks body and frontmatter `{{ … }}` spans,
+directive conditions, collection gates and callbacks, and `expression`-typed
+frontmatter values; it does not check lifecycle stacks, and in a frontmatter
+`$( … )` ternary it checks only the `{{ … }}` placeholders, not the condition
+or value branches themselves.
+
+#### One warning per place it is written
+
+A member warning is keyed by the document and the position of the selector
+as written. A callback that runs for a hundred items, a frontmatter value
+evaluated in more than one pass, and a child document included twice each
+give one warning per misspelled selector. Two places that both spell `h.nmae`
+each get their own warning, even when `h` has the same type in both, and the
+same selector in two different child documents is reported once for each
+document. The position always points at the authored text, even after earlier
+stages have rewritten the document.
+
+#### Schemas that are still being resolved
+
+A schema can hold dynamic slots, `{{ … }}` placeholders that are filled in
+when the schema is resolved (see
+[Schema slots](./schemas/schema-slots.md)). A slot never changes which
+members an object declares, so the editor checks members against the
+unresolved schema as soon as you type, before any resolved schema exists. A
+property whose whole type is still waiting on a slot is unknown and stays
+silent. Composition always resolves the schema before it evaluates any
+expression, so it checks members against the resolved schema; a composition
+that cannot resolve its schema fails with `dm.schema.slot_pending` before any
+member warning exists.
 
 ## Namespaces
 

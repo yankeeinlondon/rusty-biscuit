@@ -350,6 +350,7 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 | `dm.style.unknown_key` / `dm.style.deprecated_key`             | `style:` surface problems                                                                             |
 | `dm.expression.malformed` / `dm.expression.unknown_function`   | expression-typed frontmatter values that do not parse or call an unknown function (errors)            |
 | `dm.expression.undeclared_property`                            | an expression reads an undeclared document property (advisory warning; the property is valid)         |
+| `dm.expression.undeclared_member`                              | an expression reads a member its value's known object type does not declare (advisory warning)        |
 
 The severity policy follows one guiding principle: *diagnose edit-time problems, not compose-time ones*. A document is a template; values arrive at compose time via CLI `--set`, seeds, `$(...)` expansion, or an interactive prompt. So:
 

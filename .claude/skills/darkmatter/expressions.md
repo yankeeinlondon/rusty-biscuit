@@ -110,6 +110,45 @@ and DMLS both read it.
   if they grow.
   User docs: `darkmatter/docs/inline/call-check.md`.
 
+**Undeclared member check** (`expression/member_check.rs`,
+`dm.expression.undeclared_member`, Warning). One passive classifier decides
+every constant member selector (dotted variable segment, postfix `.name`,
+string-literal bracket key; a bracket key is one key even with dots):
+`expression_member_findings(expr, text, &TypeScope)` → `MemberFinding
+{ member, subject, span, node_ordinal }`, and `expression_member_diagnostics`
+→ `ExpressionDiagnostic`. The library owns the code
+(`UNDECLARED_MEMBER_CODE`), message (`MemberFinding::message`: "Member 'x' is
+not declared by the known object type of 'subject'."), severity, and span (the
+member name; a bracket key's quotes included). Never build them elsewhere.
+- **Verdict.** The base is typed by `call_check::expression_type` under the
+  read's branch facts, plus one local rule (`base_type`): a constant index or
+  member on a value with no variable path (`load_data(…)[0].nmae`) projects
+  like a path. `scope/projection.rs::declares_member` walks the base's arms
+  (ignoring `null`): `MemberDeclaration::Undeclared` only when every non-null
+  arm is a closed object and none declares the name; open, pattern-key,
+  scalar, dictionary, unknown, or unresolvable-ref arms keep it silent. A
+  chain stops at its first undeclared or unknown step (no cascade). `fm`,
+  `local`, reserved namespaces, host globals, and `null` bases are never
+  checked; a value selected through `fm`/`local` is.
+- **Absence** is the root rules unchanged (`absence::static_member_reads`):
+  fallback primary, ternary condition, `| null` direct argument (so `&&`
+  operands, which bind `and`'s `unknown | null`), and branch facts silence a
+  read; the right-hand side of `||` and comparison operands do not.
+- **Types for a site** come from `DeclaredTypes::for_site(&SiteSchema)`
+  (`DarkmatterSchemas::site_schema_for`): the resolved effective schema, or,
+  while a layer holds unresolved slots, the document **template**
+  (`SiteSchema::Template`, `DeclaredTypes::for_template`). Slots never change
+  declared properties; a constraint waiting on a slot is unknown, never the
+  literals beside it. Trigger/baseline-only properties are unknown in a
+  template. The call check uses the same layer.
+- Consumers: DMLS checks every branch ([dmls.md](dmls.md#call-diagnostics));
+  composition warns only for reached selectors
+  ([compose.md](compose.md#undeclared-members-dmexpressionundeclared_member)).
+  Tests: `lib/tests/l1/member_check.rs` (type, absence, form rows),
+  `lib/tests/l1/compose_member_warnings.rs`, `cli/tests/l1/compose_member_warnings.rs`,
+  `dmls/tests/l1/undeclared_member.rs` (editor/library agreement per surface).
+  User docs: `darkmatter/docs/topics/darkmatter-expressions.md#misspelled-members`.
+
 **Function binding** (`expression/call_binding/`). Ordinary value calls bind
 through the shared coercion engine before their handler runs; handlers are
 `PureFn = fn(&BoundCall) -> Result<Value, String>` and

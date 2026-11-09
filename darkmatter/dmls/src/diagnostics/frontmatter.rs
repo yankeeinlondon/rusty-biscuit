@@ -813,7 +813,8 @@ fn problem_range(
 /// identifier, in any operand position, that is an undeclared document property,
 /// `dm.expression.unknown_function` (`ERROR`) for each call to a function
 /// outside Darkmatter's catalog, the design-time call check's
-/// `dm.expression.incompatible_call` / `dm.expression.uncertain_call`
+/// `dm.expression.incompatible_call` / `dm.expression.uncertain_call` and,
+/// outside a lifecycle stack, `dm.expression.undeclared_member`
 /// ([`FrontmatterCalls`]),
 /// and `dm.expression.nested_span_in_literal` for a lifecycle predicate. All
 /// carry source `darkmatter.frontmatter`; ranges go through the scalar
@@ -1149,7 +1150,7 @@ impl GuardedStackCalls {
     }
 }
 
-/// The design-time call check over the `{{ … }}` spans of frontmatter values
+/// The design-time call and member checks over the `{{ … }}` spans of frontmatter values
 /// outside lifecycle stacks (those are [`stack_expression_diagnostics`]'),
 /// which frontmatter interpolation evaluates. `$schema` declarations are not
 /// interpolated; a span that does not parse, and a stale tree, report

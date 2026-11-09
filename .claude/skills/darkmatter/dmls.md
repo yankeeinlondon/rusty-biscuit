@@ -974,7 +974,10 @@ keep agreeing. User docs:
 [`dmls/docs/diagnostics.md#call-diagnostics`](../../../darkmatter/dmls/docs/diagnostics.md#call-diagnostics).
 
 - **Types.** Every site's `TypeScope` is built over
-  `DeclaredTypes::new(effective.simplified)` (declaration-only), never the
+  `call_check::declared_types(ctx)`: `DeclaredTypes::for_schema` of the
+  effective schema (declaration-only), or `DeclaredTypes::for_template` of the
+  pending template kept in `SlotStatus.template` while slots are unresolved
+  and no snapshot is served, never the
   static-frontmatter layer (which hover's `with_site_scope` uses): a set
   `maybe: 3` does not remove `null`. Enclosing `::block` guards narrow
   through `BodyGuards::scope_at`; ternary and `&&` branches narrow inside the
@@ -987,6 +990,15 @@ keep agreeing. User docs:
   walks must cover the same surfaces.
 - **Ranges.** The argument's span, or the call's for arity, ambiguity, or no
   matching overload. The message is the library's `CallFinding.message`.
+- **Undeclared members.** `call_check::call_diagnostics` is the one choke
+  point: it appends `expression_member_diagnostics` (every branch and callback
+  body, independent of `strict`, `data` types `null`) to the call findings, so
+  every surface that shows call diagnostics (body spans, `when=`, collection
+  gates/callbacks in `providers/collections.rs`, frontmatter `{{ }}` and
+  expression-typed values) shows member warnings. Lifecycle stacks use
+  `stack_call_diagnostics` (calls only). Not checked: a frontmatter `$( … )`
+  ternary's condition and value branches (only `{{ }}` inside them), which
+  composition does check. Tests: `tests/l1/undeclared_member.rs`.
 - **Setting.** `ExpressionsConfig { strict }` in `config/mod.rs`:
   `[expressions] strict` in `.dmls.toml`, `dmls.expressions.strict` from
   `didChangeConfiguration` (DMLS never pulls `workspace/configuration`).

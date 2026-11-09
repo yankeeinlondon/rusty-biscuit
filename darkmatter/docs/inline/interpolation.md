@@ -163,7 +163,10 @@ whether anything **declares** the name:
 ```
 
 The advisory is decided by the name's root: `{{ user.name }}` is reported when
-nothing declares `user`. It is suppressed where the author has handled the
+nothing declares `user`. A misspelled member of a declared, typed root
+(`{{ user.nmae }}` when `user` is `{ name: string }`) is a separate advisory,
+`dm.expression.undeclared_member`, which follows the same absence rules (see
+[Misspelled members](../topics/darkmatter-expressions.md#misspelled-members)). It is suppressed where the author has handled the
 absence:
 
 | Expression | Undeclared `x` reported? |

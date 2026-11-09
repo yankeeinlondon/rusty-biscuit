@@ -1019,7 +1019,7 @@ impl From<SchemaError> for AssemblyError {
 ///
 /// ## Errors
 ///
-/// Propagates [`SchemaError`] from extension loading, baseline merging, `$schema`
+/// Propagates [`SchemaError`] ([`AssemblyError::error`]) from extension loading, baseline merging, `$schema`
 /// resolution, or validator construction so the caller can range a
 /// `dm.schema.prepare` / `dm.schema.invalid_schema_shape` diagnostic. A
 /// template left unresolved is [`SchemaError::UnresolvedSlots`] with its
