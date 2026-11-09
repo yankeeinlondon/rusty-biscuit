@@ -2,9 +2,14 @@
 kind: plan
 total_phases: 4
 created: 2026-11-08
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
-yolo: "true"
+yolo: 'true'
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Windows and WSL2 failure repair plan
@@ -39,10 +44,10 @@ The implementation runs all phases without human gates. It produces an implement
 
 ### Wave 1
 
-- [ ] **Inventory failures**
+- [x] **Inventory failures**
   - Create `implementation-log.md` beside this plan. Link the nightly run, commit, failed jobs and individual test identities; copy relevant excerpts from the existing S5 records and retrieve the missing compile/model_id excerpts with read-only GitHub CLI commands (`GIT_TERMINAL_PROMPT=0`). Reconcile the 141 identities plus separate compile failure without counting parameterized controls as failures.
   - Record current source differences from `a816f1447`, existing repairs, and the remaining messenger and WSL2 evidence. Keep a row per identity with cause, repair location, filter, environment, execution status, and evidence link.
-- [ ] **Record environment**
+- [x] **Record environment**
   - Read declared BUILD variables and OS skill host instructions. At planning time only `BUILD_WSL=build-win` was returned; native Windows and Linux destinations were not declared. Resolve documented host roles from SSH configuration and probe only documented aliases with `BatchMode=yes`; pass matching BUILD variables per invocation, never hardcode them into repository scripts.
   - Record archive-prerequisite status and qualifying existing evidence. Do not mutate standing clones, provision system packages, or run Cargo tests in this phase. Missing access is an explicit unverified acceptance item, not a reason to substitute another OS.
 
