@@ -639,6 +639,14 @@ mod tests {
     }
 
     #[test]
+    fn the_undeclared_member_code_is_deniable_on_compose_only() {
+        use darkmatter::markdown::compose::expression::UNDECLARED_MEMBER_CODE;
+        assert_eq!(parse(Compose, PolicyVerb::Deny, UNDECLARED_MEMBER_CODE), PolicySelector::Code(UNDECLARED_MEMBER_CODE));
+        assert!(long_help(Compose, PolicyVerb::Deny).contains(UNDECLARED_MEMBER_CODE));
+        assert!(parse_selector(Render, PolicyVerb::Deny, UNDECLARED_MEMBER_CODE).is_err());
+    }
+
+    #[test]
     fn every_recovery_code_is_a_compose_diagnostic_code() {
         for entry in POLICY_REGISTRY {
             for code in entry.codes {

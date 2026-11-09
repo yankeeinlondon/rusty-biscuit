@@ -85,6 +85,7 @@ pub mod iterable;
 pub mod iteration;
 pub mod lexer;
 pub mod lint;
+pub mod member_check;
 pub(crate) mod path_projection;
 pub mod prepared;
 pub mod read_gate;
@@ -129,9 +130,10 @@ pub use functions::test_hooks as function_test_hooks;
 pub use ctx::CtxLookup;
 pub use diagnostics::{
     DataLocation, Diagnostic, DiagnosticSource, ExpressionDiagnostic, GrantNeeded, INCOMPATIBLE_CALL_CODE, ReferenceDetails, Severity,
-    UNCERTAIN_CALL_CODE,
+    UNCERTAIN_CALL_CODE, UNDECLARED_MEMBER_CODE,
     call_severity, expression_call_diagnostics, one_based_position,
 };
+pub use member_check::{MemberFinding, expression_member_diagnostics, expression_member_findings};
 pub use host::{
     FactsArtifact, HostCatalogError, HostFunctionCatalog, HostFunctionError, HostFunctionScope, HostFunctions,
     HostFunctionsBuilder, HostHandler, INCOMPLETE_ANALYSIS_CODE, IncompleteHostCall, incomplete_host_calls,

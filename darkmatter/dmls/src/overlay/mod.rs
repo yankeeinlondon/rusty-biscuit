@@ -250,6 +250,10 @@ pub struct SlotStatus {
     /// constraint that is not a slot), when the template is unresolved and
     /// its root is one object shape.
     pub template_shape: Option<Arc<simplified_schema::simplified::SchemaShape>>,
+    /// The document layer of the unresolved template, which types expression
+    /// sites (the call and member checks) while no snapshot is served; `None`
+    /// when a snapshot is served or that layer has no SimplifiedSchema root.
+    pub template: Option<Arc<darkmatter::markdown::schemas::DocumentTemplate>>,
 }
 
 impl DocumentOverlay {
@@ -1306,9 +1310,9 @@ impl OverlayCache {
         let assembled = validation_timing::part(|| {
             schema::assemble(path, text, config, workspace_roots, registry, context, slot_use)
         });
-        let (outcome, pins_missed, template_shape) = match assembled {
-            Ok(bundle) => (SchemaOutcome::Ready(bundle.map(Arc::new)), false, None),
-            Err(error) => match crate::slot_jobs::find_unresolved(&error) {
+        let (outcome, pins_missed, template_shape, template) = match assembled {
+            Ok(bundle) => (SchemaOutcome::Ready(bundle.map(Arc::new)), false, None, None),
+            Err(schema::AssemblyError { error, template }) => match crate::slot_jobs::find_unresolved(&error) {
                 // No snapshot serves this template: the last resolution's
                 // failure, when there is one, stays shown until a refresh
                 // replaces it.
@@ -1318,9 +1322,9 @@ impl OverlayCache {
                         Some(installed) => SchemaOutcome::Failed(Arc::clone(installed)),
                         None => SchemaOutcome::Failed(Arc::new(error)),
                     };
-                    (outcome, true, shape)
+                    (outcome, true, shape, template)
                 }
-                None => (SchemaOutcome::Failed(Arc::new(error)), false, None),
+                None => (SchemaOutcome::Failed(Arc::new(error)), false, None, None),
             },
         };
         let templated = pins_missed
@@ -1347,6 +1351,7 @@ impl OverlayCache {
                 refreshing: view.refreshing || demanded,
                 unresolved: !matches!(outcome, SchemaOutcome::Ready(_)),
                 template_shape,
+                template,
             }
         });
         let named_types = Arc::new(frontmatter_named_types(text, path, &schema_roots, context));
@@ -1810,7 +1815,9 @@ pub(crate) fn resolve_slot_templates(
     context: &FileResolutionContext,
     session: &Arc<darkmatter::markdown::schemas::slots::SlotSession>,
 ) -> Result<(), SchemaError> {
-    schema::assemble(path, text, config, workspace_roots, registry, context, schema::SlotUse::Resolve(session)).map(|_| ())
+    schema::assemble(path, text, config, workspace_roots, registry, context, schema::SlotUse::Resolve(session))
+        .map(|_| ())
+        .map_err(|failure| failure.error)
 }
 
 #[cfg(test)]

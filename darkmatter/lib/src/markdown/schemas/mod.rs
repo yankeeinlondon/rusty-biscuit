@@ -840,6 +840,37 @@ impl DarkmatterSchemas {
         source: &Markdown,
         schema_override: Option<&Value>,
     ) -> Result<Option<EffectiveSchema>, SchemaError> {
+        match self.site_schema_with_override(source, schema_override)? {
+            SiteSchema::Effective(effective) => Ok(effective),
+            SiteSchema::Template { unresolved, .. } => Err(SchemaError::UnresolvedSlots(unresolved)),
+        }
+    }
+
+    /// The schema an expression site of `source` is typed against: the
+    /// effective schema [`Self::effective_for`] builds, or, where that would
+    /// fail with [`SchemaError::UnresolvedSlots`], the document layer's
+    /// template with the unresolved error kept beside it.
+    ///
+    /// Slots live only in constraints, so a template declares the same
+    /// properties and object members its resolution will. The template holds
+    /// the **document** layer only: the pending `$schema` itself, or the
+    /// concrete document schema when only a matched trigger payload is
+    /// pending. Like [`Self::effective_for`] it never resolves a slot the
+    /// session has not already resolved and reads nothing more.
+    ///
+    /// ## Errors
+    ///
+    /// Every error [`Self::effective_for`] returns other than
+    /// [`SchemaError::UnresolvedSlots`].
+    pub fn site_schema_for(&self, source: &Markdown) -> Result<SiteSchema, SchemaError> {
+        self.site_schema_with_override(source, None)
+    }
+
+    fn site_schema_with_override(
+        &self,
+        source: &Markdown,
+        schema_override: Option<&Value>,
+    ) -> Result<SiteSchema, SchemaError> {
         let _resolve = timings::stage(ValidationStage::Resolve);
         crate::note_work!(EffectivePreparation);
         let base_dir = base_dir_for(source, &self.file_resolution_context);
@@ -868,7 +899,7 @@ impl DarkmatterSchemas {
                 // reference. The loader refuses a trigger file as a schema
                 // document, so its refusal is reported as that reference.
                 // That check reads the bytes the resolution just read.
-                Some(simplified_schema::resolve::buffers::with_reads_retained(|| {
+                let resolution = simplified_schema::resolve::buffers::with_reads_retained(|| {
                     let r = resolve::resolve_authored_schema_with_roots(
                         value,
                         authored.as_ref(),
@@ -883,7 +914,20 @@ impl DarkmatterSchemas {
                     })?;
                     triggers::assemble::check_document_schema_not_trigger(&r.referenced_files)?;
                     Ok::<_, SchemaError>(r)
-                })?)
+                });
+                match resolution {
+                    Ok(resolved) => Some(resolved),
+                    Err(SchemaError::UnresolvedSlots(unresolved)) => {
+                        let template = unresolved.pending.as_ref().and_then(|pending| pending.template()).map(
+                            |(root, definitions)| DocumentTemplate {
+                                root: root.clone(),
+                                definitions: Arc::clone(definitions),
+                            },
+                        );
+                        return Ok(SiteSchema::Template { template, unresolved });
+                    }
+                    Err(error) => return Err(error),
+                }
             }
             None => None,
         };
@@ -891,7 +935,19 @@ impl DarkmatterSchemas {
         // Trigger matching + payload resolution. A trigger property the
         // document redeclares is discarded before its slots resolve.
         let document_declared = resolved.as_ref().map(|r| declared_by_json(&r.json_schema)).unwrap_or_default();
-        let trigger_layers = self.resolve_trigger_layers(source, &document_declared)?;
+        let trigger_layers = match self.resolve_trigger_layers(source, &document_declared) {
+            Ok(layers) => layers,
+            Err(SchemaError::UnresolvedSlots(unresolved)) => {
+                let template = resolved.and_then(|document| {
+                    document.simplified.map(|root| DocumentTemplate {
+                        root,
+                        definitions: document.definitions,
+                    })
+                });
+                return Ok(SiteSchema::Template { template, unresolved });
+            }
+            Err(error) => return Err(error),
+        };
 
         // Build the merged schema in precedence order: baseline → triggers →
         // document (highest precedence wins). The lowest-precedence layer is the
@@ -909,7 +965,7 @@ impl DarkmatterSchemas {
         let merged_json: Arc<Value> = match (&self.baseline, trigger_layers.is_empty(), doc_json) {
             // Baseline only — share the Arc, no deep clone.
             (Some(base), true, None) => Arc::clone(&base.json_schema),
-            (None, true, None) => return Ok(None),
+            (None, true, None) => return Ok(SiteSchema::Effective(None)),
             // A lone trigger payload is shared as resolved.
             (None, false, None) if trigger_layers.len() == 1 => Arc::clone(&trigger_layers[0].json_schema),
             (baseline, _, doc) => merged_trigger_schema(
@@ -940,7 +996,7 @@ impl DarkmatterSchemas {
             .as_ref()
             .filter(|document| document.simplified.is_none())
             .map(|document| SchemaRoot::Single(declarations_of_json_schema(&document.json_schema)));
-        Ok(Some(EffectiveSchema {
+        Ok(SiteSchema::Effective(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
             raw_document,
             baseline_declarations: self.baseline.as_ref().map(|baseline| baseline.declarations.clone()),
@@ -973,7 +1029,7 @@ impl DarkmatterSchemas {
             conversion: OnceLock::new(),
             layered_definitions: OnceLock::new(),
             raw_declarations: OnceLock::new(),
-        }))
+        })))
     }
 
     /// The templates (schemas holding `{{ … }}` slots) the effective schema
@@ -1325,6 +1381,34 @@ fn schema_declares_property(root: &Value, schema: &Value, name: &str, depth: usi
         .unwrap_or_default();
     arms.chain(referenced)
         .any(|arm| schema_declares_property(root, arm, name, depth + 1))
+}
+
+/// The document layer of a schema whose slots are still pending: its
+/// expanded SimplifiedSchema root and the definitions its references point
+/// into. For declarations only; nothing validates against it.
+#[derive(Debug, Clone)]
+pub struct DocumentTemplate {
+    pub root: SchemaRoot,
+    pub definitions: Arc<DefinitionTable>,
+}
+
+/// What [`DarkmatterSchemas::site_schema_for`] types a document's
+/// expressions against.
+#[derive(Clone)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the resolved schema is the common case and is returned by value, as `effective_for` returns it"
+)]
+pub enum SiteSchema {
+    /// The resolved effective schema; `None` when the document has none.
+    Effective(Option<EffectiveSchema>),
+    /// A layer still holds unresolved slots. `template` is the document
+    /// layer's SimplifiedSchema root (`None` when that layer has none), and
+    /// `unresolved` the error [`DarkmatterSchemas::effective_for`] returns.
+    Template {
+        template: Option<DocumentTemplate>,
+        unresolved: Box<simplified_schema::UnresolvedSlots>,
+    },
 }
 
 /// The fully-resolved schema for a document.

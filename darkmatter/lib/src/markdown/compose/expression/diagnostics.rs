@@ -43,6 +43,11 @@ pub const INCOMPATIBLE_CALL_CODE: &str = "dm.expression.incompatible_call";
 /// unknown). Always a warning.
 pub const UNCERTAIN_CALL_CODE: &str = "dm.expression.uncertain_call";
 
+/// A member read the known object type of its base does not declare:
+/// every non-null alternative is a closed object without that name, and the
+/// read does not handle its absence. Always a warning.
+pub const UNDECLARED_MEMBER_CODE: &str = "dm.expression.undeclared_member";
+
 /// How serious a diagnostic is, independent of any blocking policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]

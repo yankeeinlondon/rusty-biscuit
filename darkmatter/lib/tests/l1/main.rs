@@ -126,6 +126,7 @@ mod host_functions;
 mod design_time_call_check;
 #[cfg(feature = "effects-instrumentation")]
 mod variable_type_projection;
+mod member_check;
 #[cfg(feature = "effects-instrumentation")]
 mod file_predicates;
 #[cfg(feature = "effects-instrumentation")]

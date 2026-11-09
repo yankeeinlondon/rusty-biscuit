@@ -73,6 +73,7 @@ mod suggest_constraint_phase1;
 mod test_layout;
 mod type_definition_arguments;
 mod type_scope_ownership_guard;
+mod undeclared_member;
 mod undeclared_property;
 mod union_item_editor;
 mod validation_timing_log;

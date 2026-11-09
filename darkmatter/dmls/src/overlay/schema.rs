@@ -7,7 +7,8 @@
 //! zero Claudine-specific code), and the document's own `$schema` on top. The
 //! library ([`darkmatter::markdown::schemas`]) remains the semantic authority;
 //! this module only decides *which* baselines apply and hands the layered
-//! result to [`DarkmatterSchemas::effective_for`].
+//! result to [`DarkmatterSchemas::site_schema_for`], whose pending-template
+//! answer becomes an [`AssemblyError`] carrying the document template.
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -22,8 +23,8 @@ use darkmatter::markdown::schemas::resolve::resolve_schema;
 use simplified_schema::resolve::merge_baseline;
 use simplified_schema::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, darkmatter_base_json_schema_ref, effective_property_shape,
-    triggers::TriggerRegistry,
+    DarkmatterSchemas, DocumentTemplate, EffectiveSchema, SiteSchema, darkmatter_base_json_schema_ref,
+    effective_property_shape, triggers::TriggerRegistry,
 };
 use simplified_schema::{
     DefKey, Definition, DefinitionTable, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaAdvisory,
@@ -992,6 +993,23 @@ impl DefinitionLookup for NoDefinitions {
     }
 }
 
+/// Why [`assemble`] produced no bundle.
+#[derive(Debug)]
+pub(crate) struct AssemblyError {
+    pub(crate) error: SchemaError,
+    /// The document layer of a schema whose slots are unresolved
+    /// ([`SchemaError::UnresolvedSlots`]), which types expression sites
+    /// until a snapshot is served; `None` for every other failure and for a
+    /// document layer with no SimplifiedSchema root.
+    pub(crate) template: Option<Arc<DocumentTemplate>>,
+}
+
+impl From<SchemaError> for AssemblyError {
+    fn from(error: SchemaError) -> Self {
+        Self { error, template: None }
+    }
+}
+
 /// Assembles the effective schema for a document.
 ///
 /// ## Returns
@@ -1003,7 +1021,9 @@ impl DefinitionLookup for NoDefinitions {
 ///
 /// Propagates [`SchemaError`] from extension loading, baseline merging, `$schema`
 /// resolution, or validator construction so the caller can range a
-/// `dm.schema.prepare` / `dm.schema.invalid_schema_shape` diagnostic.
+/// `dm.schema.prepare` / `dm.schema.invalid_schema_shape` diagnostic. A
+/// template left unresolved is [`SchemaError::UnresolvedSlots`] with its
+/// [`AssemblyError::template`].
 pub(crate) fn assemble(
     doc_path: &Path,
     document_text: &str,
@@ -1012,7 +1032,7 @@ pub(crate) fn assemble(
     trigger_registry: Option<TriggerRegistry>,
     file_context: &FileResolutionContext,
     slots: SlotUse<'_>,
-) -> Result<Option<SchemaBundle>, SchemaError> {
+) -> Result<Option<SchemaBundle>, AssemblyError> {
     let combined =
         ValidationStage::Resolve.time(|| combined_baseline(doc_path, config, workspace_roots, file_context))?;
 
@@ -1045,7 +1065,16 @@ pub(crate) fn assemble(
         SlotUse::Resolve(session) => schemas.with_slot_session(Arc::clone(session)),
     };
 
-    match schemas.effective_for(&md)? {
+    let effective = match schemas.site_schema_for(&md)? {
+        SiteSchema::Effective(effective) => effective,
+        SiteSchema::Template { template, unresolved } => {
+            return Err(AssemblyError {
+                error: SchemaError::UnresolvedSlots(unresolved),
+                template: template.map(Arc::new),
+            });
+        }
+    };
+    match effective {
         Some(effective) => Ok(Some(SchemaBundle {
             advisories: effective.advisories().to_vec(),
             effective,

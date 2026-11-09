@@ -16,7 +16,7 @@ use crate::markdown::compose::expression::{
     Expr, FmPath, LOCAL_ROOT, fm_namespace_path, reserved_root_descriptors,
 };
 use crate::markdown::schemas::catalog::GlobalCatalog;
-use crate::markdown::schemas::EffectiveSchema;
+use crate::markdown::schemas::{DocumentTemplate, EffectiveSchema, SiteSchema};
 use simplified_schema::{DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, TypeExpr};
 
 /// The declarations one owner's sites share: its schema projection, its
@@ -220,6 +220,31 @@ impl<'s> DeclaredTypes<'s> {
             raw: Some(schema.raw_declarations()),
             definitions: Some(schema.layered_definitions()),
             ..Self::new(schema.simplified.as_ref())
+        }
+    }
+
+    /// The declared layer of an expression site typed by `schema`
+    /// ([`DarkmatterSchemas::site_schema_for`](crate::markdown::schemas::DarkmatterSchemas::site_schema_for)):
+    /// [`Self::for_schema`] of a resolved schema, or the document template
+    /// alone while slots are pending. A template has no trigger or baseline
+    /// layer, so a property only those layers declare is undeclared there and
+    /// its type is unknown; a constraint waiting on a slot is unknown, never
+    /// the literals written beside it.
+    pub fn for_site(schema: &'s SiteSchema) -> Self {
+        match schema {
+            SiteSchema::Effective(effective) => Self::for_schema(effective.as_ref()),
+            SiteSchema::Template { template, .. } => Self::for_template(template.as_ref()),
+        }
+    }
+
+    /// The declared layer of a pending document template alone (the
+    /// template arm of [`Self::for_site`]), for a holder that keeps the
+    /// template without its [`SiteSchema`]; `None` is an owner with no
+    /// schema.
+    pub fn for_template(template: Option<&'s DocumentTemplate>) -> Self {
+        match template {
+            Some(template) => Self::new(Some(&template.root)).with_definitions(&template.definitions),
+            None => Self::new(None),
         }
     }
 
@@ -614,12 +639,74 @@ pub(super) fn walk(shape: Shape, path: &[Member], definitions: &DefinitionTable)
     path.iter().fold(shape, |shape, member| member_shape(&shape, member, definitions))
 }
 
+/// Whether a value of `shape` is known to declare the member `name`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemberDeclaration {
+    /// At least one non-null alternative declares it, and every one is a
+    /// closed object.
+    Declared,
+    /// Every non-null alternative is a closed object, and none declares it.
+    Undeclared,
+    /// No non-null alternative, or one that is not a closed object: an
+    /// unknown, open, pattern-key, array, scalar, or unresolved type.
+    Unknown,
+}
+
+/// The declaration verdict for the member `name` on a value of `shape`.
+///
+/// `null` alternatives are ignored, so a null-only shape is
+/// [`MemberDeclaration::Unknown`]. A recursive reference opens its
+/// definition's body through the same alias budget [`member_shape`] uses; a
+/// missing definition, an exhausted budget, or an unresolved import is
+/// unknown. An optional member is declared.
+pub(crate) fn declares_member(shape: &Shape, name: &str, definitions: &DefinitionTable) -> MemberDeclaration {
+    let Shape::Arms { arms, .. } = shape else {
+        return MemberDeclaration::Unknown;
+    };
+    arms_declare(arms, name, definitions, definitions.len())
+}
+
+fn arms_declare(arms: &[PropertyAtom], name: &str, definitions: &DefinitionTable, aliases: usize) -> MemberDeclaration {
+    if arms.is_empty() {
+        return MemberDeclaration::Unknown;
+    }
+    let mut declared = false;
+    for arm in arms {
+        match arm_declares(arm, name, definitions, aliases) {
+            MemberDeclaration::Unknown => return MemberDeclaration::Unknown,
+            MemberDeclaration::Declared => declared = true,
+            MemberDeclaration::Undeclared => {}
+        }
+    }
+    if declared { MemberDeclaration::Declared } else { MemberDeclaration::Undeclared }
+}
+
+fn arm_declares(atom: &PropertyAtom, name: &str, definitions: &DefinitionTable, aliases: usize) -> MemberDeclaration {
+    if atom.is_array {
+        return MemberDeclaration::Unknown;
+    }
+    match &atom.ty {
+        TypeExpr::InlineObject(shape) if shape.pattern_keys.is_empty() => {
+            if shape.properties.contains_key(name) {
+                MemberDeclaration::Declared
+            } else {
+                MemberDeclaration::Undeclared
+            }
+        }
+        TypeExpr::Ref(key) if aliases > 0 => match definitions.get(key).map(|definition| Shape::of_type(&definition.body)) {
+            Some(Shape::Arms { arms, .. }) => arms_declare(&arms, name, definitions, aliases - 1),
+            _ => MemberDeclaration::Unknown,
+        },
+        _ => MemberDeclaration::Unknown,
+    }
+}
+
 /// The type of `member` read from a value of `shape`: the union over its
 /// alternatives, with `null` when the value itself may be `null` (a read
 /// below `null` is `null`). An alternative the step cannot follow — an
 /// undeclared or dynamic member, an open object, a scalar — contributes
 /// `unknown`, which absorbs the rest.
-fn member_shape(shape: &Shape, member: &Member, definitions: &DefinitionTable) -> Shape {
+pub(crate) fn member_shape(shape: &Shape, member: &Member, definitions: &DefinitionTable) -> Shape {
     let Shape::Arms { arms, nullable } = shape else {
         return Shape::Unknown { non_null: false };
     };
@@ -717,4 +804,38 @@ fn constant_member(index: &Expr) -> Option<Member> {
 fn index_literal(number: f64) -> Option<i64> {
     const LIMIT: f64 = 9_223_372_036_854_775_808.0; // 2^63
     (number.fract() == 0.0 && (-LIMIT..LIMIT).contains(&number)).then_some(number as i64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markdown::compose::expression::parse;
+    use crate::markdown::schemas::DarkmatterSchemas;
+    use crate::markdown::{Markdown, compose::ComposeSource};
+
+    /// A reference whose definition is present is still unknown once the
+    /// alias budget is spent: only a cycle of aliases could spend it.
+    #[test]
+    fn an_exhausted_alias_budget_is_unknown() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("types.yaml"),
+            "kind: schema\ntypes:\n    node:\n        label: string(required)\n        children: node[](required)\n",
+        )
+        .unwrap();
+        let path = dir.path().join("doc.md");
+        std::fs::write(&path, "---\n$schema:\n  tree: node(required)@./types.yaml\n---\nBody\n").unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path()).with_repository_root(dir.path());
+        let markdown = Markdown::try_from(path.as_path()).unwrap().with_source(ComposeSource::File(path.clone()));
+        let effective = DarkmatterSchemas::new(context).effective_for(&markdown).unwrap().expect("a schema");
+        let declared = DeclaredTypes::for_schema(Some(&effective));
+        let site = super::super::TypeScope::unguarded(&declared);
+        let Shape::Arms { arms, .. } = site.type_of_expr(&parse("tree.children[0]").unwrap()).unwrap().shape().clone() else {
+            panic!("a typed item");
+        };
+        let definitions = site.definitions();
+        assert!(matches!(arms[0].ty, TypeExpr::Ref(_)));
+        assert_eq!(arm_declares(&arms[0], "label", definitions, definitions.len()), MemberDeclaration::Declared);
+        assert_eq!(arm_declares(&arms[0], "label", definitions, 0), MemberDeclaration::Unknown);
+    }
 }

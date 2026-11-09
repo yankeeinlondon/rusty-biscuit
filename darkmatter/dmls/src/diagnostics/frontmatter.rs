@@ -919,8 +919,14 @@ fn expression_diagnostics(
                             calls.push(ctx, doc_span, found, out);
                         }
                     }
+                    // A lifecycle stack's value gets call findings only.
                     None => {
-                        for found in calls.check(&parsed) {
+                        let found = if lifecycle.stack_event(&path).is_some() {
+                            calls.check_stack(&parsed)
+                        } else {
+                            calls.check(&parsed, expression)
+                        };
+                        for found in found {
                             let doc_span = value.project(found.span.clone()).unwrap_or_else(|| value.expression_span());
                             calls.push(ctx, doc_span, found, out);
                         }
@@ -1049,7 +1055,7 @@ fn stack_expression_diagnostics(
                 }
             }
             None => {
-                for found in calls.check(&parsed) {
+                for found in calls.check_stack(&parsed) {
                     let doc_span = expression.range(found.span.clone());
                     calls.push(ctx, doc_span, found, out);
                 }
@@ -1169,7 +1175,7 @@ fn interpolation_call_diagnostics(
         let Ok(parsed) = crate::overlay::expressions::parse(&interpolation.text) else {
             continue;
         };
-        for found in calls.check(&parsed) {
+        for found in calls.check(&parsed, &interpolation.text) {
             let doc_span = interpolation.project(found.span.clone()).unwrap_or_else(|| interpolation.outer_span());
             calls.push(ctx, doc_span, found, out);
         }
@@ -1192,11 +1198,21 @@ impl<'d> FrontmatterCalls<'d> {
         }
     }
 
+    /// Call and member findings of `expr`, parsed from `text`.
     fn check(
         &self,
         expr: &darkmatter::markdown::compose::expression::SpannedExpr,
+        text: &str,
     ) -> Vec<crate::diagnostics::call_check::CallDiagnostic> {
-        crate::diagnostics::call_check::call_diagnostics(expr, &self.site, self.strict)
+        crate::diagnostics::call_check::call_diagnostics(expr, text, &self.site, self.strict)
+    }
+
+    /// Call findings alone, for a lifecycle stack's expression.
+    fn check_stack(
+        &self,
+        expr: &darkmatter::markdown::compose::expression::SpannedExpr,
+    ) -> Vec<crate::diagnostics::call_check::CallDiagnostic> {
+        crate::diagnostics::call_check::stack_call_diagnostics(expr, &self.site, self.strict)
     }
 
     fn push(

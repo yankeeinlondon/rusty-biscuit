@@ -69,7 +69,7 @@ pub(super) fn diagnostics(
     let scan = scan_collection_regions_lenient(ctx.text);
     for authored in authored_sites(&scopes, &scan, &site) {
         let text = &authored.site.text;
-        for found in call_check::call_diagnostics(&authored.site.expression, &authored.site.scope, strict) {
+        for found in call_check::call_diagnostics(&authored.site.expression, text, &authored.site.scope, strict) {
             if let Some(range) = ctx.source_map.byte_range_to_lsp(authored.authored(found.span.clone())) {
                 out.push(call_check::lsp_diagnostic(range, source::COMPOSE, found));
             }

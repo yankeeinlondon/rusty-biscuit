@@ -1089,9 +1089,9 @@ fn expression_diagnostics(
     let unguarded = TypeScope::unguarded(&declared);
     let guards = collections::scopes(ctx.text);
     let strict = ctx.config.expressions.strict;
-    let calls = |expr: &SpannedExpr, at: usize, project: &dyn Fn(SourceSpan) -> SourceSpan| {
+    let calls = |expr: &SpannedExpr, text: &str, at: usize, project: &dyn Fn(SourceSpan) -> SourceSpan| {
         let site = guards.scope_at(unguarded.clone(), at);
-        call_check::call_diagnostics(expr, &site, strict)
+        call_check::call_diagnostics(expr, text, &site, strict)
             .into_iter()
             .filter_map(|found| {
                 let range = ctx.source_map.byte_range_to_lsp(project(found.span.clone()))?;
@@ -1122,7 +1122,7 @@ fn expression_diagnostics(
                 Some(2) if authored.get(1..authored.len() - 1) == Some(value.value.as_str()) => Some(value.span.start + 1),
                 _ => None,
             };
-            out.extend(calls(&expr, directive.span.start, &|span: SourceSpan| match base {
+            out.extend(calls(&expr, &value.value, directive.span.start, &|span: SourceSpan| match base {
                 Some(base) => base + span.start..base + span.end,
                 None => value.span.clone(),
             }));
@@ -1148,7 +1148,7 @@ fn expression_diagnostics(
             }
             Ok(expr) => {
                 let base = interpolation.inner.start;
-                out.extend(calls(&expr, base, &|span: SourceSpan| base + span.start..base + span.end));
+                out.extend(calls(&expr, &interpolation.text, base, &|span: SourceSpan| base + span.start..base + span.end));
                 for (name, span) in expressions::unknown_function_calls(&expr, &interpolation.text) {
                     if let Some(range) =
                         ctx.source_map.byte_range_to_lsp(base + span.start..base + span.end)

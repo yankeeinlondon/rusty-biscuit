@@ -291,3 +291,104 @@ fn outside_a_slot_a_contract_naming_a_template_is_unresolved() {
     let message = format!("{}", failure.error);
     assert!(message.contains("unresolved") || message.contains("slot"), "{message}");
 }
+
+mod site_schemas {
+    use super::*;
+    use darkmatter::markdown::compose::ComposeSource;
+    use darkmatter::markdown::compose::expression::{
+        ArgumentCategory, DeclaredTypes, Shape, TypeScope, check_expression_calls, expression_member_findings, parse,
+        parse_spanned,
+    };
+    use darkmatter::markdown::schemas::SiteSchema;
+    use simplified_schema::TypeExpr;
+
+    /// A pending document schema: `os` waits on a pure literal slot beside a
+    /// literal member, `server` is a closed object.
+    const PENDING: &str = "---\n$schema:\n  os: enum(Windows, {{ 123 }}; required)\n  server: '{ name: string }'\nos: Windows\n---\nBody.\n";
+    /// The same schema with the slot dropped.
+    const CONCRETE: &str = "---\n$schema:\n  os: enum(Windows; required)\n  server: '{ name: string }'\nos: Windows\n---\nBody.\n";
+
+    fn schemas_at(dir: &Path) -> DarkmatterSchemas {
+        DarkmatterSchemas::new(
+            biscuit_file::FileResolutionContext::new(dir)
+                .with_env(HashMap::new())
+                .with_repository_root(dir),
+        )
+    }
+
+    fn markdown(dir: &Path, name: &str, text: &str) -> Markdown {
+        let path = dir.join(name);
+        write(&path, text);
+        Markdown::try_from(path.as_path()).unwrap().with_source(ComposeSource::File(path))
+    }
+
+    #[cfg(feature = "work-counters")]
+    fn slot_runs() -> u64 {
+        darkmatter::work_counters::snapshot().get(darkmatter::work_counters::Work::SlotResolution)
+    }
+
+    #[test]
+    fn a_pending_document_schema_types_its_sites_from_the_template() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = biscuit_file::canonicalize_simplified(temp.path()).unwrap();
+        let schemas = schemas_at(&dir);
+        let pending = markdown(&dir, "pending.md", PENDING);
+
+        #[cfg(feature = "work-counters")]
+        let before = slot_runs();
+        let site = schemas.site_schema_for(&pending).expect("a pending template is not an error");
+        #[cfg(feature = "work-counters")]
+        assert_eq!(slot_runs(), before, "no slot is evaluated");
+
+        let SiteSchema::Template { template: Some(template), unresolved } = &site else {
+            panic!("a pending document schema is a template");
+        };
+        assert_eq!(unresolved.slots.len(), 1);
+        assert!(template.definitions.is_empty());
+        let declared = DeclaredTypes::for_site(&site);
+        let scope = TypeScope::unguarded(&declared);
+        let server = scope.type_of_expr(&parse("server").unwrap()).expect("a document property").shape().clone();
+        let Shape::Arms { arms, .. } = &server else { panic!("server is typed: {server:?}") };
+        let TypeExpr::InlineObject(shape) = &arms[0].ty else { panic!("server is an object: {server:?}") };
+        assert_eq!(shape.properties.keys().collect::<Vec<_>>(), ["name"]);
+        assert!(shape.pattern_keys.is_empty());
+        let text = "server.nmae";
+        let findings = expression_member_findings(&parse_spanned(text).unwrap(), text, &scope);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+
+        // `effective_for` keeps reporting the template as unresolved.
+        assert!(matches!(schemas.effective_for(&pending), Err(simplified_schema::SchemaError::UnresolvedSlots(_))));
+
+        let concrete = schemas.site_schema_for(&markdown(&dir, "concrete.md", CONCRETE)).expect("resolves");
+        assert!(matches!(concrete, SiteSchema::Effective(Some(_))), "a concrete schema is effective");
+        let none = schemas.site_schema_for(&markdown(&dir, "plain.md", "---\ntitle: x\n---\nBody.\n")).unwrap();
+        assert!(matches!(none, SiteSchema::Effective(None)));
+    }
+
+    /// A constraint waiting on a slot is unknown to the call check, never
+    /// the literal members written beside it: the concrete `enum(Windows)`
+    /// is judged as a string, the pending one is not judged at all.
+    #[test]
+    fn a_pending_enum_is_not_judged_by_its_literal_members() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = biscuit_file::canonicalize_simplified(temp.path()).unwrap();
+        let schemas = schemas_at(&dir);
+        let categories = |site: &SiteSchema| -> Vec<ArgumentCategory> {
+            let declared = DeclaredTypes::for_site(site);
+            let scope = TypeScope::unguarded(&declared);
+            ["upper(os)", "min(os, 1)", "os == 'Linux' ? upper(os) : ''"]
+                .into_iter()
+                .map(|text| check_expression_calls(&parse_spanned(text).unwrap(), &scope)[0].category())
+                .collect()
+        };
+        let concrete = schemas.site_schema_for(&markdown(&dir, "concrete.md", CONCRETE)).unwrap();
+        assert_eq!(
+            categories(&concrete),
+            [ArgumentCategory::Compatible, ArgumentCategory::Uncertain, ArgumentCategory::Compatible],
+            "control: the literal list types the argument"
+        );
+        let pending = schemas.site_schema_for(&markdown(&dir, "pending.md", PENDING)).unwrap();
+        assert!(matches!(pending, SiteSchema::Template { .. }));
+        assert_eq!(categories(&pending), [ArgumentCategory::Unknown; 3]);
+    }
+}

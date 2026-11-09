@@ -18,6 +18,7 @@
 //! | `dm.expression.malformed`, document-body span | `WARNING` | A body `{{ … }}` is only inferred to be an expression. |
 //! | `dm.expression.undeclared_property` | `WARNING` | Advisory: the property is valid and `null` unless supplied at runtime. |
 //! | `dm.expression.unknown_function` | `ERROR` | The function catalog is closed, so compose fails on the call. |
+//! | `dm.expression.undeclared_member` | `WARNING` | Advisory: the member's base has a known closed object type that does not declare it, so the read is `null`; composition warns only where it reaches the read. |
 //! | `dm.expression.unavailable_global` | `ERROR` | The event's view declares the global unavailable, so the read fails when the stack runs. |
 //! | `dm.expression.nested_span_in_literal` | `ERROR` | Its surfaces never re-interpolate the literal. |
 //! | `dm.expression.incompatible_call` | `ERROR` | Argument category 5 (or a wrong argument count or ambiguous overload): composition rejects the document. |
@@ -164,6 +165,9 @@ pub mod code {
     pub const EXPRESSION_UNDECLARED_PROPERTY: &str = "dm.expression.undeclared_property";
     /// A call to a function outside Darkmatter's closed function catalog.
     pub const EXPRESSION_UNKNOWN_FUNCTION: &str = darkmatter::markdown::compose::report_diagnostics::UNKNOWN_FUNCTION_CODE;
+    /// A constant member read whose base has a known closed object type
+    /// that does not declare the member.
+    pub const EXPRESSION_UNDECLARED_MEMBER: &str = darkmatter::markdown::compose::expression::UNDECLARED_MEMBER_CODE;
     /// A read, inside a lifecycle stack, of a global the event's binding view
     /// declares unavailable (`err` outside an error event).
     pub const EXPRESSION_UNAVAILABLE_GLOBAL: &str = "dm.expression.unavailable_global";
