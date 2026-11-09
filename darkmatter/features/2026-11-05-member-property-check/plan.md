@@ -1,7 +1,7 @@
 ---
 kind: plan
 created: 2026-11-08
-phase: 4
+phase: 6
 total_phases: 7
 agent: claude/sonnet
 yolo: true
@@ -46,6 +46,42 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/member_check.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+- darkmatter/lib/src/markdown/compose/inline/collection_blocks.rs
+- darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+- darkmatter/lib/src/markdown/compose/inline/page_blocks.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/member_sites.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/tests/l1/compose_member_warnings.rs
+- darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+- darkmatter/lib/tests/l1/compose_member_warnings.rs
+- darkmatter/cli/tests/l1/compose_member_warnings.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/undeclared_member.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 ---
 
 # Plan: Member Property Check
@@ -129,26 +165,26 @@ Each item has a named test in the phase that delivers it.
 
 - [ ] Every row of the spec's type table and absence table is pinned through
   `expression_member_findings` (Phase 2).
-- [ ] AC1: the `map(load_data(...), h => h.nmae)` document composes under the
+- [x] AC1: the `map(load_data(...), h => h.nmae)` document composes under the
   default policy with exactly one warning at `nmae` for three rows, none for
   `[]`; DMLS reports it in both cases; a computed contract reports neither
   (Phases 3, 5).
-- [ ] AC2: dot, parenthesized, `fm.`, and constant-bracket forms; optional unset
+- [x] AC2: dot, parenthesized, `fm.`, and constant-bracket forms; optional unset
   member silent; typed function return and literal object bases (Phases 2, 5).
-- [ ] AC3: a schema with a pending enum slot reports `server.nmae` in DMLS before
+- [x] AC3: a schema with a pending enum slot reports `server.nmae` in DMLS before
   its snapshot is published, and composition reports it with and without
   resolution (Phases 3, 5).
-- [ ] AC4–AC6: union/scalar/dictionary/open/pattern/bounded-ref/unresolved-import
+- [x] AC4–AC6: union/scalar/dictionary/open/pattern/bounded-ref/unresolved-import
   rows; nested paths; dotted bracket key; computed key; typed array element;
   no cascade; shadowing; per-site identity; include dedup (Phases 2, 5).
-- [ ] AC7: every covered composition surface, library/editor agreement on code,
+- [x] AC7: every covered composition surface, library/editor agreement on code,
   message, severity, span; the documented reachability difference; body edits,
   multiline frontmatter, Unicode before the member (Phase 5).
-- [ ] AC8: default success; `--deny` code and `--deny all` stop; structured CLI
+- [x] AC8: default success; `--deny` code and `--deny all` stop; structured CLI
   output carries the shared diagnostic with clean stderr; a later failure keeps
   earlier member warnings; existing root, suppression, namespace, and
   unobserved-evaluator tests pass unchanged (Phase 5).
-- [ ] `try(...)` typing feeds member checks: `try(load_data(..., "{ a: string }[]"), [])`
+- [x] `try(...)` typing feeds member checks: `try(load_data(..., "{ a: string }[]"), [])`
   items are checked; `try` is not an absence guard (Phases 2, 5).
 - [ ] AC9: `docs/topics/darkmatter-expressions.md`, `dmls/docs/diagnostics.md`,
   `docs/cli/policy.md`, and the Darkmatter skill describe current behavior with
@@ -755,14 +791,14 @@ under the precheck's schema.
 
 ### Wave 8 (parallel; disjoint files)
 
-- [ ] **Observer plumbing** — M14 in `expression/absence.rs` (trait, `Observation`)
+- [x] **Observer plumbing** — M14 in `expression/absence.rs` (trait, `Observation`)
   and `expression/mod.rs` (`evaluate_expr`, `evaluate_observed`). Unit tests in
   `absence.rs`'s test module: dotted variable, postfix access, bracket key each
   report their ordinal; unchosen ternary branch and short-circuited `||` operand
   report nothing; a callback over `[]` reports nothing and over three items
   reports its ordinal once; an expression that fails after a read still reports
   it; `()` and `Vec<MissingRoot>` observers unchanged.
-- [ ] **Candidate store and key** — M15 in new `member_sites.rs` (register in
+- [x] **Candidate store and key** — M15 in new `member_sites.rs` (register in
   `compose/mod.rs`) and the `member_candidates` field on `ComposeReport`
   (`context/report.rs`, not merged in the child merge at `:565`). Unit tests: key
   equality; no key when projection fails; text mismatch yields nothing; repeated
@@ -770,7 +806,7 @@ under the precheck's schema.
 
 ### Wave 9 (after Wave 8)
 
-- [ ] **Precheck candidates** — M16/M17 in `call_precheck.rs`,
+- [x] **Precheck candidates** — M16/M17 in `call_precheck.rs`,
   `schema_validation.rs` (`site_schema_for` wrapper), and
   `pipeline/mod.rs::run_call_precheck`. Existing `compose_call_precheck.rs` tests
   pass unchanged.
@@ -782,23 +818,23 @@ the surface's own projector (M15), and routes warnings per M18. Tests for these
 surfaces live in Phase 5's file; each task adds a focused unit test in its own
 file where the module already has a test module.
 
-- [ ] **Interpolation** — `interpolation/evaluator.rs`, `interpolation/rewrite.rs`,
+- [x] **Interpolation** — `interpolation/evaluator.rs`, `interpolation/rewrite.rs`,
   `inline/interpolation.rs` (body `rewrite_body`, target pass, pending reads),
   `frontmatter_interpolation.rs` (evaluator at `:1073`, drains at `:1168`,
   `:1251`). Body warnings are sorted by authored start before
   `report.add_warnings`, as roots are (`inline/interpolation.rs:238-240`).
-- [ ] **Conditions** — `conditions.rs` (`ConditionSite::evaluate`,
+- [x] **Conditions** — `conditions.rs` (`ConditionSite::evaluate`,
   `evaluate_condition_observed`), `page_blocks/engine.rs` (`:70`, `:157`),
   `transclusion/engine.rs` (`:686`).
-- [ ] **Collections** — `collection_blocks/engine.rs` (`:339-340` gates and
+- [x] **Collections** — `collection_blocks/engine.rs` (`:339-340` gates and
   callbacks, and region-body interpolation keys through the copy's origin).
-- [ ] **Frontmatter `$()`** — `frontmatter_shell_expansion.rs` (`:1791`, `:2029`,
+- [x] **Frontmatter `$()`** — `frontmatter_shell_expansion.rs` (`:1791`, `:2029`,
   `:2089`) and the routing at `pipeline/mod.rs:604-607` (the only task in this
   wave that edits `pipeline/mod.rs`).
 
 ### Validation checkpoint (end of Phase 4)
 
-- [ ] `just test` and `just lint` in `darkmatter/` pass; `undeclared_property`,
+- [x] `just test` and `just lint` in `darkmatter/` pass; `undeclared_property`,
   `unknown_identifier_warning.rs`, and the existing compose performance tests
   pass unchanged.
 
@@ -809,7 +845,7 @@ in-process; spawn `md` only to prove CLI wiring.
 
 ### Wave 11 (parallel; disjoint files)
 
-- [ ] **Library composition** — `lib/tests/l1/compose_member_warnings.rs`, through
+- [x] **Library composition** — `lib/tests/l1/compose_member_warnings.rs`, through
   the compose entry `compose_call_precheck.rs` uses:
   - `ac1_rows_and_empty`: three rows → one warning at `nmae` (line, column),
     composition succeeds; empty list → none; computed contract → none and no
@@ -842,14 +878,14 @@ in-process; spawn `md` only to prove CLI wiring.
   - `discovery_pass_reports_none`: a `defer_expression_failures` request reports
     none;
   - `pass_repetition`: a frontmatter leaf evaluated in both passes → one warning.
-- [ ] **CLI** — `cli/tests/l1/compose_member_warnings.rs` via
+- [x] **CLI** — `cli/tests/l1/compose_member_warnings.rs` via
   `CliProcessFixture`: default `md compose` exits 0 and the warning appears on
   stderr for Markdown output; `--deny dm.expression.undeclared_member` exits 1
   with the shared diagnostic and no deliverable; `--deny all` likewise; JSON
   output carries `code`, `severity: warning`, `source.line`/`column` in the
   envelope `diagnostics` with stderr empty; `md compose --help` lists the code.
   Existing `policy_verbs.rs` and `compose_call_warnings.rs` pass unchanged.
-- [ ] **Agreement** — in `dmls/tests/l1/undeclared_member.rs`, add
+- [x] **Agreement** — in `dmls/tests/l1/undeclared_member.rs`, add
   `library_and_editor_agree`: per surface fixture, the DMLS diagnostic and the
   composition warning's `diagnostic` match on code, message, severity, and span
   (composition one-based character column − 1 equals the LSP character for BMP
@@ -858,7 +894,7 @@ in-process; spawn `md` only to prove CLI wiring.
 
 ### Validation checkpoint (end of Phase 5)
 
-- [ ] `just test` and `just lint` in `darkmatter/` pass. `just test-l2` is not
+- [x] `just test` and `just lint` in `darkmatter/` pass. `just test-l2` is not
   required (no terminal behavior).
 
 ## Phase 6 — Documentation and skills

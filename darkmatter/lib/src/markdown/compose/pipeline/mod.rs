@@ -596,14 +596,25 @@ impl Markdown {
                     effective: prepared_schemas.effective_for(self),
                     ctx: shell_expansion::site::authored_context(self, None),
                 });
-            let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
-                self.frontmatter_mut(),
-                options,
-                runtime,
-                &mut provenance,
-                &fse_ctx,
-                fse_templates.as_ref(),
-            )?;
+            // Member reads a ternary reached are judged before its command
+            // runs; a discovery pass reports none.
+            let member_candidates = std::sync::Arc::clone(&report.member_candidates);
+            let fse_report = {
+                let observed: &ComposeReport = report;
+                let mut check = |warnings: &[ComposeWarning]| stop_if_blocked_with(observed, options, None, warnings, &[]);
+                let members = (!options.defer_expression_failures && !member_candidates.is_empty()).then(|| {
+                    frontmatter_shell_expansion::ShellMembers { candidates: &member_candidates, check: &mut check }
+                });
+                frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
+                    self.frontmatter_mut(),
+                    options,
+                    runtime,
+                    &mut provenance,
+                    &fse_ctx,
+                    fse_templates.as_ref(),
+                    members,
+                )?
+            };
             report.frontmatter_shell_expansions_applied = fse_report.replacements;
             report.shell_approvals_used += fse_report.approvals_used;
             report.add_warnings(fse_report.warnings);
@@ -1035,13 +1046,16 @@ fn interpolate_frontmatter_pass(
         &options.exclude_keys,
         &options.name_coercion_keys,
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
+        (!options.defer_expression_failures).then(|| report.member_candidates.clone()),
     )
     .map_err(|failure| attribute_frontmatter_failure(failure, options, fm_authored_ctx, &fm_source_ctx))
 }
 
 /// Runs the passive call check and adds its warnings to `report`; the
 /// warnings found before a rejection are reported with it, as a later
-/// stage's failure keeps the earlier warnings.
+/// stage's failure keeps the earlier warnings. The undeclared-member
+/// candidates it found are kept on `report` for the evaluating stages
+/// ([`ComposeReport::member_candidates`]).
 ///
 /// Out of line, like `finish_document`: its temporaries would otherwise sit
 /// in the pipeline frame that recurs once per nested composition.
@@ -1054,10 +1068,11 @@ fn run_call_precheck(
     report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
     use super::call_precheck::{PrecheckFailure, check_document};
-    let effective = prepared_schemas.effective_for(markdown);
-    match check_document(markdown, provenance, options, effective.as_ref()) {
-        Ok(warnings) => {
+    let site = prepared_schemas.site_schema_for(markdown);
+    match check_document(markdown, provenance, options, &site) {
+        Ok((warnings, candidates)) => {
             report.add_warnings(warnings);
+            report.member_candidates = std::sync::Arc::new(candidates);
             Ok(())
         }
         Err(PrecheckFailure::Frontmatter { failure, earlier }) => {

@@ -46,6 +46,7 @@ const INVENTORY: &[(&str, &str, Coverage)] = &[
     ("Doc", "markdown/compose/expression/binding.rs", Coverage::Fixture),
     ("TestLookup", "markdown/compose/expression/mod.rs", Coverage::Fixture),
     ("Nothing", "markdown/compose/expression/absence.rs", Coverage::Fixture),
+    ("Json", "markdown/compose/expression/absence.rs", Coverage::Fixture),
     ("FixtureLookup", "markdown/compose/expression/semantics.rs", Coverage::Fixture),
     ("FixtureLookup", "markdown/compose/expression/catalog/tests.rs", Coverage::Fixture),
 ];

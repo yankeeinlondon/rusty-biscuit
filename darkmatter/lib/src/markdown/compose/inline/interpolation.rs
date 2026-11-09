@@ -12,6 +12,7 @@ use super::super::expression::{
 };
 use super::super::context::report::CandidateLocus;
 use super::super::expression::absence::MissingRoot;
+use super::super::member_sites::MemberFrame;
 use super::super::pipeline::{FinalVerdict, blocking_guard};
 use super::super::schema_validation::PreparedSchemas;
 use super::super::ComposeWarning;
@@ -192,9 +193,14 @@ fn rewrite_body<L: EvaluationLookup>(
     let BodyRewrite { markdown, state, schemas, options, document, runtime, scan_mode } = rewrite;
     let verdict = FinalVerdict { markdown, state, schemas };
     let lookup = SiteLookup::new(document, scopes, Some(&runtime.iteration));
-    let evaluator = interpolation::Evaluator::new(&lookup)
+    let mut evaluator = interpolation::Evaluator::new(&lookup)
         .with_presentation_values(state.presentation_values())
         .observing_missing_roots();
+    // A discovery pass reports no member reads; a body with no map to its
+    // authored text names no site.
+    if let Some(origin) = origin.filter(|_| !options.defer_expression_failures) {
+        evaluator = evaluator.with_member_sites(report.member_candidates.clone(), MemberFrame::Body(origin));
+    }
     let authored = markdown.loaded_source_context_for_errors();
     let locate = |root: &MissingRoot| {
         root.span

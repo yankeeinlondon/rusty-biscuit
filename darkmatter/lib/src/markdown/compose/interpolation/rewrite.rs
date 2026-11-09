@@ -369,6 +369,10 @@ pub(crate) fn interpolate_text_selected<L: EvaluationLookup>(
                 let mark = evaluator.missing_root_mark();
                 let evaluated = evaluator.eval(&expr);
                 evaluator.locate_missing_roots(mark, Some(loc.start..loc.end));
+                // Reversed with the rest below, so they end in authored order.
+                let mut members = evaluator.member_warnings(&loc.expression, &(loc.start..loc.end));
+                members.reverse();
+                warnings.append(&mut members);
                 match evaluated {
                     EvalResult::Value(replacement) => {
                         // Inherit line indentation for multiline replacements
@@ -512,11 +516,13 @@ pub(crate) fn interpolate_value_guarded<L: EvaluationLookup>(
         // the context-typo check on its single parsed expression — otherwise
         // `phase: "{{ ctx.toady }}"` (resolving to null) would warn in body text
         // but stay silent in frontmatter.
-        let warnings = evaluator.collect_context_warnings(&expr, warning_stage);
-        show_new_warnings(&mut before_eval, &warnings, &mut 0)?;
-        let value = evaluator
-            .eval_json(&expr)
-            .map_err(|cause| located(interpolation_error(&loc.expression, cause)))?;
+        let mut warnings = evaluator.collect_context_warnings(&expr, warning_stage);
+        let mut shown = 0;
+        show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
+        let value = evaluator.eval_json(&expr);
+        warnings.extend(evaluator.member_warnings(&loc.expression, &(loc.start..loc.end)));
+        let value = value.map_err(|cause| located(interpolation_error(&loc.expression, cause)))?;
+        show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
         return Ok((value, 1, warnings));
     }
     let result = interpolate_text_guarded(input, None, evaluator, ScanMode::Plain, policy, warning_stage, before_eval, None)?;
@@ -1279,6 +1285,59 @@ mod tests {
                 report.warnings[0].code.as_deref(),
                 Some(ComposeWarning::UNKNOWN_CONTEXT_VARIABLE_CODE)
             );
+        }
+    }
+
+    mod member_sites {
+        use super::*;
+        use crate::markdown::compose::member_sites::{MemberCandidate, MemberCandidates, MemberFrame, MemberSiteKey};
+        use std::sync::Arc;
+
+        /// Candidates for `{{ a.b }}` (ordinal 0) at offset `start` of the
+        /// leaf `/t`.
+        fn candidates(start: usize) -> Arc<MemberCandidates> {
+            let mut candidates = MemberCandidates::default();
+            candidates.insert(
+                MemberSiteKey::leaf("/t".to_string(), start),
+                0,
+                MemberCandidate {
+                    expression: "a.b".to_string(),
+                    order: 2,
+                    warning: ComposeWarning::new("interpolation", "member b"),
+                },
+            );
+            Arc::new(candidates)
+        }
+
+        fn messages(warnings: &[ComposeWarning]) -> Vec<&str> {
+            warnings.iter().map(|warning| warning.message.as_str()).collect()
+        }
+
+        #[test]
+        fn mixed_text_reports_a_reached_candidate_at_its_offset() {
+            let state = make_state(json!({"a": {"c": 1}}));
+            let evaluator = Evaluator::new(&state).with_member_sites(candidates(2), MemberFrame::Leaf(Default::default()));
+            evaluator.set_member_leaf("/t".to_string());
+            let policy = ExpressionFailurePolicy::Strict;
+            let result = interpolate_text("x {{ a.b }}", &evaluator, ScanMode::Plain, policy, "test").unwrap();
+            assert_eq!(messages(&result.warnings), ["member b"]);
+            // Another offset of the same leaf is another site.
+            let result = interpolate_text("{{ a.b }}", &evaluator, ScanMode::Plain, policy, "test").unwrap();
+            assert!(result.warnings.is_empty());
+            // An unchosen branch is never reached.
+            let result = interpolate_text("x {{ a.c ? 1 : a.b }}", &evaluator, ScanMode::Plain, policy, "test").unwrap();
+            assert!(result.warnings.is_empty());
+        }
+
+        #[test]
+        fn a_whole_value_reports_a_reached_candidate() {
+            let state = make_state(json!({"a": {"c": 1}}));
+            let evaluator = Evaluator::new(&state).with_member_sites(candidates(0), MemberFrame::Leaf(Default::default()));
+            evaluator.set_member_leaf("/t".to_string());
+            let (value, _, warnings) =
+                interpolate_value_guarded("{{ a.b }}", &evaluator, ExpressionFailurePolicy::Strict, "test", None).unwrap();
+            assert_eq!(value, serde_json::Value::Null);
+            assert_eq!(messages(&warnings), ["member b"]);
         }
     }
 }

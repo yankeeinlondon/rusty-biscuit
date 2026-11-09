@@ -556,8 +556,11 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, E
 /// root that no absence construct handles (spec Requirement 4).
 ///
 /// Observation follows evaluation: an unchosen ternary branch or a
-/// short-circuited operand is never read, so it is never reported. The value
-/// and error are exactly those of [`evaluate`].
+/// short-circuited operand is never read, so it is never reported. The same
+/// holds for the member selectors a member-observing observer records
+/// ([`MissingRootObserver::OBSERVES_MEMBERS`]); it is told the expression
+/// finished on success and on failure. The value and error are exactly those
+/// of [`evaluate`].
 pub(crate) fn evaluate_observed<L: EvaluationLookup, O: MissingRootObserver>(
     expr: &Expr,
     lookup: &L,
@@ -565,7 +568,11 @@ pub(crate) fn evaluate_observed<L: EvaluationLookup, O: MissingRootObserver>(
 ) -> Result<Value, ExpressionError> {
     lookup.begin_expression_scope();
     let budget = evaluation_budget(lookup);
-    evaluate_expr(expr, lookup, AbsenceScope::default(), observer, &budget)
+    let result = evaluate_expr(expr, lookup, AbsenceScope::default(), observer, &budget);
+    if O::OBSERVES_MEMBERS {
+        observer.finish_expression(expr);
+    }
+    result
 }
 
 fn evaluation_budget<L: EvaluationLookup>(lookup: &L) -> iteration::IterationBudget {
@@ -599,6 +606,17 @@ pub(crate) fn observe_missing<O: MissingRootObserver>(
     }
 }
 
+/// Whether `expr` selects a member a member check can judge: a dotted
+/// variable, a postfix member, or a string-literal bracket key.
+pub(crate) fn is_member_selector(expr: &Expr) -> bool {
+    match expr {
+        Expr::Variable(path) => path.contains('.'),
+        Expr::MemberAccess { .. } => true,
+        Expr::Index { index, .. } => matches!(index.as_ref(), Expr::StringLiteral(_)),
+        _ => false,
+    }
+}
+
 /// Recursive evaluation inside one already-open expression scope. `scope`
 /// says whether this position handles absence; see [`absence`].
 fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
@@ -609,6 +627,9 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
     budget: &iteration::IterationBudget,
 ) -> Result<Value, ExpressionError> {
     let operand = scope.operand();
+    if O::OBSERVES_MEMBERS && is_member_selector(expr) {
+        observer.member_read(std::ptr::from_ref(expr).addr());
+    }
     match expr {
         Expr::Variable(path) => {
             let binding = lookup.resolve(path)?;
@@ -1057,6 +1078,11 @@ fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
 ) -> Result<(Value, Option<String>), ExpressionError> {
     match expr {
         Expr::Index { base, index } => {
+            // This arm evaluates the index node itself, so it records it as
+            // `evaluate_expr` would.
+            if O::OBSERVES_MEMBERS && is_member_selector(expr) {
+                observer.member_read(std::ptr::from_ref(expr).addr());
+            }
             let (base_value, base_occurrence) =
                 evaluate_caller_file_argument(base, lookup, scope, observer, budget)?;
             let index_value = evaluate_expr(index, lookup, scope.operand(), observer, budget)?;

@@ -111,6 +111,7 @@ fn execute_frontmatter_shell_expansion(
         &mut provenance,
         &test_ctx(),
         None,
+        None,
     )
 }
 

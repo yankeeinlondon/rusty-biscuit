@@ -419,3 +419,145 @@ P {{ server.nmae }}
     assert!(fixture.wait_for_slot_prepared());
     fixture.shutdown();
 }
+
+/// Approves every shell command, so a frontmatter `$( … )` value composes.
+struct AllowAll;
+
+impl darkmatter::markdown::compose::shell_expansion::types::ShellApprovalHandler for AllowAll {
+    fn approve(
+        &self,
+        _request: darkmatter::markdown::compose::shell_expansion::types::ShellApprovalRequest,
+    ) -> Result<
+        darkmatter::markdown::compose::shell_expansion::types::ShellApprovalDecision,
+        darkmatter::markdown::compose::ShellExpansionError,
+    > {
+        Ok(darkmatter::markdown::compose::shell_expansion::types::ShellApprovalDecision::AllowOnce)
+    }
+}
+
+/// The member warnings composition reports for `text` as `doc.md` in a
+/// fresh workspace holding `files`, and those DMLS publishes for it.
+fn library_and_editor(text: &str, files: &[(&str, &str)]) -> (Vec<darkmatter::markdown::compose::expression::Diagnostic>, Vec<Value>) {
+    use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest, RequestSnapshot};
+
+    let workspace = LspWorkspace::new();
+    let dir = workspace.path();
+    for (name, content) in files {
+        std::fs::write(dir.join(name), content).unwrap();
+    }
+    let path = dir.join("doc.md");
+    std::fs::write(&path, text).unwrap();
+    let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
+        .with_source_file(path.clone())
+        .with_shell_policy_root(dir)
+        .with_shell_working_directory(dir)
+        .with_shell_approval_handler(std::sync::Arc::new(AllowAll));
+    let snapshot = RequestSnapshot::new(dir).with_home(Some(dir.join("home")));
+    let request = ComposeRequest::prepare(options, &snapshot).expect("request");
+    let (_, report) = Markdown::try_from(path.as_path())
+        .expect("document loads")
+        .compose_with(&request)
+        .unwrap_or_else(|error| panic!("{text:?} failed to compose: {error}"));
+    let composed: Vec<_> = report
+        .warnings
+        .iter()
+        .filter(|warning| warning.code.as_deref() == Some(MEMBER))
+        .map(|warning| *warning.diagnostic.clone().expect("a member warning carries its diagnostic"))
+        .collect();
+
+    let mut session = Session::open(&workspace, text);
+    let diagnostics = session.diagnostics();
+    session.shutdown();
+    let edited = diagnostics.into_iter().filter(|diagnostic| diagnostic["code"] == json!(MEMBER)).collect();
+    (composed, edited)
+}
+
+/// Composition's warning and DMLS's diagnostic for `text` are the same
+/// finding: code, message, severity, and start position (one-based line and
+/// character column against zero-based LSP positions; the fixtures are
+/// ASCII, so the editor's UTF-8 offsets are characters).
+#[track_caller]
+fn assert_agree(text: &str, files: &[(&str, &str)]) {
+    use darkmatter::markdown::compose::expression::Severity;
+
+    // Control: the declared member is silent on both sides.
+    let (composed, edited) = library_and_editor(&text.replace("nmae", "name"), files);
+    assert!(composed.is_empty() && edited.is_empty(), "control: {composed:#?} {edited:#?}");
+
+    let (composed, edited) = library_and_editor(text, files);
+    let ([library], [editor]) = (composed.as_slice(), edited.as_slice()) else {
+        panic!("one reached member on each side: composition {composed:#?}, editor {edited:#?}");
+    };
+    assert_eq!(library.code, editor["code"].as_str().unwrap(), "{library:#?} {editor:#?}");
+    assert_eq!(library.message, editor["message"].as_str().unwrap(), "{library:#?} {editor:#?}");
+    assert_eq!(library.severity, Severity::Warning, "{library:#?}");
+    assert_eq!(editor["severity"], json!(WARNING), "{editor:#?}");
+    let source = library.source.as_ref().expect("composition locates the member");
+    let range = &editor["range"];
+    let (line, start, end) = (
+        range["start"]["line"].as_u64().unwrap() as usize,
+        range["start"]["character"].as_u64().unwrap() as usize,
+        range["end"]["character"].as_u64().unwrap() as usize,
+    );
+    assert_eq!(source.line.map(|line| line - 1), Some(line), "line: {library:#?} {editor:#?}");
+    assert_eq!(source.column.map(|column| column - 1), Some(start), "column: {library:#?} {editor:#?}");
+    // Composition's diagnostic carries only the start (`span` is `None` for
+    // a member warning), so the extent is the editor's alone.
+    assert_eq!(end - start, "nmae".len(), "{editor:#?}");
+}
+
+/// Library/editor agreement (AC7): each surface holds one reached
+/// undeclared member, which composition and DMLS report identically.
+///
+/// A frontmatter `$( … )` ternary's condition and value branches are not
+/// here: composition reports a member there, but DMLS checks only the
+/// `{{ }}` placeholders inside a `$( … )` value (`shell_placeholder`).
+mod library_and_editor_agree {
+    use super::assert_agree;
+
+    /// Three rows matching the closed `{ name: string }` contract.
+    const NAMED_HOSTS: &str = "- name: web\n- name: db\n- name: cache\n";
+
+    const HEAD: &str = "---\n$schema:\n  server: \"{ name: string, port: number }\"\n  hosts: \"{ name: string }[]\"\nserver: { name: web, port: 80 }\nhosts: [{ name: a }, { name: b }, { name: c }]\n";
+
+    fn doc(extra: &str, body: &str) -> String {
+        format!("{HEAD}{extra}---\n\n{body}")
+    }
+
+    macro_rules! surfaces {
+        ($($name:ident: $extra:expr, $body:expr, $files:expr;)+) => {
+            $(
+                #[test]
+                fn $name() {
+                    assert_agree(&doc($extra, $body), $files);
+                }
+            )+
+        };
+    }
+
+    surfaces! {
+        body_interpolation: "", "B {{ server.nmae }}\n", &[];
+        frontmatter_interpolation: "title: \"x {{ server.nmae }}\"\n", "{{ title }}\n", &[];
+        block_condition: "", "::block when=\"server.nmae\"\ninside\n::end-block\n", &[];
+        file_condition: "", "::file ./child.md when=\"server.nmae\"\n", &[("child.md", "Child.\n")];
+        map_callback: "", "::map hosts \"h => h.nmae\"\n{{ h }}\n::end-map\n", &[];
+        filter_callback: "", "::filter hosts \"h => h.nmae\"\n{{ h.name }}\n::end-filter\n", &[];
+        map_region_body: "", "::map hosts\n{{ i.nmae }}\n::end-map\n", &[];
+        load_data_callback: "",
+            "H {{ map(load_data(\"hosts.yaml\", \"{ name: string }[]\"), h => h.nmae) }}\n",
+            &[("hosts.yaml", NAMED_HOSTS)];
+        shell_placeholder: "pick: \"$( echo {{ server.nmae }} )\"\n", "{{ pick }}\n", &[];
+    }
+}
+
+/// An unchosen ternary branch is checked by the editor and never reached by
+/// composition.
+#[test]
+fn reachability_differs() {
+    let text = "---\n$schema:\n  server: \"{ name: string, port: number }\"\nserver: { name: web, port: 80 }\n---\n\nT {{ server.port > 0 ? server.name : server.nmae }}\n";
+    let (composed, edited) = library_and_editor(text, &[]);
+    assert!(composed.is_empty(), "composition never evaluates the unchosen branch: {composed:#?}");
+    assert_eq!(members(&edited), [at(text, "T ", "nmae", 0, COMPOSE, "server")], "{edited:#?}");
+}
+

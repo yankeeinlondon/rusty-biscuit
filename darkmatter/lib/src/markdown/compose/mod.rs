@@ -117,6 +117,7 @@ pub mod report_diagnostics;
 pub(crate) mod pipeline;
 pub(crate) mod schema_validation;
 pub(crate) mod link_title_warnings;
+pub(crate) mod member_sites;
 pub(crate) mod site_scope;
 pub use schema_validation::effective_schema_for;
 pub mod setters;

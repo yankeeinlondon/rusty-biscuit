@@ -681,16 +681,31 @@ impl<'a> TransclusionEngine<'a> {
                 if let Some(watch) = watch.as_deref_mut() {
                     watch.check(report)?;
                 }
-                let mut missing = Vec::new();
+                let mut observation = crate::markdown::compose::expression::absence::Observation::default();
                 let should_include = site
-                    .evaluate(expr, &lookup, &mut missing)
+                    .evaluate(expr, &lookup, &mut observation)
                     .map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
-                report.add_unknown_root_candidates("condition", missing, |_| {
+                report.add_unknown_root_candidates("condition", std::mem::take(&mut observation.roots), |_| {
                     crate::markdown::compose::unknown_identifiers::directive_locus(
                         self.markdown,
                         directive.line,
                     )
                 });
+                if let Some(members) =
+                    crate::markdown::compose::member_sites::BodyMembers::new(&report.member_candidates, origin, options)
+                {
+                    let start = crate::markdown::compose::call_precheck::condition_start(
+                        self.markdown.content(),
+                        directive.span.start,
+                        expr,
+                    );
+                    report.add_warnings(members.warnings(start, expr, &mut observation));
+                    // A blocking member read stops before the directive
+                    // composes its target.
+                    if let Some(watch) = watch.as_deref_mut() {
+                        watch.check(report)?;
+                    }
+                }
                 if !should_include {
                     let mut fixed_report = ComposeReport::new();
                     fixed_report.transclusions_skipped = 1;

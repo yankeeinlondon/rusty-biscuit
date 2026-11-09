@@ -134,6 +134,13 @@ pub struct ComposeReport {
     /// pass reports other warnings the compose pass would not. Never merged
     /// from a child report.
     pub(crate) passive_warnings: usize,
+
+    /// The undeclared-member candidates this document's passive call check
+    /// found, joined with the selectors its evaluator reaches
+    /// ([`member_sites`](crate::markdown::compose::member_sites)). Per
+    /// document: never merged from a child report, whose member warnings
+    /// merge as warnings.
+    pub(crate) member_candidates: std::sync::Arc<crate::markdown::compose::member_sites::MemberCandidates>,
 }
 
 /// First-read undeclared-property candidates in read order, one per root.

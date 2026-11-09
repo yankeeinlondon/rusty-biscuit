@@ -10,6 +10,7 @@ use super::super::context::report::CandidateLocus;
 use super::super::{ComposeReport, ComposeWarning, EffectiveState};
 use super::super::pipeline::{FinalVerdict, ReportWatch};
 use super::super::schema_validation::PreparedSchemas;
+use super::super::member_sites::BodyMembers;
 use super::super::site_scope::authored_opener;
 use tracing::debug;
 
@@ -60,6 +61,7 @@ pub(crate) fn run_stage(
         _ => false,
     };
     let origin = body.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
+    let members = BodyMembers::new(&report.member_candidates, origin, options);
     let rendered = page_blocks::engine::render_page_blocks_with_edits(
         markdown.content(),
         &regions,
@@ -67,6 +69,7 @@ pub(crate) fn run_stage(
         report,
         source,
         &|span| authored_opener(markdown, origin, span),
+        members.as_ref(),
         &mut stop,
     )?;
     let Some((rendered, edits)) = rendered else {

@@ -246,6 +246,21 @@ impl PreparedSchemas {
             .as_ref()
             .and_then(|schemas| schemas.effective_for(markdown).ok().flatten())
     }
+
+    /// The schema expression sites of `markdown` are typed by: its effective
+    /// schema, or, while a layer holds unresolved slots, its document
+    /// template ([`DarkmatterSchemas::site_schema_for`]). An error is
+    /// [`SiteSchema::Effective`]`(None)`, as [`Self::effective_for`] gives
+    /// `None`; the validation stage owns reporting it.
+    ///
+    /// [`DarkmatterSchemas::site_schema_for`]: crate::markdown::schemas::DarkmatterSchemas::site_schema_for
+    /// [`SiteSchema::Effective`]: crate::markdown::schemas::SiteSchema::Effective
+    pub(crate) fn site_schema_for(&self, markdown: &Markdown) -> crate::markdown::schemas::SiteSchema {
+        self.schemas
+            .as_ref()
+            .and_then(|schemas| schemas.site_schema_for(markdown).ok())
+            .unwrap_or(crate::markdown::schemas::SiteSchema::Effective(None))
+    }
 }
 
 /// Caller-file values projected from the captured launch context.

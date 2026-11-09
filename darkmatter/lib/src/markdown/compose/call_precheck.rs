@@ -30,6 +30,14 @@
 //! shared record ([`ComposeWarning::diagnostic`]) located at its authored
 //! argument, so composition and DMLS report the same fields.
 //!
+//! The same walk records the document's undeclared-member candidates
+//! ([`expression_member_findings`] on every expression it checks, plus each
+//! frontmatter `$( … )` ternary's condition and value branches), keyed by
+//! where each was authored ([`MemberSiteKey`]). They are not warnings: an
+//! evaluating stage reports one only when it reaches the selector
+//! ([`member_sites`](super::member_sites)). While a schema layer holds
+//! unresolved slots, every site is typed by the document template.
+//!
 //! A body expression is checked under the guards of every enclosing
 //! `::block` (when page blocks are enabled, the only case in which a false
 //! block is removed) and the locals of every enclosing `::map` / `::filter`
@@ -49,9 +57,10 @@ use super::context::report::{ExpressionOrigin, WarningIdentity, WarningSubject};
 use super::expression::{ALWAYS_FALSE_CALL_CODE, UNCERTAIN_CALL_CODE};
 use super::expression::{
     CallCheck, DeclaredTypes, ExpressionDiagnostic, ExpressionError, ExpressionFinder, ExpressionLocation,
-    IncompleteHostCall, SpannedExpr, TypeScope, check_expression_calls, incomplete_host_calls, one_based_position,
-    parse_spanned,
+    IncompleteHostCall, MemberFinding, SpannedExpr, TypeScope, check_expression_calls, expression_member_findings,
+    incomplete_host_calls, one_based_position, parse_spanned,
 };
+use super::member_sites::{MemberCandidate, MemberCandidates, MemberSiteKey};
 use super::frontmatter_interpolation::{FrontmatterExpressionLocation, LocatedFrontmatterError};
 use super::value_origin::ValuePathSegment as Segment;
 use super::collection_blocks::{
@@ -62,7 +71,7 @@ use super::pipeline::operations::ComposeOperationSet;
 use super::value_origin::{FrontmatterProvenance, ValuePathSegment};
 use super::{ComposeOperation, ComposeSource, ComposeWarning, transclusion};
 use crate::markdown::Markdown;
-use crate::markdown::schemas::EffectiveSchema;
+use crate::markdown::schemas::SiteSchema;
 use crate::markdown::types::{AuthoredSpan, MarkdownError, SourceRef};
 use serde_json::Value;
 
@@ -119,12 +128,28 @@ struct Advisory {
     origin: std::ops::Range<usize>,
 }
 
+/// An undeclared member of one authored expression: a candidate the
+/// evaluator turns into a warning only if it reaches the selector.
+struct MemberAdvisory {
+    site: MemberSiteKey,
+    /// The trimmed text the expression was parsed from.
+    expression: String,
+    finding: MemberFinding,
+    /// As for [`Advisory`].
+    leaf: Option<(Vec<Segment>, String)>,
+    key: Option<String>,
+    /// Byte range of the member name in the scanned text.
+    origin: std::ops::Range<usize>,
+}
+
 /// Warnings found so far, in scan order; [`advisory_warnings`] puts them in
 /// authored order. The surfaces are scanned one after another, so a block
 /// condition's warning is found before an earlier interpolation's.
 #[derive(Default)]
 struct Advisories {
     found: Vec<Advisory>,
+    /// Undeclared members, for [`member_candidates`].
+    members: Vec<MemberAdvisory>,
     /// Waived untyped collection sources, ranked by their body offset.
     recovered: Vec<(Order, super::collection_blocks::RecoveredSource)>,
     /// Frontmatter string leaves ranked so far.
@@ -158,6 +183,36 @@ impl Advisories {
         }
         for call in incomplete {
             self.push(&call.function, call.diagnostic(), rank, offset, leaf, key);
+        }
+    }
+
+    /// Records the undeclared members of `expr`, parsed from `text` and
+    /// authored at `site`, under `scope`; `origin_of` places a span of `text`
+    /// in the scanned text. Nothing is recorded for a site with no proven
+    /// authored position.
+    #[allow(clippy::too_many_arguments)]
+    fn record_members(
+        &mut self,
+        expr: &SpannedExpr,
+        text: &str,
+        scope: &TypeScope<'_>,
+        site: Option<MemberSiteKey>,
+        origin_of: &dyn Fn(std::ops::Range<usize>) -> std::ops::Range<usize>,
+        leaf: Option<(&[Segment], &str)>,
+        key: Option<&str>,
+    ) {
+        let Some(site) = site else {
+            return;
+        };
+        for finding in expression_member_findings(expr, text, scope) {
+            self.members.push(MemberAdvisory {
+                site: site.clone(),
+                expression: text.trim().to_string(),
+                origin: origin_of(finding.span.clone()),
+                finding,
+                leaf: leaf.map(|(path, text)| (path.to_vec(), text.to_string())),
+                key: key.map(str::to_string),
+            });
         }
     }
 
@@ -195,7 +250,8 @@ fn expression_start(text: &str, location: &ExpressionLocation) -> usize {
 
 /// Checks every executable authored call of `markdown` on the surface
 /// `options` composes, against the declared types of every layer of
-/// `schema` ([`DeclaredTypes::for_schema`]).
+/// `schema`, or of its document template while a layer holds unresolved
+/// slots ([`DeclaredTypes::for_site`]).
 ///
 /// Authored order is frontmatter first, leaf by leaf in key order, then the
 /// body by offset, with interpolations and block and transclusion
@@ -205,7 +261,9 @@ fn expression_start(text: &str, location: &ExpressionLocation) -> usize {
 ///
 /// One warning per finding [`CallCheck::diagnostics`] shows without
 /// `expressions.strict`, plus one per incomplete host call, in authored
-/// order.
+/// order; and the document's undeclared-member candidates, one per finding
+/// of [`expression_member_findings`] on the same expressions plus each
+/// frontmatter `$(…)` condition and value branch, keyed by authored site.
 ///
 /// ## Errors
 ///
@@ -218,9 +276,9 @@ pub(crate) fn check_document(
     markdown: &Markdown,
     provenance: &FrontmatterProvenance,
     options: &super::ComposeRequest,
-    schema: Option<&EffectiveSchema>,
-) -> Result<Vec<ComposeWarning>, PrecheckFailure> {
-    let declared = DeclaredTypes::for_schema(schema);
+    schema: &SiteSchema,
+) -> Result<(Vec<ComposeWarning>, MemberCandidates), PrecheckFailure> {
+    let declared = DeclaredTypes::for_site(schema);
     // A declared host global is a declared root: a collection may iterate it,
     // and a local may not shadow it.
     let declared = match options.host_globals.as_ref() {
@@ -233,6 +291,9 @@ pub(crate) fn check_document(
     if options.call_check_covers(ComposeOperation::FrontmatterInterpolation) {
         rejected = check_frontmatter(markdown, provenance, &options.exclude_keys, &site, &mut advisories)
             .map(|(order, failure)| (order, Rejection::Frontmatter(failure)));
+    }
+    if options.call_check_covers(ComposeOperation::FrontmatterShellExpansion) {
+        record_shell_members(markdown, provenance, &options.exclude_keys, &site, &mut advisories);
     }
     if rejected.is_none() {
         rejected = check_body(markdown, options, &site, &mut advisories)
@@ -247,13 +308,130 @@ pub(crate) fn check_document(
             Rejection::Body(error) => PrecheckFailure::Body { error: Box::new(error), earlier },
         });
     }
+    let locator = Locator::new(markdown, options);
+    let candidates = member_candidates(&locator, std::mem::take(&mut advisories.members));
     let warnings = advisory_warnings(markdown, options, advisories);
     let policy = options.blocking_policy();
     if policy.blocking(&warnings).is_empty() {
-        return Ok(warnings);
+        return Ok((warnings, candidates));
     }
     let (blocking, rest) = warnings.into_iter().partition(|warning| policy.blocks_warning(warning));
     Err(PrecheckFailure::Blocked { blocking, rest })
+}
+
+/// Where the precheck's findings sit in the document as authored: the
+/// projection call advisories and member candidates share.
+struct Locator<'m> {
+    markdown: &'m Markdown,
+    document: Option<std::path::PathBuf>,
+    /// [`Self::document`] as a terminal row names it.
+    display: Option<String>,
+    source: biscuit_terminal::errors::SourceContext,
+    loaded: Option<biscuit_terminal::errors::SourceContext>,
+    body_origin: Option<BodyOrigin>,
+}
+
+/// A finding's authored position: one-based line and character column,
+/// the line a row names, and the ` at file:line` suffix a message ends with.
+struct Located {
+    position: Option<(usize, usize)>,
+    line: Option<usize>,
+    suffix: String,
+}
+
+impl<'m> Locator<'m> {
+    fn new(markdown: &'m Markdown, options: &super::ComposeRequest) -> Self {
+        use biscuit_terminal::components::prose::Prose;
+        let document = match markdown.source().as_ref().unwrap_or(&options.source) {
+            ComposeSource::File(path) => Some(path.clone()),
+            ComposeSource::Url(url) => Some(std::path::PathBuf::from(url.to_string())),
+            ComposeSource::Unknown => None,
+        };
+        let home = options.resolution_context().home_dir();
+        let display = document.as_deref().map(|path| Prose::escape_text(&super::util::abbreviate_path(path, home)));
+        Self {
+            markdown,
+            document,
+            display,
+            source: markdown.full_source_context_for_errors(),
+            loaded: markdown.loaded_source_context_for_errors(),
+            body_origin: BodyOrigin::capture(markdown),
+        }
+    }
+
+    /// Locates the scanned range `origin` of the frontmatter `leaf` (or of the
+    /// body when `None`), projected through the YAML scalar or the body's
+    /// rewrites into the loaded text; `key` names the frontmatter key for a
+    /// line when the projection fails.
+    fn locate(&self, leaf: Option<&(Vec<Segment>, String)>, key: Option<&str>, origin: &std::ops::Range<usize>) -> Located {
+        let position = self.loaded.as_ref().and_then(|context| {
+            let range = match leaf {
+                Some((path, scanned)) => FrontmatterExpressionLocation {
+                    path: path.clone(),
+                    scanned: scanned.clone(),
+                    span: origin.clone(),
+                }
+                .project(&context.content)?,
+                None => self.body_origin.as_ref()?.project(origin)?,
+            };
+            one_based_position(&context.content, range.start)
+        });
+        let line = position.map(|(line, _)| line).or_else(|| match key {
+            Some(key) => super::shell_expansion::types::frontmatter_key_line(&self.source, key),
+            None => Some(
+                self.markdown.frontmatter_line_count()
+                    + self.markdown.content().get(..origin.start).map_or(0, |before| before.matches('\n').count())
+                    + 1,
+            ),
+        });
+        let suffix = match (self.display.as_deref(), line) {
+            (Some(document), Some(line)) => format!(" at {document}:{line}"),
+            (Some(document), None) => format!(" in {document}"),
+            (None, Some(line)) => format!(" at line {line}"),
+            (None, None) => String::new(),
+        };
+        Located { position, line, suffix }
+    }
+}
+
+/// Each member advisory as a candidate warning, keyed by its site and its
+/// access node's ordinal. The warning is the shared diagnostic at the
+/// member's authored position; its message is the library message followed
+/// by the location call advisories name.
+fn member_candidates(locator: &Locator<'_>, members: Vec<MemberAdvisory>) -> MemberCandidates {
+    use biscuit_terminal::components::prose::Prose;
+    let mut candidates = MemberCandidates::default();
+    for member in members {
+        let located = locator.locate(member.leaf.as_ref(), member.key.as_deref(), &member.origin);
+        let message = member.finding.message();
+        let message = message.strip_suffix('.').unwrap_or(&message);
+        let diagnostic = member.finding.diagnostic().at(locator.document.clone(), located.position);
+        let warning = ComposeWarning {
+            source: Some(ComposeWarning::EXPRESSION_SOURCE.to_string()),
+            code: Some(diagnostic.code.clone()),
+            identity: Some(WarningIdentity {
+                subject: WarningSubject::Expression {
+                    document: None,
+                    scope: member.leaf.as_ref().map(|(path, _)| path_label(path)),
+                    origin: ExpressionOrigin::Authored(member.origin.clone()),
+                },
+            }),
+            path: locator.document.clone(),
+            line_number: located.line,
+            diagnostic: Some(Box::new(diagnostic)),
+            ..ComposeWarning::new("interpolation", format!("{}{}.", Prose::escape_text(message), located.suffix))
+        };
+        candidates.insert(
+            member.site,
+            member.finding.node_ordinal,
+            MemberCandidate {
+                order: member.finding.span.start,
+                expression: member.expression,
+                warning,
+            },
+        );
+    }
+    candidates
 }
 
 fn advisory_warnings(markdown: &Markdown, options: &super::ComposeRequest, advisories: Advisories) -> Vec<ComposeWarning> {
@@ -264,49 +442,15 @@ fn advisory_warnings(markdown: &Markdown, options: &super::ComposeRequest, advis
     let recovered = advisories.recovered;
     let mut found = advisories.found;
     found.sort_by_key(|advisory| advisory.order);
-    let document = match markdown.source().as_ref().unwrap_or(&options.source) {
-        ComposeSource::File(path) => Some(path.clone()),
-        ComposeSource::Url(url) => Some(std::path::PathBuf::from(url.to_string())),
-        ComposeSource::Unknown => None,
-    };
-    let home = options.resolution_context().home_dir();
-    let display = document.as_deref().map(|path| Prose::escape_text(&super::util::abbreviate_path(path, home)));
-    let source = markdown.full_source_context_for_errors();
-    let loaded = markdown.loaded_source_context_for_errors();
-    let body_origin = BodyOrigin::capture(markdown);
+    let locator = Locator::new(markdown, options);
+    let Locator { document, display, .. } = &locator;
     let body = markdown.content();
     let phrased: Vec<(Order, ComposeWarning)> = found
         .into_iter()
         .map(|advisory| {
             let order = advisory.order;
-            // The authored position of the finding, projected through the
-            // YAML scalar or the body's rewrites into the loaded text.
-            let position = loaded.as_ref().and_then(|context| {
-                let range = match &advisory.leaf {
-                    Some((path, scanned)) => FrontmatterExpressionLocation {
-                        path: path.clone(),
-                        scanned: scanned.clone(),
-                        span: advisory.origin.clone(),
-                    }
-                    .project(&context.content)?,
-                    None => body_origin.as_ref()?.project(&advisory.origin)?,
-                };
-                one_based_position(&context.content, range.start)
-            });
-            let line = position.map(|(line, _)| line).or_else(|| match &advisory.key {
-                Some(key) => super::shell_expansion::types::frontmatter_key_line(&source, key),
-                None => Some(
-                    markdown.frontmatter_line_count()
-                        + body.get(..advisory.origin.start).map_or(0, |before| before.matches('\n').count())
-                        + 1,
-                ),
-            });
-            let location = match (display.as_deref(), line) {
-                (Some(document), Some(line)) => format!(" at {document}:{line}"),
-                (Some(document), None) => format!(" in {document}"),
-                (None, Some(line)) => format!(" at line {line}"),
-                (None, None) => String::new(),
-            };
+            let Located { position, line, suffix: location } =
+                locator.locate(advisory.leaf.as_ref(), advisory.key.as_deref(), &advisory.origin);
             let function = &advisory.function;
             let detail = advisory.finding.message.strip_prefix(&format!("{function}: ")).unwrap_or(&advisory.finding.message);
             let message = format!("`{function}(…)`{location}: {}", Prose::escape_text(detail));
@@ -394,8 +538,20 @@ fn check_frontmatter_value(
         Value::String(text) if text.contains("{{") => {
             let rank = advisories.next_leaf();
             let leaf = Some((path.as_slice(), text.as_str()));
-            let mut record = |checks: &[CallCheck], incomplete: &[IncompleteHostCall], offset: usize| {
-                advisories.record(checks, incomplete, rank, offset, leaf, Some(key));
+            let label = path_label(path);
+            let mut record = |found: Found<'_, '_>| {
+                advisories.record(found.checks, found.incomplete, rank, found.offset, leaf, Some(key));
+                let site = MemberSiteKey::leaf(label.clone(), found.location.start);
+                let offset = found.offset;
+                advisories.record_members(
+                    found.expr,
+                    &found.location.expression,
+                    found.scope,
+                    Some(site),
+                    &|span| offset + span.start..offset + span.end,
+                    leaf,
+                    Some(key),
+                );
             };
             let (location, check, at) =
                 first_rejected(text, ExpressionFinder::scan_plain(text).expressions, |_| site.clone(), &mut record)?;
@@ -427,8 +583,60 @@ fn check_frontmatter_value(
     }
 }
 
+/// Records the undeclared members of each authored top-level `$( … )`
+/// ternary's condition and value branches: the expressions frontmatter shell
+/// expansion evaluates. A piece holding a `{{ … }}` placeholder is evaluated
+/// only after the placeholder is filled, so its text is not the authored
+/// text and it gets no candidate (the placeholder is a frontmatter
+/// interpolation site of its own).
+fn record_shell_members(
+    markdown: &Markdown,
+    provenance: &FrontmatterProvenance,
+    exclude_keys: &std::collections::HashSet<String>,
+    site: &TypeScope<'_>,
+    advisories: &mut Advisories,
+) {
+    use super::frontmatter_shell_expansion::{FrontmatterShellBody, parse_frontmatter_shell_value_spanned};
+    use super::member_sites::ShellPiece;
+    for (key, value) in markdown.frontmatter().as_map() {
+        let Value::String(text) = value else {
+            continue;
+        };
+        if exclude_keys.contains(key) || !text.contains("$(") || provenance.data().is_data_key(key) {
+            continue;
+        }
+        let Some(FrontmatterShellBody::Ternary(ternary)) =
+            parse_frontmatter_shell_value_spanned(text).map(|parsed| parsed.body)
+        else {
+            continue;
+        };
+        let path = [ValuePathSegment::Key(key.clone())];
+        for (piece, span) in [
+            (ShellPiece::Condition, ternary.condition_span),
+            (ShellPiece::Then, ternary.then_span),
+            (ShellPiece::Else, ternary.else_span),
+        ] {
+            let Some(source) = text.get(span.clone()).filter(|source| !source.contains("{{")) else {
+                continue;
+            };
+            let Ok(expr) = parse_spanned(source) else {
+                continue;
+            };
+            advisories.record_members(
+                &expr,
+                source,
+                site,
+                Some(MemberSiteKey::shell(key, piece)),
+                &|found| span.start + found.start..span.start + found.end,
+                Some((&path, text)),
+                Some(key),
+            );
+        }
+    }
+}
+
 /// A frontmatter leaf's key path as text, which scopes its offsets.
-fn path_label(path: &[ValuePathSegment]) -> String {
+pub(crate) fn path_label(path: &[ValuePathSegment]) -> String {
     path.iter()
         .map(|segment| match segment {
             ValuePathSegment::Key(key) => format!("/{key}"),
@@ -447,6 +655,10 @@ fn check_body(
     advisories: &mut Advisories,
 ) -> Option<(usize, MarkdownError)> {
     let body = markdown.content();
+    // Member candidates are keyed by where a body construct was authored.
+    let origin = BodyOrigin::capture(markdown);
+    let origin = origin.as_ref();
+    let body_key = |offset: usize| origin.and_then(|origin| MemberSiteKey::body(origin, offset));
     let page_blocks = options.call_check_covers(ComposeOperation::PageBlocks);
     let collections = options.call_check_covers(ComposeOperation::CollectionBlocks);
     let mut covered = ComposeOperationSet::empty();
@@ -499,6 +711,15 @@ fn check_body(
                 advisory.origin = expression_site.authored_range(advisory.finding.span.clone());
                 advisory.order = (BODY_RANK, advisory.origin.start);
             }
+            advisories.record_members(
+                &expression_site.expression,
+                &expression_site.text,
+                &expression_site.scope,
+                body_key(expression_site.origin),
+                &|span| expression_site.authored_range(span),
+                None,
+                None,
+            );
             if let Some((check, at)) = rejected {
                 let start = expression_site.authored_range(at..at + 1).start;
                 let error = rejection(None, &expression_site.text, check);
@@ -511,7 +732,7 @@ fn check_body(
         && body.contains("::block")
         && let Ok(regions) = super::page_blocks::parser::parse_page_blocks(body, markdown.source_context_for_errors())
     {
-        rejections.extend(check_block_conditions(markdown, &regions, &guards, site, advisories));
+        rejections.extend(check_block_conditions(markdown, &regions, &guards, site, &body_key, advisories));
     }
 
     if (options.call_check_covers(ComposeOperation::BlockTransclusion)
@@ -523,8 +744,9 @@ fn check_body(
             let when = directive.options.when_expr.as_ref()?;
             let scope = guards.scope_at(site.clone(), directive.span.start);
             let offset = condition_start(body, directive.span.start, when);
-            let (check, at) = rejected_condition(when, &scope, &mut |checks, incomplete| {
-                advisories.record(checks, incomplete, BODY_RANK, offset, None, None)
+            let (check, at) = rejected_condition(when, &scope, &mut |checks, incomplete, expr, scope| {
+                advisories.record(checks, incomplete, BODY_RANK, offset, None, None);
+                advisories.record_members(expr, when, scope, body_key(offset), &|span| offset + span.start..offset + span.end, None, None);
             })?;
             let error = condition_rejection(markdown, when, directive.line, check);
             Some((offset + at, transclusion::TransclusionError::from(error).into()))
@@ -537,8 +759,18 @@ fn check_body(
         } else {
             ExpressionFinder::new(body).scan()
         };
-        let mut record = |checks: &[CallCheck], incomplete: &[IncompleteHostCall], offset: usize| {
-            advisories.record(checks, incomplete, BODY_RANK, offset, None, None);
+        let mut record = |found: Found<'_, '_>| {
+            advisories.record(found.checks, found.incomplete, BODY_RANK, found.offset, None, None);
+            let offset = found.offset;
+            advisories.record_members(
+                found.expr,
+                &found.location.expression,
+                found.scope,
+                body_key(found.location.start),
+                &|span| offset + span.start..offset + span.end,
+                None,
+                None,
+            );
         };
         if let Some((location, check, at)) =
             first_rejected(body, scan.expressions, |location| guards.scope_at(site.clone(), location.start), &mut record)
@@ -558,57 +790,89 @@ fn check_block_conditions(
     regions: &[PageBlockRegion],
     guards: &BodyScopes,
     site: &TypeScope<'_>,
+    body_key: &dyn Fn(usize) -> Option<MemberSiteKey>,
     advisories: &mut Advisories,
 ) -> Option<(usize, MarkdownError)> {
     let body = markdown.content();
     regions.iter().find_map(|region| {
         if let Some(when) = &region.options.when_expr {
             let offset = condition_start(body, region.span.start, when);
-            if let Some((check, at)) =
-                rejected_condition(when, &guards.scope_at(site.clone(), region.span.start), &mut |checks, incomplete| {
-                    advisories.record(checks, incomplete, BODY_RANK, offset, None, None)
-                })
-            {
+            if let Some((check, at)) = rejected_condition(
+                when,
+                &guards.scope_at(site.clone(), region.span.start),
+                &mut |checks, incomplete, expr, scope| {
+                    advisories.record(checks, incomplete, BODY_RANK, offset, None, None);
+                    advisories.record_members(
+                        expr,
+                        when,
+                        scope,
+                        body_key(offset),
+                        &|span| offset + span.start..offset + span.end,
+                        None,
+                        None,
+                    );
+                },
+            ) {
                 let error = condition_rejection(markdown, when, region.start_line, check);
                 return Some((offset + at, PageBlockError::from(error).into()));
             }
         }
-        check_block_conditions(markdown, &region.children, guards, site, advisories)
+        check_block_conditions(markdown, &region.children, guards, site, body_key, advisories)
     })
+}
+
+/// One checked `{{ … }}`, as [`first_rejected`] passes it to its recorder.
+struct Found<'a, 'd> {
+    checks: &'a [CallCheck],
+    incomplete: &'a [IncompleteHostCall],
+    /// The expression's offset in the scanned text.
+    offset: usize,
+    location: &'a ExpressionLocation,
+    expr: &'a SpannedExpr,
+    scope: &'a TypeScope<'d>,
 }
 
 /// The first `{{ … }}` of `expressions` in `text` holding a rejected call,
 /// each checked under the scope `scope_at` gives it, with the rejection's
-/// byte offset in `text`. The checks and incomplete host calls of that
-/// expression and every one before it are passed to `record` with the
-/// expression's offset in `text`; the caller keeps only the warnings before
-/// the rejection. An expression that does not parse is left to its
-/// evaluating stage, which reports it.
+/// byte offset in `text`. That expression and every one before it are passed
+/// to `record` with their checks, incomplete host calls, and offset in
+/// `text`; the caller keeps only the warnings before the rejection. An
+/// expression that does not parse is left to its evaluating stage, which
+/// reports it.
 fn first_rejected<'d>(
     text: &str,
     expressions: Vec<ExpressionLocation>,
     scope_at: impl Fn(&ExpressionLocation) -> TypeScope<'d>,
-    record: &mut impl FnMut(&[CallCheck], &[IncompleteHostCall], usize),
+    record: &mut impl FnMut(Found<'_, 'd>),
 ) -> Option<(ExpressionLocation, CallCheck, usize)> {
     expressions.into_iter().find_map(|location| {
         let expr = parse_spanned(&location.expression).ok()?;
-        let (checks, rejected) = checked(&expr, &scope_at(&location));
+        let scope = scope_at(&location);
+        let (checks, rejected) = checked(&expr, &scope);
         let offset = expression_start(text, &location);
-        record(&checks, &incomplete_host_calls(&expr), offset);
+        record(Found {
+            checks: &checks,
+            incomplete: &incomplete_host_calls(&expr),
+            offset,
+            location: &location,
+            expr: &expr,
+            scope: &scope,
+        });
         rejected.map(|(check, at)| (location, check, offset + at))
     })
 }
 
-/// The condition's first rejected call and its offset in `when`; its checks
-/// and incomplete host calls are passed to `record` either way.
+/// The condition's first rejected call and its offset in `when`; its checks,
+/// incomplete host calls, parsed expression, and `scope` are passed to
+/// `record` either way.
 fn rejected_condition(
     when: &str,
     scope: &TypeScope<'_>,
-    record: &mut impl FnMut(&[CallCheck], &[IncompleteHostCall]),
+    record: &mut impl FnMut(&[CallCheck], &[IncompleteHostCall], &SpannedExpr, &TypeScope<'_>),
 ) -> Option<(CallCheck, usize)> {
     let expr = parse_spanned(when).ok()?;
     let (checks, rejected) = checked(&expr, scope);
-    record(&checks, &incomplete_host_calls(&expr));
+    record(&checks, &incomplete_host_calls(&expr), &expr, scope);
     rejected
 }
 
@@ -628,7 +892,7 @@ fn checked(expr: &SpannedExpr, scope: &TypeScope<'_>) -> (Vec<CallCheck>, Option
 /// Byte offset in `body` of the `when` condition text of the directive
 /// starting at `directive`; the directive's start when the authored text is
 /// escaped.
-fn condition_start(body: &str, directive: usize, when: &str) -> usize {
+pub(crate) fn condition_start(body: &str, directive: usize, when: &str) -> usize {
     directive + body.get(directive..).and_then(|rest| rest.find(when)).unwrap_or(0)
 }
 

@@ -312,9 +312,24 @@ pub(crate) fn spanned_nodes(expr: &SpannedExpr) -> Vec<&SpannedExpr> {
     nodes
 }
 
+/// The ordinals in [`expr_nodes`] of `root` of the node addresses in
+/// `addresses` (each recorded while `root` was evaluated), ascending and
+/// distinct. Drains `addresses`.
+pub(crate) fn reached_ordinals(root: &Expr, addresses: &mut Vec<usize>) -> Vec<usize> {
+    if addresses.is_empty() {
+        return Vec::new();
+    }
+    let reached: std::collections::HashSet<usize> = addresses.drain(..).collect();
+    expr_nodes(root)
+        .into_iter()
+        .enumerate()
+        .filter(|(_, node)| reached.contains(&std::ptr::from_ref(*node).addr()))
+        .map(|(ordinal, _)| ordinal)
+        .collect()
+}
+
 /// [`spanned_nodes`] for the span-erased tree: the same nodes in the same
 /// order, so an ordinal names one node in both.
-#[cfg_attr(not(test), expect(dead_code, reason = "composition's runtime member observation is not wired yet"))]
 pub(crate) fn expr_nodes(expr: &Expr) -> Vec<&Expr> {
     let mut nodes = Vec::new();
     let mut pending = vec![expr];

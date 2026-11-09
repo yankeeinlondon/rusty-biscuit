@@ -14,6 +14,7 @@
 //! for; `{{ }}` interpolation, shell stages, and transclusion read those
 //! frames at each site afterward.
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -24,6 +25,12 @@ use serde_json::{Number, Value};
 
 use super::error::{CollectionError, CollectionSite, IterationFailure};
 use super::parser::site;
+use super::scopes::authored_origin;
+use crate::markdown::compose::ComposeWarning;
+use crate::markdown::compose::call_precheck::condition_start;
+use crate::markdown::compose::expression::absence::Observation;
+use crate::markdown::compose::expression::evaluate_observed;
+use crate::markdown::compose::member_sites::BodyMembers;
 use super::types::{CollectionKind, CollectionRegion, QuotedExpression, SortOrder};
 use crate::markdown::compose::body_origin::{ExpansionWriter, ScopeRanges, Splice};
 use crate::markdown::compose::conditions::ConditionSite;
@@ -178,6 +185,10 @@ enum Prefix {
 struct Located {
     callback: Callback,
     span: Range<usize>,
+    /// The decoded callback text, and the body offset of its first byte:
+    /// the site its member reads are joined at.
+    text: String,
+    start: usize,
 }
 
 /// A region's callbacks, parsed once.
@@ -210,6 +221,12 @@ pub(crate) struct Execution<'a, L: EvaluationLookup> {
     /// Plans by region start, so a region invoked once per enclosing
     /// iteration parses its callbacks once.
     plans: HashMap<usize, Rc<Plan>>,
+    /// Turns the member selectors a gate or callback reached into warnings.
+    members: Option<BodyMembers<'a>>,
+    /// Member warnings of callbacks not yet added to `report`; a callback
+    /// evaluates behind a shared borrow. Added before the next gate's `stop`
+    /// and when the traversal ends.
+    member_warnings: RefCell<Vec<ComposeWarning>>,
     /// Whether this traversal only discovers the copies a body could have
     /// (see [`Self::new`]).
     discover: bool,
@@ -242,7 +259,32 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         report: &'a mut ComposeReport,
         stop: &'a mut dyn FnMut(&ComposeReport) -> bool,
     ) -> Self {
-        Self { content, lookup, budget, context, opener, report, stop, plans: HashMap::new(), discover: !budget.is_charging() }
+        Self {
+            content,
+            lookup,
+            budget,
+            context,
+            opener,
+            report,
+            stop,
+            plans: HashMap::new(),
+            members: None,
+            member_warnings: RefCell::new(Vec::new()),
+            discover: !budget.is_charging(),
+        }
+    }
+
+    /// Reports the undeclared members each gate and callback reaches through
+    /// `members`. A discovery traversal reports none.
+    pub(crate) fn with_members(mut self, members: Option<BodyMembers<'a>>) -> Self {
+        self.members = members.filter(|_| !self.discover);
+        self
+    }
+
+    /// Adds the callbacks' pending member warnings to the report.
+    fn flush_members(&mut self) {
+        let pending = self.member_warnings.take();
+        self.report.add_warnings(pending);
     }
 
     /// Expands the whole body: `nodes` are its top-level regions.
@@ -254,7 +296,10 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
     pub(crate) fn expand(&mut self, nodes: &[Node<'_>]) -> Result<Expansion, Halt> {
         let mut writer = ExpansionWriter::new(self.content.len(), self.budget);
         let path = IterationPath::empty();
-        self.render(&mut writer, 0..self.content.len(), nodes, None, &path)?;
+        let rendered = self.render(&mut writer, 0..self.content.len(), nodes, None, &path);
+        // Kept with a later failure, like every warning reported before it.
+        self.flush_members();
+        rendered?;
         let (output, splices, scopes) = writer.finish();
         Ok(Expansion { output, splices, scopes })
     }
@@ -299,7 +344,8 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
                     .map_or(region.span.start..region.span.start + 2, |at| {
                         region.span.start + at..region.span.start + at + expression.len()
                     });
-                self.condition(expression, &region.span, region.start_line, scope)
+                let start = condition_start(self.content, region.span.start, expression);
+                self.condition(expression, &region.span, region.start_line, scope, start)
                     .map_err(|halt| self.in_iteration(halt, span, path))?
             }
             None => true,
@@ -314,8 +360,17 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
     }
 
     /// Evaluates a `when` condition in `scope`: its context warnings are
-    /// reported and `stop` is asked before it runs, as page blocks do.
-    fn condition(&mut self, expression: &str, directive: &std::ops::Range<usize>, line: usize, scope: Option<&Arc<LexicalScope>>) -> Result<bool, Halt> {
+    /// reported and `stop` is asked before it runs, as page blocks do. Its
+    /// reached undeclared members are reported after it runs; `start` is the
+    /// body offset of its first byte.
+    fn condition(
+        &mut self,
+        expression: &str,
+        directive: &std::ops::Range<usize>,
+        line: usize,
+        scope: Option<&Arc<LexicalScope>>,
+        start: usize,
+    ) -> Result<bool, Halt> {
         let lookup = self.lookup;
         let context = self.context.clone();
         let current = || context.clone();
@@ -331,16 +386,23 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         for warning in warnings {
             self.report.add_warning(site.locate_warning(warning));
         }
+        let pending = self.member_warnings.take();
+        self.report.add_warnings(pending);
         if (self.stop)(self.report) {
             return Err(Halt::Blocked);
         }
-        let mut missing = Vec::new();
+        let mut observation = Observation::default();
         let verdict = match scope {
-            Some(scope) => site.evaluate(expression, &ScopedLookup::new(lookup, Arc::clone(scope)), &mut missing),
-            None => site.evaluate(expression, lookup, &mut missing),
+            Some(scope) => site.evaluate(expression, &ScopedLookup::new(lookup, Arc::clone(scope)), &mut observation),
+            None => site.evaluate(expression, lookup, &mut observation),
         }
         .map_err(|error| Halt::from(crate::markdown::compose::page_blocks::PageBlockError::from(error)))?;
-        self.report.add_unknown_root_candidates("condition", missing, |_| CandidateLocus::BodyLine(line));
+        self.report.add_unknown_root_candidates("condition", std::mem::take(&mut observation.roots), |_| {
+            CandidateLocus::BodyLine(line)
+        });
+        if let Some(members) = &self.members {
+            self.report.add_warnings(members.warnings(start, expression, &mut observation));
+        }
         Ok(verdict)
     }
 
@@ -356,7 +418,12 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
                     message: error.to_string(),
                 })
             })?;
-            Ok(Located { callback, span: quoted.span.clone() })
+            Ok(Located {
+                callback,
+                span: quoted.span.clone(),
+                text: quoted.text.clone(),
+                start: authored_origin(quoted),
+            })
         };
         let optional = |quoted: &Option<QuotedExpression>| quoted.as_ref().map(&parse).transpose();
         let positional = optional(&header.callback)?;
@@ -424,7 +491,7 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         if !self.discover
             && let Some(when) = &header.when
             && !self
-                .condition(&when.text, &region.span, region.start_line, scope)
+                .condition(&when.text, &region.span, region.start_line, scope, authored_origin(when))
                 .map_err(|halt| self.in_iteration(halt, when.span.clone(), path))?
         {
             return Ok(());
@@ -569,8 +636,23 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         path: &IterationPath,
     ) -> Result<Value, Halt> {
         let frame = self.bind_entry(parent, &located.callback.pattern, entry, &located.span, path)?;
-        evaluate(&located.callback.body, &ScopedLookup::new(self.lookup, frame))
-            .map_err(|cause| self.callback_failure(located.span.clone(), path, cause))
+        let lookup = ScopedLookup::new(self.lookup, frame);
+        let value = match &self.members {
+            Some(members) => {
+                let mut observation = Observation::default();
+                let value = evaluate_observed(&located.callback.body, &lookup, &mut observation);
+                let mut pending = self.member_warnings.borrow_mut();
+                // Every item reaches the same sites; keep each warning once.
+                for warning in members.warnings(located.start, &located.text, &mut observation) {
+                    if !pending.contains(&warning) {
+                        pending.push(warning);
+                    }
+                }
+                value
+            }
+            None => evaluate(&located.callback.body, &lookup),
+        };
+        value.map_err(|cause| self.callback_failure(located.span.clone(), path, cause))
     }
 
     fn sort_key(

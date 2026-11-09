@@ -41,6 +41,7 @@ use super::interpolation::{
 };
 use super::interpolation::rewrite::reborrow;
 use super::expression::absence::MissingRoot;
+use super::member_sites::{MemberCandidates, MemberFrame};
 use super::{ComposeContext, ComposeWarning, SharedFrontmatter};
 use super::value_origin::{DataPaths, FrontmatterProvenance};
 use crate::markdown::frontmatter::Frontmatter;
@@ -331,6 +332,7 @@ fn rewrite_value<L: EvaluationLookup>(
                 warning.message = format!("key '{key}': {}", warning.message);
                 warning
             };
+            evaluator.set_member_leaf(super::call_precheck::path_label(&scope.segments));
             let mut scoped = reborrow(&mut scope.before_eval).map(|check| {
                 move |new: &[ComposeWarning]| check(&new.iter().cloned().map(present).collect::<Vec<_>>())
             });
@@ -768,6 +770,7 @@ pub(crate) fn interpolate_frontmatter_located(
     exclude_keys: &HashSet<String>,
     name_coercion_keys: &[String],
     before_eval: BeforeEval<'_>,
+    members: Option<std::sync::Arc<MemberCandidates>>,
 ) -> Result<FrontmatterInterpolationReport, LocatedFrontmatterError> {
     interpolate_frontmatter_impl(
         frontmatter,
@@ -780,6 +783,7 @@ pub(crate) fn interpolate_frontmatter_located(
         exclude_keys,
         name_coercion_keys,
         before_eval,
+        members,
     )
 }
 
@@ -806,6 +810,7 @@ pub(crate) fn interpolate_frontmatter(
         resolution_context,
         exclude_keys,
         name_coercion_keys,
+        None,
         None,
     )
     .map_err(|failure| *failure.error)
@@ -853,6 +858,7 @@ pub(crate) fn interpolate_frontmatter_best_effort(
         exclude_keys,
         name_coercion_keys,
         None,
+        None,
     )
     .map_err(|failure| *failure.error)
 }
@@ -892,6 +898,7 @@ fn interpolate_frontmatter_impl(
     exclude_keys: &HashSet<String>,
     name_coercion_keys: &[String],
     mut before_eval: BeforeEval<'_>,
+    members: Option<std::sync::Arc<MemberCandidates>>,
 ) -> Result<FrontmatterInterpolationReport, LocatedFrontmatterError> {
     // A `$schema` subtree is schema syntax, and its `{{ … }}` are slots that
     // only the slot resolver evaluates, after their reads are approved;
@@ -1086,9 +1093,20 @@ fn interpolate_frontmatter_impl(
     let mut all_warnings = Vec::new();
     let mut missing_roots = Vec::new();
     let mut scanned_leaves: Vec<Vec<ValuePathSegment>> = Vec::new();
-    fn evaluator_for(state: &FrontmatterSeedState, best_effort: bool) -> Evaluator<'_, FrontmatterSeedState> {
+    // A best-effort pass is discovery: it reports no undeclared reads.
+    fn evaluator_for<'s>(
+        state: &'s FrontmatterSeedState,
+        best_effort: bool,
+        members: Option<&std::sync::Arc<MemberCandidates>>,
+    ) -> Evaluator<'s, FrontmatterSeedState> {
         let evaluator = Evaluator::new(state);
-        if best_effort { evaluator } else { evaluator.observing_missing_roots() }
+        match (best_effort, members) {
+            (true, _) => evaluator,
+            (false, None) => evaluator.observing_missing_roots(),
+            (false, Some(members)) => evaluator
+                .observing_missing_roots()
+                .with_member_sites(members.clone(), MemberFrame::Leaf(Default::default())),
+        }
     }
     // Rewrites one templated key's authored leaves; its data leaves pass
     // through untouched.
@@ -1180,7 +1198,7 @@ fn interpolate_frontmatter_impl(
             // Scope the evaluator so its `&state` borrow ends before we mutate
             // `state.data` below.
             let outcome = {
-                let evaluator = evaluator_for(&state, best_effort);
+                let evaluator = evaluator_for(&state, best_effort, members.as_ref());
                 let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves, reborrow(&mut before_eval));
                 missing_roots.extend(
                     evaluator.take_missing_roots().into_iter().map(|root| (key.clone(), root)),
@@ -1263,7 +1281,7 @@ fn interpolate_frontmatter_impl(
         }
 
         let outcome = {
-            let evaluator = evaluator_for(&state, best_effort);
+            let evaluator = evaluator_for(&state, best_effort, members.as_ref());
             let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves, reborrow(&mut before_eval));
             missing_roots.extend(
                 evaluator.take_missing_roots().into_iter().map(|root| (key.clone(), root)),

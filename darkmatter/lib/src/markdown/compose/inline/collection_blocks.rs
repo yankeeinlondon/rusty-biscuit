@@ -8,6 +8,7 @@ use super::super::collection_blocks::CollectionError;
 use super::super::collection_blocks::parser::parse_collection_regions_in;
 use super::super::context::effective_state as state;
 use super::super::context::report::CandidateLocus;
+use super::super::member_sites::BodyMembers;
 use super::super::page_blocks;
 use super::super::pipeline::{FinalVerdict, ReportWatch};
 use super::super::schema_validation::PreparedSchemas;
@@ -89,7 +90,10 @@ pub(crate) fn run_stage(
         let nodes = structure(&pages, &collections);
         let origin = body.origin.as_ref().filter(|origin| origin.describes(content));
         let opener = |span: &std::ops::Range<usize>| super::super::site_scope::authored_opener(markdown, origin, span);
-        Execution::new(content, &lookup, &runtime.iteration, source, &opener, report, &mut stop).expand(&nodes)
+        let members = BodyMembers::new(&report.member_candidates, origin, options);
+        Execution::new(content, &lookup, &runtime.iteration, source, &opener, report, &mut stop)
+            .with_members(members)
+            .expand(&nodes)
     };
     let expansion = match expansion {
         Ok(expansion) => expansion,

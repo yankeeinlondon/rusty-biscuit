@@ -700,12 +700,32 @@ pub(crate) fn is_reserved_root(root: &str) -> bool {
 
 /// Receives each evaluated variable read that found no value, is not handled
 /// by its [`AbsenceScope`], and that resolved as an absent document property.
+///
+/// An observer that sets [`OBSERVES_MEMBERS`](Self::OBSERVES_MEMBERS) also
+/// receives every member selector node the evaluator reached
+/// ([`member_read`](Self::member_read)) and the root of each evaluated
+/// expression once it finishes, successfully or not
+/// ([`finish_expression`](Self::finish_expression)).
 pub(crate) trait MissingRootObserver {
     /// `false` only for the no-op observer, so unobserved evaluation skips the
     /// classification check entirely.
     const OBSERVES: bool = true;
 
+    /// Whether the evaluator reports reached member selectors; `false` keeps
+    /// evaluation exactly as it was for every observer but [`Observation`].
+    const OBSERVES_MEMBERS: bool = false;
+
     fn missing_root(&mut self, root: &str);
+
+    /// A dotted variable, a postfix member, or a string-literal bracket key
+    /// was reached, identified by its node's address in the evaluated tree.
+    /// Recorded before the base is evaluated, so a read reached before a
+    /// failure is kept.
+    fn member_read(&mut self, _node: usize) {}
+
+    /// The evaluation of `root` finished; the addresses recorded since the
+    /// last call belong to it.
+    fn finish_expression(&mut self, _root: &Expr) {}
 }
 
 impl MissingRootObserver for () {
@@ -730,6 +750,50 @@ impl MissingRootObserver for Vec<MissingRoot> {
             root: root.to_string(),
             span: None,
         });
+    }
+}
+
+/// The observation of a migrated composition surface: the missing roots, as
+/// a `Vec<MissingRoot>` observer collects them, and the member selectors the
+/// evaluator reached, as node ordinals of the evaluated expression
+/// ([`expr_nodes`](super::member_check::expr_nodes)), which name the same
+/// nodes as a static finding's `node_ordinal`.
+#[derive(Debug, Default)]
+pub(crate) struct Observation {
+    pub(crate) roots: Vec<MissingRoot>,
+    /// Ordinals of the expressions finished so far, each expression's
+    /// distinct and ascending.
+    reached: Vec<usize>,
+    /// Node addresses reached in the expression still being evaluated.
+    addresses: Vec<usize>,
+}
+
+impl Observation {
+    /// The reached ordinals recorded since the last call.
+    pub(crate) fn take_reached(&mut self) -> Vec<usize> {
+        std::mem::take(&mut self.reached)
+    }
+}
+
+impl Extend<MissingRoot> for Observation {
+    fn extend<I: IntoIterator<Item = MissingRoot>>(&mut self, roots: I) {
+        self.roots.extend(roots);
+    }
+}
+
+impl MissingRootObserver for Observation {
+    const OBSERVES_MEMBERS: bool = true;
+
+    fn missing_root(&mut self, root: &str) {
+        self.roots.missing_root(root);
+    }
+
+    fn member_read(&mut self, node: usize) {
+        self.addresses.push(node);
+    }
+
+    fn finish_expression(&mut self, root: &Expr) {
+        self.reached.extend(super::member_check::reached_ordinals(root, &mut self.addresses));
     }
 }
 
@@ -1211,6 +1275,104 @@ mod tests {
                 let expected: Vec<(&str, bool, SourceSpan)> = expected.to_vec();
                 assert_eq!(reads, expected, "{source}");
             }
+        }
+    }
+
+    mod member_observation {
+        use super::*;
+        use crate::markdown::compose::expression::{EvaluationLookup, evaluate_observed};
+        use serde_json::{Value, json};
+
+        /// Resolves a dotted path through one JSON object.
+        struct Json(Value);
+
+        impl EvaluationLookup for Json {
+            fn get(&self, path: &str) -> Option<Value> {
+                path.split('.').try_fold(&self.0, |value, segment| value.get(segment)).cloned()
+            }
+        }
+
+        fn state() -> Json {
+            Json(json!({
+                "server": { "name": "web" },
+                "hosts": [{ "name": "a" }, { "name": "b" }, { "name": "c" }],
+                "empty": [],
+                "yes": true,
+                "no": false,
+            }))
+        }
+
+        /// The ordinals `source` reached, and the result.
+        fn reached(source: &str) -> (Vec<usize>, Result<Value, String>) {
+            let expr = parse(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+            let mut observation = Observation::default();
+            let result = evaluate_observed(&expr, &state(), &mut observation).map_err(|error| error.to_string());
+            (observation.take_reached(), result)
+        }
+
+        #[test]
+        fn each_selector_form_reports_its_own_node() {
+            // Ordinals are pre-order: `(server).nmae` is MemberAccess 0,
+            // Paren 1, Variable 2; `server["nmae"]` is Index 0, Variable 1,
+            // the key 2; in `[server.name, server.nmae]` the items are 1, 2.
+            for (source, expected) in [
+                ("server.nmae", vec![0]),
+                ("(server).nmae", vec![0]),
+                ("server[\"nmae\"]", vec![0]),
+                ("[server.name, server.nmae]", vec![1, 2]),
+                ("server", vec![]),
+                ("hosts[0]", vec![]),
+            ] {
+                assert_eq!(reached(source).0, expected, "{source}");
+            }
+        }
+
+        #[test]
+        fn unevaluated_operands_report_nothing() {
+            // Ternary: condition 1, then 2, else 3.
+            assert_eq!(reached("yes ? server.a : server.b").0, [2]);
+            assert_eq!(reached("no ? server.a : server.b").0, [3]);
+            // `||`: left 1, right 2; a truthy left skips the right.
+            assert_eq!(reached("server.name || server.nmae").0, [1]);
+            assert_eq!(reached("server.nmae || server.other").0, [1, 2]);
+        }
+
+        #[test]
+        fn a_callback_reports_once_per_expression_and_never_over_nothing() {
+            // `map(src, h => h.nmae)`: CallbackCall 0, source 1, body 2.
+            assert_eq!(reached("map(empty, h => h.nmae)").0, Vec::<usize>::new());
+            assert_eq!(reached("map(hosts, h => h.nmae)").0, [2]);
+        }
+
+        #[test]
+        fn a_read_before_a_failure_is_kept() {
+            let (ordinals, result) = reached("upper(server.nmae, 1, 2)");
+            assert!(result.is_err(), "the call must fail: {result:?}");
+            assert_eq!(ordinals, [1]);
+        }
+
+        #[test]
+        fn each_expression_is_separate_and_take_drains() {
+            let first = parse("server.a").unwrap();
+            let second = parse("[1, server.b]").unwrap();
+            let mut observation = Observation::default();
+            evaluate_observed(&first, &state(), &mut observation).unwrap();
+            evaluate_observed(&second, &state(), &mut observation).unwrap();
+            assert_eq!(observation.take_reached(), [0, 2]);
+            assert!(observation.take_reached().is_empty());
+        }
+
+        #[test]
+        fn root_observers_are_unchanged() {
+            let expr = parse("missing.nmae").unwrap();
+            let mut observation = Observation::default();
+            let mut roots: Vec<MissingRoot> = Vec::new();
+            let observed = evaluate_observed(&expr, &state(), &mut observation).unwrap();
+            assert_eq!(evaluate_observed(&expr, &state(), &mut roots).unwrap(), observed);
+            assert_eq!(evaluate_observed(&expr, &state(), &mut ()).unwrap(), observed);
+            assert_eq!(observation.roots, roots);
+            assert_eq!(roots.len(), 1);
+            assert_eq!(observation.take_reached(), [0]);
         }
     }
 }

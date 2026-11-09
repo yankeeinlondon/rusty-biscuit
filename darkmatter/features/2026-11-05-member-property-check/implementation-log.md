@@ -38,6 +38,42 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/collection_blocks/engine.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/member_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+    - darkmatter/lib/src/markdown/compose/inline/collection_blocks.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/inline/page_blocks.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/member_sites.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/tests/l1/compose_member_warnings.rs
+    - darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - darkmatter/lib/tests/l1/compose_member_warnings.rs
+    - darkmatter/cli/tests/l1/compose_member_warnings.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/undeclared_member.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
     - darkmatter
     - darkmatter-cli
@@ -131,23 +167,113 @@ decisions_for_review:
         Alternative: report members in lifecycle stacks too; composition does
         not observe those reads, so the editor and composition would then
         differ on another surface.
+    - |-
+        Composition keys each member site where it was authored. A body site uses
+        its byte offset in the loaded file (through the body's origin map), so a
+        repeated ::map copy or a second include of one child finds the same
+        candidate. A frontmatter site uses its key path plus the {{ offset inside
+        the authored value, with no YAML position projection; the plan named both
+        this and the YAML projector. The offset in the value is cheaper, and the
+        second frontmatter pass re-reads the authored value, so offsets agree.
+        Alternative: project into the file through the YAML scalar on every
+        evaluation (slower, same result). Only member_sites.rs and the two
+        frontmatter call sites would change.
+    - |-
+        A frontmatter $( ... ) ternary's pieces are keyed by role (condition, then,
+        else) per top-level key, not by byte offset, because the shell stage holds
+        the piece texts but not their positions. A piece containing a {{ }}
+        placeholder gets no candidate: its evaluated text is not the authored text,
+        and the placeholder itself is already reported by frontmatter interpolation
+        (a test proves it). Alternative: thread offsets through the shell parser;
+        more change for no difference in what is reported.
+    - |-
+        Blocking (--deny) for $( ... ) member warnings happens before any command
+        of the stage runs: the shell stage takes a check hook and calls it once
+        every ternary is prepared. The plan only said the warnings are added before
+        the next pipeline checkpoint, which would have let the chosen command run
+        first. Alternative: the plan's later check; simpler, but a denied read could
+        already have chosen and run a command. Reverting means dropping the hook in
+        frontmatter_shell_expansion.rs and pipeline/mod.rs.
+    - |-
+        A ::file/::code when= condition re-checks the blocking policy right after
+        its member warnings are added, before that directive composes its target.
+        Without it, a denied member read in the condition would only stop the next
+        directive or stage, after the child was composed.
+    - |-
+        Collection callbacks (map, filter, sort, while/until) run behind a shared
+        borrow, so their member warnings wait (each kept once) and are added to the
+        report before the next gate's policy check and when the traversal ends,
+        including on failure. A denied member read in a callback therefore stops
+        at the next gate or at the end of the stage, not between items.
+        Alternative: make callback evaluation mutable throughout the engine; a
+        larger change to code paths unrelated to this feature.
+    - |-
+        The precheck now types every site with the document template while a
+        schema layer still has unresolved slots (DeclaredTypes::for_site), for call
+        checks too, as the review's Ruling B approved. Previously such documents
+        were checked untyped. No existing test changed.
+    - |-
+        I created Phase 5's composition test file
+        (lib/tests/l1/compose_member_warnings.rs) in Phase 4 with one smoke test per
+        wired surface, so each surface was proven as it landed. Phase 5 extends it
+        with the acceptance cases; nothing there needs to be redone.
+    - |-
+        Phase 5, pending schema without resolution: the plan expected a composition
+        whose schema template stays pending (a passive slot session) to fail and
+        still carry the member warning. It cannot: composition needs the effective
+        schema before any expression runs, so it fails with dm.schema.slot_pending
+        before the site is reached. The spec agrees ("composition, which always
+        resolves the schema first, reports it after resolution"), so the test
+        asserts the failure and no member warning. Alternative: evaluate
+        frontmatter before schema preparation, which would reorder the pipeline.
+        Nothing to redo unless the pipeline order changes.
+    - |-
+        Phase 5, editor coverage of frontmatter $( ... ) ternaries: composition
+        reports an undeclared member in a $( ... ) ternary condition or value
+        branch; the editor (DMLS) does not, because the plan limited DMLS to its
+        existing single check point, which sees only the {{ }} placeholders inside
+        a $( ... ). The spec says DMLS checks all branches, so this is a gap
+        against its wording. I kept the plan's scope and excluded these sites
+        from the agreement test (documented in its module comment). Alternative:
+        extend DMLS's frontmatter check to parse $( ... ) ternaries the way the
+        composition precheck does (record_shell_members); that is a new DMLS
+        surface plus an agreement-test row. Phase 6 documents the gap.
+    - |-
+        Phase 5, warnings lost on a failure in the same stage: within one
+        body/frontmatter interpolation pass, {{ }} sites are evaluated from the end
+        of the text to the start, and the stage's collected warnings are dropped if
+        a site fails. A member authored before the failing site is never evaluated
+        (so nothing is lost); only a member authored after it, read first, loses
+        its warning. --deny still blocks on it. All warning families already
+        behave this way, so I did not change it: the fix is to carry warnings on
+        the stage's error type (about 26 construction sites) and add them to the
+        report before failing. The acceptance test covers a failure in a later
+        stage, where the warning is kept. If the reviewer wants the fix, it is a
+        self-contained change in interpolation/rewrite.rs and its two callers.
+    - |-
+        Phase 5, test adaptations: (a) `a && b` / `a || b` operands are typed
+        unknown|null by the and/or functions, so a member there is never flagged;
+        the short-circuit tests use `server.nmae == 'x'` as the operand. (b) No
+        frontmatter leaf is evaluated by both interpolation passes today (pass 2
+        only takes the keys pass 1 held back), so pass_repetition covers a
+        held-back leaf and asserts one warning. Nothing to redo.
 message_to_agent: |-
-    Phase 3 wired the member check into DMLS. What Phase 4+ needs to know:
-    - Library: DeclaredTypes::for_template(Option<&DocumentTemplate>) is new;
-      for_site's template arm delegates to it.
-    - DMLS: call_check::call_diagnostics(expr, text, site, strict) carries
-      member warnings; call_check::stack_call_diagnostics is call-only and is
-      used for every lifecycle-stack expression (FrontmatterCalls::check_stack).
-      The overlay's SlotStatus.template holds the pending document template
-      (from overlay/schema.rs::assemble's AssemblyError), and
-      declared_types falls back to it when no bundle is served.
-    - Tests: dmls/tests/l1/undeclared_member.rs covers every editor surface
-      (Phase 5 AC7 parity tests can reuse its every_surface document shape).
-    - member_check.rs's expr_nodes still carries the
-      cfg_attr(not(test), expect(dead_code)) attribute: remove it when the
-      composition observer (M14) calls it.
-    - Gates after Phase 3: see the Phase 3 close in the log.
-
+    Phase 5 added acceptance tests only; no library, CLI, or DMLS source changed.
+    Facts Phase 6's docs must state (see decisions_for_review for detail):
+    - Composition warns only for reached selectors; DMLS warns on every branch.
+      Beyond that documented difference, DMLS does NOT check members inside a
+      frontmatter $( ... ) ternary condition/value branch (only the {{ }} inside
+      it); composition does. Document this as a current limitation.
+    - A schema with pending slots: DMLS reports from the template; composition
+      always resolves the schema first, so a passive (non-resolving) session
+      fails with dm.schema.slot_pending before any member warning exists.
+    - Operands of && and || are never flagged (and/or accept unknown|null).
+    - Terminal stderr form: "Member 'nmae' is not declared by the known object
+      type of 'server' at <file>:6." (location before the final period); JSON
+      carries code, severity "warning", source.line/column (1-based characters,
+      column at the member name; for server["nmae"] at the opening quote).
+    - `md compose --help` lists the code (tested in cli l1
+      compose_member_warnings::compose_help_lists_the_code).
 ---
 
 # Implementation Log for 2026-11-05-member-property-check (7 phases)
@@ -530,3 +656,242 @@ severity, message, and null `data` types:
   `dmls/docs/diagnostics.md` and the skill for this feature.
 - No pre-existing failures.
 - Status: Phase 3 complete; ready for Phase 4.
+
+## Phase 4
+
+### Wave 8 — Observer plumbing and candidate store (2026-11-09)
+
+- **M14**: `MissingRootObserver` gained `OBSERVES_MEMBERS` (default `false`),
+  `member_read(node)` and `finish_expression(root)`. `evaluate_expr` records
+  a dotted variable, a postfix member, or a string-literal bracket key at node
+  entry, before its base is evaluated (`is_member_selector`, now
+  `pub(crate)` in `expression/mod.rs`); the caller-file argument path records
+  its own `Index` node. `evaluate_observed` calls `finish_expression` on
+  success and on failure. `Observation { roots, reached, addresses }` turns
+  addresses into ordinals with one `expr_nodes` walk per expression
+  (`member_check::reached_ordinals`), so the `cfg_attr(not(test),
+  expect(dead_code))` on `expr_nodes` is gone. `()` and `Vec<MissingRoot>`
+  keep the defaults.
+  - The ordinal conversion lives in `member_check.rs`, not in `absence.rs`:
+    the source guard `unknown_identifier_warning::absence_handling_names_no_function`
+    forbids the text `is_empty` in `absence.rs`'s production code, and clippy
+    rejects the spellings that avoid it.
+  - Tests: `absence::tests::member_observation::*` (6): each selector form
+    reports its own node; unchosen ternary branch and short-circuited `||`
+    report nothing; a callback over `[]` reports nothing and over three items
+    once; a read before a failure is kept; ordinals are per expression and
+    `take_reached` drains; `()` and `Vec<MissingRoot>` return the same value
+    and roots.
+- **M15**: new `compose/member_sites.rs`: `MemberSiteKey` (`body` projects a
+  body offset through `BodyOrigin`; `leaf` is a frontmatter key-path label plus
+  the `{{` offset in the leaf; `shell` names a `$( … )` piece),
+  `MemberCandidate { expression, order, warning }`, `MemberCandidates`
+  (`warnings(key, expression, reached)` requires the trimmed expression text
+  to match, sorts by member offset), `MemberFrame` (how an interpolating
+  evaluator names its sites) and `BodyMembers` (the view a condition or
+  collection stage uses). `ComposeReport.member_candidates:
+  Arc<MemberCandidates>`, not merged from a child report.
+  - Tests: `member_sites::tests::*` (4): key equality; authored order;
+    another site or rewritten text yields nothing; repeated reaches collapse
+    to one warning in a report.
+
+### Wave 9 — Precheck candidates (2026-11-09)
+
+- **M16/M17**: `check_document` takes `&SiteSchema` (built with
+  `DeclaredTypes::for_site`) and returns `(warnings, MemberCandidates)`.
+  Every surface that runs `checked`/`rejected_condition` also records member
+  findings under the same scope: frontmatter leaves (`leaf` key), body
+  interpolation and region bodies (`body` key at the `{{`), `::block when`
+  and `::file`/`::code when` (`body` key at `condition_start`), collection
+  gates and callbacks (`body` key at the quoted value's first decoded byte).
+  `record_shell_members` parses each top-level `$( … )` ternary with
+  `parse_frontmatter_shell_value_spanned` and records its condition and value
+  branches (`shell` key). `PreparedSchemas::site_schema_for` wraps the library
+  call; `run_call_precheck` stores the candidates on the report.
+- The authored-position projection call advisories used is now the shared
+  `Locator` (`locate` → position, line, `at file:line` suffix), used by both
+  `advisory_warnings` and `member_candidates`.
+- Existing `compose_call_precheck`, `dynamic_schema_slot*`,
+  `design_time_call_check`, `expression_recovery_slots`,
+  `load_data_options_slots`, `unknown_identifier*`, `undeclared*` tests pass
+  unchanged.
+
+### Wave 10 — Surfaces (2026-11-09)
+
+- **Interpolation**: `Evaluator::with_member_sites(candidates, frame)`,
+  `set_member_leaf`, `member_warnings(expression, span)`. With a view
+  installed, `evaluate` runs an `Observation`; the variable fast path records
+  ordinal 0 for a dotted name and the presentation-value path records every
+  selector of its constant chain. `interpolate_text_selected` appends the
+  warnings right after `eval` (reversed with the rest, so they end in authored
+  order) so the next `before_eval` and the stage's final check see them; the
+  whole-value path appends them after `eval_json` and shows them to
+  `before_eval`. Body interpolation (`inline/interpolation.rs::rewrite_body`,
+  which also serves pending reads) installs a `MemberFrame::Body(origin)`
+  view; the directive target pass installs none. Frontmatter interpolation
+  (both passes) installs `MemberFrame::Leaf`, and `rewrite_value` names each
+  leaf before rewriting it; the best-effort (discovery) pass installs none.
+- **Conditions**: page blocks (`page_blocks/engine.rs::evaluate_when`),
+  transclusion `when=` (`transclusion/engine.rs`), and `::block` inside a
+  collection traversal evaluate with an `Observation`; `BodyMembers` turns the
+  reached ordinals into warnings added right after the condition. A
+  transclusion re-checks its `ReportWatch` after adding them, before the
+  directive composes its target.
+- **Collections**: `Execution::with_members`; gates evaluate through
+  `condition` (keyed at the quoted value's first byte), callbacks through
+  `call` with an `Observation`. A callback runs behind `&self`, so its
+  warnings wait in a `RefCell` (each kept once) and are added before the next
+  gate's `stop` and when the traversal ends, failure included.
+- **Frontmatter `$()`**: `evaluate_ternary_condition`/`evaluate_value_branch`
+  are generic over the observer (`Observation` implements
+  `Extend<MissingRoot>`), so their other callers are unchanged. Each ternary's
+  condition and selected value branch are joined after the condition picks a
+  branch. `execute_frontmatter_shell_expansion` gained
+  `members: Option<ShellMembers>`; its `check` (the pipeline's
+  `stop_if_blocked_with`) sees the member warnings before any command runs,
+  and they lead the stage report's warnings.
+- Tests in each module: `interpolation::rewrite::tests::member_sites::*` (2).
+  Composition smoke tests, one per surface, seeded in Phase 5's file
+  `lib/tests/l1/compose_member_warnings.rs` (8): body interpolation;
+  unchosen branch; frontmatter interpolation (whole value and mixed text);
+  `::block when`; `::file when`; `::map`/`::filter` callbacks, `::map` gate,
+  empty source; region body across three copies; `$( … )` condition, selected
+  value branch, unselected branch. Each starts from a `name` control and
+  asserts the shared diagnostic's line, column, and message.
+- Added after the gate run: `a_placeholder_in_a_frontmatter_shell_value_is_a_frontmatter_interpolation_site`
+  proves a `{{ … }}` inside a `$( … )` value is reported by frontmatter
+  interpolation (the leaf key), which is why the `$( … )` recorder skips a
+  piece holding a placeholder.
+
+### Requirement-to-test mapping (Phase 4)
+
+| Behavior | Test(s) |
+| --- | --- |
+| Reach recording per selector form; unevaluated operands silent; callbacks once; read before a failure kept; old observers unchanged (M14) | `absence::tests::member_observation::*` |
+| Site keys, text guard, authored order, collapse by identity (M15) | `member_sites::tests::*` |
+| Interpolation join (mixed text, whole value, unchosen branch, other offset) | `interpolation::rewrite::tests::member_sites::*` |
+| Body / frontmatter interpolation, unchosen branch | `l1 compose_member_warnings::{body_interpolation_reports_a_reached_member, frontmatter_interpolation_reports_a_reached_member, an_unchosen_branch_reports_nothing}` |
+| `::block when`, `::file when` | `l1 compose_member_warnings::{a_block_condition_reports_a_reached_member, a_transclusion_condition_reports_a_reached_member}` |
+| `::map`/`::filter` callbacks and gate, empty source, region body across copies | `l1 compose_member_warnings::{collection_gates_and_callbacks_report_once_per_site, a_region_body_reports_once_across_its_copies}` |
+| `$( … )` condition, selected/unselected value branch, placeholder | `l1 compose_member_warnings::{a_frontmatter_shell_ternary_reports_its_condition_and_selected_value_branch, a_placeholder_in_a_frontmatter_shell_value_is_a_frontmatter_interpolation_site}` |
+| Precheck unchanged for calls | existing `compose_call_precheck`, `dynamic_schema_slot*`, `design_time_call_check` |
+
+Fidelity: the boundary is the compose pipeline (library, file reads of the
+document and a child), so the surface tests are F2 L1 through the public
+`compose_with` in temp dirs; the CLI wiring (`--deny`, JSON output) is
+Phase 5's CLI file.
+
+### Phase 4 close (2026-11-09)
+
+- Gate-skip check (repository root, after all edits):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter, test-toolkit, darkmatter-cli]`,
+  `change_class: package`. Gates not skippable; both run.
+- `just lint` (darkmatter/): pass (after replacing a guard-avoiding
+  `first().is_none()` that clippy rejected; see Wave 8).
+- `just test` (darkmatter/): first run stopped on
+  `lookup_parity::the_inventory_lists_every_lookup_implementation`: the new
+  test lookup `Json` in `absence.rs` had to be listed in its inventory
+  (`compose/tests/lookup_parity.rs`, `Coverage::Fixture`). Rerun: 16175 run,
+  16175 passed, 10 skipped. Three tests over 5 s under load
+  (`compose_shell_template::every_suggested_rule_approves_the_command`
+  5.14 s, and the two DMLS tests Phase 2 already recorded); alone they take
+  2.99 s, 2.42 s, 2.35 s. Recorded as load-sensitive.
+- `undeclared_property`, `unknown_identifier_warning.rs`, and the compose
+  performance tests pass unchanged (in the full run).
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Dependent packages: Claudine (the composition consumer), filtered to
+  `compose|precheck|call_check|member`: 60 passed. No public API changed
+  (every new item is `pub(crate)`).
+- Cross-OS: not run. No path, process, or OS-specific code; the `$( … )`
+  test runs `echo`, as existing cross-platform l1 tests do.
+- Docs and the Darkmatter skill: not changed here; Phase 6 owns them
+  (`compose.md` should describe `member_sites.rs`, the per-surface routing,
+  and the decisions below).
+- Status: Phase 4 complete; ready for Phase 5.
+
+## Phase 5
+
+### Wave 11 — Acceptance tests (2026-11-09)
+
+Three disjoint test files, written in parallel; each slice verified with a
+filtered nextest run, then the phase gates ran once. No library, CLI, or DMLS
+source changed in this phase.
+
+- **Library composition** (`lib/tests/l1/compose_member_warnings.rs`, +17
+  tests, 26 in the file, ~0.14 s total). New helpers: `try_compose_in`
+  (applies option edits, composes through `compose_with_warnings` so a
+  failure's warnings are visible; `compose_in` now delegates to it),
+  `position`/`after`/`expect`/`expect_last` (expected line and character
+  column computed from the authored text, cross-checked by literal values),
+  `write_files`. Every positive case starts from a `name` control.
+- **CLI** (`cli/tests/l1/compose_member_warnings.rs`, 5 tests, registered in
+  `cli/tests/l1/main.rs` after `compose_call_warnings`): one `md` spawn per
+  behavior through `CliProcessFixture`.
+  - The terminal warning reads `Member 'nmae' is not declared by the known
+    object type of 'server' at <path>/doc.md:6.`; the location sits before the
+    final period, so the test matches the message without it. JSON keeps the
+    location in `source` only.
+- **Agreement** (`dmls/tests/l1/undeclared_member.rs`): `library_and_editor_agree`
+  is a `macro_rules!` module with one test per surface (body interpolation,
+  frontmatter interpolation, `::block when`, `::file when`, `::map` callback,
+  `::filter` callback, region body, `load_data` callback, `{{ }}` inside a
+  `$( … )` value). Composition runs in the LSP workspace's temp dir through
+  `ComposeRequest::prepare(…, RequestSnapshot::new(dir).with_home(…))`.
+  Composition's member diagnostic has no `span`, so only the start is
+  compared; the LSP range length (4) is asserted on the editor side.
+  `reachability_differs`: an unchosen ternary branch is DMLS-only.
+- Findings recorded in `decisions_for_review`: (1) the plan's "without
+  resolution" AC3 case fails before any expression runs (the spec agrees);
+  (2) DMLS does not check `$( … )` ternary conditions/value branches,
+  composition does, so those are excluded from the agreement set; (3) a
+  failure in the same interpolation stage drops warnings of sites authored
+  after it (pre-existing for every warning family; not changed);
+  (4) `&&`/`||` operands are never flagged; no leaf is evaluated by both
+  frontmatter passes, so `pass_repetition` covers a held-back leaf.
+
+### Requirement-to-test mapping (Phase 5)
+
+| Requirement | Test(s) |
+| --- | --- |
+| AC1 rows → one warning at `nmae`, `[]` → none, computed contract → none | lib `ac1_rows_and_empty`; dmls `ac1_editor`, `library_and_editor_agree::load_data_callback` |
+| AC2 dot, `(server)`, `fm.`, `["nmae"]`, literal object, typed function return; optional unset silent | lib `ac2_forms` |
+| AC3 pending template: with resolution warns; passive session fails `dm.schema.slot_pending` with no member warning | lib `ac3_pending_template`; dmls `pending_template*` (Phase 3) |
+| AC5 nested step, dotted bracket key, computed key (root warning only), `hosts[0].nmae`, no cascade | lib `ac5_paths` |
+| AC6 two callbacks → two; iterations → one; `local.`; shadowing; include dedup; per-document attribution | lib `ac6_identity` |
+| AC7 each composition surface reached/unreached; unchosen branch, short-circuit, empty collection | lib `ac7_surfaces_*` (7 tests) plus the Phase 4 smoke tests |
+| AC7 authored positions: body edit before the site, multiline frontmatter, `é` before the member | lib `ac7_surfaces_authored_positions` |
+| AC7 library/editor agreement and reachability difference | dmls `library_and_editor_agree::*` (9), `reachability_differs` |
+| `try(...)` fallback not reached → none; file present → one | lib `ac7_try` |
+| AC8 later failure keeps member warnings | lib `ac8_later_failure` |
+| AC8 default success, `--deny` code, `--deny all`, JSON envelope with clean stderr, `--help` lists the code | cli `compose_member_warnings::*` (5) |
+| Discovery pass reports none | lib `discovery_pass_reports_none` |
+| One warning across frontmatter passes | lib `pass_repetition` |
+
+Fidelity: the boundary is the compose pipeline (in-process F2 L1 in temp
+dirs) and the `md` binary for CLI wiring (spawned once per behavior); the
+agreement tests drive the real language server over its protocol in a temp
+workspace. No new input-format parser, so no Input Robustness Matrix applies.
+
+### Phase 5 close (2026-11-09)
+
+- Slice verification: lib `-E 'test(compose_member_warnings)'` 26/26;
+  cli `compose_member_warnings | policy_verbs | compose_call_warnings` 37/37;
+  dmls `undeclared_member` 18/18.
+- Gate-skip check (repository root, after all edits):
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit]`,
+  `change_class: package` (Phase 4 is still uncommitted, so it is in the
+  tree too). Gates not skippable; both run.
+- `just lint` (darkmatter/): pass.
+- `just test` (darkmatter/): 16208 run, 16208 passed, 10 skipped (160 s); no
+  test reported slow.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Dependent packages: not rerun. This phase changed only test files, so no
+  symbol a dependent (Claudine) uses changed; Phase 4's dependent run still
+  applies.
+- Cross-OS: not run; tests only, no path or OS-specific code (the CLI tests
+  use `CliProcessFixture` paths; the agreement tests build URIs with the
+  existing `uri` helper).
+- No pre-existing failures; none skipped.
+- Status: Phase 5 complete; ready for Phase 6.

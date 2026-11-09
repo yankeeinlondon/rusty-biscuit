@@ -127,6 +127,7 @@ mod design_time_call_check;
 #[cfg(feature = "effects-instrumentation")]
 mod variable_type_projection;
 mod member_check;
+mod compose_member_warnings;
 #[cfg(feature = "effects-instrumentation")]
 mod file_predicates;
 #[cfg(feature = "effects-instrumentation")]

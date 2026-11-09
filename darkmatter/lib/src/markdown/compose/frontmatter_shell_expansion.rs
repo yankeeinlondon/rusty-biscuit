@@ -26,7 +26,8 @@
 //! `"$( file_exists('x') ? 'a' : 'b' )"` — is a user error and is rejected with a
 //! diagnostic suggesting `{{ … }}` interpolation instead.
 
-use super::expression::absence::MissingRoot;
+use super::expression::absence::{MissingRoot, MissingRootObserver, Observation};
+use super::member_sites::{MemberCandidates, MemberSiteKey, ShellPiece};
 use super::expression::{
     ExpressionError, fm_namespace, evaluate_observed, is_truthy, parse,
     scalar_string,
@@ -1356,18 +1357,30 @@ pub(crate) struct FrontmatterTemplates {
     pub ctx: SourceContext,
 }
 
+/// How frontmatter shell expansion reports the undeclared members its
+/// ternary conditions and value branches reach.
+pub(crate) struct ShellMembers<'a> {
+    pub(crate) candidates: &'a MemberCandidates,
+    /// Shown the member warnings once every ternary is prepared and before
+    /// any command runs; an `Err` (a blocking policy) stops the stage there.
+    pub(crate) check: &'a mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>,
+}
+
 /// Executes all frontmatter shell expansion directives and rewrites
 /// frontmatter values in place.
 ///
 /// Scans top-level string-valued frontmatter entries for `$(...)` expressions,
 /// validates them, executes approved commands through the shared shell runtime,
-/// trims output, and rewrites the frontmatter values.
+/// trims output, and rewrites the frontmatter values. With `members`, the
+/// undeclared members each ternary's condition and selected value branch
+/// reached are reported first in the report's warnings, in key order.
 ///
 /// ## Errors
 ///
 /// Returns an error if:
 /// - Policy file I/O fails
 /// - Command execution fails (blacklisted, denied, execution error, etc.)
+/// - `members`' check refuses the member warnings (before any command runs)
 pub(crate) fn execute_frontmatter_shell_expansion(
     frontmatter: &mut Frontmatter,
     options: &crate::markdown::compose::ComposeRequest,
@@ -1375,6 +1388,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     provenance: &mut FrontmatterProvenance,
     ctx: &SourceContext,
     templates: Option<&FrontmatterTemplates>,
+    mut members: Option<ShellMembers<'_>>,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {
     let candidates = scan_frontmatter(frontmatter, provenance, ctx, &options.exclude_keys)?;
 
@@ -1409,6 +1423,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
 
     let mut pending: Vec<(usize, String, Pending)> = Vec::with_capacity(candidates.len());
     let mut missing_roots = Vec::new();
+    let mut member_warnings = Vec::new();
 
     // Placeholders of a `$( … )` value are read from the frontmatter as it
     // stands now, after the first interpolation pass.
@@ -1491,7 +1506,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                 // allowlisted, so prepare BOTH branches before evaluating
                 // the condition. An unselected branch with an un-approved
                 // command still fails the entire directive.
-                let mut then_missing = Vec::new();
+                let mut then_missing = Observation::default();
                 let then_prepared = prepare_optional_branch(
                     then_branch,
                     candidate,
@@ -1503,7 +1518,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     BranchPosition::Then,
                     &mut then_missing,
                 )?;
-                let mut else_missing = Vec::new();
+                let mut else_missing = Observation::default();
                 let else_prepared = prepare_optional_branch(
                     else_branch,
                     candidate,
@@ -1516,7 +1531,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     &mut else_missing,
                 )?;
 
-                let mut condition_missing = Vec::new();
+                let mut condition_missing = Observation::default();
                 let pick_then = evaluate_ternary_condition(
                     condition_source,
                     state,
@@ -1525,11 +1540,30 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     &mut condition_missing,
                 )?;
 
-                let branch_missing = if pick_then { then_missing } else { else_missing };
+                let (mut branch_missing, branch, piece) = if pick_then {
+                    (then_missing, then_branch, ShellPiece::Then)
+                } else {
+                    (else_missing, else_branch, ShellPiece::Else)
+                };
+                // Only the condition and the selected value branch were read.
+                if let Some(members) = &members {
+                    let joined = |piece, source: &str, observation: &mut Observation| {
+                        members.candidates.warnings(
+                            &MemberSiteKey::shell(&candidate.key, piece),
+                            source,
+                            &observation.take_reached(),
+                        )
+                    };
+                    member_warnings.extend(joined(ShellPiece::Condition, condition_source, &mut condition_missing));
+                    if let Branch::Value { source } = branch {
+                        member_warnings.extend(joined(piece, source, &mut branch_missing));
+                    }
+                }
                 missing_roots.extend(
                     condition_missing
+                        .roots
                         .into_iter()
-                        .chain(branch_missing)
+                        .chain(branch_missing.roots)
                         .map(|root| (candidate.key.clone(), root)),
                 );
                 let selected = if pick_then { then_prepared } else { else_prepared };
@@ -1541,6 +1575,13 @@ pub(crate) fn execute_frontmatter_shell_expansion(
         };
 
         pending.push((index, candidate.key.clone(), pending_item));
+    }
+
+    // A blocking member read stops the stage before any command runs.
+    if let Some(members) = members.as_mut()
+        && !member_warnings.is_empty()
+    {
+        (members.check)(&member_warnings)?;
     }
 
     // Run executable preparations in parallel; value branches skip the shell
@@ -1562,7 +1603,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
 
     // Rewrite frontmatter values
     let fm_mut = frontmatter.as_map_mut();
-    let mut warnings = Vec::new();
+    let mut warnings = member_warnings;
     for (_, key, execution) in executions {
         let (value, exec_warnings) = execution?;
         warnings.extend(exec_warnings);
@@ -1783,12 +1824,12 @@ pub(crate) fn directive_reachable_pipelines(
 ///
 /// The condition is a gate, like `when=`: a bare absent property in it is
 /// recorded in `missing`, not treated as an absence check.
-fn evaluate_ternary_condition(
+fn evaluate_ternary_condition<O: MissingRootObserver + Extend<MissingRoot>>(
     condition_source: &str,
     state: &FrontmatterSeedState,
     key: &str,
     ctx: &SourceContext,
-    missing: &mut Vec<MissingRoot>,
+    missing: &mut O,
 ) -> Result<bool, ShellExpansionError> {
     let evaluator = Evaluator::new(state).observing_missing_roots();
     let rewrite = interpolate_text(
@@ -1954,7 +1995,7 @@ fn prepare_optional_branch(
     ctx: &SourceContext,
     state: &FrontmatterSeedState,
     position: BranchPosition,
-    missing: &mut Vec<MissingRoot>,
+    missing: &mut Observation,
 ) -> Result<PreparedBranch, ShellExpansionError> {
     match branch {
         Branch::Empty => Ok(PreparedBranch::Value(String::new())),
@@ -1979,7 +2020,7 @@ fn prepare_optional_branch(
                 position,
                 &candidate.key,
                 ctx,
-                missing,
+                &mut missing.roots,
             )?;
             let tokens = tokenize(&resolved, ctx)
                 .map_err(|error| remap_branch_parse_error(error, position, &candidate.key, ctx))?;
@@ -2018,13 +2059,13 @@ fn prepare_optional_branch(
 /// the [`ResolutionContext`](super::expression::ResolutionContext) when one is
 /// available, so a read-side function such as `file_exists(...)` resolves; an
 /// absent bare property evaluates to `null`, which renders as an empty string.
-fn evaluate_value_branch(
+fn evaluate_value_branch<O: MissingRootObserver + Extend<MissingRoot>>(
     source: &str,
     state: &FrontmatterSeedState,
     position: BranchPosition,
     key: &str,
     ctx: &SourceContext,
-    missing: &mut Vec<MissingRoot>,
+    missing: &mut O,
 ) -> Result<String, ShellExpansionError> {
     let evaluator = Evaluator::new(state).observing_missing_roots();
     let rewrite = interpolate_text(
