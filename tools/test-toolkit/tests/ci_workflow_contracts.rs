@@ -1490,8 +1490,16 @@ fn the_release_calculation_runs_on_a_branch_not_a_detached_head() {
         !release.contains("ref: ${{ github.event.workflow_run.head_sha }}"),
         "release-plz must not check out a bare SHA; a detached HEAD has no `@{{upstream}}`"
     );
+    let preparation = job_block("release-plz.yml", "  release-plz-pr:");
     assert!(
-        release.contains("github.event.workflow_run.head_sha"),
+        preparation.contains("ref: main") && preparation.contains("release_path.py select prepare"),
+        "preparation must check out the branch and let `select prepare` judge freshness"
+    );
+    // The executable freshness behavior is driven by
+    // `release_path_commands_write_step_outputs_and_locate_errors`.
+    let module = read("scripts/ci/release_path.py");
+    assert!(
+        module.contains(r#"req_sha(event, "workflow_run.head_sha")"#) && module.contains("def verify_freshness("),
         "the validated SHA must still be compared against the checked-out branch tip"
     );
 }
@@ -1516,10 +1524,26 @@ fn the_release_calculation_is_provable_from_a_branch_without_releasing() {
         dry_run.contains("contents: read"),
         "the dry run must drop write permissions; it may not release"
     );
+    // Both calculations go through `release_path.py`, which adds the shared
+    // calculation environment (`calculation_env`); a bare `release-plz`
+    // invocation in either job would calculate without it. The environment
+    // itself is driven by `update_calculates_in_the_shared_environment_without_credentials`
+    // and `release_pr_refuses_incomplete_credentials_and_leaves_the_checkout_clean`.
     assert!(
-        dry_run.contains("release-plz update"),
-        "the dry run must exercise the version calculation that fails on a bad git state"
+        dry_run.contains("python3 scripts/ci/release_path.py update"),
+        "the dry run must exercise the version calculation in the shared calculation environment"
     );
+    let preparation = job_block("release-plz.yml", "  release-plz-pr:");
+    assert!(
+        preparation.contains("python3 scripts/ci/release_path.py release-pr"),
+        "preparation must calculate through release_path.py release-pr"
+    );
+    for (job, block) in [("release-dry-run", &dry_run), ("release-plz-pr", &preparation)] {
+        assert!(
+            !block.lines().any(|line| line.trim_start().starts_with("release-plz ")),
+            "{job} must not run release-plz outside the shared calculation environment"
+        );
+    }
     for forbidden in ["command: release-pr", "command: release\n", "GITHUB_TOKEN"] {
         assert!(
             !dry_run.contains(forbidden),
@@ -1550,10 +1574,1152 @@ fn release_calculation_asserts_a_clean_tracked_worktree() {
         release.contains("git status --porcelain --untracked-files=no"),
         "release-plz must assert a clean tracked worktree around release calculation"
     );
+    for step in [
+        "Assert clean tracked worktree before release calculation",
+        "Assert clean tracked worktree after release calculation",
+        "Assert clean tracked worktree before publication",
+    ] {
+        assert!(release.contains(step), "release-plz must keep the step `{step}`");
+    }
+}
+
+/// All three release jobs install the tool through one composite action, so the
+/// dry run proves the exact version publication runs, on the repository's
+/// pinned toolchain rather than a floating `stable`.
+#[test]
+fn the_release_tool_setup_pins_one_version_on_the_repository_toolchain() {
+    let action = read(".github/actions/setup-release-plz/action.yml");
     assert!(
-        release.contains("gitignored"),
-        "release-plz must document why the ignored lockfile cannot block checkout"
+        action.contains("using: composite"),
+        "the release tool setup must be a local composite action"
     );
+    assert!(
+        action.contains("RELEASE_PLZ_VERSION: 0.4.3\n")
+            && action.contains(r#"release-plz-v${RELEASE_PLZ_VERSION}.tar.gz"#),
+        "the action must build exactly release-plz 0.4.3"
+    );
+    assert!(
+        action.contains(r#""release-plz ${RELEASE_PLZ_VERSION}""#),
+        "the action must prove the installed binary is the pinned version"
+    );
+    assert!(
+        action.contains(r#"open("rust-toolchain.toml", "rb")"#)
+            && action.contains("toolchain: ${{ steps.toolchain.outputs.channel }}"),
+        "the action must install the toolchain rust-toolchain.toml pins"
+    );
+    assert!(
+        !action.contains("rust-toolchain@stable") && !action.contains("uses: release-plz/action"),
+        "the action must not float the toolchain or delegate to release-plz/action"
+    );
+    let toolchain: toml::Table = read("rust-toolchain.toml").parse().expect("rust-toolchain.toml parses");
+    let channel = toolchain["toolchain"]["channel"].as_str().expect("an exact channel");
+    assert!(
+        channel.split('.').count() == 3 && channel.split('.').all(|part| part.parse::<u32>().is_ok()),
+        "the action's x.y.z check must accept the shipped pin, found {channel:?}"
+    );
+}
+
+/// The release tool is the upstream 0.4.3 source with one in-repo patch, so
+/// that renamed packages' tags (which point at commits carrying the old
+/// names) still resolve. The source is verified by hash, the patch applies
+/// exactly, the build is locked, and the cache key covers every input. There
+/// is no route to an unpatched binary: it cannot calculate these releases.
+#[test]
+fn the_release_tool_is_built_from_verified_source_with_the_in_repo_patch() {
+    let action = read(".github/actions/setup-release-plz/action.yml");
+    let patch = read(".github/actions/setup-release-plz/release-plz-0.4.3-historical-manifest-path.patch");
+    let pinned_sha = action
+        .split("RELEASE_PLZ_SOURCE_SHA256: ")
+        .nth(1)
+        .and_then(|rest| rest.lines().next())
+        .expect("the action pins the source archive's SHA-256");
+    assert!(
+        pinned_sha.len() == 64 && pinned_sha.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "the source pin must be a full SHA-256, found {pinned_sha:?}"
+    );
+    for (needle, why) in [
+        (
+            "https://github.com/release-plz/release-plz/archive/refs/tags/release-plz-v${RELEASE_PLZ_VERSION}.tar.gz",
+            "download the upstream tag's source archive",
+        ),
+        (r#"echo "${RELEASE_PLZ_SOURCE_SHA256}  ${archive}" | sha256sum --check --strict"#, "verify the archive before extracting it"),
+        (
+            "RELEASE_PLZ_PATCH: ${{ github.action_path }}/release-plz-0.4.3-historical-manifest-path.patch\n",
+            "apply the patch that sits next to the action",
+        ),
+        (r#"git apply --verbose "${RELEASE_PLZ_PATCH}""#, "apply the patch exactly, with no fuzz"),
+        ("cargo build --locked --release -p release-plz\n", "build against upstream's lockfile"),
+        ("RUSTUP_TOOLCHAIN: ${{ steps.toolchain.outputs.channel }}\n", "build with the repository's pinned toolchain"),
+        (
+            "hashFiles('.github/actions/setup-release-plz/release-plz-0.4.3-historical-manifest-path.patch')",
+            "key the cache on the patch",
+        ),
+        ("${{ steps.pin.outputs.version }}-${{ steps.pin.outputs.source-sha256 }}-patch-", "key the cache on version and source"),
+        ("-rust-${{ steps.toolchain.outputs.channel }}-${{ runner.os }}-${{ runner.arch }}", "key the cache on toolchain and runner"),
+        ("key: ${{ steps.cache.outputs.cache-primary-key }}\n", "save under the key that was restored"),
+    ] {
+        assert!(action.contains(needle), "the release tool setup must {why}: missing `{needle}`");
+    }
+    for (prefix, why) in [
+        ("uses: actions/cache/restore@", "restore"),
+        ("uses: actions/cache/save@", "save"),
+    ] {
+        let pin = action
+            .split(prefix)
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .unwrap_or_else(|| panic!("the action must {why} the built binary explicitly"));
+        assert!(
+            pin.len() == 40 && pin.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "the cache {why} action must be pinned by commit SHA, found {pin:?}"
+        );
+    }
+    // The patch's tests run, and the binary is proven, before it can be saved.
+    let tests = action
+        .find("cargo test --locked -p release_plz_core --lib -- ")
+        .expect("a cache miss runs the patch's upstream unit tests");
+    let build = action.find("cargo build --locked --release").unwrap();
+    let guard = action.find(r#""release-plz ${RELEASE_PLZ_VERSION}""#).expect("the version guard remains");
+    let save = action.find("uses: actions/cache/save@").unwrap();
+    assert!(tests < build && build < guard && guard < save, "test, build, prove, then save");
+    let filters = action[tests..].lines().next().unwrap().split(" -- ").nth(1).unwrap();
+    for filter in filters.split_whitespace() {
+        assert!(
+            patch.contains(&format!("+    fn {filter}")),
+            "test filter `{filter}` must select a test the patch adds"
+        );
+    }
+    for forbidden in ["binstall", "cargo install release-plz", "releases/download", "uses: actions/cache@"] {
+        assert!(
+            !action.contains(forbidden),
+            "the release tool setup must have no unpatched or prebuilt route (`{forbidden}`)"
+        );
+    }
+    // The patch changes only the git-only calculation; publication
+    // (`command/release.rs`, `git_cmd`) is the verified upstream code.
+    let touched: Vec<&str> = patch
+        .lines()
+        .filter_map(|line| line.strip_prefix("diff --git a/"))
+        .map(|line| line.split(' ').next().unwrap())
+        .collect();
+    assert_eq!(
+        touched,
+        [
+            "crates/release_plz_core/src/lock_compare.rs",
+            "crates/release_plz_core/src/next_ver.rs",
+            "crates/release_plz_core/src/registry_packages.rs",
+        ],
+        "the patch must stay confined to the historical package lookup"
+    );
+}
+
+/// Tag-only recovery depends on two behaviors of release-plz itself, read
+/// from the `release-plz-v0.4.3` sources (`release_plz_core` `release.rs`,
+/// `git_cmd` `lib.rs`, `release_plz` `config.rs`):
+///
+/// - `release_package_if_needed` returns before any release handling when
+///   `Repo::tag_exists` is true, and `tag_exists` is `git tag -l`, so it sees
+///   only local tags. Deleting the tag in the disposable clone is enough.
+/// - `release_package_git_only` reads `git_tag.enabled` and
+///   `git_release.enabled` separately, and `git_tag_enable = false` disables
+///   only the tag, so the Release is still created against the existing tag.
+///
+/// A fake release-plz cannot prove either, so the pin is tied to the version
+/// whose sources were read. Changing the pin means re-reading those three
+/// functions and then updating this constant.
+#[test]
+fn tag_only_recovery_relies_on_the_release_plz_version_it_was_verified_against() {
+    const VERIFIED_RELEASE_PLZ: &str = "0.4.3";
+    let action = read(".github/actions/setup-release-plz/action.yml");
+    assert!(
+        action.contains(&format!("RELEASE_PLZ_VERSION: {VERIFIED_RELEASE_PLZ}\n")),
+        "the release-plz pin changed: re-verify release_package_if_needed (local `git tag -l` \
+         short-circuit) and release_package_git_only (tag and Release enabled separately) in the \
+         new version's sources, then update VERIFIED_RELEASE_PLZ"
+    );
+    let module = read("scripts/ci/release_path.py");
+    let tag_delete = module
+        .find(r#"_git(runner, clone, "tag", "-d", candidate.tag)"#)
+        .expect("recovery deletes the tag in the disposable clone only");
+    let invocation = module.find(r#""release-plz", "release","#).expect("publication runs release-plz release");
+    assert!(
+        tag_delete < invocation,
+        "the local tag must be gone before release-plz looks for it"
+    );
+    assert!(
+        module.contains(r#"workspace["git_tag_enable"] = False"#),
+        "recovery must disable only tag creation, using the key the verified release-plz reads"
+    );
+    let config: toml::Table = read("release-plz.toml").parse().expect("release-plz.toml parses");
+    assert_ne!(
+        config["workspace"].get("git_release_enable"),
+        Some(&toml::Value::Boolean(false)),
+        "recovery carries git_release_enable over; it must leave Release creation on"
+    );
+}
+
+/// The first release through a never-proven publication path may create tags
+/// for exactly two packages. Everything else that shapes those tags and
+/// Releases is unchanged.
+#[test]
+fn release_eligibility_is_the_temporary_two_package_allowlist() {
+    let config: toml::Table = read("release-plz.toml").parse().expect("release-plz.toml parses");
+    let workspace = config["workspace"].as_table().expect("[workspace]");
+    for (key, expected) in [
+        ("release", toml::Value::Boolean(false)),
+        ("git_only", toml::Value::Boolean(true)),
+        ("publish", toml::Value::Boolean(false)),
+        ("release_always", toml::Value::Boolean(false)),
+        ("semver_check", toml::Value::Boolean(false)),
+        ("pr_draft", toml::Value::Boolean(true)),
+        ("pr_branch_prefix", toml::Value::String("release-plz-".into())),
+        ("git_tag_name", toml::Value::String("{{ package }}-v{{ version }}".into())),
+    ] {
+        assert_eq!(workspace.get(key), Some(&expected), "[workspace].{key}");
+    }
+    assert_eq!(
+        workspace["pr_labels"],
+        toml::Value::Array(vec!["release".into(), "automated".into()]),
+        "proposals keep the release and automated labels"
+    );
+
+    let packages = config["package"].as_array().expect("[[package]] entries");
+    let mut enabled = Vec::new();
+    let mut excluded = Vec::new();
+    let mut changelogs = BTreeMap::new();
+    for package in packages {
+        let name = package["name"].as_str().expect("package name").to_string();
+        match package.get("release") {
+            Some(toml::Value::Boolean(true)) => enabled.push(name.clone()),
+            Some(toml::Value::Boolean(false)) => excluded.push(name.clone()),
+            None => {}
+            Some(other) => panic!("{name}: release must be a boolean, found {other}"),
+        }
+        if let Some(path) = package.get("changelog_path") {
+            changelogs.insert(name, path.as_str().expect("changelog_path string").to_string());
+        }
+    }
+    assert_eq!(enabled, ["sniff-detection-cli", "git-wt-cli"]);
+    assert_eq!(excluded, ["biscuit-tui", "biscuit-tui-cli", "tabby", "ui"]);
+    assert_eq!(changelogs["sniff-detection-cli"], "sniff/cli/CHANGELOG.md");
+    assert_eq!(changelogs["git-wt-cli"], "worktree/cli/CHANGELOG.md");
+    assert_eq!(
+        changelogs.len(),
+        10,
+        "existing custom changelog paths are kept: {changelogs:?}"
+    );
+}
+
+const RELEASE_JOBS: [&str; 3] = ["  release-plz-pr:", "  release-plz-release:", "  release-dry-run:"];
+
+/// Everything from a step's `run:` key to the end of the step; `run:` is the
+/// last key of every step in the release workflows.
+fn step_run(step: &str) -> Option<&str> {
+    step.split_once("\n        run:").map(|(_, run)| run)
+}
+
+/// The workflow's own token only reads. The single place `write` appears is
+/// the App token request, which scopes its own installation token.
+#[test]
+fn the_release_workflow_token_only_reads() {
+    let release = workflow("release-plz.yml");
+    let preamble = release.split_once("\njobs:\n").expect("release-plz.yml declares jobs").0;
+    assert!(
+        preamble.contains("\npermissions:\n  contents: read\n"),
+        "release-plz.yml's default permissions must be `contents: read`"
+    );
+    for header in RELEASE_JOBS {
+        assert_eq!(
+            job_permissions(&job_block("release-plz.yml", header)),
+            [("contents".to_owned(), "read".to_owned())],
+            "`{}` must grant its own token `contents: read` alone",
+            header.trim()
+        );
+    }
+    let writes: Vec<&str> = release
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#') && line.contains("write"))
+        .collect();
+    assert_eq!(
+        writes,
+        [
+            "permission-contents: write",
+            "permission-pull-requests: write",
+            "permission-contents: write",
+            "permission-pull-requests: write",
+        ],
+        "only the two App token requests may ask for write access"
+    );
+}
+
+/// Preparation and publication each queue on one fixed group, so a second
+/// event waits for the first instead of canceling it mid-publication.
+#[test]
+fn release_jobs_queue_on_fixed_groups_without_canceling() {
+    for (header, group) in [
+        ("  release-plz-pr:", "release-plz-pr"),
+        ("  release-plz-release:", "release-plz-release"),
+    ] {
+        assert!(
+            job_block("release-plz.yml", header).contains(&format!(
+                "\n    concurrency:\n      group: {group}\n      cancel-in-progress: false\n"
+            )),
+            "`{}` must queue on the fixed `{group}` group without canceling",
+            header.trim()
+        );
+    }
+}
+
+/// Every release job installs release-plz through the shared action, and no
+/// checkout leaves the workflow token in Git configuration for release-plz to
+/// push with.
+#[test]
+fn release_jobs_share_one_tool_setup_and_drop_checkout_credentials() {
+    for header in RELEASE_JOBS {
+        let steps = steps(&job_block("release-plz.yml", header));
+        let setups = steps
+            .iter()
+            .filter(|step| step.contains("uses: ./.github/actions/setup-release-plz\n"))
+            .count();
+        assert_eq!(setups, 1, "`{}` must install release-plz through the shared action once", header.trim());
+        let checkouts: Vec<&String> = steps.iter().filter(|step| step.contains("uses: actions/checkout@")).collect();
+        assert!(!checkouts.is_empty(), "`{}` must check out the repository", header.trim());
+        for checkout in checkouts {
+            assert!(
+                checkout.contains("\n          persist-credentials: false\n"),
+                "`{}`: every checkout must drop its credentials:\n{checkout}",
+                header.trim()
+            );
+        }
+    }
+    assert!(
+        !workflow("release-plz.yml").contains("uses: release-plz/action"),
+        "release-plz.yml must not delegate to release-plz/action"
+    );
+}
+
+/// Each App token is minted only once the event is selected and the checkout
+/// is proven clean, immediately before the step that hands it to release-plz,
+/// and asks for exactly the two scopes a proposal and a Release need.
+#[test]
+fn release_app_tokens_are_minted_after_selection_and_before_release_plz() {
+    for (header, invocation) in [
+        ("  release-plz-pr:", "release_path.py release-pr"),
+        ("  release-plz-release:", "release_path.py publish"),
+    ] {
+        let job = header.trim();
+        let steps = steps(&job_block("release-plz.yml", header));
+        let index = |needle: &str| {
+            let found: Vec<usize> = (0..steps.len()).filter(|&at| steps[at].contains(needle)).collect();
+            assert_eq!(found.len(), 1, "`{job}` must have exactly one step containing `{needle}`");
+            found[0]
+        };
+        let select = index("\n        id: select\n");
+        let clean = index("- name: Assert clean tracked worktree before ");
+        let token = index("uses: actions/create-github-app-token@v2\n");
+        let invoke = index(invocation);
+        assert!(
+            select < clean && clean < token && token < invoke,
+            "`{job}`: select ({select}) < clean-tree check ({clean}) < token ({token}) < release-plz ({invoke})"
+        );
+        let mint = &steps[token];
+        assert!(
+            mint.contains("\n        if: steps.select.outputs.selected == 'true'\n"),
+            "`{job}`: the token is minted only for a selected event"
+        );
+        let inputs: Vec<(&str, &str)> = mint
+            .split_once("\n        with:\n")
+            .unwrap_or_else(|| panic!("`{job}`: the token step takes inputs"))
+            .1
+            .lines()
+            .take_while(|line| line.starts_with("          "))
+            .map(|line| line.trim().split_once(": ").expect("an input is `key: value`"))
+            .collect();
+        assert_eq!(
+            inputs,
+            [
+                ("app-id", "${{ vars.RELEASE_APP_ID }}"),
+                ("private-key", "${{ secrets.RELEASE_APP_PRIVATE_KEY }}"),
+                ("owner", "${{ github.repository_owner }}"),
+                ("repositories", "${{ github.event.repository.name }}"),
+                ("permission-contents", "write"),
+                ("permission-pull-requests", "write"),
+            ],
+            "`{job}`: the token is scoped to this repository and two permissions"
+        );
+        let release_plz = &steps[invoke];
+        assert!(
+            release_plz.contains("GIT_TOKEN: ${{ steps.app-token.outputs.token }}")
+                && !release_plz.contains("github.token")
+                && !release_plz.contains("GITHUB_TOKEN"),
+            "`{job}`: release-plz receives the App token and never the workflow token"
+        );
+    }
+}
+
+/// The dry run calculates from any branch, so it must hold nothing that could
+/// publish: no secret, no App token.
+#[test]
+fn the_release_dry_run_holds_no_credential() {
+    let dry_run = job_block("release-plz.yml", "  release-dry-run:");
+    for forbidden in ["secrets.", "app-token", "create-github-app-token", "github.token", "GIT_TOKEN"] {
+        assert!(!dry_run.contains(forbidden), "the dry run must not reference `{forbidden}`");
+    }
+}
+
+/// Diagnostics and inventories are kept when the step before them fails.
+#[test]
+fn release_artifacts_upload_even_after_a_failure() {
+    let mut uploads = 0;
+    for header in RELEASE_JOBS {
+        for step in steps(&job_block("release-plz.yml", header)) {
+            if step.contains("uses: actions/upload-artifact@") {
+                uploads += 1;
+                assert!(step.contains("\n        if: always()"), "`{}` must upload with `if: always()`:\n{step}", header.trim());
+            }
+        }
+    }
+    assert_eq!(uploads, 2, "the publication inventory and the dry-run diagnostics are both uploaded");
+}
+
+/// Release automation starts only from a completed `ci` run on `main`, a
+/// closed pull request into `main`, or a manual dispatch. Opening, updating or
+/// marking a proposal ready never runs it.
+#[test]
+fn release_triggers_are_ci_completion_a_closed_pull_request_and_dispatch() {
+    let release = workflow("release-plz.yml");
+    let on = release
+        .split_once("\non:\n")
+        .and_then(|(_, rest)| rest.split_once("\nenv:\n"))
+        .expect("release-plz.yml declares `on:` before `env:`")
+        .0;
+    let triggers: Vec<&str> = on
+        .lines()
+        .filter(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
+        .collect();
+    assert_eq!(
+        triggers,
+        [
+            "  workflow_run:",
+            r#"    workflows: ["ci"]"#,
+            "    types:",
+            "      - completed",
+            "    branches:",
+            "      - main",
+            "  pull_request:",
+            "    branches:",
+            "      - main",
+            "    types:",
+            "      - closed",
+            "  workflow_dispatch:",
+        ]
+    );
+    for forbidden in ["ready_for_review", "opened", "synchronize", "pull_request_target"] {
+        assert!(!release.contains(forbidden), "release-plz.yml must not mention `{forbidden}`");
+    }
+}
+
+/// An integration build checks out the commit its tag was resolved to, proves
+/// it, and uploads to that exact tag; only the build job can write, and only
+/// once a selection exists.
+#[test]
+fn integration_builds_check_out_and_upload_exactly_the_selected_tag() {
+    let select = job_block("build-integrations.yml", "  select:");
+    assert_eq!(job_permissions(&select), [("contents".to_owned(), "read".to_owned())], "the selector only reads");
+    let selector = steps(&select);
+    let selection = step_with_id(&selector, "select").expect("the selector has a `select` step");
+    assert!(
+        selection.contains("run: python3 scripts/ci/integration_release.py select\n"),
+        "selection must resolve the tag's commit (no `--no-resolve`):\n{selection}"
+    );
+    assert!(select.contains("commit: ${{ steps.select.outputs.commit }}"), "the resolved commit is a job output");
+
+    let build = job_block("build-integrations.yml", "  build:");
+    assert_eq!(job_permissions(&build), [("contents".to_owned(), "write".to_owned())], "only the build job uploads");
+    assert!(
+        build.contains("\n    needs: select\n") && build.contains("\n    if: needs.select.outputs.selected == 'true'\n"),
+        "the build job starts only for a selected integration"
+    );
+    for binding in [
+        "COMMIT: ${{ needs.select.outputs.commit }}",
+        "TAG: ${{ matrix.tag }}",
+        "PACKAGE: ${{ matrix.package }}",
+    ] {
+        assert!(build.contains(binding), "the build job must bind `{binding}`");
+    }
+    let build_steps = steps(&build);
+    let checkout = build_steps.iter().position(|step| step.contains("uses: actions/checkout@")).expect("a checkout");
+    assert!(
+        build_steps[checkout].contains("\n          ref: ${{ needs.select.outputs.commit }}\n")
+            && build_steps[checkout].contains("\n          persist-credentials: false\n"),
+        "the build checks out the resolved commit without credentials:\n{}",
+        build_steps[checkout]
+    );
+    let proof = &build_steps[checkout + 1];
+    assert!(
+        proof.contains(r#"head="$(git rev-parse HEAD)""#) && proof.contains(r#"[ "${head}" != "${COMMIT}" ]"#) && proof.contains("exit 1"),
+        "the step after the checkout must fail unless HEAD is the resolved commit:\n{proof}"
+    );
+    assert!(
+        build_steps.iter().any(|step| step.contains("--target aarch64-unknown-linux-musl")),
+        "the build targets aarch64-unknown-linux-musl"
+    );
+    let upload = build_steps.iter().find(|step| step.contains("gh release upload")).expect("an upload step");
+    assert!(
+        upload.contains(r#"gh release upload "${TAG}" "pkg/${PACKAGE}-aarch64.tar.gz""#),
+        "the archive is uploaded to the selected tag, quoted:\n{upload}"
+    );
+
+    assert!(
+        !workflow("build-integrations.yml").contains("github.event.release"),
+        "event values reach the build only through the selector's outputs"
+    );
+    for (file, headers) in [
+        ("release-plz.yml", RELEASE_JOBS.to_vec()),
+        ("build-integrations.yml", vec!["  select:", "  build:"]),
+    ] {
+        for header in headers {
+            for step in steps(&job_block(file, header)) {
+                if let Some(run) = step_run(&step) {
+                    assert!(!run.contains("${{"), "{file}: no expression may be interpolated into a run script:\n{step}");
+                }
+            }
+        }
+    }
+}
+
+/// A change to either release module schedules the contracts that execute it.
+#[test]
+fn release_module_changes_schedule_the_release_contracts() {
+    let manifest: toml::Table = read("tools/test-toolkit/Cargo.toml").parse().expect("the manifest parses");
+    let inputs = manifest["package"]["metadata"]["ci"]["tests"]["source-inputs"]
+        .as_array()
+        .expect("test-toolkit declares source-inputs");
+    for module in ["scripts/ci/release_path.py", "scripts/ci/integration_release.py"] {
+        assert!(
+            inputs.iter().any(|input| input.as_str() == Some(module)),
+            "source-inputs must list `{module}`: {inputs:?}"
+        );
+    }
+}
+
+/// A `git` command isolated from the host's global and system configuration,
+/// so a developer's signing or line-ending settings cannot shape the fixture.
+fn hermetic_git(repo: &Path, empty_config: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
+        .current_dir(repo)
+        .env("GIT_CONFIG_GLOBAL", empty_config)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(["-c", "user.name=fixture", "-c", "user.email=fixture@invalid"]);
+    command
+}
+
+fn git_ok(repo: &Path, empty_config: &Path, args: &[&str]) -> String {
+    let output = hermetic_git(repo, empty_config)
+        .args(args)
+        .output()
+        .expect("git runs");
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("git output is UTF-8").trim().to_string()
+}
+
+/// The release diagnostic captures the state the historical calculation failed
+/// in — a CRLF working-tree file under an `eol=crlf` rule, checked against a
+/// revision that predates both the file and the rule — and changes nothing,
+/// not even the index's stat cache.
+#[test]
+fn release_diagnostics_describe_a_crlf_checkout_without_changing_it() {
+    let Some(python) = python_interpreter() else {
+        eprintln!("no Python interpreter is available; skipping the release diagnostic fixture");
+        return;
+    };
+    let module = repo_root().join("scripts/ci/release_path.py");
+    let temp = tempfile::tempdir().expect("temp dir");
+    let empty_config = temp.path().join("empty.gitconfig");
+    fs::write(&empty_config, "").expect("empty config");
+    let repo = temp.path().join("repo");
+    fs::create_dir(&repo).expect("repo dir");
+    let git = |args: &[&str]| git_ok(&repo, &empty_config, args);
+
+    git(&["init", "-q", "-b", "main"]);
+    fs::write(repo.join("README.md"), "fixture\n").expect("readme");
+    git(&["add", "README.md"]);
+    git(&["commit", "-q", "-m", "before attributes"]);
+    let historical = git(&["rev-parse", "HEAD"]);
+
+    fs::create_dir(repo.join("scripts")).expect("scripts dir");
+    fs::write(repo.join(".gitattributes"), "* text=auto eol=lf\n*.ps1 text eol=crlf\n").expect("attributes");
+    fs::write(repo.join(".gitignore"), "ignored.log\n").expect("gitignore");
+    fs::write(repo.join("scripts/init.ps1"), "Write-Host one\r\nWrite-Host two\r\n").expect("ps1");
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "add powershell"]);
+    let head = git(&["rev-parse", "HEAD"]);
+    git(&["remote", "add", "origin", "https://example.invalid/fixture.git"]);
+    git(&["update-ref", "refs/remotes/origin/main", &head]);
+    git(&["branch", "-q", "--set-upstream-to=origin/main"]);
+    fs::write(repo.join("ignored.log"), "noise\n").expect("ignored file");
+    fs::write(repo.join("new.txt"), "untracked\n").expect("untracked file");
+
+    let diagnose = |output: &Path, historical: &str| {
+        let run = Command::new(python)
+            .arg(&module)
+            .args(["diagnose", "--repo"])
+            .arg(&repo)
+            .arg("--output")
+            .arg(output)
+            .args(["--historical-revision", historical])
+            .env("GIT_CONFIG_GLOBAL", &empty_config)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .expect("the probed interpreter runs");
+        assert!(
+            run.status.success(),
+            "diagnose must succeed: {}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        let report: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).expect("report written"))
+                .expect("report is JSON");
+        (report, String::from_utf8(run.stdout).expect("summary is UTF-8"))
+    };
+
+    let index_before = fs::read(repo.join(".git/index")).expect("index");
+    let (report, summary) = diagnose(&temp.path().join("out/clean.json"), &historical);
+    assert_eq!(
+        fs::read(repo.join(".git/index")).expect("index"),
+        index_before,
+        "diagnostics must not rewrite the index"
+    );
+
+    assert_eq!(report["source_sha"], head.as_str());
+    assert_eq!(report["branch"], "main");
+    assert_eq!(report["upstream"], "origin/main");
+    assert_eq!(report["tracked_changes"], serde_json::json!([]));
+    assert_eq!(
+        report["untracked_not_ignored"],
+        serde_json::json!(["new.txt"]),
+        "untracked files are listed and ignored ones are not"
+    );
+    let probe = &report["probe"];
+    assert_eq!(probe["path"], "scripts/init.ps1");
+    assert!(
+        probe["attributes"].as_str().is_some_and(|attrs| attrs.contains("eol: crlf")),
+        "{probe}"
+    );
+    assert_eq!(probe["index"]["bytes"]["crlf"], 0, "{probe}");
+    assert_eq!(probe["index"]["bytes"]["lf"], 2, "{probe}");
+    assert_eq!(probe["worktree"]["bytes"]["crlf"], 2, "{probe}");
+    assert_eq!(probe["worktree"]["bytes"]["lf"], 0, "{probe}");
+    assert_eq!(probe["worktree"]["matches_index_after_filters"], true, "{probe}");
+    assert_ne!(
+        probe["worktree"]["hash_without_filters"], probe["index"]["blob"],
+        "the raw CRLF bytes differ from the LF blob: {probe}"
+    );
+    assert_eq!(probe["diff_quiet_exit"], 0, "{probe}");
+    let history = &report["historical"];
+    assert_eq!(history["revision"], historical.as_str());
+    assert_eq!(history["available"], true);
+    assert_eq!(history["probe_present"], false);
+    assert_eq!(history["gitattributes_present"], false);
+    assert!(summary.contains("### Release calculation diagnostics"), "{summary}");
+    assert!(
+        summary.contains(&format!("`{historical}` available: True")),
+        "{summary}"
+    );
+
+    // A tracked edit and an unknown historical revision are both reported,
+    // not raised.
+    fs::write(repo.join("README.md"), "edited\n").expect("edit");
+    let missing = "0".repeat(40);
+    let (report, _) = diagnose(&temp.path().join("out/dirty.json"), &missing);
+    assert_eq!(report["tracked_changes"], serde_json::json!([" M README.md"]));
+    assert_eq!(report["historical"]["available"], false);
+    assert!(report["historical"].get("probe_present").is_none(), "{report}");
+}
+
+/// Builds the history shape behind the historical release failure: `P0` has no
+/// PowerShell script, `P` adds it with LF content, and `B` adds only the
+/// attribute rule, leaving the script's blob unchanged. HEAD is `B` with the
+/// script's CRLF working copy, as a checkout under that rule writes it.
+/// Returns `(P0, P)`.
+fn crlf_rule_history(repo: &Path, empty_config: &Path, with_rule: bool) -> (String, String) {
+    let git = |args: &[&str]| git_ok(repo, empty_config, args);
+    git(&["init", "-q", "-b", "main"]);
+    fs::write(repo.join("README.md"), "fixture\n").expect("readme");
+    git(&["add", "README.md"]);
+    git(&["commit", "-q", "-m", "P0: before the script"]);
+    let before_script = git(&["rev-parse", "HEAD"]);
+    fs::create_dir(repo.join("scripts")).expect("scripts dir");
+    fs::write(repo.join("scripts/init.ps1"), "Write-Host one\nWrite-Host two\n").expect("ps1");
+    git(&["add", "scripts/init.ps1"]);
+    git(&["commit", "-q", "-m", "P: add the script"]);
+    let before_rule = git(&["rev-parse", "HEAD"]);
+    let rule = if with_rule { "*.ps1 text eol=crlf\n" } else { "*.md text\n" };
+    fs::write(repo.join(".gitattributes"), rule).expect("attributes");
+    git(&["add", ".gitattributes"]);
+    git(&["commit", "-q", "-m", "B: add the attribute rule"]);
+    if with_rule {
+        // Git writes the working copy, and records its CRLF size and stat in
+        // the index, exactly as a fresh checkout under the rule does.
+        fs::remove_file(repo.join("scripts/init.ps1")).expect("remove LF copy");
+        git(&["checkout", "-q", "--", "scripts/init.ps1"]);
+        assert_eq!(git(&["status", "--porcelain"]), "", "the CRLF copy is clean under the rule");
+    }
+    (before_script, before_rule)
+}
+
+/// Regression for the historical release calculation failure. release-plz walks
+/// history with one `git checkout --quiet <sha>` per commit inside a copy of
+/// the repository. Walking back across the commit that introduced
+/// `*.ps1 eol=crlf` without changing `scripts/init.ps1` leaves the CRLF working
+/// copy in place under no rule, so it differs from its LF blob. A copied tree
+/// has a stale stat cache, Git re-reads the file, and the next checkout to a
+/// commit before the script aborts. The diagnostic reports that state.
+#[test]
+fn release_history_walk_back_across_the_crlf_rule_aborts_on_a_stale_stat_cache() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let empty_config = temp.path().join("empty.gitconfig");
+    fs::write(&empty_config, "").expect("empty config");
+
+    let walk = |name: &str, with_rule: bool| {
+        let repo = temp.path().join(name);
+        fs::create_dir(&repo).expect("repo dir");
+        let (before_script, before_rule) = crlf_rule_history(&repo, &empty_config, with_rule);
+        git_ok(&repo, &empty_config, &["checkout", "-q", &before_rule]);
+        // A copy rewrites every file; identical bytes with a fresh mtime are
+        // exactly the stale stat cache a copied repository carries.
+        let script = repo.join("scripts/init.ps1");
+        let bytes = fs::read(&script).expect("script bytes");
+        fs::write(&script, &bytes).expect("rewrite script");
+        let next = hermetic_git(&repo, &empty_config)
+            .args(["checkout", "--quiet", &before_script])
+            .output()
+            .expect("git runs");
+        (repo, bytes, next)
+    };
+
+    // Control: the same walk without the CRLF rule reaches the oldest commit.
+    let (_, control_bytes, control) = walk("control", false);
+    assert!(!control_bytes.contains(&b'\r'), "the control copy is LF");
+    assert!(
+        control.status.success(),
+        "the control walk must succeed: {}",
+        String::from_utf8_lossy(&control.stderr)
+    );
+
+    let (repo, bytes, failed) = walk("historical", true);
+    assert!(bytes.windows(2).any(|pair| pair == b"\r\n"), "the copy kept its CRLF bytes");
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(!failed.status.success(), "the walk must abort");
+    assert!(
+        stderr.contains("would be overwritten by checkout") && stderr.contains("scripts/init.ps1"),
+        "the historical error names the script: {stderr}"
+    );
+
+    let Some(python) = python_interpreter() else {
+        eprintln!("no Python interpreter is available; skipping the diagnostic half of the regression");
+        return;
+    };
+    let module = repo_root().join("scripts/ci/release_path.py");
+    let report_path = temp.path().join("report.json");
+    let run = Command::new(python)
+        .arg(&module)
+        .args(["diagnose", "--repo"])
+        .arg(&repo)
+        .arg("--output")
+        .arg(&report_path)
+        .env("GIT_CONFIG_GLOBAL", &empty_config)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .expect("the probed interpreter runs");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&report_path).expect("report")).expect("JSON");
+    let probe = &report["probe"];
+    assert_eq!(report["branch"], "HEAD", "the walk is detached: {report}");
+    assert_eq!(probe["worktree"]["bytes"]["crlf"], 2, "{probe}");
+    assert_eq!(probe["index"]["bytes"]["crlf"], 0, "{probe}");
+    assert_eq!(probe["worktree"]["matches_index_after_filters"], false, "{probe}");
+    assert!(
+        probe["attributes"].as_str().is_some_and(|attrs| !attrs.contains("eol")),
+        "no rule applies at the walked commit: {probe}"
+    );
+    assert_eq!(
+        report["tracked_changes"],
+        serde_json::json!([" M scripts/init.ps1"]),
+        "the diagnostic names the file Git refuses to overwrite"
+    );
+}
+
+/// The repair for the historical failure above, exercised with the environment
+/// `release_path.py` itself builds for `release-plz update` and `release-pr`
+/// (`calculation_env`): the same walk back across the rule now reaches the
+/// oldest commit, and returning to the newest leaves the tree clean. The
+/// fallback rule must be the repository's own PowerShell rule, or it would
+/// change how current trees are checked out.
+#[test]
+fn release_history_walk_back_succeeds_in_the_release_calculation_environment() {
+    let Some(python) = python_interpreter() else {
+        eprintln!("no Python interpreter is available; skipping the release calculation environment");
+        return;
+    };
+    let temp = tempfile::tempdir().expect("temp dir");
+    let empty_config = temp.path().join("empty.gitconfig");
+    fs::write(&empty_config, "").expect("empty config");
+    let attributes_dir = temp.path().join("attributes");
+    fs::create_dir(&attributes_dir).expect("attributes dir");
+
+    let built = Command::new(python)
+        .arg("-c")
+        .arg(
+            "import json, sys\n\
+             from pathlib import Path\n\
+             sys.path.insert(0, sys.argv[1])\n\
+             import release_path\n\
+             env = release_path.calculation_env({'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'core.autocrlf', \
+             'GIT_CONFIG_VALUE_0': 'false'}, attributes_dir=Path(sys.argv[2]))\n\
+             print(json.dumps({'env': env, 'rule': release_path.CALCULATION_ATTRIBUTES}))\n",
+        )
+        .arg(repo_root().join("scripts/ci"))
+        .arg(&attributes_dir)
+        .output()
+        .expect("the probed interpreter runs");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let built: serde_json::Value = serde_json::from_slice(&built.stdout).expect("JSON");
+    let env: BTreeMap<String, String> = serde_json::from_value(built["env"].clone()).expect("string env");
+    let rule = built["rule"].as_str().expect("rule text");
+
+    let repository_rules = fs::read_to_string(repo_root().join(".gitattributes")).expect(".gitattributes");
+    assert!(
+        repository_rules.lines().any(|line| line == rule.trim_end()),
+        "the fallback rule {rule:?} must be a line of .gitattributes"
+    );
+    // Appended after the caller's entries, and pointing outside any checkout.
+    assert_eq!(env["GIT_CONFIG_COUNT"], "2", "{env:?}");
+    assert_eq!(env["GIT_CONFIG_KEY_0"], "core.autocrlf", "{env:?}");
+    assert_eq!(env["GIT_CONFIG_KEY_1"], "core.attributesFile", "{env:?}");
+    let attributes_file = Path::new(&env["GIT_CONFIG_VALUE_1"]);
+    assert!(attributes_file.starts_with(&attributes_dir), "{env:?}");
+    assert_eq!(fs::read_to_string(attributes_file).expect("attributes file"), rule);
+
+    let repo = temp.path().join("repo");
+    fs::create_dir(&repo).expect("repo dir");
+    let (before_script, before_rule) = crlf_rule_history(&repo, &empty_config, true);
+    let calculating = |args: &[&str]| {
+        let output = hermetic_git(&repo, &empty_config).envs(&env).args(args).output().expect("git runs");
+        assert!(
+            output.status.success(),
+            "git {args:?} in the calculation environment: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("UTF-8").trim().to_string()
+    };
+    calculating(&["checkout", "-q", &before_rule]);
+    let script = repo.join("scripts/init.ps1");
+    let bytes = fs::read(&script).expect("script bytes");
+    assert!(bytes.windows(2).any(|pair| pair == b"\r\n"), "the copy kept its CRLF bytes");
+    fs::write(&script, &bytes).expect("rewrite script");
+    assert_eq!(calculating(&["status", "--porcelain"]), "", "the rule still covers the CRLF copy");
+    calculating(&["checkout", "--quiet", &before_script]);
+    calculating(&["checkout", "--quiet", "main"]);
+    assert_eq!(calculating(&["status", "--porcelain", "--untracked-files=all"]), "", "the walk ends clean");
+}
+
+#[test]
+fn release_diagnostics_refuse_a_directory_outside_git() {
+    let Some(python) = python_interpreter() else {
+        eprintln!("no Python interpreter is available; skipping the release diagnostic fixture");
+        return;
+    };
+    let module = repo_root().join("scripts/ci/release_path.py");
+    let temp = tempfile::tempdir().expect("temp dir");
+    let plain = temp.path().join("plain");
+    fs::create_dir(&plain).expect("plain dir");
+    let report = temp.path().join("report.json");
+    let run = Command::new(python)
+        .arg(&module)
+        .args(["diagnose", "--repo"])
+        .arg(&plain)
+        .arg("--output")
+        .arg(&report)
+        .env("GIT_CEILING_DIRECTORIES", temp.path())
+        .output()
+        .expect("the probed interpreter runs");
+    assert_eq!(run.status.code(), Some(2), "a non-checkout is a usage error");
+    assert!(
+        String::from_utf8_lossy(&run.stderr).contains("not inside a Git working tree"),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(!report.exists(), "no report is written for a non-checkout");
+}
+
+// The release path's decisions, exercised in-process through the two modules'
+// public functions by `tests/fixtures/release_path/driver.py`. Each group below
+// runs its named driver cases in one interpreter; the groups together must
+// name every case (`release_path_case_groups_cover_every_driver_case`).
+
+/// Runs `cases` from the release path driver. `modules` are the production
+/// scripts the cases import; each test names them so a change to either
+/// schedules it.
+fn run_release_path_cases(driver: &Path, modules: &[PathBuf], cases: &[&str]) {
+    let Some(python) = python_interpreter() else {
+        eprintln!("no Python interpreter is available; skipping the release path driver");
+        return;
+    };
+    for module in modules {
+        assert!(module.is_file(), "{} must exist", module.display());
+    }
+    let run = Command::new(python)
+        .arg(driver)
+        .arg(repo_root())
+        .args(cases)
+        .env("GIT_CEILING_DIRECTORIES", std::env::temp_dir())
+        .output()
+        .expect("the probed interpreter runs");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        run.status.success(),
+        "release path cases failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    for case in cases {
+        assert!(stdout.contains(&format!("ok   {case}")), "case {case} did not report success:\n{stdout}");
+    }
+}
+
+const RELEASE_SELECTION_CASES: &[&str] = &[
+    "preparation_selects_only_a_successful_ci_push_run_on_main",
+    "preparation_refuses_a_foreign_head_repository_and_malformed_fields",
+    "publication_selects_the_release_apps_merged_proposal",
+    "unrelated_pull_requests_are_no_ops",
+    "a_plausible_proposal_failing_identity_is_refused",
+    "app_configuration_is_required_without_a_default_token_fallback",
+    "the_strict_json_loader_refuses_ambiguous_documents",
+    "the_shipped_configuration_is_the_two_package_allowlist",
+    "per_package_configuration_keeps_settings_and_disables_tags_only_on_recovery",
+    "remote_tags_are_peeled_to_their_commit",
+    "automation_env_scopes_the_token_and_identity_to_one_process",
+    "release_pr_output_names_only_approved_packages",
+    "only_an_exact_integration_tag_selects_one_build",
+];
+const RELEASE_REVISION_CASES: &[&str] = &[
+    "topology_accepts_only_a_two_parent_merge_of_the_final_commit",
+    "candidates_come_from_the_proposal_not_a_later_main",
+];
+const RELEASE_PUBLICATION_CASES: &[&str] = &[
+    "new_candidates_are_published_from_the_final_commit_one_package_each",
+    "a_complete_rerun_writes_nothing",
+];
+const RELEASE_RECOVERY_CASES: &[&str] = &[
+    "a_tag_without_its_release_is_recovered_without_moving_the_tag",
+    "a_failure_after_the_first_package_keeps_its_status_and_inventory",
+];
+const RELEASE_REFUSAL_CASES: &[&str] = &["refused_remote_states_stop_before_any_release_command"];
+const RELEASE_COMMAND_CASES: &[&str] = &["the_select_command_writes_outputs_and_locates_errors"];
+const RELEASE_FIELD_CASES: &[&str] = &[
+    "shared_validators_locate_every_field_shape",
+    "label_lists_are_read_whole_or_refused",
+    "preparation_reads_every_selector_strictly",
+    "publication_reads_every_selector_strictly",
+];
+const RELEASE_CONFIG_CASES: &[&str] = &[
+    "the_toml_loader_accepts_equivalent_syntax_and_refuses_ambiguity",
+    "every_required_release_setting_is_typed_and_located",
+];
+const RELEASE_FORGE_CASES: &[&str] = &[
+    "github_forge_reads_release_state_over_http",
+    "github_forge_never_reads_a_failure_or_malformed_response_as_absence",
+];
+const RELEASE_REMOTE_TAG_CASES: &[&str] = &[
+    "remote_tag_targets_are_peeled_from_a_real_origin",
+    "integration_select_resolves_the_tag_commit_from_origin",
+];
+const RELEASE_SELECT_LOADER_CASES: &[&str] = &["select_commands_refuse_a_malformed_configuration_before_any_credential"];
+const RELEASE_PR_COMMAND_CASES: &[&str] = &[
+    "release_pr_refuses_incomplete_credentials_and_leaves_the_checkout_clean",
+    "update_calculates_in_the_shared_environment_without_credentials",
+    "calculation_report_lists_the_approved_bumps_and_every_change",
+];
+
+/// Nightly, manual and pull-request CI runs, failed or incomplete runs, a
+/// foreign head repository, unrelated or forged proposals, missing App
+/// configuration, malformed event and configuration shapes, and integration
+/// tags that only resemble a release, all decided before any credential.
+#[test]
+fn release_path_selects_only_trusted_events() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[
+            repo_root().join("scripts/ci/release_path.py"),
+            repo_root().join("scripts/ci/integration_release.py"),
+        ],
+        RELEASE_SELECTION_CASES,
+    );
+}
+
+/// A squash, a rebase, a moved proposal, or a checkout other than the merge
+/// commit is refused, and a later `main` cannot change what is released.
+#[test]
+fn release_path_publishes_only_the_reviewed_final_commit() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[repo_root().join("scripts/ci/release_path.py")],
+        RELEASE_REVISION_CASES,
+    );
+}
+
+#[test]
+fn release_path_publishes_each_package_once_from_a_fresh_clone() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[repo_root().join("scripts/ci/release_path.py")],
+        RELEASE_PUBLICATION_CASES,
+    );
+}
+
+#[test]
+fn release_path_recovers_a_missing_release_and_keeps_a_failing_status() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[repo_root().join("scripts/ci/release_path.py")],
+        RELEASE_RECOVERY_CASES,
+    );
+}
+
+/// A tag at another commit, a Release without its tag, a draft Release, and an
+/// API failure each stop publication before any release command runs.
+#[test]
+fn release_path_refuses_inconsistent_remote_state_before_mutation() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[repo_root().join("scripts/ci/release_path.py")],
+        RELEASE_REFUSAL_CASES,
+    );
+}
+
+#[test]
+fn release_path_commands_write_step_outputs_and_locate_errors() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[
+            repo_root().join("scripts/ci/release_path.py"),
+            repo_root().join("scripts/ci/integration_release.py"),
+        ],
+        RELEASE_COMMAND_CASES,
+    );
+}
+
+/// Each shared validator once over every shape (absent, null, wrong type,
+/// empty, format), then every selector both select functions read, wired with
+/// a control and one invalid shape.
+#[test]
+fn release_path_validators_locate_every_malformed_field() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[repo_root().join("scripts/ci/release_path.py")],
+        RELEASE_FIELD_CASES,
+    );
+}
+
+/// Equivalent TOML spellings load identically; duplicate keys, trailing or
+/// malformed content, a missing or empty allowlist, and every mistyped required
+/// setting are refused at a located path.
+#[test]
+fn release_path_configuration_loader_refuses_ambiguous_or_mistyped_settings() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[repo_root().join("scripts/ci/release_path.py")],
+        RELEASE_CONFIG_CASES,
+    );
+}
+
+/// The real `GitHubForge` against a local HTTP server: only a 404 means
+/// absence; other statuses, malformed bodies, and a refused connection are
+/// located errors.
+#[test]
+fn release_path_forge_never_reads_an_api_failure_as_absence() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[repo_root().join("scripts/ci/release_path.py")],
+        RELEASE_FORGE_CASES,
+    );
+}
+
+/// Lightweight and annotated tags on a local bare `origin` resolve to their
+/// commit, for publication and for integration selection alike.
+#[test]
+fn release_path_resolves_tags_to_their_peeled_commit_on_origin() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[
+            repo_root().join("scripts/ci/release_path.py"),
+            repo_root().join("scripts/ci/integration_release.py"),
+        ],
+        RELEASE_REMOTE_TAG_CASES,
+    );
+}
+
+#[test]
+fn release_path_select_commands_refuse_a_malformed_configuration() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[repo_root().join("scripts/ci/release_path.py")],
+        RELEASE_SELECT_LOADER_CASES,
+    );
+}
+
+#[test]
+fn release_path_release_pr_refuses_incomplete_credentials_and_stays_clean() {
+    run_release_path_cases(
+        &repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"),
+        &[repo_root().join("scripts/ci/release_path.py")],
+        RELEASE_PR_COMMAND_CASES,
+    );
+}
+
+#[test]
+fn release_path_case_groups_cover_every_driver_case() {
+    let Some(python) = python_interpreter() else {
+        eprintln!("no Python interpreter is available; skipping the release path driver");
+        return;
+    };
+    let listing = Command::new(python)
+        .arg(repo_root().join("tools/test-toolkit/tests/fixtures/release_path/driver.py"))
+        .arg(repo_root())
+        .arg("--list")
+        .output()
+        .expect("the probed interpreter runs");
+    assert!(listing.status.success(), "{}", String::from_utf8_lossy(&listing.stderr));
+    let mut listed: Vec<String> = String::from_utf8_lossy(&listing.stdout).lines().map(str::to_owned).collect();
+    listed.sort();
+    let mut grouped: Vec<String> = [
+        RELEASE_SELECTION_CASES,
+        RELEASE_REVISION_CASES,
+        RELEASE_PUBLICATION_CASES,
+        RELEASE_RECOVERY_CASES,
+        RELEASE_REFUSAL_CASES,
+        RELEASE_COMMAND_CASES,
+        RELEASE_FIELD_CASES,
+        RELEASE_CONFIG_CASES,
+        RELEASE_FORGE_CASES,
+        RELEASE_REMOTE_TAG_CASES,
+        RELEASE_SELECT_LOADER_CASES,
+        RELEASE_PR_COMMAND_CASES,
+    ]
+    .concat()
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    grouped.sort();
+    assert_eq!(listed, grouped, "every driver case must run in exactly one group");
 }
 
 // --- D14: scheduled automation is separate and bounded ------------------------
@@ -2153,14 +3319,21 @@ fn every_producer_job_emits_an_explicit_status_artifact() {
         );
 
         // `always()`, not `!cancelled()` and not the default: the whole point is
-        // that a FAILED job still reports itself.
+        // that a FAILED job still reports itself. The upload also needs the
+        // contract's name, so it skips only when the contract never resolved.
         let tail = &block[block
             .find("name: Record producer status")
             .expect("checked above")..];
         assert_eq!(
             tail.matches("if: ${{ always() }}").count(),
-            2,
-            "{file}: `{name}` must guard both the status write and its upload with always()"
+            1,
+            "{file}: `{name}` must guard the status write with always()"
+        );
+        assert_eq!(
+            tail.matches("if: ${{ always() && steps.cell.outputs.status_artifact != '' }}")
+                .count(),
+            1,
+            "{file}: `{name}` must guard the status upload with always() and a named artifact"
         );
     }
 }
@@ -7733,7 +8906,7 @@ fn every_producer_uploads_a_completion_artifact() {
             let status = step_named(&job_steps, "Upload producer status")
                 .expect("every producer uploads its status");
             assert!(
-                status.contains("if: ${{ always() }}"),
+                status.contains("if: ${{ always() && steps.cell.outputs.status_artifact != '' }}"),
                 "{file}:{job_id}: the status upload still publishes after a failure"
             );
             if let Some(junit) = junit {
@@ -8088,9 +9261,16 @@ fn every_hosted_producer_records_and_uploads_its_cell_on_the_nightly_only() {
             "{file}: neither a green-only nor a cancel-proof guard"
         );
 
+        // A name the cell contract supplies is empty when the contract never
+        // resolved, so that upload also requires it.
+        let upload_guard = if artifact.contains("steps.cell.outputs.") {
+            "if: ${{ !cancelled() && github.event_name == 'schedule' && steps.cell.outputs.package != '' }}"
+        } else {
+            guard
+        };
         let uploader = executable_lines(&all[upload]);
         assert!(
-            uploader.contains(guard)
+            uploader.contains(upload_guard)
                 && uploader.contains("uses: actions/upload-artifact@v6")
                 && uploader.contains(&format!("name: {artifact}"))
                 && uploader.contains("retention-days: 90")
@@ -8347,4 +9527,93 @@ fn active_cadence_guidance_agrees_with_the_environment_table() {
          wsl2-ubuntu: {wsl:?}):\n  {}",
         problems.join("\n  ")
     );
+}
+
+
+/// The step's own `if:` expression, or an empty string when it has none.
+fn step_condition(step: &str) -> &str {
+    step.lines()
+        .find_map(|line| line.strip_prefix("        if: "))
+        .unwrap_or_default()
+}
+
+#[test]
+fn uploads_named_by_the_cell_contract_skip_when_it_failed_to_resolve() {
+    // `cell_contract.py` emits its outputs only once the whole contract
+    // resolves. An upload that runs after a failed step (`always()` or
+    // `!cancelled()`) and takes its artifact name from those outputs would then
+    // run with an empty name and add a second, misleading error.
+    let expected = [
+        ("_package-ci.yml", "  check:", "Upload producer status", "always()", "status_artifact"),
+        ("_package-ci.yml", "  test:", "Upload producer status", "always()", "status_artifact"),
+        ("_package-ci.yml", "  lint:", "Upload producer status", "always()", "status_artifact"),
+        ("_wsl-ci.yml", "  wsl:", "Upload producer status", "always()", "status_artifact"),
+        ("_package-ci.yml", "  test:", "Upload JUnit", "!cancelled()", "junit_artifact"),
+        ("_wsl-ci.yml", "  wsl:", "Upload wsl2-ubuntu L1 JUnit", "!cancelled()", "junit_artifact"),
+        ("_wsl-ci.yml", "  wsl:", "Upload this cell's observation", "!cancelled()", "package"),
+    ];
+    let mut problems = Vec::new();
+    for (file, header, name, runs_after_failure, output) in expected {
+        let job_steps = steps(&job_block(file, header));
+        let Some(step) = step_named(&job_steps, name) else {
+            problems.push(format!("{file} {} has no `{name}` step", header.trim()));
+            continue;
+        };
+        let condition = step_condition(step);
+        let guard = format!("steps.cell.outputs.{output} != ''");
+        if !condition.contains(runs_after_failure) || !condition.contains(&guard) {
+            problems.push(format!(
+                "{file} {} `{name}` must run on `{runs_after_failure}` and require `{guard}`, \
+                 found `if: {condition}`",
+                header.trim()
+            ));
+        }
+        // The guard qualifies when the upload runs; the published name stays
+        // the contract's (see `retired_packages_reach_verdict_through_package_evidence`).
+        if name == "Upload producer status"
+            && !step.contains("name: ${{ steps.cell.outputs.status_artifact }}")
+        {
+            problems.push(format!(
+                "{file} {} `{name}` must be named by `steps.cell.outputs.status_artifact`",
+                header.trim()
+            ));
+        }
+    }
+
+    // No other upload may be added later without the same guard.
+    for file in ["_package-ci.yml", "_wsl-ci.yml"] {
+        for job in jobs(&workflow(file)) {
+            for step in steps(&job) {
+                if !step.contains("uses: actions/upload-artifact@") {
+                    continue;
+                }
+                let condition = step_condition(&step);
+                // A diagnostic gated on a later step's failure cannot run after a
+                // failed resolution: that step is skipped, never failed.
+                if !(condition.contains("always()") || condition.contains("!cancelled()"))
+                    || condition.contains(".outcome == 'failure'")
+                {
+                    continue;
+                }
+                let Some(artifact) = step
+                    .lines()
+                    .find_map(|line| line.strip_prefix("          name: "))
+                else {
+                    continue;
+                };
+                // One guarded output suffices: the contract emits all of them
+                // or none (the WSL observation's name embeds two).
+                let guarded = condition.contains("steps.cell.outputs.") && condition.contains(" != ''");
+                if artifact.contains("steps.cell.outputs.") && !guarded {
+                    problems.push(format!(
+                        "{file} `{}` is named by `{artifact}` but runs after a failed contract \
+                         without a nonempty guard",
+                        step_name(&step)
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(problems.is_empty(), "contract-named uploads:\n  {}", problems.join("\n  "));
 }

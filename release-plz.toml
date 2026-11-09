@@ -30,14 +30,25 @@ git_tag_name = "{{ package }}-v{{ version }}"
 # cannot be combined with `publish = true`, which is already the case here.
 publish = false
 git_only = true
-# Disabled: semver-checks builds each crate during version determination, which
-# regenerates the intentionally-untracked, gitignored Cargo.lock files at the
-# nested workspace roots (tree-hugger, schematic/schema) and the stray
-# research locks. Those older release tags still track them, so release-plz's
-# internal `git checkout` then aborts on "local changes would be overwritten".
-# With `publish = false` there is no crates.io consumer for semver gating anyway.
+# Disabled: semver-checks builds each crate during version determination, and
+# with `publish = false` there is no crates.io consumer for semver gating.
 semver_check = false
 changelog_update = true
+# Proposal branch prefix and release trigger, stated rather than inherited:
+# publication refuses any merged pull request whose branch lacks this prefix,
+# and releases happen only when a merged release proposal bumps a version.
+pr_branch_prefix = "release-plz-"
+release_always = false
+
+# TEMPORARY first-release allowlist. Workspace-wide eligibility is off and only
+# `sniff-detection-cli` and `git-wt-cli` opt back in below, so the first run of
+# a publication path that has never succeeded can create at most two permanent
+# tags. A calculation that proposes any other package is an error, not a
+# reason to widen this list. Restore workspace-wide eligibility (delete this
+# line and the two `release = true` entries) in a separate change once the
+# first release's tags, GitHub Releases, and published-release event are
+# verified.
+release = false
 
 [changelog]
 header = """# Changelog
@@ -94,6 +105,12 @@ changelog_path = "biscuit-speaks/cli/CHANGELOG.md"
 [[package]]
 name = "sniff-detection-cli"
 changelog_path = "sniff/cli/CHANGELOG.md"
+release = true # temporary first-release allowlist; see [workspace].release
+
+[[package]]
+name = "git-wt-cli"
+changelog_path = "worktree/cli/CHANGELOG.md"
+release = true # temporary first-release allowlist; see [workspace].release
 
 [[package]]
 name = "sniff"

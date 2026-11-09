@@ -1,31 +1,28 @@
 name: Release-plz
 
-# Release automation is gated on validation (D13 / OQ2 Option A): the release-PR
-# calculation runs only AFTER the required `ci` workflow concludes successfully
-# on `main`, instead of racing it on every push.
+# Three jobs, one tool. Every job gets release-plz through
+# `.github/actions/setup-release-plz`, which builds (or restores from cache)
+# one patched, pinned build, so the dry run calculates with exactly the tool
+# and toolchain the two publishing jobs run.
+#
+# - `release-plz-pr` prepares: after a successful `ci` push run on `main`, it
+#   opens or updates the draft release proposal with the release App's token.
+# - `release-plz-release` publishes: after the App's proposal is merged with a
+#   merge commit, it tags and releases the proposal's final commit.
+# - `release-dry-run` calculates from any branch, read-only, with no App
+#   credentials, and keeps its diagnostics even when the calculation fails.
+#
+# Every decision about an event is made by `scripts/ci/release_path.py`, which
+# reads the event from `GITHUB_EVENT_PATH`; the job `if:` guards below are a
+# coarse first filter, not the authority. No event value is interpolated into
+# shell code. The operational guide is `docs/releases.md`.
 #
 # Footgun: `workflow_run` workflows execute the definition from the DEFAULT
-# BRANCH, not from the triggering commit. Edits to this trigger take effect only
-# once merged to `main`. That is GitHub's rule, not a repository choice: a
-# `workflow_run` job holds `contents: write` and the registry token, so reading
-# its definition from the triggering commit would let that commit rewrite the
-# privileged workflow. `release-dry-run` below is the escape hatch — it is
-# `workflow_dispatch`, which DOES honour the ref you select, so the release
+# BRANCH, not from the triggering commit. Edits to the preparation job take
+# effect only once merged to `main`. That is GitHub's rule: a privileged
+# definition must not come from the commit it is judging. `release-dry-run`
+# is `workflow_dispatch`, which DOES honour the ref you select, so the
 # calculation can be exercised from a branch before its definition is merged.
-#
-# Lockfile note: lockfiles are TRACKED as of 2026-07-30 (they were gitignored
-# from 2026-04-08). The clean-worktree assertions below inspect tracked files
-# only, so a lock that release-plz regenerates is now visible to them and will
-# fail the release rather than being silently ignored.
-#
-# That is deliberate for now — a version bump that rewrites a lock should be
-# surfaced, not swallowed — but this path only runs on `main` after a green CI
-# run and has not been exercised since the policy changed. If it fires, decide
-# between committing the regenerated lock as part of the release commit or
-# scoping the assertion to exclude lockfiles; do not simply re-ignore them.
-# Run `release-dry-run` first: it reports exactly which tracked files a real
-# calculation would touch, so that decision is made from evidence.
-# See fixes/2026-07-30-ci-cd-stabilization/plan.md.
 on:
   workflow_run:
     workflows: ["ci"]
@@ -41,70 +38,64 @@ on:
   workflow_dispatch:
 
 env:
-  # release-plz shells out to `cargo package`/`publish`, which compiles. The
-  # repository tracks no rustc wrapper; cleared explicitly so a stray
-  # environment value cannot intercept a release build.
+  # release-plz shells out to Cargo, which compiles. The repository tracks no
+  # rustc wrapper; cleared explicitly so a stray environment value cannot
+  # intercept a release build.
   RUSTC_WRAPPER: ""
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# The workflow's own token only reads. Every write is made with a short-lived
+# installation token of the release App, minted in the job that needs it.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release-plz-pr:
     name: Create Release PR
     runs-on: ubuntu-latest
-    # Only after a SUCCESSFUL ci run on main in the canonical repository.
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.repository == 'yankeeinlondon/rusty-biscuit'
+    permissions:
+      contents: read
     concurrency:
-      group: release-plz-${{ github.ref }}
+      group: release-plz-pr
       cancel-in-progress: false
     steps:
       # The branch, NOT `workflow_run.head_sha`. A bare SHA detaches HEAD, and
       # release-plz resolves the branch it is releasing through
       # `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}`, which on
       # a detached HEAD answers `fatal: HEAD does not point to a branch`. Every
-      # release calculation from 2026-08-31 to 2026-09-13 died there, before a
-      # single version was computed. Checking out a branch ref also restores the
-      # upstream tracking that expression needs. Freshness is asserted below
-      # rather than pinned here.
+      # release calculation from 2026-08-31 to 2026-09-13 died there. Freshness
+      # is asserted against `workflow_run.head_sha` by `select prepare` instead.
       - name: Checkout
         uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 0
+          persist-credentials: false
 
-      # `main` can advance between the validated run finishing and this job
-      # starting. That newer commit gets its own `ci` run and its own release
-      # calculation, so this one is stale rather than broken: report and stand
-      # down. Failing here would make an ordinary merge look like a release
-      # fault.
-      - name: Stand down unless main is still the commit CI validated
-        id: freshness
+      # A stale run (main advanced past the commit CI validated) or any event
+      # that is not a successful ci push run on main stands down here with a
+      # notice, before any tool or credential exists.
+      - name: Select the validated main revision
+        id: select
         shell: bash
         env:
-          VALIDATED: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          set -euo pipefail
-          head="$(git rev-parse HEAD)"
-          if [ "${head}" != "${VALIDATED}" ]; then
-            echo "::notice title=release skipped::main advanced from ${VALIDATED} to ${head}; that commit's own ci run owns its release calculation"
-            echo "stale=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "stale=false" >> "$GITHUB_OUTPUT"
-          fi
+          RELEASE_APP_ID: ${{ vars.RELEASE_APP_ID }}
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+          HAS_RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+        run: python3 scripts/ci/release_path.py select prepare
 
-      - name: Install Rust
-        if: steps.freshness.outputs.stale != 'true'
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up release-plz
+        if: steps.select.outputs.selected == 'true'
+        uses: ./.github/actions/setup-release-plz
 
       - name: Assert clean tracked worktree before release calculation
-        if: steps.freshness.outputs.stale != 'true'
+        if: steps.select.outputs.selected == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -114,21 +105,37 @@ jobs:
             exit 1
           fi
 
-      - name: Run release-plz
-        if: steps.freshness.outputs.stale != 'true'
-        uses: release-plz/action@v0.5
+      - name: Mint the release App token
+        if: steps.select.outputs.selected == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v2
         with:
-          command: release-pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
 
-      # release-pr pushes its changes to a dedicated release branch, so the
-      # checked-out commit must stay clean. A dirty tracked worktree here means
-      # release-plz mutated a tracked file in place — surface it as a release
-      # failure rather than letting it silently poison a later checkout. If this
-      # is what fires next, `release-dry-run` names the files first.
+      # release-plz receives the App token as `GIT_TOKEN` for its API calls and
+      # through a credential helper scoped to its own process for the push;
+      # the bot is author and committer of the proposal commit, for this
+      # process only. It calculates in the same environment as the dry run's
+      # `update`. Nothing is written to Git configuration.
+      - name: Open or update the release proposal
+        if: steps.select.outputs.selected == 'true'
+        shell: bash
+        env:
+          GIT_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+        run: python3 scripts/ci/release_path.py release-pr --output "${RUNNER_TEMP}/release-pr.json"
+
+      # `release-pr` commits its proposal to the release branch and pushes it,
+      # so the checked-out `main` must finish exactly as clean as it started.
+      # A tracked modification here means release-plz edited this checkout in
+      # place; `release-dry-run` names such files from a branch first.
       - name: Assert clean tracked worktree after release calculation
-        if: steps.freshness.outputs.stale != 'true'
+        if: steps.select.outputs.selected == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -143,23 +150,61 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
       github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
       contains(github.event.pull_request.labels.*.name, 'release') &&
       github.repository == 'yankeeinlondon/rusty-biscuit'
+    permissions:
+      contents: read
     concurrency:
       group: release-plz-release
       cancel-in-progress: false
     steps:
-      - name: Checkout
+      # The merge commit this event names, never the current `main`: a later
+      # push must not change what an earlier merge releases. Tags are fetched
+      # with the full history.
+      - name: Checkout the merge commit
         uses: actions/checkout@v5
         with:
-          ref: main
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # Authorship by the release App, canonical repositories, a two-parent
+      # merge whose second parent is the proposal's final commit, and the
+      # release configuration at that commit, all before any credential.
+      - name: Verify the merged release proposal
+        id: select
+        shell: bash
+        env:
+          RELEASE_APP_ID: ${{ vars.RELEASE_APP_ID }}
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+          HAS_RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+        run: python3 scripts/ci/release_path.py select publish
+
+      - name: Inventory tags and Releases before publication
+        if: steps.select.outputs.selected == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ steps.select.outputs.merge_sha }}
+          HEAD_SHA: ${{ steps.select.outputs.head_sha }}
+          BASE_SHA: ${{ steps.select.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/release_path.py inventory \
+            --merge-sha "${MERGE_SHA}" --head-sha "${HEAD_SHA}" --base-sha "${BASE_SHA}" \
+            --title "Release inventory before publication" \
+            --output "${RUNNER_TEMP}/release-path/inventory-before.json"
+
+      - name: Set up release-plz
+        if: steps.select.outputs.selected == 'true'
+        uses: ./.github/actions/setup-release-plz
 
       - name: Assert clean tracked worktree before publication
+        if: steps.select.outputs.selected == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -169,28 +214,64 @@ jobs:
             exit 1
           fi
 
-      - name: Run release-plz
-        uses: release-plz/action@v0.5
+      - name: Mint the release App token
+        if: steps.select.outputs.selected == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v2
         with:
-          command: release
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # One release-plz process per package, each in a fresh clone detached at
+      # the proposal's final commit. A tag that exists without its Release is
+      # recovered by creating only the Release; a tag at any other commit, a
+      # Release without its tag, or a draft Release stops publication before
+      # anything is written. Re-running this run is the recovery path.
+      - name: Publish tags and Releases
+        if: steps.select.outputs.selected == 'true'
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+          MERGE_SHA: ${{ steps.select.outputs.merge_sha }}
+          HEAD_SHA: ${{ steps.select.outputs.head_sha }}
+          BASE_SHA: ${{ steps.select.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/release_path.py publish \
+            --merge-sha "${MERGE_SHA}" --head-sha "${HEAD_SHA}" --base-sha "${BASE_SHA}" \
+            --workdir "${RUNNER_TEMP}/release-path/packages" \
+            --output "${RUNNER_TEMP}/release-path/publication.json"
+
+      - name: Keep the publication inventory
+        if: always() && steps.select.outputs.selected == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-path/*.json
+          if-no-files-found: warn
+
+      - name: Remove disposable clones
+        if: always()
+        shell: bash
+        run: rm -rf "${RUNNER_TEMP}/release-path"
 
   # The only way to exercise the release calculation from a branch.
   #
-  # `release-plz update` is the stage that failed for six weeks: it resolves the
-  # repository and computes each crate's next version, and it writes ONLY to the
-  # local worktree — no branch, no push, no pull request, no registry. It is
-  # what `release-pr` runs before it publishes anything, so a green run here
-  # proves the git state this workflow hands release-plz is one it can work in.
+  # `release-plz update` computes each crate's next version and writes ONLY to
+  # this disposable checkout: no branch, no push, no pull request, no
+  # registry. It intentionally leaves its edits in place (manifests,
+  # changelogs, possibly new changelog files), which `calculation-report`
+  # lists; `release-pr` instead commits the same calculation to the proposal
+  # branch and must leave its checkout clean.
   #
-  # It also answers the lockfile question in the header: the diff it reports is
-  # exactly the tracked-file set a real calculation would produce, which is what
-  # the post-calculation assertion in `release-plz-pr` would judge.
-  #
-  # `release-plz/action` only accepts `release-pr` and `release`, so the binary
-  # is installed directly — same version and same installer the action uses.
-  # Write permissions are dropped: this job must not be able to release.
+  # Read-only: no App token, no private key, and the workflow token only reads.
+  # Diagnostics and the artifact run even when the calculation fails, and that
+  # failure stays the job's result.
   release-dry-run:
     name: Release Dry Run
     runs-on: ubuntu-latest
@@ -202,6 +283,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Prove the release calculation has a branch to stand on
         shell: bash
@@ -210,41 +292,53 @@ jobs:
           echo "branch:   $(git rev-parse --abbrev-ref HEAD)"
           echo "upstream: $(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}')"
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up release-plz
+        uses: ./.github/actions/setup-release-plz
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
-        env:
-          BINSTALL_VERSION: 1.23.0
-
-      - name: Install release-plz
+      - name: Diagnose before the calculation
         shell: bash
         run: |
           set -euo pipefail
-          cargo-binstall release-plz@0.3.165 \
-            --force --strategies=crate-meta-data,compile --no-confirm
+          python3 scripts/ci/release_path.py diagnose \
+            --output "${RUNNER_TEMP}/release-diagnostics/before.json" --summary "${GITHUB_STEP_SUMMARY}"
 
+      # `release_path.py update` runs `release-plz update` in the calculation
+      # environment `release-pr` also uses (a process-scoped fallback
+      # attributes file that keeps historical checkouts of PowerShell scripts
+      # clean), so a dry-run success predicts the proposal's calculation.
       - name: Compute next versions
         shell: bash
-        run: release-plz update
+        env:
+          RELEASE_PLZ_LOG: debug
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/release-diagnostics"
+          GIT_TRACE="${RUNNER_TEMP}/release-diagnostics/git-trace.log" \
+            python3 scripts/ci/release_path.py update \
+            > "${RUNNER_TEMP}/release-diagnostics/update.stdout.log" 2> "${RUNNER_TEMP}/release-diagnostics/update.stderr.log"
 
-      - name: Report what a real calculation would touch
+      - name: Report what the calculation changed
         shell: bash
         run: |
           set -euo pipefail
-          changed="$(git status --porcelain --untracked-files=no)"
-          if [ -z "${changed}" ]; then
-            echo "No tracked file would change; the post-calculation assertion would pass."
-            exit 0
-          fi
-          {
-            echo "### Tracked files a release calculation would rewrite"
-            echo
-            echo '```'
-            echo "${changed}"
-            echo '```'
-            echo
-            echo "The \`release-plz-pr\` post-calculation assertion judges exactly this set."
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "${changed}"
+          python3 scripts/ci/release_path.py calculation-report --output "${RUNNER_TEMP}/release-diagnostics/calculation.json"
+
+      - name: Diagnose after the calculation
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/release-diagnostics"
+          git diff > "${RUNNER_TEMP}/release-diagnostics/update.diff"
+          git ls-files --others --exclude-standard > "${RUNNER_TEMP}/release-diagnostics/untracked.txt"
+          tail -n 40 "${RUNNER_TEMP}/release-diagnostics/update.stderr.log" 2>/dev/null || true
+          python3 scripts/ci/release_path.py diagnose \
+            --output "${RUNNER_TEMP}/release-diagnostics/after.json" --summary "${GITHUB_STEP_SUMMARY}"
+
+      - name: Keep the diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-dry-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-diagnostics
+          if-no-files-found: warn
