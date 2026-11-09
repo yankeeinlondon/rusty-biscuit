@@ -28,6 +28,7 @@ import "./just/ai.just"
 import "./just/devops.just"
 import "./just/ci-local.just"
 import "./just/spec.just"
+import "./just/distribution.just"
 
 # Every package area in this monorepo that owns tests.
 #

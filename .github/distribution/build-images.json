@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "max_glibc": "2.35",
+  "required_env": {
+    "PCRE2_SYS_STATIC": "1"
+  },
+  "cleared_env": [
+    "RUSTC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER",
+    "CARGO_BUILD_RUSTC_WRAPPER",
+    "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+    "CARGO_TARGET_DIR",
+    "CARGO_BUILD_TARGET_DIR",
+    "RUSTFLAGS",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_BUILD_RUSTFLAGS",
+    "RUSTDOCFLAGS",
+    "CARGO_INCREMENTAL"
+  ],
+  "dist": {
+    "version": "0.34.0",
+    "release_url": "https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0",
+    "sha256": {
+      "aarch64-apple-darwin": "d1eec30e63eed23e5a5bd48fe96eae314799811bffca254ec1d2264638ba1890",
+      "x86_64-apple-darwin": "6aa89bb1e7c18f51ae8b148ce2fc6ab00ac46ed8173d4f2ed9afa12101218773",
+      "aarch64-unknown-linux-gnu": "58efb33edf01342875bfd0c3ce2befa9d73075579ca1b3e5dd75b98c88f92e83",
+      "x86_64-unknown-linux-gnu": "7fee44ff3ff71ed0064b32d4ec62fee6b58bd37c5887b12a86aedddc5af0c7b5"
+    }
+  },
+  "linux": {
+    "image": "ubuntu:22.04",
+    "index_digest": "sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11",
+    "platform_digests": {
+      "amd64": "sha256:8a2321a92b438238f93b4346fff61bc4259c99fdd4d9b52ee86f153fee0c344f",
+      "arm64": "sha256:a8fb2ba88181746111cbbe2969826d6546b71226785b196c93d2c3445a25000d"
+    },
+    "os_version_id": "22.04",
+    "build_packages": [
+      "build-essential",
+      "pkg-config",
+      "curl",
+      "ca-certificates",
+      "xz-utils",
+      "binutils"
+    ],
+    "tool_packages": [
+      "python3"
+    ],
+    "runtime_packages": [],
+    "allowed_libraries": [
+      "libc.so.6",
+      "libm.so.6",
+      "libgcc_s.so.1",
+      "libpthread.so.0",
+      "libdl.so.2",
+      "librt.so.1",
+      "ld-linux-x86-64.so.2",
+      "ld-linux-aarch64.so.1"
+    ],
+    "allowed_interpreters": [
+      "/lib64/ld-linux-x86-64.so.2",
+      "/lib/ld-linux-aarch64.so.1"
+    ]
+  },
+  "macos": {
+    "deployment_target": "15.0",
+    "allowed_library_prefixes": [
+      "/usr/lib/",
+      "/System/Library/Frameworks/"
+    ]
+  },
+  "forbidden_library_patterns": [
+    "pcre2"
+  ],
+  "forbidden_path_fragments": [
+    "/opt/homebrew",
+    "/usr/local/Cellar",
+    "/usr/local/opt",
+    "/Users/",
+    "/home/runner",
+    "/private/tmp/",
+    "/tmp/"
+  ],
+  "package_extras": {
+    "claudine-cli": {
+      "build_packages": [
+        "libasound2-dev"
+      ],
+      "runtime_packages": [
+        "libasound2"
+      ],
+      "allowed_libraries": [
+        "libasound.so.2"
+      ]
+    }
+  },
+  "targets": {
+    "aarch64-apple-darwin": {
+      "os": "macos",
+      "runner": "macos-15",
+      "arch": "arm64"
+    },
+    "x86_64-apple-darwin": {
+      "os": "macos",
+      "runner": "macos-15-intel",
+      "arch": "x86_64"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "os": "linux",
+      "runner": "ubuntu-22.04-arm",
+      "arch": "aarch64",
+      "platform": "linux/arm64",
+      "image_digest_key": "arm64"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "os": "linux",
+      "runner": "ubuntu-22.04",
+      "arch": "x86_64",
+      "platform": "linux/amd64",
+      "image_digest_key": "amd64"
+    }
+  }
+}

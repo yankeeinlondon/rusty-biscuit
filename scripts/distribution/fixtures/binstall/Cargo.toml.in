@@ -1,0 +1,30 @@
+# Fixture crate for `verify_binstall.py fixture-check`. Not a workspace member
+# (the `.in` suffix keeps Cargo and the CI planner from treating it as one).
+# The rendered placeholders are the port of the in-process archive server on
+# 127.0.0.1 and the version selecting which fixture release the manifest names. Apart from the
+# local `{ repo }`, the binstall block equals the enabled form every capable
+# manifest carries (`BINSTALL_URLS` in `scripts/ci/distribution.py`).
+[package]
+name = "binstall-fixture"
+version = "@VERSION@"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "fixture-tool"
+path = "src/main.rs"
+
+# Mirrors worktree's `render_dirty_tree`: feature-gated, absent from archives.
+[[bin]]
+name = "fixture-helper"
+path = "src/bin/fixture-helper.rs"
+required-features = ["helper"]
+
+[features]
+helper = []
+
+[package.metadata.binstall]
+pkg-url = "http://127.0.0.1:@PORT@/releases/download/{ name }-v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+disabled-strategies = ["quick-install", "compile"]

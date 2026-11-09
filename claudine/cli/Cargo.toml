@@ -3,6 +3,8 @@ name = "claudine-cli"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+repository = "https://github.com/yankeeinlondon/rusty-biscuit"
+homepage = "https://github.com/yankeeinlondon/rusty-biscuit/tree/main/claudine"
 description = "cross-agent abstraction and meta-agent harness"
 # Integration tests are one binary per execution contract, declared below;
 # see `2026-09-21-consolidated-test-binaries`.
@@ -259,3 +261,16 @@ ubuntu-latest = ["libasound2-dev"]
 # Off by default so test targets may construct commands freely; the crate root
 # denies it for production builds (see `clippy.toml` for the method list).
 disallowed_methods = "allow"
+
+# cargo-binstall reads these from the tagged manifest (`--git`, or `--manifest-path`
+# on a tag checkout). release-plz tags are `{package}-v{version}`, which binstall's
+# default URL guesses never match. Binary distribution is not approved for this
+# package, so `crate-meta-data` is disabled: binstall reports an opt-out instead of
+# probing for archives. Enabling the `binstall` channel in `docs/deployment.yaml`
+# removes `crate-meta-data` here in the same release proposal; distribution preflight
+# refuses the two disagreeing.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/{ name }-v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+disabled-strategies = ["crate-meta-data", "quick-install", "compile"]

@@ -290,6 +290,20 @@ SUITE_REGISTRY: dict[str, dict[str, Any]] = {
             "cardinality; its two driver assertions are not the measurement"
         ),
     },
+    # The binary distribution suites (`scripts/ci/test_distribution.py` and
+    # `scripts/distribution/test_*.py`). They need PyYAML and semver at the
+    # versions `scripts/ci/requirements-distribution.txt` pins, which the
+    # companion step's host Python does not carry, so the canonical recipe
+    # provisions a temporary pinned environment and fails on any skipped test.
+    "distribution": {
+        "owner": "repo-deps",
+        "kind": "companion",
+        "environment": "ubuntu-latest",
+        "recipe": "just distribution-test",
+        "just": ((".", "distribution-test"),),
+        "counts": "json",
+        "counts_args": f"--counts-out {COUNTS_OUT_PLACEHOLDER}",
+    },
     # The build owner's artifact publisher: no Cargo package and no pnpm
     # workspace entry selects it, so this registration is the only thing that
     # schedules its suite. The glob stays quoted -- given a bare directory
@@ -341,6 +355,18 @@ SUITE_OWNER_PATHS: dict[str, tuple[str, ...]] = {
     "pnpm-workspace.yaml": ("test-toolkit",),
     "scripts/Cargo.toml": ("repo-deps",),
     "tools/test-toolkit/Cargo.toml": ("test-toolkit",),
+    # The binary distribution configuration. No compiled code reads these; the
+    # `distribution` companion suite validates the real files (the policy as
+    # an all-disabled control, the reviewed dist base, the license targets,
+    # and the pinned build images), so an edit to one schedules that suite.
+    "docs/deployment.yaml": ("repo-deps",),
+    "dist-workspace.toml": ("repo-deps",),
+    "about.toml": ("repo-deps",),
+    ".github/distribution/build-images.json": ("repo-deps",),
+    # The rollout ledger: the suite checks it against the real policy.
+    ".github/distribution/rollout.json": ("repo-deps",),
+    # Defines `distribution-test`, the `distribution` suite's canonical recipe.
+    "just/distribution.just": ("repo-deps",),
 }
 
 # AC15 makes `sniff` the authority on package areas: this planner replicates
@@ -1597,12 +1623,17 @@ def validate_package_ci(
         # a companion nothing can run.
         for directory, recipe in registered.get("just", ()):
             justfile = root / directory / "justfile"
+            # The root justfile's recipes also live in the `just/*.just` files
+            # it imports.
+            if directory == ".":
+                texts = list(just_sources(root).values())
+            else:
+                texts = [justfile.read_text(encoding="utf-8")] if justfile.is_file() else []
             # A recipe DEFINITION, not a substring: `test-frontend-watch:` must
             # not satisfy the check for `test-frontend`.
-            recipe_defined = justfile.is_file() and re.search(
-                rf"^{re.escape(recipe)}(?::|\s)",
-                justfile.read_text(encoding="utf-8"),
-                re.MULTILINE,
+            recipe_defined = any(
+                re.search(rf"^{re.escape(recipe)}(?::|\s)", text, re.MULTILINE)
+                for text in texts
             )
             if not recipe_defined:
                 raise RuntimeError(

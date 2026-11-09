@@ -249,6 +249,8 @@ just install-claudine
 claudine init # brings you through a short interactive interview
 ```
 
+Prebuilt `claudine` binaries for macOS and Linux (archives, a shell installer, Homebrew, and cargo-binstall) are **planned**; see [Distributing prebuilt binaries](../docs/distribution.md), which also covers the ALSA library `claudine` needs on Linux.
+
 
 ## Supported Providers
 

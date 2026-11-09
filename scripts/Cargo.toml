@@ -105,6 +105,7 @@ rstest = "0.23"
 tiers = ["L1"]
 companion-suites = [
     "artifact-publisher",
+    "distribution",
     "test_affected_scope.py",
     "test_build_key.py",
     "test_ci_local.py",

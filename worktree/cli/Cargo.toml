@@ -3,6 +3,10 @@ name = "git-wt-cli"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+description = "Create, list, switch between, and remove git worktrees"
+repository = "https://github.com/yankeeinlondon/rusty-biscuit"
+homepage = "https://github.com/yankeeinlondon/rusty-biscuit/tree/main/worktree"
+readme = "../README.md"
 
 # The package was renamed from `worktree-cli`; the library keeps its crate name so
 # no `use worktree_cli::…` path changes.
@@ -13,6 +17,14 @@ path = "src/lib.rs"
 [[bin]]
 name = "wt"
 path = "src/main.rs"
+
+# Test-only helper rendered inside a real terminal by `tests/level2_dirty_tree.rs`.
+# Gated so default builds, `cargo install`, and cargo-binstall's binary list
+# (which skips feature-gated binaries) never include it.
+[[bin]]
+name = "render_dirty_tree"
+path = "src/bin/render_dirty_tree.rs"
+required-features = ["terminal-tests"]
 
 [features]
 terminal-tests = ["dep:test-toolkit"]
@@ -93,3 +105,16 @@ l2-backends = ["tmux", "kitty"]
 sidecars = ["backend-proof", "harness-broker"]
 features = ["terminal-tests"]
 local-features = []
+
+# cargo-binstall reads these from the tagged manifest (`--git`, or `--manifest-path`
+# on a tag checkout). release-plz tags are `{package}-v{version}`, which binstall's
+# default URL guesses never match. Binary distribution is not approved for this
+# package, so `crate-meta-data` is disabled: binstall reports an opt-out instead of
+# probing for archives. Enabling the `binstall` channel in `docs/deployment.yaml`
+# removes `crate-meta-data` here in the same release proposal; distribution preflight
+# refuses the two disagreeing.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/{ name }-v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+disabled-strategies = ["crate-meta-data", "quick-install", "compile"]

@@ -1545,6 +1545,7 @@ member directory, plus the two owners' own manifests:
 | `.github/ci/schemas/contract.json`, `.github/ci/schemas/archive_guard_cases.json` | `repo-deps`, `test-toolkit` |
 | `.github/ci/**` (otherwise) | `repo-deps` |
 | `scripts/Cargo.toml` | `repo-deps` |
+| `docs/deployment.yaml`, `dist-workspace.toml`, `about.toml`, `.github/distribution/build-images.json`, `.github/distribution/rollout.json`, `just/distribution.just` | `repo-deps` (its `distribution` companion suite reads them) |
 | `.github/workflows/**` | `test-toolkit` |
 | `tools/test-audit/**`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` | `test-toolkit` |
 | `tools/test-toolkit/Cargo.toml` | `test-toolkit` |

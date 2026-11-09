@@ -5,9 +5,10 @@
 Rusty Biscuit's CI/CD runs on **GitHub Actions** and is layered to match the [testing tier
 taxonomy](../testing-strategy.md): fast feedback first, then full coverage, then
 nightly/advisory work. [release-plz](https://release-plz.dev) automates release PRs, version tags,
-and GitHub releases. **Automated crates.io publishing is disabled, and general CLI binary
-distribution to package managers is not implemented.** See [Release Strategy](#release-strategy)
-for the implemented process and planned distribution work.
+and GitHub releases. **Automated crates.io publishing is disabled. Prebuilt CLI binaries are
+built and attached to a package's Release only once that package is approved, and no package is
+approved yet.** See [Release Strategy](#release-strategy) for the release process and
+[Binary distribution](../distribution.md) for the distribution workflow.
 
 Package-area gates use the same `just` recipes developers run locally. Scope selection is handled
 by `scripts/ci/affected_scope.py`, which emits **one canonical resolved plan**: the selected
@@ -971,9 +972,12 @@ changelog locations, and the current limits of internal dependency management. T
 explains what to do when no release proposal appears and how to inspect a calculation without
 publishing anything.
 
-The current configuration disables crates.io publication. General CLI archives, installers,
-Homebrew, npm, and PyPI publication are planned. The four-environment release evidence gate is
-also planned. The specialized integration archive workflow has the limitations described above.
+The current configuration disables crates.io publication. The `Distribute binaries` workflow
+attaches archives, checksums, and a shell installer to an approved CLI package's existing Release,
+and publishes its Homebrew formula when that channel is enabled. No package is approved yet, so
+these channels are **planned** until their first live release; see
+[Binary distribution](../distribution.md). npm and PyPI publication are planned. The
+four-environment release evidence gate is also planned. The specialized integration archive workflow has the limitations described above.
 
 ## Caching and Performance
 

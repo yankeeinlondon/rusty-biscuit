@@ -101,6 +101,8 @@ sniff repo git-status --refresh-remotes  # Sync remote tracking data
 sniff hardware --json
 ```
 
+Prebuilt `sniff` binaries for macOS and Linux (archives, a shell installer, Homebrew, and cargo-binstall) are **planned**; see [Distributing prebuilt binaries](../docs/distribution.md).
+
 ## Detection Categories
 
 | Category | Description |

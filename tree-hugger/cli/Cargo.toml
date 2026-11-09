@@ -3,6 +3,9 @@ name = "tree-hugger-cli"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+description = "Multi-language symbol extraction, references, and lint diagnostics built on Tree-sitter"
+repository = "https://github.com/yankeeinlondon/rusty-biscuit"
+homepage = "https://github.com/yankeeinlondon/rusty-biscuit/tree/main/tree-hugger"
 
 [[bin]]
 name = "hug"
@@ -69,3 +72,16 @@ features = ["terminal-tests"]
 local-features = []
 # The library/CLI severity agreement test reads the library's shared fixture.
 source-inputs = ["tree-hugger/lib/tests/fixtures/lint/undefined_symbol.py"]
+
+# cargo-binstall reads these from the tagged manifest (`--git`, or `--manifest-path`
+# on a tag checkout). release-plz tags are `{package}-v{version}`, which binstall's
+# default URL guesses never match. Binary distribution is not approved for this
+# package, so `crate-meta-data` is disabled: binstall reports an opt-out instead of
+# probing for archives. Enabling the `binstall` channel in `docs/deployment.yaml`
+# removes `crate-meta-data` here in the same release proposal; distribution preflight
+# refuses the two disagreeing.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/{ name }-v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+disabled-strategies = ["crate-meta-data", "quick-install", "compile"]

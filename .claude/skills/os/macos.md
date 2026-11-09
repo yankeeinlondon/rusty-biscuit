@@ -110,7 +110,9 @@ per-batch loop on macOS without measuring it.
   - Put the source copy and the target dir under `$HOME`, for example
     `~/.cache/<scratch>/{src,target}`. Docker's file sharing rejects bind
     mounts from `/Volumes/…` and `/tmp` (`/private`) with
-    `mkdir …: read-only file system`.
+    `mkdir …: read-only file system`. A mount from `/Volumes/…` can also hang
+    instead of failing, so copy helper scripts into the already-mounted
+    directory (as `scripts/distribution/build.sh container` does).
   - A file rewritten under the same name on a bind mount can reach the
     container stale and truncated to the old file's length. A headless
     Chromium `--dump-dom` of a regenerated page silently lacked its last

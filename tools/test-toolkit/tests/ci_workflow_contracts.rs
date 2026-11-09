@@ -9617,3 +9617,445 @@ fn uploads_named_by_the_cell_contract_skip_when_it_failed_to_resolve() {
 
     assert!(problems.is_empty(), "contract-named uploads:\n  {}", problems.join("\n  "));
 }
+
+// ---------------------------------------------------------------------------
+// Binary distribution (`distribute-binaries.yml`): credentials, the
+// verification boundary, immutability, and recovery
+// ---------------------------------------------------------------------------
+
+const DISTRIBUTION: &str = "distribute-binaries.yml";
+
+/// The id of a job block (`  upload:` -> `upload`).
+fn job_id(block: &str) -> String {
+    block.lines().next().unwrap_or_default().trim().trim_end_matches(':').to_owned()
+}
+
+/// A job's `if:` expression, folded block scalars joined into one line.
+fn job_condition(block: &str) -> String {
+    let mut lines = block.lines().skip_while(|line| !line.starts_with("    if:"));
+    let Some(first) = lines.next() else {
+        return String::new();
+    };
+    let mut condition = first.trim_start_matches("    if:").trim().trim_start_matches(">-").trim().to_owned();
+    for line in lines.take_while(|line| line.starts_with("      ")) {
+        condition.push(' ');
+        condition.push_str(line.trim());
+    }
+    condition
+}
+
+/// The workflow token reads everywhere except `upload`, the only writer;
+/// `reuse-bundle` alone may read another run's artifacts. The tap token
+/// reaches the tap publisher only, and no job holds any other secret.
+#[test]
+fn distribution_scopes_each_credential_to_the_one_job_that_needs_it() {
+    let source = workflow(DISTRIBUTION);
+    let preamble = source.split_once("\njobs:\n").expect("the workflow declares jobs").0;
+    assert!(
+        preamble.contains("\npermissions:\n  contents: read\n"),
+        "{DISTRIBUTION}'s default permissions must be `contents: read`"
+    );
+    let read_only = [("contents".to_owned(), "read".to_owned())];
+    let mut seen = Vec::new();
+    for block in jobs(&source) {
+        let id = job_id(&block);
+        let expected: Vec<(String, String)> = match id.as_str() {
+            "upload" => vec![("contents".to_owned(), "write".to_owned())],
+            "reuse-bundle" => vec![
+                ("contents".to_owned(), "read".to_owned()),
+                ("actions".to_owned(), "read".to_owned()),
+            ],
+            _ => read_only.to_vec(),
+        };
+        assert_eq!(job_permissions(&block), expected, "`{id}` declares the wrong permissions");
+        let executable = executable_lines(&block);
+        let secrets: Vec<&str> = executable
+            .lines()
+            .filter(|line| line.contains("secrets."))
+            .map(str::trim)
+            .collect();
+        let allowed: &[&str] = if id == "homebrew-tap" {
+            &["HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}"]
+        } else {
+            &[]
+        };
+        assert_eq!(secrets, allowed, "`{id}` may hold only its own secret");
+        for step in steps(&block) {
+            if step.contains("uses: actions/checkout@") {
+                assert!(
+                    step.contains("\n          persist-credentials: false\n"),
+                    "`{id}`: every checkout must drop its credentials:\n{step}"
+                );
+            }
+        }
+        seen.push(id);
+    }
+    for id in ["preflight", "prepare", "build", "package", "reuse-bundle", "smoke", "upload", "install", "binstall", "homebrew-tap"] {
+        assert!(seen.iter().any(|job| job == id), "{DISTRIBUTION} must define `{id}`: {seen:?}");
+    }
+}
+
+/// Verification mode builds and keeps artifacts but can never reach a write:
+/// each publishing job requires a production event AND the selection's
+/// `publishable`, the publish command has no fixture forge, and the jobs
+/// after upload start only from a successful upload.
+#[test]
+fn distribution_verification_runs_cannot_reach_publication() {
+    let production = "(github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'recover'))";
+    for id in ["upload", "homebrew-tap", "rollout-candidate"] {
+        let condition = job_condition(&named_job(DISTRIBUTION, id));
+        assert!(
+            condition.contains("needs.preflight.outputs.publishable == 'true'") && condition.contains(production),
+            "`{id}` must require a publishable selection from a production event: {condition}"
+        );
+    }
+    for id in ["install", "binstall"] {
+        let condition = job_condition(&named_job(DISTRIBUTION, id));
+        assert!(
+            condition.contains("needs.upload.result == 'success'"),
+            "`{id}` runs only after a successful upload: {condition}"
+        );
+    }
+    let tap = named_job(DISTRIBUTION, "homebrew-tap");
+    assert!(
+        tap.contains("\n    needs: [preflight, upload, install]\n")
+            && job_condition(&tap).contains("needs.install.result == 'success'")
+            && job_condition(&tap).contains("needs.preflight.outputs.formula_update == 'true'"),
+        "the formula is published only after every target installs from the Release"
+    );
+
+    let select = steps(&named_job(DISTRIBUTION, "preflight"));
+    let select = step_with_id(&select, "select").expect("preflight has a `select` step");
+    assert!(
+        select.contains(r#"if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${MODE}" = verify ]; then"#)
+            && select.contains("args=(verify-select ")
+            && select.contains("args=(preflight "),
+        "only a verify-mode dispatch selects with fixture approval:\n{select}"
+    );
+
+    let source = executable_lines(&workflow(DISTRIBUTION));
+    assert!(!source.contains("--forge-fixture"), "no job may substitute a fixture forge");
+    // Preflight's rollout gate reads the default branch's ledger.
+    assert!(!source.contains("--rollout "), "no job may substitute a rollout ledger");
+    let upload = steps(&named_job(DISTRIBUTION, "upload"));
+    let publish = upload
+        .iter()
+        .find(|step| step.contains("scripts/ci/distribution.py \"${args[@]}\""))
+        .expect("upload runs distribution.py publish");
+    assert!(
+        publish.contains("args=(publish --selection ") && publish.contains("check-bundle"),
+        "upload rechecks the bundle and publishes through `distribution.py publish`:\n{publish}"
+    );
+}
+
+/// Assets are added to the Release release-plz already published; nothing in
+/// the workflow creates, edits, or deletes a Release, replaces an asset,
+/// writes a tag, or points at a mutable `latest` URL.
+#[test]
+fn distribution_never_edits_releases_tags_or_existing_assets() {
+    let source = executable_lines(&workflow(DISTRIBUTION));
+    for forbidden in [
+        "gh release create",
+        "gh release edit",
+        "gh release delete",
+        "gh release upload",
+        "--clobber",
+        "git push",
+        "git tag",
+        "make_latest",
+        "releases/latest",
+        "create-release",
+        "--method PATCH",
+        "--method DELETE",
+        "-X DELETE",
+        "-X PATCH",
+    ] {
+        assert!(!source.contains(forbidden), "{DISTRIBUTION} must not use `{forbidden}`");
+    }
+    let triggers = workflow(DISTRIBUTION).split_once("\non:\n").expect("triggers").1.split_once("\nenv:\n").expect("env").0.to_owned();
+    assert!(
+        triggers.contains("  release:\n    types:\n      - published\n") && triggers.contains("  workflow_dispatch:\n"),
+        "distribution starts from a published Release or a manual run:\n{triggers}"
+    );
+    for event in ["pull_request", "push:", "workflow_run", "schedule"] {
+        assert!(!triggers.contains(event), "distribution must not run on `{event}`");
+    }
+}
+
+/// A package's uploads queue behind each other and every package's formula
+/// updates share one tap-wide queue; neither ever cancels a run in progress,
+/// and neither is keyed on a value that changes every run.
+#[test]
+fn distribution_serializes_publication_without_canceling() {
+    for (id, group) in [
+        ("upload", "distribute-binaries-${{ needs.preflight.outputs.package }}"),
+        ("homebrew-tap", "homebrew-tap"),
+    ] {
+        assert!(
+            named_job(DISTRIBUTION, id).contains(&format!(
+                "\n    concurrency:\n      group: {group}\n      cancel-in-progress: false\n"
+            )),
+            "`{id}` must queue on `{group}` without canceling"
+        );
+    }
+    let source = executable_lines(&workflow(DISTRIBUTION));
+    assert!(!source.contains("cancel-in-progress: true"), "no distribution run may cancel another");
+    for line in source.lines().filter(|line| line.trim_start().starts_with("group:")) {
+        assert!(!line.contains("run_id") && !line.contains("run_number"), "a concurrency group keyed per run serializes nothing: {line}");
+    }
+}
+
+/// Event values reach shell code only through `env:`, and every job that
+/// builds checks out the selected commit and proves it before using it.
+#[test]
+fn distribution_builds_only_the_selected_commit_and_interpolates_nothing() {
+    for block in jobs(&workflow(DISTRIBUTION)) {
+        let id = job_id(&block);
+        for step in steps(&block) {
+            if let Some(run) = step_run(&step) {
+                assert!(!run.contains("${{"), "`{id}`: no expression may be interpolated into a run script:\n{step}");
+            }
+        }
+    }
+    for id in ["prepare", "build", "package"] {
+        let block = named_job(DISTRIBUTION, id);
+        assert!(
+            block.contains("\n      COMMIT: ${{ needs.preflight.outputs.commit }}\n"),
+            "`{id}` binds the selected commit"
+        );
+        let job_steps = steps(&block);
+        let checkout = job_steps
+            .iter()
+            .position(|step| step.contains("\n          ref: ${{ needs.preflight.outputs.commit }}\n"))
+            .unwrap_or_else(|| panic!("`{id}` checks out the selected commit"));
+        let proof = &job_steps[checkout + 1];
+        assert!(
+            proof.contains(r#"head="$(git -C source rev-parse HEAD)""#) && proof.contains(r#"[ "${head}" != "${COMMIT}" ]"#) && proof.contains("exit 1"),
+            "`{id}`: the step after the checkout must fail unless HEAD is the selected commit:\n{proof}"
+        );
+    }
+}
+
+/// Manual recovery with a bundle run id rebuilds nothing: the original run's
+/// bundle is checked against this run's preflight and that run's Package job
+/// before it becomes this run's bundle. Without one, upload is told it is a
+/// fresh rebuild, which a partially published Release refuses.
+#[test]
+fn distribution_recovery_reuses_only_a_verified_original_bundle() {
+    for id in ["prepare", "build", "package"] {
+        assert!(
+            job_condition(&named_job(DISTRIBUTION, id)).contains("needs.preflight.outputs.bundle_run_id == ''"),
+            "`{id}` must not run when a bundle is reused"
+        );
+    }
+    let reuse = named_job(DISTRIBUTION, "reuse-bundle");
+    assert!(
+        job_condition(&reuse).contains("needs.preflight.outputs.bundle_run_id != ''")
+            && reuse.contains("\n          run-id: ${{ needs.preflight.outputs.bundle_run_id }}\n")
+            && reuse.contains("--run \"${docs}/run.json\"")
+            && reuse.contains("--jobs \"${docs}/jobs.json\""),
+        "`reuse-bundle` downloads the named run's bundle and checks it against that run:\n{reuse}"
+    );
+    let package = named_job(DISTRIBUTION, "package");
+    let keep = steps(&package);
+    let bundle_check = keep.iter().position(|step| step.contains("check-bundle")).expect("package checks its bundle");
+    let keep_bundle = keep.iter().position(|step| step.contains("name: distribution-bundle\n")).expect("package keeps its bundle");
+    assert!(bundle_check < keep_bundle, "the bundle is verified before it is kept");
+    let upload = named_job(DISTRIBUTION, "upload");
+    assert!(
+        upload.contains("FRESH_REBUILD: ${{ github.event_name == 'workflow_dispatch' && needs.preflight.outputs.bundle_run_id == '' }}")
+            && upload.contains(r#"[ "${FRESH_REBUILD}" != true ] || args+=(--fresh-rebuild)"#),
+        "a recovery run without a bundle is a fresh rebuild:\n{upload}"
+    );
+}
+
+/// The subcommands a distribution script dispatches: argparse's
+/// `add_parser("<name>"` in Python, a `<name>) cmd_` case arm in shell.
+/// Empty for a script that takes only positional arguments.
+fn dispatched_subcommands(source: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for line in source.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.split_once("add_parser(\"").map(|(_, rest)| rest) {
+            names.extend(rest.split('"').next().map(str::to_owned));
+        } else if let Some((name, _)) = line.split_once(") cmd_") {
+            names.push(name.trim().to_owned());
+        }
+    }
+    names
+}
+
+/// Every script the distribution workflow runs exists, and every subcommand it
+/// names is one that script dispatches. The workflow and the scripts live in
+/// different files, so a renamed or dropped subcommand would otherwise surface
+/// only on the first real release, after the Release is already published.
+#[test]
+fn distribution_workflow_calls_only_declared_script_entry_points() {
+    let scripts = [
+        ("scripts/ci/distribution.py", read("scripts/ci/distribution.py")),
+        ("scripts/distribution/build.sh", read("scripts/distribution/build.sh")),
+        ("scripts/distribution/install_check.sh", read("scripts/distribution/install_check.sh")),
+        ("scripts/distribution/installers.py", read("scripts/distribution/installers.py")),
+        ("scripts/distribution/licenses.sh", read("scripts/distribution/licenses.sh")),
+        ("scripts/distribution/publish-tap.sh", read("scripts/distribution/publish-tap.sh")),
+        ("scripts/distribution/tap.py", read("scripts/distribution/tap.py")),
+        ("scripts/distribution/verify_binstall.py", read("scripts/distribution/verify_binstall.py")),
+    ];
+    let source = executable_lines(&workflow(DISTRIBUTION));
+
+    // (script, the token after it) for every invocation in a run script.
+    let mut calls: Vec<(String, String)> = Vec::new();
+    for line in source.lines() {
+        let mut rest = line;
+        while let Some(start) = rest.find("scripts/") {
+            let tail = &rest[start..];
+            let end = tail
+                .find(|c: char| !(c.is_ascii_alphanumeric() || "_-./".contains(c)))
+                .unwrap_or(tail.len());
+            let path = &tail[..end];
+            if path.ends_with(".py") || path.ends_with(".sh") {
+                let next = tail[end..].split_whitespace().next().unwrap_or_default();
+                calls.push((path.to_owned(), next.to_owned()));
+            }
+            rest = &tail[end..];
+        }
+    }
+    // The three subcommands passed through a Bash array, and `install_check.sh`'s
+    // mode variable, spelled where they are assigned.
+    for (assignment, script) in [
+        ("args=(verify-select ", "scripts/ci/distribution.py"),
+        ("args=(preflight ", "scripts/ci/distribution.py"),
+        ("args=(publish ", "scripts/ci/distribution.py"),
+        ("mode=native", "scripts/distribution/install_check.sh"),
+        ("mode=container", "scripts/distribution/install_check.sh"),
+    ] {
+        assert!(source.contains(assignment), "{DISTRIBUTION} no longer assigns `{assignment}`; update this contract");
+        let name = assignment.trim_start_matches("args=(").trim_start_matches("mode=").trim();
+        calls.push((script.to_owned(), name.to_owned()));
+    }
+
+    let mut called: Vec<&str> = calls.iter().map(|(path, _)| path.as_str()).collect();
+    called.sort_unstable();
+    called.dedup();
+    let listed: Vec<&str> = scripts.iter().map(|(path, _)| *path).collect();
+    assert_eq!(called, listed, "the scripts {DISTRIBUTION} runs must be exactly the ones this contract checks");
+
+    for (path, next) in &calls {
+        let (_, script) = scripts.iter().find(|(listed, _)| listed == path).expect("listed above");
+        let declared = dispatched_subcommands(script);
+        if declared.is_empty() || !next.starts_with(|c: char| c.is_ascii_lowercase()) {
+            continue;
+        }
+        assert!(
+            declared.iter().any(|name| name == next),
+            "{DISTRIBUTION} runs `{path} {next}`, but {path} dispatches only {declared:?}"
+        );
+    }
+}
+
+/// Every tool the distribution jobs download is pinned to one version and
+/// checked against a SHA-256 before it runs, and the Python requirements are
+/// exact pins. An unpinned tool would let two runs of the same tag build or
+/// verify with different code.
+#[test]
+fn distribution_tools_are_pinned_by_version_and_digest() {
+    let is_digest = |value: &str| value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase());
+    let targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"];
+
+    let requirements = read("scripts/ci/requirements-distribution.txt");
+    let pins: Vec<&str> = requirements.lines().map(str::trim).filter(|line| !line.is_empty() && !line.starts_with('#')).collect();
+    assert!(!pins.is_empty(), "requirements-distribution.txt must pin the suites' libraries");
+    for pin in pins {
+        let (name, version) = pin.split_once("==").unwrap_or_else(|| panic!("`{pin}` must be an exact `==` pin"));
+        assert!(!name.is_empty() && !version.is_empty() && !version.contains(['*', ',', ' ']), "`{pin}` must be an exact pin");
+    }
+
+    let images: serde_json::Value = serde_json::from_str(&read(".github/distribution/build-images.json")).expect("build-images.json parses");
+    let dist = &images["dist"];
+    let version = dist["version"].as_str().expect("dist.version");
+    assert!(
+        dist["release_url"].as_str().is_some_and(|url| url.ends_with(&format!("/download/v{version}"))),
+        "dist's download URL must name its pinned version"
+    );
+    let digests = dist["sha256"].as_object().expect("dist.sha256");
+    let mut pinned: Vec<&str> = digests.keys().map(String::as_str).collect();
+    pinned.sort_unstable();
+    let mut expected = targets.to_vec();
+    expected.sort_unstable();
+    assert_eq!(pinned, expected, "dist must be pinned for exactly the four build hosts");
+    assert!(digests.values().all(|digest| digest.as_str().is_some_and(is_digest)), "every dist pin is a SHA-256");
+    let linux = &images["linux"];
+    for digest in [&linux["index_digest"], &linux["platform_digests"]["amd64"], &linux["platform_digests"]["arm64"]] {
+        assert!(
+            digest.as_str().and_then(|d| d.strip_prefix("sha256:")).is_some_and(is_digest),
+            "the Ubuntu image must be pinned by digest: {digest}"
+        );
+    }
+
+    let action = read(".github/actions/setup-dist/action.yml");
+    assert!(action.contains("-r scripts/ci/requirements-distribution.txt"), "the venv installs exactly the pinned requirements");
+    assert!(action.contains("CARGO_ABOUT_VERSION: 0.8.4\n") && action.contains("BINSTALL_VERSION: 1.26.2\n"), "cargo-about and cargo-binstall are pinned");
+    let mut digests_in_action = 0;
+    for line in action.lines().map(str::trim) {
+        let value = line
+            .strip_prefix("CARGO_ABOUT_SHA256: ")
+            .or_else(|| line.strip_prefix("sha="))
+            .map(|value| value.trim_end_matches(" ;;"));
+        if let Some(value) = value {
+            assert!(is_digest(value), "`{line}` must be a SHA-256");
+            digests_in_action += 1;
+        }
+    }
+    assert_eq!(digests_in_action, 5, "cargo-about once and cargo-binstall once per build host");
+    assert_eq!(action.matches("| shasum -a 256 -c -").count(), 3, "each download is checked before it is unpacked");
+    for unpinned in ["cargo install", "cargo binstall", "pip install --upgrade", "@latest", "releases/latest"] {
+        assert!(!executable_lines(&action).contains(unpinned), "setup-dist must not use `{unpinned}`");
+    }
+}
+
+/// `just distribution-test` is the one command that runs the distribution
+/// Python suites, locally and as `repo-deps`'s `distribution` companion suite in
+/// CI, in a temporary environment holding exactly the pinned requirements.
+#[test]
+fn distribution_suites_run_through_the_registered_companion_recipe() {
+    let root_justfile = read("justfile");
+    assert!(root_justfile.contains("\nimport \"./just/distribution.just\"\n"), "the root justfile imports the distribution recipes");
+    let recipes = read("just/distribution.just");
+    let test_recipe = recipes.split_once("\ndistribution-test ").expect("distribution-test is defined").1;
+    let test_recipe = test_recipe.split("\n\n").next().unwrap_or_default();
+    assert!(
+        test_recipe.contains("bash scripts/distribution/pinned-python.sh ")
+            && test_recipe.contains("\"${PYTHON}\" scripts/distribution/run_suites.py \"$@\""),
+        "distribution-test runs every suite through run_suites.py with the pinned interpreter:\n{test_recipe}"
+    );
+    let verify_recipe = recipes.split_once("\ndistribution-verify ").expect("distribution-verify is defined").1;
+    assert!(
+        verify_recipe.contains("bash scripts/distribution/pinned-python.sh bash scripts/distribution/verify.sh"),
+        "distribution-verify runs with the pinned interpreter"
+    );
+    let pinned = read("scripts/distribution/pinned-python.sh");
+    assert!(
+        pinned.contains(" -m venv ")
+            && pinned.contains("-r scripts/ci/requirements-distribution.txt")
+            && pinned.contains("export PYTHON"),
+        "pinned-python.sh provisions a temporary environment holding exactly the pinned requirements"
+    );
+    let check_recipe = recipes.split_once("\ndistribution-check:").expect("distribution-check is defined").1;
+    assert!(
+        check_recipe.contains("just distribution-test") && check_recipe.contains("-p test-toolkit --test ci_workflow_contracts -E 'test(/^distribution_/)'"),
+        "distribution-check runs the suites and these contracts"
+    );
+
+    let registry = read("scripts/ci/affected_scope.py");
+    let entry = registry.split_once("\n    \"distribution\": {\n").expect("SUITE_REGISTRY registers `distribution`").1;
+    let entry = entry.split_once("\n    },").expect("entry ends").0;
+    for field in [
+        "\"owner\": \"repo-deps\"",
+        "\"kind\": \"companion\"",
+        "\"recipe\": \"just distribution-test\"",
+        "\"counts\": \"json\"",
+    ] {
+        assert!(entry.contains(field), "the `distribution` registry entry must declare {field}:\n{entry}");
+    }
+    assert!(read("scripts/Cargo.toml").contains("\n    \"distribution\",\n"), "repo-deps declares the `distribution` companion suite");
+}

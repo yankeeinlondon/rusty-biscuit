@@ -1,0 +1,121 @@
+{
+  "first_package": "biscuit-hash-cli",
+  "verified": [],
+  "pending": [
+    {
+      "name": "approval",
+      "package": "biscuit-hash-cli",
+      "reason": "docs/deployment.yaml does not approve biscuit-hash-cli; approval (with brew: bh) arrives through a reviewed release proposal"
+    },
+    {
+      "name": "release-app",
+      "package": "biscuit-hash-cli",
+      "reason": "the RELEASE_APP_BOT_LOGIN repository variable is not set, so preflight cannot prove a tag came from a reviewed release proposal"
+    },
+    {
+      "name": "homebrew-tap",
+      "package": "biscuit-hash-cli",
+      "reason": "the yankeeinlondon/homebrew-tap repository, the HOMEBREW_TAP_TOKEN secret, and the HOMEBREW_TAP_AUTHOR variable do not exist yet"
+    },
+    {
+      "name": "clean-runtime-macos",
+      "package": "biscuit-hash-cli",
+      "reason": "no clean macOS 15 VM (no developer tools, no Homebrew libraries) is provisioned for runtime evidence"
+    },
+    {
+      "name": "x86_64-runtime",
+      "package": "biscuit-hash-cli",
+      "reason": "no native x86_64 macOS or x86_64 Linux host has run the archives and installer; emulation is not evidence"
+    },
+    {
+      "name": "wsl2-runtime",
+      "package": "biscuit-hash-cli",
+      "reason": "no WSL2 host has run the Linux archive and installer"
+    },
+    {
+      "name": "live-release",
+      "package": "biscuit-hash-cli",
+      "reason": "no biscuit-hash-cli release has been distributed; its run creates the first ledger candidate"
+    },
+    {
+      "name": "first-chain",
+      "package": "biscuit-file-cli",
+      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+    },
+    {
+      "name": "approval",
+      "package": "biscuit-file-cli",
+      "reason": "docs/deployment.yaml does not approve biscuit-file-cli"
+    },
+    {
+      "name": "first-chain",
+      "package": "tree-hugger-cli",
+      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+    },
+    {
+      "name": "approval",
+      "package": "tree-hugger-cli",
+      "reason": "docs/deployment.yaml does not approve tree-hugger-cli"
+    },
+    {
+      "name": "first-chain",
+      "package": "git-wt-cli",
+      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+    },
+    {
+      "name": "approval",
+      "package": "git-wt-cli",
+      "reason": "docs/deployment.yaml does not approve git-wt-cli"
+    },
+    {
+      "name": "first-chain",
+      "package": "sniff-detection-cli",
+      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+    },
+    {
+      "name": "approval",
+      "package": "sniff-detection-cli",
+      "reason": "docs/deployment.yaml does not approve sniff-detection-cli"
+    },
+    {
+      "name": "first-chain",
+      "package": "darkmatter-cli",
+      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+    },
+    {
+      "name": "approval",
+      "package": "darkmatter-cli",
+      "reason": "docs/deployment.yaml does not approve darkmatter-cli"
+    },
+    {
+      "name": "first-chain",
+      "package": "darkmatter-lsp",
+      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+    },
+    {
+      "name": "approval",
+      "package": "darkmatter-lsp",
+      "reason": "docs/deployment.yaml does not approve darkmatter-lsp"
+    },
+    {
+      "name": "first-chain",
+      "package": "claudine-cli",
+      "reason": "waits for a verified biscuit-hash-cli entry; preflight refuses this package until then"
+    },
+    {
+      "name": "approval",
+      "package": "claudine-cli",
+      "reason": "docs/deployment.yaml does not approve claudine-cli"
+    },
+    {
+      "name": "brew-description",
+      "package": "darkmatter-cli",
+      "reason": "the Cargo description fails brew audit; shorten it in the release proposal that enables brew"
+    },
+    {
+      "name": "brew-description",
+      "package": "claudine-cli",
+      "reason": "the Cargo description fails brew audit; shorten it in the release proposal that enables brew"
+    }
+  ]
+}

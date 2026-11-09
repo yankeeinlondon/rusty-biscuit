@@ -4438,6 +4438,7 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
     EXPECTED_COMPANION_OWNERS = {
         "archive-path-guard": "test-toolkit",
         "artifact-publisher": "repo-deps",
+        "distribution": "repo-deps",
         "homelab-frontend": "homelab-server",
         "test_affected_scope.py": "repo-deps",
         "test_build_key.py": "repo-deps",
@@ -4717,6 +4718,19 @@ class ToolingPathOwnershipTests(unittest.TestCase):
         # where CI's own suites are declared to run at all.
         self.assert_selects("scripts/Cargo.toml", ["repo-deps"])
         self.assert_selects("tools/test-toolkit/Cargo.toml", ["test-toolkit"])
+
+    def test_a_distribution_configuration_change_selects_repo_deps_alone(self) -> None:
+        # No compiled code reads these; the `distribution` companion suite
+        # validates the real files, and the recipe file defines its command.
+        for path in (
+            "docs/deployment.yaml",
+            "dist-workspace.toml",
+            "about.toml",
+            ".github/distribution/build-images.json",
+            ".github/distribution/rollout.json",
+            "just/distribution.just",
+        ):
+            self.assert_selects(path, ["repo-deps"])
 
     def test_another_packages_manifest_is_not_a_trigger(self) -> None:
         # The other half of R13.6: the exception is two paths wide, not general.

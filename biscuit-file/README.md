@@ -52,6 +52,8 @@ bf document.pdf --md
 cat data.json | bf --input-format json --yaml
 ```
 
+Prebuilt `bf` binaries for macOS and Linux (archives, a shell installer, Homebrew, and cargo-binstall) are **planned**; see [Distributing prebuilt binaries](../docs/distribution.md).
+
 ## Portable References
 
 A `FileResolutionContext` describes a file tree with two directories: `cwd`,

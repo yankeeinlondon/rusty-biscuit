@@ -27,6 +27,8 @@ cargo install --path biscuit-hash/cli
 just -f biscuit-hash/justfile install
 ```
 
+Prebuilt `bh` binaries for macOS and Linux (archives, a shell installer, Homebrew, and cargo-binstall) are **planned**; see [Distributing prebuilt binaries](../docs/distribution.md).
+
 ## CLI Usage
 
 ```sh

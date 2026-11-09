@@ -18,9 +18,10 @@ Run**.
 
 Today, releasing creates a Git tag (a name marking a specific source revision) and a GitHub
 Release page containing release notes and access to the source. It does **not** publish to
-crates.io, Homebrew, npm, or PyPI, or build installers for the general command-line applications.
-General binary distribution is **planned**, not built. The only binaries built today are the
-archives for three home-automation integrations (see
+crates.io, npm, or PyPI. A separate workflow attaches prebuilt binaries, installers, and Homebrew
+formulas for approved command-line packages (see [Binary distribution](#binary-distribution)), but
+no package is approved yet, so those remain **planned** for users. The only binaries built today are
+the archives for three home-automation integrations (see
 [Integration archives](#7-integration-archives)).
 
 > **Current state.** Only `sniff-detection-cli` and `git-wt-cli` are eligible for release
@@ -224,6 +225,18 @@ inspect **Create Release PR**:
   Run the [dry run](#8-prove-the-calculation-from-a-branch) to get its full diagnostics.
 - **Success with `packages: none (nothing to release)` in the summary.** Nothing has changed since
   the last release.
+
+### Binary distribution
+
+Publishing a Release also starts the **Distribute binaries** workflow. For a package that
+[`docs/deployment.yaml`](deployment.yaml) approves, it builds the tagged commit for macOS and Linux
+and attaches the archives, a shell installer, and checksums to the Release this guide created; for
+any other package it does nothing. The Release therefore briefly has notes but no binaries. Approval
+must already be in the tagged commit, so it is merged before the release, usually inside the
+release proposal itself.
+
+[Distributing prebuilt binaries](distribution.md) explains approval, the rollout ledger, what to do
+when a distribution run fails, and how users install the results.
 
 ## 4. Edit the changelog
 
@@ -595,6 +608,8 @@ a release proposal:
   decision those jobs act on.
 - [`build-integrations.yml`](../.github/workflows/build-integrations.yml) builds the integration
   archives.
+- [Distributing prebuilt binaries](distribution.md) covers the **Distribute binaries** workflow that
+  attaches CLI binaries to a published Release.
 - [CI/CD](topics/ci-cd.md) explains how the automated checks run before release preparation.
 - [release-plz in CI](cicd/release-plz-ci.md) explains the tool in more detail. Its general examples
   include publishing capabilities that this repository has not enabled.
