@@ -277,6 +277,80 @@ fn option_matrix_coercion_exceptions() {
     }
 }
 
+/// A literal option the binder converts is judged passively on its bound
+/// value: each call is rejected before anything runs, in a live position
+/// and in a dead ternary branch, at the argument execution would blame.
+/// `(file, contract, options, code, blamed argument text)`.
+const COERCED_REJECTIONS: &[(&str, &str, &str, &str, usize)] = &[
+    ("rows.csv", "{ name: string, port: number }[]", "{header: \"false\"}", ROW_SHAPE_CONFLICT, 1),
+    ("rows.csv", "tuple([string, number])[]", "{delimiter: 10}", INVALID_OPTIONS, 2),
+    ("rows.json", "string[]", "{header: \"true\"}", INVALID_OPTIONS, 2),
+    ("rows.tsv", "tuple([string, number])[]", "{delimiter: 5}", INVALID_OPTIONS, 2),
+    ("rows.csv", "{ name: string, port: number }[]", "{header: \"false\", delimiter: sep}", ROW_SHAPE_CONFLICT, 1),
+];
+
+#[test]
+fn coerced_literal_options_are_rejected_before_anything_runs() {
+    let dir = TempDir::new().unwrap();
+    for name in ["rows.csv", "rows.tsv"] {
+        write(dir.path(), name, ROWS_CSV);
+    }
+    write(dir.path(), "rows.json", "[\"a\"]\n");
+    for &(file, contract, options, code, argument) in COERCED_REJECTIONS {
+        let call = format!("load_data(\"{file}\", \"{contract}\", {options})");
+        for line in [format!("{{{{ {call} }}}}"), format!("{{{{ false ? {call} : null }}}}")] {
+            let runtime = DataRuntime::new();
+            let content = format!("---\nsep: \",\"\n---\n{line}\n");
+            let failure = compose_named(dir.path(), "doc.md", &content, &runtime).expect_err("rejected");
+            let record = failure.error.call_diagnostic().unwrap_or_else(|| panic!("{line}: no located record"));
+            assert_eq!(record.code, code, "{line}: {record:#?}");
+            let blamed = if argument == 1 { format!("\"{contract}\"") } else { options.to_string() };
+            let column = line.find(&blamed).unwrap() + 1;
+            let source = record.source.as_ref().expect("located");
+            assert_eq!((source.line, source.column), (Some(4), Some(column)), "{line}: {record:#?}");
+            assert_eq!(codes(&failure), [code], "{line}");
+            assert_nothing_read(&runtime, &line);
+        }
+    }
+}
+
+/// The same five shapes, computed from frontmatter so only execution sees
+/// them, fail with the same codes once the binder has converted them.
+#[test]
+fn coerced_computed_options_fail_at_execution_with_the_same_codes() {
+    let dir = TempDir::new().unwrap();
+    for name in ["rows.csv", "rows.tsv"] {
+        write(dir.path(), name, ROWS_CSV);
+    }
+    write(dir.path(), "rows.json", "[\"a\"]\n");
+    for (file, contract, frontmatter, options, code) in [
+        ("rows.csv", OBJECT_ROWS, "opts: {header: \"false\"}", "opts", ROW_SHAPE_CONFLICT),
+        ("rows.csv", "\"tuple([string, number])[]\"", "opts: {delimiter: 10}", "opts", INVALID_OPTIONS),
+        ("rows.json", "\"string[]\"", "opts: {header: \"true\"}", "opts", INVALID_OPTIONS),
+        ("rows.tsv", "\"tuple([string, number])[]\"", "opts: {delimiter: 5}", "opts", INVALID_OPTIONS),
+        ("rows.csv", OBJECT_ROWS, "hdr: \"false\"\nsep: \",\"", "{header: hdr, delimiter: sep}", ROW_SHAPE_CONFLICT),
+    ] {
+        let runtime = DataRuntime::new();
+        let failure = failed(dir.path(), &runtime, frontmatter, &format!("load_data(\"{file}\", {contract}, {options})"));
+        assert_eq!(codes(&failure), [code], "{frontmatter}: {}", failure.error);
+        assert_nothing_read(&runtime, frontmatter);
+    }
+}
+
+/// `header: "true"` binds to `true`, so a tuple contract reads the header
+/// row as a header, written literally or computed.
+#[test]
+fn coerced_header_true_on_a_tuple_contract_reads_rows() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "rows.csv", ROWS_CSV);
+    let runtime = DataRuntime::new();
+    let contract = "\"tuple([string, number])[]\"";
+    let literal = loaded(dir.path(), &runtime, "", &format!("load_data(\"rows.csv\", {contract}, {{header: \"true\"}})"));
+    assert_eq!(literal, json!([["web", 8080]]));
+    let computed = loaded(dir.path(), &runtime, "hdr: \"true\"", &format!("load_data(\"rows.csv\", {contract}, {{header: hdr}})"));
+    assert_eq!(computed, literal);
+}
+
 /// The valid delimiter cells each split on their own character.
 #[test]
 fn option_matrix_valid_delimiters_read_rows() {
@@ -520,6 +594,80 @@ fn tabular_options_on_json_fail_before_reading() {
         let reason = "applies only to CSV and TSV data, but this call reads JSON";
         assert_inapplicable(dir.path(), &runtime, "rows.json", &failure, key, reason);
     }
+}
+
+// ── Computed contracts ──────────────────────────────────────────────────────
+
+/// A contract read from frontmatter is unknown to the passive check, which
+/// still refuses options that cannot apply to the provable format, in a
+/// dead branch too, before anything runs.
+#[test]
+fn computed_contract_does_not_hide_inapplicable_literal_options() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "rows.json", "[\"a\"]\n");
+    write(dir.path(), "rows.tsv", "a\tb\n");
+    write(dir.path(), "rows.csv", ROWS_CSV);
+    for (file, options) in [
+        ("rows.json", "{header: true}"),
+        ("rows.json", "{delimiter: \";\"}"),
+        ("rows.tsv", "{delimiter: \";\"}"),
+        ("rows.csv", "{format: \"json\", header: true}"),
+        ("rows.csv", "{delimiter: \";;\"}"),
+    ] {
+        let call = format!("load_data(\"{file}\", contract, {options})");
+        for line in [format!("{{{{ {call} }}}}"), format!("{{{{ false ? {call} : null }}}}")] {
+            let runtime = DataRuntime::new();
+            let content = format!("---\ncontract: \"string[]\"\n---\n{line}\n");
+            let failure = compose_named(dir.path(), "doc.md", &content, &runtime).expect_err("rejected");
+            let record = failure.error.call_diagnostic().unwrap_or_else(|| panic!("{line}: no located record"));
+            assert_eq!(record.code, INVALID_OPTIONS, "{line}: {record:#?}");
+            let source = record.source.as_ref().expect("located");
+            let column = line.find(options).unwrap() + 1;
+            assert_eq!((source.line, source.column), (Some(4), Some(column)), "{line}: {record:#?}");
+            assert_eq!(codes(&failure), [INVALID_OPTIONS], "{line}");
+            assert_nothing_read(&runtime, &line);
+        }
+    }
+}
+
+/// Options the passive check cannot see are still judged at execution
+/// beside a computed contract, from the extension or an explicit format.
+#[test]
+fn computed_contract_and_options_fail_applicability_at_execution() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "rows.json", "[\"a\"]\n");
+    write(dir.path(), "rows.tsv", "a\tb\n");
+    write(dir.path(), "rows.csv", ROWS_CSV);
+    for (file, frontmatter, key, reason) in [
+        ("rows.json", "opts: {header: true}", "header", "this call reads JSON"),
+        ("rows.json", "opts: {delimiter: \";\"}", "delimiter", "this call reads JSON"),
+        ("rows.tsv", "opts: {delimiter: \";\"}", "delimiter", TSV_REASON),
+        ("rows.csv", "opts: {format: json, header: true}", "header", "this call reads JSON"),
+    ] {
+        let runtime = DataRuntime::new();
+        let frontmatter = format!("contract: \"string[]\"\n{frontmatter}");
+        let failure = failed(dir.path(), &runtime, &frontmatter, &format!("load_data(\"{file}\", contract, opts)"));
+        assert_inapplicable(dir.path(), &runtime, file, &failure, key, reason);
+    }
+}
+
+/// Applicable options beside a computed contract compose, and a headerless
+/// read is judged by the contract execution receives.
+#[test]
+fn computed_contract_with_applicable_options_reads_rows() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "rows.csv", ROWS_CSV);
+    write(dir.path(), "rows.json", "[\"a\"]\n");
+    let runtime = DataRuntime::new();
+    let frontmatter = "objects: \"{name: string, port: number}[]\"\ntuples: \"tuple([string, string])[]\"\nlist: \"string[]\"";
+    let rows = loaded(dir.path(), &runtime, frontmatter, "load_data(\"rows.csv\", objects, {header: true})");
+    assert_eq!(rows, json!([{"name": "web", "port": 8080}]));
+    let rows = loaded(dir.path(), &runtime, frontmatter, "load_data(\"rows.csv\", tuples, {header: false})");
+    assert_eq!(rows, json!([["name", "port"], ["web", "8080"]]));
+    let rows = loaded(dir.path(), &runtime, frontmatter, "load_data(\"rows.json\", list, {header: null, delimiter: null})");
+    assert_eq!(rows, json!(["a"]));
+    let failure = failed(dir.path(), &runtime, frontmatter, "load_data(\"rows.csv\", objects, {header: false})");
+    assert_eq!(codes(&failure), [ROW_SHAPE_CONFLICT], "{}", failure.error);
 }
 
 /// A delimiter the reader cannot use is refused before the contract is
@@ -828,3 +976,4 @@ fn concurrent_identical_option_calls_read_once() {
     assert!(outputs.iter().all(|output| output == "[[{\"name\":\"web\",\"port\":8080}]]"), "{outputs:?}");
     assert_eq!(work(&runtime), (1, 1, 1), "{:?}", runtime.stats());
 }
+

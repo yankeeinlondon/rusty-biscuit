@@ -3,8 +3,9 @@
 //! document before a later action runs, YAML alias and multi-line flow
 //! locations, the Markdown-mode report, absent
 //! optional diagnostic fields, lifecycle reads, the `md graph` and
-//! `md validate refs` envelopes, and the file-reference fields of a missing
-//! data file.
+//! `md validate refs` envelopes, the file-reference fields of a missing
+//! data file, and the options argument (a headerless read and a refused
+//! option).
 //!
 //! Broader read-set and contract-mismatch conformance lives in
 //! `output_envelope.rs`; nothing here repeats it. Each test spawns `md` once
@@ -485,4 +486,56 @@ fn a_transcluded_childs_malformed_data_fails_the_reference_check() {
     assert_eq!(record["source"]["file"], child_path.to_string_lossy().as_ref(), "{record:#}");
     assert_eq!(record["data_location"], json!({ "file": read_entry(&data), "line": 2, "column": 1 }), "{record:#}");
     assert_eq!(envelope["read_set"], json!([read_entry(&data)]), "{envelope:#}");
+}
+
+// ── 9. The options argument ────────────────────────────────────────────────
+
+/// A headerless CSV read through `{header: false}` yields every record as a
+/// positional row, and the file is in the read set.
+#[test]
+fn compose_headerless_rows_json() {
+    let fixture = CliProcessFixture::named("load_data_headerless_rows");
+    let data = fixture.write_file("cwd/rows.csv", "web,8080\ndb,5432\n");
+    fixture.write_file("cwd/doc.md", "Ports: {{ load_data(\"rows.csv\", \"tuple([string, number])[]\", {header: false}) }}\n");
+
+    let envelope = json_run(&fixture, &["compose", "doc.md"], 0);
+    validate_strictly(include_str!("../../schemas/output/compose.yaml"), &envelope);
+    assert_eq!(envelope["outcome"], "success", "{envelope:#}");
+    assert_eq!(envelope["document"].as_str().map(str::trim_end), Some("Ports: [[\"web\",8080],[\"db\",5432]]"), "{envelope:#}");
+    assert_eq!(envelope["diagnostics"], json!([]), "{envelope:#}");
+    assert_eq!(envelope["read_set"], json!([read_entry(&data)]), "{envelope:#}");
+}
+
+/// A literal invalid delimiter is refused by the call check before anything
+/// runs: one `dm.data.invalid_options` record located at the `{` of the
+/// options argument (column 55), no `data_location`, and an empty read set.
+/// `docs/cli/data-contracts.md` ("Option errors") shows this envelope.
+#[test]
+fn compose_invalid_option_json_envelope() {
+    let fixture = CliProcessFixture::named("load_data_invalid_option");
+    fixture.write_file("cwd/rows.csv", "web,8080\ndb,5432\n");
+    fixture.write_file("cwd/doc.md", "{{ load_data(\"rows.csv\", \"tuple([string, number])[]\", {delimiter: \",,\"}) }}\n");
+
+    let envelope = json_run(&fixture, &["compose", "doc.md"], 1);
+    validate_strictly(include_str!("../../schemas/output/compose.yaml"), &envelope);
+    assert_failed(&envelope);
+    let record = only_record(&envelope);
+    assert_eq!(record["code"], "dm.data.invalid_options", "{record:#}");
+    assert_eq!(record["severity"], "error", "{record:#}");
+    assert_eq!(
+        record["message"],
+        "load_data(): option `delimiter` is invalid: must be one ASCII character other than a double quote, CR, or LF (write a tab as \"\\t\")",
+        "{record:#}"
+    );
+    assert_eq!((&record["source"]["line"], &record["source"]["column"]), (&json!(1), &json!(55)), "{record:#}");
+    assert_eq!(record["source"]["inserted"], false, "{record:#}");
+    assert_eq!(
+        record["expected_type"],
+        "{format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean} | null",
+        "{record:#}"
+    );
+    assert_eq!(record["actual_type"], "literal {\"delimiter\":\",,\"}", "{record:#}");
+    assert!(record.get("data_location").is_none(), "no data file was read: {record:#}");
+    assert_eq!(envelope["summary"], Value::Null, "{envelope:#}");
+    assert_eq!(envelope["read_set"], json!([]), "the call check ran nothing: {envelope:#}");
 }

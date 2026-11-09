@@ -310,6 +310,68 @@ fn header_false_with_object_contract_is_ranged_on_as() {
     );
 }
 
+/// Literal options are judged on the values the shared binder converts them
+/// to, with composition's codes and argument ranges.
+#[test]
+fn coerced_literal_options_are_ranged_like_composition() {
+    let workspace = LspWorkspace::new();
+    let cases = [
+        (r#"load_data("rows.csv", "{ name: string, port: number }[]", {header: "false"})"#, r#""{ name: string, port: number }[]""#, "dm.data.row_shape_conflict"),
+        (r#"load_data("rows.csv", "tuple([string, number])[]", {delimiter: 10})"#, "{delimiter: 10}", "dm.data.invalid_options"),
+        (r#"load_data("rows.json", "string[]", {header: "true"})"#, r#"{header: "true"}"#, "dm.data.invalid_options"),
+        (r#"load_data("rows.tsv", "tuple([string, number])[]", {delimiter: 5})"#, "{delimiter: 5}", "dm.data.invalid_options"),
+    ];
+    let mut text = String::from("# Doc\n\n");
+    for (call, _, _) in &cases {
+        text.push_str(&format!("{{{{ {call} }}}}\n\n"));
+    }
+    text.push_str("{{ load_data(\"rows.csv\", \"tuple([string, number])[]\", {header: \"true\"}) }}\n");
+    let session = Session::open(&workspace, &text);
+
+    for (call, argument, code) in cases {
+        let line_start = text.find(call).unwrap();
+        let start = line_start + call.find(argument).unwrap();
+        let error = session.error_on_line_of(start);
+        assert_eq!(error["code"], json!(code), "{call}: {error:#?}");
+        assert_eq!(error["range"], session.range(start..start + argument.len()), "{call}: {error:#?}");
+    }
+    let errors = session.diagnostics.iter().filter(|diagnostic| diagnostic["severity"] == json!(1)).count();
+    assert_eq!(errors, 4, "the valid coerced header adds no error: {:#?}", session.diagnostics);
+
+    session.shutdown();
+}
+
+/// A frontmatter contract is unknown to the passive check, which still
+/// ranges inapplicable literal options on the third argument and leaves the
+/// row rules, which need the contract, to execution.
+#[test]
+fn computed_contract_keeps_option_applicability_diagnostics() {
+    let workspace = LspWorkspace::new();
+    let cases = [
+        (r#"load_data("rows.json", contract, {header: true})"#, "{header: true}"),
+        (r#"load_data("rows.json", contract, {delimiter: ";"})"#, r#"{delimiter: ";"}"#),
+        (r#"load_data("rows.tsv", contract, {delimiter: ";"})"#, r#"{delimiter: ";"}"#),
+    ];
+    let mut text = String::from("---\ncontract: \"string[]\"\n---\n# Doc\n\n");
+    for (call, _) in &cases {
+        text.push_str(&format!("{{{{ {call} }}}}\n\n"));
+    }
+    text.push_str("{{ load_data(\"rows.csv\", contract, {header: false}) }}\n\n");
+    text.push_str("{{ load_data(\"rows.json\", contract, {header: null, delimiter: null}) }}\n");
+    let session = Session::open(&workspace, &text);
+
+    for (call, argument) in cases {
+        let start = text.find(call).unwrap() + call.find(argument).unwrap();
+        let error = session.error_on_line_of(start);
+        assert_eq!(error["code"], json!("dm.data.invalid_options"), "{call}: {error:#?}");
+        assert_eq!(error["range"], session.range(start..start + argument.len()), "{call}: {error:#?}");
+    }
+    let errors = session.diagnostics.iter().filter(|diagnostic| diagnostic["severity"] == json!(1)).count();
+    assert_eq!(errors, 3, "the applicable calls add no error: {:#?}", session.diagnostics);
+
+    session.shutdown();
+}
+
 #[test]
 fn computed_options_with_a_literal_json_file_produce_no_diagnostic() {
     let workspace = LspWorkspace::new();

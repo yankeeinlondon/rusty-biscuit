@@ -455,7 +455,11 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   literal mixing literal and computed members is
   `ArgumentType::PartialObject` (classified as `Typed`), so its literal
   members are still judged. `dm.data.invalid_options` is ranged at argument
-  2; options the binder refuses get no data problem. Every message comes
+  2; options the binder refuses get no data problem, and when it refuses the
+  file or `as`, only a step-2 contract problem may replace its error. An
+  unknown (computed) `as` skips the contract and row steps only: the
+  delimiter and applicability checks never depend on it, so never return
+  early on one unknown argument. Every message comes
   from `options::invalid_options_message`, so passive and execution text
   match. Only `tuple([…])[]` gives list rows: nested arrays (`string[][]`)
   are not in the grammar.

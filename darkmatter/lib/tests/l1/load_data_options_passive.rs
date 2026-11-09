@@ -243,6 +243,195 @@ mod option_values {
     }
 }
 
+/// Literal options are judged as the shared binder binds them, so an
+/// ordinary conversion to a field's declared type decides the verdict the
+/// same way it decides execution.
+mod coerced_values {
+    use super::*;
+
+    #[test]
+    fn string_header_false_with_csv_object_contract_is_rejected_at_as() {
+        let message =
+            assert_rejected_at("load_data('rows.csv', '{ name: string, port: number }[]', {header: 'false'})", ROW_SHAPE_CONFLICT_CODE, 1);
+        assert!(message.contains("name: string"), "{message}");
+        assert_rejected_at("load_data(f, '{ name: string }[]', {format: 'tsv', header: 'false'})", ROW_SHAPE_CONFLICT_CODE, 1);
+    }
+
+    #[test]
+    fn numeric_delimiter_on_csv_binds_to_text_and_is_invalid_options() {
+        let message = assert_invalid_option("load_data('rows.csv', 'tuple([string, number])[]', {delimiter: 10})", "delimiter");
+        assert!(message.contains("one ASCII character"), "{message}");
+        // A one-digit number binds to a usable delimiter.
+        assert_accepted("load_data('rows.csv', 'tuple([string, number])[]', {delimiter: 5})");
+    }
+
+    #[test]
+    fn string_header_on_json_is_invalid_options() {
+        let message = assert_invalid_option("load_data('rows.json', 'string[]', {header: 'true'})", "header");
+        assert!(message.contains("this call reads JSON"), "{message}");
+    }
+
+    #[test]
+    fn numeric_delimiter_on_tsv_is_invalid_options() {
+        let message = assert_invalid_option("load_data('rows.tsv', 'tuple([string, number])[]', {delimiter: 5})", "delimiter");
+        assert!(message.contains("format \"csv\""), "{message}");
+    }
+
+    #[test]
+    fn string_header_false_beside_a_computed_member_is_rejected_at_as() {
+        assert_rejected_at(
+            "load_data('rows.csv', '{ name: string, port: number }[]', {header: 'false', delimiter: sep})",
+            ROW_SHAPE_CONFLICT_CODE,
+            1,
+        );
+        assert_invalid_option("load_data('rows.json', 'string[]', {header: 'true', delimiter: d})", "header");
+        assert_invalid_option("load_data('rows.tsv', 'tuple([string])[]', {header: h, delimiter: 5})", "delimiter");
+        // A computed format still defers every format-dependent check.
+        assert_accepted("load_data('rows.csv', '{ name: string }[]', {header: 'false', format: x})");
+    }
+
+    #[test]
+    fn native_controls_are_still_rejected() {
+        assert_rejected_at("load_data('rows.csv', '{ name: string, port: number }[]', {header: false})", ROW_SHAPE_CONFLICT_CODE, 1);
+        assert_invalid_option("load_data('rows.json', 'string[]', {header: true})", "header");
+    }
+
+    #[test]
+    fn string_header_true_on_a_csv_tuple_contract_is_accepted() {
+        assert_accepted("load_data('rows.csv', 'tuple([string, number])[]', {header: 'true'})");
+        assert_accepted("load_data('rows.csv', '{ name: string }[]', {header: 'true', delimiter: d})");
+    }
+
+    /// `format` is an enum of names, which the binder keeps or refuses but
+    /// never converts, so the bound name is the authored one.
+    #[test]
+    fn literal_format_is_read_from_the_bound_options() {
+        assert_invalid_option("load_data('rows.csv', 'string[]', {format: 'json', header: 'true'})", "header");
+        assert_rejected_at("load_data(f, '{ name: string }[]', {format: 'csv', header: 'false', delimiter: d})", ROW_SHAPE_CONFLICT_CODE, 1);
+        assert_binding_error_at_options("load_data('rows.json', 'string[]', {format: 5, header: 'true'})");
+    }
+}
+
+/// A computed `as` leaves the contract unknown, but the option checks that
+/// never depend on it (delimiter validity, applicability to a provable
+/// format) still run; only the row rules wait for a known contract.
+mod computed_contract {
+    use super::*;
+
+    #[test]
+    fn header_on_an_extension_json_file_is_invalid_options() {
+        let message = assert_invalid_option("load_data('rows.json', contract, {header: true})", "header");
+        assert!(message.contains("this call reads JSON"), "{message}");
+    }
+
+    #[test]
+    fn delimiter_on_an_extension_json_file_is_invalid_options() {
+        assert_invalid_option("load_data('rows.json', contract, {delimiter: ';'})", "delimiter");
+    }
+
+    #[test]
+    fn non_tab_delimiter_on_an_extension_tsv_file_is_invalid_options() {
+        let message = assert_invalid_option("load_data('rows.tsv', contract, {delimiter: ';'})", "delimiter");
+        assert!(message.contains("format \"csv\""), "{message}");
+    }
+
+    #[test]
+    fn explicit_json_format_on_a_csv_file_with_header_is_invalid_options() {
+        assert_invalid_option("load_data('rows.csv', contract, {format: 'json', header: true})", "header");
+    }
+
+    /// Each explicit non-tabular format, aliases included, refuses `header`.
+    macro_rules! header_refused_for_format {
+        ($($test:ident => $format:literal),+ $(,)?) => {$(
+            #[test]
+            fn $test() {
+                let source = concat!("load_data(f, contract, {format: '", $format, "', header: true})");
+                assert_invalid_option(source, "header");
+            }
+        )+};
+    }
+
+    header_refused_for_format! {
+        header_with_explicit_yaml_is_invalid_options => "yaml",
+        header_with_explicit_yml_is_invalid_options => "yml",
+        header_with_explicit_json_is_invalid_options => "json",
+        header_with_explicit_jsonl_is_invalid_options => "jsonl",
+        header_with_explicit_ndjson_is_invalid_options => "ndjson",
+        header_with_explicit_toml_is_invalid_options => "toml",
+        header_with_explicit_json5_is_invalid_options => "json5",
+    }
+
+    #[test]
+    fn unusable_delimiter_is_still_invalid_options() {
+        assert_invalid_option("load_data('rows.csv', contract, {delimiter: ';;'})", "delimiter");
+        assert_invalid_option("load_data(f, contract, {delimiter: ';;'})", "delimiter");
+    }
+
+    /// A union of a literal contract with a computed or `null` arm is as
+    /// unknown as a bare variable.
+    #[test]
+    fn partly_literal_contracts_still_judge_applicability() {
+        assert_invalid_option("load_data('rows.json', x ? 'string[]' : c, {header: true})", "header");
+        assert_invalid_option("load_data('rows.json', x ? 'string[]' : null, {header: true})", "header");
+        assert_invalid_option("load_data('rows.json', x ? 'string' : c, {delimiter: ';'})", "delimiter");
+    }
+
+    #[test]
+    fn applicable_or_null_options_are_accepted() {
+        assert_accepted("load_data('rows.json', contract, {header: null, delimiter: null})");
+        assert_accepted("load_data('rows.csv', contract, {header: true})");
+        assert_accepted("load_data('rows.tsv', contract, {header: true})");
+        assert_accepted("load_data(f, contract, {format: 'csv', header: true})");
+        assert_accepted("load_data(f, contract, {format: 'tsv', header: true})");
+        assert_accepted("load_data('rows.tsv', contract, {delimiter: '\\t'})");
+    }
+
+    /// Whether headerless rows fit depends on the contract alone.
+    #[test]
+    fn headerless_csv_is_not_judged() {
+        assert_accepted("load_data('rows.csv', contract, {header: false})");
+        assert_accepted("load_data(f, contract, {format: 'tsv', header: false})");
+        assert_accepted("load_data('rows.csv', contract)");
+    }
+
+    #[test]
+    fn computed_options_or_format_still_defer() {
+        assert_accepted("load_data('rows.json', contract, opts)");
+        assert_accepted("load_data('rows.json', contract, {format: x, header: true})");
+        assert_accepted("load_data('rows.tsv', contract, {format: x, delimiter: ';'})");
+        // A computed file with no literal format proves none.
+        assert_accepted("load_data(f, contract, {header: true})");
+    }
+}
+
+/// A literal contract keeps its place ahead of applicability, and a contract
+/// the binder refuses keeps the binder's error, which execution meets first.
+mod contract_precedence {
+    use super::*;
+
+    #[test]
+    fn provably_invalid_literal_contract_outranks_applicability() {
+        assert_rejected_at("load_data('rows.json', 'string', {header: true})", NOT_A_CONTAINER_CODE, 1);
+        assert_rejected_at("load_data(f, 'number', {format: 'json', delimiter: ';'})", NOT_A_CONTAINER_CODE, 1);
+    }
+
+    #[test]
+    fn malformed_contract_keeps_the_binder_error() {
+        for source in [
+            "load_data('rows.json', '{{bad', {header: true})",
+            "load_data('rows.json', '{{bad', {delimiter: ';;'})",
+            "load_data('rows.tsv', '{{bad', {delimiter: ','})",
+        ] {
+            let check = load_check(source);
+            assert!(check.is_rejected(), "{source}: {check:#?}");
+            assert_eq!(check.data_problem, None, "{source}: the binder's error is the rejection");
+            let diagnostic = check.rejection_diagnostic().unwrap_or_else(|| panic!("{source}: no rejection"));
+            assert_eq!(diagnostic.code, INCOMPATIBLE_CALL_CODE, "{source}: {diagnostic:#?}");
+            assert_eq!(diagnostic.span, check.argument_spans[1], "{source}");
+        }
+    }
+}
+
 mod binder {
     use super::*;
 
@@ -422,3 +611,4 @@ mod typing {
         assert_eq!(min_of("min(r.port, 5)"), ArgumentCategory::Compatible);
     }
 }
+

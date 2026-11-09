@@ -309,6 +309,9 @@ impl FunctionRegistration {
     /// Binds a value argument of a callback registration without inventing a
     /// JSON value for its inline callback. The evaluator checks callback syntax
     /// and arity separately; current callback registrations have one overload.
+    /// The value binds against the first overload's parameter, so the passive
+    /// call check also uses it to bind one literal argument of a
+    /// single-overload function (`load_data`'s options) as execution would.
     ///
     /// ## Errors
     /// A type or arity error from the same binder used by eager calls.

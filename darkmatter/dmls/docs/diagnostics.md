@@ -534,8 +534,8 @@ data-specific errors. Each one is proven from literal arguments alone, and
 | Code | When | Ranged at |
 |------|------|-----------|
 | `dm.data.not_a_container`, `dm.data.this_import_rejected` | The literal `as` contract is not an object or list type, or names a `@this` import. | `as` |
-| `dm.data.row_shape_conflict` | The file is CSV or TSV and `as` cannot describe its rows (it mixes object and list rows, or its elements are not rows), or the options say `header: false`, which reads rows by position, and `as` asks for object rows. The format is known from a literal `format` option or a literal file extension. | `as` |
-| `dm.data.invalid_options` | A literal options value is wrong for the format: a `delimiter` that is not one ASCII character, is a double quote, CR, or LF, or is not a tab on TSV; or a `delimiter` or `header` on a non-tabular format. | the options argument |
+| `dm.data.row_shape_conflict` | The file is CSV or TSV and `as` cannot describe its rows (it mixes object and list rows, or its elements are not rows), or the options say `header: false` (or a value that converts to it, such as `"false"`), which reads rows by position, and `as` asks for object rows. The format is known from a literal `format` option or a literal file extension. | `as` |
+| `dm.data.invalid_options` | A literal options value, converted to its field's type (`{delimiter: 10}` is `"10"`), is wrong for the format: a `delimiter` that is not one ASCII character, is a double quote, CR, or LF, or is not a tab on TSV; or a `delimiter` or `header` on a non-tabular format. | the options argument |
 
 ```markdown
 {{ load_data("rows.csv", "{ name: string }[]", {header: false}) }}   row_shape_conflict at "{ name: string }[]"
@@ -549,7 +549,10 @@ format name the catalog does not declare (`{format: "CSV"}`) is an
 the check to composition: a variable or call as the options value, a computed
 `format` (which might change the format the extension implies), or a
 computed `file` with no literal `format`. So
-`{{ load_data(name, "string[]", opts) }}` shows nothing.
+`{{ load_data(name, "string[]", opts) }}` shows nothing. A computed `as`
+defers only the `row_shape_conflict` check, so
+`{{ load_data("rows.json", t, {header: true}) }}` still shows
+`invalid_options` at `{header: true}`.
 
 ## Ranging
 

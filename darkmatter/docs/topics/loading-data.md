@@ -318,9 +318,16 @@ Format names are exact and lowercase: `"CSV"`, `" csv"`, and `"text"` are
 errors. An alias is the same format, not a variant: `{format: "yml"}` reads
 exactly as `{format: "yaml"}` does, and a message about it names `YAML`.
 
-The options object is closed. A key other than these three, or a value of the
-wrong type (`{header: "false"}`, `{delimiter: 5}`), is refused like any other
-argument of the wrong type, before anything runs.
+The options object is closed. A key other than these three, or a value that
+cannot convert to its field's type (`{header: [1]}`, `{delimiter: {}}`), is
+refused like any other argument of the wrong type, before anything runs.
+
+Option values convert the way every function argument does, and every check
+judges the converted value, whether the call runs or is only checked:
+`{header: "false"}` is `{header: false}`, and `{delimiter: 5}` is
+`{delimiter: "5"}`. So `{delimiter: 10}` is the two-character delimiter
+`"10"` and is refused, and `{header: "false"}` with an object-row contract
+is the headerless conflict described below.
 
 ### Files without a header row
 
@@ -417,6 +424,12 @@ can prove from the literal parts: a literal `delimiter` is always checked; the
 format checks run only when no computed value can change the format. A
 computed value is checked when the call runs, with the same message. See
 [When loading fails](#when-loading-fails) for where each failure is located.
+
+A computed `as` does not stop these checks: `load_data("rows.json", t,
+{header: true})` is refused before anything runs, because `header` never
+applies to JSON whatever the contract is. Only the row rules for CSV and TSV
+(for example `header: false` with object rows) wait until the call runs and
+the contract is known.
 
 A `null` file still returns `null` without reading anything, and its computed
 options are not checked; a literal mistake in its options is still refused

@@ -1032,7 +1032,9 @@ pub fn check_call_with_definitions(
         };
         classify_call(registration, arguments, definitions, &mut check);
         if check.problem.is_none() && registration.name() == LOAD_DATA {
-            check.data_problem = load_data_problem(arguments, options_bind(&check));
+            let options_bind = !binder_refuses(&check, 2);
+            let leading_bind = !binder_refuses(&check, 0) && !binder_refuses(&check, 1);
+            check.data_problem = load_data_problem(registration, arguments, options_bind, leading_bind);
         }
         if !check.is_rejected() {
             check.always_false = registration.malformed_reference_parameter().filter(|index| {
@@ -1122,13 +1124,12 @@ fn shared_failing_argument(verdicts: &[Vec<ArgumentCheck>]) -> Option<usize> {
     }
 }
 
-/// Whether a `load_data` call's options argument (index 2), when supplied,
-/// is not already refused by the binder: the binder's error is what
-/// execution reports first, so no option check of its own runs then.
-fn options_bind(check: &CallCheck) -> bool {
-    let refused = |index: usize| index == 2;
-    !check.arguments.iter().any(|argument| refused(argument.index) && argument.category == ArgumentCategory::Incompatible)
-        && !check.binding_error.as_ref().is_some_and(|error| error.argument_errors().any(|failure| refused(failure.index)))
+/// Whether the binder already refuses argument `index` of a `load_data`
+/// call: the binder's error is what execution reports first, so the passive
+/// data checks defer to it.
+fn binder_refuses(check: &CallCheck, index: usize) -> bool {
+    check.arguments.iter().any(|argument| argument.index == index && argument.category == ArgumentCategory::Incompatible)
+        || check.binding_error.as_ref().is_some_and(|error| error.argument_errors().any(|failure| failure.index == index))
 }
 
 /// The static failure of a `load_data` call (two arguments, or three with
@@ -1155,17 +1156,34 @@ fn options_bind(check: &CallCheck) -> bool {
 /// `format`, defers steps 3 and 4 to execution. Step 1 never looks at the
 /// file, so a literal mistake is refused even beside a literal `null` file.
 /// Options the binder refuses (`options_bind` false) are its error alone.
+/// When it refuses the file or the contract (`leading_bind` false), only a
+/// step 2 contract problem, which names the refused contract more exactly,
+/// is reported; steps 1, 3, and 4 would outrank the binder's error, which
+/// execution meets first.
+///
+/// Every literal option is judged as the binder converts it to its declared
+/// field type, the value execution receives: `{header: "false"}` is a
+/// headerless read and `{delimiter: 10}` is the delimiter `"10"`. Literal
+/// members of a partly computed object are bound on their own; when they do
+/// not bind, nothing about the options is judged.
 ///
 /// A computed `as` the checker types as known string literals (a callback
 /// item over a literal list) is judged per literal, and is proven wrong only
-/// when every literal is; the first literal's problem is reported.
+/// when every literal is; the first literal's problem is reported. Any other
+/// computed `as` is unknown: it skips step 2 and the row rules of step 4,
+/// while steps 1 and 3, which never depend on the contract, still run.
 ///
 /// Malformed contract syntax is `None`: the binder's own type error already
 /// rejects it. So is an unknown shipped type, which execution reports.
-fn load_data_problem(arguments: &[ArgumentType], options_bind: bool) -> Option<DataProblem> {
+fn load_data_problem(
+    registration: &FunctionRegistration,
+    arguments: &[ArgumentType],
+    options_bind: bool,
+    leading_bind: bool,
+) -> Option<DataProblem> {
     let (file, contract, options) = match arguments {
         [file, contract] => (file, contract, OptionsView::Closed(None)),
-        [file, contract, options] if options_bind => (file, contract, OptionsView::of(options)),
+        [file, contract, options] if options_bind => (file, contract, OptionsView::of(registration, options)),
         [file, contract, _] => (file, contract, OptionsView::Unknown),
         _ => return None,
     };
@@ -1173,28 +1191,22 @@ fn load_data_problem(arguments: &[ArgumentType], options_bind: bool) -> Option<D
     let delimiter = match options.literal("delimiter") {
         Some(Value::String(text)) => match super::data::options::delimiter_byte(text) {
             Ok(byte) => Some(byte),
-            Err(error) => return Some(data_problem(&error)),
+            Err(error) if leading_bind => return Some(data_problem(&error)),
+            Err(_) => None,
         },
         _ => None,
     };
-    // 2. The contract, per literal carrier.
-    let carriers: Vec<&Value> = match contract {
-        ArgumentType::Literal(carrier) => vec![carrier],
-        ArgumentType::Typed(ScopeShape::Arms { arms, nullable: false }) => {
-            let carriers: Option<Vec<&Value>> = arms
-                .iter()
-                .map(|arm| arm.literal_value().filter(|value| !arm.is_array && value.is_string()))
-                .collect();
-            carriers?
-        }
-        _ => return None,
-    };
-    let verdicts: Vec<ContractVerdict> = carriers.into_iter().map(judge_literal_contract).collect();
-    let first = verdicts.first()?;
-    if let ContractVerdict::Problem(problem) = first
+    // 2. The contract, per literal carrier; `None` when it is not known.
+    let verdicts: Option<Vec<ContractVerdict>> =
+        literal_carriers(contract).map(|carriers| carriers.into_iter().map(judge_literal_contract).collect());
+    if let Some(verdicts) = &verdicts
+        && let Some(ContractVerdict::Problem(problem)) = verdicts.first()
         && verdicts.iter().all(|verdict| matches!(verdict, ContractVerdict::Problem(_)))
     {
         return Some(problem.clone());
+    }
+    if !leading_bind {
+        return None;
     }
     let format = provable_format(file, &options)?;
     // 3. Applicability of literal options to the provable format.
@@ -1210,7 +1222,7 @@ fn load_data_problem(arguments: &[ArgumentType], options_bind: bool) -> Option<D
     if !matches!(format, biscuit_file::DataFormat::Csv | biscuit_file::DataFormat::Tsv) {
         return None;
     }
-    let mut problems = verdicts.into_iter().map(|verdict| match verdict {
+    let mut problems = verdicts?.into_iter().map(|verdict| match verdict {
         ContractVerdict::Problem(problem) => Some(problem),
         ContractVerdict::Rows { written, property, definitions } => row_problem(&written, &property, &definitions, header),
         ContractVerdict::Open => None,
@@ -1219,31 +1231,60 @@ fn load_data_problem(arguments: &[ArgumentType], options_bind: bool) -> Option<D
     problems.all(|problem| problem.is_some()).then_some(first)
 }
 
-/// What the passive check can read of a `load_data` options argument.
+/// The literal `as` values a `load_data` contract argument can take: the
+/// literal itself, or every arm of a non-null union of string literals.
+/// `None` when any value is computed, so the contract is unknown.
+fn literal_carriers(contract: &ArgumentType) -> Option<Vec<&Value>> {
+    let carriers: Vec<&Value> = match contract {
+        ArgumentType::Literal(carrier) => vec![carrier],
+        ArgumentType::Typed(ScopeShape::Arms { arms, nullable: false }) => arms
+            .iter()
+            .map(|arm| arm.literal_value().filter(|value| !arm.is_array && value.is_string()))
+            .collect::<Option<_>>()?,
+        _ => return None,
+    };
+    (!carriers.is_empty()).then_some(carriers)
+}
+
+/// What the passive check can read of a `load_data` options argument: its
+/// literal members as the shared binder binds them (so `{header: "false"}`
+/// is `false` and `{delimiter: 10}` is `"10"`, exactly as execution receives
+/// them), `null` members dropped.
 enum OptionsView<'a> {
     /// Nothing computed: omitted or `null` (`None`), or a literal object.
-    Closed(Option<&'a serde_json::Map<String, Value>>),
+    Closed(Option<serde_json::Map<String, Value>>),
     /// An object literal with some computed members.
-    Partial { literals: &'a serde_json::Map<String, Value>, computed: &'a [String] },
-    /// A computed value, or a literal the binder judges.
+    Partial { bound: serde_json::Map<String, Value>, computed: &'a [String] },
+    /// A computed value, a literal the binder judges, or literal members
+    /// that do not bind on their own (execution's binder error comes first).
     Unknown,
 }
 
 impl<'a> OptionsView<'a> {
-    fn of(argument: &'a ArgumentType) -> Self {
-        match argument {
-            ArgumentType::Literal(Value::Null) => Self::Closed(None),
-            ArgumentType::Literal(Value::Object(members)) => Self::Closed(Some(members)),
-            ArgumentType::PartialObject { literals, computed, .. } => Self::Partial { literals, computed },
-            _ => Self::Unknown,
+    fn of(registration: &FunctionRegistration, argument: &'a ArgumentType) -> Self {
+        let (literals, computed) = match argument {
+            ArgumentType::Literal(Value::Null) => return Self::Closed(None),
+            ArgumentType::Literal(Value::Object(members)) => (members, None),
+            ArgumentType::PartialObject { literals, computed, .. } => (literals, Some(computed.as_slice())),
+            _ => return Self::Unknown,
+        };
+        // Every option field is optional, so the literal members bind as an
+        // object of their own exactly as they do beside the computed ones.
+        let present = literals.iter().filter(|(_, value)| !value.is_null()).map(|(key, value)| (key.clone(), value.clone())).collect();
+        let Ok(Value::Object(bound)) = registration.bind_callback_value(2, Value::Object(present)) else {
+            return Self::Unknown;
+        };
+        match computed {
+            None => Self::Closed(Some(bound)),
+            Some(computed) => Self::Partial { bound, computed },
         }
     }
 
-    /// The literal, non-null value of option `key`.
-    fn literal(&self, key: &str) -> Option<&'a Value> {
+    /// The bound, non-null value of literal option `key`.
+    fn literal(&self, key: &str) -> Option<&Value> {
         let members = match self {
-            Self::Closed(members) => (*members)?,
-            Self::Partial { literals, .. } => literals,
+            Self::Closed(members) => members.as_ref()?,
+            Self::Partial { bound, .. } => bound,
             Self::Unknown => return None,
         };
         members.get(key).filter(|value| !value.is_null())

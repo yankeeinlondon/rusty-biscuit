@@ -614,6 +614,13 @@ on whether the options are written in the call:
   frontmatter, are judged when the call runs. The record is located at the
   call expression, with `null` types.
 
+Literal options are judged even when `as` is computed, because whether an
+option applies to a format never depends on the contract:
+`load_data("rows.json", t, {header: true})` is refused before anything runs,
+whatever `t` holds. Only the CSV and TSV row rules wait for a contract the
+call check can read. When the call check refuses a literal `as` itself, that
+contract error is the one reported, ahead of any option error.
+
 A key that is not an option, a value of the wrong type, or a format name that
 is not in the list is not `dm.data.invalid_options`: the argument does not fit
 the parameter at all, so it is `dm.expression.incompatible_call` at the
