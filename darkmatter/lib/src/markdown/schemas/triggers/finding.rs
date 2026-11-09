@@ -218,7 +218,7 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
         // A slot reached through an import names the file that defined it.
         SchemaError::UnresolvedSlots(unresolved) => unresolved.slots.iter().find_map(|slot| slot.origin.as_ref())?,
         // A refused slot value names the file the slot was written in.
-        SchemaError::SlotResult { slot, .. } => slot.origin.as_ref()?,
+        SchemaError::SlotResult { slot, .. } | SchemaError::SlotReadRefused { slot, .. } => slot.origin.as_ref()?,
         // A failed resolution names the file of the first slot it reports.
         SchemaError::SlotResolution(failure) => {
             let slot = match failure.error.as_ref() {

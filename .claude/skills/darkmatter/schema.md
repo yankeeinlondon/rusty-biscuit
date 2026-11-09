@@ -375,7 +375,17 @@ existing resolution, validation, and trigger paths fail closed with that
 typed error rather than seeing a partial list. A trigger match condition
 never admits a slot (`triggers::grammar::is_match_safe_constraint` excludes
 them). `triggers/finding.rs::related_path` names the file of the template's
-first slot written in a file (`Slot::origin`), and a refused slot value (`SchemaError::SlotResult`) its slot's file.
+first slot written in a file (`Slot::origin`), and a refused slot value (`SchemaError::SlotResult`) or refused read (`SchemaError::SlotReadRefused`) its slot's file.
+A **template type** (a slot as a property's whole type, `TypeExpr::Slot`)
+also parses passively, and resolves in the library; until the host grants
+its reads, `DarkmatterSlotHost::template_reads` refuses every read a returned
+definition causes with `SLOT_APPROVAL_REQUIRED_CODE` (an import-free returned
+definition resolves). Darkmatter's
+expression-typing readers (`compose/expression/scope/*`, `call_binding`,
+`call_check`, `data/contract.rs`, `context/catalog.rs`) treat it as untyped
+(diagnostic suppression, never the schema type `unknown`); completion,
+detection, trigger matching, and DMLS hover claim nothing for it ("type
+pending").
 The library's resolution hook is `simplified_schema::slots::SlotHost`
 (`PendingSchema::resolve`, `SimplifiedSchema::resolve_slots`). Darkmatter's
 host is `schemas::slots::DarkmatterSlotHost` (`schemas/slots/`):

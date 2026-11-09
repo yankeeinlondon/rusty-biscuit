@@ -132,12 +132,18 @@ document's `$schema` and the slot needs a grant again. The same holds when a
 - A payload left with no slot after the replacement is an ordinary schema:
   the editor does not treat it as pending.
 
-### Not yet supported
+### Template types
 
-A **template type**, a slot that supplies a property's whole type definition
-(`status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`), is **planned**, not
-built, and is not accepted today. See
-[Template Types (Planned)](../../../../simplified-schema/docs/topics/language/slots.md#template-types-planned).
+A **template type** is a slot that supplies a property's whole type
+definition (`status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`).
+The library's rules for what the value must be and how it merges with the
+suffix are in
+[Template Types](../../../../simplified-schema/docs/topics/language/slots.md#template-types).
+
+> **Planned:** Darkmatter does not yet grant the reads a returned
+> definition causes. A returned definition that imports a type or names an
+> example file fails with `dm.schema.slot_approval_required`; one that names
+> no file resolves.
 
 ## What a slot may contain
 

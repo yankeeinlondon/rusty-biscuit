@@ -891,7 +891,7 @@ fn slot_resolution_records(
             })
             .collect(),
         SlotResolutionError::Schema(schema) => match schema.as_ref() {
-            simplified_schema::SchemaError::SlotResult { slot, kind } => {
+            simplified_schema::SchemaError::SlotResult { slot, kind, .. } => {
                 vec![(Some(slot.as_ref().clone()), at(slot, &slot.span, codes::slot_result_code(kind), kind.to_string()))]
             }
             other => vec![(None, unlocated(codes::SLOT_FAILED_CODE, Severity::Error, other.to_string()))],

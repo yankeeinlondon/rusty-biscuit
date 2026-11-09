@@ -350,7 +350,9 @@ fn unresolved_as_unknown(def: &mut PropertyDef) {
 
 fn unresolved_atom_as_unknown(atom: &mut PropertyAtom) {
     match &mut atom.ty {
-        TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {
+        // A pending template type is untyped here, like an unresolved
+        // reference: the check proves nothing against an unknown type.
+        TypeExpr::Imported { .. } | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {
             atom.ty = TypeExpr::Primitive(SimplifiedType::Unknown);
             atom.constraints.retain(|constraint| matches!(constraint, Constraint::Required));
         }

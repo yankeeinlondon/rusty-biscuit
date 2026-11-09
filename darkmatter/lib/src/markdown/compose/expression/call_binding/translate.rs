@@ -671,6 +671,9 @@ impl<'r> Translator<'r> {
             }
             TypeExpr::Imported { name, reference } => self.reference(path, atom, name, reference)?,
             TypeExpr::Ref(key) => self.definition_reference(path, key, value_constraints)?,
+            // A pending template type binds untyped: no diagnostic is raised
+            // against a type that is not known yet.
+            TypeExpr::Slot(_) => Shape::Any,
         })
     }
 

@@ -430,6 +430,10 @@ pub(crate) fn load_frontmatter_yaml(yaml: &str) -> Option<FrontmatterMap> {
 ///    substitutions and `{{ }}` interpolation expressions with safe
 ///    placeholders so YAML-significant characters inside them (e.g., nested
 ///    double quotes in `"$(dirname "{{path}}")"`) don't break the YAML parser.
+///
+/// When every strategy fails, the direct parse's error is returned, or the
+/// "quote the slot" hint when an unquoted `{{ … }}` value is what broke both
+/// parses ([`quote_the_slot`]).
 fn parse_yaml_with_fallbacks(yaml: &str) -> Result<ParsedYaml, YamlParseError> {
     // Strategy 1: direct parse
     match parse_yaml_map_rejecting_duplicates(yaml) {
@@ -472,9 +476,66 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> Result<ParsedYaml, YamlParseError> {
                     Ok(parsed)
                 }
                 Err(error) if is_final_yaml_error(&error) => Err(error),
-                Err(_) => Err(original_err),
+                Err(error) => Err(quote_the_slot(target, original_err, &error)),
             }
         }
+    }
+}
+
+/// `original`, the direct parse's error, replaced by the "quote the slot"
+/// hint at the slot when an unquoted `{{ … }}` value in `yaml` is what broke
+/// it ([`simplified_schema::slots::decode_error_slot`]) and `protected`, the
+/// expression-protected parse's error, is on that value's line or the next.
+///
+/// An unquoted slot alone never gets here: the protected parse reads it as
+/// an ordinary scalar. This is the slot whose remaining text still breaks
+/// YAML (`status: {{ x }} -> note: y`), which quoting the whole value fixes.
+/// Requiring the protected error there keeps a slot the protected parse
+/// rescued from being blamed for an error further down. A multi-line
+/// expression shifts the protected parse's lines, so a slot after one keeps
+/// the original error.
+fn quote_the_slot(yaml: &str, original: YamlParseError, protected: &YamlParseError) -> YamlParseError {
+    let (Some(original_at), Some(protected_at)) = (original.location(), protected.location()) else {
+        return original;
+    };
+    let Some(slot) = simplified_schema::slots::decode_error_slot(yaml, original_at.line()) else {
+        return original;
+    };
+    let line_start = yaml[..slot.start].rfind('\n').map_or(0, |newline| newline + 1);
+    let line = yaml[..line_start].matches('\n').count() + 1;
+    if protected_at.line() != line && protected_at.line() != line + 1 {
+        return original;
+    }
+    let column = yaml[line_start..slot.start].chars().count() + 1;
+    located_yaml_error(simplified_schema::slots::quote_the_slot_message(yaml, &slot), line, column)
+}
+
+/// A YAML error reading `message` at 1-based `line` and `column`.
+///
+/// `serde_yaml_ng` has no public constructor for a positioned error; it
+/// positions an error a visitor raises at the node being read, so this reads
+/// a stand-in document whose only node sits at that line and column. Its
+/// byte `index` is the stand-in's, not the frontmatter's.
+fn located_yaml_error(message: String, line: usize, column: usize) -> YamlParseError {
+    struct Refuse(String);
+
+    impl serde::de::Visitor<'_> for Refuse {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(&self.0)
+        }
+
+        fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<(), E> {
+            Err(E::custom(self.0))
+        }
+    }
+
+    let stand_in = format!("{}{}x", "\n".repeat(line.saturating_sub(1)), " ".repeat(column.saturating_sub(1)));
+    let deserializer = serde_yaml_ng::Deserializer::from_str(&stand_in);
+    match serde::Deserializer::deserialize_any(deserializer, Refuse(message.clone())) {
+        Err(error) => error,
+        Ok(()) => <YamlParseError as serde::de::Error>::custom(message),
     }
 }
 
@@ -1505,5 +1566,73 @@ b: "$(echo b)""#;
             Some("\u{1F5A5}\u{FE0F} Build succeeded".to_string())
         );
         assert!(remaining.starts_with("# Body"));
+    }
+
+    /// The YAML error `parse_frontmatter` reports for `content`.
+    fn frontmatter_yaml_error(content: &str) -> YamlParseError {
+        match parse_frontmatter(content) {
+            Err(MarkdownError::FrontmatterParse { source, .. }) => source,
+            other => panic!("expected a frontmatter parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unquoted_schema_slot_that_breaks_yaml_reports_quote_the_slot() {
+        let content = concat!(
+            "---\n",
+            "title: Release\n",
+            "$schema:\n",
+            "  status: {{ load_data('./t.yaml') }} -> note: the status\n",
+            "---\n",
+            "body\n",
+        );
+
+        let error = frontmatter_yaml_error(content);
+
+        assert!(
+            error.to_string().starts_with("quote the slot: write `status: \"{{ … }}\"`"),
+            "{error}"
+        );
+        let location = error.location().expect("located at the slot");
+        assert_eq!((location.line(), location.column()), (3, 11));
+    }
+
+    #[test]
+    fn an_unquoted_schema_slot_and_interpolation_still_parse() {
+        let content = concat!(
+            "---\n",
+            "title: {{ name }}\n",
+            "$schema:\n",
+            "  status: {{ x }}(required)\n",
+            "  tags: {{ y }}[]\n",
+            "  kind: {{ z }}\n",
+            "---\n",
+        );
+
+        let (frontmatter, _) = parse_frontmatter(content).unwrap();
+
+        assert_eq!(frontmatter.get::<String>("title").unwrap().as_deref(), Some("{{ name }}"));
+        assert_eq!(
+            frontmatter.get::<serde_json::Value>("$schema").unwrap(),
+            Some(serde_json::json!({
+                "status": "{{ x }}(required)",
+                "tags": "{{ y }}[]",
+                "kind": "{{ z }}",
+            }))
+        );
+    }
+
+    #[test]
+    fn an_unrelated_frontmatter_error_keeps_its_message() {
+        for content in [
+            "---\ntitle: {{ name }}\nlist: [a, b\n---\n",
+            "---\ntitle: {{ name }}\nbad: : value\n---\n",
+            "---\nbad: : value\n---\n",
+            // The protected parse reads the slot; the error is the list's.
+            "---\n$schema:\n  status: {{ x }}(required)\nlist: [a, b\n---\n",
+        ] {
+            let error = frontmatter_yaml_error(content);
+            assert!(!error.to_string().contains("quote the slot"), "{content:?}: {error}");
+        }
     }
 }

@@ -300,8 +300,10 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
             items.len() >= tuple.required_len()
                 && (tuple.spread.is_some() || items.len() <= tuple.elements.len())
         }),
-        // A function describes a callable; no frontmatter value is one.
-        TypeExpr::Function(_) => false,
+        // A function describes a callable; no frontmatter value is one. A
+        // template type is refused in a match condition; a pending one
+        // proves no match.
+        TypeExpr::Function(_) | TypeExpr::Slot(_) => false,
         TypeExpr::InlineObject(shape) => {
             let Some(map) = value.as_object() else {
                 return false;

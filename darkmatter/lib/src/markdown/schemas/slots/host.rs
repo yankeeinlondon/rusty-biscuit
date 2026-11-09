@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 use simplified_schema::expression::parse_spanned;
 use simplified_schema::simplified::Slot;
-use simplified_schema::slots::{SlotAdmissionError, SlotFailure, SlotHost, SlotRequest};
+use simplified_schema::slots::{
+    SchemaRead, SchemaReadOutcome, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, TemplateReads,
+};
 use simplified_schema::span::SourceSpan;
 
 use super::admission::slot_class_report;
@@ -87,6 +89,10 @@ impl SlotHost for DarkmatterSlotHost {
         }
     }
 
+    fn template_reads(&self) -> std::rc::Rc<dyn TemplateReads> {
+        std::rc::Rc::new(UngrantedTemplateReads)
+    }
+
     fn resolve(&self, request: &SlotRequest<'_>) -> Result<Value, SlotFailure> {
         let slot = request.slot;
         let parsed = parse_spanned(&slot.expression)
@@ -118,6 +124,23 @@ impl SlotHost for DarkmatterSlotHost {
             }
         }
     }
+}
+
+/// Refuses every read a template type's returned definition asks for: no
+/// grant reaches those reads yet, so a returned definition that imports or
+/// references a file needs approval, and one that names none resolves.
+struct UngrantedTemplateReads;
+
+impl TemplateReads for UngrantedTemplateReads {
+    fn admit(&self, _: &Slot, read: &SchemaRead<'_>) -> Result<(), SlotAdmissionError> {
+        Err(SlotAdmissionError {
+            code: Some(SLOT_APPROVAL_REQUIRED_CODE),
+            message: format!("reading `{}` for a template type needs approval", read.path.display()),
+            span: None,
+        })
+    }
+
+    fn observe(&self, _: &Slot, _: &SchemaReadOutcome<'_>) {}
 }
 
 /// The code a failed slot reports: a refused read's slot code, a

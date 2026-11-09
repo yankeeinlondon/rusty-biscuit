@@ -1945,6 +1945,8 @@ pub(crate) fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) ->
             TypeExpr::Tuple(_) => "tuple".to_string(),
             TypeExpr::Function(_) => "function".to_string(),
             TypeExpr::Ref(key) => key.name.clone(),
+            // A template type's definition is not known until it resolves.
+            TypeExpr::Slot(_) => "type pending".to_string(),
         };
         if atom.is_array && !matches!(atom.ty, TypeExpr::Imported { .. }) {
             name.push_str("[]");
@@ -2183,6 +2185,7 @@ fn alternative_line(alternative: &PropertyAtom, definitions: &dyn DefinitionLook
         TypeExpr::Tuple(_) => "- **tuple".to_string(),
         TypeExpr::Function(_) => "- **function".to_string(),
         TypeExpr::Ref(key) => format!("- **{}", key.name),
+        TypeExpr::Slot(_) => "- **type pending".to_string(),
     };
     if alternative.is_array && !matches!(alternative.ty, TypeExpr::Imported { .. }) {
         line.push_str("[]");
@@ -2274,6 +2277,8 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
             format!("Type: **{}{}**", ty.as_keyword(), suffix)
         }
         TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
+        // A template type claims nothing about its shape until it resolves.
+        TypeExpr::Slot(_) => "Type: **type pending**".to_string(),
         TypeExpr::Tuple(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
             let spelled = simplified_schema::simplified::serialize_property_atom(&PropertyAtom {
                 description: None,
@@ -2994,7 +2999,8 @@ fn inline_object_shape<'a>(
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => None,
+        | TypeExpr::Ref(_)
+        | TypeExpr::Slot(_) => None,
     })
 }
 

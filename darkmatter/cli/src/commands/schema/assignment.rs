@@ -211,10 +211,13 @@ fn atom_prefers_string<'a>(
     }
     let primitive = match &atom.ty {
         TypeExpr::Primitive(p) => *p,
+        // An unresolved template type prefers nothing: the raw assignment
+        // text is kept for the YAML parse until the type is known.
         TypeExpr::InlineObject(_)
         | TypeExpr::Imported { .. }
         | TypeExpr::Tuple(_)
-        | TypeExpr::Function(_) => return false,
+        | TypeExpr::Function(_)
+        | TypeExpr::Slot(_) => return false,
         // A postfixed union reference (`U(required)`) prefers a string when
         // any alternative does, as a property-level union does.
         TypeExpr::Union(arms) => {

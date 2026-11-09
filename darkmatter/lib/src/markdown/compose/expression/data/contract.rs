@@ -298,7 +298,7 @@ fn local_reference(def: &PropertyDef) -> Option<&str> {
 fn local_reference_in(atom: &PropertyAtom) -> Option<&str> {
     match &atom.ty {
         TypeExpr::Imported { name, .. } if atom.ty.is_local_reference() => Some(name),
-        TypeExpr::Imported { .. } | TypeExpr::Primitive(_) | TypeExpr::Ref(_) => None,
+        TypeExpr::Imported { .. } | TypeExpr::Primitive(_) | TypeExpr::Ref(_) | TypeExpr::Slot(_) => None,
         TypeExpr::InlineObject(shape) => shape
             .properties
             .values()
@@ -619,7 +619,7 @@ fn collect_imports<'d>(def: &'d PropertyDef, found: &mut Vec<&'d str>) {
 fn collect_imports_in<'d>(atom: &'d PropertyAtom, found: &mut Vec<&'d str>) {
     match &atom.ty {
         TypeExpr::Imported { reference, .. } => found.push(reference),
-        TypeExpr::Primitive(_) | TypeExpr::Ref(_) => {}
+        TypeExpr::Primitive(_) | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {}
         TypeExpr::InlineObject(shape) => {
             for def in shape.properties.values().chain(shape.pattern_keys.iter().map(|pattern| &pattern.def)) {
                 collect_imports(def, found);

@@ -592,10 +592,13 @@ down validation: it may not use lookaround or a backreference, and it may be
 at most 4096 bytes (see
 [The pattern cap](../../../../simplified-schema/docs/topics/language/slots.md#the-pattern-cap)).
 
-> **Planned:** a **template type**, a slot that supplies a property's whole
-> type definition (`status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`),
-> is not accepted yet;
-> see [Template Types (Planned)](../../../../simplified-schema/docs/topics/language/slots.md#template-types-planned).
+A **template type** is a slot that supplies a property's whole type
+definition (`status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`);
+see [Template Types](../../../../simplified-schema/docs/topics/language/slots.md#template-types).
+
+> **Planned:** Darkmatter does not yet grant the reads a returned definition
+> causes, so a returned definition that imports a type fails with
+> `dm.schema.slot_approval_required`.
 
 The full grammar and every result rule are in
 [Slots: Values Supplied by an Expression](../../../../simplified-schema/docs/topics/language/slots.md).

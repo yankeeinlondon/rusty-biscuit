@@ -389,7 +389,8 @@ fn collect_atom_targets(atom: &PropertyAtom, targets: &mut BTreeSet<String>) {
         }
         // A function signature is description-only; a document schema that
         // reaches one fails to load before its references matter.
-        TypeExpr::Primitive(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {}
+        // A template type names no file until it resolves.
+        TypeExpr::Primitive(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {}
     }
 }
 

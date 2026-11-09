@@ -288,12 +288,14 @@ fn is_completable(ty: &TypeExpr) -> bool {
         // completable here. A union never reaches here: callers read its
         // arms through `resolved_alternatives`, which also opens a reference,
         // so a `Ref` here is one whose definition is missing.
+        // A pending template type offers no values until it resolves.
         TypeExpr::InlineObject(_)
         | TypeExpr::Imported { .. }
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => false,
+        | TypeExpr::Ref(_)
+        | TypeExpr::Slot(_) => false,
     }
 }
 
@@ -316,7 +318,8 @@ fn kind_for_atom(atom: &PropertyAtom) -> Option<CompletionKind> {
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => return None,
+        | TypeExpr::Ref(_)
+        | TypeExpr::Slot(_) => return None,
     };
     match ty {
         SimplifiedType::File => {
