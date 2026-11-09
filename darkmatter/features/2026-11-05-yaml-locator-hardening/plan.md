@@ -1,7 +1,7 @@
 ---
 total_phases: 3
 created: 2026-11-08
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: true
 packages:
@@ -18,6 +18,57 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/tests/l1/load_data_diagnostics.rs
+- darkmatter/lib/tests/l1/load_data_execution.rs
+- darkmatter/lib/tests/l1/yaml_document_loading.rs
+- darkmatter/lib/tests/position_fixtures/mod.rs
+- darkmatter/cli/tests/l1/load_data.rs
+- darkmatter/cli/tests/l1/diagnostic_positions.rs
+- darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/expressions.md
+source_files_during_phase_3:
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/marks.rs
+docs_updated_during_phase_3:
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/topics/loading-data.md
+- simplified-schema/docs/topics/diagnostics.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/schema.md
+source_code:
+- simplified-schema/lib/src/mapping_orders.rs
+- simplified-schema/lib/src/positions.rs
+- simplified-schema/lib/tests/l1/alias_positions.rs
+- simplified-schema/lib/tests/l1/main.rs
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/schemas/tests/positions.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/marks.rs
+- darkmatter/lib/tests/l1/load_data_diagnostics.rs
+- darkmatter/lib/tests/l1/load_data_execution.rs
+- darkmatter/lib/tests/l1/yaml_document_loading.rs
+- darkmatter/lib/tests/position_fixtures/mod.rs
+- darkmatter/cli/tests/l1/load_data.rs
+- darkmatter/cli/tests/l1/diagnostic_positions.rs
+- darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+documentation:
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/topics/loading-data.md
+- simplified-schema/docs/topics/diagnostics.md
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/schema.md
+completed_phase: 3
+implemented: true
 ---
 
 # YAML Locator Hardening: Implementation Plan
@@ -342,7 +393,7 @@ show the improved locations. Prerequisite: Phase 1 complete.
 
 ### Wave 3 (one agent)
 
-- [ ] **Remove flow suppression**
+- [x] **Remove flow suppression**
     - Apply Rules 13, 14 in `locate.rs`; rewrite its two tests per Rule 18:
       the first becomes `yaml_orders_by_authored_index_and_places_an_alias`
       (text `base: &b {x: 1}\nzeta: *b\nalpha: 2\n`: `zeta` position
@@ -355,7 +406,7 @@ show the improved locations. Prerequisite: Phase 1 complete.
 
 ### Wave 4 (parallel; five agents, five files)
 
-- [ ] **load_data library tests**
+- [x] **load_data library tests**
     - File `darkmatter/lib/tests/l1/load_data_diagnostics.rs`; use existing
       helpers `load`, `places`, `place`, `only`, `assert_all_mismatches`.
     - Spec example 1 and spec example 2 with the contracts from the spec
@@ -399,7 +450,7 @@ show the improved locations. Prerequisite: Phase 1 complete.
     - Replace the `pointer_only!` entries per Rule 18; add the Rule 19
       fallback test.
     - Malformed-input behavior stays in its own existing tests.
-- [ ] **load_data CLI wiring tests**
+- [x] **load_data CLI wiring tests**
     - File `darkmatter/cli/tests/l1/load_data.rs`, using `CliProcessFixture`,
       `json_run`, `only_record`, `read_entry`, `validate_strictly`.
     - Control: `base: &b {port: 1}\none: *b\n` against
@@ -416,11 +467,11 @@ show the improved locations. Prerequisite: Phase 1 complete.
       single failing value, `record["source"]` is equal.
     - Multi-line flow: `items: [\n  1,\n  x\n]\n` against
       `{ items: number[] }` reports `/items/1` at line 3, column 3.
-- [ ] **Frontmatter shared cases**
+- [x] **Frontmatter shared cases**
     - Add the two `PositionCase`s of Rule 17 to
       `darkmatter/lib/tests/position_fixtures/mod.rs` and list them in `CASES`.
       This covers lib, CLI, and DMLS frontmatter parity with LF and CRLF.
-- [ ] **Whole-file YAML validation test**
+- [x] **Whole-file YAML validation test**
     - File `darkmatter/lib/tests/l1/yaml_document_loading.rs`: a document with
       inline `$schema` (`name: string(required)`,
       `base: "{ port: number }"`, `one: "{ port: number }"`), data
@@ -429,7 +480,7 @@ show the improved locations. Prerequisite: Phase 1 complete.
       `problem.line` equal to the authored lines, and `&text[byte_range]` equal
       to `x` and `*b`. Add a control row (`port: 8080`-style valid) that
       validates.
-- [ ] **DMLS alias range regression**
+- [x] **DMLS alias range regression**
     - File `darkmatter/dmls/tests/l1/yaml_document_editor.rs`, using `Probe`,
       `ROSTER_DEFINITION`, `schema_diagnostics`, `start`, `position_of`,
       `only`/`codes`: text
@@ -445,9 +496,9 @@ show the improved locations. Prerequisite: Phase 1 complete.
 
 ### Validation checkpoint 2
 
-- [ ] In `darkmatter/`: `just test` and `just lint` pass. All new tests are
+- [x] In `darkmatter/`: `just test` and `just lint` pass. All new tests are
       L1, so `just test-l2` is not run.
-- [ ] Grep `darkmatter/` and `.claude/skills/` for `has_multi_line_flow_collection`
+- [x] Grep `darkmatter/` and `.claude/skills/` for `has_multi_line_flow_collection`
       and `pointers only` / `pointer-only`: remaining hits are only in
       historical specs under `features/` and `fixes/`.
 
@@ -502,17 +553,17 @@ Prerequisite: Phases 1 and 2.
 
 ### Wave 5 (parallel; four agents, four files)
 
-- [ ] **Data contracts doc**: `darkmatter/docs/cli/data-contracts.md` per Rule 21.
-- [ ] **Loading-data doc**: `darkmatter/docs/topics/loading-data.md` per Rule 21.
-- [ ] **Diagnostics doc and skill**:
+- [x] **Data contracts doc**: `darkmatter/docs/cli/data-contracts.md` per Rule 21.
+- [x] **Loading-data doc**: `darkmatter/docs/topics/loading-data.md` per Rule 21.
+- [x] **Diagnostics doc and skill**:
       `simplified-schema/docs/topics/diagnostics.md` and
       `.claude/skills/darkmatter/schema.md` per Rule 21.
-- [ ] **Implementation log**: write it per Rule 22 (leave the verification
+- [x] **Implementation log**: write it per Rule 22 (leave the verification
       section for Wave 6 to complete).
 
 ### Wave 6 (sequential)
 
-- [ ] **Full verification**
+- [x] **Full verification**
     - Run `just test` and `just lint` in `simplified-schema/` then
       `darkmatter/`; record results in the implementation log.
     - Re-read every comment and doc touched for drift (CLAUDE.md "Authoring
@@ -525,7 +576,7 @@ Prerequisite: Phases 1 and 2.
 
 ### Validation checkpoint 3 (final)
 
-- [ ] All Definition of Done items hold and are covered by named tests.
-- [ ] Implementation log lists tests added per acceptance criterion and the
+- [x] All Definition of Done items hold and are covered by named tests.
+- [x] Implementation log lists tests added per acceptance criterion and the
       terminal state "implementation complete, ready for review" (never move
       the feature to `_completed`, never commit).

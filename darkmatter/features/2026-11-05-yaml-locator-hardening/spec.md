@@ -27,7 +27,7 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-07
 clarified: false
-implemented: false
+implemented: true
 review_iterations: 0
 packages:
     - simplified-schema
@@ -36,6 +36,7 @@ related:
     - 2026-11-04-loading-data
 depends-on:
     - 2026-11-04-loading-data
+implemented_by: "claude/opus"
 ---
 
 # YAML Locator Hardening

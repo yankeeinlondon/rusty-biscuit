@@ -17,6 +17,21 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/tests/l1/load_data_diagnostics.rs
+- darkmatter/lib/tests/l1/load_data_execution.rs
+- darkmatter/lib/tests/l1/yaml_document_loading.rs
+- darkmatter/lib/tests/position_fixtures/mod.rs
+- darkmatter/cli/tests/l1/load_data.rs
+- darkmatter/cli/tests/l1/diagnostic_positions.rs
+- darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/expressions.md
 decisions_for_review:
 - |-
   Three Darkmatter tests that the plan schedules for rewriting in Phase 2
@@ -48,25 +63,101 @@ decisions_for_review:
   scalar spans to their text in `simplified/source.rs`, which would change
   positions in documents with no alias too. Redo cost: one locator change and
   the expected column in `a_yaml_alias_under_a_sequence_root_is_located_at_its_token`.
-message_to_agent: |-
-  Phase 1 is done: `PositionMap::project` now projects aliases as leaves at
-  their `*name` token. Darkmatter frontmatter and `load_data` already pick
-  this up for alias files, so three alias-only Darkmatter tests were rewritten
-  in Phase 1 (see decisions_for_review). For Phase 2, Wave 3:
-  `yaml_orders_by_authored_index_and_places_an_alias` already exists in
-  `locate.rs` (do not add it again); `a_yaml_alias_reports_pointers_only` is
-  gone from `pointer_only!` in `load_data_diagnostics.rs` (only the
-  multi-line-flow entry remains, and it goes when you remove the
-  suppression). I also dropped the now-false clause "as it does a file with
-  an alias" from the `has_multi_line_flow_collection` doc; the function
-  itself is yours to delete. Inline SimplifiedSchema objects cannot name a
-  `<<` property (`{ <<: ... }` is a parse error, "unterminated pattern key"),
-  so use pattern-key contracts (`{ <string>: ... }`) for `<<` cases, as the
-  plan already says. When an object has both type failures and a missing
-  required key, the validator reports only the type failures, so test a
-  missing child under an alias with otherwise-valid children.
-  `.claude/skills/darkmatter/schema.md` still says the alignment witness
-  "holds no alias"; that is Phase 3's Rule 21 edit.
+- |-
+  The merge-key hint is added where `load_data` contract-mismatch records
+  get their messages, `compose/report_diagnostics.rs` (`contract_records`),
+  not under `compose/expression/data/` as the plan's Rule 5a says: that
+  directory only raises the typed error, and every record's message is
+  built in `report_diagnostics.rs`. It fires only for a YAML data file, when
+  the problem is an unexpected property whose last path segment is exactly
+  `<<` (so plain and quoted spellings alike, decided on the decoded key, not
+  the source text). The engine's detail has no final period, so the record
+  reads "...; unexpected property. YAML merge keys are not applied, so `<<`
+  is read as an ordinary key." Alternatives: also hint for JSON/TOML files
+  with a `"<<"` key (rejected: the sentence talks about YAML merge keys,
+  which those formats do not have), or move message building into the data
+  module (a refactor with no behavior gain). Redo cost if the reviewer wants
+  other wording or scope: the `MERGE_KEY_HINT` constant and its guard, plus
+  `load_data_diagnostics::an_unexpected_merge_key_explains_that_merge_keys_are_not_applied`.
+- |-
+  The plan's "missing child under an alias" case put the missing
+  `extra` key beside a failing `port` under the same aliased object
+  (`/one/extra` sorting after `/one/port`). The validator reports only the
+  type failure when an object has both a type failure and a missing
+  required key, so that case cannot produce `/one/extra`. The test
+  (`a_missing_child_under_an_alias_is_located_at_the_alias`) uses
+  conforming data (`base: &b {port: 1}`) so the only record is
+  `/one/extra`, missing, at the alias (2:6). Ordering of a missing member
+  after its present siblings is already covered by
+  `a_missing_member_follows_the_present_members_of_its_parent`. Redo cost:
+  none unless the validator changes to report both.
+- |-
+  The DMLS parity test (`position_parity_tests.rs`) matched each expected
+  problem to a DMLS diagnostic by code and message. The new `alias_use`
+  case has three problems with the same message (`"x" is not of type
+  "number"`), so the match was ambiguous. The match now also requires the
+  diagnostic to start at the library's byte offset, which keeps the test
+  one-to-one; the recorded range text (`x`, `*b`, `*b`) is still asserted.
+  Alternative: give each alias use a different failing value, which would
+  stop the case from matching the specification's example. The plan's DMLS
+  test also called its diagnostics "kind_check-graded"; they are
+  `dm.schema.type_mismatch`, which is what the test asserts. Its Unicode
+  probe put `é` on a line before the alias, which cannot tell UTF-16 from
+  byte columns, so a third variant writes `é` earlier on the alias's own
+  line (`platforms: [{name: é}, &p {name: [1]}, *p]`).
+- |-
+  The Rule 19 fallback fixture `&k a: 1\nb: 2\n` against
+  `{ a: number, b: string }` does not fail: the number `2` converts to the
+  string "2". The test uses `b: x` against `{ a: number, b: number }`,
+  which keeps the same unproven layout (an anchored key) and a single
+  mismatch at `/b`, reported with no line or column.
+- |-
+  The plan asked for the alias, flow, and merge-key text to replace the
+  "YAML positions that cannot be proven" section of the two Darkmatter docs.
+  I put that material in a new section, "YAML anchors, aliases, and merge
+  keys", just before it, and kept the old heading for the remaining
+  fallback (an anchored key), because located aliases are no longer an
+  "unproven" case and the remaining fallback still belongs under that name. `loading-data.md` also
+  gained a "YAML merge keys" row in its format-behavior table. Alternative:
+  one combined section under the old heading, which reads oddly since most
+  of it describes what is now located. Redo cost: merging or renaming two
+  headings in two docs.
+source_files_during_phase_3:
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/marks.rs
+docs_updated_during_phase_3:
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/topics/loading-data.md
+- simplified-schema/docs/topics/diagnostics.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/schema.md
+source_code:
+- simplified-schema/lib/src/mapping_orders.rs
+- simplified-schema/lib/src/positions.rs
+- simplified-schema/lib/tests/l1/alias_positions.rs
+- simplified-schema/lib/tests/l1/main.rs
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/schemas/tests/positions.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/marks.rs
+- darkmatter/lib/tests/l1/load_data_diagnostics.rs
+- darkmatter/lib/tests/l1/load_data_execution.rs
+- darkmatter/lib/tests/l1/yaml_document_loading.rs
+- darkmatter/lib/tests/position_fixtures/mod.rs
+- darkmatter/cli/tests/l1/load_data.rs
+- darkmatter/cli/tests/l1/diagnostic_positions.rs
+- darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+documentation:
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/topics/loading-data.md
+- simplified-schema/docs/topics/diagnostics.md
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/schema.md
+completed_phase: 3
+implemented: true
 ---
 
 # Implementation Log for 2026-11-05-yaml-locator-hardening (3 phases)
@@ -137,3 +228,185 @@ parity across lib, CLI, and DMLS, DMLS ranges) are Phase 2's Wave 4.
 - Cross-OS check: skipped. There is no OS-specific code, path handling, or
   `cfg` in this change.
 - No test failed or was skipped beyond the suite's existing 10 skips.
+
+## Phase 2
+
+Started and finished 2026-11-08. Every Phase 2 task in the plan is checked.
+
+### What changed
+
+- `lib/src/markdown/compose/expression/data/locate.rs` (Rules 13, 14):
+  `has_multi_line_flow_collection` and the `SchemaValueKind` import are
+  deleted; `Format::Yaml` holds a plain `PositionMap` (`PositionMap::new()`
+  when the file did not load, whose `byte_range` is `None`, as the old
+  `None` was). The module and variant docs say an alias is placed at its
+  token, a multi-line flow collection is located, and an unproven layout is
+  pointer-only. The flow test became
+  `a_multi_line_flow_collection_keeps_yaml_positions`, and
+  `an_unproven_yaml_layout_is_unpositioned_but_keeps_authored_order` covers
+  Rule 19 at unit level. `yaml_orders_by_authored_index_and_places_an_alias`
+  was already rewritten in Phase 1.
+- `lib/src/markdown/compose/report_diagnostics.rs` (Rule 5a): the merge-key
+  hint, `MERGE_KEY_HINT`, appended to a YAML unexpected-property record whose
+  key is `<<` (see decisions_for_review for placement and wording).
+- `lib/tests/l1/load_data_execution.rs`: one drifted comment ("Aliases only
+  make contract violations pointer-only") corrected; the test is unchanged.
+- `.claude/skills/darkmatter/expressions.md`: the `load_data` locating bullet
+  no longer says an alias or multi-line flow file reports pointers only, and
+  names the merge-key hint.
+- No other Darkmatter source changed (Rule 15): `just test` passed with no
+  other edits.
+
+### Requirement → test mapping
+
+| Requirement | Test(s) |
+|---|---|
+| Spec example 1 (`/servers/1/port` 4:12) through `load_data` | `load_data_diagnostics::an_alias_beside_an_unrelated_failure_keeps_it_located` |
+| Spec example 2 (1:17 / 2:6 / 3:6, three records in authored order) | `load_data_diagnostics::every_use_of_a_failing_anchor_is_one_record_at_its_alias` |
+| Missing child under an alias keeps its pointer at the alias | `load_data_diagnostics::a_missing_child_under_an_alias_is_located_at_the_alias` |
+| Several failing children of one alias share its position | `load_data_diagnostics::failing_children_of_one_alias_share_its_position_with_distinct_pointers` |
+| Alias to scalar / sequence / mapping; neighbors located | `load_data_diagnostics::an_alias_to_a_{scalar,sequence,mapping}_keeps_its_neighbors_located` |
+| Literal `<<` (bare, quoted), sequence of aliases | `load_data_diagnostics::a_literal_merge_key_is_an_ordinary_key_located_at_its_alias`, `a_quoted_literal_merge_key_…`, `a_sequence_of_aliases_is_located_item_by_item` |
+| Merge-key hint (both spellings) and unchanged control message | `load_data_diagnostics::an_unexpected_merge_key_explains_that_merge_keys_are_not_applied` |
+| Multi-line flow: objects, nested mapping, comment `# ]`, quoted `"}"`/`"]"`, alias item, key after `]` | `load_data_diagnostics::a_multi_line_flow_collection_is_located_inside_and_after_it`, `a_failing_alias_item_in_a_multi_line_flow_sequence_is_located_at_its_token`, `a_multi_line_flow_sequence_of_scalars_is_located` (replaces the `pointer_only!` entry; the macro is gone), `locate::tests::a_multi_line_flow_collection_keeps_yaml_positions` |
+| Character column (not byte column) in `data_location` | `load_data_diagnostics::an_alias_position_is_a_character_column` |
+| LF / CRLF / BOM / BOM+CRLF identical | `load_data_diagnostics::alias_positions_survive_line_endings_and_a_byte_order_mark` |
+| Counts and order equal the hand-expanded data | `load_data_diagnostics::aliases_keep_the_records_and_order_of_the_same_data_written_out` |
+| Rule 19 unproven-layout fallback (pointer only) | `load_data_diagnostics::an_unproven_yaml_layout_reports_pointers_only`, `locate::tests::an_unproven_yaml_layout_is_unpositioned_but_keeps_authored_order` |
+| CLI wiring: control exit 0; alias records, schema-valid envelope, read set, no later action; `source` unchanged | `cli load_data::conforming_aliased_yaml_lets_the_later_action_run`, `an_aliased_yaml_mismatch_is_located_at_each_alias_and_runs_no_later_action` |
+| CLI multi-line flow `/items/1` 3:3 | `cli load_data::a_multi_line_flow_sequence_is_located` |
+| Frontmatter (lib, CLI, DMLS; LF and CRLF) | `ALIAS_USE`, `ALIAS_BESIDE_UNRELATED_FAILURE` in `position_fixtures/mod.rs`, run by lib `diagnostic_positions::*`, CLI `json_reports_each_alias_use_at_its_token{,_with_crlf_line_ends}`, `json_keeps_a_failure_beside_an_alias_located`, DMLS `position_parity_tests::*` |
+| Whole-file YAML validation (control + BOM/CRLF/Unicode variants, ranges `x`/`*b`) | `yaml_document_loading::control_an_aliased_document_validates`, `an_alias_use_is_located_at_its_token` |
+| DMLS alias range ends after `*p`; UTF-16 columns | `dmls yaml_document_editor::an_alias_use_is_ranged_at_its_token` |
+| Malformed-input behavior unchanged | existing `load_data_diagnostics` malformed tests and `load_data_execution` `yaml_*_is_malformed` rows, unmodified and green |
+
+Boundary and fidelity: `load_data` cases are in-process at the library's
+public result (`error_diagnostics` of a real composition, F2, L1); the CLI
+tests spawn the real `md` binary once per behavior to prove wiring (F3, L1,
+in the consolidated `cli/tests/l1` binary); the DMLS tests run the real
+provider registry over an overlay (L1). All new tests are declared in
+existing `l1` binaries and carry no tier marker.
+
+### Gates
+
+- `darkmatter`: `just lint` clean (including the wasm32 check);
+  `just test` gave 15710 passed and 10 skipped (the suite's existing skips).
+- Dependents: `claudine` and `claudine-cli`, narrowed to the tests that
+  compose with `load_data` or schema slots
+  (`cargo nextest run -p claudine -p claudine-cli -E 'test(/composition::sequence::tests|completion::engine::tests|schema_completion::tests/)'`):
+  251 passed. simplified-schema was not changed in this phase.
+- The gate-skip calculator was not consulted, because the gates were run.
+- Cross-OS check: skipped; no path, process, or `cfg` code changed.
+- No test failed or was skipped beyond the existing 10 skips. During
+  development the DMLS parity test failed on the new alias case because of
+  an ambiguous message match (see decisions_for_review); it is fixed.
+- Checkpoint grep: the only remaining "pointer only" hit outside
+  `features/`/`fixes/` is `darkmatter/docs/cli/data-contracts.md` (Phase 3,
+  Rule 21).
+
+## Phase 3
+
+Started and finished 2026-11-08. Documentation and verification only; no
+behavior changed.
+
+### Summary of the whole implementation (Rule 22)
+
+- Phase 1 (simplified-schema): `PositionMap::project` treats an alias as an
+  authored leaf at its `*name` token and accounts for the indexed mappings
+  below it, so an alias no longer forces the top-level fallback.
+- Phase 2 (darkmatter): `load_data`'s YAML locator stopped discarding the map
+  for a multi-line flow collection, `Format::Yaml` holds a plain
+  `PositionMap` (the `Option` is removed, Rule 13; `PositionMap::new()` when
+  the file did not load), and the merge-key hint was added to an unexpected
+  `<<` record of a YAML data file.
+- **Intentional replacement:** the whole-file "pointer only" exception that
+  `2026-11-04-loading-data` documented (any alias or multi-line flow
+  collection made every contract mismatch in the file pointer-only) is
+  replaced. Pointer-only now applies only to a layout the position map cannot
+  prove (for example an anchored key `&k a: 1`). That spec is not edited.
+- Locator defects fixed under Rule 12: none; no change to
+  `simplified/source.rs` was needed in any phase.
+
+### What changed
+
+- `darkmatter/docs/cli/data-contracts.md`: new section "YAML anchors,
+  aliases, and merge keys" (what an alias is, the three-use example with its
+  1:17 / 2:6 / 3:6 table, an alias beside an unrelated failure at 4:12, a
+  multi-line flow example at 3:10, merge keys not applied with the hint's
+  full message); "YAML positions that cannot be proven" keeps its heading
+  and now names only the unproven-layout fallback, with the
+  `&k a: 1` example. The duplicate-key, second-document, non-string-key, and
+  tag bullets are unchanged.
+- `darkmatter/docs/topics/loading-data.md`: a shorter "YAML aliases and
+  merge keys" section, the "cannot be proven" section rewritten the same way,
+  and a "YAML merge keys" row in the format-behavior table.
+- `simplified-schema/docs/topics/diagnostics.md`: after the `byte_range`
+  paragraph, an alias (or a path below one) is reported at its `*name` token,
+  with an example, and an unprovable document falls back to top-level keys
+  (every problem at its top-level key's line, column 1, as
+  `positions::tests::an_unquoted_template_keeps_the_top_level_fallback`
+  shows).
+- `.claude/skills/darkmatter/schema.md`: the alignment-witness bullet no
+  longer says the tree must hold no alias; aliases are leaves at their token,
+  `<<` is an ordinary key, and the fallback is for unproven layouts (anchored
+  keys, unquoted `{{ }}`).
+- Drift found by the Wave 6 grep and fixed (comment-only, code assumed
+  right): `darkmatter/lib/src/markdown/compose/expression/data/parse.rs`
+  (`positions` doc said a YAML file with an alias or a multi-line flow
+  collection is never positioned) and
+  `darkmatter/lib/src/markdown/schemas/yaml_documents/marks.rs` (module doc
+  said `PositionMap` refuses a file with an alias).
+- Re-read for drift, no change needed: the module and type docs of
+  `simplified-schema/lib/src/positions.rs`, `mapping_orders.rs`, and
+  `darkmatter/.../data/locate.rs` (updated in Phases 1 and 2).
+- Remaining grep hits (`holds no alias`, `file with an alias`, `contains an
+  alias`, `Pointer only`, `pointer-only`, `multi-line flow`) outside
+  `features/`/`fixes/`, each checked true: `data-contracts.md` "Pointer only"
+  (the unproven-layout bullet); `schemas/definition.md:857` (a load error is
+  located "even in a file with an alias", still true); `expressions.md` skill
+  (Phase 2 text, accurate); `hash/write.rs`, `frontmatter.md`,
+  `dmls/src/overlay/expressions.rs`, `simplified/source.rs`,
+  `yaml_scalar.rs`, `content-policy`, `claudine` schemas matrix (other
+  locators or in-place editing, unrelated to `PositionMap`); `biscuit-file`
+  and `biscuit-terminal` (other "pointer only" meanings); test section
+  headers in `load_data_diagnostics.rs` and `cli/tests/l1/load_data.rs`
+  ("…are located").
+
+### Requirement → test mapping
+
+Phase 3 changed no behavior: the doc and skill text, and the two
+corrected comments, describe behavior already pinned by Phase 1 and Phase 2
+tests (see those mappings). Each example in the new docs is the input of an
+existing test:
+
+| Doc claim | Test |
+|---|---|
+| Three uses: 1:17 / 2:6 / 3:6 | `load_data_diagnostics::every_use_of_a_failing_anchor_is_one_record_at_its_alias` |
+| Alias beside an unrelated failure: `/servers/1/port` 4:12 | `load_data_diagnostics::an_alias_beside_an_unrelated_failure_keeps_it_located` |
+| Missing member and several failures under one alias | `a_missing_child_under_an_alias_is_located_at_the_alias`, `failing_children_of_one_alias_share_its_position_with_distinct_pointers` |
+| Multi-line flow, `x` on line 3 at column 10 | `a_multi_line_flow_collection_is_located_inside_and_after_it` (same line layout) |
+| Merge-key hint text, YAML-only, plain and quoted | `an_unexpected_merge_key_explains_that_merge_keys_are_not_applied` |
+| `/server/<</port` at the `*b` | `a_literal_merge_key_is_an_ordinary_key_located_at_its_alias`, `positions::tests::aliases_and_literal_merge_keys_are_projected` |
+| `&k a: 1` then `b: x` is `/b` with no position | `an_unproven_yaml_layout_reports_pointers_only` |
+| Fallback: line of the top-level key, column 1 | `positions::tests::an_unquoted_template_keeps_the_top_level_fallback` |
+| `byte_range` covers only `*b` | Phase 1 `alias_positions` tests |
+
+### Gates
+
+- `simplified-schema`: `just test` 1454 passed, 0 skipped; `just lint` clean.
+- `darkmatter`: `just test` 15710 passed (4 slow, all pre-existing
+  `claudine_editor_parity` / `content_policy_baseline` DMLS tests over 5 s,
+  none touched by this change), 10 skipped (the suite's existing skips);
+  `just lint` clean, including the wasm32 check.
+- Dependents: `claudine` and `claudine-cli`, narrowed as in Phase 2
+  (`cargo nextest run -p claudine -p claudine-cli -E 'test(/composition::sequence::tests|completion::engine::tests|schema_completion::tests/)'`):
+  251 passed.
+- The gate-skip calculator was not consulted, because the gates were run.
+- Cross-OS check: skipped; no path, process, or `cfg` code changed in any
+  phase of this feature.
+- No test failed during this phase.
+
+### Terminal state
+
+Implementation complete, ready for review. The feature directory was not
+moved to `_completed`, and nothing was committed.
