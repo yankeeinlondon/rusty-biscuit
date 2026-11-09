@@ -4,7 +4,7 @@ Core library for the Claudine cross-agent event handling, skill linking, and MCP
 
 ## Architecture
 
-The library is organized into eighteen top-level modules plus the shared error type:
+The main top-level modules (an overview, not every module in `lib.rs`) plus the shared error type:
 
 ```
 claudine/lib/src/
@@ -20,9 +20,9 @@ claudine/lib/src/
 ├── messaging/      → Outbound messaging routes, resolution, and provider dispatch
 ├── mcp/            → MCP catalog, defaults, import/export, session, and injection
 ├── permissions/    → Provider-agnostic policy engine (queries, mutations, canonical model)
+├── protect/        → Protect: default-allow deny catalog for bash commands, write/edit paths, and MCP responses
 ├── provider/       → Central provider catalog: `Provider` enum, `ProviderInfo`, behavior traits
 ├── reporting/      → JSONL-to-SQLite reporting index, sync, and typed queries
-├── services/       → Cross-provider runtime policy services (Protect)
 ├── stream/         → Structured stream parsing for 6 providers + typed protocol models + summary/reporting
 ├── system_prompt/  → System prompt discovery, CLI switch resolution, and preparation
 └── error.rs        → ClaudineError enum
@@ -68,18 +68,18 @@ The `Provider` enum and `EventSupportLevel` type are owned by [`crate::provider`
 
 ### Provider Catalog (`provider`)
 
-Central catalog for the 7-variant `Provider` enum and all per-provider static facts. `provider_info(p) -> &'static ProviderInfo` is the single registry every per-domain dispatch flows through.
+Central catalog for the 10-variant `Provider` enum and all per-provider static facts. `provider_info(p) -> &'static ProviderInfo` is the single registry every per-domain dispatch flows through.
 
 Key types:
-- `Provider` — 7-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode); serde snake_case identifiers remain `kimi_code` / `open_code` / `qwen_code`, while the catalog `slug` values are the canonical short forms `kimi` / `opencode` / `qwen`
-- `PROVIDERS_DISPLAY_ORDER` — `[Provider; PROVIDER_COUNT]` array (7 entries) used by every matrix-style report
+- `Provider` — 10-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode, Kilo, Pi, Antigravity); serde snake_case identifiers remain `kimi_code` / `open_code` / `qwen_code`, while the catalog `slug` values are the canonical short forms `kimi` / `opencode` / `qwen`
+- `PROVIDERS_DISPLAY_ORDER` — `[Provider; PROVIDER_COUNT]` array (10 entries) used by every matrix-style report
 - `ProviderInfo` — full per-provider record: identity (`display_name`, `slug`, `binary`, `agent_offset`, `cli_aliases`, `docs_url`, `usage_dashboard_url`, `sniff_binding`), event mapping, four behavior trait objects, agent and resource accessors, and the Phase 5 typed catalog (`PathTemplate`, `OutputFormatSupport`, `EntrypointSpec`, `SystemPromptSpec`, `YoloSupport`, `ReasoningSupport`, `KnownGap`, `AcpSupport`, `PromptArgConventions`)
 - `EventSupportLevel` — `Hook` | `NonHook` | `Acp` | `NotSupported` per provider-event pair
 - `EventMappingTable` / `EventMapping` — per-provider event row table; the source of truth for support level, native names, parse aliases, and which rows participate in standard hook registration
 - `ProviderBehavior`, `McpBehavior`, `AdapterBehavior`, `ConfiguratorBehavior` — focused behavior traits implemented as zero-sized provider structs and stored as `&'static dyn Trait` on `ProviderInfo`
 - `AcpSupport`, `AcpServerMode`, `AcpEvent` — typed ACP capability descriptor surfaced by `claudine hooks --capture-method`
 
-Adding an eighth provider is a matter of: adding the `Provider` variant, creating one `provider/<name>.rs` file with a `<NAME>_INFO: ProviderInfo` constant, registering it in `provider/registry.rs`, and adding a CLI-side `WrapperProfile` entry. See [`docs/topics/building-an-agent-wrapper.md`](../docs/topics/building-an-agent-wrapper.md) for the full checklist.
+Adding another provider is a matter of: adding the `Provider` variant, creating one `provider/<name>.rs` file with a `<NAME>_INFO: ProviderInfo` constant, registering it in `provider/registry.rs`, and adding a CLI-side `WrapperProfile` entry. See [`docs/topics/building-an-agent-wrapper.md`](../docs/topics/building-an-agent-wrapper.md) for the full checklist.
 
 ### Hook Adapters (`hook_adapters`)
 
@@ -272,11 +272,9 @@ Execution parity note (2026-06-16): the CLI-side execution of `compose` and `inl
 
 Styled terminal badge constants for the execution line header: `YOLO`, `NON_INTERACTIVE`, `INTERACTIVE`, `VERBOSE`, `COMPOSE`, `INLINE_COMPOSE`, `REPO_FLAG`, and scope badges (`USER_SCOPED`, `REPO_SCOPED`, `MASKED_REPO_SCOPED`).
 
-### Services (`services`)
+### Protect (`protect`)
 
-Cross-provider runtime policy engines that operate on normalized event context:
-
-- `protect` — Capability-aware policy evaluation service used to normalize safety decisions (`allow`, `ask`, `stop`, `advisory`) across providers with different control surfaces.
+A best-effort, default-allow deny catalog for bash commands, write/edit paths, and MCP responses. Each evaluation returns `ProtectOutcome::Allow` or `ProtectOutcome::Block` (with the matched rule). See [Protect Service](../docs/topics/protect-service.md).
 
 ### Permissions (`permissions`)
 
@@ -307,7 +305,7 @@ Outbound messaging routes for the `Message` hook action. Supports Discord, Slack
 Discovery, CLI switch resolution, and preparation of system prompts injected by the wrapper:
 
 - Discovers standard `system-prompt.md` files across package, package-area, repo, user, and current-directory scopes (`StandardPromptScope`)
-- Resolves explicit CLI switches (`--system-prompt` / `--append-system-prompt` / `--replace-system-prompt`) via `SystemPromptArgs` and `SystemPromptMode`
+- Resolves explicit CLI switches (`--append-system-prompt` / `--replace-system-prompt`, files only) via `SystemPromptArgs` and `SystemPromptMode`
 - Captures provenance via `SystemPromptSource` (`StandardDiscovered` or `ExplicitFile`)
 - `resolve_and_prepare()` and `prepare_system_prompt()` build the final system prompt string passed to the provider; `LaunchContext` carries the resolved state into wrapper execution
 
@@ -344,10 +342,8 @@ Timeouts, shell policy, and runtime attempt classification for composed prompt p
 | `Speak` | TTS via biscuit-speaks with template interpolation | Fire-and-forget (tokio::spawn) |
 | `SoundEffect` | Playa embedded effects with volume/speed control | Fire-and-forget (tokio::spawn_blocking) |
 | `Message` | Send Markdown notifications through the configured messaging route, with Discord image attachment support in v1 | Background task registered with the delivery tracker; await `messaging::drain_deliveries` before exit |
-| `Log` (file) | Append JSONL, creates parent dirs, supports daily rotation | Synchronous |
-| `Log` (server) | POST JSON with configurable timeout and headers | Non-fatal on failure |
 | `Report` | Write to stdout with optional template/format (Text, Json, Compact) | Synchronous |
-| `FireAndForget` | Execute command asynchronously without waiting | Fire-and-forget (tokio::spawn) |
+| `Bash` | Run a validated shell command with interpolated params; its result is ignored | Awaited, with a fixed 3 s timeout |
 | `Call` | Execute command synchronously with timeout and response mapper | Blocking (returns `HookResponse`) |
 
 ## Key Dependencies

@@ -8,42 +8,38 @@ Actions are the responses Claudine executes when an event fires during an agenti
 
 ## Event Binding Structure
 
-Actions live inside event bindings under a provider's `events` map:
+Actions live under the top-level `actions` map, keyed by canonical event name. Each value is the ordered list of actions for that event, and the same bindings apply to every provider:
 
 ```json
 {
-  "version": "1.0",
-  "settings": { ... },
-  "providers": {
-    "claude": {
-      "events": {
-        "before_tool": {
-          "enabled": true,
-          "actions": [
-            { "type": "log" },
-            { "type": "sound_effect", "name": "alert", "volume": 0.5 }
-          ],
-          "matcher": null
-        }
-      }
-    }
+  "actions": {
+    "before_tool": [
+      { "type": "report" },
+      { "type": "sound_effect", "effect": "space-alarm", "volume": 0.5 }
+    ]
+  },
+  "matchers": {
+    "before_tool": "^Bash$"
   }
 }
 ```
 
-| Field | Type | Default | Description |
+| Key | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | `bool` | `true` | Toggle the entire binding on/off |
-| `actions` | `HookAction[]` | `[]` | Ordered list of actions to execute |
-| `matcher` | `string?` | `null` | Optional regex filter (matches `tool_name` for tool events, `notification_type` for notifications) |
+| `actions.<event>` | `HookAction[]` | absent | Ordered list of actions to execute when `<event>` fires |
+| `matchers.<event>` | `string` | absent | Optional filter for that event's actions (a regex over `tool_name` for tool events and `notification_type` for notifications, or a Darkmatter condition) |
 
-When `matcher` is set, the binding only fires if the regex matches the relevant field. For example, `"matcher": "^Bash$"` restricts the binding to Bash tool invocations.
+An event with no `actions` entry runs no actions. A file that still uses the old `version` + `providers.<provider>.events` shape is treated as the old format: Claudine renames it to `config.json.bak` and treats the configuration as missing, so setup runs again.
 
-A matcher can also be a Darkmatter condition over the same paths as [`when`](#available-paths), such as `"matcher": "hook.tool_name == 'Bash' && git.branch == 'main'"`. Claudine tries the string as a condition first; a bare word such as `Bash`, or a string that is not a valid condition, is compiled as a regex.
+Every dispatched event is also appended to a daily JSONL log under `~/.claudine/logs/` while the top-level `logging` setting is `true` (the default); this is independent of the actions bound to the event.
+
+When a matcher is set, the event's actions run only if the matcher matches. For example, `"before_tool": "^Bash$"` restricts the `before_tool` actions to Bash tool invocations.
+
+A matcher can also be a Darkmatter condition over the same paths as [`when`](#available-paths), such as `"before_tool": "hook.tool_name == 'Bash' && git.branch == 'main'"`. Claudine tries the string as a condition first; a bare word such as `Bash`, or a string that is not a valid condition, is compiled as a regex.
 
 ## Action Types
 
-Every action is a JSON object with a `"type"` discriminator. Claudine supports seven action types.
+Every action is a JSON object with a `"type"` discriminator. Claudine supports six action types; an unknown `type`, or an unknown field on an action, fails to load.
 
 ### `sound_effect`
 
@@ -53,12 +49,12 @@ The global scheduler serializes it with lifecycle, speech, and other Playa jobs.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `name` | `string` | (required) | Effect name from playa's 88 embedded effects |
+| `effect` | `string` | (required) | Effect name from playa's 88 embedded effects |
 | `volume` | `f32` | `1.0` | Playback volume (0.0 to 1.0) |
 | `speed` | `f32` | `1.0` | Playback speed multiplier |
 
 ```json
-{ "type": "sound_effect", "name": "success", "volume": 0.8, "speed": 1.2 }
+{ "type": "sound_effect", "effect": "confirmation", "volume": 0.8, "speed": 1.2 }
 ```
 
 ### `speak`
@@ -76,52 +72,15 @@ redact private preparation text.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `message` | `string` | (required) | Template message with `{{variable}}` placeholders |
+| `voice` | `string?` | `null` | Voice override for this action |
+| `gender` | `male` \| `female` | `null` | Gender preference for voice selection |
 
 ```json
 { "type": "speak", "message": "Tool {{tool_name}} completed on {{git.branch}}" }
 ```
 
-The provider and voice come from the [`tts` setting](#text-to-speech-settings-tts);
+The provider and default voice come from the [`tts` setting](#text-to-speech-settings-tts);
 `speak` actions run only when `tts` is `true` or an object.
-
-### `log`
-
-Write the event payload to a log target. When no target is specified, defaults to a daily-rotated JSONL file under `~/.claudine/logs/`.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `target` | `LogTarget?` | file (daily rotation) | Destination for log records |
-
-**File target** (default):
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `path` | `string?` | `~/.claudine/logs/<date>.jsonl` | Explicit file path (supports `~`) |
-| `rotate_daily` | `bool` | `true` | Rotate by local day boundary |
-
-**Server target**:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `url` | `string` | (required) | HTTP endpoint URL |
-| `timeout_ms` | `u64` | `10000` | Request timeout in milliseconds |
-| `headers` | `map?` | `null` | Additional HTTP headers |
-
-```json
-{ "type": "log" }
-```
-
-```json
-{
-  "type": "log",
-  "target": {
-    "type": "server",
-    "url": "https://hooks.example.com/events",
-    "timeout_ms": 5000,
-    "headers": { "Authorization": "Bearer tok_xxx" }
-  }
-}
-```
 
 ### `report`
 
@@ -161,24 +120,26 @@ Print event information to stdout, making it visible in the agent's output strea
 }
 ```
 
-### `fire_and_forget`
+### `bash`
 
-Spawn an external command asynchronously without waiting for completion or inspecting output. Command and args support template interpolation. The command must be findable on `PATH`.
+Run an external command without inspecting its output. The command is spawned directly with an argument list, not through a shell, so shell syntax such as pipes or `&&` is not interpreted. Claudine waits up to 3 seconds for it; a non-zero exit, a spawn failure, or a timeout is logged as a warning and the rest of the binding continues. A `bash` action cannot influence agent behavior; use [`call`](#call) for that.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `command` | `string` | (required) | Command name or path to executable |
-| `args` | `string[]?` | `null` | Optional arguments |
+| `command` | `string` | (required) | An absolute path to an existing executable, or a command name found on `PATH`. A `.js`/`.ts`/`.mjs`/`.mts` script runs through its shebang interpreter, else `bun`, else `node` (`.js`/`.mjs` only) |
+| `params` | `string` | `""` | Arguments as one string, split into separate arguments with shell-style quoting after interpolation |
+
+Both fields support template interpolation. Quote a placeholder whose value may contain spaces (`--message '{{tool_name}}'`); otherwise the value splits into several arguments.
 
 ```json
-{ "type": "fire_and_forget", "command": "notify-send", "args": ["Claudine", "{{event}} fired"] }
+{ "type": "bash", "command": "notify-send", "params": "Claudine '{{event}} fired'" }
 ```
 
 ### `message`
 
 Send a message to the configured messaging destination (Slack, Discord, Signal, WhatsApp, or webhooks). Delivery runs in the background and does not block the pipeline, but the CLI waits for it before exiting, for up to 10 seconds (less under `claudine handle`'s deadline). A send still running then is reported with a warning that its delivery is unknown, and the exit code does not change (see [Messaging](messaging.md#the-cli-drains-before-every-ordinary-exit)). Empty messages after template interpolation are silently skipped.
 
-Requires messaging configuration in `settings.messaging` (see [Messaging Configuration](#messaging-configuration) below).
+Requires messaging configuration under the top-level `messenger` key (see [Messaging Configuration](#messaging-configuration) below).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -451,17 +412,17 @@ on.
 
 ## Messaging Configuration
 
-The `message` action requires a destination configured under `settings.messaging` in your `config.json`. Configuration supports both user scope (`~/.claudine/config.json`) and repo scope (`.claudine/config.json`).
+The `message` action requires a destination configured under the top-level `messenger` key in your user config (`~/.claudine/config.json`). A repo config (`.claudine/config.json`) can only choose which named configuration is active, through `active_messenger`.
 
 ### Named Config Pattern
 
-Multiple provider configurations are stored under a `configs` map keyed by user-chosen names. An `active` field selects which named config is currently in use. Setting `active` to `null` or omitting it disables messaging for that scope.
+Multiple provider configurations are stored under a `configurations` map keyed by user-chosen names. An `active_config` field selects which named configuration is currently in use; it must name a key in `configurations`. Omitting `active_config` disables messaging.
 
-Scope resolution: repo-scope `active` overrides user-scope when present. If repo scope sets `active` to `null`, the user-scope active config is used as fallback.
+Scope resolution: a repo-scope `active_messenger` string replaces the user-scope `active_config` for that repo. A repo-scope `"active_messenger": null` disables messaging for that repo. When the repo config omits `active_messenger`, the user-scope `active_config` applies.
 
 ### Provider Configs
 
-Secrets can be provided inline (e.g., `bot_token`) or via an environment variable name (e.g., `bot_token_env`). Inline values take precedence. Default env var names follow the `messenger` CLI conventions.
+Secrets are read from the environment variables named by the `*_env` fields (e.g., `bot_token_env`); each field has a default that follows the `messenger` CLI conventions. Only the webhook routes also accept an inline secret, `webhook_url`, which takes precedence over `webhook_url_env`.
 
 **Discord:**
 
@@ -538,38 +499,36 @@ Webhook routes can omit the inline `webhook_url` and rely solely on an environme
 }
 ```
 
-This is useful for shared repo configs where the webhook secret should not be committed.
+This is useful when the config file is shared or backed up and the webhook secret should not be stored in it.
 
 ### Desktop Notifications
 
 Desktop notifications are **zero-config** and are not managed through `claudine config`. They are triggered via the `notify` field in composition lifecycle frontmatter only. See [Lifecycle Notifications](flow-control/lifecycle.md).
 
-### Example Settings Block
+### Example Messenger Block
 
 ```json
 {
-  "settings": {
-    "messaging": {
-      "active": "work-slack",
-      "configs": {
-        "work-slack": {
-          "provider": "slack",
-          "channel_id": "C012345ABC",
-          "bot_token_env": "SLACK_BOT_TOKEN"
-        },
-        "personal-discord": {
-          "provider": "discord",
-          "channel_id": "123456789012345678",
-          "bot_token_env": "DISCORD_BOT_TOKEN"
-        },
-        "deploy-webhook": {
-          "provider": "slack_webhook",
-          "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
-        },
-        "alerts-webhook": {
-          "provider": "discord_webhook",
-          "webhook_url_env": "DISCORD_WEBHOOK_URL"
-        }
+  "messenger": {
+    "active_config": "work-slack",
+    "configurations": {
+      "work-slack": {
+        "provider": "slack",
+        "channel_id": "C012345ABC",
+        "bot_token_env": "SLACK_BOT_TOKEN"
+      },
+      "personal-discord": {
+        "provider": "discord",
+        "channel_id": "123456789012345678",
+        "bot_token_env": "DISCORD_BOT_TOKEN"
+      },
+      "deploy-webhook": {
+        "provider": "slack_webhook",
+        "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
+      },
+      "alerts-webhook": {
+        "provider": "discord_webhook",
+        "webhook_url_env": "DISCORD_WEBHOOK_URL"
       }
     }
   }
@@ -578,52 +537,38 @@ Desktop notifications are **zero-config** and are not managed through `claudine 
 
 ## Full Example
 
-A complete event binding with multiple actions:
+A complete set of event bindings with multiple actions:
 
 ```json
 {
-  "providers": {
-    "claude": {
-      "events": {
-        "before_tool": {
-          "enabled": true,
-          "actions": [
-            { "type": "log" },
-            {
-              "type": "call",
-              "command": "security-check",
-              "args": ["--tool", "{{tool_name}}", "--branch", "{{git.branch}}"],
-              "timeout_ms": 5000,
-              "mapper": { "type": "exit_code" }
-            },
-            {
-              "type": "report",
-              "handler": { "format": "compact" }
-            }
-          ],
-          "matcher": "^Bash$"
-        },
-        "turn_complete": {
-          "enabled": true,
-          "actions": [
-            { "type": "log" },
-            { "type": "sound_effect", "name": "success" },
-            { "type": "speak", "message": "Turn complete on {{git.branch}}" },
-            { "type": "message", "message": "Turn complete on **{{git.branch}}**" }
-          ]
-        },
-        "tool_error": {
-          "enabled": true,
-          "actions": [
-            { "type": "log" },
-            { "type": "sound_effect", "name": "error", "volume": 0.6 },
-            { "type": "speak", "message": "{{tool_name}} failed: {{error}}" }
-          ]
-        }
+  "actions": {
+    "before_tool": [
+      {
+        "type": "call",
+        "command": "security-check",
+        "args": ["--tool", "{{tool_name}}", "--branch", "{{git.branch}}"],
+        "timeout_ms": 5000,
+        "mapper": { "type": "exit_code" }
+      },
+      {
+        "type": "report",
+        "handler": { "format": "compact" }
       }
-    }
+    ],
+    "turn_complete": [
+      { "type": "sound_effect", "effect": "confirmation" },
+      { "type": "speak", "message": "Turn complete on {{git.branch}}" },
+      { "type": "message", "message": "Turn complete on **{{git.branch}}**" }
+    ],
+    "tool_error": [
+      { "type": "sound_effect", "effect": "error-1", "volume": 0.6 },
+      { "type": "speak", "message": "{{tool_name}} failed: {{error}}" }
+    ]
+  },
+  "matchers": {
+    "before_tool": "^Bash$"
   }
 }
 ```
 
-This configuration logs all Bash tool invocations, runs a security check that can block execution, and reports the result. Turn completions get a sound and TTS announcement. Tool errors are logged with an alert sound and spoken error summary.
+This configuration runs a security check that can block each Bash tool invocation, then reports it. Turn completions get a sound, a TTS announcement, and a message. Tool errors get an alert sound and a spoken error summary. Every event is also written to the JSONL event log, because `logging` defaults to `true`.

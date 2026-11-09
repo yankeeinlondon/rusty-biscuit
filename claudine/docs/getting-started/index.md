@@ -215,7 +215,7 @@ structuring an Agent Skill as a tree of Markdown documents where the _lead/head_
 
 ## Wrapped Execution
 
-For all the _synchronization_ features described in the last section all you would need to use **Claudine** is run `claudine sync` once in a while to keep everything in sync between your providers. That is a starting point for what **Claudine** can do for you but to get more out of it you'll almost surely want to leverage the _wrapped execution_ features of **Claudine**:
+For all the _synchronization_ features described in the last section all you would need to use **Claudine** is run `claudine sync` (hook registrations) and `claudine skills --fix`, `claudine commands --fix`, and `claudine agents --fix` (shared resources) once in a while to keep everything in sync between your providers. That is a starting point for what **Claudine** can do for you but to get more out of it you'll almost surely want to leverage the _wrapped execution_ features of **Claudine**:
 
 - instead of running `claude`, `codex`, `opencode`, etc. to start your CLI put **claudine** in front:
     - `claudine claude` - executes Claude Code in wrapped execution mode
@@ -224,6 +224,10 @@ For all the _synchronization_ features described in the last section all you wou
     - `claudine kimi` - executes Kimi Code CLI in wrapped execution mode
     - `claudine qwen` - executes Qwen CLI in wrapped execution mode
     - `claudine goose` - executes Goose CLI in wrapped execution mode
+    - `claudine gemini` - executes Gemini CLI in wrapped execution mode
+    - `claudine kilo` - executes Kilo Code CLI in wrapped execution mode
+    - `claudine pi` - executes Pi in wrapped execution mode
+    - `claudine antigravity` - executes Antigravity (the `agy` CLI) in wrapped execution mode
 
 Ok so now you know _what_ you're supposed to do and if you're good at "instruction following" (just like you expect your LLM to be) then that's all you need. Sadly, us humans have this annoying tendency to need to know _why_ they should do things. Well ok, princess ... here's **why** you should wrap your agent execution:
 
@@ -268,9 +272,10 @@ which do the same thing regardless of the agent you are using:
 Whenever you run in a wrapped context, Claudine will add some helpful ENV variables you can use for logging, conditional expressions in your workflow, etc.
 
 - **AGENT** provides the name of the CLI Agent being used
-- **MODEL** provides the name of the _default_ model being used by the agent (Note: if you are using subagents the model may vary across them but the main orchestrator node should be consistent with this ENV variable)
+- **MODEL** provides the name of the model the agent was launched with, when one was resolved from `--model`, a model ENV variable, frontmatter, or the provider's config (Note: if you are using subagents the model may vary across them but the main orchestrator node should be consistent with this ENV variable)
 - **PACKAGE_AREA** is set when in a monorepo, it is based off the CWD and provides the directory path between the root of the repo and up to but not including where actual packages are defined
 - **PACKAGE** is set when you are in a monorepo _and_ you started the agent in a package of that monorepo
+- **YOLO** and **INTERACTIVE** (`true`/`false`) say how the session was started, and **CLAUDINE_SESSION_ID**, **CLAUDINE_PID**, and **AGENT_PARAMS** identify it; **OPERATION** is set when you pass `--operation`
 
 **Note:** as you'll see in later sections and documents, these are the tip of the iceberg on contextual variables which Claudine provides when you are using Composition and Transclusion based prompts.
 
@@ -412,7 +417,7 @@ Ok I know _interpolation_ was kind of exciting but if you really want the full e
 
 ```md
 ---
-cowbell="$(cowbell some)"
+cowbell: "$(cowbell some)"
 ---
 
 {{cowbell}}

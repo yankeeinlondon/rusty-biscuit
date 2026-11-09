@@ -27,7 +27,7 @@ The reporting is broken down into the following sections:
 
    We then report on the **canonical** base providers:
 
-   - the _canonical_ base providers will be defined in the user and repo configuration files and are set when the user runs `claudine init` (via an interactive Q and A).
+   - the _canonical_ base providers will be defined in the user and repo configuration files and are set in `claudine config` (the Preferences tab).
        - obviously if the current working directory is **not** a git repo then we only report on the user scoped canonical provider
    - to provide symbolic links _to_ skills we need to isolate which provider will _provide_ the skill sources ... the "canonical provider" is the designated provider of skills.
    - based on this context here are two examples of what **line 5** of the Header Intro section might look like:
@@ -73,7 +73,7 @@ The reporting is broken down into the following sections:
 
 4. Auto-Init Behavior
 
-   - When `--apply` is used in a git repo and the repo canonical provider is not configured, claudine automatically runs `claudine init --repo` before proceeding with the fix operation.
+   - When `--apply` is used in a git repo and the repo canonical provider is not configured, claudine stops without applying fixes or printing the report, and tells the user to run `claudine config` and set the repo provider in the Preferences tab.
 
 5. Exceptions
 

@@ -38,7 +38,7 @@ Like any standard hook based event system, you can attach your own custom action
 
 In addition to the two actions above, Claudine provides two _services_ which are **cross-event** in nature:
 
-- **Logging** - Claudine logs what it sees. This includes hook events (as well as _wrapped execution_ or _composition_ when that is used). Logging can be turned off and we ask you whether you'd like this on when you first run `claudine init`.
+- **Logging** - Claudine logs what it sees. This includes hook events (as well as _wrapped execution_ or _composition_ when that is used). Logging can be turned off and we ask you whether you'd like this on the first time you run a `claudine` command, which starts a short setup interview.
 - **Protect** - We provide a _protection_ service which will analyze hook events for dangerous commands and either block these commands or require explicit user approval.
 
 ### Agentic Execution Wrapping
@@ -67,11 +67,12 @@ The immediate benefits of wrapped execution are:
     - **Protect.** Claudine will intelligently strip out potentially dangerous/secret **ENV keys** for you; helping you to not spuriously share secrets that aren't needed to be shared.
     - **More Context.** Claudine will also add a few "contextual" ENV keys for you which might be helpful for event handling and are used for logging purposes. Things like 
         - `AGENT` being set for the Agentic CLI's name
-        - `REPO` the name of the repo you're in
         - `PACKAGE_AREA` the name of the package area you are in
         - `PACKAGE` the name of the particular package you are in
         - `INTERACTIVE` is a boolean flag indicating whether the session is interactive or not
         - `YOLO` is a boolean flag indicating whether you are running in **yolo** mode or not
+        - `CLAUDINE_SESSION_ID`, `CLAUDINE_PID`, and `AGENT_PARAMS` identify the wrapped session; `MODEL` and `OPERATION` are set when a model or `--operation` is given
+        - there is no `REPO` variable; a composition document reads the repo name from `ctx.repo`
 
     > **Note:** by default when you start Claudine in wrapped execution mode, it will explicitly share which variables have been removed and which have been added. Later, if you don't want to always see that you can run your commands with the `--quiet` flag and this extra information will be removed.
 
@@ -245,8 +246,9 @@ Now you'll want to run the following from the repo's root:
 just init
 # now install the claudine CLI
 just install-claudine
-# now you're ready to use Claudine but it's best if you first just initialize it
-claudine init # brings you through a short interactive interview
+# the first command that needs a config (for example `claudine hooks`) runs a short
+# interactive setup interview; change settings later with `claudine config`
+claudine hooks
 ```
 
 

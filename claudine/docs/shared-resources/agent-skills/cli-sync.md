@@ -1,17 +1,20 @@
 ```sh
 # synchronizes Agent Skills (not other shared resources)
-claudine skills sync
-# synchronizes all shared resources (skills, prompts, agent definitions, mcp)
-claudine sync
+claudine skills --fix
+# slash commands and agent definitions have their own --fix
+claudine commands --fix
+claudine agents --fix
 ```
+
+There is no `skills sync` subcommand: `claudine skills sync` lists the skills whose names contain "sync". `claudine sync` re-registers hooks only; it does not touch skills, commands, agents, or MCP servers.
 
 ## CLI Switches
 
-- `--fix` will try to fix malformed agent skills
+- `--fix` (alias of `--apply`) links shared skills into providers that are missing them, and repairs fixable frontmatter problems (tab indentation, a missing `name`) first
 
 ## Frontmatter Props
 
-- if the `sync` Frontmatter property is set to `false` on an Agent Skill then this skill will _not_ be synced, however, non-synced skills will be called out in the CLI reporting (as having not been synced)
+- **planned:** setting the `sync` Frontmatter property to `false` on an Agent Skill will keep that skill from being synced, and the CLI report will call it out as not synced; today every skill is synced
 
 ## User and Repo scoping
 

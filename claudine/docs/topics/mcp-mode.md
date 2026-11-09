@@ -20,13 +20,13 @@ A provider that has never run (no `~/.codex` yet) gets an empty overlay with jus
 When a user has passed in a non-interactive prompt to an Agent for processing or to kick off a new interactive session, the process is the same:
 
 ```sh
-# run an non-interactive session and add the `brave-search` MCP server
-claudine codex --non-interactive "#brave-search Who is donald duck?"
-# start an interactive session and opt into the `brave-search` MCP server
-claudine codex "#brave-search"
+# a prompt argument makes the session non-interactive; the tag adds the `brave-search` MCP server
+claudine codex --mcp "#brave-search Who is donald duck?"
+# no prompt argument starts an interactive session; `--use` opts into `brave-search`
+claudine codex --use brave-search
 ```
 
-> These two examples both showing using the `codex` Agent in interactive or non-interactive modes using the `#{tag}` syntax which indicates MCP opt in
+> The first example uses the `#{tag}` syntax in a non-interactive prompt to opt in; the second names the server with `--use` (which also turns on MCP mode) for an interactive session
 
 ### Opt In Syntax
 

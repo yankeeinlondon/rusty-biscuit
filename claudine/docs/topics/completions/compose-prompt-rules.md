@@ -4,12 +4,15 @@
 
 Claudine expects, by convention, that your _prompts_ used in a `claudine compose <prompt>` command to live in a certain set of directories:
 
-- `{repo-root}/prompts`,
-- `.claudine/prompts`,
-- `.claude/commands` (for backwards compatibility; note we only use locally scoped commands not user scoped),
+- `{local}/prompts`,
+- `{local}/.claudine/prompts`,
+- `{local}/docs`,
+- `{local}/.<provider>/skills` (`.claude`, `.codex`, `.gemini`, `.opencode`, `.goose`, `.qwen`, `.kimi`; only repo-local skill directories, never user-scoped ones),
 - `~/.claudine/prompts`
 
-> **Note:** when working inside a monorepo, this will be extended to include (note: that these two document root are considered the most "local"):
+Here `{local}` is the repository root when you launch inside a repository, and the launch directory otherwise. `.claude/commands` is not a prompt root.
+
+> **Note:** when working inside a monorepo, this will be extended to include (note: that these two document root are considered the most "local", and `{package}/prompts` is searched before `{package-area}/prompts`):
 > 
 > - `{package}/prompts`
 > - `{package-area}/prompts`
