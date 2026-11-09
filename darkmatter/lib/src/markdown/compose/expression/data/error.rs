@@ -29,6 +29,10 @@ pub const UNSUPPORTED_FORMAT_CODE: &str = "dm.data.unsupported_format";
 pub const MALFORMED_CODE: &str = "dm.data.malformed";
 /// The parsed data does not satisfy `as` (R5).
 pub const CONTRACT_MISMATCH_CODE: &str = "dm.data.contract_mismatch";
+/// An options object (`load_data`'s third argument) binds but cannot apply:
+/// an invalid delimiter, a non-tab TSV delimiter, or a tabular option on a
+/// non-tabular format.
+pub const INVALID_OPTIONS_CODE: &str = "dm.data.invalid_options";
 
 /// Every `dm.data.*` code, each always an error. None is a warning, so none
 /// belongs in the `--deny` registry of governed warnings.
@@ -39,6 +43,7 @@ pub const DATA_DIAGNOSTIC_CODES: &[&str] = &[
     UNSUPPORTED_FORMAT_CODE,
     MALFORMED_CODE,
     CONTRACT_MISMATCH_CODE,
+    INVALID_OPTIONS_CODE,
 ];
 
 /// Where a parser located a malformed data document.
@@ -141,6 +146,16 @@ pub enum DataError {
         table: Option<TabularSource>,
     },
 
+    /// An option of the options object cannot apply to this call. It names no
+    /// position in a data file: it is decided before the file is read.
+    #[error("{}", super::options::invalid_options_message(key, reason))]
+    InvalidOptions {
+        /// The option key (`format`, `delimiter`, or `header`).
+        key: &'static str,
+        /// Why the value cannot apply, naming what is accepted.
+        reason: String,
+    },
+
     /// The contract is not a valid SimplifiedSchema type, or names a type its
     /// import does not export.
     #[error("load_data(): the contract `{written}` is invalid: {source}")]
@@ -162,7 +177,7 @@ pub struct TabularSource {
     pub data: Arc<DelimitedData>,
 }
 
-fn format_name(format: DataFormat) -> &'static str {
+pub(super) fn format_name(format: DataFormat) -> &'static str {
     match format {
         DataFormat::Toml => "TOML",
         DataFormat::Yaml => "YAML",
@@ -196,6 +211,7 @@ impl DataError {
             Self::UnsupportedFormat { .. } => Some(UNSUPPORTED_FORMAT_CODE),
             Self::Malformed { .. } => Some(MALFORMED_CODE),
             Self::ContractMismatch { .. } => Some(CONTRACT_MISMATCH_CODE),
+            Self::InvalidOptions { .. } => Some(INVALID_OPTIONS_CODE),
             Self::FileReference(_) | Self::ContractSchema { .. } => None,
         }
     }
@@ -208,7 +224,10 @@ impl DataError {
             | Self::ThisImportRejected { written, .. }
             | Self::ContractMismatch { written, .. }
             | Self::ContractSchema { written, .. } => Some(written),
-            Self::FileReference(_) | Self::UnsupportedFormat { .. } | Self::Malformed { .. } => None,
+            Self::FileReference(_)
+            | Self::UnsupportedFormat { .. }
+            | Self::Malformed { .. }
+            | Self::InvalidOptions { .. } => None,
         }
     }
 }
@@ -274,6 +293,17 @@ mod tests {
     fn a_file_family_failure_converts_to_the_shared_file_reference_variant() {
         let error = ExpressionError::from(Arc::new(remote_not_enabled()));
         assert!(matches!(error, ExpressionError::FileReference(ref d) if d.kind == FileRefFailure::RemoteNotEnabled));
+    }
+
+    #[test]
+    fn invalid_options_has_its_own_code_and_names_no_contract() {
+        let error = DataError::InvalidOptions { key: "delimiter", reason: "must be one character".into() };
+        assert_eq!(error.code(), Some(INVALID_OPTIONS_CODE));
+        assert!(DATA_DIAGNOSTIC_CODES.contains(&INVALID_OPTIONS_CODE));
+        assert_eq!(error.written_contract(), None);
+        assert!(!error.is_deferral());
+        assert_eq!(error.to_string(), "load_data(): option `delimiter` is invalid: must be one character");
+        assert!(matches!(ExpressionError::from(Arc::new(error)), ExpressionError::Data(_)));
     }
 
     #[test]

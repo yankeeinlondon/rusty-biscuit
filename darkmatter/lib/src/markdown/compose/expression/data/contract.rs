@@ -116,6 +116,27 @@ pub enum RowShapeConflict {
     /// No arm selects a row mode: an empty tuple, or only `null`.
     #[error("the contract selects no row shape; {ROW_SHAPE_SUGGESTION}")]
     NoRowMode,
+    /// `header: false` reads rows by position, but the contract's rows are
+    /// objects, which need header names.
+    #[error(
+        "`header: false` reads rows by position, but this contract describes rows as objects; use a `tuple([…])[]` or `string[][]` contract, or read an input that has a header"
+    )]
+    HeaderlessObjectRows,
+}
+
+/// The rule for `header: false`: rows are read by position, so a contract
+/// whose rows are known to be objects cannot apply. A provisional
+/// classification (an unresolved import decides the mode) stays open until
+/// the contract is resolved at execution.
+///
+/// ## Errors
+///
+/// [`RowShapeConflict::HeaderlessObjectRows`] for object rows.
+pub fn require_positional_rows(class: RowClassification) -> Result<(), RowShapeConflict> {
+    match class {
+        RowClassification::Known(RowMode::Object) => Err(RowShapeConflict::HeaderlessObjectRows),
+        RowClassification::Known(RowMode::List) | RowClassification::Provisional => Ok(()),
+    }
 }
 
 /// Resolves `written` as a contract for a document whose context is
@@ -778,6 +799,19 @@ mod tests {
         let b = prepare_contract("{ port: Port@./schemas/types.yaml }[]", &document(&second)).unwrap();
         assert_eq!(a.imports.len(), 1);
         assert_ne!(a.key, b.key, "the same text in two folders names two types");
+    }
+
+    #[test]
+    fn headerless_rows_refuse_known_object_rows_only() {
+        assert_eq!(
+            require_positional_rows(RowClassification::Known(RowMode::Object)),
+            Err(RowShapeConflict::HeaderlessObjectRows)
+        );
+        assert_eq!(require_positional_rows(RowClassification::Known(RowMode::List)), Ok(()));
+        assert_eq!(require_positional_rows(RowClassification::Provisional), Ok(()));
+        let message = RowShapeConflict::HeaderlessObjectRows.to_string();
+        assert!(message.contains("`header: false`"), "{message}");
+        assert!(message.contains("tuple("), "{message}");
     }
 
     #[test]

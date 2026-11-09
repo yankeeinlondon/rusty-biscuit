@@ -8,10 +8,10 @@
 ## Signature
 
 ```text
-load_data(file: file | null, as: type-definition(container)) -> unknown | null | error
+load_data(file: file | null, as: type-definition(container), [options: {format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean} | null]) -> unknown | null | error
 ```
 
-Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file (chosen by its extension) and returns its data converted to the container type `as` describes, or fails naming where the data breaks that type. CSV and TSV rows become objects keyed by the header, or lists of cells, as `as`'s element type says. Null passes through without reading anything.
+Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file and returns its data converted to the container type `as` describes, or fails naming where the data breaks that type. CSV and TSV rows become objects keyed by the header, or lists of cells, as `as`'s element type says. The optional `options` object chooses how the file is read: `format` (`yaml`, `json`, `jsonl`, `csv`, `tsv`, `toml`, `json5`, or the aliases `yml` and `ndjson`) overrides the extension; `delimiter`, one ASCII character other than a double quote, CR, or LF, separates CSV cells (default a comma; TSV accepts only a tab); `header: false` reads every CSV or TSV record as a row by position, which needs a list-row contract (default `true`). `delimiter` or `header` on a non-tabular format is an error. Null passes through without reading anything.
 
 ## Parameters
 
@@ -19,6 +19,7 @@ Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file (chosen by its ext
 | --- | --- | --- |
 | `file` | `file \| null` | required |
 | `as` | `type-definition(container)` | required |
+| `options` | `{format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean} \| null` | optional |
 
 ## Returns
 

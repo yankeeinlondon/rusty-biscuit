@@ -50,6 +50,7 @@ mod lsp_session;
 mod mapping_only_corpus;
 mod named_type_references;
 mod no_side_effects;
+mod option_arguments;
 mod packaging_contract;
 mod referenced_targets;
 mod registry_observability;

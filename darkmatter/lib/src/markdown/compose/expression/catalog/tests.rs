@@ -788,3 +788,91 @@ fn shipped_callback_examples_passively_parse_through_the_catalog() {
         }
     }
 }
+
+/// `load_data`'s third parameter is an optional, nullable, closed inline
+/// object whose keys and `format` members come from the catalog.
+#[test]
+fn load_data_options_parameter_is_a_closed_inline_object() {
+    use simplified_schema::simplified::{FunctionParameters, SimplifiedType};
+
+    let descriptors = function_descriptors("load_data");
+    assert_eq!(descriptors.len(), 1, "one overload");
+    let descriptor = &descriptors[0];
+    assert_eq!(&*descriptor.signature, "load_data(file, as, [options])");
+    let FunctionParameters::List(parameters) = &descriptor.function_type.parameters else {
+        panic!("load_data declares parameters");
+    };
+    assert_eq!(parameters.len(), 3);
+    let options = &parameters[2];
+    assert_eq!(options.name, "options");
+    assert!(options.optional && !options.rest);
+    let PropertyDef::Union(arms) = &options.def else {
+        panic!("options is `{{…}} | null`: {:?}", options.def);
+    };
+    assert!(arms.iter().any(|arm| arm.ty == TypeExpr::Primitive(SimplifiedType::Null)), "admits null: {arms:?}");
+    let shape = arms
+        .iter()
+        .find_map(|arm| match &arm.ty {
+            TypeExpr::InlineObject(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("an inline-object arm");
+    assert_eq!(shape.properties.keys().map(String::as_str).collect::<Vec<_>>(), ["format", "delimiter", "header"]);
+    assert!(shape.pattern_keys.is_empty(), "closed: no pattern keys");
+    let PropertyDef::Single(format) = &shape.properties["format"] else {
+        panic!("format is one enum");
+    };
+    assert_eq!(format.ty, TypeExpr::Primitive(SimplifiedType::Enum));
+    let members: Vec<&str> = format
+        .constraints
+        .iter()
+        .find_map(|constraint| match constraint {
+            Constraint::Members(values) => Some(values.iter().map(String::as_str).collect()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    assert_eq!(members, ["yaml", "yml", "json", "jsonl", "ndjson", "csv", "tsv", "toml", "json5"]);
+}
+
+/// The shared binder decides the options object's shape: an unknown key, a
+/// wrongly typed field, and a format name outside the enum fail binding at
+/// argument 2, while `null`, `{}`, and null fields bind (and the unchanged
+/// handler then reads the file).
+#[test]
+fn load_data_options_bind_through_the_shared_binder() {
+    use crate::markdown::compose::expression::ExpressionError;
+    use crate::markdown::compose::expression::functions::call_function;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("rows.csv"), "name,port\nweb,8080\n").unwrap();
+    let context = ResolutionContext::at(dir.path().to_path_buf());
+    let call = |options: Value| {
+        call_function("load_data", &[json!("rows.csv"), json!("tuple([string, number])[]"), options], Some(&context))
+            .expect("load_data is registered")
+    };
+    for options in [
+        json!({"quote": ","}),
+        json!({"header": [1]}),
+        json!({"format": "CSV"}),
+        json!({"format": " csv"}),
+        json!({"format": "text"}),
+        json!({"delimiter": [","]}),
+        json!(5),
+        json!("csv"),
+        json!([]),
+    ] {
+        let error = call(options.clone()).expect_err(&options.to_string());
+        let ExpressionError::Call(binding) = &error else {
+            panic!("{options}: not a binding error: {error:?}");
+        };
+        let indices: Vec<usize> = binding.argument_errors().map(|failure| failure.index).collect();
+        assert!(!indices.is_empty() && indices.iter().all(|index| *index == 2), "{options}: {indices:?}");
+    }
+    for options in [json!(null), json!({}), json!({"header": null}), json!({"format": null, "delimiter": null})] {
+        assert_eq!(call(options.clone()).unwrap_or_else(|error| panic!("{options}: {error}")), json!([["web", 8080]]));
+    }
+    // The coercion engine's normal conversions apply to option fields.
+    for options in [json!({"delimiter": 5}), json!({"header": "false"})] {
+        assert!(call(options.clone()).is_ok(), "{options} binds");
+    }
+}

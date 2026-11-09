@@ -93,7 +93,7 @@ DMLS searches the same five [schema roots](./definition.md#schema-roots) as `md`
 
 ### Claudine documents
 
-Claudine's trigger bundle consists of seven ordinary disk files in
+Claudine's trigger bundle consists of eight ordinary disk files in
 `claudine/schemas/`:
 
 | File | Kind | Holds |
@@ -102,6 +102,7 @@ Claudine's trigger bundle consists of seven ordinary disk files in
 | `lifecycle.yaml` | library (`kind: schema`) | the recursive lifecycle stack families and the `loop:` block type |
 | `sequence-types.yaml` | library (`kind: schema`) | recursive sequence tasks and group containers |
 | `linking.yaml` | library (`kind: schema`) | the linking keys of a skill, command, or agent |
+| `document.yaml` | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that `claudine.yaml` and `inline-compose.yaml` import |
 | `claudine.yaml` | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, for a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
 | `inline-compose.yaml` | trigger (`kind: schema-trigger`) | inline-compose's document metadata, for a non-null `prompt` with no non-null `sequence` |
 | `sequence.yaml` | trigger (`kind: schema-trigger`) | sequence steps and root metadata, for a non-null `sequence` |
@@ -110,13 +111,13 @@ DMLS needs no configuration for them. A document whose package area is
 `claudine/` finds them through the package-area root, so a misspelled verb, a
 malformed long form, or a `shell` action in `initialize` is a diagnostic with
 no `$schema` in the document. Anywhere else, put a complete bundle of regular
-files (all seven, so their relative imports resolve) in the repository root's
+files (all eight, so their relative imports resolve) in the repository root's
 `schemas/`, the folder an absolute `SCHEMAS_DIR` names, or `~/schemas`. A
 symlinked trigger file is ignored, and `$schema: claudine.yaml` fails, because
 a trigger activates by placement and match, never by reference. Copy the
 companion `globals.yaml` host catalog and `globals.lifecycle.json` artifact too
 for Claudine-specific expression globals and event analysis; they are separate
-from the seven-file trigger bundle.
+from the eight-file trigger bundle.
 
 DMLS reads these files **only from disk**: it has no Claudine dependency and
 registers no embedded bundle. The `claudine` binary carries its own embedded

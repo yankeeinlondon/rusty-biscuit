@@ -4,6 +4,8 @@
 //!   chooses a CSV/TSV row mode from it.
 //! - [`error`] holds [`DataError`], the typed failure kept until diagnostic
 //!   projection.
+//! - `options` reads the options object (`{format?, delimiter?, header?}`)
+//!   and decides whether it can apply to the call's effective format.
 //! - [`parse`] decodes and parses one data document in its format.
 //! - `locate` places a contract violation in its source text and in file
 //!   order, for diagnostic projection.
@@ -16,6 +18,8 @@ pub mod contract;
 pub mod error;
 pub mod load;
 pub(crate) mod locate;
+#[cfg_attr(not(test), expect(dead_code, reason = "the option model is wired into `load_data` and the call check in the next step"))]
+pub(crate) mod options;
 pub mod parse;
 pub mod runtime;
 
@@ -24,10 +28,10 @@ mod observation_tests;
 
 pub use contract::{
     PreparedContract, RowClassification, RowMode, RowShapeConflict, classify_rows, judge_written_contract, prepare_contract,
-    written_contract,
+    require_positional_rows, written_contract,
 };
 pub use error::{
-    CONTRACT_MISMATCH_CODE, DATA_DIAGNOSTIC_CODES, DataError, DataSourceLocation, MALFORMED_CODE,
+    CONTRACT_MISMATCH_CODE, DATA_DIAGNOSTIC_CODES, DataError, DataSourceLocation, INVALID_OPTIONS_CODE, MALFORMED_CODE,
     NOT_A_CONTAINER_CODE, ROW_SHAPE_CONFLICT_CODE, TabularSource, THIS_IMPORT_REJECTED_CODE, UNSUPPORTED_FORMAT_CODE,
 };
 pub use parse::{LocalDataDocument, parse_local_document};
