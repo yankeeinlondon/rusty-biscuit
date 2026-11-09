@@ -242,7 +242,7 @@ which suggests `"{ <string>: string }[]"` or `"tuple([…])[]"`:
 | `as` over a CSV | Result |
 | --- | --- |
 | `"{ name: string }[]"`, `"{ name: string }[] \| null"` | object rows |
-| `"tuple([string, number])[]"`, `"string[][]"` | list rows |
+| `"tuple([string, number])[]"` | list rows |
 | `"{ a: string }[] \| tuple([string])[]"` | conflict: the arms disagree |
 | `"string[]"`, `"unknown[]"` | conflict: a scalar or `unknown` element is not a row |
 | `"object"`, `"{ <string>: string }"` | conflict: a top-level object is not a list of rows |

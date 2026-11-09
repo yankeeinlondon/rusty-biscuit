@@ -123,11 +123,19 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
   re-raises it). With no gate nothing changes.
 
 - **Memo shape** (`runtime.rs`): contracts are prepared once per document
-  context and written text; a parsed source is keyed by identity alone
-  (canonical path or normalized URL), and a bound result by source plus the
-  contract key (the unsorted `to_json_schema_with_definitions` serialization,
-  the bare declaration, and the sorted import identities). So two contracts
-  over one file read it once and bind twice. Entries are
+  context and written text. Three layers share one generation: a raw source
+  (`RawSource`: decoded text or the first invalid UTF-8 offset, size, BLAKE3
+  hash) keyed by identity alone (canonical path or normalized URL); a parsed
+  source keyed by `SourceKey { identity, format, delimiter }` (effective
+  values, so defaults and aliases share); a bound result keyed by that plus
+  the contract key (the unsorted `to_json_schema_with_definitions`
+  serialization, the bare declaration, and the sorted import identities) and
+  the effective header. So two delimiters read once and parse twice, and two
+  contracts parse once and bind twice. `reads` counts raw loads only;
+  `source_hits` counts parse-layer hits. Each layer is single-flighted
+  against the generation of the entry below it (`single_flight` passes a
+  stale generation on), so an in-flight read never fills the new maps after
+  `invalidate_memo`. Entries are
   `Arc<OnceLock<Result<…, Arc<DataError>>>>`, filled without holding the map
   lock; a memoized error gets the current call site only at projection. The
   memo holds in every `CacheAccessMode`. `RemoteNotEnabled` (the reference

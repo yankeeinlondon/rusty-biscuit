@@ -42,24 +42,33 @@ impl Failure {
 ///
 /// ## Errors
 ///
-/// [`DataError::Malformed`] for bytes that are not UTF-8, located by the
-/// zero-based offset of the first invalid byte in `bytes` (a byte-order mark
-/// counted), with no line or column.
+/// [`DataError::Malformed`] for bytes that are not UTF-8, as
+/// [`utf8_failure`] reports it.
 pub(crate) fn decode_local(
     bytes: Vec<u8>,
     identity: &DataSourceIdentity,
     format: DataFormat,
 ) -> Result<Arc<str>, DataError> {
-    let text = String::from_utf8(bytes).map_err(|error| {
-        let offset = error.utf8_error().valid_up_to();
-        DataError::Malformed {
-            identity: identity.clone(),
-            format,
-            message: format!("the file is not valid UTF-8 (byte {offset})"),
-            location: DataSourceLocation { byte_offset: Some(offset), ..DataSourceLocation::default() },
-        }
-    })?;
-    Ok(Arc::from(strip_bom(&text)))
+    decode_bytes(&bytes).map_err(|offset| utf8_failure(identity, format, offset))
+}
+
+/// `bytes` as BOM-stripped text, or the zero-based offset of the first
+/// invalid UTF-8 byte in `bytes` (a byte-order mark counted). Format-free, so
+/// one decoded text serves every interpretation of a source.
+pub(crate) fn decode_bytes(bytes: &[u8]) -> Result<Arc<str>, usize> {
+    std::str::from_utf8(bytes).map(|text| Arc::from(strip_bom(text))).map_err(|error| error.valid_up_to())
+}
+
+/// The failure of reading bytes that are not UTF-8 as `format`: malformed,
+/// located by the zero-based `offset` of the first invalid byte, with no line
+/// or column.
+pub(crate) fn utf8_failure(identity: &DataSourceIdentity, format: DataFormat, offset: usize) -> DataError {
+    DataError::Malformed {
+        identity: identity.clone(),
+        format,
+        message: format!("the file is not valid UTF-8 (byte {offset})"),
+        location: DataSourceLocation { byte_offset: Some(offset), ..DataSourceLocation::default() },
+    }
 }
 
 /// `text` without one leading byte-order mark.
@@ -67,7 +76,8 @@ pub(crate) fn strip_bom(text: &str) -> &str {
     text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
-/// Parses BOM-stripped `text` as `format`.
+/// Parses BOM-stripped `text` as `format`. CSV and TSV split on `delimiter`,
+/// a comma and a tab when it is `None`; every other format ignores it.
 ///
 /// ## Errors
 ///
@@ -80,6 +90,7 @@ pub(crate) fn strip_bom(text: &str) -> &str {
 pub(crate) fn parse_text(
     text: &str,
     format: DataFormat,
+    delimiter: Option<u8>,
     identity: &DataSourceIdentity,
 ) -> Result<SourceContent, DataError> {
     let parsed = match format {
@@ -88,8 +99,8 @@ pub(crate) fn parse_text(
         DataFormat::Jsonl => parse_json_lines(text).map(SourceContent::Tree),
         DataFormat::Toml => parse_toml(text).map(SourceContent::Tree),
         DataFormat::Json5 => parse_json5(text).map(SourceContent::Tree),
-        DataFormat::Csv => parse_delimited(text, b',').map(SourceContent::Table),
-        DataFormat::Tsv => parse_delimited(text, b'\t').map(SourceContent::Table),
+        DataFormat::Csv => parse_delimited(text, delimiter.unwrap_or(b',')).map(SourceContent::Table),
+        DataFormat::Tsv => parse_delimited(text, delimiter.unwrap_or(b'\t')).map(SourceContent::Table),
         DataFormat::Markdown | DataFormat::Pdf | DataFormat::Text => {
             Err(Failure::new("not a data format", DataSourceLocation::default()))
         }
@@ -166,7 +177,7 @@ pub fn parse_local_document(
         return Err(DataError::UnsupportedFormat { identity: identity.clone(), extension: None });
     }
     let text = decode_local(bytes, identity, format)?;
-    match parse_text(&text, format, identity)? {
+    match parse_text(&text, format, None, identity)? {
         SourceContent::Tree(value) => Ok(LocalDataDocument { format, text, value }),
         SourceContent::Table(_) => Err(DataError::UnsupportedFormat { identity: identity.clone(), extension: None }),
     }
@@ -389,6 +400,7 @@ fn parse_delimited(text: &str, delimiter: u8) -> Result<Arc<biscuit_file::Delimi
 
 #[cfg(test)]
 mod tests {
+    use super::super::error::TabularSource;
     use super::*;
 
     fn identity() -> DataSourceIdentity {
@@ -396,14 +408,14 @@ mod tests {
     }
 
     fn malformed(text: &str, format: DataFormat) -> (String, DataSourceLocation) {
-        match parse_text(text, format, &identity()) {
+        match parse_text(text, format, None, &identity()) {
             Err(DataError::Malformed { message, location, .. }) => (message, location),
             other => panic!("{text:?} as {format:?}: expected malformed, got {other:?}"),
         }
     }
 
     fn tree(text: &str, format: DataFormat) -> Value {
-        match parse_text(text, format, &identity()) {
+        match parse_text(text, format, None, &identity()) {
             Ok(SourceContent::Tree(value)) => value,
             other => panic!("{text:?} as {format:?}: {other:?}"),
         }
@@ -444,6 +456,58 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn invalid_utf8_offset_is_format_free_until_named() {
+        let bytes = b"\xEF\xBB\xBFa,b\n\xFF\n";
+        let offset = decode_bytes(bytes).expect_err("not UTF-8");
+        assert_eq!(offset, 7, "the offset counts the byte-order mark");
+        let named = |format| match utf8_failure(&identity(), format, offset) {
+            DataError::Malformed { format, message, location, .. } => (format, message, location),
+            other => panic!("{other:?}"),
+        };
+        let (csv, csv_message, csv_location) = named(DataFormat::Csv);
+        let (yaml, yaml_message, yaml_location) = named(DataFormat::Yaml);
+        assert_eq!((csv, yaml), (DataFormat::Csv, DataFormat::Yaml));
+        assert_eq!(csv_message, yaml_message);
+        assert_eq!(csv_location, yaml_location);
+        assert_eq!(csv_location.byte_offset, Some(7));
+        assert_eq!(decode_bytes(b"\xEF\xBB\xBFok").as_deref(), Ok("ok"));
+    }
+
+    #[test]
+    fn custom_delimiter_parses() {
+        let table = |text: &str, format, delimiter| match parse_text(text, format, delimiter, &identity()) {
+            Ok(SourceContent::Table(data)) => data,
+            other => panic!("{text:?}: {other:?}"),
+        };
+        let semicolon = table("name;port\nweb;8080\n", DataFormat::Csv, Some(b';'));
+        assert_eq!(semicolon.headers.as_ref().map(|header| header.fields.len()), Some(2));
+        assert_eq!(semicolon.rows[0].fields[1].text, "8080");
+        let comma = table("name;port\nweb;8080\n", DataFormat::Csv, None);
+        assert_eq!(comma.rows[0].fields.len(), 1, "the default stays a comma");
+        let tab = table("a\tb\n1\t2\n", DataFormat::Tsv, None);
+        assert_eq!(tab.rows[0].fields[1].text, "2");
+    }
+
+    #[test]
+    fn headerless_view_includes_the_first_record() {
+        use super::super::contract::RowMode;
+        let data = match parse_text("a,b\n1,2\n", DataFormat::Csv, None, &identity()) {
+            Ok(SourceContent::Table(data)) => data,
+            other => panic!("{other:?}"),
+        };
+        let first_cells = |table: &TabularSource| {
+            (0..table.row_count()).map(|index| table.row(index).unwrap().fields[0].text.clone()).collect::<Vec<_>>()
+        };
+        let headed = TabularSource { mode: RowMode::List, header: true, data: data.clone() };
+        let headerless = TabularSource { mode: RowMode::List, header: false, data };
+        assert_eq!(first_cells(&headed), ["1"]);
+        assert_eq!(first_cells(&headerless), ["a", "1"]);
+        assert!(headerless.row(2).is_none());
+        let empty = TabularSource { mode: RowMode::List, header: false, data: Arc::new(biscuit_file::read_delimited("", b',').unwrap()) };
+        assert_eq!(empty.row_count(), 0);
     }
 
     #[test]

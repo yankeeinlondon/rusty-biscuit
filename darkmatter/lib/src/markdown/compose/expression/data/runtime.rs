@@ -6,24 +6,31 @@
 //! lifecycle, composition, and nested documents read through one memo and
 //! report into one read set.
 //!
-//! The memo has two levels. A parsed source is keyed by its resolved identity
-//! alone, and a bound result by that identity and the contract key, so two
-//! contracts over one file read and parse it once and bind it twice. Each
-//! entry is single-flight: the first caller loads, and concurrent callers for
-//! the same key wait for its result. The map lock is never held while a
-//! loader runs.
+//! The memo has three layers. A raw source (the decoded text, or the offset
+//! of its first invalid UTF-8 byte, with the size and BLAKE3 hash of what was
+//! read) is keyed by the resolved identity alone; a parsed source by a
+//! source key (identity, effective format, effective delimiter); and a
+//! bound result by a bind key (that source key, the contract key, and the
+//! effective header). So two delimiters over one file read it once and parse
+//! it twice, two contracts parse it once and bind it twice, and an omitted
+//! default shares its entries with the same default written out. Each entry
+//! is single-flight: the first caller loads, and concurrent callers for the
+//! same key wait for its result. The map lock is never held while a loader
+//! runs, and no loader consults another layer.
 //!
 //! [`DataRuntime::invalidate_memo`] ends reuse after a command ran: it starts
-//! a new generation with empty maps and leaves the read set alone. A load
-//! already in flight finishes into its old entry for its own caller, and the
-//! generation it started in keeps it from populating the new maps.
+//! a new generation with every layer empty and leaves the read set alone.
+//! Each layer is computed against the generation of the entry below it, so a
+//! load already in flight finishes into its old entry for its own caller and
+//! never populates the new maps at any layer.
 //! [`DataRuntime::memo_generation`] tells a holder of earlier results that
 //! this happened.
 //!
 //! Beside the read set, the runtime keeps an ordered [`Observation`] log:
 //! every input an expression function observed (content with the BLAKE3 hash
-//! of the bytes read, an existence answer, a missing probe, a listing). A
-//! memo hit records its observation again, so a caller that marks the log
+//! of the bytes read, an existence answer, a missing probe, a listing). The
+//! hash of a read lives on its raw entry, so a memo hit at any layer records
+//! the same observation again, and a caller that marks the log
 //! ([`DataRuntime::read_mark`]) and reads its slice afterward
 //! ([`DataRuntime::observations_since`]) sees every input it depended on.
 
@@ -129,6 +136,21 @@ impl Observation {
     }
 }
 
+/// A data source as read, before any format interprets it.
+#[derive(Debug, Clone)]
+pub(crate) struct RawSource {
+    /// The BOM-stripped text, or the zero-based offset of the first invalid
+    /// UTF-8 byte in the original bytes (a byte-order mark counted). The
+    /// failure stays format-free here; the parse layer names its format.
+    pub(crate) text: Result<Arc<str>, usize>,
+    /// The size of the document as read (local bytes, or the fetched text
+    /// before its byte-order mark is removed), in bytes.
+    pub(crate) len: usize,
+    /// BLAKE3 of what was read (local bytes before decoding, or the fetched
+    /// text), so a memo hit at any layer records the same observation.
+    pub(crate) hash: [u8; 32],
+}
+
 /// A data document read, decoded, and parsed, before any contract applies.
 #[derive(Debug, Clone)]
 pub struct LoadedSource {
@@ -136,21 +158,19 @@ pub struct LoadedSource {
     pub content: SourceContent,
     /// The format it was parsed as.
     pub format: DataFormat,
-    /// The BOM-stripped text, local or fetched, for locating failures.
+    /// The BOM-stripped text, local or fetched, for locating failures; shared
+    /// with the raw entry and every other interpretation of it.
     pub text: Arc<str>,
     /// The size of the document as read (local bytes or fetched text), in
     /// bytes.
     pub bytes: usize,
-    /// BLAKE3 of the bytes as read (local bytes before decoding, or the
-    /// fetched text), kept with the memo entry so a memo hit records the same
-    /// observation.
-    pub hash: [u8; 32],
 }
 
 /// What a source parsed into.
 ///
 /// CSV and TSV stay a table because their row shape is chosen per contract
-/// when binding, while the source memo is keyed by identity alone.
+/// and header choice when binding, while the parsed source is keyed without
+/// either.
 #[derive(Debug, Clone)]
 pub enum SourceContent {
     /// A value tree (YAML, JSON, JSON Lines, TOML, JSON5).
@@ -171,13 +191,15 @@ pub struct LoadedData {
 /// Counts of the work a [`DataRuntime`] did, for assertions about reuse.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DataRuntimeStats {
-    /// Source loaders run (each one reads a file or a fetched body).
+    /// Raw loaders run (each one reads a file or takes a fetched body). A raw
+    /// lookup answered from the memo counts nothing, so raw reuse shows as
+    /// this staying flat.
     pub reads: usize,
-    /// Documents parsed, as reported by the loaders.
+    /// Documents parsed, as reported by the parse loaders.
     pub parses: usize,
     /// Binders run (each one validates a source against a contract).
     pub binds: usize,
-    /// Source lookups answered from the memo.
+    /// Parsed-source lookups answered from the memo.
     pub source_hits: usize,
     /// Bind lookups answered from the memo.
     pub bind_hits: usize,
@@ -223,27 +245,71 @@ fn bump(counter: &AtomicUsize) {
 
 type Outcome<T> = Result<Arc<T>, Arc<DataError>>;
 type Slot<T> = Arc<OnceLock<Outcome<T>>>;
-type BindKey = (DataSourceIdentity, String);
 /// Selects one of a generation's maps.
-type MapOf<S, B, K, T> = fn(&mut Generation<S, B>) -> &mut HashMap<K, Slot<T>>;
+type MapOf<R, S, B, K, T> = fn(&mut Generation<R, S, B>) -> &mut HashMap<K, Slot<T>>;
 
-struct Generation<S, B> {
+/// The parse-layer key: one interpretation of one source. The format and
+/// delimiter are the effective ones (an alias normalized, a default filled
+/// in), so equivalent spellings share an entry.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct SourceKey {
+    pub(crate) identity: DataSourceIdentity,
+    pub(crate) format: DataFormat,
+    pub(crate) delimiter: Option<u8>,
+}
+
+/// The bind-layer key: a parsed source, a contract, and the effective
+/// header choice (`None` for a format without one).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct BindKey {
+    source: SourceKey,
+    contract: String,
+    header: Option<bool>,
+}
+
+struct Generation<R, S, B> {
     number: u64,
-    sources: HashMap<DataSourceIdentity, Slot<S>>,
+    raw: HashMap<DataSourceIdentity, Slot<R>>,
+    sources: HashMap<SourceKey, Slot<S>>,
     bindings: HashMap<BindKey, Slot<B>>,
     contracts: HashMap<String, Slot<PreparedContract>>,
 }
 
-impl<S, B> Generation<S, B> {
+impl<R, S, B> Generation<R, S, B> {
     fn new(number: u64) -> Self {
-        Self { number, sources: HashMap::new(), bindings: HashMap::new(), contracts: HashMap::new() }
+        Self {
+            number,
+            raw: HashMap::new(),
+            sources: HashMap::new(),
+            bindings: HashMap::new(),
+            contracts: HashMap::new(),
+        }
+    }
+}
+
+/// A raw source as one caller received it, with the generation it was read
+/// in.
+pub(crate) struct RawEntry<R> {
+    generation: u64,
+    value: Arc<R>,
+    from_memo: bool,
+}
+
+impl<R> RawEntry<R> {
+    pub(crate) fn value(&self) -> &R {
+        &self.value
+    }
+
+    /// Whether the memo answered, so this caller ran no raw loader.
+    pub(crate) fn answered_from_memo(&self) -> bool {
+        self.from_memo
     }
 }
 
 /// A parsed source as one caller received it, with the generation it was
 /// loaded in.
 pub struct SourceEntry<S> {
-    identity: DataSourceIdentity,
+    key: SourceKey,
     generation: u64,
     value: Arc<S>,
     from_memo: bool,
@@ -257,7 +323,7 @@ impl<S> SourceEntry<S> {
 
     /// The source's identity.
     pub fn identity(&self) -> &DataSourceIdentity {
-        &self.identity
+        &self.key.identity
     }
 
     /// Whether the memo answered, so this caller ran no loader.
@@ -284,21 +350,21 @@ impl<B> BindEntry<B> {
     }
 }
 
-/// The two-level single-flight memo, generic over the parsed source `S` and
-/// the bound result `B`.
-pub(crate) struct DataMemo<S, B> {
-    state: Mutex<Generation<S, B>>,
+/// The three-layer single-flight memo, generic over the raw source `R`, the
+/// parsed source `S`, and the bound result `B`.
+pub(crate) struct DataMemo<R, S, B> {
+    state: Mutex<Generation<R, S, B>>,
     counters: Counters,
 }
 
-impl<S, B> Default for DataMemo<S, B> {
+impl<R, S, B> Default for DataMemo<R, S, B> {
     fn default() -> Self {
         Self { state: Mutex::new(Generation::new(0)), counters: Counters::default() }
     }
 }
 
-impl<S, B> DataMemo<S, B> {
-    fn lock(&self) -> MutexGuard<'_, Generation<S, B>> {
+impl<R, S, B> DataMemo<R, S, B> {
+    fn lock(&self) -> MutexGuard<'_, Generation<R, S, B>> {
         // A loader never runs under the lock, so a poisoned lock only means a
         // panic while inserting a slot; the maps are still consistent.
         self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -316,7 +382,7 @@ impl<S, B> DataMemo<S, B> {
         self.lock().number
     }
 
-    /// Starts a new generation with empty maps.
+    /// Starts a new generation with every layer empty.
     pub(crate) fn invalidate(&self) {
         let mut state = self.lock();
         let next = state.number + 1;
@@ -328,11 +394,12 @@ impl<S, B> DataMemo<S, B> {
     /// the generation the slot belongs to, and whether this caller ran it.
     ///
     /// With `expected` set, a key is memoized only when that is still the
-    /// current generation; otherwise `init` runs for this caller alone. A
+    /// current generation; otherwise `init` runs for this caller alone and
+    /// the outcome keeps the stale `expected` generation. A
     /// deferral outcome is removed from the map so a later caller tries again.
     fn single_flight<K: Hash + Eq + Clone, T>(
         &self,
-        map: MapOf<S, B, K, T>,
+        map: MapOf<R, S, B, K, T>,
         key: K,
         expected: Option<u64>,
         init: impl FnOnce() -> Result<T, Arc<DataError>>,
@@ -340,9 +407,13 @@ impl<S, B> DataMemo<S, B> {
         let (slot, generation) = {
             let mut state = self.lock();
             let generation = state.number;
-            if expected.is_some_and(|expected| expected != generation) {
+            if let Some(expected) = expected
+                && expected != generation
+            {
                 drop(state);
-                return (init().map(Arc::new), generation, true);
+                // The stale generation is passed on, so the next layer's
+                // entry built from this one is not memoized either.
+                return (init().map(Arc::new), expected, true);
             }
             (map(&mut state).entry(key.clone()).or_default().clone(), generation)
         };
@@ -367,31 +438,49 @@ impl<S, B> DataMemo<S, B> {
         (outcome, generation, ran)
     }
 
-    /// The parsed source for `identity`, running `loader` only when no entry
-    /// of the current generation holds it.
+    /// The raw source for `identity`, running `loader` only when no entry of
+    /// the current generation holds it. Only a run counts (`reads`).
+    ///
+    /// ## Errors
+    ///
+    /// The loader's error, memoized unless it is a deferral.
+    pub(crate) fn load_raw(
+        &self,
+        identity: &DataSourceIdentity,
+        loader: impl FnOnce() -> Result<R, Arc<DataError>>,
+    ) -> Result<RawEntry<R>, Arc<DataError>> {
+        let (outcome, generation, ran) = self.single_flight(|g| &mut g.raw, identity.clone(), None, || {
+            bump(&self.counters.reads);
+            loader()
+        });
+        outcome.map(|value| RawEntry { generation, value, from_memo: !ran })
+    }
+
+    /// `raw` interpreted under `key`, running `loader` only when no entry
+    /// holds it. A raw source read before the last invalidation is parsed for
+    /// this caller alone and never memoized: its bytes may be stale.
     ///
     /// ## Errors
     ///
     /// The loader's error, memoized unless it is a deferral.
     pub(crate) fn load_source(
         &self,
-        identity: &DataSourceIdentity,
-        loader: impl FnOnce() -> Result<S, Arc<DataError>>,
+        key: &SourceKey,
+        raw: &RawEntry<R>,
+        loader: impl FnOnce(&R) -> Result<S, Arc<DataError>>,
     ) -> Result<SourceEntry<S>, Arc<DataError>> {
-        let (outcome, generation, ran) = self.single_flight(|g| &mut g.sources, identity.clone(), None, || {
-            bump(&self.counters.reads);
-            loader()
-        });
+        let (outcome, generation, ran) =
+            self.single_flight(|g| &mut g.sources, key.clone(), Some(raw.generation), || loader(&raw.value));
         if !ran {
             bump(&self.counters.source_hits);
         }
-        outcome.map(|value| SourceEntry { identity: identity.clone(), generation, value, from_memo: !ran })
+        outcome.map(|value| SourceEntry { key: key.clone(), generation, value, from_memo: !ran })
     }
 
-    /// `source` bound to the contract `contract_key`, running `binder` only
-    /// when no entry holds it. A source loaded before the last invalidation
-    /// is bound for this caller alone and never memoized: its bytes may be
-    /// stale.
+    /// `source` bound to the contract `contract_key` with the effective
+    /// `header`, running `binder` only when no entry holds it. A source
+    /// loaded before the last invalidation is bound for this caller alone and
+    /// never memoized: its bytes may be stale.
     ///
     /// ## Errors
     ///
@@ -400,9 +489,10 @@ impl<S, B> DataMemo<S, B> {
         &self,
         source: &SourceEntry<S>,
         contract_key: &str,
+        header: Option<bool>,
         binder: impl FnOnce(&S) -> Result<B, Arc<DataError>>,
     ) -> Result<BindEntry<B>, Arc<DataError>> {
-        let key = (source.identity.clone(), contract_key.to_string());
+        let key = BindKey { source: source.key.clone(), contract: contract_key.to_string(), header };
         let (outcome, _, ran) = self.single_flight(|g| &mut g.bindings, key, Some(source.generation), || {
             bump(&self.counters.binds);
             binder(&source.value)
@@ -467,7 +557,7 @@ pub struct DataRuntime {
 
 #[derive(Default)]
 struct DataRuntimeInner {
-    memo: DataMemo<LoadedSource, LoadedData>,
+    memo: DataMemo<RawSource, LoadedSource, LoadedData>,
     read_set: Mutex<BTreeSet<String>>,
     observations: Mutex<Vec<Observation>>,
     /// What each prepared contract observed, by memo key.
@@ -605,30 +695,41 @@ impl DataRuntime {
         self.inner.memo.generation()
     }
 
-    /// Counts one parse; called by a source loader.
+    /// Counts one parse; called by a parse loader.
     pub(crate) fn note_parse(&self) {
         self.inner.memo.note_parse();
     }
 
-    /// The parsed source for `identity`; see [`DataMemo::load_source`]. The
-    /// caller records the read before calling, so a failed read is recorded
-    /// too.
-    pub(crate) fn load_source(
+    /// The raw source for `identity`; see [`DataMemo::load_raw`]. The caller
+    /// records the read before calling, so a failed read is recorded too.
+    pub(crate) fn load_raw(
         &self,
         identity: &DataSourceIdentity,
-        loader: impl FnOnce() -> Result<LoadedSource, Arc<DataError>>,
-    ) -> Result<SourceEntry<LoadedSource>, Arc<DataError>> {
-        self.inner.memo.load_source(identity, loader)
+        loader: impl FnOnce() -> Result<RawSource, Arc<DataError>>,
+    ) -> Result<RawEntry<RawSource>, Arc<DataError>> {
+        self.inner.memo.load_raw(identity, loader)
     }
 
-    /// `source` bound to the contract `contract_key`; see [`DataMemo::bind`].
+    /// `raw` parsed under `key`; see [`DataMemo::load_source`].
+    pub(crate) fn load_source(
+        &self,
+        key: &SourceKey,
+        raw: &RawEntry<RawSource>,
+        loader: impl FnOnce(&RawSource) -> Result<LoadedSource, Arc<DataError>>,
+    ) -> Result<SourceEntry<LoadedSource>, Arc<DataError>> {
+        self.inner.memo.load_source(key, raw, loader)
+    }
+
+    /// `source` bound to the contract `contract_key` with the effective
+    /// `header`; see [`DataMemo::bind`].
     pub(crate) fn bind(
         &self,
         source: &SourceEntry<LoadedSource>,
         contract_key: &str,
+        header: Option<bool>,
         binder: impl FnOnce(&LoadedSource) -> Result<LoadedData, Arc<DataError>>,
     ) -> Result<BindEntry<LoadedData>, Arc<DataError>> {
-        self.inner.memo.bind(source, contract_key, binder)
+        self.inner.memo.bind(source, contract_key, header, binder)
     }
 
     /// The contract `written` describes in `ctx`'s document context,
@@ -775,8 +876,25 @@ mod tests {
     use std::sync::Barrier;
     use std::sync::atomic::AtomicBool;
 
+    /// Raw text, parsed text, and a bound length stand in for the real types.
+    type Memo = DataMemo<String, String, usize>;
+
     fn identity(name: &str) -> DataSourceIdentity {
         DataSourceIdentity::Local(PathBuf::from(format!("/data/{name}")))
+    }
+
+    fn key(file: &DataSourceIdentity, format: DataFormat, delimiter: Option<u8>) -> SourceKey {
+        SourceKey { identity: file.clone(), format, delimiter }
+    }
+
+    fn json(file: &DataSourceIdentity) -> SourceKey {
+        key(file, DataFormat::Json, None)
+    }
+
+    /// Reads `text` through the raw layer and parses it unchanged under `key`.
+    fn load(memo: &Memo, key: &SourceKey, text: &str) -> SourceEntry<String> {
+        let raw = memo.load_raw(&key.identity, || Ok(text.to_string())).unwrap();
+        memo.load_source(key, &raw, |raw| Ok(raw.clone())).unwrap()
     }
 
     fn missing(kind: crate::markdown::compose::expression::FileRefFailure) -> Arc<DataError> {
@@ -793,11 +911,11 @@ mod tests {
 
     #[test]
     fn a_source_is_read_once_and_two_contracts_bind_it_twice() {
-        let memo = DataMemo::<String, usize>::default();
-        let file = identity("hosts.yaml");
+        let memo = Memo::default();
+        let file = json(&identity("hosts.yaml"));
         for contract in ["a", "b", "a"] {
-            let source = memo.load_source(&file, || Ok("hosts".to_string())).unwrap();
-            let bound = memo.bind(&source, contract, |text| Ok(text.len() + contract.len())).unwrap();
+            let source = load(&memo, &file, "hosts");
+            let bound = memo.bind(&source, contract, None, |text| Ok(text.len() + contract.len())).unwrap();
             assert_eq!(*bound.value(), 6);
         }
         let stats = memo.stats();
@@ -807,26 +925,75 @@ mod tests {
 
     #[test]
     fn each_level_says_whether_the_memo_answered() {
-        let memo = DataMemo::<String, usize>::default();
+        let memo = Memo::default();
         let file = identity("flags.yaml");
-        let first = memo.load_source(&file, || Ok("x".to_string())).unwrap();
-        let first_bind = memo.bind(&first, "c", |text| Ok(text.len())).unwrap();
-        assert!(!first.from_memo() && !first_bind.from_memo());
-        let second = memo.load_source(&file, || Ok("x".to_string())).unwrap();
-        let second_bind = memo.bind(&second, "c", |text| Ok(text.len())).unwrap();
-        assert!(second.from_memo() && second_bind.from_memo());
+        let first_raw = memo.load_raw(&file, || Ok("x".to_string())).unwrap();
+        let first = memo.load_source(&json(&file), &first_raw, |raw| Ok(raw.clone())).unwrap();
+        let first_bind = memo.bind(&first, "c", None, |text| Ok(text.len())).unwrap();
+        assert!(!first_raw.answered_from_memo() && !first.from_memo() && !first_bind.from_memo());
+        let second_raw = memo.load_raw(&file, || Ok("x".to_string())).unwrap();
+        let second = memo.load_source(&json(&file), &second_raw, |raw| Ok(raw.clone())).unwrap();
+        let second_bind = memo.bind(&second, "c", None, |text| Ok(text.len())).unwrap();
+        assert!(second_raw.answered_from_memo() && second.from_memo() && second_bind.from_memo());
+    }
+
+    #[test]
+    fn raw_source_is_read_once_for_two_parse_keys() {
+        let memo = Memo::default();
+        let file = identity("rows.txt");
+        let parses = AtomicUsize::new(0);
+        for delimiter in *b",;,;" {
+            let raw = memo.load_raw(&file, || Ok("a;b".to_string())).unwrap();
+            let parsed = memo
+                .load_source(&key(&file, DataFormat::Csv, Some(delimiter)), &raw, |raw| {
+                    parses.fetch_add(1, Ordering::SeqCst);
+                    Ok(raw.split(delimiter as char).count().to_string())
+                })
+                .unwrap();
+            assert_eq!(parsed.value(), if delimiter == b',' { "1" } else { "2" });
+            assert_eq!(parsed.identity(), &file);
+        }
+        assert_eq!(parses.load(Ordering::SeqCst), 2);
+        let stats = memo.stats();
+        assert_eq!((stats.reads, stats.source_hits), (1, 2), "{stats:?}");
+    }
+
+    #[test]
+    fn a_raw_failure_is_shared_by_two_parse_keys() {
+        use crate::markdown::compose::expression::FileRefFailure;
+        let memo = Memo::default();
+        let file = identity("absent.csv");
+        for _ in 0..2 {
+            let failed = memo.load_raw(&file, || Err(missing(FileRefFailure::NotFound)));
+            assert!(failed.is_err());
+        }
+        let stats = memo.stats();
+        assert_eq!((stats.reads, stats.source_hits, stats.parses), (1, 0, 0), "{stats:?}");
+    }
+
+    #[test]
+    fn a_header_choice_is_its_own_binding_over_one_parse() {
+        let memo = Memo::default();
+        let file = key(&identity("rows.csv"), DataFormat::Csv, Some(b','));
+        for header in [Some(true), Some(false), Some(true)] {
+            let source = load(&memo, &file, "a,b");
+            let bound = memo.bind(&source, "c", header, |text| Ok(text.len() + usize::from(header == Some(true)))).unwrap();
+            assert_eq!(*bound.value(), 3 + usize::from(header == Some(true)));
+        }
+        let stats = memo.stats();
+        assert_eq!((stats.reads, stats.source_hits, stats.binds, stats.bind_hits), (1, 2, 2, 1), "{stats:?}");
     }
 
     #[test]
     fn concurrent_callers_share_one_load() {
-        let memo = Arc::new(DataMemo::<String, usize>::default());
+        let memo = Arc::new(Memo::default());
         let file = identity("shared.yaml");
         let entered = Arc::new(Barrier::new(2));
         let release = Arc::new(Barrier::new(2));
         let first = {
             let (memo, file, entered, release) = (memo.clone(), file.clone(), entered.clone(), release.clone());
             std::thread::spawn(move || {
-                memo.load_source(&file, || {
+                memo.load_raw(&file, || {
                     entered.wait();
                     release.wait();
                     Ok("loaded".to_string())
@@ -837,9 +1004,7 @@ mod tests {
         entered.wait();
         let second = {
             let (memo, file) = (memo.clone(), file.clone());
-            std::thread::spawn(move || {
-                memo.load_source(&file, || Ok("second loader".to_string())).map(|entry| entry.value().clone())
-            })
+            std::thread::spawn(move || memo.load_raw(&file, || Ok("second loader".to_string())).map(|entry| entry.value().clone()))
         };
         release.wait();
         assert_eq!(first.join().unwrap().unwrap(), "loaded");
@@ -848,22 +1013,61 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_callers_share_one_raw_load_and_one_parse() {
+        let memo = Arc::new(Memo::default());
+        let file = key(&identity("shared.csv"), DataFormat::Csv, Some(b';'));
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let parses = Arc::new(AtomicUsize::new(0));
+        let caller = |gate: Option<(Arc<Barrier>, Arc<Barrier>)>| {
+            let (memo, file, parses) = (memo.clone(), file.clone(), parses.clone());
+            std::thread::spawn(move || {
+                let raw = memo
+                    .load_raw(&file.identity, || {
+                        if let Some((entered, release)) = &gate {
+                            entered.wait();
+                            release.wait();
+                        }
+                        Ok("a;b".to_string())
+                    })
+                    .unwrap();
+                let parsed = memo
+                    .load_source(&file, &raw, |raw| {
+                        parses.fetch_add(1, Ordering::SeqCst);
+                        Ok(raw.to_uppercase())
+                    })
+                    .unwrap();
+                parsed.value().clone()
+            })
+        };
+        let first = caller(Some((entered.clone(), release.clone())));
+        entered.wait();
+        let second = caller(None);
+        release.wait();
+        assert_eq!(first.join().unwrap(), "A;B");
+        assert_eq!(second.join().unwrap(), "A;B");
+        assert_eq!(memo.stats().reads, 1);
+        assert_eq!(parses.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn invalidation_reads_again_and_a_late_old_load_never_populates_the_new_maps() {
-        let memo = Arc::new(DataMemo::<String, usize>::default());
-        let file = identity("regenerated.yaml");
+        let memo = Arc::new(Memo::default());
+        let file = json(&identity("regenerated.yaml"));
         let entered = Arc::new(Barrier::new(2));
         let release = Arc::new(Barrier::new(2));
         let old = {
             let (memo, file, entered, release) = (memo.clone(), file.clone(), entered.clone(), release.clone());
             std::thread::spawn(move || {
-                let source = memo
-                    .load_source(&file, || {
+                let raw = memo
+                    .load_raw(&file.identity, || {
                         entered.wait();
                         release.wait();
                         Ok("old".to_string())
                     })
                     .unwrap();
-                *memo.bind(&source, "contract", |text| Ok(text.len())).unwrap().value()
+                let source = memo.load_source(&file, &raw, |raw| Ok(raw.clone())).unwrap();
+                *memo.bind(&source, "contract", None, |text| Ok(text.len())).unwrap().value()
             })
         };
         entered.wait();
@@ -871,47 +1075,120 @@ mod tests {
         release.wait();
         assert_eq!(old.join().unwrap(), 3, "the in-flight caller still gets its own result");
 
-        let source = memo.load_source(&file, || Ok("newer".to_string())).unwrap();
+        let source = load(&memo, &file, "newer");
         assert_eq!(source.value(), "newer", "the old load is not reused after invalidation");
-        let bound = memo.bind(&source, "contract", |text| Ok(text.len())).unwrap();
+        let bound = memo.bind(&source, "contract", None, |text| Ok(text.len())).unwrap();
         assert_eq!(*bound.value(), 5, "the old binding did not populate the new generation");
         let stats = memo.stats();
         assert_eq!((stats.reads, stats.binds, stats.invalidations), (2, 2, 1));
     }
 
     #[test]
-    fn a_source_loaded_before_invalidation_binds_without_memoizing() {
-        let memo = DataMemo::<String, usize>::default();
-        let file = identity("stale.yaml");
-        let stale = memo.load_source(&file, || Ok("stale".to_string())).unwrap();
+    fn invalidation_clears_all_three_layers_and_a_late_raw_load_never_populates_them() {
+        let memo = Arc::new(Memo::default());
+        let file = key(&identity("late.csv"), DataFormat::Csv, Some(b','));
+        // Every layer is warm before the in-flight read starts.
+        let warm = load(&memo, &file, "warm");
+        memo.bind(&warm, "c", Some(true), |text| Ok(text.len())).unwrap();
         memo.invalidate();
-        memo.bind(&stale, "c", |text| Ok(text.len())).unwrap();
-        let fresh = memo.load_source(&file, || Ok("fresh!".to_string())).unwrap();
-        assert_eq!(*memo.bind(&fresh, "c", |text| Ok(text.len())).unwrap().value(), 6);
+
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let late = {
+            let (memo, file, entered, release) = (memo.clone(), file.clone(), entered.clone(), release.clone());
+            std::thread::spawn(move || {
+                let raw = memo
+                    .load_raw(&file.identity, || {
+                        entered.wait();
+                        release.wait();
+                        Ok("late".to_string())
+                    })
+                    .unwrap();
+                let source = memo.load_source(&file, &raw, |raw| Ok(raw.clone())).unwrap();
+                *memo.bind(&source, "c", Some(true), |text| Ok(text.len() * 10)).unwrap().value()
+            })
+        };
+        entered.wait();
+        memo.invalidate();
+        release.wait();
+        assert_eq!(late.join().unwrap(), 40, "the in-flight caller still gets its own result");
+
+        let source = load(&memo, &file, "fresh!");
+        assert_eq!(source.value(), "fresh!", "neither the warm nor the late raw entry survived");
+        assert!(!source.from_memo(), "the late parse did not populate the new generation");
+        let bound = memo.bind(&source, "c", Some(true), |text| Ok(text.len())).unwrap();
+        assert!(!bound.from_memo(), "the late binding did not populate the new generation");
+        assert_eq!(*bound.value(), 6);
+        let stats = memo.stats();
+        assert_eq!((stats.reads, stats.parses, stats.source_hits, stats.bind_hits), (3, 0, 0, 0), "{stats:?}");
+        assert_eq!(stats.invalidations, 2);
+    }
+
+    #[test]
+    fn a_parse_from_an_older_raw_generation_is_not_memoized() {
+        let memo = Memo::default();
+        let file = json(&identity("stale.json"));
+        let stale = memo.load_raw(&file.identity, || Ok("stale".to_string())).unwrap();
+        memo.invalidate();
+        let parsed = memo.load_source(&file, &stale, |raw| Ok(raw.clone())).unwrap();
+        assert_eq!(parsed.value(), "stale", "the stale caller still parses for itself");
+        let fresh = load(&memo, &file, "fresh");
+        assert_eq!(fresh.value(), "fresh");
+        assert!(!fresh.from_memo());
+        assert_eq!(memo.stats().source_hits, 0);
+    }
+
+    #[test]
+    fn a_source_loaded_before_invalidation_binds_without_memoizing() {
+        let memo = Memo::default();
+        let file = json(&identity("stale.yaml"));
+        let stale = load(&memo, &file, "stale");
+        memo.invalidate();
+        memo.bind(&stale, "c", None, |text| Ok(text.len())).unwrap();
+        let fresh = load(&memo, &file, "fresh!");
+        assert_eq!(*memo.bind(&fresh, "c", None, |text| Ok(text.len())).unwrap().value(), 6);
         assert_eq!(memo.stats().bind_hits, 0);
+    }
+
+    #[test]
+    fn memo_generation_advances_once_per_invalidation() {
+        let runtime = DataRuntime::new();
+        assert_eq!(runtime.memo_generation(), 0);
+        runtime.invalidate_memo();
+        assert_eq!(runtime.memo_generation(), 1);
+        runtime.invalidate_memo();
+        assert_eq!((runtime.memo_generation(), runtime.stats().invalidations), (2, 2));
     }
 
     #[test]
     fn a_failure_is_memoized_but_a_remote_deferral_is_not() {
         use crate::markdown::compose::expression::FileRefFailure;
-        let memo = DataMemo::<String, usize>::default();
+        let memo = Memo::default();
         let file = identity("absent.json");
         for _ in 0..2 {
-            assert!(memo.load_source(&file, || Err(missing(FileRefFailure::NotFound))).is_err());
+            assert!(memo.load_raw(&file, || Err(missing(FileRefFailure::NotFound))).is_err());
         }
         assert_eq!(memo.stats().reads, 1);
 
         let remote = DataSourceIdentity::Remote(Box::new(url::Url::parse("https://example.com/a.json").unwrap()));
-        assert!(memo.load_source(&remote, || Err(missing(FileRefFailure::RemoteNotEnabled))).is_err());
+        assert!(memo.load_raw(&remote, || Err(missing(FileRefFailure::RemoteNotEnabled))).is_err());
         let fetched = AtomicBool::new(false);
         let entry = memo
-            .load_source(&remote, || {
+            .load_raw(&remote, || {
                 fetched.store(true, Ordering::SeqCst);
                 Ok("body".to_string())
             })
             .unwrap();
         assert!(fetched.load(Ordering::SeqCst), "the deferral was not remembered");
         assert_eq!(entry.value(), "body");
+
+        let parsed = json(&identity("bad.json"));
+        let raw = memo.load_raw(&parsed.identity, || Ok("{".to_string())).unwrap();
+        for _ in 0..2 {
+            let failed = memo.load_source(&parsed, &raw, |_| Err(missing(FileRefFailure::NotFound)));
+            assert!(failed.is_err());
+        }
+        assert_eq!(memo.stats().source_hits, 1, "a parse failure is memoized too");
     }
 
     #[test]

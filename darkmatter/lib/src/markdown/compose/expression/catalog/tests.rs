@@ -871,8 +871,13 @@ fn load_data_options_bind_through_the_shared_binder() {
     for options in [json!(null), json!({}), json!({"header": null}), json!({"format": null, "delimiter": null})] {
         assert_eq!(call(options.clone()).unwrap_or_else(|error| panic!("{options}: {error}")), json!([["web", 8080]]));
     }
-    // The coercion engine's normal conversions apply to option fields.
-    for options in [json!({"delimiter": 5}), json!({"header": "false"})] {
-        assert!(call(options.clone()).is_ok(), "{options} binds");
+    // The coercion engine's normal conversions apply to option fields, and
+    // the handler reads the converted values: `5` splits on the character
+    // `5` (so each row is one cell), and `"false"` reads the header as a row.
+    for (options, code) in [(json!({"delimiter": 5}), "dm.data.contract_mismatch"), (json!({"header": "false"}), "dm.data.contract_mismatch")] {
+        match call(options.clone()) {
+            Err(ExpressionError::Data(data)) => assert_eq!(data.code(), Some(code), "{options}: {data}"),
+            other => panic!("{options} binds and is applied: {other:?}"),
+        }
     }
 }

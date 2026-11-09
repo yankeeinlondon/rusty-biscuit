@@ -119,7 +119,7 @@ pub enum RowShapeConflict {
     /// `header: false` reads rows by position, but the contract's rows are
     /// objects, which need header names.
     #[error(
-        "`header: false` reads rows by position, but this contract describes rows as objects; use a `tuple([…])[]` or `string[][]` contract, or read an input that has a header"
+        "`header: false` reads rows by position, but this contract describes rows as objects; use a `tuple([…])[]` contract, or read an input that has a header"
     )]
     HeaderlessObjectRows,
 }

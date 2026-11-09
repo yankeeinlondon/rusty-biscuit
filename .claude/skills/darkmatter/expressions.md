@@ -423,12 +423,28 @@ codes). Code: `compose/expression/data/` (`load.rs` is the function;
 `contract.rs`, `parse.rs`, `locate.rs`, `runtime.rs`, `error.rs`). The
 command-scoped memo and read set are in [requests.md](requests.md#data-runtime-and-read-set).
 
-- **Call order** (`load.rs`): prepare the contract, resolve the file and record
-  it in the read set, pick the format from the extension
-  (`biscuit_file::detect_from_extension`, a URL's path included), pick the
-  CSV/TSV row mode, fetch a URL through `fetch_remote_text` (host policy
-  before any memo lookup), parse through the source memo, bind through the
-  bind memo. A `null` file returns `null` before anything is prepared or read.
+- **Call order** (`load.rs`): a `null` file returns `null` before anything
+  else (options included); read the options (`options.rs::DataOptions`,
+  aliases `yml`/`ndjson` normalized there); prepare the contract; resolve the
+  file, run the slot gate, record it in the read set; pick the effective
+  format (`options.format`, else `load.rs::data_format_of` on the extension,
+  a URL's path included, shared with the call check); `check_applicability`
+  (`delimiter`/`header` only on CSV/TSV, TSV tab only); pick the CSV/TSV row
+  mode and, for `header: false`, `require_positional_rows`; fetch a URL
+  through `fetch_remote_text` (host policy before any memo layer); then the
+  raw, parse, and bind memo layers. Observe the read once per call after the
+  parse layer (the raw entry's hash, `None` on a read or parse failure).
+- **Options passively** (`call_check.rs::load_data_problem`): in execution
+  order — a literal bad `delimiter`, the contract, applicability to the
+  *provable* format (a literal `format`, else a literal file's extension
+  when no computed member can set `format`), the row rules. An object
+  literal mixing literal and computed members is
+  `ArgumentType::PartialObject` (classified as `Typed`), so its literal
+  members are still judged. `dm.data.invalid_options` is ranged at argument
+  2; options the binder refuses get no data problem. Every message comes
+  from `options::invalid_options_message`, so passive and execution text
+  match. Only `tuple([…])[]` gives list rows: nested arrays (`string[][]`)
+  are not in the grammar.
 - **Contract** (`contract.rs::prepare_contract`): `as` is a quoted string
   parsed by `parse_property_definition`; a document-local name (`Name`,
   `Name@this`) at any depth is `dm.data.this_import_rejected`, while imported

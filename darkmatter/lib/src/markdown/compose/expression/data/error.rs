@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use biscuit_file::{DataFormat, DelimitedData};
+use biscuit_file::{DataFormat, DelimitedData, DelimitedRecord};
 use simplified_schema::SchemaError;
 use simplified_schema::coercion::ConversionError;
 
@@ -141,8 +141,8 @@ pub enum DataError {
         text: Arc<str>,
         /// For CSV and TSV, the table the rows were built from and how: a
         /// pointer `/i/<column>` (object rows) or `/i/<n>` (list rows) names
-        /// row `rows[i]`, whose fields carry their raw source offsets. `None`
-        /// for every other format.
+        /// [`TabularSource::row`] `i`, whose fields carry their raw source
+        /// offsets. `None` for every other format.
         table: Option<TabularSource>,
     },
 
@@ -168,13 +168,43 @@ pub enum DataError {
     },
 }
 
-/// The delimited table a CSV or TSV value was built from, and its row mode.
+/// The delimited table a CSV or TSV value was built from, its row mode, and
+/// whether its first record was a header.
+///
+/// Rows are read only through [`Self::row_count`] and [`Self::row`], the one
+/// logical view binding and diagnostic lookup share: row `i` of the value is
+/// `row(i)`, whose fields keep their raw source offsets. The parsed table is
+/// never rewritten for a headerless read.
 #[derive(Debug, Clone)]
 pub struct TabularSource {
-    /// How each row became a value; in list mode the header row is skipped.
+    /// How each row became a value.
     pub mode: RowMode,
-    /// The header and data rows with their raw field offsets.
+    /// Whether the first record is a header (and so not a row). Object rows
+    /// always have one.
+    pub header: bool,
+    /// The first record and the records after it, with their raw field
+    /// offsets.
     pub data: Arc<DelimitedData>,
+}
+
+impl TabularSource {
+    /// The number of rows the value has.
+    pub fn row_count(&self) -> usize {
+        let first = usize::from(!self.header && self.data.headers.is_some());
+        first + self.data.rows.len()
+    }
+
+    /// Row `index` of the value: with a header, the record after it; without
+    /// one, the first record is row 0.
+    pub fn row(&self, index: usize) -> Option<&DelimitedRecord> {
+        match (&self.data.headers, self.header) {
+            (Some(first), false) => match index.checked_sub(1) {
+                None => Some(first),
+                Some(index) => self.data.rows.get(index),
+            },
+            _ => self.data.rows.get(index),
+        }
+    }
 }
 
 pub(super) fn format_name(format: DataFormat) -> &'static str {

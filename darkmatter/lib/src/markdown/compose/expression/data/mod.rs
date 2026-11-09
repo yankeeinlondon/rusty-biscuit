@@ -9,8 +9,9 @@
 //! - [`parse`] decodes and parses one data document in its format.
 //! - `locate` places a contract violation in its source text and in file
 //!   order, for diagnostic projection.
-//! - [`load`] is the `load_data` function: resolve, read through the memo,
-//!   parse, and bind to the contract.
+//! - [`load`] is the `load_data` function: read the options, resolve, choose
+//!   the effective format, read and parse through the memo, and bind to the
+//!   contract.
 //! - [`runtime`] holds [`DataRuntime`], the command-wide memo and read set
 //!   every expression context of one command shares.
 
@@ -18,13 +19,14 @@ pub mod contract;
 pub mod error;
 pub mod load;
 pub(crate) mod locate;
-#[cfg_attr(not(test), expect(dead_code, reason = "the option model is wired into `load_data` and the call check in the next step"))]
 pub(crate) mod options;
 pub mod parse;
 pub mod runtime;
 
 #[cfg(test)]
 mod observation_tests;
+#[cfg(test)]
+mod option_execution_tests;
 
 pub use contract::{
     PreparedContract, RowClassification, RowMode, RowShapeConflict, classify_rows, judge_written_contract, prepare_contract,
