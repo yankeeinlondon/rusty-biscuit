@@ -2,7 +2,7 @@
 kind: fix
 name: release-path-repair
 date: 2026-11-06
-status: draft-spec
+status: finalized-spec
 depends-on:
   - 2026-11-06-proven-push-planner-cell
 next_spec: 2026-10-28-publish
@@ -11,8 +11,18 @@ related:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-07
-review_iterations: 0
-implemented: false
+review_iterations: 3
+completed: true
+implemented: true
+needs_rulings: false
+rulings:
+  - id: first-release-set
+    decided_by: Ken Snyder
+    decided_on: 2026-11-08
+    decision: >-
+      Temporarily restrict release eligibility to sniff-detection-cli and
+      git-wt-cli for the first real release; restore workspace-wide eligibility
+      once that release is verified.
 $schema:
   status: |-
     enum(
@@ -33,6 +43,7 @@ $schema:
   clarified: boolean -> indicates whether the specification was built -- in part -- with the 'clarify.md' prompt
   implemented: boolean -> indicates whether this spec's plan has been implemented
   implemented_by: string -> the agent who implemented the plan
+implemented_by: "claude/opus"
 ---
 
 # Make the existing release path work once
@@ -248,19 +259,37 @@ does not authorize creating credentials, merging a proposal, or publishing.
 
 ### Which packages should the first real release include?
 
-The workspace-wide calculation may propose many packages after the long gap.
-Decide the first release set before merging; a successful calculation is not
-approval of every proposed version.
+**Ruled 2026-11-08: a temporary named set of `sniff-detection-cli` and
+`git-wt-cli`.**
 
-- **Review the complete generated proposal (recommended).** Preserves the
-  existing package-selection policy and releases related version changes
-  together. The cost is a potentially large review. Recommend this because
-  this repair is meant to restore the configured path without introducing
-  another package-selection policy. Keep it in draft until review finishes.
-- **Temporarily allow only a small named set.** Limits the first publication's
-  reach and review burden. It changes release eligibility and requires checking
-  dependent versions and restoring the intended configuration afterward. If
-  chosen, document the exact packages and restoration step before implementation.
+The workspace-wide calculation would propose most of the workspace's ~74
+eligible packages after the long gap, and this is the first live run of a
+publication path that has never succeeded. Because a wrong published tag is
+never moved, the first release limits how many permanent tags a defect could
+produce. Both packages were tagged most recently (October), so their
+changelogs are short to verify, and both are shipped CLIs the publishing
+feature consumes next. No integration package is included; integration routing
+stays covered by focused tests, as described under acceptance.
+
+Implementation:
+
+- Change `release-plz.toml` so only these two packages are release-eligible,
+  keeping the four existing placeholder exclusions, `git_only`, `publish`,
+  the tag format, and changelog paths. Comment the restriction as temporary
+  and name the restoration step beside it.
+- Confirm with the dry run that the proposal contains exactly these two
+  packages and that neither depends on an unreleased version bump of another
+  workspace package; a dependency that requires a bump is a finding to report,
+  not a reason to add packages silently.
+- Restore workspace-wide eligibility (the configuration before this change)
+  in a follow-up change once the first release's tags, Releases, and
+  published-release event are verified and recorded in the implementation log.
+  The restoration is not part of this fix's implementation and is not
+  pre-authorized to merge; the next proposal then carries the backlog.
+
+The rejected alternative was reviewing the complete workspace-wide proposal in
+one pull request, which preserves the existing policy but exposes the whole
+workspace to an unproven publication path.
 
 ## Not in scope
 
