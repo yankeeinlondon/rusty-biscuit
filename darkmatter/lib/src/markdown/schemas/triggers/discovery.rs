@@ -186,6 +186,9 @@ pub struct LoadedTrigger {
     /// The bundle an [`Embedded`](TriggerSource::Embedded) trigger's payload
     /// resolves in.
     pub(crate) bundle: Option<EmbeddedSchemaBundle>,
+    /// A schema-root trigger file's text as discovery read it, so an inline
+    /// payload's slots are positioned in it without reading it again.
+    pub(crate) text: Option<std::sync::Arc<str>>,
 }
 
 /// A file shadowed by an earlier root's file of the same name.
@@ -289,6 +292,7 @@ impl TriggerRegistry {
                         envelope,
                         pattern_cwd: base_dir.clone(),
                         bundle: Some(bundle),
+                        text: None,
                     };
                     loaded.push((trigger, payload));
                 }
@@ -431,6 +435,7 @@ fn load_embedded_trigger(
                 envelope,
                 pattern_cwd: PathBuf::new(),
                 bundle: Some(bundle),
+                text: None,
             };
             let (payload, read_paths) = super::assemble::resolve_embedded_trigger_payload(&trigger)?;
             let reads: EmbeddedReads = read_paths
@@ -737,6 +742,7 @@ pub fn scan_with_source(
             envelope,
             pattern_cwd: pattern_cwd.to_path_buf(),
             bundle: None,
+            text: Some(std::sync::Arc::clone(&content)),
         };
         let (payload, observed) = simplified_schema::resolve::observed::collect(|| {
             super::assemble::resolve_trigger_payload(&trigger, roots.search_paths(), context)

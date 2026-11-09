@@ -375,9 +375,10 @@ lane, so a slow slot there would stall them.
 **A job carries its inputs.** Each job is captured on the dispatch thread:
 the document text, configuration, workspace roots, trigger registry,
 file-resolution context, the in-memory grants given in this server
-process, and the open YAML and JSON buffers. Resolution reads an unsaved
-buffer in place of its file, so editing `os.yaml` without saving already
-changes the values a document under the template is offered.
+process, and every open buffer, whatever its extension. Resolution reads
+an unsaved buffer in place of its file, so editing `os.yaml`, `os.toml`, or
+`hosts.csv` without saving already changes the values a document under the
+template is offered.
 
 **A fresh session, no prompt.** The worker resolves each job with a new
 `SlotSession` built for the document's context, with no approval handler:
@@ -386,7 +387,10 @@ anything else becomes `dm.schema.slot_approval_required`. Each slot gets
 `DMLS_SLOT_LIMITS`, a quarter of a command's work allowance (25,000 item
 visits, 4 MiB of expansion), so a runaway slot fails with the ordinary
 `dm.iteration.*` code in tens of milliseconds instead of occupying the
-worker.
+worker. A slot that calls `package()`, `package_area()`, `ipv4()`, `ipv6()`,
+or `has_agentic_cli()` has the observation it reads captured on the worker,
+from the document's context, when that slot first runs; a template with no
+such call captures nothing, and no request ever waits for a capture.
 
 **Newest job wins.** Every job has a sequence number. A demand for a
 document whose job is still in flight for different inputs sets that job's

@@ -24,11 +24,13 @@ use simplified_schema::expression::{SpannedExpr, SpannedExprKind};
 use crate::markdown::compose::DataRuntime;
 use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
 use crate::markdown::compose::conditions::ShortcutLookup;
-use crate::markdown::compose::context::capture::CapturedObservations;
+use crate::markdown::compose::context::capture::{CapturedObservations, ContextGroup, function_group};
 use crate::markdown::compose::expression::data::Observation;
 use crate::markdown::compose::expression::iteration::{IterationBudget, IterationLimits};
 use crate::markdown::compose::expression::read_gate::{GateRefusal, ReadGate, ReadTarget};
 use crate::markdown::compose::expression::{ExpressionError, ResolutionContext, evaluate};
+
+use super::observations::SessionObservations;
 
 /// A gate that refuses every read: the evaluator's default until approvals
 /// decide otherwise.
@@ -97,7 +99,7 @@ pub(crate) struct SlotEvaluation {
 #[derive(Debug, Clone)]
 pub(crate) struct SlotEvaluator {
     data: DataRuntime,
-    observations: CapturedObservations,
+    observations: Arc<SessionObservations>,
     gates: Arc<dyn SlotGates>,
     remote: Option<RemoteFetchRuntime>,
     limits: IterationLimits,
@@ -110,7 +112,7 @@ impl SlotEvaluator {
     pub(crate) fn new(data: DataRuntime) -> Self {
         Self {
             data,
-            observations: CapturedObservations::default(),
+            observations: Arc::new(SessionObservations::supplied(CapturedObservations::default())),
             gates: Arc::new(SameGate(Arc::new(DenyAllReads))),
             remote: None,
             limits: IterationLimits::default(),
@@ -140,10 +142,18 @@ impl SlotEvaluator {
         self
     }
 
-    /// Reads the request's captured observations (its clock reading) instead
-    /// of a set of its own.
+    /// Reads exactly `observations` (a clock reading, a test's addresses)
+    /// instead of a set of its own.
     #[must_use]
     pub(crate) fn with_observations(mut self, observations: CapturedObservations) -> Self {
+        self.observations = Arc::new(SessionObservations::supplied(observations));
+        self
+    }
+
+    /// Reads the session's observations, capturing a group a slot's calls
+    /// need when it first evaluates.
+    #[must_use]
+    pub(crate) fn with_session_observations(mut self, observations: Arc<SessionObservations>) -> Self {
         self.observations = observations;
         self
     }
@@ -173,7 +183,7 @@ impl SlotEvaluator {
     ) -> Result<SlotEvaluation, ExpressionError> {
         let mut resolution = ResolutionContext::new(context);
         resolution.data = self.data.clone();
-        resolution.observations = self.observations.clone();
+        resolution.observations = self.observations.covering(observed_groups(parsed));
         resolution.slot_gate = Some(self.gates.gate_for(defining));
         resolution.remote_fetch = self.remote.clone();
         resolution.iteration = IterationBudget::new(self.limits);
@@ -192,6 +202,24 @@ impl SlotEvaluator {
         context_digests.dedup();
         Ok(SlotEvaluation { value, observations, context_digests })
     }
+}
+
+/// The groups whose observations the functions `expr` calls read (callback
+/// bodies included), found passively.
+fn observed_groups(expr: &SpannedExpr) -> Vec<ContextGroup> {
+    let mut groups = Vec::new();
+    walk_nodes(expr, &mut |node| {
+        let name = match &node.kind {
+            SpannedExprKind::FunctionCall { name, .. } | SpannedExprKind::CallbackCall { name, .. } => name,
+            _ => return,
+        };
+        if let Some(group) = function_group(name)
+            && !groups.contains(&group)
+        {
+            groups.push(group);
+        }
+    });
+    groups
 }
 
 /// The digest of each environment input `expr` can read: `env.NAME` by its

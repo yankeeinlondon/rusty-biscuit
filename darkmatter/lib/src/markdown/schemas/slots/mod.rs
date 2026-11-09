@@ -11,6 +11,11 @@
 //!   reports what it depended on.
 //! - [`grants`] holds the read grants, the user's grant store, and matching.
 //! - [`host`] joins them as [`DarkmatterSlotHost`].
+//! - [`dependencies`] records what evaluations consumed besides the files
+//!   they observed (captured calls, volatility, context inputs), for the
+//!   cache.
+//! - [`observations`] captures the structured observations a slot's calls
+//!   read, when a slot first needs them.
 //! - [`session`] resolves a command's templates, pinning one snapshot per
 //!   template and sharing results across commands through `cache`.
 //! - [`codes`] holds the `dm.schema.slot_*` codes.
@@ -18,9 +23,11 @@
 pub(crate) mod admission;
 pub(crate) mod cache;
 pub mod codes;
+pub(crate) mod dependencies;
 pub(crate) mod evaluator;
 pub mod grants;
 pub mod host;
+pub(crate) mod observations;
 pub mod session;
 
 pub use codes::SLOT_DIAGNOSTIC_CODES;

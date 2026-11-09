@@ -472,6 +472,17 @@ struct DataRuntimeInner {
     observations: Mutex<Vec<Observation>>,
     /// What each prepared contract observed, by memo key.
     contract_observations: Mutex<HashMap<String, Arc<Vec<Observation>>>>,
+    /// What the slots of a contract naming a template observed and consumed
+    /// while it was prepared inside a slot, by memo key: a memo hit replays
+    /// them, so the enclosing slot's resolution depends on them as a cold
+    /// preparation's does.
+    contract_slot_inputs: Mutex<HashMap<String, Arc<ContractSlotInputs>>>,
+}
+
+/// What a contract's own slots observed and consumed during its preparation.
+struct ContractSlotInputs {
+    observations: Vec<Observation>,
+    dependencies: crate::markdown::schemas::slots::dependencies::SlotDependencies,
 }
 
 /// A position in a [`DataRuntime`]'s observation log ([`DataRuntime::read_mark`]).
@@ -625,7 +636,12 @@ impl DataRuntime {
     /// preparation read (imports at any depth, including the one that made
     /// it fail) are observed with the hash of the text read, and every other
     /// location an import probed (a missing import) as a missing probe,
-    /// whether it succeeds or fails. A memo hit observes the same again.
+    /// whether it succeeds or fails. A memo hit observes the same again, and
+    /// also replays what the contract's own slots observed and consumed (a
+    /// contract naming a template, prepared inside a slot), including each
+    /// read their gates allowed with the contract file that defined it, so
+    /// every resolution that loads through the contract depends on them and
+    /// is served to another command only under grants covering those reads.
     ///
     /// In a schema slot, `ctx`'s gate judges each schema file before it is
     /// opened. A memo hit opens nothing; the inputs it observes are judged by
@@ -648,16 +664,30 @@ impl DataRuntime {
         let session = crate::markdown::schemas::slots::session::active_session_id()
             .map_or_else(String::new, |session| format!("\0slots:{session}"));
         let key = format!("{identity:016x}\0{written}{session}");
+        let in_slot = !session.is_empty();
         let mut refused = None;
+        let mut ran = false;
         let prepared = self.inner.memo.contract(key.clone(), || {
+            ran = true;
             let prepare = || super::contract::prepare_contract(written, document);
-            let (((prepared, refusal), texts), observed) = simplified_schema::resolve::observed::collect(|| {
-                simplified_schema::resolve::buffers::recording(|| ctx.gate_schema_reads(super::load::FUNCTION, prepare))
-            });
+            let (((((prepared, refusal), texts), observed), slot_observations), consumed) =
+                crate::markdown::schemas::slots::dependencies::collect(|| {
+                    capture_observations(|| {
+                        simplified_schema::resolve::observed::collect(|| {
+                            simplified_schema::resolve::buffers::recording(|| {
+                                ctx.gate_schema_reads(super::load::FUNCTION, prepare)
+                            })
+                        })
+                    })
+                });
             // Kept per key, before the memo slot is filled, so every caller
             // the slot answers (one waiting on this preparation included)
             // observes the same inputs.
             self.contract_observations_guard().insert(key.clone(), Arc::new(contract_observations(&observed, &texts)));
+            if in_slot {
+                let inputs = ContractSlotInputs { observations: slot_observations, dependencies: consumed };
+                self.contract_slot_inputs_guard().insert(key.clone(), Arc::new(inputs));
+            }
             refused = refusal;
             prepared
         });
@@ -666,7 +696,13 @@ impl DataRuntime {
             // caller with other grants prepares it again.
             self.inner.memo.forget_contract(&key);
             self.contract_observations_guard().remove(&key);
+            self.contract_slot_inputs_guard().remove(&key);
             return Err(refusal);
+        }
+        if !ran && let Some(inputs) = self.contract_slot_inputs_guard().get(&key).cloned() {
+            // A cold preparation observed these as its slots ran.
+            inputs.observations.iter().cloned().for_each(|observation| self.observe(observation));
+            crate::markdown::schemas::slots::dependencies::replay(&inputs.dependencies);
         }
         let observations = self.contract_observations_guard().get(&key).cloned();
         observations.iter().flat_map(|observations| observations.iter()).cloned().for_each(|observation| self.observe(observation));
@@ -675,6 +711,10 @@ impl DataRuntime {
 
     fn contract_observations_guard(&self) -> MutexGuard<'_, HashMap<String, Arc<Vec<Observation>>>> {
         self.inner.contract_observations.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn contract_slot_inputs_guard(&self) -> MutexGuard<'_, HashMap<String, Arc<ContractSlotInputs>>> {
+        self.inner.contract_slot_inputs.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

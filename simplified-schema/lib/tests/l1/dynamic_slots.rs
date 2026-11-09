@@ -792,3 +792,123 @@ fn the_slot_modules_name_no_host() {
         }
     }
 }
+
+/// A host that supplies the text an inline `$schema` value was written in
+/// gets slot spans in that text, kept on the template and on a failure, so
+/// a failure is positioned without reading the file again; without the
+/// text, or when the text does not prove the value, no position is claimed.
+#[cfg(feature = "file")]
+mod authored_source {
+    use std::sync::Arc;
+
+    use super::*;
+    use simplified_schema::resolve::{AuthoredSchemaValue, resolve_authored_yaml_schema};
+    use simplified_schema::SlotResolutionFailure;
+
+    /// A frontmatter document: its text, and the YAML of its block.
+    fn document(yaml: &str) -> (Arc<str>, std::ops::Range<usize>) {
+        let text = format!("---\n{yaml}---\nBody.\n");
+        (text.into(), 4..4 + yaml.len())
+    }
+
+    fn authored_pending(yaml: &str, value_yaml: &str, owner: InlineOwner<'_>, file: Option<PathBuf>) -> (PendingSchema, Arc<str>) {
+        let dir = fixtures();
+        let (text, mapping) = document(yaml);
+        let authored = AuthoredSchemaValue { file, text: Arc::clone(&text), mapping };
+        let value: YamlValue = serde_yaml_ng::from_str(value_yaml).unwrap();
+        let result =
+            resolve_authored_yaml_schema(&value, owner, Some(&authored), &dir, &[], &context(&dir), ShippedSources::NONE);
+        (pending_of(result), text)
+    }
+
+    #[test]
+    fn a_document_value_slot_is_spanned_in_the_document_through_its_carrier() {
+        let yaml = "title: x\n$schema:\n  os: \"enum(macOS, {{ \\\"x\\\" }})\"\n";
+        let file = PathBuf::from("/docs/doc.md");
+        let (pending, text) = authored_pending(yaml, "os: \"enum(macOS, {{ \\\"x\\\" }})\"\n", InlineOwner::Document, Some(file.clone()));
+        let slot = &pending.slots()[0];
+        assert_eq!(&text[slot.span.clone()], "{{ \\\"x\\\" }}");
+        let (kept_file, kept_text) = pending.slot_text(slot).expect("the document text is kept");
+        assert_eq!((kept_file, kept_text.as_ref()), (Some(file.as_path()), text.as_ref()));
+        assert_eq!(pending.authored_source().map(|authored| authored.mapping.clone()), Some(4..4 + yaml.len()));
+    }
+
+    #[test]
+    fn a_failure_of_the_template_keeps_the_text_for_its_slot() {
+        let yaml = "$schema:\n  os: enum({{ wrong }})\n";
+        let (pending, text) = authored_pending(yaml, "os: enum({{ wrong }})\n", InlineOwner::Document, None);
+        let error = Arc::new(resolve(&pending, &StubHost::answering(&[("wrong", json!(1))]), &fixtures()).unwrap_err());
+        let SlotResolutionError::Schema(schema) = error.as_ref() else { panic!("{error:?}") };
+        let SchemaError::SlotResult { slot, .. } = schema.as_ref() else { panic!("{schema:?}") };
+        let slot = slot.as_ref().clone();
+        assert_eq!(&text[slot.span.clone()], "{{ wrong }}");
+        let failure = SlotResolutionFailure::of_pending(Arc::clone(&error), &pending);
+        assert_eq!(failure.slot_text(&slot).map(|(file, text)| (file, text.as_ref())), Some((None, text.as_ref())));
+        assert!(SlotResolutionFailure::new(failure.error.clone(), failure.sources.clone()).slot_text(&slot).is_none());
+    }
+
+    #[test]
+    fn a_trigger_payload_slot_names_its_file_and_is_spanned_in_it() {
+        let dir = fixtures();
+        let trigger = dir.join("a.trigger.yaml");
+        let text: Arc<str> = "kind: schema-trigger\nmatch:\n  topic: literal(x)\n$schema:\n  os: enum({{ wrong }})\n".into();
+        let authored = AuthoredSchemaValue { file: Some(trigger.clone()), text: Arc::clone(&text), mapping: 0..text.len() };
+        let value: YamlValue = serde_yaml_ng::from_str("os: enum({{ wrong }})\n").unwrap();
+        let pending = pending_of(resolve_authored_yaml_schema(
+            &value,
+            InlineOwner::Trigger(&trigger),
+            Some(&authored),
+            &dir,
+            &[],
+            &context(&dir),
+            ShippedSources::NONE,
+        ));
+        let slot = &pending.slots()[0];
+        assert_eq!(&text[slot.span.clone()], "{{ wrong }}");
+        let (file, kept) = pending.slot_text(slot).expect("the trigger text is kept");
+        assert_eq!(file, slot.origin.as_deref(), "the file is the one the slot names");
+        assert_eq!(kept.as_ref(), text.as_ref());
+    }
+
+    #[test]
+    fn a_root_union_arm_slot_is_spanned_in_the_document() {
+        let yaml = "$schema:\n  - name: string\n  - os: enum({{ wrong }})\n";
+        let (pending, text) =
+            authored_pending(yaml, "- name: string\n- os: enum({{ wrong }})\n", InlineOwner::Document, None);
+        assert_eq!(&text[pending.slots()[0].span.clone()], "{{ wrong }}");
+    }
+
+    #[test]
+    fn text_that_does_not_say_what_the_value_is_proves_nothing() {
+        let yaml = "$schema:\n  os: enum({{ other }})\n";
+        let (pending, _) = authored_pending(yaml, "os: enum({{ wrong }})\n", InlineOwner::Document, None);
+        assert!(pending.authored_source().is_none());
+        assert!(pending.slot_text(&pending.slots()[0]).is_none());
+    }
+
+    #[test]
+    fn without_the_text_a_slot_is_spanned_in_its_type_string() {
+        let pending = pending_inline("os: enum({{ wrong }})\n", &fixtures());
+        let slot = &pending.slots()[0];
+        assert_eq!(&"enum({{ wrong }})"[slot.span.clone()], "{{ wrong }}");
+        assert!(pending.slot_text(slot).is_none());
+    }
+
+    /// The Markdown factory re-parses a root union's inline arms when an arm
+    /// is a file reference; those arms' slots are in the document too.
+    #[test]
+    fn a_markdown_root_union_with_a_file_arm_spans_its_inline_slot_in_the_document() {
+        use simplified_schema::SchemaSource;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        std::fs::write(root.join("other.yaml"), "$schema:\n  name: string\n").unwrap();
+        let text = "---\n$schema:\n  - ./other.yaml\n  - os: enum({{ wrong }})\n---\nBody.\n";
+        std::fs::write(root.join("doc.md"), text).unwrap();
+        let schema =
+            SimplifiedSchema::try_from_markdown(SchemaSource::from(root.join("doc.md")).bound(FileResolutionContext::new(&root)))
+                .expect("a template is admitted");
+        let slot = &schema.pending_slots()[0];
+        assert_eq!(&text[slot.span.clone()], "{{ wrong }}");
+    }
+}

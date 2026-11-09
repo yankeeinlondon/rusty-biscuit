@@ -380,7 +380,10 @@ fn with_expression_cause(record: Diagnostic, cause: Option<&ExpressionError>) ->
             vec![with_failed_fetch(record, function, reference)]
         }
         Some(ExpressionError::SchemaFileRead { file, .. }) => vec![with_file_reference(record, file)],
-        Some(ExpressionError::Data(data)) => data_records(record, data),
+        Some(ExpressionError::Data(data)) => match crate::markdown::schemas::slots::host::contract_template_failure(data) {
+            Some(failure) => contract_template_records(record, failure),
+            None => data_records(record, data),
+        },
         Some(ExpressionError::SlotReadRefused {
             refusal: crate::markdown::compose::expression::read_gate::GateRefusal::ApprovalRequired { needed },
             ..
@@ -390,6 +393,25 @@ fn with_expression_cause(record: Diagnostic, cause: Option<&ExpressionError>) ->
         }],
         _ => vec![record],
     }
+}
+
+/// `record`, a slot whose `load_data` contract named a template, once per
+/// record of that template's failed slots: each keeps its own code and what
+/// its cause adds (a `data_location`, the `grants_needed`, reference
+/// fields), as it would had it failed in this slot, while `record`'s
+/// `source`, `span`, and message stay primary. The diagnostic model has no
+/// secondary location, so the inner slot's own position is not published.
+fn contract_template_records(record: Diagnostic, failure: &simplified_schema::SlotResolutionFailure) -> Vec<Diagnostic> {
+    slot_resolution_records(&failure.error, &|slot| failure_text(failure, slot))
+        .into_iter()
+        .map(|(_, inner)| Diagnostic {
+            message: record.message.clone(),
+            source: record.source.clone(),
+            span: record.span.clone(),
+            iteration_path: record.iteration_path.clone(),
+            ..inner
+        })
+        .collect()
 }
 
 fn with_file_reference(record: Diagnostic, diagnostic: &FileReferenceDiagnostic) -> Diagnostic {
@@ -752,10 +774,11 @@ pub(crate) fn slot_resolution_diagnostics(
 /// `dm.schema.slot_pending` per slot of a template not resolved for this
 /// run. `None` for any other schema error.
 ///
-/// Each record's `source` and `span` are [`template_diagnostics`]': the
-/// slot in its defining file, when the resolution kept that file's text.
-/// An editor publishes a record of a slot written in its own document at
-/// that span.
+/// Each record's `source` and `span` are the slot in its defining file,
+/// when the resolution kept that file's text ([`template_slot_text`]), as
+/// [`template_diagnostics`] reports them. An editor publishes a record of a
+/// slot written in its own document at that span, once it has checked
+/// that the text is the one it is showing.
 pub fn template_slot_records(
     error: &simplified_schema::SchemaError,
 ) -> Option<Vec<(Option<simplified_schema::simplified::Slot>, Diagnostic)>> {
@@ -768,10 +791,62 @@ pub fn template_slot_records(
             unresolved
                 .slots
                 .iter()
-                .map(|slot| (Some(slot.clone()), unlocated(SLOT_PENDING_CODE, Severity::Error, error.to_string())))
+                .map(|slot| {
+                    let text_of = |slot: &simplified_schema::simplified::Slot| template_slot_text(error, slot);
+                    (Some(slot.clone()), slot_record(slot, &slot.span, SLOT_PENDING_CODE, error.to_string(), &text_of))
+                })
                 .collect(),
         ),
         _ => None,
+    }
+}
+
+/// The file `slot` of the template `error` reports was written in, and the
+/// text its spans are byte ranges of, as the resolution kept them: a schema
+/// file it read, or the document or trigger file an inline `$schema` is
+/// written in. `None` when no kept text proves where the slot is; nothing
+/// is read to find out.
+pub fn template_slot_text(
+    error: &simplified_schema::SchemaError,
+    slot: &simplified_schema::simplified::Slot,
+) -> Option<(Option<PathBuf>, std::sync::Arc<str>)> {
+    match error {
+        simplified_schema::SchemaError::SlotResolution(failure) => failure_text(failure, slot),
+        simplified_schema::SchemaError::UnresolvedSlots(unresolved) => unresolved
+            .pending
+            .as_ref()?
+            .slot_text(slot)
+            .map(|(file, text)| (file.map(Path::to_path_buf), std::sync::Arc::clone(text))),
+        _ => None,
+    }
+}
+
+/// One record of `slot` at `span` (a range of the slot's), positioned in
+/// the text `text_of` gives when that text proves it; otherwise naming only
+/// the slot's origin.
+fn slot_record(
+    slot: &simplified_schema::simplified::Slot,
+    span: &simplified_schema::span::SourceSpan,
+    code: &str,
+    message: String,
+    text_of: &dyn Fn(&simplified_schema::simplified::Slot) -> Option<SlotText>,
+) -> Diagnostic {
+    let (file, text) = match text_of(slot) {
+        Some((file, text)) => (file, Some(text)),
+        None => (slot.origin.clone(), None),
+    };
+    let span = text.as_deref().and_then(|text| proven_slot_span(text, slot, span));
+    let position = span.as_ref().zip(text.as_deref()).map(|(span, text)| crate::markdown::span::line_col_of_offset(text, span.start));
+    Diagnostic {
+        source: Some(DiagnosticSource {
+            file,
+            line: position.map(|(line, _)| line),
+            column: position.map(|(_, column)| column),
+            section: None,
+            inserted: false,
+        }),
+        span,
+        ..unlocated(code, Severity::Error, message)
     }
 }
 
@@ -782,23 +857,7 @@ fn slot_resolution_records(
     use crate::markdown::schemas::slots::codes;
     use simplified_schema::slots::SlotResolutionError;
     let at = |slot: &simplified_schema::simplified::Slot, span: &simplified_schema::span::SourceSpan, code: &str, message: String| {
-        let (file, text) = match text_of(slot) {
-            Some((file, text)) => (file, Some(text)),
-            None => (slot.origin.clone(), None),
-        };
-        let span = text.as_deref().and_then(|text| proven_slot_span(text, slot, span));
-        let position = span.as_ref().zip(text.as_deref()).map(|(span, text)| crate::markdown::span::line_col_of_offset(text, span.start));
-        Diagnostic {
-            source: Some(DiagnosticSource {
-                file,
-                line: position.map(|(line, _)| line),
-                column: position.map(|(_, column)| column),
-                section: None,
-                inserted: false,
-            }),
-            span,
-            ..unlocated(code, Severity::Error, message)
-        }
+        slot_record(slot, span, code, message, text_of)
     };
     match error {
         SlotResolutionError::Refused(refused) => refused
@@ -819,13 +878,7 @@ fn slot_resolution_records(
             .collect(),
         SlotResolutionError::Schema(schema) => match schema.as_ref() {
             simplified_schema::SchemaError::SlotResult { slot, kind } => {
-                use simplified_schema::SlotResultKind;
-                let code = match kind {
-                    SlotResultKind::Empty => codes::SLOT_EMPTY_CODE,
-                    SlotResultKind::PatternRejected(_) => codes::SLOT_PATTERN_REJECTED_CODE,
-                    _ => codes::SLOT_WRONG_SHAPE_CODE,
-                };
-                vec![(Some(slot.as_ref().clone()), at(slot, &slot.span, code, kind.to_string()))]
+                vec![(Some(slot.as_ref().clone()), at(slot, &slot.span, codes::slot_result_code(kind), kind.to_string()))]
             }
             other => vec![(None, unlocated(codes::SLOT_FAILED_CODE, Severity::Error, other.to_string()))],
         },

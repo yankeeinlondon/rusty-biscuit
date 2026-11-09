@@ -112,6 +112,44 @@ and `>` YAML scalars and a Markdown frontmatter block, without normalizing
 line endings. A slot reached through `Name@./other.yaml` points into the file
 that defines it.
 
+### An inline `$schema` value
+
+A host that resolves a `$schema` value it already parsed (a Markdown
+document's frontmatter, a trigger file's payload, a YAML document's root
+`$schema`) passes the text the value was read from, so its slots point into
+that file too:
+
+```rust,ignore
+use std::sync::Arc;
+use simplified_schema::resolve::{AuthoredSchemaValue, InlineOwner, resolve_authored_yaml_schema};
+
+let text: Arc<str> = "---\n$schema:\n  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }})\n---\n".into();
+let authored = AuthoredSchemaValue {
+    file: Some("/repo/doc.md".into()),
+    mapping: 4..text.len() - 4,          // the frontmatter block's YAML
+    text: Arc::clone(&text),
+};
+let value = &serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text[4..text.len() - 4])?["$schema"];
+let result = resolve_authored_yaml_schema(value, InlineOwner::Document, Some(&authored), base_dir, &[], &context, shipped);
+// Err(SchemaError::UnresolvedSlots(u)): u.pending's slots now span `text`.
+```
+
+The value is located in `mapping` under its `$schema` key and checked
+against the parsed value node for node and scalar for scalar; only then are
+its spans moved into the file. When the text does not prove the value (it
+says something else, or the value comes through a YAML alias), or no text is
+given, the spans stay relative to each type string and the template keeps
+no text, so a host never reports a guessed position.
+
+The template keeps the text it was resolved from
+(`PendingSchema::authored_source()`), and so does a failure built from it
+(`SlotResolutionFailure::of_pending`). Either answers `slot_text(&slot)`:
+the file a slot was written in and the text its spans index, taken from the
+schema files the resolution read (for a slot with an origin) or the authored
+value (a document's slots, which have no origin, and a trigger payload's,
+whose origin is the trigger file). `None` means no text proves the slot's
+place. Nothing is read to answer it.
+
 ## Nothing Runs While Parsing
 
 Parsing a slot parses its expression once, to report a syntax error where it
@@ -340,7 +378,7 @@ unchanged.
 | --- | --- |
 | `SlotResolutionError::Refused` | the host's `admit` refused one or more slots; each with its `SlotAdmissionError` (code, message, optional span inside the expression) |
 | `SlotResolutionError::Failed` | the host's `resolve` failed for one or more slots; each with its `SlotFailure` |
-| `SlotResolutionError::Schema` holding `SchemaError::SlotResult` | a value cannot fill its position; `slot.span` (in `slot.origin`'s file when set) is where it is reported |
+| `SlotResolutionError::Schema` holding `SchemaError::SlotResult` | a value cannot fill its position; `slot.span` is where it is reported, in the text `slot_text(&slot)` names |
 | `SlotResolutionError::Schema` holding another `SchemaError` | the schema the values make fails as any schema would |
 | `SlotResolutionError::Canceled` | `is_canceled` returned `true` |
 

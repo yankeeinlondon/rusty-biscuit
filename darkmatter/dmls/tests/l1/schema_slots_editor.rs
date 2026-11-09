@@ -71,7 +71,10 @@ fn uri(path: &Path) -> String {
 }
 
 fn open(fixture: &LspFixture, path: &Path, text: &str, version: i32) {
-    let language = if path.extension().is_some_and(|extension| extension == "yaml") { "yaml" } else { "markdown" };
+    let language = match path.extension().and_then(|extension| extension.to_str()) {
+        Some("md") | None => "markdown",
+        Some(extension) => extension,
+    };
     fixture.notify(
         "textDocument/didOpen",
         json!({ "textDocument": { "uri": uri(path), "languageId": language, "version": version, "text": text } }),
@@ -279,30 +282,6 @@ fn a_grant_command_with_an_invalid_target_is_refused_and_changes_nothing() {
 }
 
 #[test]
-fn an_unsaved_edit_of_the_data_file_refreshes_the_snapshot() {
-    let workspace = LspWorkspace::new();
-    let root = workspace_with_data(&workspace, &["Linux"]);
-    let data = root.join("os.yaml");
-    allow_file_persisted(&root, &data);
-    let doc = root.join("doc.md");
-    let text = SCHEMA_DOC.replace("os: Linux", "os: Haiku");
-    let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
-    fixture.initialize(params(&root));
-    let diagnostics = open_and_resolve(&mut fixture, &doc, &text);
-    assert!(invalid_os(&diagnostics).is_some(), "Haiku is not listed yet: {diagnostics:#?}");
-
-    // Opening the data file refreshes once; the unsaved edit, again.
-    open(&fixture, &data, "- Linux\n", 1);
-    assert!(fixture.wait_for_slot_prepared());
-    change(&fixture, &data, "- Linux\n- Haiku\n", 2);
-    assert!(fixture.wait_for_slot_prepared(), "the buffer edit refreshes the document");
-    fixture.flush_server();
-    let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
-    assert_eq!(invalid_os(&diagnostics), None, "the unsaved member is loaded: {diagnostics:#?}");
-    assert_eq!(std::fs::read_to_string(&data).unwrap(), "- Linux\n", "the disk file is untouched");
-}
-
-#[test]
 fn a_saved_change_to_the_data_file_refreshes_the_snapshot_through_its_watch() {
     let workspace = LspWorkspace::new();
     let root = workspace_with_data(&workspace, &["Linux"]);
@@ -380,6 +359,9 @@ fn while_a_refresh_is_held_the_last_good_snapshot_is_served_marked_stale() {
     let first = fixture.wait_for_diagnostics(&uri(&doc));
     assert!(invalid_os(&first).is_some());
     assert!(with_code(&first, "dm.schema.slot_pending").is_empty(), "{first:#?}");
+    let current = completion_items(&mut fixture, &doc, 3, 4);
+    assert_eq!(labels(&current), ["Linux"], "{current:#?}");
+    assert!(current.iter().all(|item| item.get("detail").is_none()), "control: current: {current:#?}");
 
     write_members(&data, &["Linux", "Haiku"]);
     watched_change(&fixture, &data, 2);
@@ -396,6 +378,12 @@ fn while_a_refresh_is_held_the_last_good_snapshot_is_served_marked_stale() {
     );
     let value = hover.result.expect("hover")["contents"]["value"].as_str().unwrap_or_default().to_string();
     assert!(value.contains("stale"), "{value}");
+    let stale = completion_items(&mut fixture, &doc, 3, 4);
+    assert!(
+        !stale.is_empty() && stale.iter().all(|item| item["detail"].as_str().is_some_and(|detail| detail.contains(STALE_NOTE))),
+        "R1-F5: every candidate says it is stale: {stale:#?}"
+    );
+    assert_eq!(without_detail(&stale), without_detail(&current), "labels, edits, and order are unchanged");
 
     fixture.release_slot_job();
     assert!(fixture.wait_for_slot_prepared());
@@ -403,6 +391,41 @@ fn while_a_refresh_is_held_the_last_good_snapshot_is_served_marked_stale() {
     let refreshed = fixture.wait_for_diagnostics(&uri(&doc));
     assert_eq!(invalid_os(&refreshed), None, "{refreshed:#?}");
     assert!(with_code(&refreshed, "dm.schema.slot_pending").is_empty(), "{refreshed:#?}");
+    let refreshed = completion_items(&mut fixture, &doc, 3, 4);
+    assert!(labels(&refreshed).contains(&"Haiku".to_string()), "{refreshed:#?}");
+    assert!(refreshed.iter().all(|item| item.get("detail").is_none()), "control: current again: {refreshed:#?}");
+}
+
+/// The note a candidate served from a refreshing snapshot carries.
+const STALE_NOTE: &str = "Schema slots stale";
+/// The note a candidate offered before the template first resolves carries.
+const PENDING_NOTE: &str = "Schema slots pending";
+
+/// The completion items at `line`:`character` of `doc`, in response order.
+fn completion_items(fixture: &mut LspFixture, doc: &Path, line: u32, character: u32) -> Vec<Value> {
+    let response = fixture.request(
+        "textDocument/completion",
+        json!({ "textDocument": { "uri": uri(doc) }, "position": { "line": line, "character": character } }),
+    );
+    let result = response.result.expect("completion");
+    result["items"].as_array().or_else(|| result.as_array()).cloned().unwrap_or_default()
+}
+
+fn labels(items: &[Value]) -> Vec<String> {
+    items.iter().filter_map(|item| item["label"].as_str().map(str::to_string)).collect()
+}
+
+/// `items` with their `detail` removed, so a decorated list compares equal
+/// to the undecorated one it came from.
+fn without_detail(items: &[Value]) -> Vec<Value> {
+    items
+        .iter()
+        .cloned()
+        .map(|mut item| {
+            item.as_object_mut().unwrap().remove("detail");
+            item
+        })
+        .collect()
 }
 
 #[test]
@@ -639,4 +662,521 @@ fn a_selected_trigger_slot_with_no_override_reports_its_unapproved_read() {
 
     let diagnostics = open_and_resolve(&mut fixture, &doc, "---\ntopic: sandbox\nos: Windows\n---\n\n# Doc\n");
     assert_eq!(with_code(&diagnostics, "dm.schema.slot_approval_required").len(), 1, "{diagnostics:#?}");
+}
+
+/// The LSP range (UTF-8 positions, which the fixture negotiates) of the
+/// `nth` `{{ … }}` in `text`.
+fn slot_range(text: &str, nth: usize) -> Value {
+    let start = text.match_indices("{{").nth(nth).expect("a slot").0;
+    let end = start + text[start..].find("}}").expect("a closed slot") + 2;
+    let position = |offset: usize| {
+        let before = &text[..offset];
+        let line_start = before.rfind('\n').map_or(0, |at| at + 1);
+        json!({ "line": before.matches('\n').count(), "character": offset - line_start })
+    };
+    json!({ "start": position(start), "end": position(end) })
+}
+
+/// R1-F3.9: an inline slot's record is ranged at the span the library
+/// proved for it, the same one `md compose` reports. A double-quoted
+/// carrier's escapes keep its authored text from equaling the expression,
+/// and a second slot with the same expression is a different slot; each is
+/// ranged at its own bytes.
+#[test]
+fn an_inline_slot_is_ranged_at_its_own_authored_bytes_through_a_quoted_carrier() {
+    let workspace = LspWorkspace::new();
+    let root = workspace_with_data(&workspace, &["Linux"]);
+    let doc = root.join("doc.md");
+    let text = "---\n$schema:\n  os: \"enum({{ load_data(\\\"./os.yaml\\\", \\\"string[]\\\") }})\"\n  arch: enum({{ load_data(\"./os.yaml\", \"string[]\") }})\nos: Linux\n---\n\n# Doc\n";
+    let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+    fixture.initialize(params(&root));
+
+    let diagnostics = open_and_resolve(&mut fixture, &doc, text);
+    let mut ranges: Vec<Value> =
+        with_code(&diagnostics, "dm.schema.slot_approval_required").iter().map(|diagnostic| diagnostic["range"].clone()).collect();
+    ranges.sort_by_key(|range| range["start"]["line"].as_u64());
+    assert_eq!(ranges, vec![slot_range(text, 0), slot_range(text, 1)], "{diagnostics:#?}");
+}
+
+/// R1-F3.23: the unsaved buffer is the text positions are proven in. An
+/// edit above the `$schema` moves the published range with it once the
+/// edited buffer resolves, and a record of the earlier revision is never
+/// placed at bytes it no longer names.
+#[test]
+fn an_unsaved_edit_above_the_schema_moves_the_slot_range() {
+    let workspace = LspWorkspace::new();
+    let root = workspace_with_data(&workspace, &["Linux"]);
+    let doc = root.join("doc.md");
+    let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+    fixture.initialize(params(&root));
+    let diagnostics = open_and_resolve(&mut fixture, &doc, SCHEMA_DOC);
+    let approval = with_code(&diagnostics, "dm.schema.slot_approval_required");
+    assert_eq!(approval.iter().map(|diagnostic| diagnostic["range"].clone()).collect::<Vec<_>>(), vec![slot_range(SCHEMA_DOC, 0)]);
+
+    let edited = SCHEMA_DOC.replacen("---\n", "---\ntitle: Moved\nsummary: down\n", 1);
+    change(&fixture, &doc, &edited, 2);
+    assert!(fixture.wait_for_slot_prepared(), "the edited buffer resolves");
+    fixture.flush_server();
+    let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
+    let approval = with_code(&diagnostics, "dm.schema.slot_approval_required");
+    assert_eq!(approval.iter().map(|diagnostic| diagnostic["range"].clone()).collect::<Vec<_>>(), vec![slot_range(&edited, 0)], "{diagnostics:#?}");
+}
+
+/// R1-F3.27: a trigger slot is ranged at the document's frontmatter, and
+/// its related information points at the slot in the trigger file.
+#[test]
+fn a_trigger_slot_points_at_its_position_in_the_trigger_file() {
+    let workspace = LspWorkspace::new();
+    let root = trigger_slot_workspace(&workspace);
+    let doc = root.join("docs/doc.md");
+    let trigger = std::fs::read_to_string(root.join("schemas/a.trigger.yaml")).unwrap();
+    let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+    fixture.initialize(params(&root));
+
+    let diagnostics = open_and_resolve(&mut fixture, &doc, "---\ntopic: sandbox\nos: Windows\n---\n\n# Doc\n");
+    let approval = with_code(&diagnostics, "dm.schema.slot_approval_required");
+    assert_eq!(approval.len(), 1, "{diagnostics:#?}");
+    let related = &approval[0]["relatedInformation"][0]["location"];
+    assert_eq!(related["uri"], json!(uri(&root.join("schemas/a.trigger.yaml"))), "{:#?}", approval[0]);
+    assert_eq!(related["range"]["start"], slot_range(&trigger, 0)["start"], "{:#?}", approval[0]);
+}
+
+/// R1-F5: every editor response projected from a template's snapshot says
+/// so when that snapshot is not current: candidates from every completion
+/// site, a body expression's hover, and a quick fix that inserts a value
+/// the slots supplied. Each cell checks the current snapshot first (no
+/// note), holds a refresh after the data changes (the note), and, where the
+/// state can end, releases it (no note again).
+mod stale_responses {
+    use super::*;
+
+    /// A gated server with `text` opened as `doc.md` over an `os.yaml`
+    /// holding `before`, resolved once. Returns the fixture, the document,
+    /// the data file, and the resolved diagnostics.
+    fn resolved<'w>(workspace: &'w LspWorkspace, text: &str, before: &str) -> (LspFixture<'w>, PathBuf, PathBuf, Vec<Value>) {
+        let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+        let data = root.join("os.yaml");
+        std::fs::write(&data, before).unwrap();
+        allow_file_persisted(&root, &data);
+        let doc = root.join("doc.md");
+        let mut fixture = LspFixture::start_with_slot_gate(workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        open(&fixture, &doc, text, 1);
+        fixture.release_slot_job();
+        assert!(fixture.wait_for_slot_prepared());
+        fixture.flush_server();
+        let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
+        (fixture, doc, data, diagnostics)
+    }
+
+    /// Writes `after` to the data file, waits until its refresh is held,
+    /// and returns the diagnostics published while it is.
+    fn hold_refresh(fixture: &mut LspFixture, doc: &Path, data: &Path, after: &str) -> Vec<Value> {
+        std::fs::write(data, after).unwrap();
+        watched_change(fixture, data, 2);
+        fixture.wait_for_event(dmls::StartupEvent::SlotPreparing);
+        fixture.round_trip();
+        fixture.wait_for_diagnostics(&uri(doc))
+    }
+
+    fn all_noted(items: &[Value], note: &str) -> bool {
+        !items.is_empty() && items.iter().all(|item| item["detail"].as_str().is_some_and(|detail| detail.contains(note)))
+    }
+
+    fn hover_text(fixture: &mut LspFixture, doc: &Path, line: u32, character: u32) -> String {
+        let hover = fixture.request(
+            "textDocument/hover",
+            json!({ "textDocument": { "uri": uri(doc) }, "position": { "line": line, "character": character } }),
+        );
+        hover.result.expect("hover")["contents"]["value"].as_str().unwrap_or_default().to_string()
+    }
+
+    #[test]
+    fn an_array_item_candidate_from_a_refreshing_snapshot_is_marked_stale() {
+        let workspace = LspWorkspace::new();
+        let text = "---\n$schema:\n  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }})[]\nos:\n  - \n---\n";
+        let (mut fixture, doc, data, _) = resolved(&workspace, text, "- Linux\n");
+        let current = completion_items(&mut fixture, &doc, 4, 4);
+        assert_eq!(labels(&current), ["Linux"], "{current:#?}");
+        assert!(current.iter().all(|item| item.get("detail").is_none()), "{current:#?}");
+
+        hold_refresh(&mut fixture, &doc, &data, "- Linux\n- Haiku\n");
+        let stale = completion_items(&mut fixture, &doc, 4, 4);
+        assert!(all_noted(&stale, STALE_NOTE), "{stale:#?}");
+        assert_eq!(without_detail(&stale), without_detail(&current));
+    }
+
+    #[test]
+    fn a_union_value_candidate_from_a_refreshing_snapshot_is_marked_stale() {
+        let workspace = LspWorkspace::new();
+        let text = "---\n$schema:\n  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }}) | number\nos: \n---\n";
+        let (mut fixture, doc, data, _) = resolved(&workspace, text, "- Linux\n");
+        let current = completion_items(&mut fixture, &doc, 3, 4);
+        assert!(labels(&current).contains(&"Linux".to_string()), "{current:#?}");
+        assert!(current.iter().all(|item| item.get("detail").is_none()), "{current:#?}");
+
+        hold_refresh(&mut fixture, &doc, &data, "- Linux\n- Haiku\n");
+        let stale = completion_items(&mut fixture, &doc, 3, 4);
+        assert!(all_noted(&stale, STALE_NOTE), "{stale:#?}");
+        assert_eq!(without_detail(&stale), without_detail(&current));
+    }
+
+    #[test]
+    fn a_union_item_candidate_from_a_refreshing_snapshot_is_marked_stale() {
+        let workspace = LspWorkspace::new();
+        let text = "---\n$schema:\n  os: (enum({{ load_data(\"./os.yaml\", \"string[]\") }}) | number)[]\nos:\n  - \n---\n";
+        let (mut fixture, doc, data, _) = resolved(&workspace, text, "- Linux\n");
+        let current = completion_items(&mut fixture, &doc, 4, 4);
+        assert!(labels(&current).contains(&"Linux".to_string()), "{current:#?}");
+        assert!(current.iter().all(|item| item.get("detail").is_none()), "{current:#?}");
+
+        hold_refresh(&mut fixture, &doc, &data, "- Linux\n- Haiku\n");
+        let stale = completion_items(&mut fixture, &doc, 4, 4);
+        assert!(all_noted(&stale, STALE_NOTE), "{stale:#?}");
+        assert_eq!(without_detail(&stale), without_detail(&current));
+    }
+
+    #[test]
+    fn a_suggestion_from_a_refreshing_snapshot_is_marked_stale() {
+        let workspace = LspWorkspace::new();
+        let text = "---\n$schema:\n  os: string(suggest({{ load_data(\"./os.yaml\", \"string[]\") }}))[]\nos:\n  - \n---\n";
+        let (mut fixture, doc, data, _) = resolved(&workspace, text, "- Linux\n");
+        let current = completion_items(&mut fixture, &doc, 4, 4);
+        assert_eq!(labels(&current), ["Linux"], "{current:#?}");
+        assert!(current.iter().all(|item| item.get("detail").is_none()), "{current:#?}");
+
+        hold_refresh(&mut fixture, &doc, &data, "- Linux\n- Haiku\n");
+        let stale = completion_items(&mut fixture, &doc, 4, 4);
+        assert!(all_noted(&stale, STALE_NOTE), "{stale:#?}");
+        assert_eq!(without_detail(&stale), without_detail(&current));
+    }
+
+    #[test]
+    fn literal_candidates_offered_before_the_first_resolution_are_marked_pending() {
+        let workspace = LspWorkspace::new();
+        let root = workspace_with_data(&workspace, &["Linux"]);
+        allow_file_persisted(&root, &root.join("os.yaml"));
+        let doc = root.join("doc.md");
+        let text = "---\n$schema:\n  os: enum(Haiku, {{ load_data(\"./os.yaml\", \"string[]\") }})\nos: \n---\n";
+        let mut fixture = LspFixture::start_with_slot_gate(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        open(&fixture, &doc, text, 1);
+        fixture.wait_for_event(dmls::StartupEvent::SlotPreparing);
+
+        let pending = completion_items(&mut fixture, &doc, 3, 4);
+        assert_eq!(labels(&pending), ["Haiku"], "{pending:#?}");
+        assert!(all_noted(&pending, PENDING_NOTE), "the literal parts alone never look complete: {pending:#?}");
+
+        fixture.release_slot_job();
+        assert!(fixture.wait_for_slot_prepared());
+        let resolved = completion_items(&mut fixture, &doc, 3, 4);
+        assert!(labels(&resolved).contains(&"Linux".to_string()), "{resolved:#?}");
+        assert!(resolved.iter().all(|item| item.get("detail").is_none()), "control: {resolved:#?}");
+    }
+
+    #[test]
+    fn a_body_expression_hover_from_a_refreshing_snapshot_is_marked_stale() {
+        let workspace = LspWorkspace::new();
+        // `os` is unset, so the hover describes the schema's members rather
+        // than a static value.
+        let text = "---\n$schema:\n  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }})\n---\n\n{{ os }}\n";
+        let (mut fixture, doc, data, _) = resolved(&workspace, text, "- Linux\n");
+        let current = hover_text(&mut fixture, &doc, 5, 3);
+        assert!(current.contains("Linux") && !current.contains(STALE_NOTE), "{current}");
+
+        hold_refresh(&mut fixture, &doc, &data, "- Linux\n- Haiku\n");
+        let stale = hover_text(&mut fixture, &doc, 5, 3);
+        assert!(stale.contains(STALE_NOTE), "{stale}");
+
+        fixture.release_slot_job();
+        assert!(fixture.wait_for_slot_prepared());
+        let refreshed = hover_text(&mut fixture, &doc, 5, 3);
+        assert!(refreshed.contains("Haiku") && !refreshed.contains(STALE_NOTE), "control: {refreshed}");
+    }
+
+    #[test]
+    fn a_quick_fix_inserting_a_slot_value_from_a_refreshing_snapshot_is_marked_stale() {
+        let workspace = LspWorkspace::new();
+        // A missing required key is reported only in strict mode.
+        std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+        let text = "---\n$schema:\n  os: literal({{ load_data(\"./os.yaml\", \"string[]\")[0] }}; required)\ntitle: Doc\n---\n";
+        let (mut fixture, doc, data, diagnostics) = resolved(&workspace, text, "- Linux\n");
+        let add_key = |fixture: &mut LspFixture, diagnostics: &[Value]| {
+            let missing = with_code(diagnostics, "dm.schema.missing_required");
+            assert_eq!(missing.len(), 1, "{diagnostics:#?}");
+            let actions = fixture.request(
+                "textDocument/codeAction",
+                json!({
+                    "textDocument": { "uri": uri(&doc) },
+                    "range": missing[0]["range"],
+                    "context": { "diagnostics": [missing[0]] }
+                }),
+            );
+            let actions = actions.result.expect("code actions");
+            actions
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|action| action["title"].as_str().is_some_and(|title| title.starts_with("Add required key")))
+                .unwrap_or_else(|| panic!("an add-key fix: {actions:#?}"))
+                .clone()
+        };
+        let current = add_key(&mut fixture, &diagnostics);
+        assert!(current.to_string().contains("os: Linux"), "{current:#?}");
+        assert_eq!(current["title"], json!("Add required key `os`"));
+
+        let held = hold_refresh(&mut fixture, &doc, &data, "- macOS\n");
+        let stale = add_key(&mut fixture, &held);
+        assert!(stale.to_string().contains("os: Linux"), "the last-good value: {stale:#?}");
+        assert!(stale["title"].as_str().unwrap().contains("stale"), "{stale:#?}");
+    }
+}
+
+/// R1-F4: an open buffer is what a slot reads of any file it depends on,
+/// whatever the file's extension. Each format row first rejects `Haiku`
+/// against the data file on disk; the only edit then adds `Haiku` to the
+/// unsaved buffer, and the completed refresh accepts it while the disk file
+/// stays as it was.
+mod unsaved_buffers {
+    use super::*;
+    use biscuit_file::DataFormat;
+
+    /// A document whose `os` is an enum of what `expression` evaluates to,
+    /// in a block carrier (the contracts hold `:` and quotes), set to `Haiku`.
+    fn document(expression: &str) -> String {
+        format!("---\n$schema:\n  os: |-\n    enum({{{{ {expression} }}}})\nos: Haiku\n---\n\n# Doc\n")
+    }
+
+    struct Case {
+        file: &'static str,
+        expression: &'static str,
+        disk: &'static str,
+        unsaved: &'static str,
+    }
+
+    /// A started server on a workspace holding `case.file` with its disk
+    /// text (granted), whose document already rejected `Haiku`, and whose
+    /// data file is open with its disk text.
+    fn opened<'w>(workspace: &'w LspWorkspace, case: &Case) -> (LspFixture<'w>, PathBuf, PathBuf) {
+        let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+        let data = root.join(case.file);
+        std::fs::write(&data, case.disk).unwrap();
+        allow_file_persisted(&root, &data);
+        let doc = root.join("doc.md");
+        let mut fixture = LspFixture::start_with_snapshot(workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        let text = document(case.expression);
+        let diagnostics = open_and_resolve(&mut fixture, &doc, &text);
+        assert!(invalid_os(&diagnostics).is_some(), "Haiku is not listed on disk: {diagnostics:#?}");
+        open(&fixture, &data, case.disk, 1);
+        assert!(fixture.wait_for_slot_prepared(), "opening the data file refreshes the document");
+        (fixture, data, doc)
+    }
+
+    fn edit_accepts_haiku(fixture: &mut LspFixture, data: &Path, doc: &Path, case: &Case) {
+        change(fixture, data, case.unsaved, 2);
+        assert!(fixture.wait_for_slot_prepared(), "the buffer edit refreshes the document");
+        fixture.flush_server();
+        let diagnostics = fixture.wait_for_diagnostics(&uri(doc));
+        assert!(codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")), "{diagnostics:#?}");
+        assert_eq!(invalid_os(&diagnostics), None, "the unsaved member is loaded: {diagnostics:#?}");
+        assert_eq!(std::fs::read_to_string(data).unwrap(), case.disk, "the disk file is untouched");
+    }
+
+    fn unsaved_member_is_loaded(case: &Case) {
+        let workspace = LspWorkspace::new();
+        let (mut fixture, data, doc) = opened(&workspace, case);
+        edit_accepts_haiku(&mut fixture, &data, &doc, case);
+    }
+
+    /// One `#[test]` per row, so nextest runs them in parallel; `FILES`
+    /// lists the rows for [`every_loadable_format_has_a_row`].
+    macro_rules! format_rows {
+        ($($name:ident: $file:literal, $expression:literal, $disk:literal => $unsaved:literal;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    unsaved_member_is_loaded(&Case { file: $file, expression: $expression, disk: $disk, unsaved: $unsaved });
+                }
+            )*
+            const FILES: &[&str] = &[$($file),*];
+        };
+    }
+
+    format_rows! {
+        yaml: "os.yaml", r#"load_data("./os.yaml", "string[]")"#, "- Linux\n" => "- Linux\n- Haiku\n";
+        json: "os.json", r#"load_data("./os.json", "string[]")"#, "[\"Linux\"]\n" => "[\"Linux\", \"Haiku\"]\n";
+        json5: "os.json5", r#"load_data("./os.json5", "string[]")"#, "['Linux',]\n" => "['Linux', 'Haiku',]\n";
+        jsonl: "os.jsonl", r#"load_data("./os.jsonl", "string[]")"#, "\"Linux\"\n" => "\"Linux\"\n\"Haiku\"\n";
+        toml: "os.toml", r#"load_data("./os.toml", "{ os: string[] }").os"#, "os = [\"Linux\"]\n" => "os = [\"Linux\", \"Haiku\"]\n";
+        csv: "os.csv", r#"map(load_data("./os.csv", "{ os: string, kernel: string }[]"), row => row.os)"#, "os,kernel\nLinux,linux\n" => "os,kernel\nLinux,linux\nHaiku,haiku\n";
+        tsv: "os.tsv", r#"map(load_data("./os.tsv", "{ os: string, kernel: string }[]"), row => row.os)"#, "os\tkernel\nLinux\tlinux\n" => "os\tkernel\nLinux\tlinux\nHaiku\thaiku\n";
+        markdown: "os.md", r#"frontmatter("./os.md", "os")"#, "---\nos: [Linux]\n---\n" => "---\nos: [Linux, Haiku]\n---\n";
+    }
+
+    /// The extension of a format a slot can read a file in (`load_data`'s
+    /// formats, and Markdown through `frontmatter`); a new format fails to
+    /// compile here until it is given a row.
+    fn readable_extension(format: DataFormat) -> Option<&'static str> {
+        match format {
+            DataFormat::Yaml => Some("yaml"),
+            DataFormat::Json => Some("json"),
+            DataFormat::Json5 => Some("json5"),
+            DataFormat::Jsonl => Some("jsonl"),
+            DataFormat::Toml => Some("toml"),
+            DataFormat::Csv => Some("csv"),
+            DataFormat::Tsv => Some("tsv"),
+            DataFormat::Markdown => Some("md"),
+            DataFormat::Pdf | DataFormat::Text => None,
+        }
+    }
+
+    #[test]
+    fn every_loadable_format_has_a_row() {
+        let formats = [
+            DataFormat::Yaml,
+            DataFormat::Json,
+            DataFormat::Json5,
+            DataFormat::Jsonl,
+            DataFormat::Toml,
+            DataFormat::Csv,
+            DataFormat::Tsv,
+            DataFormat::Markdown,
+            DataFormat::Pdf,
+            DataFormat::Text,
+        ];
+        for extension in formats.into_iter().filter_map(readable_extension) {
+            assert!(
+                FILES.iter().any(|file| Path::new(file).extension().is_some_and(|found| found == extension)),
+                "no unsaved-buffer row reads a .{extension} file"
+            );
+        }
+    }
+
+    /// Closing the buffer returns the slot to the file on disk.
+    #[test]
+    fn closing_the_buffer_reverts_to_the_disk_contents() {
+        let case = Case {
+            file: "os.toml",
+            expression: r#"load_data("./os.toml", "{ os: string[] }").os"#,
+            disk: "os = [\"Linux\"]\n",
+            unsaved: "os = [\"Linux\", \"Haiku\"]\n",
+        };
+        let workspace = LspWorkspace::new();
+        let (mut fixture, data, doc) = opened(&workspace, &case);
+        edit_accepts_haiku(&mut fixture, &data, &doc, &case);
+
+        fixture.notify("textDocument/didClose", json!({ "textDocument": { "uri": uri(&data) } }));
+        assert!(fixture.wait_for_slot_prepared(), "closing the buffer refreshes the document");
+        fixture.flush_server();
+        let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(invalid_os(&diagnostics).is_some(), "the disk file lists no Haiku: {diagnostics:#?}");
+    }
+
+    /// A contract's named-type import is read through its open buffer
+    /// whatever its extension (a `.schema` file is a YAML schema document).
+    #[test]
+    fn an_imported_schema_with_an_unusual_extension_is_read_from_its_buffer() {
+        let workspace = LspWorkspace::new();
+        let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+        let (data, types) = (root.join("os.yaml"), root.join("os.schema"));
+        std::fs::write(&data, "- Linux\n- Haiku\n").unwrap();
+        let disk = "kind: schema\ntypes:\n  Os: enum(Linux)[]\n";
+        std::fs::write(&types, disk).unwrap();
+        let store = grant_store(&root);
+        std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+        std::fs::write(&store, format!("allow file {}\nallow file {}\n", data.display(), types.display())).unwrap();
+        let doc = root.join("doc.md");
+        let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        let text = document(r#"load_data("./os.yaml", "Os@./os.schema")"#);
+        let diagnostics = open_and_resolve(&mut fixture, &doc, &text);
+        assert!(
+            invalid_os(&diagnostics).is_some() || !codes(&diagnostics).is_empty(),
+            "the disk contract has no Haiku: {diagnostics:#?}"
+        );
+
+        open(&fixture, &types, disk, 1);
+        assert!(fixture.wait_for_slot_prepared());
+        change(&fixture, &types, "kind: schema\ntypes:\n  Os: enum(Linux, Haiku)[]\n", 2);
+        assert!(fixture.wait_for_slot_prepared(), "the import's buffer edit refreshes the document");
+        fixture.flush_server();
+        let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(codes(&diagnostics).is_empty(), "the unsaved contract admits Haiku: {diagnostics:#?}");
+    }
+
+    /// An unsaved buffer that differs from the committed file is dirty, so
+    /// the automatic grant no longer covers it.
+    #[test]
+    fn a_dirty_buffer_loses_the_automatic_grant() {
+        let workspace = LspWorkspace::new();
+        let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+        let data = root.join("os.toml");
+        std::fs::write(&data, "os = [\"Linux\"]\n").unwrap();
+        let text = document(r#"load_data("./os.toml", "{ os: string[] }").os"#);
+        let doc = root.join("doc.md");
+        std::fs::write(&doc, &text).unwrap();
+        git(&root, &["init", "-q", "-b", "main"]);
+        git(&root, &["add", "-A"]);
+        git(&root, &["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture"]);
+        let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        let diagnostics = open_and_resolve(&mut fixture, &doc, &text);
+        assert!(
+            codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")),
+            "the clean, committed file is granted automatically: {diagnostics:#?}"
+        );
+
+        open(&fixture, &data, "os = [\"Linux\", \"Haiku\"]\n", 1);
+        assert!(fixture.wait_for_slot_prepared(), "opening the data file refreshes the document");
+        fixture.flush_server();
+        let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
+        assert_eq!(
+            with_code(&diagnostics, "dm.schema.slot_approval_required").len(),
+            1,
+            "the unsaved text is not the committed file, so it needs a grant: {diagnostics:#?}"
+        );
+    }
+}
+
+/// A slot calling a captured-context function resolves on the worker: the
+/// worker's session captures the group the slot's call reads from the
+/// document's context when the slot runs. The defaults are typed on any
+/// host (an address list's length, a boolean, `""` outside a repository);
+/// the clock and `PATH` probes are the controls.
+mod captured_functions {
+    use super::*;
+
+    fn resolves_on_the_worker(declaration: &str) {
+        let workspace = LspWorkspace::new();
+        let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+        let doc = root.join("doc.md");
+        let text = format!("---\n$schema:\n  value: \"{declaration}\"\n---\n\n# Doc\n");
+        let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        let diagnostics = open_and_resolve(&mut fixture, &doc, &text);
+        assert!(codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")), "{diagnostics:#?}");
+    }
+
+    /// One `#[test]` per function, so each fails on its own.
+    macro_rules! function_rows {
+        ($($name:ident: $declaration:literal;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    resolves_on_the_worker($declaration);
+                }
+            )*
+        };
+    }
+
+    function_rows! {
+        ipv4: "number(default({{ length(ipv4()) }}))";
+        ipv6: "number(default({{ length(ipv6()) }}))";
+        has_agentic_cli: "boolean(default({{ has_agentic_cli('kimi') }}))";
+        package: "string(default({{ package('./child') }}))";
+        package_area: "string(default({{ package_area('./child') }}))";
+        is_today: "boolean(default({{ is_today('2024-06-16') }}))";
+        has_command: "boolean(default({{ has_command('git') }}))";
+    }
 }

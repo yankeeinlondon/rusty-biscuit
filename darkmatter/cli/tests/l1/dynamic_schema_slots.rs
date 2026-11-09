@@ -502,3 +502,96 @@ fn compose_still_needs_approval_for_a_selected_trigger_slot_with_no_override() {
     assert_eq!(diagnostic_codes(&report["diagnostics"]), [APPROVAL_REQUIRED], "{report:#}");
     assert_eq!(report["read_set"], json!([]), "{report:#}");
 }
+
+/// The byte range of the first `{{ … }}` in `text`, as a JSON span.
+fn first_slot_span(text: &str) -> Value {
+    let start = text.find("{{").expect("a slot");
+    let end = start + text[start..].find("}}").expect("a closed slot") + 2;
+    json!({ "start": start, "end": end })
+}
+
+/// Asserts `records` is one record with `code` at `file` (relative to the
+/// fixture `cwd`), `line`, and `column`, spanning the first slot of `text`.
+fn assert_slot_record(fixture: &CliProcessFixture, records: &Value, code: &str, file: &str, (line, column): (u64, u64), text: &str) {
+    assert_eq!(diagnostic_codes(records), [code], "{records:#}");
+    let record = &records[0];
+    assert_eq!(record["source"]["file"], json!(canonical(fixture, file)), "{record:#}");
+    assert_eq!((&record["source"]["line"], &record["source"]["column"]), (&json!(line), &json!(column)), "{record:#}");
+    assert_eq!(record["span"], first_slot_span(text), "{record:#}");
+}
+
+const WRONG_SHAPE: &str = "dm.schema.slot_wrong_shape";
+const INLINE_DOCUMENT: &str = "---\ntitle: Inline\n$schema:\n  os: enum({{ 123 }})\nos: Linux\n---\n\nBody.\n";
+
+/// A repository holding `docs/doc.md` as `INLINE_DOCUMENT`, whose inline
+/// `$schema` slot yields a number where an enum takes strings.
+fn inline_document(name: &str) -> Option<CliProcessFixture> {
+    let fixture = CliProcessFixture::named(name);
+    if !fixture.initialize_repository() {
+        return None;
+    }
+    fixture.write_file("cwd/docs/doc.md", INLINE_DOCUMENT);
+    assert!(fixture.commit_all(fixture.cwd()), "the fixture commits");
+    Some(fixture)
+}
+
+/// R1-F3.1: the inline slot is reported in the document, at the slot.
+#[test]
+fn compose_reports_an_inline_slot_failure_at_the_slot_in_the_document() {
+    let Some(fixture) = inline_document("slots-position-compose-inline") else {
+        return;
+    };
+    let output = run(&fixture, &["compose", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 1, include_str!("../../schemas/output/compose.yaml"));
+    assert_slot_record(&fixture, &report["diagnostics"], WRONG_SHAPE, "docs/doc.md", (4, 12), INLINE_DOCUMENT);
+}
+
+/// R1-F3.2.
+#[test]
+fn schema_validate_reports_an_inline_slot_failure_at_the_slot_in_the_document() {
+    let Some(fixture) = inline_document("slots-position-validate-inline") else {
+        return;
+    };
+    let output = run(&fixture, &["schema", "validate", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 1, include_str!("../../schemas/output/schema-validate.yaml"));
+    let record = &report["files"][0];
+    assert_eq!(record["error"], "slots", "{report:#}");
+    assert_slot_record(&fixture, &record["diagnostics"], WRONG_SHAPE, "docs/doc.md", (4, 12), INLINE_DOCUMENT);
+}
+
+/// R1-F3.24: `md clean` reports the same position.
+#[test]
+fn clean_reports_an_inline_slot_failure_at_the_slot_in_the_document() {
+    let Some(fixture) = inline_document("slots-position-clean-inline") else {
+        return;
+    };
+    let output = run(&fixture, &["clean", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 1, include_str!("../../schemas/output/clean.yaml"));
+    assert_slot_record(&fixture, &report["run_diagnostics"], WRONG_SHAPE, "docs/doc.md", (4, 12), INLINE_DOCUMENT);
+}
+
+const TRIGGER_TEXT: &str = "kind: schema-trigger\nmatch:\n  topic: literal(sandbox; required)\n$schema:\n    os: enum({{ load_data(\"../data/os.yaml\", \"string[]\") }}; required)\n";
+
+/// R1-F3.3: a selected trigger's unapproved slot read is reported in the
+/// trigger file, at the slot.
+#[test]
+fn compose_reports_a_trigger_slot_failure_at_the_slot_in_the_trigger_file() {
+    let Some(fixture) = overridden_trigger("slots-position-compose-trigger", "topic: sandbox\nos: Windows\n", &[]) else {
+        return;
+    };
+    let output = run(&fixture, &["compose", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 1, include_str!("../../schemas/output/compose.yaml"));
+    assert_slot_record(&fixture, &report["diagnostics"], APPROVAL_REQUIRED, "schemas/a.trigger.yaml", (5, 14), TRIGGER_TEXT);
+}
+
+/// R1-F3.4.
+#[test]
+fn schema_validate_reports_a_trigger_slot_failure_at_the_slot_in_the_trigger_file() {
+    let Some(fixture) = overridden_trigger("slots-position-validate-trigger", "topic: sandbox\nos: Windows\n", &[]) else {
+        return;
+    };
+    let output = run(&fixture, &["schema", "validate", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 1, include_str!("../../schemas/output/schema-validate.yaml"));
+    let record = &report["files"][0];
+    assert_slot_record(&fixture, &record["diagnostics"], APPROVAL_REQUIRED, "schemas/a.trigger.yaml", (5, 14), TRIGGER_TEXT);
+}

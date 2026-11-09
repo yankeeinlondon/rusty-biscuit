@@ -273,10 +273,14 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
     // correct-by-construction value (YAML-quoted where required) instead of an
     // empty scaffold.
     let shape = crate::providers::frontmatter::known_shape(ctx);
+    let mut scaffolded = false;
     let new_text: String = keys
         .iter()
         .map(|key| match literal_scaffold(shape, key, crate::providers::frontmatter::definitions(ctx)) {
-            Some(value) => format!("\n{key}: {value}"),
+            Some(value) => {
+                scaffolded = true;
+                format!("\n{key}: {value}")
+            }
             None => format!("\n{key}: "),
         })
         .collect();
@@ -285,11 +289,16 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
         .filter(|diag| string_code(diag) == Some(code::SCHEMA_MISSING_REQUIRED))
         .cloned()
         .collect();
-    let title = if keys.len() == 1 {
+    let mut title = if keys.len() == 1 {
         format!("Add required key `{}`", keys[0])
     } else {
         format!("Add {} required keys", keys.len())
     };
+    // A scaffolded literal may be a slot's value, so a fix built while the
+    // slots are not current says so.
+    if scaffolded && let Some(note) = crate::providers::frontmatter::slot_note(ctx) {
+        title.push_str(&format!(" ({note})"));
+    }
     let mut builder = EditBuilder::new();
     builder.edit(
         ctx.uri.clone(),

@@ -981,7 +981,17 @@ pub(crate) fn call_function(
         return Some(call_host(&entry, &name, args));
     }
     let entry = find_binding(&name)?;
-    Some(call_entry(entry, &name, args, ctx))
+    let answer = call_entry(entry, &name, args, ctx);
+    // A schema slot's cached resolution must be re-checked against what a
+    // captured or volatile call answered (`schemas::slots::dependencies`).
+    crate::markdown::schemas::slots::dependencies::note_call(
+        entry.binding.slot_class,
+        entry.binding.canonical,
+        args,
+        ctx,
+        &answer,
+    );
+    Some(answer)
 }
 
 /// Calls a host function through the same steps as a built-in pure handler:

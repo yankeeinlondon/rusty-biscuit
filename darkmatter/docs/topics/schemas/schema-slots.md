@@ -168,7 +168,7 @@ Every expression function declares what it may do in a slot:
 | Class | Functions | In a slot |
 | --- | --- | --- |
 | pure | `length`, `lower`, `as_csv`, `map`, `is_date`, … | allowed |
-| captured | the date functions (`is_today`, `date`, `older_than`, …), `has_command`, `has_binary`, `package`, `package_area`, `ipv4`, `ipv6`, `has_agentic_cli` | allowed; they read values the request captured once |
+| captured | the date functions (`is_today`, `date`, `older_than`, …), `has_command`, `has_binary`, `package`, `package_area`, `ipv4`, `ipv6`, `has_agentic_cli` | allowed; they read values the request captured once, and a later command reuses the result only if each call answers the same for it |
 | input-reading | `load_data`, `frontmatter` and its family, `file_exists`, `validate_schema`, `find_files`, the path functions (`absolute`, `basename`, `join`, `link`, …), `has_skill` | allowed; every read is checked against the slot's approvals |
 | volatile | `recent_commits`, `predict_conflicts`, `branch_exists_on_remote`, `remote_vendor` | allowed; never reused across commands |
 | rejected | `as_markdown`, `pr`, `pr_list`, `cicd`, `cicd_list`, `ping`, `ping_under`, `has_alias`, `has_builtin_function`, `has_user_function`, `can_execute` | refused (`dm.schema.slot_forbidden_function`) |
@@ -185,6 +185,34 @@ folder, and a slot inside a named type imported from another file
 document's inline `$schema` evaluates in the document's folder. The context
 is derived from the command's request context; nothing is re-read from the
 process.
+
+A captured function reads what the command captured, wherever the slot is
+written. `package()` and `package_area()` read the repository's package
+layout, `ipv4()` and `ipv6()` the host's interface addresses, and
+`has_agentic_cli()` the installed agentic CLIs. The command captures each of
+these when a slot that calls the function first runs, so a schema moved from
+a document's inline `$schema` into a referenced file, an imported type, a
+trigger, or a `load_data` contract keeps working:
+
+```yaml
+# schema.yaml, referenced by `$schema: ./schema.yaml`
+kind: schema
+$schema:
+  addresses: number(default({{ length(ipv4()) }}))
+  package: string(default({{ package('./child') }}))
+```
+
+- `md compose`, `md graph`, and `md validate refs` capture from their
+  request: the package layout from the repository the request found, the
+  other values the way the request captures a `ctx.*` group. A library
+  caller that composes with a fixed context of its own gets no new capture,
+  and the slot fails with `dm.schema.slot_failed`, as a document expression
+  reading that value would.
+- `md schema validate`, `md clean`, and the editor capture from the context
+  they validate in: its environment and its repository. Outside a
+  repository no package matches, so `package(...)` is `""`.
+- A schema that calls none of these functions captures nothing, and each
+  value is captured at most once per command.
 
 Each slot gets its own work budget, the default iteration limits (100 000
 item visits, 16 MiB of expansion). A runaway expression stops with the
@@ -417,7 +445,7 @@ flowchart TD
     A[validate against a template] --> B{pinned in this command?}
     B -- yes, inputs unchanged --> P[use the pinned schema]
     B -- no, or an input changed --> C{cached by an earlier command?}
-    C -- "yes: inputs, context, and this command's grants all still hold" --> Q[use it, replay its reads, pin it]
+    C -- "yes: inputs, context, captured calls, and this command's grants all still hold" --> Q[use it, replay its reads, pin it]
     C -- no --> R[admit and evaluate every slot, store and pin the result]
 ```
 
@@ -430,21 +458,52 @@ disk) and shared when they still hold. A result is reused only if:
   are unchanged counts as unchanged without being reread; a file edited
   within the clock's resolution without changing size is not noticed;
 - every `ctx` group and `env` value it read is the same;
-- the requesting command's grants allow every read it made. A result that
-  needed a grant for this run only is not reused by a command without that
-  grant.
+- every call to a captured function gives the same answer when it is made
+  again, with the same arguments, against the requesting command's own
+  captured values. For example, a result that used
+  `is_today('2024-06-16')` is reused on June 16 at any hour but not on June
+  17; one that used `ipv4()`, `package(...)`, or `has_agentic_cli(...)` is
+  not reused once the captured addresses, package topology, or installed
+  tools give another answer; and one that used `has_command('/opt/bin/tool')`
+  is not reused once the executable is gone, even with the same `PATH`;
+- the requesting command's grants allow every read it made, each judged for
+  the schema file whose slot made it. A result that needed a grant for this
+  run only is not reused by a command without that grant. This holds at
+  every depth: when a repository schema loads data under a type from a
+  shared schema outside the repository, and that type's own slot reads a
+  file, the read is judged for the shared schema, which gets no automatic
+  grant, even though the repository schema would have been granted the same
+  file automatically. This check comes before any file the result read is
+  looked at again.
 
-A resolution that read live state (git history, a network probe), a URL, or
-a folder listing is never reused by another command. Failures are kept like
+These dependencies are recorded as the slots evaluate, so they include every
+slot that ran: one in a root-union arm that resolution reaches only after the
+first arms resolved, and the slots of a type a `load_data` contract names
+(described below), including a contract the command had already prepared for
+another template.
+
+A resolution in which a volatile function ran (git state such as
+`remote_vendor()`, a network probe), whether in a slot of its own, a later
+union arm, or a contract's type, or one that read a URL or a folder listing,
+is never reused by another command. Within one command, a pinned schema that
+used a captured function is checked again after a shell command or other
+step ran, so an executable the step removed is noticed. Failures are kept like
 results, so creating the missing file or repairing the bad one is noticed;
 a failure that depends on grants (a read needing approval, a denied read)
 is never kept.
 
 A slot whose `load_data` contract names a type holding slots resolves that
 type's slots too, in the same session. When that leads back to a template
-being resolved, the outer slot fails with `dm.schema.slot_cycle`. Outside a
-slot (in a document's own `load_data`), a contract naming a type with slots
-fails as unresolved.
+being resolved, the outer slot fails with `dm.schema.slot_cycle`. When one
+of the type's own slots fails, the outer slot reports that failure with the
+code and fields it would have in a slot of its own (see the table under
+[Failures](#failures)). The record is
+positioned at the outer slot, the one that read the data; the inner slot's
+own position is not published. For example, with `Os: enum({{ 123 }})[]`
+in `types.yaml`, a document slot `{{ load_data("./os.yaml",
+"Os@./types.yaml") }}` fails with `dm.schema.slot_wrong_shape` at that
+document slot. Outside a slot (in a document's own `load_data`), a contract
+naming a type with slots fails as unresolved.
 
 ## In the editor
 
@@ -469,11 +528,22 @@ What you see while you work:
 
 | State | Diagnostics | Completion and hover |
 | --- | --- | --- |
-| not resolved yet (just opened) | `dm.schema.slot_pending` (information) at the slot; the frontmatter is not judged | the template's literal parts: `enum(Haiku, {{ … }})` offers `Haiku`; hover says the slots are pending |
+| not resolved yet (just opened) | `dm.schema.slot_pending` (information) at the slot; the frontmatter is not judged | the template's literal parts: `enum(Haiku, {{ … }})` offers `Haiku`; each candidate and the hover say the slots are pending |
 | resolved | ordinary schema diagnostics against the loaded values | the loaded values |
-| an input changed, a refresh is running | the last resolution's verdict, plus one `dm.schema.slot_pending` (information) saying it is being refreshed | the last resolution's values; hover says they are stale |
-| a read needs approval | `dm.schema.slot_approval_required` (warning) at the slot, with quick fixes | the template's literal parts |
-| a slot failed | the slot's own code (see [Failures](#failures)) at the slot | the template's literal parts |
+| an input changed, a refresh is running | the last resolution's verdict, plus one `dm.schema.slot_pending` (information) saying it is being refreshed | the last resolution's values; each candidate and the hover say they are stale |
+| a read needs approval | `dm.schema.slot_approval_required` (warning) at the slot, with quick fixes | the template's literal parts, said to be pending |
+| a slot failed | the slot's own code (see [Failures](#failures)) at the slot | the template's literal parts, said to be pending |
+
+A completion candidate says so in its detail line, after anything it
+already showed; its label and the text it inserts are unchanged:
+
+```text
+os: |          Linux    Schema slots stale: refreshing; shown from their last resolution.
+```
+
+The hover of a `{{ os }}` expression in the body carries the same note,
+and so does the title of an *Add required key* quick fix whose inserted
+value the slots supplied.
 
 A template that did not resolve is never validated against: the
 frontmatter gets the slot's diagnostics instead of a verdict, so a schema
@@ -503,8 +573,12 @@ any of those lies in a Git repository, that repository's `.git/index` and
 `HEAD` (an automatic grant depends on what they record). DMLS watches each
 path itself, whatever its extension, so saving a data file, creating a
 missing one, or staging a change refreshes the documents that read it. An
-unsaved edit to an open YAML or JSON data file refreshes them too, and the
-resolution reads the unsaved text. A client that cannot watch files gets a
+unsaved edit to any open file a resolution read refreshes them too, whatever
+its format (a YAML, JSON, JSON5, JSON Lines, TOML, CSV, or TSV data file, a
+Markdown file `frontmatter()` reads, or a schema file a contract imports),
+and the resolution reads the unsaved text; closing the buffer unsaved goes
+back to the file on disk. An open buffer whose text differs from the
+committed file is a modified file, so it gets no automatic grant. A client that cannot watch files gets a
 fallback: each save re-checks every recorded path by `stat` (size,
 modification time, and whether it exists), not by content, so a rewrite
 that keeps a file's size and timestamp is not noticed until something else
@@ -520,9 +594,46 @@ installed.
 
 ## Failures
 
-A failed slot is reported at the slot, in the file it is written in (an
-imported schema's own file included), with a line and column only when the
-file's text is known. The cause the expression failed with is kept:
+A failed slot is reported at the slot, in the file it is written in. The
+record's `source.file`, `line`, and `column` and its `span` (byte offsets in
+that file) point at the slot's `{{ … }}` as you wrote it:
+
+| The slot is written in | The record names |
+| --- | --- |
+| the document's own frontmatter `$schema` (including a root-union arm) | the document |
+| a schema file the `$schema` references, or a file a named type is imported from | that schema file |
+| a schema-trigger file's inline `$schema` payload | the trigger file |
+| a YAML document's own root `$schema` | the YAML document |
+
+The type string may be written in any YAML form; the position is of the
+bytes in the file, not of the decoded string:
+
+```yaml
+$schema:
+  a: enum({{ load_data("./os.yaml", "string[]") }})          # plain
+  b: 'enum(macOS, {{ ''x'' }})'                              # single-quoted
+  c: "enum(macOS, {{ \"x\" }})"                              # double-quoted, escapes counted as written
+  d: |-                                                      # literal or folded block, any chomping
+    enum(macOS, {{ load_data("./os.yaml", "string[]") }})    # or indentation indicator
+```
+
+A position is given only when it is proven. The schema's text is the one
+the command read when it resolved the template; nothing is read again to
+report a failure. When no text proves the slot's place, `line`, `column`,
+and `span` are `null` and the file is still named. That happens for a
+`$schema` given with `md schema validate --schema` (it is not in the
+document), and for a value whose text does not say what the parsed value is
+(for example, a YAML alias or merge key carrying the definition). A refused
+read inside a slot is positioned at the read itself when the expression is
+written exactly as it reads; through a YAML escape inside the expression, it
+is positioned at the whole expression instead.
+
+DMLS ranges a slot written in the open document at this same span, as long
+as the resolution it reports read the buffer's current text; a record from
+an earlier revision of the buffer is ranged at the `$schema` value until the
+edited buffer resolves.
+
+The cause the expression failed with is kept:
 
 | Failure | Code | Also carries |
 | --- | --- | --- |

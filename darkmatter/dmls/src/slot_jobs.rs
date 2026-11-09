@@ -72,8 +72,8 @@ pub(crate) struct SlotJob {
     pub workspace_roots: Vec<PathBuf>,
     pub registry: Option<TriggerRegistry>,
     pub context: FileResolutionContext,
-    /// The open YAML and JSON buffers, which `load_data` and schema
-    /// resolution read in place of their files.
+    /// Every open buffer, whatever its extension, which `load_data`, the
+    /// Markdown readers, and schema resolution read in place of their files.
     pub buffers: SourceBuffers,
     /// The in-memory grants given in this server process.
     pub once_grants: Vec<Grant>,

@@ -298,7 +298,7 @@ pub(crate) fn resolve_trigger_payload(
     let Some(payload) = trigger.envelope.payload.as_ref() else {
         return Ok(ResolvedPayload::matcher_only());
     };
-    file_payload_memo::resolve(source, payload, schema_roots, context)
+    file_payload_memo::resolve(source, payload, trigger.text.as_ref(), schema_roots, context)
 }
 
 /// Empties the process-wide trigger payload memo (see
@@ -307,22 +307,31 @@ pub(crate) fn reset_process_caches() {
     file_payload_memo::clear();
 }
 
-/// [`resolve_trigger_payload`] for a schema-root file, uncached.
+/// [`resolve_trigger_payload`] for a schema-root file, uncached. `text` is
+/// the file's text as discovery read it: an inline payload's slots are
+/// positioned in it.
 fn resolve_file_payload(
     source: &Path,
     payload: &YamlValue,
+    text: Option<&std::sync::Arc<str>>,
     schema_roots: &[PathBuf],
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedPayload, SchemaError> {
     let base_dir = source.parent().unwrap_or_else(|| Path::new("."));
+    let authored = text.map(|text| simplified_schema::resolve::AuthoredSchemaValue {
+        file: Some(source.to_path_buf()),
+        mapping: 0..text.len(),
+        text: std::sync::Arc::clone(text),
+    });
     // The trigger file owns an inline payload's named types, so its
     // definitions never share keys with the document's or another trigger's.
     // A trigger file is never a schema document, so the loader refuses a
     // payload that names one before any cycle check could see it; that
     // refusal is reported as the cycle it is.
-    let resolved = match resolve::resolve_yaml_schema_owned_by(
+    let resolved = match resolve::resolve_authored_yaml_schema(
         payload,
         simplified_schema::resolve::InlineOwner::Trigger(source),
+        authored.as_ref(),
         base_dir,
         schema_roots,
         context,
@@ -449,6 +458,9 @@ mod file_payload_memo {
     struct Key {
         source: PathBuf,
         payload: YamlValue,
+        /// The trigger file's text: a template payload's slots carry their
+        /// ranges in it, so an edit elsewhere in the file is a miss.
+        text: Option<std::sync::Arc<str>>,
         schema_roots: Vec<PathBuf>,
         tree: PathBuf,
         tree_origin: BaseDirOrigin,
@@ -457,12 +469,19 @@ mod file_payload_memo {
     }
 
     impl Key {
-        fn new(source: &Path, payload: &YamlValue, schema_roots: &[PathBuf], original: &FileResolutionContext) -> Self {
+        fn new(
+            source: &Path,
+            payload: &YamlValue,
+            text: Option<&std::sync::Arc<str>>,
+            schema_roots: &[PathBuf],
+            original: &FileResolutionContext,
+        ) -> Self {
             // Mirrors `resolve_file_payload`'s base folder.
             let folder = source.parent().unwrap_or_else(|| Path::new("."));
             Self {
                 source: source.to_path_buf(),
                 payload: payload.clone(),
+                text: text.cloned(),
                 schema_roots: schema_roots.to_vec(),
                 tree: original.base_dir().to_path_buf(),
                 tree_origin: original.base_dir_origin().clone(),
@@ -488,10 +507,11 @@ mod file_payload_memo {
     pub(super) fn resolve(
         source: &Path,
         payload: &YamlValue,
+        text: Option<&std::sync::Arc<str>>,
         schema_roots: &[PathBuf],
         original: &FileResolutionContext,
     ) -> Result<ResolvedPayload, SchemaError> {
-        let key = Key::new(source, payload, schema_roots, original);
+        let key = Key::new(source, payload, text, schema_roots, original);
         let held = {
             let entries = ENTRIES.lock().expect("trigger payload memo poisoned");
             entries
@@ -512,7 +532,7 @@ mod file_payload_memo {
         }
 
         tally::record_miss();
-        let resolved = resolve_file_payload(source, payload, schema_roots, original)?;
+        let resolved = resolve_file_payload(source, payload, text, schema_roots, original)?;
         let fingerprint = inputs_fingerprint(schema_roots, &resolved);
         let mut entries = ENTRIES.lock().expect("trigger payload memo poisoned");
         entries.retain(|entry| entry.key != key);
@@ -1083,6 +1103,7 @@ mod tests {
             envelope,
             pattern_cwd: source.parent().and_then(Path::parent).unwrap_or(source).to_path_buf(),
             bundle: None,
+            text: Some(content.into()),
         }
     }
 

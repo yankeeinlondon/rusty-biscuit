@@ -499,7 +499,7 @@ pub struct Preparation {
     /// Whether the document is a YAML document, whose scope also prepares
     /// a [`KindRegistry`].
     kinds: bool,
-    /// The open YAML and JSON buffers when the preparation began.
+    /// The open buffers when the preparation began.
     buffers: SourceBuffers,
 }
 
@@ -721,14 +721,15 @@ impl TriggerRegistries {
         self.scopes.get(path)?.kinds.clone()
     }
 
-    /// The open YAML and JSON buffers, a snapshot a YAML document's schema
-    /// resolution reads through ([`buffers::with`]).
+    /// Every open buffer, whatever its extension: a snapshot a YAML
+    /// document's schema resolution and a slot job read through
+    /// ([`buffers::with`]).
     pub fn source_buffers(&self) -> &SourceBuffers {
         &self.buffers
     }
 
-    /// Records the unsaved text of the open YAML or JSON buffer at `path` (`None`
-    /// once it closes), and marks stale every kind registry that read that
+    /// Records the unsaved text of the open buffer at `path` (`None` once it
+    /// closes), and marks stale every kind registry that read that
     /// file (a root file or an import) with different text, and, when it
     /// opens at a path no registry read, every kind registry it could join:
     /// a buffer directly inside one of its roots, or at a location its

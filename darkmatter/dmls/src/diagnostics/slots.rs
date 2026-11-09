@@ -3,10 +3,12 @@
 //!
 //! Each slot's record is the library's own
 //! ([`report_diagnostics::template_slot_records`]), so its code, message, and
-//! typed cause match `md compose`. A slot written in this document is ranged
-//! at the slot; a slot in another schema file is ranged at this document's
-//! `$schema` value (or the frontmatter block, for a trigger payload) and
-//! points at the slot with related information.
+//! typed cause match `md compose`, and so is its position: a slot written in
+//! this document is ranged at the span the library proved in this text; a
+//! slot in another schema file (or one whose resolution read an earlier
+//! revision of this buffer) is ranged at this document's `$schema` value (or
+//! the frontmatter block, for a trigger payload) and points at the slot with
+//! related information.
 //!
 //! | Code | Severity | When |
 //! | --- | --- | --- |
@@ -98,7 +100,7 @@ pub(crate) fn failure_diagnostics(
     for (slot, record) in records {
         let local = slot.as_ref().filter(|slot| slot_is_local(ctx, slot.origin.as_deref()));
         let range = local
-            .and_then(|slot| authored_slot_span(ctx, ast, slot))
+            .and_then(|slot| local_span(ctx, slot_error, slot, &record))
             .and_then(|span| ctx.source_map.byte_range_to_lsp(span))
             .unwrap_or(fallback);
         let severity = match record.code.as_str() {
@@ -160,26 +162,18 @@ fn refreshing_diagnostic(range: Range) -> Diagnostic {
     )
 }
 
-/// Where `slot`, written in this document's inline `$schema`, is authored:
-/// the `{{ … }}` inside the `$schema` value whose expression is the slot's.
-/// The library reports an inline slot relative to its type string, which
-/// YAML may quote or fold, so the slot is found by its text instead.
-fn authored_slot_span(
+/// The range of `record`, the record of `slot` written in this document,
+/// as the library positioned it: only when the resolution it came from read
+/// this very text, so a record left from an earlier revision of the buffer
+/// is never placed at bytes it no longer names.
+fn local_span(
     ctx: &DocumentContext,
-    ast: Option<&FrontmatterAst>,
+    error: &SchemaError,
     slot: &simplified_schema::simplified::Slot,
+    record: &darkmatter::markdown::compose::expression::diagnostics::Diagnostic,
 ) -> Option<std::ops::Range<usize>> {
-    let value = crate::overlay::named_types::frontmatter_value_span(ctx.text, ast?)?;
-    let text = ctx.text.get(value.clone())?;
-    let mut from = 0;
-    while let Some(open) = text[from..].find("{{").map(|at| from + at) {
-        let close = text[open + 2..].find("}}").map(|at| open + 2 + at)?;
-        if text[open + 2..close].trim() == slot.expression {
-            return Some(value.start + open..value.start + close + 2);
-        }
-        from = open + 2;
-    }
-    None
+    let (_, text) = report_diagnostics::template_slot_text(error, slot)?;
+    (*text == *ctx.text).then(|| record.span.clone()).flatten()
 }
 
 /// The `$schema` value, else the frontmatter block, else the document start.

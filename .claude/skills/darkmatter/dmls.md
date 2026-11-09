@@ -689,7 +689,10 @@ Code: `dmls/src/slot_jobs.rs`, `overlay/mod.rs::schema_for`,
   (`spawn_slot_worker`), never on the registry lane and never on a request.
   Each job builds a fresh `SlotSession::for_context` (Full mode, **no**
   handler, in-memory once grants, `with_cancel`, `with_slot_limits(DMLS_SLOT_LIMITS)`)
-  and runs `overlay::resolve_slot_templates` inside `buffers::with`.
+  and runs `overlay::resolve_slot_templates` inside `buffers::with`. Its
+  session captures a slot's `Repo`/`Network`/`Agent` observation from
+  `job.context` on the worker when the slot first calls `package()`,
+  `ipv4()`, `has_agentic_cli()`, … (`schema_slots_editor::captured_functions`).
 - Requests serve the installed session through `schema::SlotUse::Pins`
   (`DarkmatterSchemas::with_slot_pins_only`): no evaluation, no read a slot
   names. `tests/l1/no_side_effects.rs` pins this with the
@@ -708,13 +711,25 @@ Code: `dmls/src/slot_jobs.rs`, `overlay/mod.rs::schema_for`,
   per recorded path (`slot_watch_registration`, id
   `dmls-schema-slot-watchers`), plus `.git/index` and `HEAD` when a read lies
   in the repository.
-- Diagnostics: `slots::failure_diagnostics` positions an inline slot by
-  finding its `{{ … }}` text inside the `$schema` value (the library reports
-  inline slot spans relative to the type string); `slot_approval_required`
+- Diagnostics: `slots::failure_diagnostics` ranges a slot written in the
+  document at the record's own `span` (the library projects it into the
+  document through every YAML carrier), only when
+  `report_diagnostics::template_slot_text` says the resolution read the
+  buffer's current text; otherwise at the `$schema` value. `slot_approval_required`
   carries `data.choices` that `code_actions::grant_slot_read_actions` turns
   into `Command` quick fixes (`dmls.grantSlotRead`). Completion reads
   `SlotStatus::template_shape` (literal members of `Constraint::Dynamic`)
   until a snapshot serves.
+- Stale/pending status: `providers/frontmatter.rs::slot_note` is the one
+  source of the note. Every response projected from the served schema
+  carries it: `frontmatter::completion` appends it to each ordinary
+  candidate's `detail` (`with_slot_notes`, at the boundary every builder
+  feeds, never inside one), frontmatter hover and the schema-reading DSL
+  hovers (`{{ … }}`, collection openers, a `::shell` hole) through
+  `with_slot_marker`, and an "Add required key" fix that scaffolds a
+  literal through its title. Schema-authoring candidates (type keywords,
+  constraints) come from the grammar and stay undecorated. Pinned by
+  `schema_slots_editor::stale_responses`.
 - Test seams: `StartupHooks::slot_gate`, `LspFixture::start_with_slot_gate`,
   `release_slot_job`, `wait_for_slot_prepared`, and the
   `StartupEvent::{SlotJobQueued, SlotPreparing, SlotPrepared}` events. Tests:
@@ -742,8 +757,9 @@ User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
   resolver read and `select_schema_file` probe consults the thread's
   snapshot; never add a DMLS-side read path). Invalidation is the trigger
   scope's, plus `TriggerRegistries::set_buffer` from
-  `didOpen`/`didChange`/`didClose` (`ServerState::note_schema_buffer`: YAML
-  and `.json` buffers, since a JSON file can be a `$schema` target), which
+  `didOpen`/`didChange`/`didClose` (`ServerState::note_schema_buffer`: every
+  buffer, whatever its extension, since what a slot or import reads is known
+  only once it runs; never filter it by extension), which
   marks stale scopes whose `deps.kind_sources` (root files and imports) read
   that file with other text, and, for a path never read, kind scopes it
   could join (`joins_kind_sources`: directly inside a searched or absent

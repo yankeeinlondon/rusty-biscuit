@@ -91,12 +91,13 @@ impl Case {
         error_diagnostics(&failure.error)
     }
 
-    /// The records of validating `doc` as `md schema validate` does, whose
-    /// schema must fail to resolve.
+    /// The records of validating `doc` as `md schema validate` does (in the
+    /// document's own context), whose schema must fail to resolve.
     fn validate_records(&self, doc: &str) -> Vec<Diagnostic> {
         let document = self.path(doc);
         let request = self.request(&document);
-        let schemas = DarkmatterSchemas::new(request.resolution_context().clone())
+        let context = request.resolution_context().for_cwd(document.parent().expect("document folder"));
+        let schemas = DarkmatterSchemas::new(context)
             .with_darkmatter_baseline_json_schema()
             .expect("baseline")
             .with_trigger_discovery()
@@ -105,7 +106,7 @@ impl Case {
         assert!(schemas.discovery_findings().is_empty(), "{:?}", schemas.discovery_findings());
         let markdown =
             Markdown::try_from(document.as_path()).expect("document").with_source(ComposeSource::File(document.clone()));
-        let error = schemas.validate(&markdown).err().expect("the schema does not resolve");
+        let Err(error) = schemas.validate(&markdown) else { panic!("the schema does not resolve") };
         template_diagnostics(&error, &document).unwrap_or_else(|| panic!("not a template failure: {error:?}"))
     }
 }
@@ -397,5 +398,139 @@ mod unproven {
         let source = records[0].source.as_ref();
         assert_eq!(source.and_then(|source| source.line), None, "{records:#?}");
         assert_eq!(records[0].span, None, "{records:#?}");
+    }
+}
+
+/// R1-F3.21: a cycle between two templates whose slots load data under
+/// each other's types is at the outer slot, in its schema file.
+mod cycle {
+    use super::*;
+
+    const A: &str = "kind: schema\n$schema:\n    os: enum({{ load_data(\"./data.yaml\", \"Os@./b.yaml\") }}; required)\ntypes:\n    Items: enum({{ load_data(\"./data.yaml\", \"Os@./b.yaml\") }})[]\n";
+    const B: &str = "kind: schema\ntypes:\n    Os: enum({{ load_data(\"./data.yaml\", \"Items@./a.yaml\") }})[]\n";
+
+    #[test]
+    fn a_cycle_is_at_the_outer_slot_in_its_file() {
+        let case = Case::new(
+            &[
+                ("docs/a.yaml", A),
+                ("docs/b.yaml", B),
+                ("docs/data.yaml", "- macOS\n"),
+                (DOC, "---\n$schema: ./a.yaml\nos: macOS\n---\nBody.\n"),
+            ],
+            &[],
+        );
+        let file = case.path("docs/a.yaml");
+        assert_at(&case.compose_records(DOC), "dm.schema.slot_cycle", &file, 3, 14, nth_slot(A, 0));
+        assert_at(&case.validate_records(DOC), "dm.schema.slot_cycle", &file, 3, 14, nth_slot(A, 0));
+    }
+}
+
+/// R1-F3.22: a whole YAML document's inline root `$schema` slot is in that
+/// document.
+mod yaml_document {
+    use super::*;
+
+    #[test]
+    fn a_yaml_document_inline_schema_slot_is_in_the_document() {
+        let text = "# settings\n$schema:\n  os: \"enum({{ 123 }})\"\nos: Linux\n";
+        let case = Case::new(&[("docs/settings.yaml", text)], &[]);
+        let path = case.path("docs/settings.yaml");
+        let request = case.request(&path);
+        let context = request.resolution_context().for_cwd(path.parent().expect("folder"));
+        let schemas =
+            DarkmatterSchemas::new(context).with_slot_session(Arc::new(SlotSession::for_request(&request)));
+        let Err(error) = schemas.validate_yaml_document(text, &path) else { panic!("the slot fails") };
+        let records = template_diagnostics(&error, &path).expect("a template failure");
+        let span = nth_slot(text, 0);
+        let (line, column) = line_column(text, span.start);
+        assert_at(&records, WRONG_SHAPE, &path, line, column, span);
+    }
+}
+
+/// R1-F3.25: a refused read inside a slot is positioned at the read when
+/// the authored expression is its text, and at the whole expression when a
+/// YAML escape makes the authored bytes differ.
+mod refused {
+    use super::*;
+
+    const FORBIDDEN: &str = "dm.schema.slot_forbidden_binding";
+
+    #[test]
+    fn a_refused_binding_in_a_plain_carrier_is_at_the_binding() {
+        let case = Case::document("$schema:\n  os: enum({{ 'a' == fm.x }})\nos: a\n");
+        let text = case.text(DOC);
+        let start = text.find("fm.x").expect("the binding");
+        let (line, column) = line_column(&text, start);
+        assert_at(&case.validate_records(DOC), FORBIDDEN, &case.path(DOC), line, column, start..start + 4);
+    }
+
+    #[test]
+    fn a_refused_binding_after_an_escape_is_at_the_whole_expression() {
+        let case = Case::document("$schema:\n  os: \"enum({{ \\\"a\\\" == fm.x }})\"\nos: a\n");
+        let text = case.text(DOC);
+        let start = text.find("{{").expect("a slot") + 3;
+        let end = text.find(" }}").expect("the slot's end");
+        let (line, column) = line_column(&text, start);
+        assert_at(&case.validate_records(DOC), FORBIDDEN, &case.path(DOC), line, column, start..end);
+    }
+}
+
+/// R1-F3.26, R1-F3.28: a `load_data` contract naming a template whose own
+/// slot fails is reported at the slot that read the data, in the document,
+/// with the code (and data location, and grants needed) the contract slot's
+/// failure gets when it happens directly in a slot.
+mod contract_template {
+    use super::*;
+
+    const DOC_TEXT: &str =
+        "---\n$schema:\n  os: enum({{ load_data(\"./os.yaml\", \"Os@./types.yaml\") }})\nos: Linux\n---\n";
+
+    /// The document reading `os.yaml` under `Os@./types.yaml`, whose
+    /// definition is `os_type`; `untracked` files get no automatic grant.
+    fn case(os_type: &str, files: &[(&str, &str)], untracked: &[(&str, &str)]) -> Case {
+        let types = format!("kind: schema\ntypes:\n  Os: {os_type}\n");
+        let mut committed = vec![("docs/types.yaml", types.as_str()), ("docs/os.yaml", "- Linux\n"), (DOC, DOC_TEXT)];
+        committed.extend_from_slice(files);
+        Case::new(&committed, untracked)
+    }
+
+    /// Both reports of `case`, each asserted to be one record with `code` at
+    /// the document's reading slot.
+    fn records_at_the_reading_slot(case: &Case, code: &str) -> Vec<Vec<Diagnostic>> {
+        let reports = vec![case.compose_records(DOC), case.validate_records(DOC)];
+        for records in &reports {
+            assert_at(records, code, &case.path(DOC), 3, 12, nth_slot(DOC_TEXT, 0));
+        }
+        reports
+    }
+
+    #[test]
+    fn a_wrong_shape_keeps_its_code() {
+        let case = case("enum({{ 123 }})[]", &[], &[]);
+        records_at_the_reading_slot(&case, WRONG_SHAPE);
+    }
+
+    #[test]
+    fn an_unapproved_read_keeps_its_code_and_grants_needed() {
+        let case = case("enum({{ load_data(\"./names.yaml\", \"string[]\") }})[]", &[], &[("docs/names.yaml", "- Linux\n")]);
+        for records in records_at_the_reading_slot(&case, APPROVAL_REQUIRED) {
+            let needed = records[0].grants_needed.as_ref().expect("grants needed");
+            assert!(!needed.is_empty(), "{records:#?}");
+        }
+    }
+
+    #[test]
+    fn a_data_failure_keeps_its_code_and_data_location() {
+        let case =
+            case("enum({{ load_data(\"./names.yaml\", \"string[]\") }})[]", &[("docs/names.yaml", "- Linux\n- [nested]\n")], &[]);
+        for records in [case.compose_records(DOC), case.validate_records(DOC)] {
+            let code = records.first().map(|record| record.code.clone()).unwrap_or_default();
+            assert!(code.starts_with("dm.data."), "{records:#?}");
+            assert_at(&records, &code, &case.path(DOC), 3, 12, nth_slot(DOC_TEXT, 0));
+            let location = records[0].data_location.as_ref().expect("a data location");
+            assert!(location.file.ends_with("names.yaml"), "{records:#?}");
+            assert_eq!(location.line, Some(2), "{records:#?}");
+        }
     }
 }

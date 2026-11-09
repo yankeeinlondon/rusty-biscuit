@@ -787,9 +787,9 @@ impl ServerState {
         self.snapshot.store(index.snapshot());
     }
 
-    /// Records an open YAML or JSON buffer's unsaved text (`None` once it closes)
-    /// for the kind registries and YAML documents' schema resolution, which
-    /// read a buffer in place of its file; a registry that read other text
+    /// Records an open buffer's unsaved text (`None` once it closes), whatever
+    /// its extension, for the kind registries, YAML documents' schema
+    /// resolution, and slot jobs, which read a buffer in place of its file; a registry that read other text
     /// goes stale and is prepared again before the documents it serves are
     /// refreshed.
     fn note_schema_buffer(&self, uri: &Uri, text: Option<&str>) {

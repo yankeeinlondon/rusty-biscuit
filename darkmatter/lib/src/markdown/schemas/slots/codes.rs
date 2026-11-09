@@ -56,6 +56,17 @@ pub const SLOT_DIAGNOSTIC_CODES: &[&str] = &[
     SLOT_GRANT_STORE_INVALID_CODE,
 ];
 
+/// The code of a slot whose value the library could not use.
+#[must_use]
+pub(crate) fn slot_result_code(kind: &simplified_schema::SlotResultKind) -> &'static str {
+    use simplified_schema::SlotResultKind;
+    match kind {
+        SlotResultKind::Empty => SLOT_EMPTY_CODE,
+        SlotResultKind::PatternRejected(_) => SLOT_PATTERN_REJECTED_CODE,
+        _ => SLOT_WRONG_SHAPE_CODE,
+    }
+}
+
 /// The slot code of a schema error that refuses slots where none may be
 /// written: [`SLOT_NOT_ALLOWED_IN_BASELINE_CODE`] for a baseline (or editor
 /// extension layer) that holds slots, and the code a `kind` selection

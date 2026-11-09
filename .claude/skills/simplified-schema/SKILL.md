@@ -132,6 +132,8 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Resolve only the top-level properties a higher layer leaves | `pending.without_properties(&names)` (drops them and the definitions only they reach; `omitted_properties()` belongs in a cache key), then `resolve` or, with no slot left, `resolve_without_slots()` |
 | The top-level names a template declares in every alternative (a root-union arm's: every arm's), unevaluated | `pending.declared_properties()` |
 | Read a slot's data file honoring editor buffers | `resolve::buffers::read(path)` |
+| Resolve an already-parsed inline `$schema` value with its slots spanned in the file it came from | `resolve::resolve_authored_yaml_schema(value, owner, Some(&AuthoredSchemaValue { file, text, mapping }), …)` (`resolve_authored_schema_with_roots` for JSON); the value is located and verified first, else no position is claimed |
+| The file and text a slot's spans index, without reading anything | `pending.slot_text(&slot)`, `SlotResolutionFailure::of_pending(error, &pending).slot_text(&slot)` |
 | Judge each schema source before it is read (a host's slot approvals) | `resolve::buffers::guarded(guard, \|\| …)`; a refusal fails the read as `PermissionDenied`; `unguarded` suspends the guards |
 | Which file a `$schema`/`Name@file`/`example(file)` reference names, its probes, and a missing name's creation path | `resolve::select_schema_file(reference, base_dir, roots, &ctx)` → `SchemaFileSelection` (`into_result()` gives the resolver's error) |
 | Validate | `validate_strict` / `validate_soft` → `Result<ValidationSuccess, ValidationFailure>` |

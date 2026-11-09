@@ -287,11 +287,20 @@ A schema can take values from data with a `{{ … }}` [slot](../topics/schemas/s
 
 | State | Diagnostics | Completion and hover |
 |---|---|---|
-| not resolved yet (just opened) | `dm.schema.slot_pending` (information) at the slot; the frontmatter is not judged | the template's literal parts: `enum(Haiku, {{ … }})` offers `Haiku` |
+| not resolved yet (just opened) | `dm.schema.slot_pending` (information) at the slot; the frontmatter is not judged | the template's literal parts, marked pending: `enum(Haiku, {{ … }})` offers `Haiku` |
 | resolved | ordinary schema diagnostics against the loaded values | the loaded values |
-| refreshing after an input changed | the last verdict, plus one `dm.schema.slot_pending` (information) | the last values, marked stale in hover |
-| a read needs approval | `dm.schema.slot_approval_required` (warning) at the slot, with quick fixes | the template's literal parts |
-| a slot failed | the slot's own code (`dm.schema.slot_*`, `dm.data.*`, `dm.iteration.*`) as an error | the template's literal parts |
+| refreshing after an input changed | the last verdict, plus one `dm.schema.slot_pending` (information) | the last values, marked stale |
+| a read needs approval | `dm.schema.slot_approval_required` (warning) at the slot, with quick fixes | the template's literal parts, marked pending |
+| a slot failed | the slot's own code (`dm.schema.slot_*`, `dm.data.*`, `dm.iteration.*`) as an error | the template's literal parts, marked pending |
+
+"Marked" means each completion item's `detail` ends with the note
+(*Schema slots stale: refreshing; shown from their last resolution.* or
+*Schema slots pending: only the schema's literal parts are known.*), and
+hover ends with the same note in italics. The hover of a body `{{ … }}`
+expression, which describes the schema's values, is marked too, and an
+*Add required key* quick fix whose inserted value comes from the schema
+names the note in its title. Labels, inserted text, and the order of
+completion items are the same as they would be unmarked.
 
 A template that did not resolve is never validated against, so a schema missing its loaded values never makes a document look valid.
 

@@ -33,7 +33,6 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use biscuit_file::FileResolutionContext;
 use simplified_schema::SchemaError;
-use simplified_schema::expression::parse_spanned;
 use simplified_schema::resolve::ResolvedSchema;
 use simplified_schema::simplified::{DefinitionTable, SchemaRoot, Slot};
 use simplified_schema::slots::{
@@ -41,16 +40,16 @@ use simplified_schema::slots::{
 };
 use simplified_schema::{SlotResolutionFailure, UnresolvedSlots};
 
-use super::admission::slot_class_report;
-use super::cache::{self, CacheEntry, ContextCheck, GrantedRead, InputCheck, Outcome, ResolutionKey};
+use super::cache::{self, CacheEntry, GrantedRead, InputCheck, Outcome, ResolutionKey};
 use super::codes::{SLOT_CYCLE_CODE, SLOT_GRANT_STORE_INVALID_CODE};
-use super::evaluator::{ContextDigest, SlotEvaluator, SlotGates, context_digest_now, context_inputs, slot_context};
+use super::dependencies::{self, SlotDependencies};
+use super::evaluator::{SlotEvaluator, SlotGates};
 use super::grants::gate::{RunGates, SlotGrants};
 use super::grants::{Grant, GrantBook, GrantStore, GrantStoreError};
 use super::host::DarkmatterSlotHost;
 use crate::markdown::compose::DataRuntime;
+use super::observations::SessionObservations;
 use crate::markdown::compose::context::capture::CapturedObservations;
-use crate::markdown::compose::expression::functions::SlotClass;
 use crate::markdown::compose::expression::iteration::IterationLimits;
 use crate::markdown::compose::expression::read_gate::{GateRefusal, ReadGate, ReadTarget};
 use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
@@ -85,7 +84,7 @@ static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 pub struct SlotSession {
     id: u64,
     data: DataRuntime,
-    observations: CapturedObservations,
+    observations: Arc<SessionObservations>,
     remote: Option<RemoteFetchRuntime>,
     hosts: Vec<String>,
     repository_root: Option<PathBuf>,
@@ -111,11 +110,12 @@ impl std::fmt::Debug for SlotSession {
 }
 
 /// A snapshot pinned for the command, with the memo generation it was last
-/// confirmed at and the inputs that confirm it.
+/// confirmed at and the inputs and captured calls that confirm it.
 struct Pin {
     outcome: Outcome,
     generation: u64,
     inputs: Vec<InputCheck>,
+    dependencies: SlotDependencies,
 }
 
 thread_local! {
@@ -173,18 +173,6 @@ impl std::fmt::Display for SlotCycle {
 
 impl std::error::Error for SlotCycle {}
 
-/// Whether `error` is, or wraps, a [`SlotCycle`].
-pub(crate) fn is_cycle(error: &SchemaError) -> bool {
-    let SchemaError::SlotResolution(failure) = error else {
-        return false;
-    };
-    match failure.error.as_ref() {
-        SlotResolutionError::Failed(failed) => failed.iter().any(|(_, failure)| failure.code == Some(SLOT_CYCLE_CODE)),
-        SlotResolutionError::Schema(schema) => is_cycle(schema),
-        _ => false,
-    }
-}
-
 impl SlotSession {
     /// A session for one command reading through `data` (the command's
     /// `load_data` runtime, whose memo and read set the slots share), with
@@ -194,7 +182,7 @@ impl SlotSession {
         Self {
             id: NEXT_SESSION.fetch_add(1, Ordering::Relaxed),
             data,
-            observations: CapturedObservations::default(),
+            observations: Arc::new(SessionObservations::supplied(CapturedObservations::default())),
             remote: None,
             hosts: Vec::new(),
             repository_root: None,
@@ -212,7 +200,12 @@ impl SlotSession {
     /// The session a composition request builds when its caller attached
     /// none: the request's data runtime, captured observations, remote
     /// runtime, `--allow host=HOST` values, repository, home (for the grant
-    /// store), and approval handler. A command that composes more than once
+    /// store), and approval handler. A slot calling a function that reads a
+    /// group the request has not captured (`ipv4()` in a referenced schema
+    /// the document never names) has it captured when it first runs: the
+    /// `Repo` group from the request's repository observation, the others
+    /// through the request's context authority, so a frozen context still
+    /// fails that slot. A command that composes more than once
     /// builds it once from its first request and attaches it to every pass
     /// with [`ComposeOptions::with_slot_session`](crate::markdown::compose::ComposeOptions::with_slot_session).
     /// Attach the command's data runtime to the request first
@@ -225,7 +218,11 @@ impl SlotSession {
             .with_home(request.resolution_context().home_dir().map(Path::to_path_buf))
             .with_repository_root(options.slot_repository_root())
             .with_allowed_hosts(options.remote_read_config.http_hosts().cloned().collect());
-        session.observations = options.context().observations().clone();
+        session.observations = Arc::new(SessionObservations::for_request(
+            options.context(),
+            options.context_authority(),
+            options.slot_repository(),
+        ));
         session.remote = options.remote_fetch.clone();
         if let Some(handler) = &options.shell_approval_handler {
             session = session.with_handler(Arc::clone(handler));
@@ -236,12 +233,18 @@ impl SlotSession {
     /// A session for a command that validates without composing (`md schema
     /// validate`, `md clean`): reading through `data`, judging automatic
     /// grants against `context`'s repository, and reading the grant store
-    /// below `context`'s home. It has no captured observations, so a slot
-    /// probing `PATH` (`has_command`) sees an empty one.
+    /// below `context`'s home. A slot calling a function that reads a
+    /// captured group (`package()`, `ipv4()`, `has_agentic_cli()`) has the
+    /// group captured from `context` when it first runs: with `context`'s
+    /// environment, the repository at `context`'s repository root (none when
+    /// it has none). A slot probing `PATH` (`has_command`) reads `context`'s
+    /// own.
     pub fn for_context(data: DataRuntime, context: &FileResolutionContext) -> Self {
-        Self::new(data)
+        let mut session = Self::new(data)
             .with_home(context.home_dir().map(Path::to_path_buf))
-            .with_repository_root(context.repository_root().map(Path::to_path_buf))
+            .with_repository_root(context.repository_root().map(Path::to_path_buf));
+        session.observations = Arc::new(SessionObservations::for_context(context));
+        session
     }
 
     /// Resolves no further than `mode`.
@@ -444,7 +447,8 @@ impl SlotSession {
             for check in &entry.inputs {
                 self.data.observe(check.observation.clone());
             }
-            self.pin(key, entry.outcome.clone(), entry.inputs.clone());
+            dependencies::replay(&entry.dependencies);
+            self.pin(key, entry.outcome.clone(), entry.inputs.clone(), entry.dependencies.clone());
             return failure_of(entry.outcome.clone(), pending);
         }
         let outcome = self.resolve_fresh(key, pending, &template_key, context);
@@ -463,13 +467,14 @@ impl SlotSession {
             Ok(grants) => grants,
             Err(error) => return Err(Arc::new(store_failure(pending.slots(), &error))),
         };
-        let recorder = Arc::new(RecordingGates { inner: RunGates(Arc::clone(&grants)), reads: Arc::default() });
-        let host = DarkmatterSlotHost::new(self.evaluator(&grants, Arc::clone(&recorder) as Arc<dyn SlotGates>))
+        let host = DarkmatterSlotHost::new(self.evaluator(&grants, Arc::new(RecordingGates(RunGates(Arc::clone(&grants))))))
             .with_cancel(self.cancel.clone());
-        let (result, observed) = {
+        // Everything the evaluations consumed is collected as they run, so
+        // a later union round and a nested contract's slots count too.
+        let ((result, consumed), observed) = {
             let _resolving = Resolving::enter(self, template_key.to_string(), context);
             crate::markdown::compose::expression::data::runtime::capture_observations(|| {
-                pending.resolve(&host, &SlotRunRequest { context: context.clone() })
+                dependencies::collect(|| pending.resolve(&host, &SlotRunRequest { context: context.clone() }))
             })
         };
         let outcome: Outcome = result.map(Arc::new).map_err(Arc::new);
@@ -488,17 +493,15 @@ impl SlotSession {
                 inputs.push(InputCheck::capture(observation));
             }
         }
-        let volatile = pending.slots().iter().any(is_volatile);
-        let only_for = (volatile || inputs.iter().any(|input| !input.rechecks())).then_some(self.id);
+        let only_for = (consumed.volatile || inputs.iter().any(|input| !input.rechecks())).then_some(self.id);
         let entry = CacheEntry {
             outcome: outcome.clone(),
             inputs: inputs.clone(),
-            context: context_checks(pending.slots(), context),
-            reads: recorder.reads.lock().unwrap_or_else(PoisonError::into_inner).clone(),
+            dependencies: consumed.clone(),
             only_for,
         };
         cache::store(key, Arc::new(entry));
-        self.pin(key, outcome.clone(), inputs);
+        self.pin(key, outcome.clone(), inputs, consumed);
         outcome
     }
 
@@ -506,7 +509,7 @@ impl SlotSession {
         let evaluator = SlotEvaluator::new(self.data.clone())
             .with_gates(gates)
             .with_remote(grants.remote_runtime(self.remote.as_ref()))
-            .with_observations(self.observations.clone());
+            .with_session_observations(Arc::clone(&self.observations));
         match self.limits {
             Some(limits) => evaluator.with_limits(limits),
             None => evaluator,
@@ -515,18 +518,21 @@ impl SlotSession {
 
     /// Whether the cached `entry` may be served to this session in
     /// `context`: it belongs to any session or this one, this session's
-    /// grants cover every read it made, and its inputs and context inputs are
-    /// unchanged. Coverage is judged first, because confirming an input
-    /// rereads it.
+    /// grants cover every read it made (each judged for the file that
+    /// defined the reading slot, a nested contract's included), its inputs
+    /// and context inputs are unchanged, and every captured call it made
+    /// answers the same with this session's captured observations. Coverage
+    /// is judged first, because confirming an input rereads it.
     fn serves(&self, entry: &CacheEntry, context: &FileResolutionContext) -> bool {
         if entry.only_for.is_some_and(|session| session != self.id) {
             return false;
         }
-        if !entry.reads.is_empty() {
+        if !entry.dependencies.reads.is_empty() {
             let Ok(grants) = self.run_grants() else {
                 return false;
             };
             if !entry
+                .dependencies
                 .reads
                 .iter()
                 .all(|read| matches!(grants.decide_without_asking(&read.defining, &read.target), Some(Ok(()))))
@@ -535,29 +541,36 @@ impl SlotSession {
             }
         }
         entry.inputs.iter().all(|input| input.holds(true))
-            && entry.context.iter().all(|check| cache::context_holds(check, context))
+            && entry.dependencies.context.iter().all(|check| cache::context_holds(check, context))
+            && entry.dependencies.captured_hold(&self.observations)
     }
 
     /// The pinned outcome for `key`, re-confirmed when the command's data
-    /// memo moved on since it was pinned; a pin whose inputs changed is
-    /// dropped.
+    /// memo moved on since it was pinned (a command ran, and may have
+    /// changed a file or removed an executable); a pin whose inputs or
+    /// captured calls changed is dropped.
     fn pinned(&self, key: &ResolutionKey) -> Option<Outcome> {
         let generation = self.data.memo_generation();
         let mut pinned = self.pinned.lock().unwrap_or_else(PoisonError::into_inner);
         let pin = pinned.get_mut(key)?;
         if pin.generation != generation {
-            if !pin.inputs.iter().all(|input| input.holds(false)) {
+            if !(pin.inputs.iter().all(|input| input.holds(false)) && pin.dependencies.captured_hold(&self.observations)) {
                 pinned.remove(key);
                 return None;
             }
             pin.generation = generation;
         }
+        // An enclosing resolution depends on what the pinned one consumed.
+        dependencies::replay(&pin.dependencies);
         Some(pin.outcome.clone())
     }
 
-    fn pin(&self, key: ResolutionKey, outcome: Outcome, inputs: Vec<InputCheck>) {
+    fn pin(&self, key: ResolutionKey, outcome: Outcome, inputs: Vec<InputCheck>, dependencies: SlotDependencies) {
         let generation = self.data.memo_generation();
-        self.pinned.lock().unwrap_or_else(PoisonError::into_inner).insert(key, Pin { outcome, generation, inputs });
+        self.pinned
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key, Pin { outcome, generation, inputs, dependencies });
     }
 }
 
@@ -639,75 +652,42 @@ fn store_failure(slots: &[Slot], error: &Arc<GrantStoreError>) -> SlotResolution
     )
 }
 
-/// Whether `slot` reads live state, so its resolution is never served to
-/// another command.
-fn is_volatile(slot: &Slot) -> bool {
-    parse_spanned(&slot.expression).is_ok_and(|parsed| slot_class_report(&parsed).class == SlotClass::Volatile)
-}
-
-/// The context inputs each slot reads, with the digest each has now in its
-/// own context.
-fn context_checks(slots: &[Slot], request: &FileResolutionContext) -> Vec<ContextCheck> {
-    let mut checks = Vec::new();
-    for slot in slots {
-        let Ok(parsed) = parse_spanned(&slot.expression) else {
-            continue;
-        };
-        let context = slot_context(request, slot.origin.as_deref());
-        for input in context_inputs(&parsed) {
-            let check = ContextCheck {
-                defining: slot.origin.clone(),
-                digest: ContextDigest { digest: context_digest_now(&input, &context), input },
-            };
-            if !checks.contains(&check) {
-                checks.push(check);
-            }
-        }
-    }
-    checks
-}
-
-/// The run's gates, remembering every read they allowed so a cached result
-/// is served only to a session whose grants cover the same reads.
+/// The run's gates, reporting every read they allow, with the file that
+/// defined the reading slot, to the [`dependencies`] collections running on
+/// this thread, so a cached result (or a memoized contract enclosing it) is
+/// served only to a session whose grants cover the same reads.
 #[derive(Debug)]
-struct RecordingGates {
-    inner: RunGates,
-    reads: Arc<Mutex<Vec<GrantedRead>>>,
-}
+struct RecordingGates(RunGates);
 
 impl SlotGates for RecordingGates {
     fn gate_for(&self, defining: &Path) -> Arc<dyn ReadGate> {
-        Arc::new(RecordingGate {
-            inner: self.inner.gate_for(defining),
-            defining: defining.to_path_buf(),
-            reads: Arc::clone(&self.reads),
-        })
+        Arc::new(RecordingGate { inner: self.0.gate_for(defining), defining: defining.to_path_buf() })
     }
 }
 
-/// One slot's gate, recording into its [`RecordingGates`].
+/// One slot's gate, reporting what it allows; see [`RecordingGates`].
 #[derive(Debug)]
 struct RecordingGate {
     inner: Arc<dyn ReadGate>,
     defining: PathBuf,
-    reads: Arc<Mutex<Vec<GrantedRead>>>,
 }
 
 impl ReadGate for RecordingGate {
     fn check(&self, target: &ReadTarget) -> Result<(), GateRefusal> {
         self.inner.check(target)?;
-        let read = GrantedRead { defining: self.defining.clone(), target: ReadTarget { observed_hash: None, ..target.clone() } };
-        let mut reads = self.reads.lock().unwrap_or_else(PoisonError::into_inner);
-        if !reads.contains(&read) {
-            reads.push(read);
-        }
+        let target = ReadTarget { observed_hash: None, ..target.clone() };
+        dependencies::note_read(GrantedRead { defining: self.defining.clone(), target });
         Ok(())
     }
 }
 
 /// Resolves the slots of a `load_data` contract that names a template,
 /// through the session whose slot is evaluating on this thread, and
-/// substitutes their values into `schema` and `definitions`.
+/// substitutes their values into `schema` and `definitions`. The slots
+/// evaluate on this thread, inside the enclosing resolution's
+/// [`dependencies::collect`], so what they observe and consume (a read they
+/// were allowed, a captured call, a volatile one) decides whether, and to
+/// whom, the enclosing result is shared.
 ///
 /// Returns `None` outside a slot evaluation: there a contract naming a
 /// template stays unresolved and lowering it fails with
@@ -715,9 +695,10 @@ impl ReadGate for RecordingGate {
 ///
 /// ## Errors
 ///
-/// The cycle `dm.schema.slot_cycle` when the template is the one being
-/// resolved (or encloses it); otherwise the slots' refusals, failures, or
-/// unusable values.
+/// Always a [`SchemaError::SlotResolution`]: the cycle
+/// `dm.schema.slot_cycle` when the template is the one being resolved (or
+/// encloses it); otherwise the slots' refusals, failures, or unusable
+/// values.
 pub(crate) fn resolve_contract_slots(
     schema: &mut SchemaRoot,
     definitions: &mut DefinitionTable,
@@ -738,7 +719,9 @@ pub(crate) fn resolve_contract_slots(
         Ok(grants) => grants,
         Err(error) => return Some(Err(contract_failure(store_failure(&slots, &error)))),
     };
-    let host = DarkmatterSlotHost::new(session.evaluator(&grants, Arc::new(RunGates(Arc::clone(&grants)))));
+    // Recording gates, so the contract's own reads reach the enclosing
+    // collections under the contract's defining file.
+    let host = DarkmatterSlotHost::new(session.evaluator(&grants, Arc::new(RecordingGates(RunGates(Arc::clone(&grants))))));
     let _resolving = Resolving::enter(&session, template, &context);
     let mut values = SlotValues::default();
     let mut unique: Vec<&Slot> = Vec::new();
@@ -769,7 +752,12 @@ pub(crate) fn resolve_contract_slots(
     if !failed.is_empty() {
         return Some(Err(contract_failure(SlotResolutionError::Failed(failed))));
     }
-    Some(simplified_schema::slots::substitute(schema, definitions, &values))
+    // An unusable value fails the resolution as the library's own replay
+    // reports one, so its typed cause reaches the slot that read the data.
+    Some(
+        simplified_schema::slots::substitute(schema, definitions, &values)
+            .map_err(|error| contract_failure(SlotResolutionError::Schema(Box::new(error)))),
+    )
 }
 
 fn contract_failure(error: SlotResolutionError) -> SchemaError {

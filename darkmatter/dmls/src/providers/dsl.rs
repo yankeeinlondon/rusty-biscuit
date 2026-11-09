@@ -442,7 +442,7 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     // A collection opener's source and callbacks are typed by the library's
     // region scopes; its keyword falls through to the catalog hover.
     if let Some(hover) = collections_provider::hover(ctx, offset) {
-        return Some(hover);
+        return Some(frontmatter::with_slot_marker(ctx, hover));
     }
     if let Some(hover) = directive_hover(ctx, offset) {
         return Some(hover);
@@ -454,7 +454,7 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         return Some(hover);
     }
     if let Some(hover) = interpolation_hover(ctx, offset) {
-        return Some(hover);
+        return Some(frontmatter::with_slot_marker(ctx, hover));
     }
     frontmatter_shell_hover(ctx, offset)
 }
@@ -489,6 +489,11 @@ fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         lines.push(shell_verdict_markdown(&command.value, ctx));
         if let Some(line) = shell_hole_type_line(ctx, offset) {
             lines.push(format!("\n{line}"));
+            // The hole's type is read from the document's schema.
+            return Some(frontmatter::with_slot_marker(
+                ctx,
+                markup_hover(ctx, directive.span.clone(), lines.join("\n")),
+            ));
         }
     }
 

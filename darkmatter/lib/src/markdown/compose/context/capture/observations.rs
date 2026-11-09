@@ -71,6 +71,24 @@ impl CapturedObservations {
         self
     }
 
+    /// The `Repo` part from `repository`, the request's one repository
+    /// observation, so a later reader never discovers it again.
+    pub(crate) fn with_repository(self, repository: &RepositoryObservation) -> Self {
+        self.with_packages(repository.root.as_deref(), repository.info.as_ref())
+    }
+
+    /// Whether the part `group` owns was captured; `false` for a group that
+    /// owns no part (only `Repo`, `Network`, and `Agent` do, besides the
+    /// clock every set has).
+    pub(crate) fn has(&self, group: ContextGroup) -> bool {
+        match group {
+            ContextGroup::Repo => self.packages.is_some(),
+            ContextGroup::Network => self.addresses.is_some(),
+            ContextGroup::Agent => self.agentic_clis.is_some(),
+            _ => false,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn for_test_agentic_clis(installed: InstalledAiClients) -> Self {
         let observed = OnceLock::new();

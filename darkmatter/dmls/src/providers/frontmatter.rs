@@ -66,13 +66,33 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
 /// only, so short-circuiting there would silently discard every sibling arm's
 /// candidates. Semantic items lead so the pure-`type-definition` ordering is
 /// unchanged, and `dedup_completions` keeps first-seen order.
+///
+/// Every ordinary candidate is projected from the served schema, so each
+/// carries the [`slot_note`] when that schema's slots are not current. The
+/// schema-authoring candidates (type keywords, constraints) come from the
+/// SimplifiedSchema grammar, never from a resolution, and are left as they are.
 pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
     if let Some(items) = type_definition_argument::completion(ctx, offset, Site::Frontmatter) {
         return items;
     }
     let mut items = meta_schema_completion(ctx, offset).unwrap_or_default();
-    items.extend(schema_completion(ctx, offset));
+    items.extend(with_slot_notes(ctx, schema_completion(ctx, offset)));
     dedup_completions(items)
+}
+
+/// `items` with the [`slot_note`] appended to each one's `detail`; labels,
+/// edits, and order are kept.
+fn with_slot_notes(ctx: &DocumentContext, mut items: Vec<CompletionItem>) -> Vec<CompletionItem> {
+    let Some(note) = slot_note(ctx) else {
+        return items;
+    };
+    for item in &mut items {
+        item.detail = Some(match item.detail.take() {
+            Some(detail) if !detail.is_empty() => format!("{detail} · {note}"),
+            _ => note.to_string(),
+        });
+    }
+    items
 }
 
 /// The ordinary (non-semantic) frontmatter completion candidates: schema keys,
@@ -1724,24 +1744,29 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     Some(with_slot_marker(ctx, hover))
 }
 
-/// `hover` with a note when the document's schema is a template whose
-/// slots are not served current: still being resolved (only its literal
-/// parts are known), or being refreshed (the facts shown are the last
-/// resolution's).
-fn with_slot_marker(ctx: &DocumentContext, mut hover: Hover) -> Hover {
-    let Some(status) = ctx.overlay.and_then(|overlay| overlay.slots.as_ref()) else {
-        return hover;
-    };
-    let note = if status.unresolved {
-        "_Schema slots pending: only the schema's literal parts are known._"
+/// The note every editor response projected from the document's schema
+/// carries when that schema is a template whose slots are not served
+/// current: still being resolved (only its literal parts are known), or
+/// being refreshed (what is shown is the last resolution's). `None` when the
+/// slots are current or the schema has none.
+pub(crate) fn slot_note(ctx: &DocumentContext) -> Option<&'static str> {
+    let status = ctx.overlay?.slots.as_ref()?;
+    if status.unresolved {
+        Some("Schema slots pending: only the schema's literal parts are known.")
     } else if status.refreshing {
-        "_Schema slots stale: refreshing; shown from their last resolution._"
+        Some("Schema slots stale: refreshing; shown from their last resolution.")
     } else {
+        None
+    }
+}
+
+/// `hover` with the [`slot_note`], in italics, after its contents.
+pub(crate) fn with_slot_marker(ctx: &DocumentContext, mut hover: Hover) -> Hover {
+    let Some(note) = slot_note(ctx) else {
         return hover;
     };
     if let lsp_types::HoverContents::Markup(markup) = &mut hover.contents {
-        markup.value.push_str("\n\n");
-        markup.value.push_str(note);
+        markup.value.push_str(&format!("\n\n_{note}_"));
     }
     hover
 }

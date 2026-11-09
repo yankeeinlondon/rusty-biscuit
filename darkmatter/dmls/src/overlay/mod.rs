@@ -903,17 +903,15 @@ impl OverlayState {
         &self.slots
     }
 
-    /// Records the unsaved text of the open YAML or JSON buffer at `path`
-    /// (`None` once it closes), which the kind registries and schema
-    /// resolution for YAML documents read in place of the file (a JSON file
-    /// can be a `$schema` target); a registry that read the file with other
-    /// text, or could read a new one there, goes stale. Does nothing for any
-    /// other path.
+    /// Records the unsaved text of the open buffer at `path` (`None` once it
+    /// closes), whatever its extension, which the kind registries, schema
+    /// resolution for YAML documents, and slot jobs read in place of the
+    /// file; a registry that read the file with other text, or could read a
+    /// new one there, goes stale.
     pub fn set_schema_buffer(&self, path: &Path, text: Option<&str>) {
-        let json = path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
-        if !is_yaml_path(path) && !json {
-            return;
-        }
+        // Every buffer, not only YAML and JSON: what a resolution depends on
+        // (a `load_data` file in any format, a Markdown file `frontmatter()`
+        // reads, an import of any extension) is known only once it runs.
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.set_buffer(path, text.map(Arc::from));
         let OverlayCache { triggers, contracts, .. } = &mut *cache;
@@ -1412,7 +1410,7 @@ impl OverlayCache {
     ///
     /// Local references read nothing; explicit references read their targets
     /// through the document's context, as resolving the saved file would,
-    /// from the open YAML and JSON buffers where one is open
+    /// from the open buffers where one is open
     /// ([`buffers::with`]), so an unsaved edit of an imported file, or an
     /// unsaved file at a probed location, counts as that file's change.
     fn standalone_named_types(

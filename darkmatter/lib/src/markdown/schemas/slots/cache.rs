@@ -13,14 +13,21 @@
 //! An entry keeps what the resolution depended on, and a lookup re-checks it
 //! before serving: each file it read (by `stat` first, rehashing only a file
 //! whose size or modification time changed), each existence answer, each
-//! context input, and that the requesting session's grants cover every read
-//! the resolution made. A file changed within the modification time's
-//! resolution without changing its size is not noticed; that is the cost of
-//! not rehashing every input on every lookup.
+//! context input, each call to a captured-context function (the clock,
+//! `has_command`, `ipv4`, `package`, ...; called again against the
+//! requesting command's captured observations, see
+//! [`dependencies`](super::dependencies)), and that the requesting session's
+//! grants cover every read the resolution made. What a resolution depended
+//! on is recorded while its slots evaluate, so it includes every slot that
+//! ran: later root-union rounds and the slots of nested `load_data`
+//! contracts. A file changed within the modification time's resolution
+//! without changing its size is not noticed; that is the cost of not
+//! rehashing every input on every lookup.
 //!
-//! A resolution that read live state (a volatile function), a URL, or a
-//! listing is served only to the session that produced it, because none of
-//! those can be re-checked cheaply. Failures are cached like successes, with
+//! A resolution in which a volatile function ran (git state such as
+//! `remote_vendor()`, directly or in a nested contract), or that read a URL
+//! or a listing, is served only to the session that produced it, because
+//! none of those can be re-checked cheaply. Failures are cached like successes, with
 //! their dependencies, so creating a missing file or repairing a bad one is
 //! a miss; a failure that depends on grants (a read needing approval or
 //! denied, an invalid grant store), on the resolution in progress (a
@@ -36,6 +43,7 @@ use biscuit_file::FileResolutionContext;
 use simplified_schema::resolve::ResolvedSchema;
 use simplified_schema::slots::{PendingSchema, SlotResolutionError};
 
+use super::dependencies::SlotDependencies;
 use super::evaluator::ContextDigest;
 use crate::markdown::compose::expression::data::{Observation, ObservationKind};
 use crate::markdown::compose::expression::read_gate::ReadTarget;
@@ -128,12 +136,18 @@ fn local_path(observation: &Observation) -> PathBuf {
 impl InputCheck {
     /// `observation`, with the file's `stat` taken now when its bytes still
     /// hash to what was read (a file changed since the read keeps no `stat`,
-    /// so the next lookup rehashes it).
+    /// so the next lookup rehashes it). A read of an open editor buffer keeps
+    /// no `stat` either: the file's says nothing about the buffer's bytes, so
+    /// once the buffer closes the disk file is rehashed.
     pub(crate) fn capture(observation: Observation) -> Self {
         let stat = match (observation.kind, observation.hash) {
             (ObservationKind::File, Some(hash)) => {
                 let path = local_path(&observation);
-                stat_of(&path).filter(|_| current_hash(&path) == Some(hash))
+                if simplified_schema::resolve::buffers::text(&path).is_some() {
+                    None
+                } else {
+                    stat_of(&path).filter(|_| current_hash(&path) == Some(hash))
+                }
             }
             _ => None,
         };
@@ -208,8 +222,10 @@ pub(crate) struct GrantedRead {
 pub(crate) struct CacheEntry {
     pub(crate) outcome: Outcome,
     pub(crate) inputs: Vec<InputCheck>,
-    pub(crate) context: Vec<ContextCheck>,
-    pub(crate) reads: Vec<GrantedRead>,
+    /// The allowed reads (with their defining files, at every nesting
+    /// depth), context inputs, captured calls, and volatility its
+    /// evaluations consumed.
+    pub(crate) dependencies: SlotDependencies,
     /// The session the entry may be served to, for an entry that depends on
     /// something only that command can vouch for; `None` for any session.
     pub(crate) only_for: Option<u64>,

@@ -387,6 +387,18 @@ evaluates in `request.for_source(defining_file)` over the command's
 `ExpressionError` (`host::failure_code`); `compose::report_diagnostics::slot_resolution_diagnostics`
 positions it at the slot in its defining file and keeps `data_location` and
 reference fields. Codes: `schemas/slots/codes.rs::SLOT_DIAGNOSTIC_CODES`.
+Positions come only from text the resolution kept, never a re-read: every
+inline `$schema` resolution passes its authored text
+(`simplified_schema::resolve::AuthoredSchemaValue`) through
+`resolve::resolve_authored_*`: the document's (`mod.rs::authored_document_schema`,
+in `effective_for` and `pending_templates_for` alike, so pre-flight pins and
+runtime share keys), a trigger file's (`LoadedTrigger::text`, part of the
+payload memo key), and a YAML document's. Failures are built with
+`SlotResolutionFailure::of_pending`, and every record reads
+`failure.slot_text(slot)` (`report_diagnostics::template_slot_text`, which
+DMLS uses too). A new route that resolves a parsed `$schema` value passes its
+text the same way, or its slots have no position. Tests:
+`lib/tests/l1/dynamic_schema_slot_positions.rs`.
 The gate is chosen per slot by its defining file
 (`evaluator.rs::SlotGates`; `with_gate` is one gate for all).
 Approval is `schemas/slots/grants/`: `store.rs` (the user-level
@@ -423,11 +435,38 @@ matched trigger payload: `ResolvedPayload::pending`, finished by
 `DataRuntime::memo_generation` moved), and a thread-local resolution stack
 (`slot_cycle`; nested `load_data` contracts resolve through
 `session::resolve_contract_slots`, keyed apart in the contract memo; their
-slots evaluate under `buffers::unguarded`, judged by their own gates only).
-`slots/cache.rs` is the process cache (grant coverage through
-`RecordingGates`, judged before the stat-first rechecks reread an input, command-scoped entries for volatile/URL/listing
+slots evaluate under `buffers::unguarded`, judged by their own gates only;
+their failure is always a `SchemaError::SlotResolution` inside
+`DataError::ContractSchema`, which `host::contract_template_failure` finds:
+`host::failure_code` gives the outer slot the inner code and
+`report_diagnostics::with_expression_cause` the inner records, at the outer
+slot).
+`slots/cache.rs` is the process cache (grant coverage: `session.rs::RecordingGates`
+notes every allowed read with its defining file into
+`SlotDependencies::reads` via `dependencies::note_read`; nested contracts use
+the same recording gates, so their reads reach the outer entry, the contract
+memo, and its replay under the contract's own file, and `serves` judges each
+`entry.dependencies.reads` for its own defining file, before the stat-first rechecks reread an input, command-scoped entries for volatile/URL/listing
 reads, no grant-dependent failures; cleared by
-`reset_process_caches_for_bench`). Work counters: `Work::SlotResolution`
+`reset_process_caches_for_bench`). What an entry depends on beyond observed
+files is evaluation-driven, never derived from `pending.slots()`:
+`slots/dependencies.rs` collects it thread-locally while slots run
+(`host.rs` notes each evaluated slot's `ctx`/`env` inputs;
+`functions::call_function` notes every `Captured` call with an answer digest
+and every `Volatile` call), so later root-union rounds and nested contract
+slots count. A session's structured observations are
+`slots/observations.rs::SessionObservations`: `SlotEvaluator::evaluate`
+asks it to cover the groups the slot's own calls read (`capture::function_group`
+over the parsed slot, so referenced, imported, trigger, contract, and
+later-round slots all demand theirs) and it captures a missing `Repo`/
+`Network`/`Agent` part once per session: `for_request` from the request's
+repository observation (`ComposeOptions::slot_repository`) and context
+authority (frozen = stays missing), `for_context` with the context's env at
+its repository root (`RepositoryObservation::default()` when it has none),
+`SlotSession::new` never. `serves` re-calls each captured call against the
+requesting session's `SessionObservations`, covered for the calls' groups (a
+pin does so when the memo generation moved); a contract memo hit replays its slots' observations and dependencies
+(`DataRuntime::prepare_contract`). Work counters: `Work::SlotResolution`
 (one per slot evaluated), `Work::SlotInputRehash` (a cached input reread). `pending_templates_for` returns `PendingTemplate`s
 (document + matched trigger payloads). Q14 (only the effective schema's slots
 resolve) has one selection, `mod.rs::discarded_by_higher_layers`, shared by

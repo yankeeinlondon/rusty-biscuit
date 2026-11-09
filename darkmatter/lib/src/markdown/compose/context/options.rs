@@ -923,6 +923,13 @@ impl ComposeOptions {
         self.request_repository().and_then(|repository| repository.root.clone())
     }
 
+    /// The request's one repository observation, which a schema slot's
+    /// `package()`/`package_area()` read; `None` when the request holds none
+    /// (never a new discovery).
+    pub(crate) fn slot_repository(&self) -> Option<std::sync::Arc<super::repository_scope::RepositoryObservation>> {
+        self.request_repository().cloned()
+    }
+
     /// The request's repository observation when it found a repository that
     /// contains `dir`, so the context builder can project it instead of
     /// discovering the repository a second time.
