@@ -82,6 +82,11 @@ impl MappingOrders {
         self.orders.is_empty()
     }
 
+    /// The pointer of every indexed mapping, in no particular order.
+    pub(crate) fn pointers(&self) -> impl Iterator<Item = &str> {
+        self.orders.keys().map(String::as_str)
+    }
+
     /// Append one segment to a JSON Pointer, escaping `~` and `/` per RFC 6901.
     ///
     /// ## Examples

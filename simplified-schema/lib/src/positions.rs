@@ -7,6 +7,7 @@
 //! lazily builds none for a validation that reports nothing. Lookup is passive: it never parses,
 //! evaluates, or resolves anything.
 
+use std::collections::HashSet;
 use std::ops::Range;
 
 use biscuit_file::serde_yaml_ng;
@@ -25,7 +26,9 @@ use crate::mapping_orders::MappingOrders;
 ///
 /// When the authored YAML can be projected onto its parsed structure, every
 /// key, value, and mapping has its own start, so a problem points at the
-/// offending node. Otherwise only top-level keys are located, at column 1.
+/// offending node. An alias (`*name`) is an authored leaf: a problem at the
+/// alias, or anywhere in the value it expands to, points at the alias token.
+/// Otherwise only top-level keys are located, at column 1.
 /// [`PositionMap::new`] is the empty map for source-free validation: its
 /// problems carry no coordinates.
 #[derive(Debug, Clone, Default)]
@@ -37,7 +40,8 @@ pub struct PositionMap {
 enum PositionSource {
     #[default]
     Empty,
-    /// An authored tree whose mappings match the parsed document's.
+    /// An authored tree whose mappings match the parsed document's, except
+    /// those expanded below an alias leaf, which have no authored text.
     Located { root: SchemaValueNode, lines: LineIndex },
     /// Top-level key → `(line, 1)`; precise projection was unavailable.
     TopLevel(IndexMap<String, (u32, u32)>),
@@ -114,21 +118,24 @@ impl PositionMap {
     /// ## Returns
     ///
     /// `None` when the locator cannot read the YAML, or what it read does not
-    /// match `orders` mapping for mapping or contains an alias: the parsed
-    /// value then has a structure the source cannot be trusted to show. Any
-    /// root kind (mapping, sequence, or scalar) is projected; frontmatter
-    /// rejects a non-mapping root before it is validated.
+    /// match `orders` mapping for mapping: the parsed value then has a
+    /// structure the source cannot be trusted to show. An alias is an authored
+    /// leaf spanning its `*name` token, and every indexed mapping at or below
+    /// it is accounted for by that leaf. Any root kind (mapping, sequence, or
+    /// scalar) is projected; frontmatter rejects a non-mapping root before it
+    /// is validated.
     pub fn project(
         text: &str,
         yaml: Range<usize>,
         base_line: u32,
         orders: &MappingOrders,
     ) -> Option<Self> {
-        let root = locate_frontmatter_value(&text[yaml.clone()], yaml.start)?;
+        let mut root = locate_frontmatter_value(&text[yaml.clone()], yaml.start)?;
         let mut mappings = 0;
         let mut pointer = String::new();
-        if !matches_orders(&root, text, orders, &mut pointer, &mut mappings)
-            || mappings != orders.len()
+        let mut aliases = HashSet::new();
+        if !matches_orders(&mut root, text, orders, &mut pointer, &mut mappings, &mut aliases)
+            || mappings + covered_by_aliases(orders, &aliases) != orders.len()
         {
             return None;
         }
@@ -207,8 +214,9 @@ impl PositionMap {
 impl PositionMap {
     /// The authored byte range of the token `problem` is reported at (the
     /// node at its instance path, or the offending key of an unknown-key
-    /// problem), as offsets into the text the map was built from. `None`
-    /// when the map holds no authored tree (empty, or top-level keys only).
+    /// problem), as offsets into the text the map was built from. For an
+    /// alias, or a path below one, it is the `*name` token. `None` when the
+    /// map holds no authored tree (empty, or top-level keys only).
     pub fn byte_range(&self, problem: &ValidationProblem) -> Option<Range<usize>> {
         let PositionSource::Located { root, .. } = &self.source else {
             return None;
@@ -283,39 +291,66 @@ fn locate_range_in(root: &SchemaValueNode, segments: &[String], target: Position
 }
 
 /// Whether every mapping in `node`'s subtree carries exactly the keys
-/// `orders` records at its pointer, in order, and no scalar is an alias.
-/// Counts the mappings visited into `mappings`.
+/// `orders` records at its pointer, in order. Counts the mappings visited
+/// into `mappings`, and records the pointer of each alias leaf in `aliases`
+/// after narrowing its span to the `*name` token.
 fn matches_orders(
-    node: &SchemaValueNode,
+    node: &mut SchemaValueNode,
     text: &str,
     orders: &MappingOrders,
     pointer: &mut String,
     mappings: &mut usize,
+    aliases: &mut HashSet<String>,
 ) -> bool {
-    match &node.kind {
-        SchemaValueKind::Scalar => alias_token(text, node.span.start).is_none(),
+    match &mut node.kind {
+        SchemaValueKind::Scalar => {
+            if let Some(token) = alias_token(text, node.span.start) {
+                node.span = token;
+                aliases.insert(pointer.clone());
+            }
+            true
+        }
         SchemaValueKind::Mapping(entries) => {
             *mappings += 1;
             let Some(keys) = orders.get(pointer) else {
                 return false;
             };
             if keys.len() != entries.len()
-                || keys.iter().zip(entries).any(|(key, entry)| *key != entry.key)
+                || keys.iter().zip(entries.iter()).any(|(key, entry)| *key != entry.key)
             {
                 return false;
             }
-            entries.iter().all(|entry| {
+            entries.iter_mut().all(|entry| {
                 with_child(pointer, &entry.key, |pointer| {
-                    matches_orders(&entry.value, text, orders, pointer, mappings)
+                    matches_orders(&mut entry.value, text, orders, pointer, mappings, aliases)
                 })
             })
         }
-        SchemaValueKind::Sequence(items) => items.iter().enumerate().all(|(index, item)| {
+        SchemaValueKind::Sequence(items) => items.iter_mut().enumerate().all(|(index, item)| {
             with_child(pointer, &index.to_string(), |pointer| {
-                matches_orders(item, text, orders, pointer, mappings)
+                matches_orders(item, text, orders, pointer, mappings, aliases)
             })
         }),
     }
+}
+
+/// How many indexed mappings sit at or below an alias leaf in `aliases`.
+///
+/// Pointers are RFC 6901 escaped, so `/` only separates segments and a prefix
+/// ending before a `/` is an ancestor: `/a` covers `/a/b` but never `/ab`.
+fn covered_by_aliases(orders: &MappingOrders, aliases: &HashSet<String>) -> usize {
+    if aliases.is_empty() {
+        return 0;
+    }
+    orders
+        .pointers()
+        .filter(|pointer| {
+            aliases.contains(*pointer)
+                || pointer
+                    .match_indices('/')
+                    .any(|(at, _)| at > 0 && aliases.contains(&pointer[..at]))
+        })
+        .count()
 }
 
 fn with_child(pointer: &mut String, segment: &str, visit: impl FnOnce(&mut String) -> bool) -> bool {
@@ -331,7 +366,8 @@ fn with_child(pointer: &mut String, segment: &str, visit: impl FnOnce(&mut Strin
 /// Positions count lines of `yaml` itself, from 1, and columns in UTF-8
 /// bytes from 1. `yaml` is parsed once to check that its authored structure
 /// can be trusted; when it cannot (or does not parse), only top-level keys
-/// are located, at column 1. Quoted keys (`"foo"`, `'foo'`) are located by
+/// are located, at column 1. Aliases are projected as leaves located at their
+/// `*name` token. Quoted keys (`"foo"`, `'foo'`) are located by
 /// their decoded key string.
 pub fn build_position_map(yaml: &str) -> PositionMap {
     serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml)
@@ -467,20 +503,95 @@ mod tests {
         assert_eq!(at(&map, "/x/😀", PositionTarget::Value), Some((1, 19)));
     }
 
-    /// Aliases, merge keys, and unquoted templates have no trusted nested
-    /// projection; top-level keys are still located.
+    /// Unquoted templates have no trusted nested projection; top-level keys
+    /// are still located.
     #[test]
-    fn unsupported_yaml_keeps_the_top_level_fallback() {
-        for (yaml, other_line) in [
-            ("base: &b\n  x: 1\nother: *b\n", 3),
-            ("base: &b\n  x: 1\nother:\n  <<: *b\n  y: 2\n", 3),
-            ("title: x\nother: {{ value }}\n", 2),
-            ("list: &l\n  - 1\nother: *l\n", 3),
+    fn an_unquoted_template_keeps_the_top_level_fallback() {
+        let map = build_position_map("title: x\nother: {{ value }}\n");
+        assert!(!is_located(&map));
+        assert_eq!(at(&map, "/other/x", PositionTarget::Value), Some((2, 1)));
+    }
+
+    /// An alias is a leaf at its `*name` token, also for a path below it, and
+    /// its neighbors keep their own positions.
+    #[test]
+    fn aliases_and_literal_merge_keys_are_projected() {
+        for (yaml, pointer, alias_at, neighbor) in [
+            ("base: &b\n  x: 1\nother: *b\n", "/other/x", (3, 8), ("/base/x", (2, 6))),
+            ("base: &b\n  x: 1\nother:\n  <<: *b\n  y: 2\n", "/other/<</x", (4, 7), ("/other/y", (5, 6))),
+            ("list: &l\n  - 1\nother: *l\n", "/other/0", (3, 8), ("/list/0", (2, 5))),
         ] {
             let map = build_position_map(yaml);
-            assert!(!is_located(&map), "{yaml:?} must not be located");
-            assert_eq!(at(&map, "/other/x", PositionTarget::Value), Some((other_line, 1)), "{yaml:?}");
+            assert!(is_located(&map), "{yaml:?} must be located");
+            assert_eq!(at(&map, pointer, PositionTarget::Value), Some(alias_at), "{yaml:?}");
+            assert_eq!(at(&map, neighbor.0, PositionTarget::Value), Some(neighbor.1), "{yaml:?}");
         }
+    }
+
+    fn range_text<'a>(map: &PositionMap, yaml: &'a str, pointer: &str) -> &'a str {
+        let PositionSource::Located { root, .. } = &map.source else {
+            panic!("{yaml:?} must be located");
+        };
+        &yaml[locate_range_in(root, &segments(pointer), PositionTarget::Value).expect("located")]
+    }
+
+    #[test]
+    fn a_projected_alias_leaf_spans_only_its_token() {
+        let yaml = "base: &b\n  x: 1\none: *b # note\nflow: {k: *b }\n";
+        let map = build_position_map(yaml);
+        assert_eq!(range_text(&map, yaml, "/one"), "*b");
+        assert_eq!(range_text(&map, yaml, "/one/x"), "*b");
+        assert_eq!(range_text(&map, yaml, "/flow/k"), "*b");
+        assert_eq!(range_text(&map, yaml, "/flow/k/x"), "*b");
+    }
+
+    /// A `*` in a comment, a quoted scalar, or a block scalar is not an alias:
+    /// it adds no boundary and the document stays projected.
+    #[test]
+    fn a_trailing_comment_and_a_quoted_or_block_star_are_not_aliases() {
+        let yaml = "a: 1 # *b\nq: \"*b\"\nblock: |\n  *b\nm:\n  k: v\n";
+        let map = build_position_map(yaml);
+        assert!(is_located(&map));
+        let PositionSource::Located { root, .. } = &map.source else { unreachable!() };
+        let mut root = root.clone();
+        let orders = MappingOrders::collect(&serde_yaml_ng::from_str(yaml).unwrap());
+        let mut aliases = HashSet::new();
+        assert!(matches_orders(&mut root, yaml, &orders, &mut String::new(), &mut 0, &mut aliases));
+        assert!(aliases.is_empty(), "{aliases:?}");
+        assert_eq!(range_text(&map, yaml, "/a"), "1");
+        assert_eq!(range_text(&map, yaml, "/q"), "\"*b\"");
+        assert_eq!(at(&map, "/block", PositionTarget::Value), Some((3, 8)));
+        assert_eq!(at(&map, "/m/k", PositionTarget::Value), Some((6, 6)));
+    }
+
+    /// A boundary covers its own pointer and its descendants, never a sibling
+    /// sharing its prefix.
+    #[test]
+    fn an_alias_boundary_covers_only_whole_segments() {
+        let orders = MappingOrders::collect(
+            &serde_yaml_ng::from_str("a: {p: {q: 1}}\nab: {r: 1}\n\"a/b\": {s: 1}\n").unwrap(),
+        );
+        let boundaries = |pointers: &[&str]| pointers.iter().map(|p| p.to_string()).collect::<HashSet<_>>();
+        assert_eq!(covered_by_aliases(&orders, &boundaries(&["/a"])), 2);
+        assert_eq!(covered_by_aliases(&orders, &boundaries(&["/a/p"])), 1);
+        assert_eq!(covered_by_aliases(&orders, &boundaries(&["/ab"])), 1);
+        assert_eq!(covered_by_aliases(&orders, &boundaries(&["/a~1b"])), 1);
+        assert_eq!(covered_by_aliases(&orders, &boundaries(&[])), 0);
+    }
+
+    /// Alias leaves are projected without searching for their anchors, so the
+    /// work does not grow with the number of uses.
+    #[test]
+    fn projecting_many_aliases_searches_no_anchor() {
+        let mut yaml = String::from("base: &b {port: 1}\n");
+        for index in 0..200 {
+            yaml.push_str(&format!("use{index}: *b\n"));
+        }
+        let before = crate::simplified::yaml_scalar::alias_search_work();
+        let map = build_position_map(&yaml);
+        assert_eq!(crate::simplified::yaml_scalar::alias_search_work(), before);
+        assert!(is_located(&map));
+        assert_eq!(at(&map, "/use199/port", PositionTarget::Value), Some((201, 9)));
     }
 
     #[test]
@@ -505,11 +616,13 @@ mod tests {
     }
 
     #[test]
-    fn an_alias_under_a_list_root_still_refuses_projection() {
-        for yaml in ["- &a x\n- *a\n", "- base: &b\n    x: 1\n- *b\n"] {
+    fn an_alias_under_a_list_root_is_projected() {
+        for (yaml, pointer, token) in [("- &a x\n- *a\n", "/1", "*a"), ("- base: &b\n    x: 1\n- *b\n", "/1/x", "*b")] {
             let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
             let orders = MappingOrders::collect(&value);
-            assert!(PositionMap::project(yaml, 0..yaml.len(), 1, &orders).is_none(), "{yaml:?}");
+            let map = PositionMap::project(yaml, 0..yaml.len(), 1, &orders).expect("projects");
+            assert_eq!(range_text(&map, yaml, pointer), token, "{yaml:?}");
+            assert_eq!(at(&map, pointer, PositionTarget::Value), Some((yaml.lines().count() as u32, 3)));
         }
     }
 

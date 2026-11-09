@@ -177,8 +177,17 @@ macro_rules! pointer_only {
     )*};
 }
 
+/// An alias use is located at its `*name` token, and the anchored original
+/// at its own authored node.
+#[test]
+fn a_yaml_alias_under_a_sequence_root_is_located_at_its_token() {
+    let dir = TempDir::new().unwrap();
+    let found = load(dir.path(), "p.yaml", "- &a x\n- *a\n", "number[]");
+    assert_all_mismatches(&found);
+    assert_eq!(places(&found), vec![place("/0", 1, 3), place("/1", 2, 3)], "{found:#?}");
+}
+
 pointer_only! {
-    a_yaml_alias_reports_pointers_only: "- &a x\n- *a\n", "number[]" => ["/0", "/1"];
     a_yaml_multi_line_flow_sequence_reports_pointers_only: "items: [\n  x,\n  1\n]\n", "{items: number[]}" => ["/items/0"];
 }
 

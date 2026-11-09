@@ -127,8 +127,8 @@ impl<'a> SourceLocator<'a> {
 }
 
 /// Whether `text` writes a flow collection (`[…]`, `{…}`) across lines. The
-/// data contract reports such a YAML file's violations by pointer alone,
-/// as it does a file with an alias, rather than trust positions inside it.
+/// data contract reports such a YAML file's violations by pointer alone
+/// rather than trust positions inside it.
 fn has_multi_line_flow_collection(text: &str) -> bool {
     let Some(root) = simplified_schema::simplified::locate_frontmatter_value(text, 0) else {
         return false;
@@ -211,12 +211,12 @@ mod tests {
     }
 
     #[test]
-    fn yaml_orders_by_authored_index_even_without_positions() {
+    fn yaml_orders_by_authored_index_and_places_an_alias() {
         let text = "base: &b {x: 1}\nzeta: *b\nalpha: 2\n";
         let mut locator = SourceLocator::new(DataFormat::Yaml, text, None);
         let zeta = locator.place(&[key("zeta")], false);
         let alpha = locator.place(&[key("alpha")], false);
-        assert_eq!((zeta.position, alpha.position), (None, None), "an alias makes the file pointer-only");
+        assert_eq!((zeta.position, alpha.position), (Some((2, 7)), Some((3, 8))));
         assert!(zeta.order < alpha.order);
     }
 

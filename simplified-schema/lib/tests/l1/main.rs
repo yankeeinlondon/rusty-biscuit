@@ -4,6 +4,7 @@
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
 mod claimed_values;
+mod alias_positions;
 mod closed_roots;
 mod coercion_core;
 mod container_contracts;
