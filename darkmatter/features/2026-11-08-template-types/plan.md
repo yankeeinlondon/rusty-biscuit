@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-11-09
-phase: 4
+phase: 6
 agent: claude/sonnet
 yolo: true
 packages:
@@ -119,18 +119,35 @@ source_files_during_phase_3:
 - simplified-schema/lib/tests/l1/template_type_refusals.rs
 - darkmatter/lib/src/markdown/schemas/slots/host.rs
 source_files_during_phase_4:
-- darkmatter/lib/src/markdown/schemas/slots/host.rs
-- darkmatter/lib/src/markdown/schemas/slots/session.rs
-- darkmatter/lib/src/markdown/schemas/slots/codes.rs
-- darkmatter/lib/src/markdown/schemas/slots/cache.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
 - darkmatter/lib/src/markdown/schemas/mod.rs
-- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
-- darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
-- darkmatter/lib/src/markdown/schemas/clean.rs
-- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/schemas/schema_files.rs
+- darkmatter/lib/src/markdown/schemas/slots/cache.rs
+- darkmatter/lib/src/markdown/schemas/slots/codes.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/pending_report.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_schema_files.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_template_triggers.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_template_types.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/schema.md
 source_files_during_phase_5:
 - darkmatter/cli/src/commands/schema/validate.rs
-- darkmatter/cli/src/commands/schema/assignment.rs
+- darkmatter/cli/src/args/target.rs
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slots.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slot_template_types.rs
+- darkmatter/cli/tests/l1/output_commands.rs
 source_files_during_phase_6:
 - darkmatter/dmls/src/slot_jobs.rs
 - darkmatter/dmls/src/providers/frontmatter.rs
@@ -181,6 +198,13 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/darkmatter/schema.md
+docs_updated_during_phase_5:
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/schema.md
 ---
 
@@ -814,28 +838,28 @@ and one invalid document).
 
 ### Wave 9 — Host and cache (single agent)
 
-- [ ] **Host implementation** — R18, R19
+- [x] **Host implementation** — R18, R19
     - `DarkmatterTemplateReads` and `DarkmatterSlotHost::template_reads` in `slots/host.rs`; new `SLOT_*` code mapping for the new `SlotResultKind` variants in `slots/codes.rs` (`slot_result_code`) and in `nested_resolution_code` (`SlotReadRefused` arrives as `Refused`, already handled); `SlotReadRefused` and the new `SchemaError` variants handled in the exhaustive matches the compiler lists (`schemas/slots/session.rs failure_of`, `compose/report_diagnostics.rs:344,801–829`, `triggers/finding.rs`, dmls `slot_jobs.rs is_slot_failure`).
     - Make sure `observe` runs inside `capture_observations`/`dependencies::collect` (the host is called from `pending.resolve` inside them, `session.rs:459`), including for nested contract resolutions that use `unguarded`.
-- [ ] **Slot-pending reporting** — report pending context
+- [x] **Slot-pending reporting** — report pending context
     - `compose/report_diagnostics.rs` and `compose/schema_validation.rs:810 defers_template`: the unresolved-template report names the property with a pending type ("template type") beside template-constraint slots, using the slot's `property` path; embedding consumers keep the existing unresolved-template report (no new approval mechanism).
 
 ### Wave 10 — Surfaces (parallel; disjoint files)
 
-- [ ] **Schema-file resolution** — R23 library half
+- [x] **Schema-file resolution** — R23 library half
     - `DarkmatterSchemas::resolve_schema_file`; unit tests with granted, undecided-without-handler, and denied grants.
-- [ ] **Triggers and layering** — R20
+- [x] **Triggers and layering** — R20
     - Tests only plus any missing `omit_properties` case: a trigger payload `owner: "{{ … }}"` is pending and matches; when the document declares `owner`, the slot never evaluates and requests no read (assert via a counting evaluator and the gate log); a returned object's nested keys never become top-level properties; a root-union lower declaration replacement follows the existing every-arm rule; slots in `match` conditions, kind definitions, the baseline, global catalogs, the editor extension layer, and a `kind:` YAML document definition remain refused, including through imports.
-- [ ] **Compose, clean, phase, reference checks** — R22
+- [x] **Compose, clean, phase, reference checks** — R22
     - Tests only through the normal command paths in `darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs` (extend): composition, `md clean`, phase projection resolve before defaults, coercion, required-key decisions; a failed resolution is never reported valid or clean; `md graph` / `md validate refs` keep deferral with no grant and use no substitute type.
 
 ### Wave 11 — Darkmatter library tests (parallel; reuse `SlotRepo` in `darkmatter/lib/tests/dynamic_slots_fixtures/mod.rs`)
 
-- [ ] **Reads and grants** — `dynamic_schema_slot_template_types.rs`
+- [x] **Reads and grants** — `dynamic_schema_slot_template_types.rs`
     - Read approval before memo or buffer access (instrument the data memo and `buffers`); transitive imports; absent grants without prompts (`SessionMode::ReferenceCheck`, no handler); computed target asked through the handler once and remembered; denied keeps `dm.schema.slot_denied`; refusal never falls back to a schema.
-- [ ] **Cache and dependencies** — same file
+- [x] **Cache and dependencies** — same file
     - Cached read observations (a warm result reports the same reads as a cold one: compare `data` read sets); a write to the data file, to an imported file, to a deeper transitive import, and creation of a previously missing candidate each force re-resolution before the next validation; grants re-checked before a dependency is reread; the existing omitted-property key, request-context inputs and size/mtime policy unchanged (the existing cache tests stay green).
-- [ ] **Equivalence** — static-vs-template paired reports through `DarkmatterSchemas` for string, list, union, nested, array results.
+- [x] **Equivalence** — static-vs-template paired reports through `DarkmatterSchemas` for string, list, union, nested, array results.
 
 **Checkpoint 4:** `just test` and `just lint` pass in `darkmatter`.
 
@@ -843,11 +867,11 @@ and one invalid document).
 
 ### Wave 12 — Commands (single agent, then tests)
 
-- [ ] **Schema validate** — R23 CLI half
+- [x] **Schema validate** — R23 CLI half
     - Implement as R23 states; delete `slots`, `template_slot_count`, the note and the JSON record; update the CLI's own help text if it mentions templates (`darkmatter/cli/src/commands/schema/`).
-- [ ] **Type-aware assignments** — `assignment.rs`
+- [x] **Type-aware assignments** — `assignment.rs`
     - Resolve through the grant gate before `apply_all`/`coerce_value`/`def_prefers_string` run, preserving the raw assignment text until the type is available; a refused resolution exits 1 as an unavailable check. `validate_one` (`validate.rs:541`) already calls `effective_for` when there are assignments; ensure the resolved effective schema is what the assignment code reads.
-- [ ] **CLI tests** — `darkmatter/cli/tests/` (`dynamic_schema_slots.rs`, `schema_validate*.rs`)
+- [x] **CLI tests** — `darkmatter/cli/tests/` (`dynamic_schema_slots.rs`, `schema_validate*.rs`)
     - Spawn the real binary (no terminal window gains focus; data output and `--output json` variants): document mode with a template type resolved, refused (`dm.schema.slot_approval_required`, exit 1), and approved via the existing non-interactive grant flags; assignment (`status=published`) coerced by the resolved type, and `status=…` with the grant absent; schema-file mode over a template-constraint slot and a template-type slot with granted, prompted (simulated through the existing approval-handler seam, not a TTY), and refused reads — each success is exit 0, each failure exit 1 with the located error and no `slots` field; a malformed returned definition no longer passes as a "valid template".
 
 **Checkpoint 5:** `just test` and `just lint` in `darkmatter` (cli crate included) pass.

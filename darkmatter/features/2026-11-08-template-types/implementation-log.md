@@ -122,6 +122,85 @@ decisions_for_review:
     <kind>", because R4 gave `NotATypeDefinition` an inner `SchemaError` rather than a `WrongShape` kind.
     Alternative: use `SlotResultKind::WrongShape` for these four. Redo cost: one branch in
     `definition_from_value` and its tests.
+  - |-
+    New diagnostic codes for the template-type result kinds. The plan said only "new SLOT_* code mapping"
+    without naming codes. I added six: `dm.schema.slot_not_a_type`, `dm.schema.slot_nested`,
+    `dm.schema.slot_reachable`, `dm.schema.slot_local_reference`, `dm.schema.slot_suffix_conflict`,
+    `dm.schema.slot_invalid_expansion` (returned patterns keep `dm.schema.slot_pattern_rejected`).
+    Alternative: one shared code (for example reuse `dm.schema.slot_wrong_shape`) with the kind only in the
+    message; scripts could then not tell the failures apart. Redo cost: the constants in `slots/codes.rs`, the
+    doc table rows, and test expectations.
+  - |-
+    A refused read of a returned definition is judged like a refused slot read everywhere it matters. It arrives
+    as `SlotResolutionError::Refused` (not `Failed`), so `session::needs_grant` (reference checks defer) and
+    `cache::caches_failure` (grant-dependent failures are not cached) now look at `Refused` codes too; a slot's own
+    admission refusal (syntax, forbidden binding) is still cached, as before. Without this a reference check
+    would have reported an ungranted template type as a failure, and a denial could have been served from the
+    cache to a session that had a grant.
+  - |-
+    The automatic grant's post-read byte check is not applied to returned-definition reads. A slot's own
+    `load_data` read is checked a second time after the read, against the committed blob's hash. The library's
+    `TemplateReads::observe` cannot refuse after the fact, so a returned definition's import is judged once,
+    before the read (clean + committed per Git at that moment). The window is a file changed between the Git
+    check and the read in the same run. Alternative: extend the library contract so `observe` may return a
+    refusal. Redo cost: a library signature change plus one call in `host.rs`.
+  - |-
+    The pending report names the property and the slot's role. The plan asked the unresolved-template report to
+    name a property with a pending type "beside template-constraint slots". `Slot` has no property path, so
+    `slots/pending_report.rs` finds it passively in the expanded template the resolution handle keeps: the
+    dotted path of the first property that reaches the slot (a slot inside a named type is reported at the first
+    property using it) and whether it is that property's type (template type) or a constraint. The record's
+    message becomes "property `status` has a template type, so its type is pending: <the unchanged message>".
+    Only the per-slot records (`template_slot_records`) carry it; the whole-file record of `template_diagnostics`
+    is unchanged. Redo cost: one function and one call site.
+  - |-
+    `resolve_schema_file` covers named types as well as the export. The plan's R23 sketch resolved only the
+    file's exported `$schema` through `prepare_yaml_schema_text`, which accepts only `kind: yaml-schema` files, so
+    every ordinary `kind: schema` file would have been refused; the export is now resolved the way a document
+    naming the file resolves it (`./<file>`), and `prepare_yaml_schema_text` is kept for a `yaml-schema` file. The
+    given text is served as the file's open buffer for the call, so the text and the disk cannot disagree (an
+    editor's other open buffers are not merged in, since the buffers module cannot list them). The spec says every
+    slot in the file resolves, and a
+    slot in a named type the export does not use (or in a `types`-only file) would otherwise never be checked.
+    The method therefore also resolves a synthetic schema importing each slot-bearing named type from the file
+    (`Name: Name@./file.yaml`), through the same session, so each slot runs in its own file. A `types`-only file
+    with no slot resolves all its types (so the file is still judged). It returns the export's resolution, or
+    the types' one for a `types`-only file. Two helpers came with it for the CLI half (Phase 5):
+    `schema_file_templates` (the pending templates, for the batched approval) and `approve_template_reads`.
+    I put them in a new `schemas/schema_files.rs` rather than `yaml_documents/mod.rs`, since a schema file is not
+    a YAML document of a claimed kind. Redo cost: drop `resolve_types`/`types_value` if only the export should
+    resolve.
+  - |-
+    A `load_data` contract naming a template that holds a template type is not resolved. The contract path
+    (`session::resolve_contract_slots`) substitutes template constraints with `simplified_schema::slots::substitute`,
+    which leaves a template type in place, so lowering then fails closed with the contract's schema error. The
+    spec's list of places that allow template types (inline `$schema`, referenced schema files, reachable named
+    types, trigger payloads) does not include contracts. Supporting them needs a public library entry that runs
+    type substitution with an expansion site and the host's read hooks. Redo cost: that library function plus
+    about 20 lines in `resolve_contract_slots`.
+  - |-
+    `md schema validate <schema file>` resolves every schema file it recognizes, not only templates. R23 says to
+    resolve "a file that `parse_standalone_schema_document` recognizes", so a concrete schema file now also has
+    its `$schema` resolved (its imports were already resolved by the shape check). The resolution runs only after
+    the file's shape check passes, so a shape failure keeps its old record. A resolver error that is not a slot
+    failure is a `schema` record (exit 1). Alternative: resolve only when the file holds a slot, which would keep
+    concrete files on the old path exactly, but would let a slot hidden behind an earlier parse failure (no
+    templates listed) pass unchecked. Redo cost: one condition in `validate.rs::resolve_schema_file`.
+  - |-
+    The prompted case of schema-file mode is tested in-process, not through the binary. The plan asked for it
+    "simulated through the existing approval-handler seam, not a TTY". The binary only installs its prompting
+    handler when stdin and stderr are terminals and has no test switch for it, so the two cases (an approving
+    and a denying scripted handler) are unit tests of the CLI's own `resolve_schema_file` in `validate.rs`,
+    which proves the CLI asks one batch before resolving and reports a deny as `dm.schema.slot_denied`. A
+    binary-level prompt test would need an L2 real-terminal test. Redo cost: one L2 test with a pseudo-terminal.
+  - |-
+    The assignment half of the phase needed no code. `validate_one` already resolved through the grant gate
+    before `apply_all`, and the effective schema the assignment code reads holds the substituted definition, so
+    `assignment.rs` is unchanged; only tests were added. Refused reads that a returned definition causes (an
+    import) still carry no `grants_needed` (the library's refusal has no field for them), so their `slots`
+    record lists the code and position but not the grant to add; a `load_data` read in the slot itself does list
+    them. Redo cost if the reviewer wants grants on import refusals: a field on the library's admission error and
+    its mapping in `report_diagnostics`.
 source_files_during_phase_1:
 - simplified-schema/lib/src/lib.rs
 - simplified-schema/lib/src/resolve.rs
@@ -175,28 +254,43 @@ packages:
 - claudine
 - claudine-cli
 - claudine-gen
+source_files_during_phase_4:
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/schema_files.rs
+- darkmatter/lib/src/markdown/schemas/slots/cache.rs
+- darkmatter/lib/src/markdown/schemas/slots/codes.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/pending_report.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_schema_files.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_template_triggers.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_template_types.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/schema.md
 message_to_agent: |-
-  Phase 3 (library resolution engine) is done; Phase 4 replaces Darkmatter's stub read gate.
-  - `SlotHost::template_reads() -> Rc<dyn TemplateReads>` is required. `DarkmatterSlotHost::template_reads`
-    (darkmatter/lib/src/markdown/schemas/slots/host.rs) currently returns `UngrantedTemplateReads`, which refuses
-    every read with `SLOT_APPROVAL_REQUIRED_CODE` and observes nothing; R18 replaces it. Import-free returned
-    definitions already resolve end to end in Darkmatter today.
-  - `TemplateReads::admit(slot, SchemaRead { path, kind: Content|Probe })` is asked once per (slot, path, kind)
-    per resolution, before anything is probed or read; `observe(slot, SchemaReadOutcome { path, kind, bytes, exists })`
-    is called after each probe/read, including failures, and can repeat for the same read (bare + suffixed
-    expansion): treat observations as a set. Probe paths are the lexical candidate paths (tempdirs show `/var/…`
-    vs `/private/var/…` spellings).
-  - A refusal surfaces as `SlotResolutionError::Refused(vec![(slot, SlotAdmissionError)])` with your code kept
-    (sticky: it outranks whatever the expansion made of it). `SchemaError::SlotReadRefused` only appears inside
-    the library; `resolve_with`'s `Attempt::Refused` maps it.
-  - Late imports appear in `ResolvedSchema.imports`/`searched` (not `referenced_files`) and in
-    `SchemaProvenance` for `SimplifiedSchema::resolve_slots`. Replays run under `buffers::with_reads_retained`.
-  - New `SlotResultKind`s are produced now (`NotATypeDefinition`, `NestedSlot`, `ReachableSlot` with `related`
-    naming the slot's file and span, `LocalReference`, `SuffixConflict`, `InvalidExpansion`, `PatternRejected`
-    for returned patterns), each with `property: Some(path)`. Darkmatter's `slot_result_code` still maps them
-    through its fallback; Phase 4 should give them codes.
-  - The darkmatter docs (`schema-slots.md`, `authoring-schemas.md`) now say Darkmatter refuses a returned
-    definition's reads with approval_required (marked planned); update them when R18 lands.
+  Phase 5 (the `md` CLI) is done. What Phase 6 (DMLS) and Phase 8 (docs) should know:
+  - `md schema validate <schema file>` now resolves every slot through the run's slot session
+    (darkmatter/cli/src/commands/schema/validate.rs `resolve_schema_file`: envelope check, then
+    `schema_file_templates` -> `approve_template_reads` -> `DarkmatterSchemas::resolve_schema_file`). The `slots`
+    count is gone from the code, the JSON record, and `cli/schemas/output/schema-validate.yaml`. Passive syntax
+    checking of a schema file stays a library/DMLS concern only.
+  - Docs that described the old passive mode were already corrected in this phase (docs/cli/schema.md
+    "Schema templates", topics/schemas/schema-slots.md table row and example, topics/schemas/definition.md
+    `schema` row, and the darkmatter skill's schema.md). Phase 8 should still do its full pass but need not
+    rediscover those.
+  - Assignments needed no code: the effective schema holds the substituted definition, so `label=123` under a
+    slot returning `alphanumeric` arrives as text (cli/tests/l1/dynamic_schema_slot_template_types.rs).
+  - A refusal caused by a returned definition's import still has no `grants_needed` (see decisions_for_review).
+  - Windows cross-check is still blocked by "Host key verification failed" for build-win-native.
 source_files_during_phase_2:
 - claudine/gen/src/schema_compat.rs
 - claudine/lib/src/composition/schema/classify.rs
@@ -284,6 +378,21 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/args/target.rs
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slots.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slot_template_types.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+docs_updated_during_phase_5:
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/schema.md
 ---
 
@@ -556,3 +665,149 @@ new `planned_probes` swallowing a planning error, was load-bearing and was fixed
   there: `select::planned_probes` (relative candidates joined to the base or root) and the exact-path gate
   assertions in `tests/l1/template_type_imports.rs` (they normalize with `canonicalize_simplified`).
 - No pre-existing failures; no load-sensitive reruns were needed.
+
+## Phase 4
+
+### Wave 9 — Host and cache
+
+- `slots/host.rs`: `DarkmatterTemplateReads` replaces the stub that refused every read. `admit` builds a
+  `ReadTarget { function: "schema import", kind: Content|Probe, location: Local(path) }` and asks
+  `gates.gate_for(defining)` (the slot's origin, else the request's `base_dir()` given through the new
+  `DarkmatterSlotHost::with_request_base`, set in `session::resolve_fresh`); `Denied` → `dm.schema.slot_denied`,
+  `ApprovalRequired` → `dm.schema.slot_approval_required`. The session's `RecordingGates` records each allowed read
+  with its defining file, so `SlotSession::serves` rechecks grants before reusing a cached result. `observe`
+  records `observe_read` (BLAKE3 of the bytes via `biscuit-hash`, `None` on failure) or `observe_existence`
+  (found/missing probe) in the command's `DataRuntime`, inside `resolve_fresh`'s `capture_observations` /
+  `dependencies::collect`, so they become cache `InputCheck`s, are replayed on a warm hit, and feed DMLS watches.
+  Pre-flight is not extended (a returned import is a computed target).
+- `session::needs_grant` and `cache::caches_failure` now judge `SlotResolutionError::Refused` codes as well as
+  `Failed` ones (see `decisions_for_review`).
+- `slots/codes.rs`: six new codes for the template-type `SlotResultKind`s; `SLOT_DIAGNOSTIC_CODES` is 21 long.
+  `SchemaError::SlotReadRefused` never reaches Darkmatter (the library maps it to `Refused`), so no other match
+  needed a change (`failure_of`, `triggers/finding.rs`, DMLS `slot_error` were checked).
+- Pending report: `slots/pending_report.rs` finds the property and role of an unresolved slot passively;
+  `report_diagnostics::template_slot_records` prefixes each `dm.schema.slot_pending` record with it.
+- `evaluator.rs`: `data()` / `gates()` accessors for the host.
+
+### Wave 10 — Surfaces
+
+- `schemas/schema_files.rs` (new): `resolve_schema_file`, `schema_file_templates`, `approve_template_reads`. The
+  test agent found that `prepare_yaml_schema_text` refuses `kind: schema` files and that a `types`-only file keeps
+  its types in `declaration`; both fixed (`prepare_export`, `named_types`), and the given text is served as the
+  open buffer (`with_text`). See `decisions_for_review`.
+- Triggers/layering (R20) and compose/clean/reference (R22) needed no source change; tests prove them.
+  No phase-projection case exists anywhere in the slot tests to mirror, so none was added; phase projection runs
+  through the same `effective_for` → `reject_unresolved` path that composition's tests cover.
+
+### Wave 11 — Tests
+
+Subagents wrote the test files in parallel (one file each); each verified its own filter only.
+
+### Requirement → test mapping (all F2/L1, in-process at the darkmatter crate's public API; real files in temp
+folders or a real Git fixture repo for the automatic grant; the boundary crossed is library ↔ host ↔ grants ↔
+filesystem)
+
+| Requirement | Tests |
+| --- | --- |
+| R18 gate before probe/read/memo; denied/approval codes | `dynamic_schema_slot_template_types::{an_ungranted_import_needs_approval, a_denied_import_keeps_the_denied_code, a_refused_import_is_decided_before_anything_is_read}` (read set, observation log and `DataRuntime::stats()` all empty) |
+| Transitive imports gated | `a_transitive_import_needs_its_own_grant`, `granting_every_transitive_import_resolves_and_observes_each` (file and folder grants) |
+| No prompts: reference check defers | `a_reference_check_leaves_an_ungranted_template_type_unresolved`, `a_reference_check_never_asks_and_reads_nothing`, `dynamic_schema_slot_surfaces::template_types::reference_check::*` |
+| Computed target asked through the handler once | `a_computed_import_is_asked_once_and_remembered`, `dynamic_schema_slot_schema_files::the_batch_asks_named_reads_and_a_computed_import_is_asked_at_resolution` |
+| Refusal never falls back | `a_refused_union_arm_fails_the_union` |
+| Missing candidate observed | `a_missing_import_fails_and_observes_its_probe` |
+| R19 cache: warm = cold reads; edits/creation re-resolve; grants rechecked | `a_warm_result_reports_the_reads_of_a_cold_one`, `editing_an_import_resolves_again`, `creating_a_missing_import_resolves_again`, `a_warm_session_without_the_grant_needs_approval` (cache-hit assertions under `--features work-counters`, run: 21 passed) |
+| Equivalence static vs template | `equivalent_returned_{string,list,pipe_union,import,array}`, `equivalent_array_suffix`, `a_granted_import_resolves_and_is_observed` |
+| R20 triggers | `dynamic_schema_slot_template_triggers::*` (6: match + resolve, document-declared property never evaluates (deny grant, nothing read), nested keys stay nested, match-condition slot refused, kind definition and baseline refused inline and through a static import) |
+| R22 compose/clean/reference | `dynamic_schema_slot_surfaces::template_types::{composition,clean,reference_check}::*` (default decision, coercion, `(required)`, null/unknown stay optional, refused read, malformed definition → `slot_not_a_type`, clean never clean on failure) |
+| Pending report | `dynamic_schema_slot_surfaces::template_types::pending_report::each_pending_record_names_its_property_and_slot_role` |
+| R23 library half | `dynamic_schema_slot_schema_files::*` (10: granted/undecided/denied/no session, template constraint, not-a-type, types-only file, templates list, batch vs computed, not a schema) |
+| New codes | `slots::codes::tests::each_result_kind_maps_to_its_code`, `every_code_is_a_unique_three_segment_schema_code` |
+
+Input Robustness Matrix: no loader or field validator changed in this phase (the returned value's one validator,
+`definition_from_value`, is the library's, covered in Phase 3); Darkmatter adds only the grant wiring.
+
+### Gates
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): `packages: [darkmatter, test-toolkit, darkmatter-cli]`, `change_class: package`;
+  gates required and run.
+- darkmatter `just test`: 16300 passed, 10 skipped. `just lint`: clean (including zed-dmls wasm).
+  `just check-tier-coverage darkmatter`: nothing stranded.
+- `cargo check -p darkmatter-cli -p darkmatter-lsp --tests`: clean.
+- Dependents: claudine, claudine-cli, claudine-gen scoped to `test(/slot|template|schema_completion/)`: 357 passed.
+- Cross-OS: `build-win-native` still refuses SSH with "Host key verification failed" (checked with
+  `ssh -o BatchMode=yes`); no Windows evidence, `os_failing` not set. Path-sensitive points: grant matching of
+  probe paths (canonicalized by `grants::gate::canonical`), the read-set entries (`DataSourceIdentity::local`).
+- No pre-existing failures; no load-sensitive reruns. One test agent used `--no-fail-fast` once on its own 11
+  tests (noted, harmless).
+
+## Phase 5
+
+### Wave 12 — Commands
+
+- **Schema validate (R23 CLI half)** — `cli/src/commands/schema/validate.rs`. `validate_yaml` now validates the
+  file's envelope as before and, when that passes, calls the new private `resolve_schema_file`: for a file that
+  `parse_standalone_schema_document` recognizes it collects `schema_file_templates`, asks them in one batch with
+  `approve_template_reads` (the run's one slot session: the terminal handler only on a terminal with a
+  formatted output, none for a data output), then `DarkmatterSchemas::resolve_schema_file`. A failure goes
+  through the existing `FileOutcome::schema_error`, so a slot refusal or failure is the `slots` record (exit 1,
+  `diagnostics` at the slot, `grants_needed` where the record has them) and any other resolver error is a
+  `schema` record. Deleted: `FileOutcome::Validated::slots`, `template_slot_count`, the "checked as written, not
+  resolved" note, the JSON `slots` field, and the `slots` property in `cli/schemas/output/schema-validate.yaml`.
+  The `md schema validate` long help now says a schema file is resolved (`cli/src/args/target.rs`).
+- **Type-aware assignments** — no source change was needed. `validate_one` already asks the slot reads and
+  builds the pre-assignment schema with `effective_for` through the session, failing with the `slots` record
+  before `apply_all` when it does not resolve; and the effective schema's `simplified` projection holds the
+  *substituted* definition, so `def_prefers_string` reads the resolved type (proved end to end: `label=123`
+  under a slot returning `alphanumeric` is valid, while a static `label: alphanumeric` with the number `123`
+  is not). `atom_prefers_string`'s `TypeExpr::Slot` arm (Phase 2) remains the typed fall-through.
+- **Docs fixed for drift** (they described the deleted passive mode): `docs/cli/schema.md` "Schema
+  templates", `docs/topics/schemas/schema-slots.md` (command table row and example),
+  `docs/topics/schemas/definition.md` (`schema` row), and the `darkmatter` skill's `schema.md`. Phase 8 still
+  owns the full documentation pass.
+
+### Requirement → test mapping
+
+The boundary is the `md` process (argument parsing → schema API → slot session → grant store under the
+fixture home → Git repository for the automatic grant → JSON on stdout), so the CLI cells spawn the real binary
+(F3, L1, no terminal: nothing prompts and no window can gain focus). The prompted path cannot be reached without
+a TTY, so it is tested in-process through the approval-handler seam the terminal handler implements.
+
+| Requirement | Tests |
+| --- | --- |
+| Schema file, template constraint, granted (automatic grant) → exit 0, no `slots` | `dynamic_schema_slots::schema_validate_of_the_shipped_schema_file_resolves_its_slot` (replaces `…_is_passive`) |
+| Schema file, template constraint, failed read → exit 1, located record | `dynamic_schema_slots::schema_validate_of_the_shipped_schema_file_without_its_data_is_unavailable` (`dm.schema.slot_failed` at the slot's span in the shipped schema) |
+| Schema file, template constraint, refused read → exit 1, `grants_needed` | `dynamic_schema_slots::schema_validate_of_the_shipped_schema_file_with_a_dirty_data_file_needs_approval` |
+| Formatted output: failure header, no "checked as written" note | `dynamic_schema_slots::schema_validate_of_a_schema_file_with_a_dirty_data_file_prints_the_slot_failure` |
+| Schema file, template type: granted / refused / persisted grant | `dynamic_schema_slot_template_types::{a_schema_file_whose_template_types_resolve_is_valid, a_schema_file_with_an_ungranted_template_type_read_is_unavailable, a_schema_file_with_a_persisted_grant_reads_the_dirty_type_file}` |
+| Malformed returned definition no longer a "valid template" | `dynamic_schema_slot_template_types::a_schema_file_whose_returned_definition_is_malformed_is_unavailable` (`dm.schema.slot_not_a_type`, exit 1) |
+| Schema file, prompted (handler seam) approve / deny | `commands::schema::validate::tests::{an_approving_handler_is_asked_once_and_the_schema_file_resolves, a_denying_handler_leaves_the_schema_file_unavailable_with_the_denied_code}` |
+| Document mode: resolved type judges the document (valid and `bogus` naming the resolved members) | `dynamic_schema_slot_template_types::a_document_is_judged_by_the_resolved_template_type` |
+| Document mode: refused → `dm.schema.slot_approval_required`, exit 1 | `…::a_document_with_an_ungranted_template_type_read_is_unavailable_never_valid` |
+| Document mode: approved via the persisted grant (the non-interactive grant path) | `…::a_document_with_a_persisted_grant_reads_the_dirty_type_file` (also proves the dirty list was read: `status=archived` is valid) |
+| Assignment converted by the resolved type | `…::an_assignment_is_converted_by_the_resolved_template_type` (`label=123` + `status=published`) |
+| Assignment with the grant absent → unavailable, nothing judged | `…::an_assignment_with_an_ungranted_template_type_read_is_unavailable` |
+| Existing document-mode and output-schema behavior unchanged | the rest of `dynamic_schema_slots`, `output_commands` |
+
+Every data-output cell checks exit status, empty stderr, and conformance with `schema-validate.yaml`.
+Input Robustness Matrix: no loader or field validator changed (the CLI only routes an already-loaded schema file
+to the library's resolver), so it does not apply.
+
+### Gates
+
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): `packages: [darkmatter, darkmatter-cli, test-toolkit]`, `change_class: package`
+  (the uncommitted tree still includes Phase 4's library work); gates required and run.
+- Targeted first: `cargo nextest run -p darkmatter-cli -E 'test(template_types) | test(dynamic_schema_slots) |
+  test(an_approving_handler) | test(a_denying_handler)'`: 41 passed.
+- darkmatter `just test`: 16314 passed, 10 skipped. The first full run found one stale test,
+  `output_commands::conforms_schema_validate_template_schema_file_counts_its_slots`, which pinned the deleted
+  `slots` count; it is now `…_resolves_its_slots` (exit 1, `error: slots`, approval required, no `slots`).
+  No load-sensitive reruns; no pre-existing failures.
+- darkmatter `just lint`: clean (including the zed-dmls wasm check). `just check-tier-coverage darkmatter`:
+  nothing stranded.
+- Dependents: only `darkmatter-cli` source changed, and no package depends on that binary crate, so there is
+  no downstream package to test (the library is unchanged in this phase).
+- Cross-OS: no OS-specific code was touched (the CLI passes the already-canonicalized path to the library;
+  tests compare paths through `biscuit_file::canonicalize_simplified`), so no cross-check was run;
+  `build-win-native` is in any case still unreachable ("Host key verification failed").
