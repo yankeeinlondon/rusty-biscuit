@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn tsv_accepts_only_a_tab_delimiter() {
-        for delimiter in [b',', b';', b'|'] {
+        for delimiter in *b",;|" {
             let options = DataOptions { delimiter: Some(delimiter), ..DataOptions::default() };
             let error = options.check_applicability(DataFormat::Tsv).unwrap_err();
             assert_eq!(key_of(&error), "delimiter");

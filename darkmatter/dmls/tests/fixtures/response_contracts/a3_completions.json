@@ -3697,9 +3697,9 @@
         }
       },
       {
-        "label": "load_data(file, as)",
+        "label": "load_data(file, as, [options])",
         "kind": 3,
-        "detail": "load_data(file: file | null, as: type-definition(container)) -> unknown | null | error",
+        "detail": "load_data(file: file | null, as: type-definition(container), [options: {format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean} | null]) -> unknown | null | error",
         "textEdit": {
           "range": {
             "start": {
