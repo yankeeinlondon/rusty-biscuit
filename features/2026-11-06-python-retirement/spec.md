@@ -34,6 +34,12 @@ port it to Rust: `consolidation.py`, `completion.py`, `schema.py`, `cell_contrac
 `diff_scope.py`, `seed.py`, `test_inputs.py`, `workflow_reading.py`, and
 `scripts/kache-config-merge.py`.
 
+When porting `runner_loss.py` and `reuse_validation.py`'s audit discovery,
+decide whether to keep deriving lost-runner and audit identity from job display
+names or replace it with an identity source that survives a lost runner.
+`2026-11-06-legible-ci-names` grandfathered those two readers only until this
+port.
+
 Also merge `ci-rollup` and the other `scripts/*.rs` tools into the same structure if
 that reduces the number of concepts.
 
