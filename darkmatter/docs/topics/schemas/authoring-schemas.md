@@ -596,9 +596,9 @@ A **template type** is a slot that supplies a property's whole type
 definition (`status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`);
 see [Template Types](../../../../simplified-schema/docs/topics/language/slots.md#template-types).
 
-> **Planned:** Darkmatter does not yet grant the reads a returned definition
-> causes, so a returned definition that imports a type fails with
-> `dm.schema.slot_approval_required`.
+Every file a returned definition imports or names is read only with a grant,
+exactly like the slot's own reads; see
+[The reads a returned definition causes](./schema-slots.md#the-reads-a-returned-definition-causes).
 
 The full grammar and every result rule are in
 [Slots: Values Supplied by an Expression](../../../../simplified-schema/docs/topics/language/slots.md).

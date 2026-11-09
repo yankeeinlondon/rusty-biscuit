@@ -55,7 +55,7 @@ command decides how far it goes:
 | --- | --- |
 | `md compose` | resolves with the automatic, persisted, and run-only grants; on a terminal, asks about the rest before anything runs; a data output fails with `dm.schema.slot_approval_required` |
 | `md schema validate <document>` | the same gate as `md compose`; an unapproved read makes the file's check unavailable (`error: slots`, exit 1), never a success |
-| `md schema validate <schema file>` | checks the template's syntax and shape only, reports how many slots it holds (`slots`), and resolves nothing |
+| `md schema validate <schema file>` | the same gate as `md schema validate <document>`: every slot in the file resolves before the file is judged, and an unapproved or failed read makes the check unavailable (`error: slots`, exit 1) |
 | `md clean` | the same gate; an unapproved read fails the run with the slot's diagnostic, and the document is never reported clean |
 | `md graph`, `md validate refs` | resolve with the automatic and persisted grants only and never ask; a template whose read nobody granted is left for composition to judge, like any other value the check defers |
 | the editor (DMLS) | resolves in the background with the automatic, persisted, and editor-session grants, never on a keystroke and never by asking; an unapproved read is a warning at the slot with quick fixes that grant it; see [In the editor](#in-the-editor) |
@@ -65,7 +65,7 @@ For example, with Claudine's sandboxing schema committed beside its
 
 ```sh
 md schema validate claudine/docs/research/sandboxing/providers/sandboxing.yaml
-# ✔ … valid …  (a schema template with 1 slot; checked as written, not resolved)
+# ✔ … valid …  (os.yaml was read with the automatic grant; the resolved schema was checked)
 md schema validate provider.md            # resolves os.yaml: the document is checked
 echo "- BeOS" >> claudine/docs/os.yaml    # now dirty: no automatic grant
 md schema validate provider.md --output json   # error: slots, grants_needed: […], exit 1
@@ -140,10 +140,47 @@ The library's rules for what the value must be and how it merges with the
 suffix are in
 [Template Types](../../../../simplified-schema/docs/topics/language/slots.md#template-types).
 
-> **Planned:** Darkmatter does not yet grant the reads a returned
-> definition causes. A returned definition that imports a type or names an
-> example file fails with `dm.schema.slot_approval_required`; one that names
-> no file resolves.
+#### The reads a returned definition causes
+
+A returned definition is type syntax, so it can name files the schema author
+never wrote: `Person@./types.yaml`, a bare `Person@person` looked up in the
+schema roots, or an `example(./sample.yaml)`. Those reads belong to the slot
+that returned the definition. Each one passes the same grant gate as the
+slot's own reads (see [What a slot may read](#what-a-slot-may-read)) before
+the file is probed, opened, taken from an editor buffer, or taken from a
+memo, and a static import's ability to read the same file never authorizes
+it.
+
+For example, with this document and its `types.yaml` beside it:
+
+```yaml
+---
+$schema:
+    owner: "{{ 'Person@./types.yaml' }}"
+owner:
+    name: Ann
+---
+```
+
+| Grants in force | Outcome |
+| --- | --- |
+| an allow grant covering `types.yaml` (or the automatic grant: a clean, committed file of the schema's repository) | `owner` validates exactly as `owner: Person@./types.yaml` would |
+| a deny grant covering `types.yaml` | fails with `dm.schema.slot_denied` at the slot |
+| none, on a terminal | asks about `types.yaml` when the definition is expanded, then continues |
+| none, with a data output, in the editor, or in a reference check | fails with `dm.schema.slot_approval_required`; a reference check defers it instead |
+
+The file a returned definition names is a computed target: it is known only
+after the slot ran, so it is never part of the batch of questions asked
+before a run. Each read is asked once per resolution. A denied or
+unapproved read always fails the resolution; no fallback turns it into a
+schema. Imports resolve against the file the slot was written in, never
+the data file that supplied the text.
+
+Every file read and every location probed, found or missing, is recorded as
+a dependency of the resolution, like the slot's own reads: it joins the
+command's read set, a cached result is reused only while those files are
+unchanged (creating a missing candidate counts as a change) and the grants
+still cover them, and the editor watches them.
 
 ## What a slot may contain
 
@@ -688,9 +725,15 @@ The cause the expression failed with is kept:
 | an exhausted work budget | `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | |
 | a value of the wrong shape, an empty list | `dm.schema.slot_wrong_shape`, `dm.schema.slot_empty` | |
 | a slot pattern the linear regex engine must not take | `dm.schema.slot_pattern_rejected` | |
+| a template type's value that is not a type definition (not a string or a list, or text the definition parser rejects) | `dm.schema.slot_not_a_type` | the parser's own error in the message |
+| a template type's definition that holds a `{{ … }}` slot of its own | `dm.schema.slot_nested` | |
+| a template type's definition that imports a type holding a slot | `dm.schema.slot_reachable` | the file holding that slot |
+| a template type's definition naming a local type (`Name`, `Name@this`) | `dm.schema.slot_local_reference` | |
+| a template type's definition that conflicts with the suffix written after the slot | `dm.schema.slot_suffix_conflict` | |
+| a template type's definition that cannot stand at the slot's position once expanded | `dm.schema.slot_invalid_expansion` | |
 | a contract that leads back to a template being resolved | `dm.schema.slot_cycle` | |
 | the user's grant store is invalid | `dm.schema.slot_grant_store_invalid` | the store's file and line in the message |
-| the schema's slots were not resolved for this surface | `dm.schema.slot_pending` | |
+| the schema's slots were not resolved for this surface | `dm.schema.slot_pending` | the property holding the slot, and whether its whole type is pending (a template type) or one constraint is (a template constraint) |
 
 The full family of slot codes is `SLOT_DIAGNOSTIC_CODES` in
 `darkmatter::markdown::schemas::slots`.

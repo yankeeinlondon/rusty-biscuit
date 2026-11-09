@@ -87,11 +87,20 @@ A clean success has only `files`. A record that could not be validated names why
 ### Schema templates
 
 A schema whose definitions hold `{{ … }}` [slots](../topics/schemas/schema-slots.md)
-(Claudine's sandboxing schema loads its `os` list from `os.yaml`) is treated two ways:
+(Claudine's sandboxing schema loads its `os` list from `os.yaml`) is always resolved
+before anything is judged, whether the argument is the schema file or a document under
+it. Both go through the same read approval:
 
-- **A schema file argument** is checked as written. Its record is `valid: true` with
-  `slots: 1` (how many slots it holds); nothing the slot names is read.
-- **A document** under the template is checked against the resolved schema. A data
+- **A schema file argument** has its shape checked, then every slot it holds is
+  resolved exactly as a document naming the file would resolve it, and the resolved
+  schema is checked: a template type's returned definition, the imports that
+  definition brings, and its suffix. A definition that is not a type, a data file that
+  is gone, or a read nobody approved makes the check unavailable (`error: slots`,
+  exit 1); the file is never reported valid as written.
+- **A document** under the template is checked against the resolved schema. A
+  `<prop>=<value>` assignment is converted by the resolved type, so `label=123` under a
+  slot that returns `alphanumeric` arrives as the text `123`; when the template does not
+  resolve, the assignment is never judged and the check is unavailable. A data
   file committed, unchanged, in the schema's repository is read without asking (the
   [automatic grant](../topics/schemas/schema-slots.md#the-automatic-grant)). On a
   terminal, every other read whose target is written in the slot is asked about in one

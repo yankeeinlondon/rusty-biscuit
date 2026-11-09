@@ -894,7 +894,7 @@ the same report:
 
 | Kind | What is checked |
 |---|---|
-| `schema` | the schema document parses as a schema: category entries, categories that `category(...)` uses but `categories` does not declare, duplicate or disagreeing overloads; and every named-type import resolves. A [template](./schema-slots.md) is checked as written: its slots are counted (the record's `slots`) and never resolved |
+| `schema` | the schema document parses as a schema: category entries, categories that `category(...)` uses but `categories` does not declare, duplicate or disagreeing overloads; and every named-type import resolves. A [template](./schema-slots.md) is then resolved through the same read approval a document naming it gets, and the resolved schema is checked; a slot that is refused or fails is a `slots` record (exit 1) |
 | `schema-trigger` | the trigger grammar: each `$path` glob, an empty `match` list, a vacuous match, `min-match` count bounds, and match-safe conditions (see [Repository Trigger Schemas](#repository-trigger-schemas)) |
 | `yaml-schema` | its exported `$schema` prepares and claims a finite set of kinds |
 

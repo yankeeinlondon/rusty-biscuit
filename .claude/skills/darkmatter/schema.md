@@ -377,10 +377,26 @@ never admits a slot (`triggers::grammar::is_match_safe_constraint` excludes
 them). `triggers/finding.rs::related_path` names the file of the template's
 first slot written in a file (`Slot::origin`), and a refused slot value (`SchemaError::SlotResult`) or refused read (`SchemaError::SlotReadRefused`) its slot's file.
 A **template type** (a slot as a property's whole type, `TypeExpr::Slot`)
-also parses passively, and resolves in the library; until the host grants
-its reads, `DarkmatterSlotHost::template_reads` refuses every read a returned
-definition causes with `SLOT_APPROVAL_REQUIRED_CODE` (an import-free returned
-definition resolves). Darkmatter's
+also parses passively, and resolves in the library. Every read a returned
+definition causes (import, transitive import, example, candidate probe) is
+asked of `slots/host.rs::DarkmatterTemplateReads` first: `admit` asks the
+session's gate for the slot's defining file (or the request base,
+`DarkmatterSlotHost::with_request_base`) as a `ReadTarget { function: "schema
+import" }` (deny → `SLOT_DENIED_CODE`, none → `SLOT_APPROVAL_REQUIRED_CODE`,
+the handler asked for this computed target; pre-flight never sees it), and
+`observe` records `Observation`s in the `DataRuntime` (read set, cache
+`InputCheck`s, DMLS watches). The refusal arrives as
+`SlotResolutionError::Refused`, so `session::needs_grant` and
+`cache::caches_failure` judge `Refused` codes as well as `Failed` ones. The
+template-type `SlotResultKind`s map to their own codes in
+`codes::slot_result_code`; an unresolved slot's pending record names its
+property and role (`slots/pending_report.rs`). `md schema validate <schema
+file>`'s library half is `schemas/schema_files.rs`
+(`resolve_schema_file`, `schema_file_templates`, `approve_template_reads`):
+the export and every slot-bearing named type resolve through the session.
+A `load_data` contract naming a template holding a template type is not
+supported (`resolve_contract_slots` substitutes template constraints only).
+Darkmatter's
 expression-typing readers (`compose/expression/scope/*`, `call_binding`,
 `call_check`, `data/contract.rs`, `context/catalog.rs`) treat it as untyped
 (diagnostic suppression, never the schema type `unknown`); completion,
@@ -505,8 +521,12 @@ for a ReferenceCheck session too). `md schema validate` and `md clean` build
 `SlotSession::for_context` and batch-ask with
 `DarkmatterSchemas::approve_slot_reads` (clean: `CleanSchemaConfig::with_slot_session`,
 asked once in `CleanSchemaContext::effective_schema`); a template failure is the
-`FileOutcome::Slots` record (`error: slots`, `diagnostics`, `grants_needed`), and a
-schema file argument reports `slots` (count) passively. `Diagnostic::grants_needed`
+`FileOutcome::Slots` record (`error: slots`, `diagnostics`, `grants_needed`). A
+schema file argument resolves too (`validate.rs::resolve_schema_file`: after its
+envelope passes, `schema_file_templates` → `approve_template_reads` →
+`DarkmatterSchemas::resolve_schema_file`); there is no passive template mode and no
+`slots` count. Assignments read the resolved effective schema, so a template
+type converts `<prop>=<value>` like its static equivalent. `Diagnostic::grants_needed`
 (`GrantNeeded`, filled from `GateRefusal::ApprovalRequired` in
 `report_diagnostics::with_expression_cause`) is in all 18 `cli/schemas/output/` files.
 User-facing: `darkmatter/docs/topics/schemas/schema-slots.md`;
