@@ -9,7 +9,7 @@ Part of the `biscuit-test-harness` skill; [SKILL.md](SKILL.md) is the index.
 | `spawn_shell()` | Default. A shell with `PATH` assembled, color forced, prompt waited for. |
 | `spawn_program(prog, args)` | Only when the test must own the process tree: no shell, no `PATH`, no color forcing. |
 | `send_text(&[u8])` | Raw bytes to the pane (escape sequences, Kitty keyboard protocol). |
-| `send_command_with_env(cmd, env)` | One command line with scoped `KEY=value` prefixes. |
+| `send_command_with_env(cmd, env)` | One command line with scoped `KEY=value` prefixes. On Windows a long line is typed as `. '<script>'`, because Cygwin readline's echo slows superlinearly with length. |
 | `capture()` | `CapturedFrame { raw, plain }`: assert styling on `raw`, visible text on `plain`. |
 
 Prefer `send_command_settled(&mut harness, cmd, env)` to `send_command_with_env`
@@ -50,6 +50,7 @@ tools install themselves, and their pickers swallow sent input.
 
 | Item | Purpose |
 |---|---|
+| `shell_path(&Path)` / `shell_quote(&str)` | One pane-shell word. Every path in a typed command goes through `shell_path`: it quotes it and, on Windows, spells it with `/`, which Cygwin bash needs for a command word. |
 | `strip_ansi(&str)` | ECMA-48-aware stripper for CSI, OSC, SGR, and charset designations. |
 | `skip_with_reason(&str)` | Prints `skipping: requires <X>` and returns `true`. |
 | `wait_for_prompt(&mut harness)` | Polls until the shell prompt appears. |

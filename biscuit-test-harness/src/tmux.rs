@@ -21,7 +21,8 @@ use std::time::Duration;
 
 use super::{
     CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, SEND_TIMEOUT, SPAWN_TIMEOUT,
-    TerminalHarness, current_process_id, process_is_alive, run_with_timeout, wait_for_prompt,
+    TerminalHarness, current_process_id, process_is_alive, run_with_timeout, shell_quote,
+    wait_for_prompt,
 };
 
 const SESSION_PREFIX: &str = "biscuit_test_";
@@ -603,19 +604,6 @@ fn tmux_pid_from_session(name: &str) -> Option<u32> {
     rest.split('_').next()?.parse().ok()
 }
 
-fn shell_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    for ch in s.chars() {
-        if ch == '\'' {
-            out.push_str("'\\''");
-        } else {
-            out.push(ch);
-        }
-    }
-    out.push('\'');
-    out
-}
 
 fn which(bin: &str) -> bool {
     Command::new("which")

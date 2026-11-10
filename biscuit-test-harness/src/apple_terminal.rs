@@ -61,7 +61,7 @@ use std::time::Duration;
 
 use super::{
     CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, TerminalHarness, current_process_id,
-    pid_from_tag, process_is_alive, run_with_timeout,
+    pid_from_tag, process_is_alive, run_with_timeout, shell_quote,
 };
 
 const WINDOW_TITLE_PREFIX: &str = "biscuit-test-terminal-";
@@ -1710,22 +1710,6 @@ fn xml_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// Wraps `s` in single quotes and escapes embedded single quotes using
-/// the POSIX `'\''` trick, matching the convention used by
-/// [`crate::TerminalHarness::send_command_with_env`].
-fn shell_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    for ch in s.chars() {
-        if ch == '\'' {
-            out.push_str("'\\''");
-        } else {
-            out.push(ch);
-        }
-    }
-    out.push('\'');
-    out
-}
 
 #[cfg(test)]
 mod tests {
@@ -1790,16 +1774,6 @@ mod tests {
             "{escaped}"
         );
         assert!(!escaped.contains('\n'), "a newline would break the literal");
-    }
-
-    #[test]
-    fn shell_quote_simple() {
-        assert_eq!(shell_quote("/usr/local/bin"), "'/usr/local/bin'");
-    }
-
-    #[test]
-    fn shell_quote_embedded_single_quote() {
-        assert_eq!(shell_quote("it's"), r"'it'\''s'");
     }
 
     #[test]

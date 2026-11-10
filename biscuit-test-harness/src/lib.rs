@@ -514,14 +514,31 @@ pub(crate) fn login_shell_argv(shell: &str, augment_path: bool) -> Vec<String> {
 /// terminal started for its own reasons, and the harness must drive the shell
 /// *it* configured, not that one.
 pub(crate) fn login_shell_command_line(shell: &str, augment_path: bool) -> String {
-    let script = single_quoted(&login_shell_script(shell, augment_path));
+    let script = shell_quote(&login_shell_script(shell, augment_path));
     format!("exec {shell} -l -c {script} {shell}")
 }
 
-/// Wraps `s` in single quotes, escaping embedded ones with the POSIX `'\''`
-/// trick.
-fn single_quoted(s: &str) -> String {
+/// Wraps `s` in single quotes for a POSIX pane shell, escaping embedded ones
+/// with the `'\''` trick.
+pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Spells `path` as one POSIX pane-shell word.
+///
+/// Every pane command goes through a POSIX shell — Cygwin or Git Bash on
+/// Windows. An unquoted native path loses its backslashes there (`C:\Users\x`
+/// arrives as `C:Usersx`), and Cygwin's bash opens a quoted `C:\…` file
+/// argument but cannot run one as the command word. On Windows the word is
+/// therefore spelled with `/` (`'C:/Users/x/md.exe'`), which both shells run
+/// and open and every Windows program accepts.
+pub fn shell_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        shell_quote(&text.replace('\\', "/"))
+    } else {
+        shell_quote(&text)
+    }
 }
 
 /// Sets the conventional color-forcing env vars on `cmd` so the
@@ -702,6 +719,9 @@ pub fn send_command_settled(
 
 /// The line [`TerminalHarness::send_command_with_env`] types: `KEY='value'`
 /// prefixes, `cmd`, and the Enter.
+///
+/// On Windows a line longer than its [`sourced_command_line`] is typed as that
+/// shorter line instead.
 fn command_line_with_env(cmd: &str, env: &[(&str, &str)]) -> String {
     use std::fmt::Write as _;
     let mut line = String::new();
@@ -712,8 +732,38 @@ fn command_line_with_env(cmd: &str, env: &[(&str, &str)]) -> String {
         let _ = write!(line, "{k}='{escaped}' ");
     }
     line.push_str(cmd);
+    if cfg!(windows)
+        && let Some(sourced) = sourced_command_line(&line)
+    {
+        return sourced;
+    }
     line.push('\n');
     line
+}
+
+/// Writes `line` to a script that removes itself and returns the line that
+/// sources it, `. '<script>'` and the Enter, when that line is the shorter.
+/// `None` when it is not, or the script cannot be written.
+///
+/// Typing is the slow part of a pane command on Windows. Cygwin's readline
+/// redraws the wrapped line for every character it receives, so the echo
+/// grows superlinearly with length: 76 characters took 0.5 s, 167 took 1.75 s,
+/// and 317 took 5.8 s in a WezTerm pane (2026-11-09), which put tests that
+/// type a few long `md` command lines past nextest's 30 s limit. Sourcing
+/// runs the same line in the same shell (an assignment prefix, `cd`, and the
+/// terminal as stdin behave exactly as typed); bash reads a sourced file
+/// whole before running it, so the script's first line can delete it.
+fn sourced_command_line(line: &str) -> Option<String> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("biscuit-pane-cmd-{}-{n}.sh", std::process::id()));
+    let word = shell_path(&path);
+    let sourced = format!(". {word}\n");
+    if sourced.len() > line.len() + 1 {
+        return None;
+    }
+    std::fs::write(&path, format!("rm -f -- {word}\n{line}\n")).ok()?;
+    Some(sourced)
 }
 
 /// Best-effort cleanup for stale resources owned by the real-terminal
@@ -771,15 +821,30 @@ pub(crate) fn process_is_alive(pid: u32) -> bool {
         // process exists and may be signalled.
         libc::pid_t::try_from(pid).is_ok_and(|pid| unsafe { libc::kill(pid, 0) } == 0)
     }
-    #[cfg(not(unix))]
+    // Never a `kill -0` child here: on Windows `kill` is Cygwin's or MSYS's,
+    // which reads a Cygwin pid, so every live native owner looked dead and each
+    // spawn's sweep killed the panes of the tests running beside it.
+    #[cfg(windows)]
     {
-        Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
+        use windows_sys::Win32::Foundation::{
+            CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
+        };
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        // SAFETY: `OpenProcess` takes no pointers; a non-null handle is closed
+        // exactly once below, and `code` outlives the call that writes it.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                // A process another account owns exists but refuses the query.
+                return GetLastError() == ERROR_ACCESS_DENIED;
+            }
+            let mut code = 0u32;
+            let queried = GetExitCodeProcess(handle, &mut code) != 0;
+            CloseHandle(handle);
+            queried && code == STILL_ACTIVE as u32
+        }
     }
 }
 
@@ -1049,6 +1114,28 @@ mod tests {
         assert_eq!(h.sent_string(), "bt image --debug 13x13.png\n");
     }
 
+    /// A long line is typed whole on Unix and as one short `. '<script>'` on
+    /// Windows, where the script holds its own removal and then the line.
+    #[test]
+    fn a_long_command_line_is_sourced_only_on_windows() {
+        let cmd = format!("printf '%s\\n' {}", "x".repeat(300));
+        let mut h = CapturingHarness::new();
+        h.send_command_with_env(&cmd, &[("A", "1")]).expect("send_command_with_env failed");
+        let sent = h.sent_string();
+        if cfg!(windows) {
+            let word = sent
+                .strip_prefix(". ")
+                .and_then(|rest| rest.strip_suffix('\n'))
+                .unwrap_or_else(|| panic!("expected a sourced line, got {sent:?}"));
+            let path = PathBuf::from(word.trim_matches('\''));
+            let script = std::fs::read_to_string(&path).expect("read the script");
+            let _ = std::fs::remove_file(&path);
+            assert_eq!(script, format!("rm -f -- {word}\nA='1' {cmd}\n"));
+        } else {
+            assert_eq!(sent, format!("A='1' {cmd}\n"));
+        }
+    }
+
     #[test]
     fn send_command_with_env_escapes_single_quotes() {
         let mut h = CapturingHarness::new();
@@ -1256,8 +1343,8 @@ mod tests {
     }
 
     #[test]
-    fn single_quoted_escapes_embedded_single_quotes() {
-        assert_eq!(single_quoted("it's"), r"'it'\''s'");
+    fn shell_quote_escapes_embedded_single_quotes() {
+        assert_eq!(shell_quote("it's"), r"'it'\''s'");
     }
 
     /// `PATH` augmentation belongs to the outer *login* shell: profile files

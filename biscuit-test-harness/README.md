@@ -96,7 +96,7 @@ Every backend implements one **shell-model-first** contract:
 |--------|---------|
 | `spawn_shell()` | Open a fresh login shell in a new pane/window, wait for its prompt. Prepends the cargo target dir to `PATH` and forces color env vars. |
 | `send_text(&[u8])` | Write **raw bytes** to the pane's stdin (escape sequences, kitty keyboard-protocol bytes, …). |
-| `send_command_with_env(cmd, env)` | Type one command line with scoped `KEY=value` prefixes. Portable, single-quote-escaped. *(provided)* |
+| `send_command_with_env(cmd, env)` | Type one command line with scoped `KEY=value` prefixes. Portable, single-quote-escaped. On Windows a long line is typed as `. '<script>'` instead, because Cygwin readline's echo slows superlinearly with line length. *(provided)* |
 | `capture()` | Capture the pane's current rendered text as a [`CapturedFrame`]. |
 | `settle()` | Sleep long enough for a redraw (default 200 ms). *(provided)* |
 | `spawn_program(prog, args)` | Escape hatch: launch a binary directly, no shell. Defaults to `Unsupported`. *(provided)* |
@@ -655,6 +655,7 @@ Re-exported from the crate root:
 | `SpawnVisibility` | `Background` (default) / `Foreground`. |
 | `strip_ansi(&str)` | Remove CSI/OSC/SGR/charset-designation escapes (ECMA-48 §5.4 aware). |
 | `skip_with_reason(&str)` | Print `skipping: requires <X>` to stderr; returns `true`. |
+| `shell_quote(&str)` / `shell_path(&Path)` | One single-quoted pane-shell word. `shell_path` also spells a Windows path with `/`, which Cygwin bash needs to run it as a command. |
 | `cleanup_stale_terminal_harness_resources()` | Best-effort cleanup for tagged stale WezTerm, tmux, and Terminal.app resources. |
 | `detect_shell()` | Pick a POSIX shell (`bash` → `sh` → `$SHELL`). |
 | `cargo_bin_dir(name)` | Locate the directory of a built cargo binary, for `PATH` augmentation. |

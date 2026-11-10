@@ -326,6 +326,27 @@ exported PATH is identical to the inherited one.
   so only the top-level `just` prints that line; plain conhost runs of
   `_record_slow_tests` alone keep output at `0x7`, so reproduce with the full
   chain, not a single step.
+- **`kill -0 <pid>` from Rust asks about a Cygwin pid, not a Windows one.**
+  On a host with Cygwin or Git Bash on `PATH`, `Command::new("kill")` runs
+  their `kill`, which reads its argument as a Cygwin pid, so every live
+  native process looked dead. The terminal harness's stale-pane sweep used it
+  and, at `-j 6`, killed the WezTerm panes of the Level-2 tests running
+  beside it ("no such pane", captures failing, commands vanishing). Ask the
+  kernel (`OpenProcess` + `GetExitCodeProcess`, `biscuit-test-harness`'s
+  `process_is_alive`); `ERROR_ACCESS_DENIED` from `OpenProcess` still means
+  the process exists.
+- **A Windows path typed into a Cygwin bash pane** loses its backslashes
+  unquoted (`C:\Users\x` runs as `C:Usersx`). Quoted, `C:\…` opens as a file
+  argument (`cat 'C:\…'`) but is "command not found" as the command word;
+  `C:/…` works in both places under Cygwin and Git Bash. Spell pane commands
+  with `biscuit_test_harness::shell_path`.
+- **Typing into a Cygwin bash pane is superlinear in the line's length**:
+  readline redraws the wrapped line for every character. In a WezTerm pane
+  the echo took 0.5 s for 76 characters, 1.75 s for 167, and 5.8 s for 317,
+  while `md` itself ran in 0.4 s. A test typing a few long `md` lines crossed
+  nextest's 30 s limit. The harness's `send_command_with_env` and
+  `send_command_settled` therefore type a long line on Windows as
+  `. '<temp script>'`; raw `send_text` is still typed character by character.
 - **`/etc/bash.bashrc`'s `CYG_SYS_BASHRC` crash** appears for any `bash -eu -c`
   started over SSH without that variable, so ad hoc probes on the rig need it
   too.
