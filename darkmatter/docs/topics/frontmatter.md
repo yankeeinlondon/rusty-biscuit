@@ -17,7 +17,8 @@ tags: [cli, docs]
 ```
 
 This page covers how frontmatter is parsed, the key order you can rely on,
-and the shallow merges the library offers. How a parent's frontmatter reaches
+how nested edits treat the rest of the file, and the shallow merges the library
+offers. How a parent's frontmatter reaches
 a transcluded child is covered in
 [Frontmatter and Recursion](./frontmatter-recursion.md).
 
@@ -48,7 +49,7 @@ when you:
 - edit with [`md set`](../cli/set.md) or [`md rm`](../cli/rm.md), and
 - iterate a mapping with `keys()` / `values()` in an expression.
 
-Edits follow two rules:
+Edits follow these rules, at the top level and inside a nested mapping alike:
 
 | Edit | Result |
 | --- | --- |
@@ -60,6 +61,7 @@ Edits follow two rules:
 md set doc.md title "Notes" --save   # title stays first
 md set doc.md draft true --save      # draft becomes the last key
 md rm doc.md owner                   # tags moves up to second place
+md set doc.md owner.phone 555 --save # phone becomes owner's last key
 ```
 
 Values produced by a program, such as an expression result or the external
@@ -69,6 +71,72 @@ in.
 Key order never changes what a document means. The semantic (non-strict)
 hash from [`md hash`](../cli/hash.md#key-order-and-stored-baselines) ignores
 it at every depth, while the strict hash follows it.
+
+## Editing Nested Values
+
+`md set` and `md rm` name a value with a [property path](../cli/index.md#property-paths)
+and change that value's lines, leaving every other byte of the file alone. Use
+this section to predict what happens to your comments and formatting.
+
+```yaml
+# before                         # after: md set doc.md owner.email k@x.io --save
+owner:                           owner:
+  # the on-call contact            # the on-call contact
+  name: Kim  # primary             name: Kim  # primary
+  email: kim@example.com           email: k@x.io
+```
+
+| Edit | What happens to the text |
+| --- | --- |
+| Replace a value | its lines are rewritten in place, in the standard YAML style; a comment on its key's line stays, and comments inside a replaced mapping or list go with it |
+| Add a key | a new line at the end of its parent, at the parent's indentation; missing parents are created |
+| Remove a value | its own lines go; a comment on the line above stays, because it is not part of the value |
+| Remove the last child | the parent stays, as `{}` or `[]`, and a later `md set` can add to an empty `{}` in place |
+
+Every edit is checked before anything is written. The edited text is parsed
+again and every value compared with the intended result, and a failed edit
+leaves the file exactly as it was.
+
+```mermaid
+flowchart TD
+    A["edit the text in place"] --> B{"could the source<br/>form be edited?"}
+    B -->|"no: indented root,<br/>inside a non-empty flow collection"| F["rewrite the whole block<br/>in the standard style"]
+    B -->|yes| V{"parse the result:<br/>did only the named values change?"}
+    F --> V
+    V -->|yes| W["write, or print"]
+    V -->|no| X["refuse with exit status 1;<br/>nothing is written"]
+```
+
+**The fallback.** Some forms cannot be edited safely line by line: an indented
+root mapping, a path inside a non-empty flow collection (`tags: [a, b]`), or a
+multi-line scalar whose end cannot be found. Darkmatter then rewrites the whole
+frontmatter block in its standard style. The values are the same but the
+block's comments and formatting are not, and the body is untouched. Naming a
+flow collection whole (`md set doc.md tags '["x"]'`) still edits in place, and
+`md clean --save` removes an indented root.
+
+**The refusal.** A YAML alias reads a value from elsewhere, so an edit can reach
+further than the path you named. Such an edit is refused, with no fallback:
+
+```yaml
+base: &b
+  x: 1
+ref: *b
+```
+
+```text
+$ md set doc.md base.x 2
+Error: Nothing was written: the edit would change the value of `ref.x`, which it does not name (an alias there likely reads an anchor in the edited node)
+```
+
+Replace the alias with the value you want first. Removing an anchor an alias
+still needs is refused the same way.
+
+The library's `Markdown::fm_get` and `Markdown::fm_insert` keep working on
+literal top-level keys. A caller that wants paths uses
+`simplified_schema::PropertyPath`, described in
+[Property Paths](../../../simplified-schema/docs/topics/property-paths.md),
+with `darkmatter::markdown::hash::edited_document_text` for the text.
 
 ## Shallow Merges (Library)
 

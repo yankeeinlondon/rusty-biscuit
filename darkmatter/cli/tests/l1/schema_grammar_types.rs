@@ -44,6 +44,6 @@ fn schema_validate_rejects_a_function_typed_property_as_a_schema_error() {
         .command()
         .args(["schema", "validate", "doc.md"])
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::contains("description-only").and(predicate::str::contains("run")));
 }

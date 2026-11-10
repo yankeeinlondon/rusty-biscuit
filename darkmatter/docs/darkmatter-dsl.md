@@ -477,7 +477,7 @@ Before we jump into explicit syntax, let's discuss two related topics: **proximi
             - By default it will be cached for **one day** before another attempt is made to resolve this from the actual source
                 - Both inline and block syntaxes provide a way for a user to override the default interval of one day
             - A hash based check for change detection is performed as soon as the cache window has expired:
-                - if the content is non-reachable for any reason (local machine is offline, the remote location returns an error code other than **404**) then the cache will be used but a warning will be issued and the cache status will remain in a "stale" state
+                - if the content is non-reachable because of a transport failure (local machine is offline, the remote location returns an error code other than **404**) then the cache will be used; a request refused by host policy (such as a redirect to a host that is not allowed) is never answered from the cache but a warning will be issued and the cache status will remain in a "stale" state
                 - if the remote server returns a **404** then an empty string will interpolated into the calling document but a warning will be provided to the caller to react to. The cache will then be reset to not check for another day.
 
      > **Note:** any resource which ends in `!` indicates that the resource is NOT ALLOWED to be empty and will halt execution with an error when this condition is met.

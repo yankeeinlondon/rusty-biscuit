@@ -27,21 +27,25 @@ impl From<ConditionError> for TransclusionError {
                 line,
                 message,
                 span: _,
+                authored,
             } => TransclusionError::ConditionParse {
                 ctx,
                 expr,
                 line,
                 message,
+                authored,
             },
             ConditionError::Eval {
                 ctx,
                 expr,
                 line,
                 cause,
+                authored,
             } => TransclusionError::ConditionEval {
                 ctx,
                 expr,
                 line,
+                authored,
                 cause,
             },
         }

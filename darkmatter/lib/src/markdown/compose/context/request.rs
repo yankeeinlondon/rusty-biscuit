@@ -473,6 +473,13 @@ impl ComposeRequest {
         self.options.local_expression_resolution_context_in(&self.context)
     }
 
+    /// The files and URLs this request's data runtime recorded so far, in
+    /// lexical order; empty when no runtime is attached
+    /// ([`ComposeOptions::with_shared_data_runtime`]).
+    pub fn read_set(&self) -> Vec<String> {
+        self.options.data_runtime_handle().map(crate::markdown::compose::DataRuntime::read_set).unwrap_or_default()
+    }
+
     /// This request with its options changed by `change`, keeping its context
     /// and the options' own `ctx.*` environment.
     ///

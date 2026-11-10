@@ -11,6 +11,8 @@ use darkmatter::markdown::compose::expression::{
     ArgumentCategory, ArgumentType, AuthoredMode, CallCheck, CallProblem, DeclaredTypes, Shape, TypeScope,
     check_expression_calls, check_prepared_calls, parse_spanned, prepare_value,
 };
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::{ComposeOptions, DataRuntime};
 use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use serde_json::json;
 
@@ -358,6 +360,48 @@ mod walk {
         assert!(found.iter().any(CallCheck::is_rejected));
         assert_eq!(hooks::handler_entries("effect"), 0);
         assert_eq!(hooks::handler_entries("min"), 0);
+    }
+
+    /// A proven-bad call in `try`'s fallback rejects even when the
+    /// protected operand would succeed and the fallback would never run.
+    #[test]
+    fn invalid_call_in_unreachable_fallback_rejects() {
+        let _effect = register("effect", "function(parameters(void); returns(boolean))");
+        hooks::reset_handler_entries();
+        let found = checks(None, "try(effect(), min('pear', 5))");
+        assert!(found.iter().any(|check| check.function == "min" && check.is_rejected()), "{found:#?}");
+        assert_eq!(hooks::handler_entries("effect"), 0);
+        assert_eq!(hooks::handler_entries("min"), 0);
+        assert_rejected_before_anything_runs("{{ try(load_data('d.yaml', 'string[]'), min('pear', 5)) }}");
+    }
+
+    #[test]
+    fn invalid_call_in_protected_operand_rejects() {
+        let _effect = register("effect", "function(parameters(void); returns(boolean))");
+        hooks::reset_handler_entries();
+        let found = checks(None, "try(min('pear', 5), effect())");
+        assert!(found.iter().any(|check| check.function == "min" && check.is_rejected()), "{found:#?}");
+        assert_eq!(hooks::handler_entries("effect"), 0);
+        assert_eq!(hooks::handler_entries("min"), 0);
+        assert_rejected_before_anything_runs("{{ try(min('pear', 5), load_data('d.yaml', 'string[]')) }}");
+    }
+
+    /// Composes a document whose first expression reads `d.yaml` and whose
+    /// second is `rejected`, and asserts the call check stopped it at `min`
+    /// before the first read.
+    fn assert_rejected_before_anything_runs(rejected: &str) {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("d.yaml"), "- x\n").unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, format!("{{{{ load_data('d.yaml', 'string[]') }}}}\n\n{rejected}\n")).unwrap();
+        let runtime = DataRuntime::new();
+        let options = ComposeOptions::new().with_source_file(&doc).with_data_runtime(runtime.clone());
+        let request = crate::request_support::request(options);
+        let failure = Markdown::try_from(doc.as_path()).unwrap().compose_with_warnings(&request).expect_err("rejected");
+        let call = failure.error.rejected_call().expect("the call check rejected it");
+        assert_eq!(call.function, "min", "{call:#?}");
+        assert_eq!(runtime.stats().reads, 0, "nothing ran, not even the earlier read");
+        assert!(failure.read_set.is_empty(), "{:?}", failure.read_set);
     }
 
     #[test]

@@ -160,6 +160,11 @@ fn project_def(def: &mut PropertyDef, phase: SchemaPhase) {
 /// arm's file-existence semantics. Nested object fields, whether in an
 /// inline-object type or in a union arm, are projected as their own shape.
 fn project_atom(atom: &mut PropertyAtom, phase: SchemaPhase, property_eager: bool) {
+    // A pending template type is kept as authored: its presence is unknown
+    // until it resolves, and lowering refuses it until then.
+    if atom.is_pending_type() {
+        return;
+    }
     let authored_required = atom.is_required();
     match &mut atom.ty {
         TypeExpr::InlineObject(shape) => *shape = project_shape(shape, phase),
@@ -168,7 +173,8 @@ fn project_atom(atom: &mut PropertyAtom, phase: SchemaPhase, property_eager: boo
         | TypeExpr::Imported { .. }
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => {}
+        | TypeExpr::Ref(_)
+        | TypeExpr::Slot(_) => {}
     }
     strip_presence(atom);
 
@@ -195,7 +201,8 @@ fn strip_union_arm(arm: &mut PropertyAtom, phase: SchemaPhase) {
         | TypeExpr::Imported { .. }
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => {}
+        | TypeExpr::Ref(_)
+        | TypeExpr::Slot(_) => {}
     }
     strip_presence(arm);
 }

@@ -8,6 +8,114 @@ pub fn split_lines<T: Into<String>>(content: T) -> Vec<String> {
     content.into().split('\n').map(|s| s.to_string()).collect()
 }
 
+/// Opens a run that word wrap treats as one unbreakable word.
+///
+/// The render-tree fold wraps a URL it prints as visible text (a link or
+/// image that cannot be clickable) between [`UNBREAKABLE_START`] and
+/// [`UNBREAKABLE_END`]. [`wrap_lines`] never breaks inside the run: when the
+/// run does not fit it moves to its own line, and when it is longer than the
+/// width it overflows that line. Both markers are zero-width,
+/// default-ignorable code points, so width measurement skips them; the fold
+/// removes them ([`strip_unbreakable_markers`]) once the last wrap has run.
+pub const UNBREAKABLE_START: char = '\u{2063}';
+
+/// Closes a run opened by [`UNBREAKABLE_START`].
+pub const UNBREAKABLE_END: char = '\u{2064}';
+
+/// Wraps `text` in the unbreakable-run markers.
+pub fn unbreakable(text: &str) -> String {
+    format!("{UNBREAKABLE_START}{text}{UNBREAKABLE_END}")
+}
+
+/// Removes every unbreakable-run marker from `content`.
+pub fn strip_unbreakable_markers(content: &str) -> String {
+    if !content.contains([UNBREAKABLE_START, UNBREAKABLE_END]) {
+        return content.to_string();
+    }
+    content
+        .chars()
+        .filter(|&ch| ch != UNBREAKABLE_START && ch != UNBREAKABLE_END)
+        .collect()
+}
+
+/// Normalizes terminal output to plain text: removes every escape sequence
+/// and every other control character except newline and tab, then trims
+/// trailing whitespace from each line.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::utils::block_constraint::normalize_plain;
+///
+/// assert_eq!(normalize_plain("\x1b[1mbold\x1b[0m  \n> "), "bold\n>");
+/// ```
+pub fn normalize_plain(content: &str) -> String {
+    let mut stripped = String::with_capacity(content.len());
+    let bytes = content.as_bytes();
+    let mut idx = 0usize;
+    while idx < content.len() {
+        if bytes[idx] == 0x1b {
+            idx = escape_sequence_end(content, idx);
+            continue;
+        }
+        let Some(ch) = content[idx..].chars().next() else {
+            break;
+        };
+        idx += ch.len_utf8();
+        if ch.is_control() && ch != '\n' && ch != '\t' {
+            continue;
+        }
+        if ch == UNBREAKABLE_START || ch == UNBREAKABLE_END {
+            continue;
+        }
+        stripped.push(ch);
+    }
+    stripped
+        .split('\n')
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Where a word containing an unbreakable run that crosses `width` ends, or
+/// `None` when the cut at `width` does not land inside such a run.
+///
+/// The returned byte index is the first whitespace after the run (outside
+/// any run), or the end of `content`.
+fn unbreakable_overflow_end(content: &str, width: u32) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut idx = 0usize;
+    let mut visible = 0u32;
+    let mut in_run = false;
+    let mut crossed = false;
+    while idx < content.len() {
+        if bytes[idx] == 0x1b {
+            idx = escape_sequence_end(content, idx);
+            continue;
+        }
+        let ch = content[idx..].chars().next()?;
+        if ch == UNBREAKABLE_START {
+            in_run = true;
+        } else if ch == UNBREAKABLE_END {
+            in_run = false;
+        } else if crossed {
+            if !in_run && ch.is_whitespace() {
+                return Some(idx);
+            }
+        } else {
+            visible = visible.saturating_add(UnicodeWidthChar::width(ch).unwrap_or(1) as u32);
+            if visible > width {
+                if !in_run {
+                    return None;
+                }
+                crossed = true;
+            }
+        }
+        idx += ch.len_utf8();
+    }
+    crossed.then_some(content.len())
+}
+
 /// The **BlockContent** struct takes a string and converts into
 /// a vector of lines by splitting
 pub struct BlockContent {
@@ -349,6 +457,7 @@ fn find_break_position(
     let bytes = content.as_bytes();
     let mut last_break: Option<(usize, usize, bool)> = None;
     let mut early_break: Option<(usize, usize, bool)> = None;
+    let mut in_run = false;
 
     while idx < content.len() {
         if bytes[idx] == 0x1b {
@@ -363,6 +472,12 @@ fn find_break_position(
         let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1) as u32;
         let ch_len = ch.len_utf8();
 
+        if ch == UNBREAKABLE_START || ch == UNBREAKABLE_END {
+            in_run = ch == UNBREAKABLE_START;
+            idx += ch_len;
+            continue;
+        }
+
         if ch_width == 0 {
             idx += ch_len;
             continue;
@@ -373,7 +488,7 @@ fn find_break_position(
         }
 
         visible = visible.saturating_add(ch_width);
-        if ch.is_whitespace() || ch == '-' {
+        if !in_run && (ch.is_whitespace() || ch == '-') {
             if visible >= start_search {
                 last_break = Some((idx, ch_len, ch.is_whitespace()));
             } else {
@@ -399,6 +514,7 @@ fn find_bespoke_break_position(
     let bytes = content.as_bytes();
     let mut last_break: Option<(usize, usize, bool)> = None;
     let mut early_break: Option<(usize, usize, bool)> = None;
+    let mut in_run = false;
 
     while idx < content.len() {
         if bytes[idx] == 0x1b {
@@ -413,6 +529,12 @@ fn find_bespoke_break_position(
         let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1) as u32;
         let ch_len = ch.len_utf8();
 
+        if ch == UNBREAKABLE_START || ch == UNBREAKABLE_END {
+            in_run = ch == UNBREAKABLE_START;
+            idx += ch_len;
+            continue;
+        }
+
         if ch_width == 0 {
             idx += ch_len;
             continue;
@@ -423,7 +545,7 @@ fn find_bespoke_break_position(
         }
 
         visible = visible.saturating_add(ch_width);
-        if ch.is_whitespace() || break_chars.contains(&ch) {
+        if !in_run && (ch.is_whitespace() || break_chars.contains(&ch)) {
             if visible >= start_search {
                 last_break = Some((idx, ch_len, ch.is_whitespace()));
             } else {
@@ -531,6 +653,19 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                             break;
                         }
                         remaining = tail;
+                    } else if let Some(end) = unbreakable_overflow_end(&remaining, effective_width) {
+                        // An unbreakable run (a printed URL) crosses the width
+                        // with no break before it: it overflows this line whole.
+                        let mut head = remaining[..end].to_string();
+                        if is_continuation && indent > 0 {
+                            head = format!("{}{}", " ".repeat(indent), head);
+                        }
+                        let tail = trim_leading_whitespace_preserve_escapes(&remaining[end..]);
+                        wrapped.push(head);
+                        if tail.is_empty() {
+                            break;
+                        }
+                        remaining = tail;
                     } else if effective_width <= 1 {
                         let (head, tail) = split_at_visible_width(&remaining, effective_width);
                         let mut final_head = head;
@@ -585,6 +720,19 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                         // non-whitespace chars (e.g. comma in "a, b") doesn't
                         // carry a stray space into the next line.
                         let tail = trim_leading_whitespace_preserve_escapes(&remaining[split_at..]);
+                        wrapped.push(head);
+                        if tail.is_empty() {
+                            break;
+                        }
+                        remaining = tail;
+                    } else if let Some(end) = unbreakable_overflow_end(&remaining, effective_width) {
+                        // An unbreakable run (a printed URL) crosses the width
+                        // with no break before it: it overflows this line whole.
+                        let mut head = remaining[..end].to_string();
+                        if is_continuation && indent > 0 {
+                            head = format!("{}{}", " ".repeat(indent), head);
+                        }
+                        let tail = trim_leading_whitespace_preserve_escapes(&remaining[end..]);
                         wrapped.push(head);
                         if tail.is_empty() {
                             break;
@@ -1035,6 +1183,37 @@ mod tests {
                 visible_width(line),
             );
         }
+    }
+
+    #[test]
+    fn unbreakable_markers_have_no_width() {
+        assert_eq!(visible_width(&unbreakable("a-b")), 3);
+    }
+
+    #[test]
+    fn wrap_lines_moves_an_unbreakable_run_to_its_own_line() {
+        let line = format!("see {} now", unbreakable("<https://e.io/a-b-c>"));
+        let wrapped = wrap_lines(vec![line], &WordWrap::WrapProse(None, None), 24);
+        let stripped: Vec<String> = wrapped.iter().map(|l| strip_unbreakable_markers(l)).collect();
+        assert_eq!(stripped, ["see", "<https://e.io/a-b-c> now"]);
+    }
+
+    #[test]
+    fn wrap_lines_lets_an_overlong_unbreakable_run_overflow_whole() {
+        let url = "<https://example.com/a-very-long-path>";
+        let line = format!("see {} now", unbreakable(url));
+        for strategy in [WordWrap::WrapProse(None, None), WordWrap::WrapProse(None, Some(2))] {
+            let wrapped = wrap_lines(vec![line.clone()], &strategy, 12);
+            let stripped: Vec<String> = wrapped.iter().map(|l| strip_unbreakable_markers(l)).collect();
+            assert!(stripped.iter().any(|l| l.trim() == url), "{strategy:?}: {stripped:?}");
+            assert!(stripped.iter().all(|l| !l.ends_with('-')), "{strategy:?}: {stripped:?}");
+        }
+    }
+
+    #[test]
+    fn normalize_plain_removes_escapes_controls_markers_and_trailing_space() {
+        let input = format!("\x1b]8;;u\x1b\\{}\x1b]8;;\x1b\\ \x07\n\x1b[2m> \x1b[0m", unbreakable("x"));
+        assert_eq!(normalize_plain(&input), "x\n>");
     }
 
     #[test]

@@ -68,6 +68,9 @@ pub struct TriggerTraceEntry {
     pub source: TriggerSource,
     /// Whether every top-level condition matched.
     pub matched: bool,
+    /// Whether the payload is a template (it holds `{{ … }}` slots): it is
+    /// valid, and resolves only for a document it matches.
+    pub pending: bool,
     /// Results in authored order: one per `match:` list entry, or one for a
     /// mapping `match:`.
     pub conditions: Vec<TriggerConditionTrace>,
@@ -109,10 +112,12 @@ pub fn trace_registry(
     frontmatter: &Value,
     document: Option<&Path>,
 ) -> TriggerTrace {
+    let pre_resolved = registry.payloads.len() == registry.triggers.len();
     let triggers = registry
         .triggers
         .iter()
-        .map(|trigger| {
+        .enumerate()
+        .map(|(idx, trigger)| {
             let subject = subject_for(registry, trigger, document);
             let conditions = trigger
                 .envelope
@@ -134,6 +139,7 @@ pub fn trace_registry(
             TriggerTraceEntry {
                 source: trigger.source.clone(),
                 matched: conditions.iter().all(|condition| condition.matched),
+                pending: pre_resolved && registry.payloads[idx].pending.is_some(),
                 conditions,
             }
         })
@@ -225,6 +231,12 @@ pub(crate) struct ResolvedPayload {
     pub searched: Vec<PathBuf>,
     /// Non-fatal findings produced while resolving payload references.
     pub advisories: Vec<super::super::SchemaAdvisory>,
+    /// The payload is a template (it holds `{{ … }}` slots): it is neither
+    /// invalid nor empty, and resolves only when a document matches it, in
+    /// that document's slot session ([`finish_file_payload`] then applies the
+    /// payload rules to the result). The other fields are then empty, except
+    /// `dependencies`, which name the schema files the template read.
+    pub pending: Option<simplified_schema::slots::PendingSchema>,
 }
 
 impl ResolvedPayload {
@@ -239,6 +251,7 @@ impl ResolvedPayload {
             dependencies: Vec::new(),
             searched: Vec::new(),
             advisories: Vec::new(),
+            pending: None,
         }
     }
 }
@@ -285,7 +298,7 @@ pub(crate) fn resolve_trigger_payload(
     let Some(payload) = trigger.envelope.payload.as_ref() else {
         return Ok(ResolvedPayload::matcher_only());
     };
-    file_payload_memo::resolve(source, payload, schema_roots, context)
+    file_payload_memo::resolve(source, payload, trigger.text.as_ref(), schema_roots, context)
 }
 
 /// Empties the process-wide trigger payload memo (see
@@ -294,31 +307,61 @@ pub(crate) fn reset_process_caches() {
     file_payload_memo::clear();
 }
 
-/// [`resolve_trigger_payload`] for a schema-root file, uncached.
+/// [`resolve_trigger_payload`] for a schema-root file, uncached. `text` is
+/// the file's text as discovery read it: an inline payload's slots are
+/// positioned in it.
 fn resolve_file_payload(
     source: &Path,
     payload: &YamlValue,
+    text: Option<&std::sync::Arc<str>>,
     schema_roots: &[PathBuf],
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedPayload, SchemaError> {
     let base_dir = source.parent().unwrap_or_else(|| Path::new("."));
+    let authored = text.map(|text| simplified_schema::resolve::AuthoredSchemaValue {
+        file: Some(source.to_path_buf()),
+        mapping: 0..text.len(),
+        text: std::sync::Arc::clone(text),
+    });
     // The trigger file owns an inline payload's named types, so its
     // definitions never share keys with the document's or another trigger's.
     // A trigger file is never a schema document, so the loader refuses a
     // payload that names one before any cycle check could see it; that
     // refusal is reported as the cycle it is.
-    let resolved = resolve::resolve_yaml_schema_owned_by(
+    let resolved = match resolve::resolve_authored_yaml_schema(
         payload,
         simplified_schema::resolve::InlineOwner::Trigger(source),
+        authored.as_ref(),
         base_dir,
         schema_roots,
         context,
-    )
-    .map_err(|error| match refused_trigger_file(&error) {
-        Some(path) => payload_cycle(source, &path).unwrap_or(error),
-        None => error,
-    })?;
+    ) {
+        // A template payload is pending: matching stays passive, and only a
+        // matched payload resolves, in the matching document's session.
+        Err(SchemaError::UnresolvedSlots(unresolved)) if unresolved.pending.is_some() => {
+            let pending = unresolved.pending.expect("checked above");
+            let mut dependencies: Vec<PathBuf> = pending.read_sources().iter().map(|(path, _)| path.clone()).collect();
+            dependencies.sort();
+            dependencies.dedup();
+            return Ok(ResolvedPayload { dependencies, pending: Some(pending), ..ResolvedPayload::matcher_only() });
+        }
+        resolved => resolved.map_err(|error| match refused_trigger_file(&error) {
+            Some(path) => payload_cycle(source, &path).unwrap_or(error),
+            None => error,
+        })?,
+    };
+    finish_file_payload(source, payload, resolved)
+}
 
+/// The payload rules applied to `resolved`, the resolution of the trigger
+/// file `source`'s `$schema` value `payload`: no cycle back to a trigger, a
+/// merge-compatible object schema that compiles, and its dependency edges.
+/// A pending payload's resolution goes through the same rules.
+pub(crate) fn finish_file_payload(
+    source: &Path,
+    payload: &YamlValue,
+    resolved: simplified_schema::resolve::ResolvedSchema,
+) -> Result<ResolvedPayload, SchemaError> {
     // Cycle detection: the payload must not resolve to a trigger envelope.
     check_payload_cycles(source, &resolved)?;
 
@@ -354,6 +397,7 @@ fn resolve_file_payload(
         dependencies: deps,
         searched: resolved.searched,
         advisories: resolved.advisories,
+        pending: None,
     })
 }
 
@@ -414,6 +458,9 @@ mod file_payload_memo {
     struct Key {
         source: PathBuf,
         payload: YamlValue,
+        /// The trigger file's text: a template payload's slots carry their
+        /// ranges in it, so an edit elsewhere in the file is a miss.
+        text: Option<std::sync::Arc<str>>,
         schema_roots: Vec<PathBuf>,
         tree: PathBuf,
         tree_origin: BaseDirOrigin,
@@ -422,12 +469,19 @@ mod file_payload_memo {
     }
 
     impl Key {
-        fn new(source: &Path, payload: &YamlValue, schema_roots: &[PathBuf], original: &FileResolutionContext) -> Self {
+        fn new(
+            source: &Path,
+            payload: &YamlValue,
+            text: Option<&std::sync::Arc<str>>,
+            schema_roots: &[PathBuf],
+            original: &FileResolutionContext,
+        ) -> Self {
             // Mirrors `resolve_file_payload`'s base folder.
             let folder = source.parent().unwrap_or_else(|| Path::new("."));
             Self {
                 source: source.to_path_buf(),
                 payload: payload.clone(),
+                text: text.cloned(),
                 schema_roots: schema_roots.to_vec(),
                 tree: original.base_dir().to_path_buf(),
                 tree_origin: original.base_dir_origin().clone(),
@@ -453,10 +507,11 @@ mod file_payload_memo {
     pub(super) fn resolve(
         source: &Path,
         payload: &YamlValue,
+        text: Option<&std::sync::Arc<str>>,
         schema_roots: &[PathBuf],
         original: &FileResolutionContext,
     ) -> Result<ResolvedPayload, SchemaError> {
-        let key = Key::new(source, payload, schema_roots, original);
+        let key = Key::new(source, payload, text, schema_roots, original);
         let held = {
             let entries = ENTRIES.lock().expect("trigger payload memo poisoned");
             entries
@@ -477,7 +532,7 @@ mod file_payload_memo {
         }
 
         tally::record_miss();
-        let resolved = resolve_file_payload(source, payload, schema_roots, original)?;
+        let resolved = resolve_file_payload(source, payload, text, schema_roots, original)?;
         let fingerprint = inputs_fingerprint(schema_roots, &resolved);
         let mut entries = ENTRIES.lock().expect("trigger payload memo poisoned");
         entries.retain(|entry| entry.key != key);
@@ -598,9 +653,12 @@ mod file_payload_memo {
             std::fs::metadata(path)
         }
 
+        /// A dependency's bytes as resolution reads them: an open or
+        /// retained buffer's text, so the fingerprint hashes what the payload
+        /// was resolved from and a retaining scope opens no file twice.
         pub(super) fn read(path: &Path) -> std::io::Result<Vec<u8>> {
             injected(path)?;
-            std::fs::read(path)
+            simplified_schema::resolve::buffers::read_to_string(path).map(String::into_bytes)
         }
     }
 
@@ -806,6 +864,7 @@ fn resolve_embedded_payload(
         dependencies: Vec::new(),
         searched: Vec::new(),
         advisories: resolved.advisories,
+        pending: None,
     };
     Ok((payload, reads))
 }
@@ -925,9 +984,11 @@ pub(crate) fn refused_trigger_file(error: &SchemaError) -> Option<PathBuf> {
 /// envelope, valid or not: a claimed envelope that discovery skips as invalid
 /// is still a trigger file, never a schema. An unreadable file returns
 /// `false` — it is not the cycle detector's concern (the resolver surfaces
-/// it separately) — as does unclaimed YAML, malformed or not.
+/// it separately) — as does unclaimed YAML, malformed or not. The text is
+/// read as the resolver read it, so a retaining scope serves the bytes the
+/// `$schema` just resolved from instead of opening the file again.
 fn file_claims_trigger_envelope(path: &Path) -> bool {
-    let Ok(content) = std::fs::read_to_string(path) else {
+    let Ok(content) = simplified_schema::resolve::buffers::read_to_string(path) else {
         return false;
     };
     !matches!(parse_trigger_envelope_from_str(&content), Ok(None))
@@ -1042,6 +1103,7 @@ mod tests {
             envelope,
             pattern_cwd: source.parent().and_then(Path::parent).unwrap_or(source).to_path_buf(),
             bundle: None,
+            text: Some(content.into()),
         }
     }
 

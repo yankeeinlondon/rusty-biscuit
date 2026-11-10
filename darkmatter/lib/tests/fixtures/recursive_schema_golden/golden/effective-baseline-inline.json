@@ -538,7 +538,7 @@
         }
       },
       "patternProperties": {
-        "^(?!(?:set|when|no_error)$)(?:append_frontmatter|append_jsonl|append_line|decrement_frontmatter|delete_frontmatter|ensure_dir|ensure_file|http_post|increment_frontmatter|merge_frontmatter|prepend_frontmatter|set_frontmatter|abs|absolute|and|as_csv|as_json|as_json5|as_line_separated|as_markdown|as_ordered_list|as_space_separated|as_tsv|as_unordered_list|basename|basename_without_index|branch_exists_on_remote|camel_case|can_execute|capitalize|cicd|cicd_list|code_link|contains|date|date_delta|decrement_file_index|dir_leading|dirname|ends_with|ensure_leading|ensure_trailing|ext|file_exists|file_index|file_trailing|find_files|find_first_index|find_last_index|first|frontmatter|has_agentic_cli|has_alias|has_binary|has_builtin_function|has_command|has_key|has_local_skill|has_skill|has_user_function|increment_file_index|ipv4|ipv6|is_array|is_date|is_date_time|is_date_time_utc|is_date_utc|is_empty|is_file_type|is_indexed_file|is_integer|is_negative|is_null|is_number|is_object|is_positive|is_string|is_this_month|is_this_month_utc|is_this_year|is_this_year_utc|is_today|is_today_utc|is_tomorrow|is_tomorrow_utc|is_yesterday|is_yesterday_utc|join|kebab_case|keys|last|length|link|lower|markdown_body_empty|markdown_title|max|min|newer_than|number|older_than|or|package|package_area|parent_dir|pascal_case|ping|ping_under|pr|pr_list|predict_conflicts|recent_commits|relative|remote_vendor|replace|replace_first|replace_last|round|snake_case|starts_with|terminal|title_case|trim|try_frontmatter|upper|validate_schema|values|without_date)$": {
+        "^(?!(?:set|when|no_error)$)(?:append_frontmatter|append_jsonl|append_line|decrement_frontmatter|delete_frontmatter|ensure_dir|ensure_file|http_post|increment_frontmatter|merge_frontmatter|prepend_frontmatter|set_frontmatter|abs|absolute|and|as_csv|as_json|as_json5|as_line_separated|as_markdown|as_ordered_list|as_space_separated|as_tsv|as_unordered_list|basename|basename_without_index|branch_exists_on_remote|camel_case|can_execute|capitalize|cicd|cicd_list|code_link|contains|date|date_delta|decrement_file_index|dir_leading|dirname|ends_with|ensure_leading|ensure_trailing|ext|file_exists|file_index|file_trailing|find_files|find_first_index|find_last_index|first|frontmatter|has_agentic_cli|has_alias|has_binary|has_builtin_function|has_command|has_key|has_local_skill|has_skill|has_user_function|increment_file_index|ipv4|ipv6|is_array|is_date|is_date_time|is_date_time_utc|is_date_utc|is_empty|is_file_type|is_indexed_file|is_integer|is_negative|is_null|is_number|is_object|is_positive|is_string|is_this_month|is_this_month_utc|is_this_year|is_this_year_utc|is_today|is_today_utc|is_tomorrow|is_tomorrow_utc|is_yesterday|is_yesterday_utc|join|kebab_case|keys|last|length|link|load_data|lower|markdown_body_empty|markdown_title|max|min|newer_than|number|older_than|or|package|package_area|parent_dir|pascal_case|ping|ping_under|pr|pr_list|predict_conflicts|recent_commits|relative|remote_vendor|replace|replace_first|replace_last|round|snake_case|starts_with|terminal|title_case|trim|try_frontmatter|upper|validate_schema|values|without_date)$": {
           "description": "a Darkmatter side effect or expression function; the parser checks its arguments"
         }
       },
@@ -786,7 +786,7 @@
       "additionalProperties": false,
       "properties": {},
       "patternProperties": {
-        "^(?!(?:stdout|stderr|info|warn|success|message|stop|skip|error|shell|set|append_frontmatter|append_jsonl|append_line|decrement_frontmatter|delete_frontmatter|ensure_dir|ensure_file|http_post|increment_frontmatter|merge_frontmatter|prepend_frontmatter|set_frontmatter|abs|absolute|and|as_csv|as_json|as_json5|as_line_separated|as_markdown|as_ordered_list|as_space_separated|as_tsv|as_unordered_list|basename|basename_without_index|branch_exists_on_remote|camel_case|can_execute|capitalize|cicd|cicd_list|code_link|contains|date|date_delta|decrement_file_index|dir_leading|dirname|ends_with|ensure_leading|ensure_trailing|ext|file_exists|file_index|file_trailing|find_files|find_first_index|find_last_index|first|frontmatter|has_agentic_cli|has_alias|has_binary|has_builtin_function|has_command|has_key|has_local_skill|has_skill|has_user_function|increment_file_index|ipv4|ipv6|is_array|is_date|is_date_time|is_date_time_utc|is_date_utc|is_empty|is_file_type|is_indexed_file|is_integer|is_negative|is_null|is_number|is_object|is_positive|is_string|is_this_month|is_this_month_utc|is_this_year|is_this_year_utc|is_today|is_today_utc|is_tomorrow|is_tomorrow_utc|is_yesterday|is_yesterday_utc|join|kebab_case|keys|last|length|link|lower|markdown_body_empty|markdown_title|max|min|newer_than|number|older_than|or|package|package_area|parent_dir|pascal_case|ping|ping_under|pr|pr_list|predict_conflicts|recent_commits|relative|remote_vendor|replace|replace_first|replace_last|round|snake_case|starts_with|terminal|title_case|trim|try_frontmatter|upper|validate_schema|values|without_date|when|then|else|no_error)$)": {
+        "^(?!(?:stdout|stderr|info|warn|success|message|stop|skip|error|shell|set|append_frontmatter|append_jsonl|append_line|decrement_frontmatter|delete_frontmatter|ensure_dir|ensure_file|http_post|increment_frontmatter|merge_frontmatter|prepend_frontmatter|set_frontmatter|abs|absolute|and|as_csv|as_json|as_json5|as_line_separated|as_markdown|as_ordered_list|as_space_separated|as_tsv|as_unordered_list|basename|basename_without_index|branch_exists_on_remote|camel_case|can_execute|capitalize|cicd|cicd_list|code_link|contains|date|date_delta|decrement_file_index|dir_leading|dirname|ends_with|ensure_leading|ensure_trailing|ext|file_exists|file_index|file_trailing|find_files|find_first_index|find_last_index|first|frontmatter|has_agentic_cli|has_alias|has_binary|has_builtin_function|has_command|has_key|has_local_skill|has_skill|has_user_function|increment_file_index|ipv4|ipv6|is_array|is_date|is_date_time|is_date_time_utc|is_date_utc|is_empty|is_file_type|is_indexed_file|is_integer|is_negative|is_null|is_number|is_object|is_positive|is_string|is_this_month|is_this_month_utc|is_this_year|is_this_year_utc|is_today|is_today_utc|is_tomorrow|is_tomorrow_utc|is_yesterday|is_yesterday_utc|join|kebab_case|keys|last|length|link|load_data|lower|markdown_body_empty|markdown_title|max|min|newer_than|number|older_than|or|package|package_area|parent_dir|pascal_case|ping|ping_under|pr|pr_list|predict_conflicts|recent_commits|relative|remote_vendor|replace|replace_first|replace_last|round|snake_case|starts_with|terminal|title_case|trim|try|try_frontmatter|upper|validate_schema|values|without_date|when|then|else|no_error)$)": {
           "description": "an action md does not provide; md compose ignores it with a warning"
         }
       },
@@ -1617,7 +1617,7 @@
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
-                    "left-margin": {
+                    "margin-left": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -1634,7 +1634,7 @@
                         }
                       ]
                     },
-                    "right-margin": {
+                    "margin-right": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -1651,7 +1651,7 @@
                         }
                       ]
                     },
-                    "top-margin": {
+                    "margin-top": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -1665,7 +1665,7 @@
                       ],
                       "description": "Terminal row count."
                     },
-                    "bottom-margin": {
+                    "margin-bottom": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -1679,7 +1679,7 @@
                       ],
                       "description": "Terminal row count."
                     },
-                    "left-padding": {
+                    "padding-left": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -1696,7 +1696,7 @@
                         }
                       ]
                     },
-                    "right-padding": {
+                    "padding-right": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -1713,7 +1713,7 @@
                         }
                       ]
                     },
-                    "top-padding": {
+                    "padding-top": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -1727,7 +1727,7 @@
                       ],
                       "description": "Terminal row count."
                     },
-                    "bottom-padding": {
+                    "padding-bottom": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -1748,13 +1748,14 @@
                         },
                         {
                           "type": "string",
-                          "description": "Horizontal length such as 2ch or 10%."
+                          "pattern": "[1-9]",
+                          "description": "Positive horizontal length such as 80ch or 50%."
                         },
                         {
-                          "minimum": 0,
+                          "minimum": 1,
                           "type": "integer",
                           "x-darkmatter-integer": true,
-                          "description": "Character-cell length."
+                          "description": "Positive character-cell length."
                         }
                       ]
                     },
@@ -1810,6 +1811,29 @@
                       ],
                       "description": "Page background fill strategy."
                     },
+                    "theme": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "x-darkmatter-suggest": [
+                            "base16-ocean",
+                            "github",
+                            "gruvbox",
+                            "one-half",
+                            "solarized",
+                            "nord",
+                            "dracula",
+                            "monokai",
+                            "vs-dark"
+                          ],
+                          "pattern": "\\S"
+                        }
+                      ],
+                      "description": "Theme pair name."
+                    },
                     "stylesheet": {
                       "anyOf": [
                         {
@@ -1851,18 +1875,769 @@
                                   "type": "null"
                                 },
                                 {
-                                  "type": "string"
+                                  "type": "string",
+                                  "x-darkmatter-suggest": [
+                                    "base16-ocean",
+                                    "github",
+                                    "gruvbox",
+                                    "one-half",
+                                    "solarized",
+                                    "nord",
+                                    "dracula",
+                                    "monokai",
+                                    "vs-dark"
+                                  ],
+                                  "pattern": "\\S"
                                 }
                               ],
-                              "description": "Syntax-highlighting theme pair for code blocks."
+                              "description": "Theme pair name."
+                            },
+                            "mode": {
+                              "anyOf": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "enum": [
+                                    "inverse",
+                                    "dark",
+                                    "light",
+                                    "same"
+                                  ]
+                                }
+                              ],
+                              "description": "Code-block theme variant relative to the page color mode."
                             }
                           }
                         }
                       ]
+                    },
+                    "margin": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "minimum": 0,
+                          "maximum": 65535,
+                          "type": "integer",
+                          "x-darkmatter-integer": true
+                        }
+                      ],
+                      "description": "All four sides; also a row count."
+                    },
+                    "padding": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "minimum": 0,
+                          "maximum": 65535,
+                          "type": "integer",
+                          "x-darkmatter-integer": true
+                        }
+                      ],
+                      "description": "All four sides; also a row count."
+                    },
+                    "mx": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Left and right; a horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Left and right, in character cells."
+                        }
+                      ]
+                    },
+                    "my": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "minimum": 0,
+                          "maximum": 65535,
+                          "type": "integer",
+                          "x-darkmatter-integer": true
+                        }
+                      ],
+                      "description": "Top and bottom, in terminal rows."
+                    },
+                    "px": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Left and right; a horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Left and right, in character cells."
+                        }
+                      ]
+                    },
+                    "py": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "minimum": 0,
+                          "maximum": 65535,
+                          "type": "integer",
+                          "x-darkmatter-integer": true
+                        }
+                      ],
+                      "description": "Top and bottom, in terminal rows."
+                    },
+                    "ml": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "mr": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "mt": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "minimum": 0,
+                          "maximum": 65535,
+                          "type": "integer",
+                          "x-darkmatter-integer": true
+                        }
+                      ],
+                      "description": "Terminal row count."
+                    },
+                    "mb": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "minimum": 0,
+                          "maximum": 65535,
+                          "type": "integer",
+                          "x-darkmatter-integer": true
+                        }
+                      ],
+                      "description": "Terminal row count."
+                    },
+                    "pl": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "pr": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "pt": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "minimum": 0,
+                          "maximum": 65535,
+                          "type": "integer",
+                          "x-darkmatter-integer": true
+                        }
+                      ],
+                      "description": "Terminal row count."
+                    },
+                    "pb": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "minimum": 0,
+                          "maximum": 65535,
+                          "type": "integer",
+                          "x-darkmatter-integer": true
+                        }
+                      ],
+                      "description": "Terminal row count."
                     }
                   }
                 }
               ]
+            },
+            "margin-left": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "description": "Horizontal length such as 2ch or 10%."
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Character-cell length."
+                }
+              ]
+            },
+            "margin-right": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "description": "Horizontal length such as 2ch or 10%."
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Character-cell length."
+                }
+              ]
+            },
+            "margin-top": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Terminal row count."
+            },
+            "margin-bottom": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Terminal row count."
+            },
+            "padding-left": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "description": "Horizontal length such as 2ch or 10%."
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Character-cell length."
+                }
+              ]
+            },
+            "padding-right": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "description": "Horizontal length such as 2ch or 10%."
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Character-cell length."
+                }
+              ]
+            },
+            "padding-top": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Terminal row count."
+            },
+            "padding-bottom": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Terminal row count."
+            },
+            "max-width": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "pattern": "[1-9]",
+                  "description": "Positive horizontal length such as 80ch or 50%."
+                },
+                {
+                  "minimum": 1,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Positive character-cell length."
+                }
+              ]
+            },
+            "alignment": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "enum": [
+                    "left",
+                    "center",
+                    "right"
+                  ]
+                }
+              ],
+              "description": "Horizontal alignment."
+            },
+            "color": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Tailwind, hexadecimal, or CSS named foreground color, optionally with opacity."
+            },
+            "bg-color": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Tailwind, hexadecimal, or CSS named foreground color, optionally with opacity."
+            },
+            "background": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "enum": [
+                    "transparent",
+                    "subtle",
+                    "pronounced"
+                  ]
+                }
+              ],
+              "description": "Page background fill strategy."
+            },
+            "theme": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "x-darkmatter-suggest": [
+                    "base16-ocean",
+                    "github",
+                    "gruvbox",
+                    "one-half",
+                    "solarized",
+                    "nord",
+                    "dracula",
+                    "monokai",
+                    "vs-dark"
+                  ],
+                  "pattern": "\\S"
+                }
+              ],
+              "description": "Theme pair name."
+            },
+            "stylesheet": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "const": ""
+                },
+                {
+                  "type": "string",
+                  "format": "darkmatter-file-reference"
+                }
+              ],
+              "description": "CSS file reference or URL used for browser rendering."
+            },
+            "meta": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object"
+                }
+              ],
+              "description": "Browser metadata passed through to generated HTML."
+            },
+            "code": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "theme": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "x-darkmatter-suggest": [
+                            "base16-ocean",
+                            "github",
+                            "gruvbox",
+                            "one-half",
+                            "solarized",
+                            "nord",
+                            "dracula",
+                            "monokai",
+                            "vs-dark"
+                          ],
+                          "pattern": "\\S"
+                        }
+                      ],
+                      "description": "Theme pair name."
+                    },
+                    "mode": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "enum": [
+                            "inverse",
+                            "dark",
+                            "light",
+                            "same"
+                          ]
+                        }
+                      ],
+                      "description": "Code-block theme variant relative to the page color mode."
+                    }
+                  }
+                }
+              ]
+            },
+            "margin": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "All four sides; also a row count."
+            },
+            "padding": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "All four sides; also a row count."
+            },
+            "mx": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "description": "Left and right; a horizontal length such as 2ch or 10%."
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Left and right, in character cells."
+                }
+              ]
+            },
+            "my": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Top and bottom, in terminal rows."
+            },
+            "px": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "description": "Left and right; a horizontal length such as 2ch or 10%."
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Left and right, in character cells."
+                }
+              ]
+            },
+            "py": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Top and bottom, in terminal rows."
+            },
+            "ml": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "description": "Horizontal length such as 2ch or 10%."
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Character-cell length."
+                }
+              ]
+            },
+            "mr": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "description": "Horizontal length such as 2ch or 10%."
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Character-cell length."
+                }
+              ]
+            },
+            "mt": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Terminal row count."
+            },
+            "mb": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Terminal row count."
+            },
+            "pl": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "description": "Horizontal length such as 2ch or 10%."
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Character-cell length."
+                }
+              ]
+            },
+            "pr": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "description": "Horizontal length such as 2ch or 10%."
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true,
+                  "description": "Character-cell length."
+                }
+              ]
+            },
+            "pt": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Terminal row count."
+            },
+            "pb": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Terminal row count."
             },
             "table": {
               "anyOf": [
@@ -1969,6 +2744,40 @@
                       ]
                     },
                     "padding": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-left": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-right": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -2329,6 +3138,40 @@
                       ]
                     },
                     "padding": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-left": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-right": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -2722,6 +3565,40 @@
                         }
                       ]
                     },
+                    "padding-left": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-right": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
                     "border": {
                       "anyOf": [
                         {
@@ -3082,6 +3959,40 @@
                         }
                       ]
                     },
+                    "padding-left": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-right": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
                     "border": {
                       "anyOf": [
                         {
@@ -3426,6 +4337,40 @@
                       ]
                     },
                     "padding": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-left": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-right": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -3889,6 +4834,40 @@
                                 }
                               ]
                             },
+                            "padding-left": {
+                              "anyOf": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "string",
+                                  "description": "Horizontal length such as 2ch or 10%."
+                                },
+                                {
+                                  "minimum": 0,
+                                  "type": "integer",
+                                  "x-darkmatter-integer": true,
+                                  "description": "Character-cell length."
+                                }
+                              ]
+                            },
+                            "padding-right": {
+                              "anyOf": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "string",
+                                  "description": "Horizontal length such as 2ch or 10%."
+                                },
+                                {
+                                  "minimum": 0,
+                                  "type": "integer",
+                                  "x-darkmatter-integer": true,
+                                  "description": "Character-cell length."
+                                }
+                              ]
+                            },
                             "border": {
                               "anyOf": [
                                 {
@@ -4219,6 +5198,57 @@
                       ],
                       "description": "Tailwind, hexadecimal, or CSS named foreground color, optionally with opacity."
                     },
+                    "padding": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-left": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-right": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
                     "local-style": {
                       "anyOf": [
                         {
@@ -4324,6 +5354,40 @@
                               ]
                             },
                             "padding": {
+                              "anyOf": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "string",
+                                  "description": "Horizontal length such as 2ch or 10%."
+                                },
+                                {
+                                  "minimum": 0,
+                                  "type": "integer",
+                                  "x-darkmatter-integer": true,
+                                  "description": "Character-cell length."
+                                }
+                              ]
+                            },
+                            "padding-left": {
+                              "anyOf": [
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "string",
+                                  "description": "Horizontal length such as 2ch or 10%."
+                                },
+                                {
+                                  "minimum": 0,
+                                  "type": "integer",
+                                  "x-darkmatter-integer": true,
+                                  "description": "Character-cell length."
+                                }
+                              ]
+                            },
+                            "padding-right": {
                               "anyOf": [
                                 {
                                   "type": "null"
@@ -4698,23 +5762,6 @@
                       ],
                       "description": "Horizontal-rule weight."
                     },
-                    "margin": {
-                      "anyOf": [
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "string",
-                          "description": "Horizontal length such as 2ch or 10%."
-                        },
-                        {
-                          "minimum": 0,
-                          "type": "integer",
-                          "x-darkmatter-integer": true,
-                          "description": "Character-cell length."
-                        }
-                      ]
-                    },
                     "padding": {
                       "anyOf": [
                         {
@@ -4732,240 +5779,39 @@
                         }
                       ]
                     },
-                    "border": {
+                    "padding-left": {
                       "anyOf": [
                         {
                           "type": "null"
                         },
                         {
-                          "type": "boolean",
-                          "description": "Enables or disables a thin border on all sides."
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
                         },
                         {
-                          "enum": [
-                            "thin",
-                            "medium",
-                            "thick",
-                            "none"
-                          ],
-                          "description": "Border weight on all sides."
-                        },
-                        {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "left": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ],
-                              "description": "Whether to draw the left border."
-                            },
-                            "right": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ],
-                              "description": "Whether to draw the right border."
-                            },
-                            "top": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ],
-                              "description": "Whether to draw the top border."
-                            },
-                            "bottom": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ],
-                              "description": "Whether to draw the bottom border."
-                            },
-                            "weight": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "enum": [
-                                    "thin",
-                                    "medium",
-                                    "thick"
-                                  ]
-                                }
-                              ],
-                              "description": "Border weight."
-                            },
-                            "color": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "string"
-                                }
-                              ],
-                              "description": "Tailwind, hexadecimal, or CSS named foreground color, optionally with opacity."
-                            },
-                            "style": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "enum": [
-                                    "solid",
-                                    "dashed",
-                                    "dotted",
-                                    "double"
-                                  ]
-                                }
-                              ],
-                              "description": "Border line style."
-                            },
-                            "radius": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "string",
-                                  "description": "Horizontal length such as 2ch or 10%."
-                                },
-                                {
-                                  "minimum": 0,
-                                  "type": "integer",
-                                  "x-darkmatter-integer": true,
-                                  "description": "Character-cell length."
-                                }
-                              ]
-                            }
-                          }
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
                         }
                       ]
                     },
-                    "emphasis": {
+                    "padding-right": {
                       "anyOf": [
                         {
                           "type": "null"
                         },
                         {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "bold": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ]
-                            },
-                            "dim": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ]
-                            },
-                            "italic": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ]
-                            },
-                            "strikethrough": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ]
-                            },
-                            "underline": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "enum": [
-                                    "straight",
-                                    "double",
-                                    "curly",
-                                    "dotted",
-                                    "dashed"
-                                  ]
-                                }
-                              ],
-                              "description": "Underline style."
-                            },
-                            "inverse": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ]
-                            },
-                            "blink": {
-                              "anyOf": [
-                                {
-                                  "type": "null"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ]
-                            }
-                          }
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
                         }
                       ]
-                    },
-                    "word-wrap": {
-                      "anyOf": [
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "enum": [
-                            "none",
-                            "wrap",
-                            "truncate",
-                            "wrap-prose"
-                          ]
-                        }
-                      ],
-                      "description": "Component wrapping policy."
                     }
                   }
                 }
@@ -5076,6 +5922,40 @@
                       ]
                     },
                     "padding": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-left": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-right": {
                       "anyOf": [
                         {
                           "type": "null"
@@ -5452,6 +6332,40 @@
                         }
                       ]
                     },
+                    "padding-left": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
+                    "padding-right": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "description": "Horizontal length such as 2ch or 10%."
+                        },
+                        {
+                          "minimum": 0,
+                          "type": "integer",
+                          "x-darkmatter-integer": true,
+                          "description": "Character-cell length."
+                        }
+                      ]
+                    },
                     "border": {
                       "anyOf": [
                         {
@@ -5686,6 +6600,17 @@
                         }
                       ],
                       "description": "Component wrapping policy."
+                    },
+                    "line-numbers": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ],
+                      "description": "Whether code blocks show a line-number gutter."
                     }
                   }
                 }

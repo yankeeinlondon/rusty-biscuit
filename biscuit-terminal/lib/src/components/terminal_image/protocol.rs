@@ -318,7 +318,7 @@ impl TerminalImage {
         Ok(ImageOutput::Pixels(output))
     }
 
-    /// Renders the image into a layout column `term.width()` cells wide.
+    /// Renders the image into a layout column `term.columns()` cells wide.
     ///
     /// When the route has no usable pixel format, or the wrapped image is
     /// over tmux's message limit, the image is drawn as half-block
@@ -360,7 +360,7 @@ impl TerminalImage {
         let pixels = self.pixels()?;
         let (pixel_width, pixel_height) = pixels.size();
         let cell = term.cell_size();
-        let dims = self.resolve_dimensions_for_image(term.width(), cell, pixel_width);
+        let dims = self.dimensions_on(term, pixel_width);
         let width_cells = dims.image_width;
         let x_offset = dims.x_offset;
         if matches!(encoder, Encoder::Sixel) {

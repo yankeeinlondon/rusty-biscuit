@@ -11,6 +11,9 @@ pub mod remote_observation;
 pub mod remote_refresh;
 pub mod remote_resolver;
 pub mod status;
+pub mod tracked_state;
+#[cfg(test)]
+mod tracked_state_tests;
 pub mod types;
 pub mod worktree;
 pub mod working_state;
@@ -47,6 +50,7 @@ pub use types::{
     LocalBranchInfo, RefDecoration, RefKind, RemoteInfo, RemoteTrackingStatus, RepoStatus,
     UntrackedFile, WorktreeInfo, parse_commit_message,
 };
+pub use tracked_state::TrackedState;
 pub use working_state::{ChangedContent, PathContent, WorkingState};
 pub use worktree::{
     WorktreeEntry, current_worktree_name_with_repo, get_current_worktree_info,

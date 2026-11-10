@@ -76,6 +76,7 @@ pub struct CleanSchemaConfig {
     schema_override: Option<Value>,
     trigger_schemas: bool,
     file_resolution_context: biscuit_file::FileResolutionContext,
+    slot_session: Option<std::sync::Arc<super::slots::SlotSession>>,
 }
 
 impl CleanSchemaConfig {
@@ -92,7 +93,19 @@ impl CleanSchemaConfig {
             schema_override: None,
             trigger_schemas: true,
             file_resolution_context: context,
+            slot_session: None,
         }
+    }
+
+    /// Resolves a schema template (a `$schema` or matched trigger payload
+    /// holding `{{ … }}` slots) through `session`, after asking its approval
+    /// handler once about the reads the slots name
+    /// ([`DarkmatterSchemas::approve_slot_reads`]). Without a session a
+    /// template is [`SchemaError::UnresolvedSlots`] and the run fails.
+    #[must_use]
+    pub fn with_slot_session(mut self, session: std::sync::Arc<super::slots::SlotSession>) -> Self {
+        self.slot_session = Some(session);
+        self
     }
 
     /// Replaces the default baseline with a caller-parsed SimplifiedSchema
@@ -154,6 +167,9 @@ impl CleanSchemaConfig {
     /// [`CleanSchemaContext::discovery_findings`].
     pub fn resolve(&self, document_path: Option<&Path>) -> Result<CleanSchemaContext, SchemaError> {
         let mut builder = DarkmatterSchemas::new(self.file_resolution_context.clone());
+        if let Some(session) = &self.slot_session {
+            builder = builder.with_slot_session(std::sync::Arc::clone(session));
+        }
         builder = match &self.baseline {
             CleanBaselineSchema::Default => builder.with_darkmatter_baseline_json_schema()?,
             CleanBaselineSchema::Disabled => builder,
@@ -169,6 +185,7 @@ impl CleanSchemaConfig {
         Ok(CleanSchemaContext {
             schemas: builder,
             schema_override: self.schema_override.clone(),
+            slot_reads_approved: std::sync::Arc::new(std::sync::Once::new()),
         })
     }
 }
@@ -182,6 +199,9 @@ impl CleanSchemaConfig {
 pub struct CleanSchemaContext {
     schemas: DarkmatterSchemas,
     schema_override: Option<Value>,
+    /// The slot reads of the run are asked about once, before the first
+    /// resolution.
+    slot_reads_approved: std::sync::Arc<std::sync::Once>,
 }
 
 impl CleanSchemaContext {
@@ -208,6 +228,13 @@ impl CleanSchemaContext {
     /// Propagates [`SchemaError`] from schema resolution and validator
     /// construction.
     pub fn effective_schema(&self, source: &Markdown) -> Result<Option<EffectiveSchema>, SchemaError> {
+        self.slot_reads_approved.call_once(|| {
+            // A handler that cannot answer leaves the reads undecided, which
+            // the resolution reports as `dm.schema.slot_approval_required`.
+            if let Err(error) = self.schemas.approve_slot_reads(source) {
+                tracing::warn!(%error, "the schema slot reads could not be approved");
+            }
+        });
         self.schemas
             .effective_for_with_override(source, self.schema_override.as_ref())
     }

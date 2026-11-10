@@ -11,7 +11,7 @@ pub mod types;
 
 pub use types::ShellBlockError;
 
-use super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, prepare_site};
+use super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, prepare_refreshed_site, prepare_site};
 use super::shell_expansion::template::HoleEvaluator;
 use super::shell_expansion::types::{ShellCommandOrigin, ShellDirective, ShellExpansionError, ShellExpansionRuntime};
 use super::shell_expansion::{
@@ -102,7 +102,7 @@ pub(crate) fn run_shell_blocks_stage(
     ctx: &biscuit_terminal::errors::SourceContext,
     line_offset: usize,
 ) -> Result<(String, ComposeReport), ShellBlockError> {
-    run_shell_blocks_stage_in(content, None, None, options, runtime, ctx, line_offset)
+    run_shell_blocks_stage_in(content, None, None, options, runtime, ctx, line_offset, None)
         .map(|(content, report, _)| (content, report))
 }
 
@@ -114,9 +114,14 @@ pub(crate) fn run_shell_blocks_stage(
 /// but never split a command, join two, or supply an executable, chain
 /// operator, or redirection.
 ///
+/// `first`, when set, runs only the first block, leaving the rest as written;
+/// `Some(true)` says its commands hold reads evaluated after an earlier
+/// command ran (see [`prepare_refreshed_site`]).
+///
 /// With `templates`, a command whose authored text holds a placeholder may
 /// also run as a template (see [`prepare_site`]), including when the values
 /// interpolated into the block keep its text from parsing as commands.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_shell_blocks_stage_in(
     content: &str,
     data: Option<&DataRanges>,
@@ -125,6 +130,7 @@ pub(crate) fn run_shell_blocks_stage_in(
     runtime: &mut ShellExpansionRuntime,
     ctx: &biscuit_terminal::errors::SourceContext,
     line_offset: usize,
+    first: Option<bool>,
 ) -> Result<(String, ComposeReport, Vec<TextEdit>), ShellBlockError> {
     let source_file = source_file_from_options(options);
 
@@ -141,10 +147,13 @@ pub(crate) fn run_shell_blocks_stage_in(
     })?;
 
     // Filter for shell blocks only
-    let shell_pairs: Vec<_> = pairs
+    let mut shell_pairs: Vec<_> = pairs
         .into_iter()
         .filter(|p| matches!(p.kind, super::block_pairs::BlockOpenKind::Shell))
         .collect();
+    if first.is_some() {
+        shell_pairs.truncate(1);
+    }
 
     if shell_pairs.is_empty() {
         return Ok((content.to_string(), ComposeReport::new(), Vec::new()));
@@ -302,7 +311,8 @@ pub(crate) fn run_shell_blocks_stage_in(
         let mut prepared = Vec::new();
         for (directive, site, start_line, offset) in commands {
             enter(offset);
-            match prepare_site(directive, site.as_ref(), options, &policy_paths, runtime) {
+            let prepare = if first == Some(true) { prepare_refreshed_site } else { prepare_site };
+            match prepare(directive, site.as_ref(), options, &policy_paths, runtime) {
                 Ok(p) => prepared.push((p, start_line, offset)),
                 Err(e) => {
                     return Err(ShellBlockError::Command {

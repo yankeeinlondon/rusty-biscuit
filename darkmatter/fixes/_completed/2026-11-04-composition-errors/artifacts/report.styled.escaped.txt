@@ -1,0 +1,14 @@
+^D\e]10;?\e]11;?\e]4;0;?\e]4;1;?\e]4;2;?\e]4;3;?\e]4;4;?\e]4;5;?\e]4;6;?\e]4;7;?\e]4;8;?\e]4;9;?\e]4;10;?\e]4;11;?\e]4;12;?\e]4;13;?\e]4;14;?\e]4;15;?\e[c\e[1mBroken references in \e]8;;file://<root>/root.md\e\root.md\e]8;;\e\\e[0m
+
+\e[1m\e]8;;file://<root>/root.md\e\root.md\e]8;;\e\\e[0m
+  \e[38;2;251;44;54mfile not found\e[0m \e[3min hyperlink\e[0m  \e[2m./missing-one.md\e[0m    \e]8;line=9:column=5:heading=intro-root;file://<root>/root.md\e\root.md\e[2m:9:5\e[0m\e]8;;\e\
+  \e[38;2;251;44;54mfile not found\e[0m \e[3min hyperlink\e[0m  \e[2m./missing-two.md\e[0m    \e]8;line=15:column=9:heading=second;file://<root>/root.md\e\root.md\e[2m:15:9\e[0m\e]8;;\e\
+  \e[38;2;251;44;54mfile not found\e[0m \e[3min hyperlink\e[0m  \e[2m./missing-three.md\e[0m  \e]8;line=22:column=13:heading=second;file://<root>/root.md\e\root.md\e[2m:22:13\e[0m\e]8;;\e\
+  \e[38;2;251;44;54mfile not found\e[0m \e[3min hyperlink\e[0m  \e[2m./missing-five.md\e[0m   \e]8;line=24:column=8:heading=second;file://<root>/root.md\e\root.md\e[2m:24:8\e[0m\e]8;;\e\
+
+\e[1m\e]8;;file://<root>/child.md\e\child.md\e]8;;\e\\e[0m \e[2m(transcluded at root.md:26)\e[0m
+  \e[38;2;251;44;54mfile not found\e[0m \e[3min hyperlink\e[0m  \e[2m./missing-four.md\e[0m  \e]8;line=7:column=43:heading=child-heading;file://<root>/child.md\e\child.md\e[2m:7:43\e[0m\e]8;;\e\
+  \e[38;2;240;177;0mfile not found\e[0m \e[3min hyperlink\e[0m  \e[2m./missing-ins.md\e[0m   \e]8;line=9:column=7:heading=child-heading;file://<root>/child.md\e\child.md\e[2m:9:7\e[0m\e]8;;\e\
+
+Checked 10 references across 2 documents: 5 ok, \e[38;2;251;44;54m\e[1m\e[38;2;251;44;54m5 broken\e[0m\e[38;2;251;44;54m\e[0m
+  \e[2m1 warning\e[0m

@@ -18,7 +18,7 @@ fn validate(values: &str) -> ValidationReport {
     let (report, summary) = DarkmatterSchemas::new(FileResolutionContext::new(dir.path()))
         .validate_summarized(&source)
         .expect("the schema prepares");
-    assert!(summary.has_schema, "the inline schema applies");
+    assert!(summary.has_schema(), "the inline schema applies");
     report
 }
 

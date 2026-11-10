@@ -210,6 +210,64 @@ impl PropertyDef {
         }
     }
 
+    /// Checks the invariants of this definition's options that the parser
+    /// checks for an authored definition: at most one `suggest`, distinct
+    /// `function` overloads, valid `narrows` clauses, and no `non-null` over
+    /// a value that admits null. Template-type resolution repeats them on a
+    /// definition a returned type was substituted into.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::Grammar`](crate::SchemaError::Grammar) for `property`,
+    /// located where the problem records a span.
+    pub fn check_union_invariants(&self, property: &str) -> Result<(), crate::SchemaError> {
+        let arms = match self {
+            Self::Single(atom) => std::slice::from_ref(atom),
+            Self::Union(atoms) => atoms.as_slice(),
+        };
+        match super::grammar::union_invariant_problem(arms, true) {
+            Some(problem) => Err(problem.into_error(property)),
+            None => Ok(()),
+        }
+    }
+
+    /// Whether a top-level atom of this definition (the single atom or any
+    /// property-level union arm) is a template type, so its type is pending.
+    pub fn has_pending_type(&self) -> bool {
+        match self {
+            Self::Single(atom) => atom.is_pending_type(),
+            Self::Union(atoms) => atoms.iter().any(PropertyAtom::is_pending_type),
+        }
+    }
+
+    /// The property's presence for consumers that may receive an
+    /// unresolved template: [`Requiredness::Pending`] while an alternative
+    /// is a template type, otherwise [`Self::is_required`]'s answer.
+    ///
+    /// An alternative is looked for through union types, grouped ones
+    /// included, as [`flattened_alternatives`](super::query::flattened_alternatives)
+    /// lists them. One that is an item of an array (`number | ({{ t }} |
+    /// boolean)[]`) cannot make the value admit null, but the type it
+    /// returns may carry a `required` marker, which an item alternative
+    /// hoists to the property; so it leaves presence pending only while the
+    /// rest of the definition does not already require it.
+    pub fn requiredness(&self) -> Requiredness {
+        let pending: Vec<bool> = super::query::flattened_alternatives(self)
+            .iter()
+            .filter(|alternative| alternative.atom.is_pending_type())
+            .map(|alternative| alternative.is_array)
+            .collect();
+        if self.has_pending_type() || pending.iter().any(|is_item| !is_item) {
+            Requiredness::Pending
+        } else if self.is_required() {
+            Requiredness::Required
+        } else if pending.is_empty() {
+            Requiredness::Optional
+        } else {
+            Requiredness::Pending
+        }
+    }
+
     /// The property-level alternatives of this definition, however they were
     /// written.
     ///
@@ -291,6 +349,30 @@ pub enum TypeExpr {
     /// in the table carries none. With `is_array` the atom is a list whose
     /// items are the definition.
     Ref(super::DefKey),
+    /// A template type: a `{{ … }}` slot whose result supplies the whole
+    /// type definition of this position (a property's type, a property-level
+    /// union arm, or a tuple element).
+    ///
+    /// This is the **pending** type. Parsing records it and evaluates
+    /// nothing; it never lowers, validates, or converts, so every consumer
+    /// answers it explicitly (it is not `unknown`, an empty object, or an
+    /// optional property). Resolution replaces the atom with the returned
+    /// definition, merged with the atom's written suffix (`[]`,
+    /// `(constraints)`, `-> description`) by the named-type merge rules.
+    Slot(Slot),
+}
+
+/// The presence of a property that may hold a template type, answered
+/// without guessing: see [`PropertyDef::requiredness`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Requiredness {
+    /// The property must be present (and its value is not nullable).
+    Required,
+    /// The property may be omitted or null.
+    Optional,
+    /// Unknown until a template type resolves: a written `(required)` alone
+    /// cannot decide it, because the returned type may admit null.
+    Pending,
 }
 
 /// The positions of a `tuple([...])` type.
@@ -309,6 +391,31 @@ pub struct TupleType {
 }
 
 impl TupleType {
+    /// Checks that `def` can be one positional element: a tuple position
+    /// takes a type without a description (the tuple's own `-> description`
+    /// describes it) and with valid union invariants
+    /// ([`PropertyDef::check_union_invariants`]). Template-type resolution
+    /// checks an element a returned type was substituted into; an authored
+    /// element cannot carry a description, and its other invariants are
+    /// judged where they always were.
+    ///
+    /// ## Errors
+    ///
+    /// A message for the first problem found.
+    pub fn check_element(def: &PropertyDef) -> Result<(), String> {
+        let arms = match def {
+            PropertyDef::Single(atom) => std::slice::from_ref(atom),
+            PropertyDef::Union(atoms) => atoms.as_slice(),
+        };
+        if arms.iter().any(|atom| atom.description.is_some()) {
+            return Err("a tuple element takes no `-> description`; describe the tuple instead".to_string());
+        }
+        def.check_union_invariants("<tuple element>").map_err(|error| match error {
+            crate::SchemaError::Grammar { message, .. } => message,
+            other => other.to_string(),
+        })
+    }
+
     /// How many leading positions must be present.
     pub fn required_len(&self) -> usize {
         self.elements.iter().filter(|element| !element.optional).count()
@@ -486,7 +593,9 @@ fn named_reference_in(atom: &PropertyAtom) -> Option<String> {
         PropertyDef::Union(arms) => arms.iter().find_map(named_reference_in),
     };
     match &atom.ty {
-        TypeExpr::Primitive(_) => None,
+        // A template type names nothing until it resolves; the grammar
+        // refuses one inside a `function(...)` signature anyway.
+        TypeExpr::Primitive(_) | TypeExpr::Slot(_) => None,
         TypeExpr::Imported { name, reference } if reference == LOCAL_REFERENCE => Some(name.clone()),
         TypeExpr::Imported { name, reference } => Some(format!("{name}@{reference}")),
         TypeExpr::Ref(key) => Some(key.name.clone()),
@@ -629,6 +738,52 @@ pub struct PropertyAtom {
 }
 
 impl PropertyAtom {
+    /// The atom's `suggest(...)` candidates that are known now, in authored
+    /// order: a static list's candidates, or a dynamic list's literal ones
+    /// (its slots supply the rest once resolved; see
+    /// [`Self::has_pending_suggestions`]). `None` when the atom has no list.
+    pub fn suggestion_candidates(&self) -> Option<std::borrow::Cow<'_, [SuggestionCandidate]>> {
+        self.constraints.iter().find_map(|constraint| match constraint {
+            Constraint::Suggest(candidates) => Some(std::borrow::Cow::Borrowed(candidates.as_slice())),
+            Constraint::Dynamic(list) if list.kind == DynamicKind::Suggest => Some(std::borrow::Cow::Owned(
+                list.elements
+                    .iter()
+                    .filter_map(|element| match element {
+                        DynamicElement::Suggestion(candidate) => Some(candidate.clone()),
+                        _ => None,
+                    })
+                    .collect(),
+            )),
+            _ => None,
+        })
+    }
+
+    /// Whether the atom's `suggest(...)` list holds an unresolved slot, so
+    /// [`Self::suggestion_candidates`] is not the whole list.
+    pub fn has_pending_suggestions(&self) -> bool {
+        self.constraints
+            .iter()
+            .any(|constraint| matches!(constraint, Constraint::Dynamic(list) if list.kind == DynamicKind::Suggest))
+    }
+
+    /// Whether the values this atom offers for completion (its `enum(...)`
+    /// members, `literal(...)` value, or `suggest(...)` candidates) include an
+    /// unresolved slot, so the known ones are not all of them.
+    pub fn has_pending_values(&self) -> bool {
+        self.constraints.iter().any(|constraint| {
+            matches!(
+                constraint,
+                Constraint::Dynamic(_) | Constraint::TemplateConstraint { kind: TemplateConstraintKind::Literal, .. }
+            )
+        })
+    }
+
+    /// Whether this atom is a template type ([`TypeExpr::Slot`]): its type
+    /// is pending until resolution, and no concrete-type helper describes it.
+    pub fn is_pending_type(&self) -> bool {
+        matches!(self.ty, TypeExpr::Slot(_))
+    }
+
     /// Convenience constructor for a bare-typed atom with no constraints.
     pub fn bare(ty: SimplifiedType) -> Self {
         Self {
@@ -710,8 +865,12 @@ impl PropertyAtom {
     /// Whether this atom supplies a default for its containing property.
     /// Like [`PropertyAtom::is_required`], a union type's arms count.
     pub(crate) fn has_default(&self) -> bool {
-        self.property_constraints()
-            .any(|constraint| matches!(constraint, Constraint::Default(_)))
+        self.property_constraints().any(|constraint| {
+            matches!(
+                constraint,
+                Constraint::Default(_) | Constraint::TemplateConstraint { kind: TemplateConstraintKind::Default, .. }
+            )
+        })
             || self
                 .union_arms()
                 .is_some_and(|arms| arms.iter().any(PropertyAtom::has_default))
@@ -1074,6 +1233,12 @@ pub enum Constraint {
     /// `required` and admits no null alternative.
     DeclaredRequired,
 
+    /// `type-definition(container)`: the declaration denotes a container
+    /// ([`super::narrowing::denotes_container`]), judged on the literal text;
+    /// an unresolved named-type reference passes provisionally
+    /// ([`super::narrowing::container_admission`]).
+    Container,
+
     // ── documentation ──────────────────────────────────────────────────────
     /// One or more example artifact file references (`example(...)`, Feature
     /// A). Non-validating for the annotated property — each referenced file is
@@ -1098,6 +1263,127 @@ pub enum Constraint {
     /// parser reads as templates. Lowers to the `x-darkmatter-operands`
     /// annotation, which never fails a value by itself.
     Operands(String),
+
+    // ── dynamic (unresolved `{{ … }}` slots) ───────────────────────────────
+    /// An `enum(...)` member list or `suggest(...)` argument list holding at
+    /// least one `{{ … }}` slot. A fully static list is always
+    /// [`Constraint::Members`] or [`Constraint::Suggest`]; this variant exists
+    /// only until resolution substitutes the slots, and lowering it fails
+    /// with [`SchemaError::UnresolvedSlots`](crate::SchemaError::UnresolvedSlots).
+    Dynamic(DynamicList),
+
+    /// A `literal(...)`, `default(...)`, `min(...)`, `max(...)`, or
+    /// `pattern(...)` whose whole argument is one `{{ … }}` slot. Resolution
+    /// replaces it with the matching concrete constraint; until then lowering
+    /// fails with [`SchemaError::UnresolvedSlots`](crate::SchemaError::UnresolvedSlots).
+    TemplateConstraint {
+        /// Which constraint the slot fills.
+        kind: TemplateConstraintKind,
+        /// The type the position belongs to: the atom's type keyword, or
+        /// [`SimplifiedType::Unknown`] on a named-type reference, whose target
+        /// is known only after resolution.
+        target: SimplifiedType,
+        /// The slot.
+        slot: Slot,
+    },
+}
+
+/// One `{{ … }}` expression written as a schema value: a complete
+/// `enum(...)`/`suggest(...)` list element, or the whole argument of a
+/// template constraint ([`TemplateConstraintKind`]).
+///
+/// Parsing records it and evaluates nothing. Spans are byte ranges into the
+/// source handed to the parser, exactly like [`SuggestionCandidate::span`]:
+/// the type-expression string at first, the whole YAML or Markdown document
+/// once source-aware parsing projects them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Slot {
+    /// The trimmed text between `{{` and `}}`.
+    pub expression: String,
+    /// The whole `{{ … }}`, both delimiters included.
+    pub span: SourceSpan,
+    /// The trimmed expression text alone.
+    pub expression_span: SourceSpan,
+    /// The schema file the slot was written in, whose context it evaluates
+    /// in: stamped by resolution for every slot of a schema file, an
+    /// imported definition, or a trigger payload. `None` only for a slot of
+    /// an inline document `$schema` or of in-memory content, which evaluates
+    /// in the request's own context.
+    pub origin: Option<std::path::PathBuf>,
+}
+
+/// Which list a [`DynamicList`] stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DynamicKind {
+    /// `enum(...)` members.
+    Members,
+    /// `suggest(...)` candidates.
+    Suggest,
+}
+
+/// One authored element of a [`DynamicList`], in declaration order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DynamicElement {
+    /// A static enum member.
+    Member(String),
+    /// A static suggestion candidate, interpreted for the list's target.
+    Suggestion(SuggestionCandidate),
+    /// A slot whose result supplies zero or more elements.
+    Slot(Slot),
+}
+
+/// An `enum(...)` or `suggest(...)` list that contains at least one slot.
+///
+/// `target` is [`SimplifiedType::Enum`] for members, and for suggestions the
+/// type the candidates are interpreted for: `String`, `Number`, or
+/// `Alphanumeric`, and `String` on a named-type reference until resolution
+/// reinterprets them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicList {
+    /// Members or suggestions.
+    pub kind: DynamicKind,
+    /// The type the elements belong to.
+    pub target: SimplifiedType,
+    /// The elements in authored order.
+    pub elements: Vec<DynamicElement>,
+}
+
+impl DynamicList {
+    /// The slots of the list, in authored order.
+    pub fn slots(&self) -> impl Iterator<Item = &Slot> {
+        self.elements.iter().filter_map(|element| match element {
+            DynamicElement::Slot(slot) => Some(slot),
+            _ => None,
+        })
+    }
+}
+
+/// The constraint a [`Constraint::TemplateConstraint`] slot fills.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TemplateConstraintKind {
+    /// The value of a `literal(...)` type.
+    Literal,
+    /// `default(...)`.
+    Default,
+    /// `min(...)`.
+    Min,
+    /// `max(...)`.
+    Max,
+    /// `pattern(...)`.
+    Pattern,
+}
+
+impl TemplateConstraintKind {
+    /// The keyword the position is written with.
+    pub fn as_keyword(self) -> &'static str {
+        match self {
+            Self::Literal => "literal",
+            Self::Default => "default",
+            Self::Min => "min",
+            Self::Max => "max",
+            Self::Pattern => "pattern",
+        }
+    }
 }
 
 impl Constraint {
@@ -1136,9 +1422,27 @@ impl Constraint {
             Constraint::Property { .. } => "property",
             Constraint::Forms(_) => "forms",
             Constraint::DeclaredRequired => "declared-required",
+            Constraint::Container => "container",
             Constraint::Example(_) => "example",
             Constraint::Category(_) => "category",
             Constraint::Operands(_) => "operands",
+            Constraint::Dynamic(list) => match list.elements.first() {
+                Some(DynamicElement::Slot(_)) | None => "{{",
+                Some(DynamicElement::Member(_)) => "<members>",
+                Some(DynamicElement::Suggestion(_)) => "suggest",
+            },
+            Constraint::TemplateConstraint { kind: TemplateConstraintKind::Literal, .. } => "<value>",
+            Constraint::TemplateConstraint { kind, .. } => kind.as_keyword(),
+        }
+    }
+
+    /// The slots this constraint holds, in authored order; empty for every
+    /// concrete constraint.
+    pub fn slots(&self) -> Vec<&Slot> {
+        match self {
+            Constraint::Dynamic(list) => list.slots().collect(),
+            Constraint::TemplateConstraint { slot, .. } => vec![slot],
+            _ => Vec::new(),
         }
     }
 }

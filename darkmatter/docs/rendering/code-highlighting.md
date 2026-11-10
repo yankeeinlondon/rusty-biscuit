@@ -19,7 +19,7 @@ ThemePair::resolve(ColorMode) -> Theme
   ...
 ```
 
-> **Do not conflate the name with a concrete theme.** `--code-theme github`
+> **Do not conflate the name with a concrete theme.** `style.page.code.theme=github`
 > does not mean "the dark GitHub theme"; it means "GitHub, resolved for the
 > current mode."
 
@@ -52,11 +52,13 @@ real (un-inverted) mode so body text stays readable. The variant is chosen from
 the **terminal's** color mode (the same source the page uses), so the panel stays
 consistent regardless of environment color detection.
 
-### `--code-block` / `CodeBlockMode`
+### `style.page.code.mode` / `CodeBlockMode`
 
-The inversion is the default, but is configurable per render via the global
-`--code-block <inverse|dark|light|same>` flag — backed by the
-[`CodeBlockMode`] enum and `DarkmatterPage::with_code_block_mode(...)`:
+The inversion is the default, but is configurable per document through the
+`style.page.code.mode` frontmatter value (`inverse`, `dark`, `light`, or
+`same`) — backed by the [`CodeBlockMode`] enum and
+`DarkmatterPage::with_code_block_mode(...)`. `md schema about --code-block
+<MODE>` sets the same mode for that report (it is not a rendering flag):
 
 | Mode | Code-block variant |
 |------|--------------------|
@@ -64,6 +66,29 @@ The inversion is the default, but is configurable per render via the global
 | `dark` | always the dark variant |
 | `light` | always the light variant |
 | `same` | match the terminal's own mode |
+
+Set the code theme and mode in frontmatter, or for one render with style
+setters on the command line; a setter wins over the document's value:
+
+```yaml
+---
+style:
+    page:
+        code:
+            theme: github
+            mode: same
+---
+```
+
+```sh
+md notes.md style.page.code.theme=dracula style.page.code.mode=light
+md notes.md --output html style.page.code.mode=inverse
+```
+
+With no `page.code.theme`, the code theme is the `CODE_THEME` environment
+variable, else the pair matching the prose theme (`page.theme`); see
+[Themes, Code Blocks, and Line Numbers](../topics/layouts-and-style.md#themes-code-blocks-and-line-numbers).
+A fence's own `theme=` still wins for that block.
 
 `CodeBlockMode::resolve(page_mode)` produces the concrete [`ColorMode`] the code
 highlighter resolves the theme against (`inverse` → `page_mode.inverted()`).
@@ -98,13 +123,12 @@ detects the live light/dark mode; for HTML the `HtmlOptions::color_mode` is the
 caller-declared page mode. In both cases the *code* theme resolves against the
 mode produced by `CodeBlockMode::resolve(page_mode)` (the inverse by default), so
 a dark page emits a light code panel and a Markdown ` ```yaml ` fence renders
-byte-identically to a `YamlBlock`. (Resolved in
-`renderable/fixes/2026-05-22-darkmatter-failures/spec.md`, defect D.)
+byte-identically to a `YamlBlock`.
 
 The browser path renders the highlighted markup from the page's resolved
 `HtmlOptions` — the same options that build the injected `.code-block` panel
-background — so markup and stylesheet always agree on theme and variant
-(review-1 finding 2). The `--code-block` override and
+background — so markup and stylesheet always agree on theme and variant.
+`style.page.code.mode` and
 `DarkmatterPage::with_code_block_mode` therefore apply to **both** terminal and
 browser. A `CodeBlock::with_theme(theme)` / `md code-block --theme` override
 wins over the page/context theme on both surfaces.
@@ -120,7 +144,7 @@ wins over the page/context theme on both surfaces.
 - `darkmatter/lib/src/markdown/render_tree/code_renderer.rs` —
   `TerminalCodeRenderer`, which threads `CodeBlockMode` and resolves the
   terminal code-block variant via `CodeHighlighter::new`.
-- `darkmatter/cli/src/args.rs` — the global `--code-block` flag.
+- `darkmatter/cli/src/args/target.rs` — `md schema about --code-block`.
 - HTML/browser inversion site: `markdown/render_tree/code_renderer.rs`
   (`render_browser_code`) and the `as_html` path.
 

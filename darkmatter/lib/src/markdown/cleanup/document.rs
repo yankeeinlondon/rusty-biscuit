@@ -9,9 +9,13 @@
 //!    Darkmatter's own frontmatter parser loads from the authored block;
 //! 3. one resolution of every rule (caller overrides, document, workspace,
 //!    default);
-//! 4. guarded body formatting ([`clean_body`]), which verifies its final
+//! 4. the migration of legacy `key=value` link titles to JSON5
+//!    ([`link_titles::migrate`]), which proves its own edit: the guard of the
+//!    next step would rightly call a changed title a changed meaning, and
+//!    compose's cleanup, which shares that step, must not migrate;
+//! 5. guarded body formatting ([`clean_body`]), which verifies its final
 //!    candidate once;
-//! 5. reassembly from the frontmatter bytes being emitted (authored, or
+//! 6. reassembly from the frontmatter bytes being emitted (authored, or
 //!    authored plus accepted repairs) and the formatted body.
 //!
 //! The body check is independent of the frontmatter repair proof. A body
@@ -28,9 +32,10 @@ use std::path::Path;
 
 use biscuit_file::{SourceSpan, YamlRepair, serde_yaml_ng};
 
-use super::body::{CleanOutcome, clean_body};
+use super::body::{BodyCleanup, CleanOutcome, clean_body};
 use super::diagnostic::CleanDiagnostic;
 use super::frontmatter::{FrontmatterRepair, FrontmatterRepairError, repair_frontmatter};
+use super::link_titles;
 use super::rules::{Leaf, MarkdownRuleOverrides, ResolvedMarkdownRules, document_rules, resolve};
 use crate::markdown::extract_frontmatter_block;
 use crate::markdown::frontmatter::load_frontmatter_yaml;
@@ -163,12 +168,26 @@ pub fn clean_document<E>(
     };
     let body_start = body_offset(&emitted.source);
     let body = &emitted.source[body_start..];
-    let cleaned = clean_body(body, &rules);
+    let migrated = link_titles::migrate(body);
+    let cleaned = match &migrated {
+        Ok(Some(migration)) => clean_body(&migration.text, &rules),
+        Ok(None) => clean_body(body, &rules),
+        Err(_) => BodyCleanup { text: String::new(), outcome: CleanOutcome::Declined, diagnostics: Vec::new(), fallback: None },
+    };
 
     if cleaned.outcome == CleanOutcome::Declined {
-        let fallback = cleaned
-            .fallback
-            .expect("a declined body cleanup carries its fallback");
+        let fallback = match migrated {
+            Err(fallback) => fallback,
+            Ok(migration) => {
+                let mut fallback = cleaned
+                    .fallback
+                    .expect("a declined body cleanup carries its fallback");
+                if let Some(migration) = migration {
+                    fallback.offset = migration.source_offset(fallback.offset);
+                }
+                fallback
+            }
+        };
         // The body is a suffix of both the source and the repaired text, so
         // its source offset is unaffected by frontmatter repairs.
         diagnostics.push(fallback.diagnostic(source, source.len() - body.len()));

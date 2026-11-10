@@ -43,6 +43,43 @@ behavior.
   example must be added to its `EXAMPLE_FILES` table. The function registry
   panics at load when a cataloged function has no runtime binding, so every
   catalog entry needs a `FunctionBinding` in the same change.
+- A new catalog function also reaches these hand-kept or generated copies,
+  and each fails a test until updated: `just regen-expr-doc` (the function
+  table in `docs/topics/darkmatter-expressions.md`), `just
+  regen-lifecycle-schema` (verb types in `schemas/partials/lifecycle.yaml`,
+  plus the verb count in `lifecycle_schema_generation.rs`), the two verb
+  pattern lists in `schemas/partials/md-lifecycle.yaml`, Claudine's mirrored
+  `expression` category in `claudine/schemas/{action,lifecycle}.yaml`, a row
+  in `tests/l1/function_binding_registry.rs`, an alias row in
+  `function_catalog_parity.rs`, the recursive-schema goldens
+  (`DARKMATTER_BLESS_RECURSIVE_GOLDEN=1`), DMLS's
+  `a3_completions.json` (`DMLS_UPDATE_GOLDEN=1`), and Claudine's insta
+  snapshot `claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap`
+  (only the Claudine suite fails; Darkmatter's `just test` stays green).
+- A binding whose failed argument binding means a domain error registers
+  `FunctionBinding::refining_binding_errors` (`load_data`: a scalar `as`
+  is `dm.data.not_a_container`, not a type error); a passive per-function
+  verdict a literal call can prove belongs on `CallCheck::data_problem`, so
+  composition and DMLS publish its code from `CallCheck::diagnostics`.
+- A runtime `ExpressionError::Data` is projected only in
+  `compose/report_diagnostics.rs`: `DataError::code()`, `data_location` for
+  `dm.data.malformed`/`dm.data.contract_mismatch` (positions from
+  `expression/data/locate.rs`, records from simplified-schema's
+  `ConversionError::located_failures`, never interpreted in darkmatter),
+  capped at `CONTRACT_RECORD_CAP` plus one overflow record. Every
+  `ExpressionError::FileReference` fills `reason`/`construct`/`reference`/
+  `failure` without changing `message`; a host the fetch policy refuses is
+  the typed `FileRefFailure::RemoteDenied`, not text. Any other failed
+  fetch from an allowed host (`RemoteTextError::Failed`, through
+  `functions/fs.rs::remote_text_error`) is `ExpressionError::RemoteRead`
+  (displayed and graded like `Other`), projected with reason `unreachable`
+  and failure `io` (`report_diagnostics::with_failed_fetch`).
+  A `$schema` target or import `validate_schema` cannot read
+  (`SchemaError::{Unresolved, NoMatch, Io}`, also inside
+  `ReferencedSchema`/`Aggregate`) is `ExpressionError::SchemaFileRead`
+  (displayed and graded like `Other`, carrying a `FileReferenceDiagnostic`
+  from `FileReferenceDiagnostic::from_schema_read`, the constructor
+  `load_data`'s contract imports share); any other schema error stays `Other`.
 - Consumers read `expression_function_catalog()` (categories in list order,
   descriptors in documentation order: category, then canonical name, then
   authored overload) or `function_descriptors(name)`, which resolves aliases
@@ -136,8 +173,9 @@ directly: `darkmatter::markdown::schemas` does not re-export them.
 - `Markdown::as_terminal`, `Markdown::as_html`, and `DarkmatterPage::render`
   route through the render-tree document fold.
 - `DarkmatterPage` owns only viewport/page framing.
-- `CliStyleClaims` represents explicitly supplied CLI flags. It is not a second
-  style model.
+- Command-line style is a later `StyleLayer` (setters or a `--style` file)
+  merged by `prepare_style_layers`; there is no separate CLI style model and
+  no `apply_*_style` override argument.
 - `CodeBlock` is the primary highlighted-code component. `YamlBlock` is a
   deprecated compatibility wrapper.
 - Component layout and paint lower to `renderable` types before target folds.

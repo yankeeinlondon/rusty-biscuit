@@ -59,13 +59,13 @@ For a practical introduction with worked examples, see
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.                                                                    |
 | `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)` (each glob a prefixed glob reference such as `^**/*spec*.md`), `required`. **Lazy by default**; `file(eager)` resolves and checks existence (implicit paths from the document directory first, then the repository root; explicit `./`/`../` from the document directory only). Schema-selected file values materialize as absolute native paths at the request boundary; lazy values use the first unprobed candidate. See [Files](#files).        |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                                                                                       |
-| `literal`    | Exactly one scalar value, of any scalar type.                                                          | Compiles to JSON Schema `const`. Bare `true`/`2` are typed; quoting forces string. Constraints: `required`, an equal `default`. See [Literals](#literals).                       |
+| `literal`    | Exactly one scalar value, of any scalar type.form                                                      | Compiles to JSON Schema `const`. Bare `true`/`2` are typed; quoting forces string. Constraints: `required`, an equal `default`. See [Literals](#literals).                       |
 | `url`        | A string parseable as an absolute URL.                                                                 | Constraints: `scheme(...)`, `default`, `required`.                                                                                                                              |
 | `email`      | A string in `addr-spec` form.                                                                          | JSON Schema `format: email`.                                                                                                                                                    |
 | `yaml`       | A string whose **content** parses as YAML, **or** a native mapping/sequence/scalar coerced to a YAML string. | JSON Schema `format: darkmatter-yaml`. Accepts JSON too (JSON is valid YAML). See [Content-Format Types](objects-and-named-types.md#content-format-types-yaml--json).                              |
 | `json`       | A string whose **content** parses as strict JSON, **or** a native value coerced to a JSON string.      | JSON Schema `format: darkmatter-json`. Rejects YAML-only syntax. See [Content-Format Types](objects-and-named-types.md#content-format-types-yaml--json).                                                  |
 | `expression` | A string that parses under the Darkmatter expression grammar. Parse-only — never evaluated.            | JSON Schema `format: darkmatter-expression`. The third content-format string type. Native booleans/numbers coerce to their string form. See [Expressions](#expressions).        |
-| `type-definition` | A string type expression, native mapping object definition, or non-empty property union.          | Describes one SimplifiedSchema property definition as data. Parse-only; the value is never resolved or normalized. Options: `forms(...)`, `declared-required`. See [Semantic Meta-Types](#semantic-meta-types).              |
+| `type-definition` | A string type expression, native mapping object definition, or non-empty property union.          | Describes one SimplifiedSchema property definition as data. Parse-only; the value is never resolved or normalized. Options: `forms(...)`, `declared-required`, `container`. See [Semantic Meta-Types](#semantic-meta-types).            |
 | `schema`     | An inline schema mapping, local schema reference string, or non-empty root union.                       | Describes one complete `$schema` declaration as data. Parse-only; validation checks syntax without reading referenced files. Options: `mapping`, `property(...)`. See [Semantic Meta-Types](#semantic-meta-types).  |
 | `unknown`    | Anything, including `null`, or omission. `any` is an equivalent alias.                                  | JSON Schema `{}`. `required` has no effect: `unknown(required)` still accepts `null` and omission. To require a value, use a concrete type, e.g. `unknown[](required)` for a required list. See [`unknown` and `null`](#unknown-and-null). |
 | `null`       | Only an explicit `null`, or omission.                                                                  | JSON Schema `{"type": "null"}`. `required` has no effect. Written unquoted (`review: null`, `review: ~`) or as `"null"`. See [`unknown` and `null`](#unknown-and-null). |
@@ -126,7 +126,8 @@ Either meta-type can also narrow which declarations it accepts:
 `schema(mapping)` accepts only a mapping, and
 `schema(property(kind, type-definition(forms(literal, enum); declared-required)))`
 demands that every exported object declare a required `kind` as a literal or
-enum. These options judge the authored declaration, never a document's data;
+enum, and `type-definition(container)` accepts only a definition of a list,
+tuple, object, or dictionary. These options judge the authored declaration, never a document's data;
 see [Narrowing a declaration](schema-types.md#narrowing-a-declaration).
 
 #### Source-Aware Presentation Boundary
@@ -754,6 +755,33 @@ The literal implies its scalar type, so conversion treats it like the correspond
 #### Trigger Matches
 
 `literal` is a pure value-equality constraint (no I/O), so it is permitted in [schema-trigger](../../../../darkmatter/docs/topics/schemas/definition.md#repository-trigger-schemas) match expressions. `kind: literal(spec)` is the idiomatic trigger discriminant, replacing the older `enum(spec)` spelling.
+
+### Values From Slots
+
+A `{{ … }}` slot can supply part of a type from an expression a host
+evaluates, so a schema need not repeat data kept elsewhere:
+
+```yaml
+os: enum(none, {{ load_data("./os.yaml", "string[]") }}; required)
+```
+
+A schema holding a slot is a template until it is explicitly resolved; see
+[Slots](./slots.md) for the syntax, what a template reports, and how
+resolution works. Each position takes one shape of value:
+
+| Position | The slot's value | Example |
+| --- | --- | --- |
+| `enum(...)` member | an array of strings, flattened into the members | `enum(none, {{ list }})` |
+| `suggest(...)` candidate | an array of scalars, flattened into the candidates | `string(suggest(a, {{ list }}))` |
+| `literal(...)` | one string, number, or boolean, its type kept | `literal({{ revision }})` |
+| `default(...)` | any value but `null` that the type accepts | `number(default({{ n }}))` |
+| `min(...)` / `max(...)` | one number; a non-negative integer where it counts | `number(min({{ low }}))` |
+| `pattern(...)` | one string, at most 4096 bytes, without lookaround or backreferences | `string(pattern({{ re }}))` |
+| a whole property definition (**planned**) | one type-definition string | not accepted today |
+
+A pattern from a slot is capped so data never moves a schema onto the
+backtracking regex engine that lookaround needs; an authored pattern is not
+([The pattern cap](./slots.md#the-pattern-cap)).
 
 ### Expressions
 

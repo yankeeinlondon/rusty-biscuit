@@ -23,7 +23,9 @@ use std::fmt;
 mod ingress;
 
 pub use ingress::reject_non_finite_json5;
-pub use ingress::{JsonNumberError, admit_json_text_numbers, is_yaml_admission_error, load_admitted_yaml};
+pub use ingress::{
+    JsonNumberError, admit_json5_text_numbers, admit_json_text_numbers, is_yaml_admission_error, load_admitted_yaml,
+};
 
 /// Why a written or supplied number cannot become a number of this model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -70,6 +70,16 @@ impl Markdown {
         // store a compose run uses (R18).
         let remote_fetch = options.remote_fetch_runtime();
         options.remote_fetch = Some(remote_fetch.clone());
+        // The same reuse rule for the data memo and read set: a caller's
+        // runtime spans its whole command; otherwise this root run owns one.
+        let data_runtime = options.data_runtime();
+        options.data_runtime = Some(data_runtime.clone());
+        // And for schema-slot resolution: one session per command, so its
+        // grants are decided once and each template pinned once.
+        if options.slot_session.is_none() {
+            options.slot_session =
+                Some(std::sync::Arc::new(crate::markdown::schemas::slots::SlotSession::for_request(&options)));
+        }
 
         let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,
@@ -146,6 +156,7 @@ impl Markdown {
         report.warnings.extend(icmp.take_warnings());
         report.warnings.extend(current.take_warnings());
         report.add_warnings(glob_warnings.take_warnings());
+        report.read_set = data_runtime.read_set();
         (Ok(report), Vec::new())
     }
 
@@ -220,15 +231,28 @@ impl Markdown {
         // recurs once per nested composition, and the depth limit's test runs
         // at the edge of the 2 MiB test stack.
         let mut report = new_document_report();
+        report.document = self.source().as_ref().and_then(ComposeSource::document_path).or_else(|| options.source.document_path());
         let result = (|| {
+            // Passive and first, so a later failure keeps these warnings and
+            // a blocking one stops the document before anything runs.
+            report_link_titles(self, BodyProvenance::capture(self).origin.as_ref(), &options, &mut report)?;
             let prepared = self.prepare_document(&mut options, runtime, &mut report, &mut hook, nested.as_ref())?;
             let PreparedDocument { mut perf, provenance, prepared_schemas, effective_state } = *prepared;
 
             let mut transclusion_ran = false;
+            let mut produced_titles_checked = false;
             // Body provenance lives until the transclusion directive parse,
             // the last stage that scans this body for instructions.
             let mut body = Some(BodyProvenance::capture(self));
             for operation in ComposeOperation::default_order() {
+                // The inline stages are done, so a link one of them wrote is
+                // in the body now. Before the `is_enabled` check: this runs
+                // once however the request narrowed the stages.
+                if !produced_titles_checked && operation.phase() != ComposePhase::InlinePre {
+                    produced_titles_checked = true;
+                    let origin = body.as_ref().and_then(|body| body.origin.as_ref());
+                    report_link_titles(self, origin, &options, &mut report)?;
+                }
                 trace!(operation = ?operation, enabled = options.is_enabled(*operation), "compose: checking operation");
                 if !options.is_enabled(*operation) {
                     continue;
@@ -321,6 +345,7 @@ impl Markdown {
             }
 
             if let Some(body) = body {
+                report.body_origin = body.origin;
                 report.body_data = Some(body.data);
                 report.body_sites = super::body_origin::BodySites { scopes: body.scopes, authored: body.authored };
             }
@@ -392,7 +417,7 @@ impl Markdown {
         // same schema assembly and projection are retained for validation,
         // post-shell trigger matching, and final body presentation.
         let mut trigger_registry = None;
-        let prepared_schemas =
+        let mut prepared_schemas =
             schema_validation::prepare_schemas(self, options, &mut trigger_registry)?;
         // A skipped schema trigger is reported before anything can fail or
         // run, so a later failure still carries it, and a policy denying it
@@ -402,6 +427,9 @@ impl Markdown {
             report.add_warning(ComposeWarning::from_invalid_trigger(finding, consumer.clone()));
         }
         stop_if_blocked(report, options, None)?;
+        if !options.setters.is_empty() {
+            options.setter_bindings = super::setters::apply_setter_plan(self, options, &prepared_schemas, &mut provenance)?;
+        }
         let caller_projection = schema_validation::prepare_caller_projection(
             self,
             options,
@@ -410,6 +438,7 @@ impl Markdown {
         )?;
         caller_projection.install(self);
         caller_projection.install_provenance(options);
+        prepared_schemas.adopt_supplied_values(&caller_projection);
 
         // A call the design-time check proves wrong rejects the document
         // before any of its expressions (and so any sibling effect) runs.
@@ -567,17 +596,37 @@ impl Markdown {
                     effective: prepared_schemas.effective_for(self),
                     ctx: shell_expansion::site::authored_context(self, None),
                 });
-            let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
-                self.frontmatter_mut(),
-                options,
-                runtime,
-                &mut provenance,
-                &fse_ctx,
-                fse_templates.as_ref(),
-            )?;
+            // Member reads a ternary reached are judged before its command
+            // runs; a discovery pass reports none.
+            let member_candidates = std::sync::Arc::clone(&report.member_candidates);
+            let mut fse_warnings = Vec::new();
+            let fse_report = {
+                let observed: &ComposeReport = report;
+                let mut check = |warnings: &[ComposeWarning]| stop_if_blocked_with(observed, options, None, warnings, &[]);
+                let members = (!options.defer_expression_failures && !member_candidates.is_empty()).then(|| {
+                    frontmatter_shell_expansion::ShellMembers { candidates: &member_candidates, check: &mut check }
+                });
+                frontmatter_shell_expansion::execute_frontmatter_shell_expansion_into(
+                    self.frontmatter_mut(),
+                    options,
+                    runtime,
+                    &mut provenance,
+                    &fse_ctx,
+                    fse_templates.as_ref(),
+                    members,
+                    &mut fse_warnings,
+                )
+            };
+            // A failure keeps the warnings found before it, unless it is the
+            // policy stop that already carries them.
+            let fse_report = fse_report.inspect_err(|error| {
+                if error.blocked_diagnostics().is_none() {
+                    report.add_warnings(std::mem::take(&mut fse_warnings));
+                }
+            })?;
             report.frontmatter_shell_expansions_applied = fse_report.replacements;
             report.shell_approvals_used += fse_report.approvals_used;
-            report.add_warnings(fse_report.warnings);
+            report.add_warnings(fse_warnings);
             add_frontmatter_candidates(
                 report,
                 "frontmatter-shell-ternary",
@@ -684,11 +733,16 @@ impl Markdown {
         // Build effective state for replacement/interpolation and condition checks.
         let esb_start = perf.is_enabled().then(std::time::Instant::now);
         let effective_state = document_state_builder(self, options)
-            .with_presentation_values(caller_projection.presentation_values())
+            .with_presentation_values(caller_projection.presentation_values(self.frontmatter().as_map()))
             .with_current_authority(options.current_authority())
             .build()?;
         if let Some(start) = esb_start {
             perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());
+        }
+        // The body's `as_markdown` content inherits this state, as this
+        // document's `::file` children do.
+        if let Some(nested) = nested {
+            nested.align_state(effective_state.data());
         }
 
         // Convert ctx diagnostics to compose warnings
@@ -727,6 +781,22 @@ impl Markdown {
 
         Ok(Box::new(PreparedDocument { perf, provenance, prepared_schemas, effective_state }))
     }
+}
+
+/// Adds the warnings of `markdown`'s link titles and stops the document when
+/// one blocks. A discovery pass reports none (the real run owns them), and a
+/// frontmatter-only compose never reads the body.
+fn report_link_titles(
+    markdown: &Markdown,
+    origin: Option<&crate::markdown::compose::body_origin::BodyOrigin>,
+    options: &super::ComposeRequest,
+    report: &mut ComposeReport,
+) -> MarkdownResult<()> {
+    if options.defer_expression_failures || options.is_frontmatter_surface_only() {
+        return Ok(());
+    }
+    report.add_warnings(crate::markdown::compose::link_title_warnings::link_title_warnings(markdown, origin));
+    stop_if_blocked(report, options, None)
 }
 
 /// What makes an undeclared-property candidate's verdict final: the
@@ -799,7 +869,12 @@ pub(crate) fn stop_if_blocked_with(
             pending
         })
         .unwrap_or_default();
-    policy_stop(policy, report.warnings.iter().chain(stage_warnings).chain(&pending))
+    let attributed = stage_warnings.iter().chain(&pending).cloned().map(|mut warning| {
+        warning.attribute_to(report.document.as_deref());
+        warning
+    });
+    let attributed: Vec<ComposeWarning> = attributed.collect();
+    policy_stop(policy, report.warnings.iter().chain(&attributed))
 }
 
 /// [`stop_if_blocked`] over warnings a pass found ahead of any composition
@@ -961,7 +1036,7 @@ fn interpolate_frontmatter_pass(
     markdown: &mut Markdown,
     provenance: &mut super::value_origin::FrontmatterProvenance,
     options: &crate::markdown::compose::ComposeRequest,
-    report: &ComposeReport,
+    report: &mut ComposeReport,
     pass: frontmatter_interpolation::FrontmatterPass<'_>,
 ) -> MarkdownResult<frontmatter_interpolation::FrontmatterInterpolationReport> {
     // Capture the on-disk locus before borrowing frontmatter so a failure can
@@ -970,7 +1045,7 @@ fn interpolate_frontmatter_pass(
     let fm_source_ctx = markdown.full_source_context_for_errors();
     let fm_authored_ctx = markdown.loaded_source_context_for_errors();
     let mut guard = blocking_guard(report, options, None, None);
-    frontmatter_interpolation::interpolate_frontmatter_located(
+    let interpolated = frontmatter_interpolation::interpolate_frontmatter_located(
         markdown.frontmatter_mut(),
         provenance,
         options.context(),
@@ -980,13 +1055,21 @@ fn interpolate_frontmatter_pass(
         &options.exclude_keys,
         &options.name_coercion_keys,
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
-    )
-    .map_err(|failure| attribute_frontmatter_failure(failure, options, fm_authored_ctx, &fm_source_ctx))
+        (!options.defer_expression_failures).then(|| report.member_candidates.clone()),
+    );
+    drop(guard);
+    interpolated.map_err(|mut failure| {
+        // The failed document keeps what the pass reported before failing.
+        report.add_warnings(std::mem::take(&mut failure.warnings));
+        attribute_frontmatter_failure(failure, options, fm_authored_ctx, &fm_source_ctx)
+    })
 }
 
 /// Runs the passive call check and adds its warnings to `report`; the
 /// warnings found before a rejection are reported with it, as a later
-/// stage's failure keeps the earlier warnings.
+/// stage's failure keeps the earlier warnings. The undeclared-member
+/// candidates it found are kept on `report` for the evaluating stages
+/// ([`ComposeReport::member_candidates`]).
 ///
 /// Out of line, like `finish_document`: its temporaries would otherwise sit
 /// in the pipeline frame that recurs once per nested composition.
@@ -999,10 +1082,11 @@ fn run_call_precheck(
     report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
     use super::call_precheck::{PrecheckFailure, check_document};
-    let effective = prepared_schemas.effective_for(markdown);
-    match check_document(markdown, provenance, options, effective.as_ref()) {
-        Ok(warnings) => {
+    let site = prepared_schemas.site_schema_for(markdown);
+    match check_document(markdown, provenance, options, &site) {
+        Ok((warnings, candidates)) => {
             report.add_warnings(warnings);
+            report.member_candidates = std::sync::Arc::new(candidates);
             Ok(())
         }
         Err(PrecheckFailure::Frontmatter { failure, earlier }) => {
@@ -1052,14 +1136,18 @@ fn finish_document(
 }
 
 /// Attributes a frontmatter interpolation failure to where its value came
-/// from: a key a caller override supplied names the override (R5); any other
-/// key is anchored to its authored span in the document.
+/// from: a value inside a setter names that setter, a key a caller override
+/// supplied names the override (R5), and any other key is anchored to its
+/// authored span in the document.
 fn attribute_frontmatter_failure(
     failure: frontmatter_interpolation::LocatedFrontmatterError,
     options: &crate::markdown::compose::ComposeRequest,
     authored: Option<biscuit_terminal::errors::SourceContext>,
     on_disk: &biscuit_terminal::errors::SourceContext,
 ) -> crate::markdown::types::MarkdownError {
+    if let Some(argument) = failing_setter(&failure, options) {
+        return (*failure.error).with_supplier(format!("the command-line setter `{argument}`"));
+    }
     let supplied_by_override = match failure.error.as_ref() {
         crate::markdown::types::MarkdownError::Interpolation { key: Some(key), .. } => options
             .set_overrides
@@ -1072,6 +1160,25 @@ fn attribute_frontmatter_failure(
         return (*failure.error).with_supplier("a command-line override (`--set`)");
     }
     failure.into_anchored(authored).with_on_disk_source(on_disk)
+}
+
+/// The setter that supplied the value a frontmatter failure happened in. With no
+/// proven location, only a setter that replaced the whole key is certain.
+fn failing_setter<'o>(
+    failure: &frontmatter_interpolation::LocatedFrontmatterError,
+    options: &'o crate::markdown::compose::ComposeRequest,
+) -> Option<&'o str> {
+    if let Some(location) = &failure.location {
+        return options.setters.argument_covering(&location.path);
+    }
+    let crate::markdown::types::MarkdownError::Interpolation { key: Some(key), .. } = failure.error.as_ref() else {
+        return None;
+    };
+    options
+        .setters
+        .names_whole_key(key)
+        .then(|| options.setters.argument_covering(&[frontmatter_interpolation::ValuePathSegment::Key(key.clone())]))
+        .flatten()
 }
 
 /// Records frontmatter undeclared-property reads, each located at its top-level key.

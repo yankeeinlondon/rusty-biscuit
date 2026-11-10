@@ -154,7 +154,7 @@ fn an_absent_document_schema_keeps_the_shared_baseline_and_no_layers_is_no_schem
     assert!(bare.effective_for(&source).expect("effective schema").is_none());
     let (report, summary) = bare.validate_summarized(&source).expect("report");
     assert!(report.valid && report.problems.is_empty());
-    assert!(!summary.has_schema);
+    assert!(!summary.has_schema());
     assert!(matches!(
         SimplifiedSchema::try_from("---\nowner: a\n---\nbody\n"),
         Err(SimplifiedSchemaError::MissingSchema { .. })

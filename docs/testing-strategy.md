@@ -254,6 +254,14 @@ each prints one line saying what it recorded:
 🐌 L1 run recorded: 3 of 812 test(s) at or above 5.0s, added to …/slow-tests.jsonl
 ```
 
+An L1 run then says how long the whole invocation took. Nextest's
+`Summary [ …s]` counts only the time spent running tests; this line also
+includes compilation:
+
+```text
+⏱️  L1 run took 3m 41s (build and tests)
+```
+
 `just slow-tests` runs no tests; it reads the log.
 
 ```sh

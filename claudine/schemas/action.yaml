@@ -386,6 +386,9 @@ types:
         link:
             - link-short@darkmatter:lifecycle
             - link-long@darkmatter:lifecycle
+        load_data:
+            - load_data-short@darkmatter:lifecycle
+            - load_data-long@darkmatter:lifecycle
         lower:
             - lower-short@darkmatter:lifecycle
             - lower-long@darkmatter:lifecycle
@@ -474,6 +477,9 @@ types:
         trim:
             - trim-short@darkmatter:lifecycle
             - trim-long@darkmatter:lifecycle
+        try:
+            - try-short@darkmatter:lifecycle
+            - try-long@darkmatter:lifecycle
         try_frontmatter:
             - try_frontmatter-short@darkmatter:lifecycle
             - try_frontmatter-long@darkmatter:lifecycle
@@ -611,6 +617,7 @@ types:
         last: last-short@darkmatter:lifecycle
         length: length-short@darkmatter:lifecycle
         link: link-short@darkmatter:lifecycle
+        load_data: load_data-short@darkmatter:lifecycle
         lower: lower-short@darkmatter:lifecycle
         markdown_body_empty: markdown_body_empty-short@darkmatter:lifecycle
         markdown_title: markdown_title-short@darkmatter:lifecycle
@@ -641,6 +648,7 @@ types:
         terminal: terminal-short@darkmatter:lifecycle
         title_case: title_case-short@darkmatter:lifecycle
         trim: trim-short@darkmatter:lifecycle
+        try: try-short@darkmatter:lifecycle
         try_frontmatter: try_frontmatter-short@darkmatter:lifecycle
         upper: upper-short@darkmatter:lifecycle
         validate_schema: validate_schema-short@darkmatter:lifecycle
@@ -763,6 +771,7 @@ types:
         last: last-short@darkmatter:lifecycle
         length: length-short@darkmatter:lifecycle
         link: link-short@darkmatter:lifecycle
+        load_data: load_data-short@darkmatter:lifecycle
         lower: lower-short@darkmatter:lifecycle
         markdown_body_empty: markdown_body_empty-short@darkmatter:lifecycle
         markdown_title: markdown_title-short@darkmatter:lifecycle
@@ -793,6 +802,7 @@ types:
         terminal: terminal-short@darkmatter:lifecycle
         title_case: title_case-short@darkmatter:lifecycle
         trim: trim-short@darkmatter:lifecycle
+        try: try-short@darkmatter:lifecycle
         try_frontmatter: try_frontmatter-short@darkmatter:lifecycle
         upper: upper-short@darkmatter:lifecycle
         validate_schema: validate_schema-short@darkmatter:lifecycle
@@ -919,6 +929,7 @@ types:
         last: last-short@darkmatter:lifecycle
         length: length-short@darkmatter:lifecycle
         link: link-short@darkmatter:lifecycle
+        load_data: load_data-short@darkmatter:lifecycle
         lower: lower-short@darkmatter:lifecycle
         markdown_body_empty: markdown_body_empty-short@darkmatter:lifecycle
         markdown_title: markdown_title-short@darkmatter:lifecycle
@@ -949,6 +960,7 @@ types:
         terminal: terminal-short@darkmatter:lifecycle
         title_case: title_case-short@darkmatter:lifecycle
         trim: trim-short@darkmatter:lifecycle
+        try: try-short@darkmatter:lifecycle
         try_frontmatter: try_frontmatter-short@darkmatter:lifecycle
         upper: upper-short@darkmatter:lifecycle
         validate_schema: validate_schema-short@darkmatter:lifecycle

@@ -61,6 +61,16 @@ Reference tests: `worktree/cli/tests/level2_powershell_remove.rs` and
     to parse in a script.
   - It hard-wraps at the column width mid-word; join a full-width row to the
     next without a space before matching a phrase.
+  - To read the line being edited, including a trailing space no screen shows,
+    bind a key to `[Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState` and
+    write it to a file, then send that key (`ESC [ 2 4 ~` is F12). Keys queue, so
+    the handler runs after the Tab before it; a handler between two Tabs resets
+    PSReadLine's cycling. Reference:
+    `darkmatter/cli/tests/level2/level2_path_completion.rs`.
+- **`md` is an `AllScope` alias of `mkdir` in Windows PowerShell 5.1 and
+  PowerShell 7.6** (measured on `build-win-native`). It outranks `md.exe`, so a
+  bare `md` prompts `Path[0]:` and a test waiting on it stalls. A native argument
+  completer registered for `md` still fires under the alias.
 - **Ctrl+C typed as ETX is ignored if the child inherits "ignore Ctrl+C".**
   `SetConsoleCtrlHandler(NULL, TRUE)` is inherited, and an sshd/nextest chain
   can carry it, so the child never sees `CTRL_C_EVENT` and runs to completion;

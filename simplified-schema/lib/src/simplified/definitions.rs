@@ -81,6 +81,19 @@ pub enum DefNamespace {
 }
 
 impl DefNamespace {
+    /// The file this namespace was authored in: a schema file or a trigger
+    /// file, by canonical path; `None` for a document's inline `$schema` and
+    /// for embedded and shipped documents.
+    pub fn file(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::File(path)
+            | Self::FileRootUnionArm(path, _)
+            | Self::TriggerPayload(path)
+            | Self::TriggerPayloadUnionArm(path, _) => Some(path),
+            Self::InlineRoot | Self::RootUnionArm(_) | Self::Embedded(_) | Self::Shipped(_) => None,
+        }
+    }
+
     /// The public identity of the source this namespace was authored in.
     pub fn source_id(&self) -> SchemaSourceId {
         match self {
@@ -164,6 +177,24 @@ impl DefinitionTable {
         self.entries.iter()
     }
 
+    /// Every definition's body, in allocation order, for slot substitution.
+    pub(crate) fn bodies_mut(&mut self) -> impl Iterator<Item = &mut PropertyDef> {
+        self.entries.values_mut().map(|definition| &mut definition.body)
+    }
+
+    /// Every definition's key and body, in allocation order, for slot
+    /// substitution.
+    pub(crate) fn entries_mut(&mut self) -> impl Iterator<Item = (&DefKey, &mut PropertyDef)> {
+        self.entries.iter_mut().map(|(key, definition)| (key, &mut definition.body))
+    }
+
+    /// Drops every definition `keep` rejects, keeping the others' identities,
+    /// `$defs` keys, and allocation order.
+    pub(crate) fn retain(&mut self, keep: impl Fn(&DefKey) -> bool) {
+        self.entries.retain(|key, _| keep(key));
+        self.by_json_key.retain(|_, key| keep(key));
+    }
+
     /// What `key`'s value is at its top level, looking through a body that
     /// is itself a reference to another definition.
     ///
@@ -185,7 +216,7 @@ impl DefinitionTable {
                 TypeExpr::Tuple(_) => return Some(DefinitionOuter::Tuple),
                 TypeExpr::Union(_) => return Some(DefinitionOuter::Union),
                 TypeExpr::Ref(target) => current = self.entries.get(target)?,
-                TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {
+                TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => {
                     return Some(DefinitionOuter::Other);
                 }
             }

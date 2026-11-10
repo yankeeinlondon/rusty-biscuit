@@ -1482,6 +1482,44 @@ fn file_ref_compose_error(diagnostic: FileReferenceDiagnostic) -> CompositionErr
     })
 }
 
+/// A `load_data` contract import that could not be read has its own typed
+/// variant inside Darkmatter, but still renders as the file-reference
+/// failure it used to be: the same code, `detail`, and status block.
+#[test]
+fn a_contract_import_failure_renders_as_an_invalid_file_reference() {
+    use darkmatter::markdown::SourceRef;
+    use darkmatter::markdown::compose::expression::data::DataError;
+    let diagnostic = FileReferenceDiagnostic {
+        function: "load_data",
+        reference: "./types.yaml".to_string(),
+        kind: FileRefFailure::NotFound,
+        cwd: PathBuf::from("/repo"),
+        fallback_dir: None,
+        source: None,
+        caller: None,
+    };
+    let import = CompositionError::ComposeFailed(MarkdownError::Interpolation {
+        key: Some("spec".to_string()),
+        expression: "frontmatter('features/spec.md')".to_string(),
+        source: Box::new(SourceRef::Effective {
+            rendered: "frontmatter('features/spec.md')".to_string(),
+            origin_key: Some("spec".to_string()),
+        }),
+        cause: Box::new(ExpressionError::Data(std::sync::Arc::new(DataError::ContractImport(diagnostic.clone())))),
+    });
+    let former = file_ref_compose_error(diagnostic);
+
+    assert_eq!(import.code(), "composition.invalid_file_reference");
+    assert_eq!(import.code(), former.code());
+    assert_eq!(import.detail(), former.detail());
+    assert_eq!(import.detail()["reference"], json!("./types.yaml"), "{}", import.detail());
+    let terminal = biscuit_terminal::terminal::Terminal::default();
+    assert_eq!(
+        import.status_block(&terminal).render(&terminal),
+        former.status_block(&terminal).render(&terminal)
+    );
+}
+
 #[test]
 fn caller_file_classification_drift_keeps_schema_diagnostic_identity() {
     let err = CompositionError::ComposeFailed(
@@ -1508,6 +1546,7 @@ fn file_reference_detail_serializes_kind_as_snake_case() {
         (FileRefFailure::Malformed, "malformed"),
         (FileRefFailure::FoundElsewhere, "found_elsewhere"),
         (FileRefFailure::RemoteNotEnabled, "remote_not_enabled"),
+        (FileRefFailure::RemoteDenied, "remote_denied"),
     ] {
         let err = file_ref_compose_error(FileReferenceDiagnostic {
             function: "frontmatter",

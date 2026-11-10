@@ -2,6 +2,7 @@
 
 pub mod fixture;
 pub mod protected_env;
+pub mod style;
 
 // Re-exported so a call site keeps saying `common::CliProcessFixture`; the
 // definitions live in their own file so this shared module stays near its
@@ -38,6 +39,21 @@ pub fn unwrapped(stderr: &str) -> String {
         .collect()
 }
 
+/// The per-file records of one `md schema validate --output json` report.
+pub fn schema_validate_records(stdout: &[u8]) -> Vec<serde_json::Value> {
+    let text = String::from_utf8_lossy(stdout);
+    let report: serde_json::Value =
+        serde_json::from_str(text.trim()).unwrap_or_else(|error| panic!("one JSON report ({error}): {text}"));
+    report["files"].as_array().unwrap_or_else(|| panic!("the report has no `files` array: {text}")).clone()
+}
+
+/// The only per-file record of one `md schema validate --output json` report.
+pub fn schema_validate_record(stdout: &[u8]) -> serde_json::Value {
+    let mut records = schema_validate_records(stdout);
+    assert_eq!(records.len(), 1, "one file record: {}", String::from_utf8_lossy(stdout));
+    records.remove(0)
+}
+
 pub fn md_file(content: &str) -> tempfile::NamedTempFile {
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "{}", content).unwrap();
@@ -46,6 +62,8 @@ pub fn md_file(content: &str) -> tempfile::NamedTempFile {
 
 pub struct MockHttpResponse {
     pub status: u16,
+    /// The response body; for a `302`, the `Location` header instead (the
+    /// body is then empty).
     pub body: &'static str,
     pub cache_control: Option<&'static str>,
 }
@@ -150,22 +168,28 @@ pub fn mock_http_server(responses: Vec<MockHttpResponse>) -> MockHttpServer {
 
             let status_text = match response.status {
                 200 => "OK",
+                302 => "Found",
                 304 => "Not Modified",
                 500 => "Internal Server Error",
                 _ => "OK",
             };
+            let (body, location) =
+                if response.status == 302 { ("", Some(response.body)) } else { (response.body, None) };
             let mut headers = format!(
                 "HTTP/1.1 {} {}\r\nContent-Length: {}\r\n",
                 response.status,
                 status_text,
-                response.body.len()
+                body.len()
             );
+            if let Some(location) = location {
+                headers.push_str(&format!("Location: {location}\r\n"));
+            }
             if let Some(cache_control) = response.cache_control {
                 headers.push_str(&format!("Cache-Control: {cache_control}\r\n"));
             }
             headers.push_str("\r\n");
             let _ = stream.write_all(headers.as_bytes());
-            let _ = stream.write_all(response.body.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
         }
     });
 
@@ -318,23 +342,13 @@ pub mod baseline {
 }
 
 pub mod layout {
-    use biscuit_terminal::terminal::Terminal;
-    use clap::Parser;
     use darkmatter::layout::{DarkmatterPage, PageComponent};
-    use darkmatter_cli::Cli;
-    use darkmatter_cli::render::apply_cli_layout_flags;
     use renderable::layout::{Alignment, Edges, Length, TargetValue, Width};
 
-    pub fn parse_cli(args: &[&str]) -> Cli {
-        let mut full = vec!["md"];
-        full.extend_from_slice(args);
-        Cli::try_parse_from(full).expect("CLI args must parse")
-    }
-
+    /// The page `md` builds for `args`' setters on a 120-column terminal, for a
+    /// document with no `style:` of its own.
     pub fn resolved_page(args: &[&str]) -> DarkmatterPage {
-        let cli = parse_cli(args);
-        let term = Terminal::new_optimistic(120);
-        apply_cli_layout_flags(DarkmatterPage::new(&term), &cli)
+        super::style::styled_page("# Doc\n", args, 120)
     }
 
     pub fn tv_cells(tv: &TargetValue<Length>) -> u16 {
@@ -364,15 +378,20 @@ pub mod layout {
             None => TestFill::Full,
             Some(p) => {
                 let l = &p.layout;
-                if l.width == Width::Auto && l.max_width.is_none() && l.padding == Edges::default()
+                // A style's `padding: 0` lowers to zero cells, the old fill's
+                // reset to `Length::Zero`: both are no padding.
+                let unpadded = [&l.padding.top, &l.padding.right, &l.padding.bottom, &l.padding.left]
+                    .into_iter()
+                    .all(is_zero);
+                if l.width == Width::Auto && l.max_width.is_none() && (l.padding == Edges::default() || unpadded)
                 {
                     TestFill::Full
                 } else if l.width == Width::Auto
                     && l.max_width.is_none()
                     && l.padding != Edges::default()
                 {
-                    if l.padding.top == TargetValue::universal(Length::Zero)
-                        && l.padding.bottom == TargetValue::universal(Length::Zero)
+                    if is_zero(&l.padding.top)
+                        && is_zero(&l.padding.bottom)
                         && l.padding.left == l.padding.right
                     {
                         TestFill::Pad(tv_length(&l.padding.left))
@@ -390,6 +409,10 @@ pub mod layout {
                 }
             }
         }
+    }
+
+    pub fn is_zero(tv: &TargetValue<Length>) -> bool {
+        matches!(tv, TargetValue::Universal(Length::Zero | Length::Ch(0)))
     }
 
     pub fn tv_length(tv: &TargetValue<Length>) -> Length {

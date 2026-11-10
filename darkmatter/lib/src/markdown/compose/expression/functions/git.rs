@@ -1,13 +1,13 @@
 use serde_json::Value;
 
-use super::{BoundCall, FunctionBinding, ResolutionContext};
+use super::{BoundCall, FunctionBinding, SlotClass, ResolutionContext};
 use crate::markdown::compose::expression::ExpressionError;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding::context("predict_conflicts", &["predictconflicts"], predict_conflicts_fn),
-    FunctionBinding::context("branch_exists_on_remote", &["branchexistsonremote"], branch_exists_on_remote_fn),
-    FunctionBinding::context("remote_vendor", &["remotevendor"], remote_vendor_fn),
-    FunctionBinding::context("recent_commits", &[], recent_commits_fn),
+    FunctionBinding::context("predict_conflicts", &["predictconflicts"], predict_conflicts_fn).slot(SlotClass::Volatile),
+    FunctionBinding::context("branch_exists_on_remote", &["branchexistsonremote"], branch_exists_on_remote_fn).slot(SlotClass::Volatile),
+    FunctionBinding::context("remote_vendor", &["remotevendor"], remote_vendor_fn).slot(SlotClass::Volatile),
+    FunctionBinding::context("recent_commits", &[], recent_commits_fn).slot(SlotClass::Volatile),
 ];
 
 /// The largest float `count` accepted: every integer up to it is exactly

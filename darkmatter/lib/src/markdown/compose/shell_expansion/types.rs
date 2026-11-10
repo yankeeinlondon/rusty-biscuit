@@ -74,10 +74,11 @@ pub(crate) fn frontmatter_key_line(ctx: &SourceContext, key: &str) -> Option<usi
     let prefix_lines = ctx.content[..range.start].lines().count();
 
     for (idx, line) in fm_text.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with(&format!("{key}:"))
-            || trimmed.starts_with(&format!("'{key}':"))
-            || trimmed.starts_with(&format!("\"{key}\":"))
+        // Unindented only: an indented match is a nested key or block-scalar
+        // text of the same name, never this top-level key.
+        if line.starts_with(&format!("{key}:"))
+            || line.starts_with(&format!("'{key}':"))
+            || line.starts_with(&format!("\"{key}\":"))
         {
             return Some(prefix_lines + idx + 1);
         }
@@ -536,6 +537,26 @@ pub trait ShellApprovalHandler: Send + Sync {
         &self,
         request: ShellApprovalRequest,
     ) -> Result<ShellApprovalDecision, ShellExpansionError>;
+
+    /// Asks about reads schema slots need, in the same pre-flight batch as
+    /// the shell commands (slot requests come first), or about one read a
+    /// slot computed during evaluation. One decision per request, in order;
+    /// a decision that is not one of its request's
+    /// [`choices`](crate::markdown::schemas::slots::grants::SlotGrantRequest::choices)
+    /// counts as unanswered.
+    ///
+    /// The default answers nothing, so a handler that does not prompt for
+    /// slot reads leaves each one `dm.schema.slot_approval_required`.
+    ///
+    /// ## Errors
+    ///
+    /// The prompt's I/O failure.
+    fn approve_slot_reads(
+        &self,
+        requests: &[crate::markdown::schemas::slots::grants::SlotGrantRequest],
+    ) -> Result<Vec<crate::markdown::schemas::slots::grants::SlotGrantDecision>, ShellExpansionError> {
+        Ok(vec![crate::markdown::schemas::slots::grants::SlotGrantDecision::Unanswered; requests.len()])
+    }
 }
 
 /// Information provided to the approval handler.
@@ -765,6 +786,11 @@ pub enum ShellExpansionError {
     /// path rather than flattening it into an opaque policy error.
     #[error(transparent)]
     Preflight(Box<crate::markdown::types::MarkdownError>),
+
+    /// The user's schema-slot grant store has an invalid line or cannot be
+    /// read, so none of its grants (or denies) can be trusted for the run.
+    #[error(transparent)]
+    SlotGrantStore(Box<crate::markdown::schemas::slots::grants::GrantStoreError>),
 }
 
 impl ShellExpansionError {
@@ -792,7 +818,30 @@ impl ShellExpansionError {
             Self::ParseDirective { .. }
             | Self::ExpressionEvaluation { .. }
             | Self::PolicyIo { .. }
-            | Self::Preflight(_) => None,
+            | Self::Preflight(_)
+            | Self::SlotGrantStore(_) => None,
+        }
+    }
+
+    /// The document context this error was raised against, when it has one.
+    pub fn context(&self) -> Option<&SourceContext> {
+        match self {
+            Self::ParseDirective { ctx, .. }
+            | Self::ExpressionEvaluation { ctx, .. }
+            | Self::CommandNotFound { ctx, .. }
+            | Self::Blacklisted { ctx, .. }
+            | Self::ApprovalRequired { ctx, .. }
+            | Self::Denied { ctx, .. }
+            | Self::NotPreApproved { ctx, .. }
+            | Self::MissingValue { ctx, .. }
+            | Self::TemplateGrammar { ctx, .. }
+            | Self::TemplateValueRejected { ctx, .. }
+            | Self::TemplateTarget { ctx, .. }
+            | Self::DynamicCommandShape { ctx, .. }
+            | Self::UnevaluatedDependencyShape { ctx, .. }
+            | Self::Timeout { ctx, .. }
+            | Self::ExecutionFailed { ctx, .. } => Some(ctx),
+            Self::PolicyIo { .. } | Self::Preflight(_) | Self::SlotGrantStore(_) => None,
         }
     }
 
@@ -817,7 +866,7 @@ impl ShellExpansionError {
             | Self::UnevaluatedDependencyShape { origin, .. }
             | Self::Timeout { origin, .. }
             | Self::ExecutionFailed { origin, .. } => Some(origin),
-            Self::PolicyIo { .. } | Self::Preflight(_) => None,
+            Self::PolicyIo { .. } | Self::Preflight(_) | Self::SlotGrantStore(_) => None,
         }
     }
 }
@@ -1140,6 +1189,11 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
             // Delegate to the wrapped rich error so its styled block (excerpt,
             // gutter, OSC8 header, schema problems, …) is preserved verbatim.
             ShellExpansionError::Preflight(inner) => inner.status_block(_term),
+
+            ShellExpansionError::SlotGrantStore(error) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "schema read grants unusable"))
+                .body(Prose::new(error.to_string()))
+                .hint("Fix or remove the line; until then no schema read grant or deny applies."),
         }
     }
 }
@@ -2393,9 +2447,11 @@ mod tests {
             rendered.contains("test.md"),
             "linked path missing from rendered diagnostic: {rendered}"
         );
+        // A terminal without OSC 8 prints the link text alone, never a
+        // `[text](url)` fallback.
         assert!(
-            rendered.contains(if cfg!(windows) { "file:///C:/test.md" } else { "file:///test.md" }),
-            "file link missing from rendered diagnostic: {rendered}"
+            !rendered.contains("](file://"),
+            "no Markdown link fallback in a rendered diagnostic: {rendered}"
         );
     }
 
@@ -2491,6 +2547,13 @@ mod tests {
         assert_eq!(frontmatter_key_line(&ctx, "quoted"), Some(3));
         assert_eq!(frontmatter_key_line(&ctx, "double"), Some(4));
         assert_eq!(frontmatter_key_line(&ctx, "missing"), None);
+    }
+
+    #[test]
+    fn frontmatter_key_line_skips_a_nested_key_of_the_same_name() {
+        let content = "---\na:\n  x: 1\nb: |\n  x: 2\nx: 3\n---\n";
+        let ctx = SourceContext::new(std::path::PathBuf::from("/test.md"), std::path::PathBuf::from("test.md"), content);
+        assert_eq!(frontmatter_key_line(&ctx, "x"), Some(6));
     }
 
     #[test]

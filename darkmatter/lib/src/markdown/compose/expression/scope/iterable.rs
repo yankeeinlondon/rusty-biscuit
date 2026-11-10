@@ -142,7 +142,10 @@ fn arm_entries(atom: &PropertyAtom, definitions: &DefinitionTable, depth: usize)
         }
         TypeExpr::InlineObject(shape) => ArmEntries::Entries(object_entry(&closed_values(shape))),
         TypeExpr::Primitive(SimplifiedType::Object) => ArmEntries::Entries(object_entry(&unknown())),
-        TypeExpr::Primitive(SimplifiedType::Unknown) | TypeExpr::Imported { .. } => ArmEntries::Unresolved,
+        // A pending template type is untyped until it resolves.
+        TypeExpr::Primitive(SimplifiedType::Unknown) | TypeExpr::Imported { .. } | TypeExpr::Slot(_) => {
+            ArmEntries::Unresolved
+        }
         TypeExpr::Ref(key) => {
             let Some(definition) = definitions.get(key).filter(|_| depth > 0) else {
                 return ArmEntries::Unresolved;
@@ -328,9 +331,9 @@ fn arm_fields(
     }
     match &atom.ty {
         TypeExpr::InlineObject(shape) => Some(fields.iter().map(|field| inline_field(shape, field)).collect()),
-        TypeExpr::Primitive(SimplifiedType::Object | SimplifiedType::Unknown) | TypeExpr::Imported { .. } => {
-            Some(fields.iter().map(|_| Some(unknown())).collect())
-        }
+        TypeExpr::Primitive(SimplifiedType::Object | SimplifiedType::Unknown)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Slot(_) => Some(fields.iter().map(|_| Some(unknown())).collect()),
         TypeExpr::Ref(key) => {
             if depth == 0 {
                 return Some(fields.iter().map(|_| Some(unknown())).collect());

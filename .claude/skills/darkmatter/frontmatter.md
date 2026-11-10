@@ -157,12 +157,16 @@ let meta: PostMeta = md.fm_parse()?;
 
 ## CLI Operations
 
-Use `md get`, `md set`, and `md rm` (top-level commands) for structured changes. `set` and
-`rm` compute the edited document from the parsed frontmatter, then splice only
-the changed top-level properties into the loaded source with
-`restore_properties_text` (`Markdown::source_text()` is the loaded text), so
-every other byte is kept. When that editor refuses the source (an indented
-root, an ambiguous edit), they fall back to re-serializing the whole document. When a
+Use `md get`, `md set`, and `md rm` (top-level commands) for structured changes. All
+three name a value by `PropertyPath` (`author.name`, `items.0`, `a\.b`), parsed before
+the document is read: a malformed path exits 2, anything else that fails exits 1 with the
+source untouched. `set` reads its value with `SetterValue`, binds it through
+`schemas::completion::declared_shape`, and blocks on a problem at or under the changed path
+or one the edit introduced (`commands/frontmatter.rs::blocking_problems`); `$schema` only
+checks that it can be a schema. `rm` plans with `RemovalPlan` and stays structural. Both
+write through `hash::edited_document_text`, described below, so comments on unnamed values
+survive; a source the editor refuses is re-serialized and verified, and a change to an
+unnamed value (an alias) is refused. When a
 document carries a managed `hash:` property, use the command's normal write
 path so Darkmatter can keep the stored hash consistent.
 
@@ -315,8 +319,9 @@ returns one `LeafSpan { path, range, decoded }` per requested string leaf.
 `range` is the scalar's absolute byte range: quotes and a block scalar's
 header are included, and the final line break is excluded. Splicing an
 encoded scalar into exactly that range leaves every other byte and line
-ending intact. This, with `restore_properties_text`, is the sanctioned
-text-preserving writer. Do not build another YAML editor.
+ending intact. This, with `restore_properties_text` and the nested editor
+below, is the sanctioned text-preserving writer. Do not build another YAML
+editor.
 
 - Each path is located within its own top-level property. An unmodeled
   construct elsewhere never blocks it.
@@ -367,6 +372,38 @@ text-preserving writer. Do not build another YAML editor.
   (anchor, alias, tag, or `<<` merge), or `UnsupportedShape` (a plain
   flow-collection item, a multi-line flow collection, or a nested sequence).
   Report the line rather than falling back to re-serializing the document.
+- Those refusals are about replacing bytes, not about where a value sits.
+  `locate_frontmatter_value` reads every flow item, across lines and past
+  comments. `hash::locate_frontmatter_value_range` (crate-private) answers
+  where a `prologue:`/`epilogue:` value was typed, for a plain flow item too,
+  and is `None` unless the node decodes to the expected text; a reference's
+  location comes from it after the leaf locator refuses, never from its key.
+
+## Text-Preserving Nested Edits
+
+`hash::edit_frontmatter_paths(source, &expected, &[PathEdit])` (`hash/path_edit.rs`)
+is the sanctioned writer for a value below the top level: `PathEdit::Set(steps)`
+writes what `expected` holds there, and `PathEdit::Remove(steps)` takes the node's
+own lines. `expected` is the map the pure `simplified_schema::{set_at, RemovalPlan}`
+edit produced; steps come from `PropertyPath::resolve_map` over that map, or from
+`RemovalPlan::targets`. `hash::edited_document_text(&edited, &edits)` adds the
+serialized fallback, so a writer calls only that.
+
+- Every result is reloaded through `Markdown::try_from_content` and compared with
+  `expected` before it is returned; a located position is never trusted on its own.
+- `UnsupportedForm` (flow collection, alias, or tag on the walked path; an indented
+  root; YAML only the lenient loader reads) falls back to serialization, verified
+  the same way, and that fallback keeps the source's fences and body bytes.
+  `Markdown::as_string` does not: the loaded body has lost its final line break and
+  its line endings.
+- `WouldChangeUnnamed` (an alias reads the edited node, or loses its anchor) has no
+  fallback. It is decided by comparing values, so it also reports any other change
+  outside the named paths.
+- A compact `- - x` and a flow bracket closing at column 0 are unsupported forms,
+  because the locator and top-level scanner cannot read them.
+- A comment stays on a value's first line when the value grows, because a block
+  scalar's last line would read it as content. A new key goes past a `|+` scalar's
+  blank lines, because the locator's span stops before them.
 
 ## `style:` Frontmatter
 

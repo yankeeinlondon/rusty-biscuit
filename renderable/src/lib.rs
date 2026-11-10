@@ -3,6 +3,7 @@ pub mod color;
 pub mod layout;
 pub mod markdown;
 pub mod microdata;
+pub mod output;
 pub mod prelude;
 pub mod style;
 pub mod stylesheet;
@@ -12,3 +13,5 @@ pub mod tree;
 pub mod wrap_policy;
 
 pub mod html;
+
+pub use output::{CommandOutput, OutputOptions, TerminalProfile, Width};

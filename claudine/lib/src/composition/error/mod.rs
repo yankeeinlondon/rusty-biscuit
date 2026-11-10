@@ -3543,7 +3543,7 @@ impl CompositionError {
 
     /// Darkmatter's shared record of the lifecycle call this error rejects,
     /// when it is a [`CompositionError::LifecycleCallRejected`]: the fields
-    /// `md compose --output report-json` and DMLS report for the same call.
+    /// `md compose --output json` and DMLS report for the same call.
     pub fn lifecycle_call_diagnostic(&self) -> Option<&darkmatter::markdown::compose::expression::Diagnostic> {
         match self {
             Self::LifecycleCallRejected { diagnostic, .. } => Some(diagnostic),

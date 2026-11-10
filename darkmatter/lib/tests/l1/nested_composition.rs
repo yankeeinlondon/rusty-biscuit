@@ -102,6 +102,47 @@ fn nested_content_shares_the_root_context_and_resolution_base() {
     assert!(!text.contains("as_markdown"), "{text}");
 }
 
+/// Nested content inherits the calling document's state exactly as that
+/// document's `::file` child does: the caller's frontmatter, then `--state`
+/// under `--set`, with the content's own frontmatter over inherited values.
+/// A content called from a transcluded child inherits that child's state,
+/// and inherited values never serialize into the returned Markdown.
+#[test]
+fn nested_content_inherits_the_callers_state_like_a_transcluded_child() {
+    let temp = tempfile::tempdir().unwrap();
+    write(&temp.path().join("docs/part.md"), "part=[{{ name }}|{{ given }}]\n");
+    write(
+        &temp.path().join("docs/sub/child.md"),
+        "---\nname: child\n---\n{{ as_markdown(\"from_child=[{{ name }}]\") }}\n",
+    );
+    let (path, document) = root_document(
+        temp.path(),
+        "docs/root.md",
+        "---\nname: root\n---\n\
+         root=[{{ name }}|{{ given }}]\n\n\
+         {{ as_markdown(\"direct=[{{ name }}|{{ given }}]\") }}\n\n\
+         {{ as_markdown(\"::file ./part.md\") }}\n\n\
+         {{ as_markdown(\"---\\nname: own\\n---\\nown=[{{ name }}]\") }}\n\n\
+         ::file ./sub/child.md\n",
+    );
+    let options = probe_options()
+        .with_source_file(&path)
+        .with_external_state(serde_json::json!({ "given": "state" }))
+        .with_set_overrides(serde_json::json!({ "given": "set" }));
+
+    let (composed, _) = compose(&document, options);
+    let text = composed.content();
+    let values = fields(text);
+
+    assert_eq!(field(&values, "root"), "root|set", "{text}");
+    assert_eq!(field(&values, "direct"), field(&values, "root"), "{text}");
+    assert_eq!(field(&values, "part"), field(&values, "root"), "{text}");
+    assert_eq!(field(&values, "own"), "own", "{text}");
+    assert_eq!(field(&values, "from_child"), "child", "{text}");
+    assert!(text.contains("---\nname: own\n---\n"), "{text}");
+    assert!(!text.contains("given:"), "inherited state must not serialize: {text}");
+}
+
 /// AC30 (nested portion): file, URL, and in-memory roots keep one document
 /// identity and one per-execution nonce across the nested child.
 #[test]

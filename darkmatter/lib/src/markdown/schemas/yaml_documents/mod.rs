@@ -23,11 +23,12 @@ use simplified_schema::{SchemaError, ValidationProblem};
 use super::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
 
 mod load;
+mod marks;
 pub mod registry;
 mod select;
 mod semantic;
 
-pub(crate) use load::locating_problem;
+pub(crate) use load::{first_tag_start, load_yaml_document, locating_problem, pointer_string};
 pub use registry::{Claim, DefinitionSource, Incomplete, KindDefinition, KindRegistry, RegistryScope};
 
 /// The route a validated YAML document took.
@@ -185,12 +186,31 @@ impl DarkmatterSchemas {
                 let json = serde_json::to_value(value).map_err(|error| SchemaError::FrontmatterShape {
                     message: format!("$schema is not representable as JSON: {error}"),
                 })?;
-                let resolved = super::resolve::resolve_schema_with_roots(&json, &base_dir, &schema_roots, context)
-                    .map_err(|error| match super::triggers::assemble::refused_trigger_file(&error) {
-                        Some(path) => super::triggers::assemble::trigger_schema_referenced(&path),
-                        None => error,
-                    })?;
-                super::triggers::assemble::check_document_schema_not_trigger(&resolved.referenced_files)?;
+                // An inline `$schema`'s slots are positioned in this file.
+                let authored = super::mentions_slot(&json).then(|| simplified_schema::resolve::AuthoredSchemaValue {
+                    file: Some(path.to_path_buf()),
+                    mapping: 0..document.text.len(),
+                    text: document.text.as_str().into(),
+                });
+                // The trigger check reads the bytes the resolution just read.
+                let resolved = simplified_schema::resolve::buffers::with_reads_retained(|| {
+                    let resolved = super::resolve::resolve_authored_schema_with_roots(
+                        &json,
+                        authored.as_ref(),
+                        &base_dir,
+                        &schema_roots,
+                        context,
+                    )
+                        // A template resolves through the slot session, as a
+                        // Markdown document's `$schema` does.
+                        .or_else(|error| self.resolve_template(error, &super::document_template_identity(&json, &base_dir)))
+                        .map_err(|error| match super::triggers::assemble::refused_trigger_file(&error) {
+                            Some(path) => super::triggers::assemble::trigger_schema_referenced(&path),
+                            None => error,
+                        })?;
+                    super::triggers::assemble::check_document_schema_not_trigger(&resolved.referenced_files)?;
+                    Ok::<_, SchemaError>(resolved)
+                })?;
                 let label = match value.as_str() {
                     Some(reference) => reference.to_string(),
                     None => "the inline `$schema`".to_string(),

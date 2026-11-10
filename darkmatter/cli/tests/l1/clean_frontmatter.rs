@@ -1,7 +1,7 @@
 //! Level-1 CLI coverage for `md clean`'s invalid-frontmatter pipeline.
 //!
 //! This module owns the document-shaped rows of the acceptance matrix — D-1
-//! through D-4 and D-6 through D-11. The `--json` envelope (D-5) lives in
+//! through D-4 and D-6 through D-11. The `--output json` envelope (D-5) lives in
 //! `clean_json.rs` and the schema-resolution contract (D-10) in
 //! `clean_schema.rs`, because both need fixture trees this module does not.
 //!

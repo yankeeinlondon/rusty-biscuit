@@ -128,7 +128,7 @@ fn assert_renders_code_link_everywhere(context: &str, line: &str, label: &str, u
     let mut options = TerminalOptions::default();
     options.color_depth = Some(ColorDepth::TrueColor);
     options.hyperlink_mode = HyperlinkMode::Always;
-    options.max_width = Some(400);
+    options.width = Some(renderable::output::Width::Columns(400));
     let terminal = render_tree_terminal(&md, &options).unwrap().output;
     assert!(terminal.contains(&format!("\x1b]8;;{url}")), "{context}: darkmatter OSC 8 {terminal:?}");
     let visible = strip_escape_codes(terminal.clone());

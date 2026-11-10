@@ -20,7 +20,9 @@
 //! ## Scope of this layer
 //!
 //! - Filesystem builtins carry [`FileReferenceDiagnostic`] via
-//!   [`ExpressionError::FileReference`].
+//!   [`ExpressionError::FileReference`]; a failed fetch from an allowed host
+//!   is [`ExpressionError::RemoteRead`], and a schema file `validate_schema`
+//!   could not read is [`ExpressionError::SchemaFileRead`].
 //! - An unrecognized function name is [`ExpressionError::UnknownFunction`] — the
 //!   failure remains authoring-fatal through callback wrappers.
 //! - A call that does not bind to its declared signatures, or a handler result
@@ -54,6 +56,10 @@ pub enum FileRefFailure {
     FoundElsewhere,
     /// A remote URL reference was used where no remote runtime is enabled.
     RemoteNotEnabled,
+    /// The run's fetch policy does not allow the URL's host, so nothing was
+    /// requested. Unlike [`RemoteNotEnabled`](Self::RemoteNotEnabled), no
+    /// later pass of the same run can read it.
+    RemoteDenied,
 }
 
 impl FileRefFailure {
@@ -100,6 +106,7 @@ impl FileRefFailure {
             FileRefFailure::NotFound => "not_found",
             FileRefFailure::FoundElsewhere => "found_elsewhere",
             FileRefFailure::RemoteNotEnabled => "remote_not_enabled",
+            FileRefFailure::RemoteDenied => "remote_denied",
         }
     }
 }
@@ -198,6 +205,28 @@ impl ProviderFailureKind {
             ProviderFailureKind::Transport => "transport",
         }
     }
+}
+
+/// How a read-side function's fetch of a URL failed.
+///
+/// Only [`Transport`](Self::Transport) is a failure of the source itself, so
+/// only it is recoverable by `try` (see
+/// [`ExpressionError::is_recoverable_read_failure`]); the other kinds are
+/// failures of the request or the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteReadKind {
+    /// The allowed host could not be reached, answered with an error status,
+    /// sent a body that could not be read, or sent a body that is not UTF-8.
+    Transport,
+    /// The run's policy refused the request, for example a redirect to a
+    /// host it does not allow.
+    Policy,
+    /// The URL cannot be fetched as written: an unsupported scheme or a URL
+    /// that does not parse.
+    InvalidReference,
+    /// The remote runtime could not run the fetch: its HTTP client or
+    /// runtime failed to start, or it lost a registered fetch.
+    Infrastructure,
 }
 
 /// A typed expression-evaluation error (Layer A: the *what*).
@@ -318,6 +347,18 @@ pub enum ExpressionError {
         group: ContextGroup,
     },
 
+    /// A schema slot's evaluation tried a read its approvals do not cover
+    /// (see [`read_gate`](super::read_gate)). Only slot evaluation sets a
+    /// gate, so document evaluation never raises it. Never recovered into a
+    /// value: `try_frontmatter` and `||` pass it through.
+    #[error("{target}: {refusal}")]
+    SlotReadRefused {
+        /// The read that was refused.
+        target: Box<super::read_gate::ReadTarget>,
+        /// Why.
+        refusal: super::read_gate::GateRefusal,
+    },
+
     /// A call that breaks a function's specified contract where the
     /// specification requires a compose error and the declared signature
     /// cannot express the rule (an argument out of a domain the type does
@@ -418,6 +459,53 @@ pub enum ExpressionError {
     #[error("malformed literal token: {0}")]
     MalformedLiteralToken(crate::markdown::literal_token::TokenError),
 
+    /// A `load_data` failure other than a file-reference one: the contract,
+    /// the format, the document's syntax, or the data's fit to the contract.
+    /// Authoring-fatal on every surface; shared through an `Arc` because the
+    /// request memo hands one failure to every call site that reaches it.
+    #[error("{0}")]
+    Data(Arc<super::data::DataError>),
+
+    /// A `load_data` failure raised inside a nested composition
+    /// (`as_markdown`) and re-raised at its call. Displayed, graded, and
+    /// projected exactly like [`Data`](Self::Data); kept distinct so a
+    /// failure inside the child is never taken for a direct read failure of
+    /// the calling expression.
+    #[error("{0}")]
+    NestedData(Arc<super::data::DataError>),
+
+    /// A read-side function's fetch from an allowed host failed: the request
+    /// failed (a network error, an HTTP error status) or the response was not
+    /// UTF-8 text. Worded and graded like [`Other`](Self::Other), so it is not
+    /// authoring-fatal and renders the same; it keeps the reference as
+    /// written so the report can fill its reference fields. A host the policy
+    /// refuses is a [`FileReference`](Self::FileReference) failure instead.
+    #[error("{function}(): {message}")]
+    RemoteRead {
+        /// The read-side function's name.
+        function: &'static str,
+        /// The URL as written (or as the calling schema property spelled it).
+        reference: String,
+        /// How the fetch failed.
+        kind: RemoteReadKind,
+        /// The remote runtime's description of the failure.
+        message: String,
+    },
+
+    /// A schema file a read-side function needed beyond its argument could
+    /// not be read: `validate_schema`'s `$schema` target or a named-type
+    /// import is missing, malformed, or unreadable. Worded and graded like
+    /// [`Other`](Self::Other), so it is not authoring-fatal and renders the
+    /// same; `file` keeps the typed cause so the report can fill its
+    /// reference fields. A schema that reads but is invalid stays `Other`.
+    #[error("{}(): {message}", file.function)]
+    SchemaFileRead {
+        /// The same message the function's `Other` failure carries.
+        message: String,
+        /// The schema file reference that could not be read.
+        file: Box<FileReferenceDiagnostic>,
+    },
+
     /// Migration catch-all for the long tail of pure builtins not yet
     /// individually classified. Always carries the function name, so it is never
     /// *less* informative than today's string.
@@ -438,6 +526,16 @@ fn display_file_reference(diagnostic: &FileReferenceDiagnostic) -> String {
                 diagnostic.function, diagnostic.reference
             )
         }
+        // Worded as the remote runtime's policy refusal, which this failure
+        // replaced as untyped text.
+        (FileRefFailure::RemoteDenied, _) => format!(
+            "{}(): remote read denied for host '{}'",
+            diagnostic.function,
+            url::Url::parse(&diagnostic.reference)
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_string))
+                .unwrap_or_default()
+        ),
         _ => crate::markdown::errors::with_hint_line(
             format!("invalid file path: {}", diagnostic.reference),
             diagnostic.glob_hint(),
@@ -446,6 +544,23 @@ fn display_file_reference(diagnostic: &FileReferenceDiagnostic) -> String {
 }
 
 impl FileReferenceDiagnostic {
+    /// The biscuit-file class of this failure: its typed cause's class when
+    /// it has one, otherwise the class its kind implies (a clean miss is
+    /// [`NoMatch`](biscuit_file::ResolutionFailure::NoMatch), a remote read
+    /// that cannot run is
+    /// [`UnsupportedRemote`](biscuit_file::ResolutionFailure::UnsupportedRemote)).
+    pub fn resolution_failure(&self) -> biscuit_file::ResolutionFailure {
+        use biscuit_file::ResolutionFailure;
+        if let Some(source) = &self.source {
+            return source.resolution_failure();
+        }
+        match self.kind {
+            FileRefFailure::Malformed => ResolutionFailure::InvalidReference,
+            FileRefFailure::NotFound | FileRefFailure::FoundElsewhere => ResolutionFailure::NoMatch,
+            FileRefFailure::RemoteNotEnabled | FileRefFailure::RemoteDenied => ResolutionFailure::UnsupportedRemote,
+        }
+    }
+
     /// The literal-glob hint for a clean miss (a [`FileRefFailure::NotFound`]
     /// with no underlying error) of a reference whose text looks like a glob;
     /// see [`biscuit_file::ResolutionFailure::glob_hint`].
@@ -456,6 +571,32 @@ impl FileReferenceDiagnostic {
             }
             _ => None,
         }
+    }
+
+    /// The file-reference failure of a schema file `function` could not
+    /// read — a `$schema` target or named-type import that is missing,
+    /// malformed, or unreadable — resolved from `cwd`; any other schema
+    /// failure is returned unchanged.
+    ///
+    /// The reference is the one the schema spells (the path, for an I/O
+    /// failure). Only this level of `error` is inspected.
+    pub(crate) fn from_schema_read(
+        function: &'static str,
+        cwd: PathBuf,
+        error: simplified_schema::SchemaError,
+    ) -> Result<Self, simplified_schema::SchemaError> {
+        use simplified_schema::SchemaError;
+        let (reference, kind, source) = match error {
+            SchemaError::Unresolved { reference, source } => (reference, FileRefFailure::classify(&source), Some(source)),
+            SchemaError::NoMatch { reference, .. } => (reference, FileRefFailure::NotFound, None),
+            SchemaError::Io { path, source } => (
+                path.to_string_lossy().into_owned(),
+                FileRefFailure::NotFound,
+                Some(biscuit_file::FileReferenceError::Io { path, source }),
+            ),
+            other => return Err(other),
+        };
+        Ok(Self { function, reference, kind, cwd, fallback_dir: None, source: source.map(Arc::new), caller: None })
     }
 }
 
@@ -516,6 +657,12 @@ impl ExpressionError {
     /// - [`CallCheck`] — a call the design-time check proves wrong rejects the
     ///   document before evaluation, so no lenient surface may keep it.
     ///
+    /// - [`Data`] and [`NestedData`] — a `load_data` contract, format,
+    ///   syntax, or contract-fit failure. No partial value may stand in for
+    ///   data that did not load. A contract import that cannot be read is
+    ///   graded like the [`FileReference`] failure it was before it had its
+    ///   own variant.
+    ///
     /// Every other variant (arity, arg-type, parse, arithmetic, generic
     /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
     /// interpolation. [`RemoteNotEnabled`] is
@@ -535,6 +682,8 @@ impl ExpressionError {
     /// [`Binding`]: ExpressionError::Binding
     /// [`Call`]: ExpressionError::Call
     /// [`CallCheck`]: ExpressionError::CallCheck
+    /// [`Data`]: ExpressionError::Data
+    /// [`NestedData`]: ExpressionError::NestedData
     /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
@@ -552,6 +701,10 @@ impl ExpressionError {
             ExpressionError::MalformedLiteralToken(_) => true,
             ExpressionError::Binding(_) => true,
             ExpressionError::CallCheck(_) => true,
+            ExpressionError::Data(data) | ExpressionError::NestedData(data) => match &**data {
+                super::data::DataError::ContractImport(diagnostic) => file_reference_is_fatal(diagnostic),
+                _ => true,
+            },
             // A broken return contract is a Darkmatter defect; a call that
             // does not bind keeps the old arity/arg-type severity.
             ExpressionError::Call(error) => {
@@ -561,16 +714,112 @@ impl ExpressionError {
             | ExpressionError::FunctionContextNotCaptured { .. }
             | ExpressionError::ContextProjectionInvariant { .. }
             | ExpressionError::ExecutionNonceUnavailable { .. } => true,
-            // A present file reference that fails to resolve is fatal (see the
-            // doc comment for the WHY). `RemoteNotEnabled` is deliberately *not*
-            // in this set: it is a v1 capability gap, not a reference mistake.
-            ExpressionError::FileReference(diagnostic) => matches!(
-                diagnostic.kind,
-                FileRefFailure::Malformed
-                    | FileRefFailure::NotFound
-                    | FileRefFailure::FoundElsewhere
-            ),
+            ExpressionError::FileReference(diagnostic) => file_reference_is_fatal(diagnostic),
             _ => false,
+        }
+    }
+
+    /// Whether `try(expr, fallback)` may replace this failure of `expr` with
+    /// its fallback: a typed failure to read a source that the request was
+    /// allowed to read.
+    ///
+    /// The recoverable failures are:
+    ///
+    /// - a [`FileReference`] miss ([`NotFound`] or [`FoundElsewhere`]) that is
+    ///   either clean (no typed cause) or an I/O failure reading the file;
+    /// - a `load_data` source that does not parse ([`DataError::Malformed`]),
+    ///   does not fit its contract ([`DataError::ContractMismatch`]), or
+    ///   misses under the same file-reference rule;
+    /// - a [`RemoteRead`] whose kind is [`RemoteReadKind::Transport`].
+    ///
+    /// Everything else is a failure of the request, the expression, or the
+    /// host and propagates: a reference that leaves its tree or lacks an
+    /// anchor (also labeled [`NotFound`], so the label alone proves nothing),
+    /// a remote read that is not enabled or is denied, an unsupported
+    /// format, invalid options, a contract or its import, a failure inside
+    /// a nested composition ([`NestedData`]), a refused slot read, and every
+    /// non-read variant. A callback wrapper is judged by its cause.
+    ///
+    /// The match is exhaustive on purpose: a new variant must be classified
+    /// here before it compiles. This is not a weaker form of
+    /// [`is_authoring_fatal`](Self::is_authoring_fatal): the two policies are
+    /// independent.
+    ///
+    /// [`FileReference`]: ExpressionError::FileReference
+    /// [`RemoteRead`]: ExpressionError::RemoteRead
+    /// [`NestedData`]: ExpressionError::NestedData
+    /// [`NotFound`]: FileRefFailure::NotFound
+    /// [`FoundElsewhere`]: FileRefFailure::FoundElsewhere
+    /// [`DataError::Malformed`]: super::data::DataError::Malformed
+    /// [`DataError::ContractMismatch`]: super::data::DataError::ContractMismatch
+    pub fn is_recoverable_read_failure(&self) -> bool {
+        use super::data::DataError;
+        match self {
+            Self::Callback { source, .. } => source.is_recoverable_read_failure(),
+            Self::FileReference(diagnostic) => is_recoverable_miss(diagnostic),
+            Self::Data(data) => match &**data {
+                DataError::Malformed { .. } | DataError::ContractMismatch { .. } => true,
+                DataError::FileReference(diagnostic) => is_recoverable_miss(diagnostic),
+                DataError::ContractImport(_)
+                | DataError::NotAContainer { .. }
+                | DataError::RowShapeConflict { .. }
+                | DataError::ThisImportRejected { .. }
+                | DataError::UnsupportedFormat { .. }
+                | DataError::InvalidOptions { .. }
+                | DataError::ContractSchema { .. } => false,
+            },
+            Self::RemoteRead { kind, .. } => *kind == RemoteReadKind::Transport,
+            Self::NestedData(_)
+            | Self::GlobReference { .. }
+            | Self::UnknownFunction { .. }
+            | Self::Parse(_)
+            | Self::InvalidCallback { .. }
+            | Self::IterationLimit(_)
+            | Self::Arithmetic { .. }
+            | Self::Provider { .. }
+            | Self::ContextNotCaptured { .. }
+            | Self::SlotReadRefused { .. }
+            | Self::ContractViolation { .. }
+            | Self::FunctionContextNotCaptured { .. }
+            | Self::ContextProjectionInvariant { .. }
+            | Self::ExecutionNonceUnavailable { .. }
+            | Self::ReservedRootPathUnknown { .. }
+            | Self::Call(_)
+            | Self::CallCheck(_)
+            | Self::Binding(_)
+            | Self::MalformedLiteralToken(_)
+            | Self::SchemaFileRead { .. }
+            | Self::Other { .. } => false,
+        }
+    }
+
+    /// The `load_data` failure this error carries, after callback wrappers:
+    /// a direct one ([`Data`](Self::Data)) or one re-raised by a nested
+    /// composition ([`NestedData`](Self::NestedData)). Every reader that
+    /// projects or grades a data failure goes through this one accessor.
+    pub fn data_failure(&self) -> Option<&Arc<super::data::DataError>> {
+        match self.without_callbacks() {
+            Self::Data(data) | Self::NestedData(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// The file-reference diagnostic this error carries, after callback
+    /// wrappers: a read-side function's own failure, or a `load_data`
+    /// source or contract import that could not be resolved or read.
+    ///
+    /// Renderers read a contract import's diagnostic through this view. They
+    /// never rebuild it as an [`FileReference`](Self::FileReference) error,
+    /// which `try` would then recover.
+    pub fn file_reference_diagnostic(&self) -> Option<&FileReferenceDiagnostic> {
+        use super::data::DataError;
+        match self.without_callbacks() {
+            Self::FileReference(diagnostic) => Some(diagnostic),
+            Self::Data(data) | Self::NestedData(data) => match &**data {
+                DataError::FileReference(diagnostic) | DataError::ContractImport(diagnostic) => Some(diagnostic),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -630,6 +879,22 @@ impl ExpressionError {
     pub fn starts_with(&self, needle: &str) -> bool {
         self.to_string().starts_with(needle)
     }
+}
+
+/// A present file reference that fails to resolve is fatal (see
+/// [`ExpressionError::is_authoring_fatal`] for the WHY). `RemoteNotEnabled`
+/// is deliberately *not* in this set: it is a v1 capability gap, not a
+/// reference mistake.
+fn file_reference_is_fatal(diagnostic: &FileReferenceDiagnostic) -> bool {
+    matches!(diagnostic.kind, FileRefFailure::Malformed | FileRefFailure::NotFound | FileRefFailure::FoundElsewhere)
+}
+
+/// A miss of a reference that was understood and rooted: no typed cause, or
+/// an I/O failure on the file itself. Tree escapes and missing anchors share
+/// the [`FileRefFailure::NotFound`] label, so the cause decides.
+fn is_recoverable_miss(diagnostic: &FileReferenceDiagnostic) -> bool {
+    matches!(diagnostic.kind, FileRefFailure::NotFound | FileRefFailure::FoundElsewhere)
+        && matches!(diagnostic.source.as_deref(), None | Some(biscuit_file::FileReferenceError::Io { .. }))
 }
 
 impl From<super::ParseError> for ExpressionError {
@@ -726,6 +991,7 @@ mod tests {
                 FileRefFailure::RemoteNotEnabled.as_str(),
                 "remote_not_enabled"
             );
+            assert_eq!(FileRefFailure::RemoteDenied.as_str(), "remote_denied");
             assert_ne!(FileRefFailure::NotFound.as_str(), "NotFound");
         }
     }
@@ -830,6 +1096,394 @@ mod tests {
                     message: "boom".to_string(),
                 };
                 assert!(err.is_authoring_fatal(), "{kind:?} must be fatal");
+            }
+        }
+    }
+
+    mod recovery {
+        use super::*;
+        use crate::markdown::compose::expression::data::{DataError, DataSourceIdentity, DataSourceLocation};
+        use crate::markdown::compose::expression::iteration::{IterationError, IterationLimitKind, IterationPath, IterationPosition};
+        use biscuit_file::FileReferenceError;
+
+        fn miss(source: Option<FileReferenceError>) -> FileReferenceDiagnostic {
+            FileReferenceDiagnostic {
+                function: "load_data",
+                reference: "optional.yaml".to_string(),
+                kind: FileRefFailure::NotFound,
+                cwd: PathBuf::from("/repo"),
+                fallback_dir: None,
+                source: source.map(Arc::new),
+                caller: None,
+            }
+        }
+
+        fn with_kind(kind: FileRefFailure) -> FileReferenceDiagnostic {
+            FileReferenceDiagnostic { kind, ..miss(None) }
+        }
+
+        fn identity() -> DataSourceIdentity {
+            DataSourceIdentity::Local(PathBuf::from("/repo/optional.yaml"))
+        }
+
+        fn data(error: DataError) -> ExpressionError {
+            ExpressionError::Data(Arc::new(error))
+        }
+
+        fn callback(error: ExpressionError) -> ExpressionError {
+            ExpressionError::Callback {
+                function: "map".to_string(),
+                position: IterationPosition::Index(0),
+                source: Box::new(error),
+            }
+        }
+
+        fn malformed() -> DataError {
+            DataError::Malformed {
+                identity: identity(),
+                format: biscuit_file::DataFormat::Yaml,
+                message: "bad".to_string(),
+                location: DataSourceLocation::default(),
+            }
+        }
+
+        fn remote_read(kind: RemoteReadKind) -> ExpressionError {
+            ExpressionError::RemoteRead {
+                function: "load_data",
+                reference: "https://data.test/a.json".to_string(),
+                kind,
+                message: "boom".to_string(),
+            }
+        }
+
+        fn call_error() -> ExpressionError {
+            let error = crate::markdown::compose::expression::functions::call_function("upper", &[serde_json::json!({})], None)
+                .expect("registered")
+                .unwrap_err();
+            assert!(matches!(error, ExpressionError::Call(_)), "{error:?}");
+            error
+        }
+
+        /// One case per variant of [`ExpressionError`] and of
+        /// [`DataError`]: the variant, and whether `try` may recover it.
+        fn cases() -> Vec<(&'static str, ExpressionError, bool)> {
+            let other = |function: &str| ExpressionError::Other { function: function.to_string(), message: "x".into() };
+            vec![
+                ("FileReference clean miss", ExpressionError::FileReference(miss(None)), true),
+                (
+                    "FileReference found elsewhere",
+                    ExpressionError::FileReference(with_kind(FileRefFailure::FoundElsewhere)),
+                    true,
+                ),
+                ("FileReference malformed", ExpressionError::FileReference(with_kind(FileRefFailure::Malformed)), false),
+                (
+                    "FileReference remote not enabled",
+                    ExpressionError::FileReference(with_kind(FileRefFailure::RemoteNotEnabled)),
+                    false,
+                ),
+                ("FileReference remote denied", ExpressionError::FileReference(with_kind(FileRefFailure::RemoteDenied)), false),
+                (
+                    "GlobReference",
+                    ExpressionError::GlobReference {
+                        function: "find_files",
+                        source: Arc::new(biscuit_file::GlobReferenceError::RejectedPrefix {
+                            pattern: "https://x/*".into(),
+                            prefix: "a remote URL",
+                            reason: "nothing local to walk",
+                        }),
+                    },
+                    false,
+                ),
+                ("UnknownFunction", ExpressionError::UnknownFunction { name: "lenght".into() }, false),
+                ("Parse", ExpressionError::Parse("unexpected".into()), false),
+                ("InvalidCallback", ExpressionError::InvalidCallback { span: 0..1, message: "x".into() }, false),
+                ("Callback over a non-read failure", callback(other("upper")), false),
+                (
+                    "IterationLimit",
+                    ExpressionError::IterationLimit(Box::new(IterationError {
+                        kind: IterationLimitKind::Visits,
+                        limit: 1,
+                        used: 1,
+                        requested: 1,
+                        path: IterationPath::empty(),
+                    })),
+                    false,
+                ),
+                ("Arithmetic", ExpressionError::Arithmetic { op: "Addition" }, false),
+                (
+                    "Provider transport",
+                    ExpressionError::Provider {
+                        function: "pr".into(),
+                        kind: ProviderFailureKind::Transport,
+                        message: "x".into(),
+                    },
+                    false,
+                ),
+                (
+                    "ContextNotCaptured",
+                    ExpressionError::ContextNotCaptured { key: "repo_root".into(), group: ContextGroup::Git },
+                    false,
+                ),
+                (
+                    "SlotReadRefused",
+                    ExpressionError::SlotReadRefused {
+                        target: Box::new(crate::markdown::compose::expression::read_gate::ReadTarget {
+                            function: "load_data".into(),
+                            kind: crate::markdown::compose::expression::functions::ReadKind::Content,
+                            location: crate::markdown::compose::expression::read_gate::ReadLocation::Local(PathBuf::from("/x")),
+                            observed_hash: None,
+                        }),
+                        refusal: crate::markdown::compose::expression::read_gate::GateRefusal::Denied,
+                    },
+                    false,
+                ),
+                ("ContractViolation", ExpressionError::ContractViolation { function: "f".into(), message: "x".into() }, false),
+                (
+                    "FunctionContextNotCaptured",
+                    ExpressionError::FunctionContextNotCaptured { function: "package".into(), group: ContextGroup::Git },
+                    false,
+                ),
+                (
+                    "ContextProjectionInvariant",
+                    ExpressionError::ContextProjectionInvariant { key: "k".into(), group: ContextGroup::Git },
+                    false,
+                ),
+                (
+                    "ExecutionNonceUnavailable",
+                    ExpressionError::ExecutionNonceUnavailable { key: "id".into(), detail: "x".into() },
+                    false,
+                ),
+                ("ReservedRootPathUnknown", ExpressionError::ReservedRootPathUnknown { root: "current", path: "current.x".into() }, false),
+                ("Call", call_error(), false),
+                (
+                    "CallCheck",
+                    ExpressionError::CallCheck(Box::new(crate::markdown::compose::expression::call_check::CallCheck {
+                        function: "load_data".into(),
+                        span: 0..1,
+                        arguments: Vec::new(),
+                        argument_spans: Vec::new(),
+                        problem: None,
+                        binding_error: None,
+                        always_false: None,
+                        data_problem: None,
+                    })),
+                    false,
+                ),
+                (
+                    "Binding",
+                    ExpressionError::Binding(Box::new(crate::markdown::compose::expression::binding::BindingError::ReservedName {
+                        root: "ctx".into(),
+                    })),
+                    false,
+                ),
+                (
+                    "MalformedLiteralToken",
+                    ExpressionError::MalformedLiteralToken(crate::markdown::literal_token::TokenError::Embedded),
+                    false,
+                ),
+                // `DataError`, every variant.
+                ("Data(FileReference) clean miss", data(DataError::FileReference(miss(None))), true),
+                ("Data(FileReference) malformed", data(DataError::FileReference(with_kind(FileRefFailure::Malformed))), false),
+                ("Data(ContractImport)", data(DataError::ContractImport(miss(None))), false),
+                ("Data(NotAContainer)", data(DataError::NotAContainer { written: "string".into() }), false),
+                (
+                    "Data(RowShapeConflict)",
+                    data(DataError::RowShapeConflict {
+                        written: "{ a: string }[]".into(),
+                        conflict: crate::markdown::compose::expression::data::RowShapeConflict::HeaderlessObjectRows,
+                    }),
+                    false,
+                ),
+                (
+                    "Data(ThisImportRejected)",
+                    data(DataError::ThisImportRejected { written: "Port[]".into(), name: "Port".into() }),
+                    false,
+                ),
+                (
+                    "Data(UnsupportedFormat)",
+                    data(DataError::UnsupportedFormat { identity: identity(), extension: Some("dat".into()) }),
+                    false,
+                ),
+                ("Data(Malformed)", data(malformed()), true),
+                (
+                    "Data(ContractMismatch)",
+                    data(DataError::ContractMismatch {
+                        identity: identity(),
+                        format: biscuit_file::DataFormat::Yaml,
+                        written: "string[]".into(),
+                        failure: simplified_schema::coercion::ConversionError { failures: Vec::new() },
+                        text: Arc::from("[1]"),
+                        table: None,
+                    }),
+                    true,
+                ),
+                ("Data(InvalidOptions)", data(DataError::InvalidOptions { key: "delimiter", reason: "x".into() }), false),
+                (
+                    "Data(ContractSchema)",
+                    data(DataError::ContractSchema {
+                        written: "strng[]".into(),
+                        source: Arc::new(simplified_schema::SchemaError::Convert {
+                            property: "as".into(),
+                            message: "unknown type".into(),
+                        }),
+                    }),
+                    false,
+                ),
+                ("NestedData(Malformed)", ExpressionError::NestedData(Arc::new(malformed())), false),
+                ("RemoteRead transport", remote_read(RemoteReadKind::Transport), true),
+                ("RemoteRead policy", remote_read(RemoteReadKind::Policy), false),
+                ("RemoteRead invalid reference", remote_read(RemoteReadKind::InvalidReference), false),
+                ("RemoteRead infrastructure", remote_read(RemoteReadKind::Infrastructure), false),
+                (
+                    "SchemaFileRead",
+                    ExpressionError::SchemaFileRead {
+                        message: "x".into(),
+                        file: Box::new(FileReferenceDiagnostic { function: "validate_schema", ..miss(None) }),
+                    },
+                    false,
+                ),
+                ("Other", other("round"), false),
+            ]
+        }
+
+        #[test]
+        fn every_variant_is_classified_and_callbacks_delegate() {
+            for (name, error, recoverable) in cases() {
+                assert_eq!(error.is_recoverable_read_failure(), recoverable, "{name}");
+                let wrapped = callback(callback(error));
+                assert_eq!(wrapped.is_recoverable_read_failure(), recoverable, "{name} inside two callbacks");
+            }
+        }
+
+        #[test]
+        fn only_an_io_cause_keeps_a_not_found_miss_recoverable() {
+            use biscuit_file::ContextAnchor;
+            let io = || std::io::Error::new(std::io::ErrorKind::PermissionDenied, "refused");
+            let causes = vec![
+                (FileReferenceError::Io { path: PathBuf::from("/repo/optional.yaml"), source: io() }, true),
+                (FileReferenceError::InvalidSyntax("x".into()), false),
+                (FileReferenceError::UnsupportedScheme { scheme: "ftp".into(), reference: "ftp:x".into() }, false),
+                (FileReferenceError::ForeignAbsolutePath { path: r"C:\x".into() }, false),
+                (FileReferenceError::MissingEnvironmentVariable { name: "HOME".into() }, false),
+                (FileReferenceError::CurrentDirectory(io()), false),
+                (FileReferenceError::BareRepository, false),
+                (FileReferenceError::VaultNotConfigured, false),
+                (FileReferenceError::UnsupportedUserHome("~x".into()), false),
+                (FileReferenceError::MissingHomeContext, false),
+                (FileReferenceError::OutsideRepository { sigil: '@', reference_cwd: PathBuf::from("/x") }, false),
+                (
+                    FileReferenceError::RepositoryEscape {
+                        sigil: '@',
+                        reference: "@/../x".into(),
+                        repository_root: PathBuf::from("/repo"),
+                        escaped_candidate: PathBuf::from("/x"),
+                    },
+                    false,
+                ),
+                (
+                    FileReferenceError::BoundaryEscape {
+                        reference: "../x".into(),
+                        boundary: PathBuf::from("/repo"),
+                        escaped_candidate: PathBuf::from("/x"),
+                    },
+                    false,
+                ),
+                (
+                    FileReferenceError::RepositoryRootNotContainingSource {
+                        repository_root: PathBuf::from("/repo"),
+                        source_path: PathBuf::from("/x"),
+                    },
+                    false,
+                ),
+                (FileReferenceError::CwdOutsideBaseDir { base_dir: PathBuf::from("/repo"), cwd: PathBuf::from("/x") }, false),
+                (FileReferenceError::ResolutionUnavailable { reference: "x".into() }, false),
+                (
+                    FileReferenceError::RelativeContextDirectory { anchor: ContextAnchor::WorkingDirectory, path: PathBuf::from("x") },
+                    false,
+                ),
+                (
+                    FileReferenceError::BaseDirNotRepositoryRoot {
+                        base_dir: PathBuf::from("/a"),
+                        repository_root: PathBuf::from("/repo"),
+                    },
+                    false,
+                ),
+                (
+                    FileReferenceError::RelativeTreeEscape {
+                        base_dir: PathBuf::from("/repo"),
+                        candidate: PathBuf::from("/x"),
+                        reference: "../x".into(),
+                    },
+                    false,
+                ),
+                (FileReferenceError::RelativePath { from: PathBuf::from("/a"), to: PathBuf::from("/b") }, false),
+                (FileReferenceError::RemoteNotLocal("https://x".into()), false),
+                (FileReferenceError::InvalidUrl("x".into()), false),
+            ];
+            for (cause, recoverable) in causes {
+                let name = format!("{cause:?}");
+                let diagnostic = miss(Some(cause));
+                assert_eq!(diagnostic.kind, FileRefFailure::NotFound);
+                assert_eq!(
+                    ExpressionError::FileReference(diagnostic.clone()).is_recoverable_read_failure(),
+                    recoverable,
+                    "{name}"
+                );
+                assert_eq!(data(DataError::FileReference(diagnostic)).is_recoverable_read_failure(), recoverable, "{name}");
+            }
+        }
+
+        #[test]
+        fn a_contract_import_is_not_recovered_where_the_same_source_miss_is() {
+            let source = ExpressionError::from(Arc::new(DataError::FileReference(miss(None))));
+            let import = ExpressionError::from(Arc::new(DataError::ContractImport(miss(None))));
+            assert!(source.is_recoverable_read_failure());
+            assert!(!import.is_recoverable_read_failure());
+            assert_eq!(source.to_string(), import.to_string(), "the two read the same");
+            assert_eq!(source.is_authoring_fatal(), import.is_authoring_fatal());
+            assert_eq!(
+                source.file_reference_diagnostic().map(|d| &d.reference),
+                import.file_reference_diagnostic().map(|d| &d.reference)
+            );
+        }
+
+        #[test]
+        fn a_nested_data_failure_reads_and_grades_like_a_direct_one_but_is_not_recovered() {
+            let direct = data(malformed());
+            let nested = ExpressionError::NestedData(Arc::new(malformed()));
+            assert!(direct.is_recoverable_read_failure());
+            assert!(!nested.is_recoverable_read_failure());
+            assert_eq!(direct.to_string(), nested.to_string());
+            assert!(nested.is_authoring_fatal());
+            assert!(Arc::ptr_eq(callback(nested.clone()).data_failure().unwrap(), nested.data_failure().unwrap()));
+            assert!(direct.data_failure().is_some());
+            assert!(other_has_no_data_failure());
+        }
+
+        fn other_has_no_data_failure() -> bool {
+            ExpressionError::FileReference(miss(None)).data_failure().is_none()
+        }
+
+        #[test]
+        fn the_file_reference_view_covers_sources_and_imports_only() {
+            assert!(callback(ExpressionError::FileReference(miss(None))).file_reference_diagnostic().is_some());
+            assert!(data(DataError::FileReference(miss(None))).file_reference_diagnostic().is_some());
+            assert!(ExpressionError::NestedData(Arc::new(DataError::ContractImport(miss(None)))).file_reference_diagnostic().is_some());
+            assert!(data(malformed()).file_reference_diagnostic().is_none());
+            assert!(remote_read(RemoteReadKind::Transport).file_reference_diagnostic().is_none());
+        }
+
+        #[test]
+        fn remote_read_display_is_unchanged_by_its_kind() {
+            for kind in [
+                RemoteReadKind::Transport,
+                RemoteReadKind::Policy,
+                RemoteReadKind::InvalidReference,
+                RemoteReadKind::Infrastructure,
+            ] {
+                let error = remote_read(kind);
+                assert_eq!(error.to_string(), "load_data(): boom");
+                assert!(!error.is_authoring_fatal());
             }
         }
     }

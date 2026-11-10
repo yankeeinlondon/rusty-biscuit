@@ -9,8 +9,18 @@
 //! actual types travel in the LSP diagnostic's `data` as
 //! `{"expected_type": …, "actual_type": …}`, `null` when unavailable.
 //!
+//! The same entry point ([`call_diagnostics`]) carries Darkmatter's
+//! undeclared-member warnings ([`expression_member_diagnostics`]) for every
+//! branch and callback body of the expression, whatever
+//! `expressions.strict` says; their `data` types are `null`. Lifecycle
+//! stacks ([`stack_call_diagnostics`], [`check_diagnostics`]) get call
+//! findings only, and frontmatter `$( … )` ternary pieces
+//! ([`member_diagnostics`]) member findings only, as in composition.
+//!
 //! Every site's [`TypeScope`] is built over the declaration-only layer
-//! ([`DeclaredTypes::for_schema`]) of the document's effective schema: a
+//! ([`DeclaredTypes::for_schema`]) of the document's effective schema, or of
+//! its document template while the schema's slots are unresolved and no
+//! snapshot is served ([`DeclaredTypes::for_template`]): a
 //! frontmatter value is a runtime value (setters, caller inputs, and
 //! interpolation can replace it), so it never narrows a design-time type.
 //! Guards narrow it through the library alone: body `::block when`
@@ -19,7 +29,7 @@
 
 use darkmatter::markdown::compose::expression::{
     CallCheck, DeclaredTypes, ExpressionDiagnostic, Severity, SpannedExpr, TypeScope, expression_call_diagnostics,
-    incomplete_host_calls,
+    expression_member_diagnostics, incomplete_host_calls,
 };
 use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
@@ -53,17 +63,41 @@ pub(crate) fn lsp_diagnostic(range: Range, source: &str, found: CallDiagnostic) 
     }
 }
 
-/// The declaration-only type layer of every layer of `ctx`'s effective
-/// schema ([`DeclaredTypes::for_schema`]); without one every variable is
-/// `unknown`.
+/// The declaration-only type layer of `ctx`'s served schema: every layer of
+/// the bundle's effective schema (fresh or last-good,
+/// [`DeclaredTypes::for_schema`]), else the document template of a schema
+/// whose slots are unresolved ([`DeclaredTypes::for_template`]); without
+/// either every variable is `unknown`.
 pub(crate) fn declared_types<'a>(ctx: &DocumentContext<'a>) -> DeclaredTypes<'a> {
-    DeclaredTypes::for_schema(ctx.overlay.and_then(|overlay| overlay.bundle()).map(|bundle| &bundle.effective))
+    let Some(overlay) = ctx.overlay else {
+        return DeclaredTypes::for_schema(None);
+    };
+    match overlay.bundle() {
+        Some(bundle) => DeclaredTypes::for_schema(Some(&bundle.effective)),
+        None => DeclaredTypes::for_template(overlay.slots.as_ref().and_then(|slots| slots.template.as_deref())),
+    }
 }
 
 /// Every shown finding of every call in `expr`, in every branch, with each
-/// argument typed at its own site under `site`, including the
-/// incomplete-analysis warnings of [`incomplete_diagnostics`].
-pub(crate) fn call_diagnostics(expr: &SpannedExpr, site: &TypeScope<'_>, strict: bool) -> Vec<CallDiagnostic> {
+/// argument typed at its own site under `site` (including the
+/// incomplete-analysis warnings of [`incomplete_diagnostics`]), then every
+/// undeclared-member warning, which `strict` does not change. `text` is the
+/// text `expr` was parsed from; every span is in it.
+pub(crate) fn call_diagnostics(expr: &SpannedExpr, text: &str, site: &TypeScope<'_>, strict: bool) -> Vec<CallDiagnostic> {
+    let mut found = expression_call_diagnostics(expr, site, strict);
+    found.extend(expression_member_diagnostics(expr, text, site));
+    found
+}
+
+/// The undeclared-member warnings alone, for a frontmatter `$( … )`
+/// ternary piece, which composition member-checks but does not call-check.
+pub(crate) fn member_diagnostics(expr: &SpannedExpr, text: &str, site: &TypeScope<'_>) -> Vec<CallDiagnostic> {
+    expression_member_diagnostics(expr, text, site)
+}
+
+/// The call findings alone, for a lifecycle stack's expression, whose
+/// member reads are not checked.
+pub(crate) fn stack_call_diagnostics(expr: &SpannedExpr, site: &TypeScope<'_>, strict: bool) -> Vec<CallDiagnostic> {
     expression_call_diagnostics(expr, site, strict)
 }
 
@@ -140,6 +174,32 @@ mod tests {
     }
 
     #[test]
+    fn a_scalar_load_data_contract_shows_its_data_code_at_the_as_argument() {
+        let text = "{{ load_data(\"d.yaml\", \"string\") }}\n";
+        let found = diagnostics(text);
+        let errors: Vec<_> = found.iter().filter(|diagnostic| diagnostic.severity == Some(DiagnosticSeverity::ERROR)).collect();
+        let [error] = errors.as_slice() else { panic!("one error: {found:#?}") };
+        assert_eq!(error.code, Some(NumberOrString::String("dm.data.not_a_container".into())), "{error:#?}");
+        let column = text.find("\"string\"").unwrap() as u32;
+        assert_eq!((error.range.start.line, error.range.start.character), (0, column), "{error:#?}");
+    }
+
+    /// The bracket spelling of a scalar union is the same union, so the
+    /// editor shows the same data code at `as`; a list of containers is clean.
+    #[test]
+    fn a_bracketed_scalar_union_contract_shows_its_data_code_at_the_as_argument() {
+        let text = "{{ load_data(\"d.yaml\", \"[string, number]\") }}\n";
+        let found = diagnostics(text);
+        let errors: Vec<_> = found.iter().filter(|diagnostic| diagnostic.severity == Some(DiagnosticSeverity::ERROR)).collect();
+        let [error] = errors.as_slice() else { panic!("one error: {found:#?}") };
+        assert_eq!(error.code, Some(NumberOrString::String("dm.data.not_a_container".into())), "{error:#?}");
+        let column = text.find("\"[string").unwrap() as u32;
+        assert_eq!((error.range.start.line, error.range.start.character), (0, column), "{error:#?}");
+        let clean = diagnostics("{{ load_data(\"d.yaml\", \"['string[]', null]\") }}\n");
+        assert!(clean.iter().all(|diagnostic| diagnostic.severity != Some(DiagnosticSeverity::ERROR)), "{clean:#?}");
+    }
+
+    #[test]
     fn callback_analysis_never_runs_provider_handlers() {
         use darkmatter::markdown::compose::expression::call_binding::FunctionRegistration;
         use darkmatter::markdown::compose::expression::function_test_hooks as hooks;
@@ -184,5 +244,35 @@ mod tests {
             })
             .collect();
         assert_eq!(codes, vec![crate::diagnostics::codes::code::EXPRESSION_INCOMPATIBLE_CALL], "{found:#?}");
+    }
+
+    /// The member check is passive too: a member read inside a `load_data`
+    /// callback beside a test-registered effect is reported without entering
+    /// either handler, so no data file is read.
+    #[test]
+    fn member_diagnostics_never_read_data_or_enter_a_handler() {
+        use darkmatter::markdown::compose::expression::call_binding::FunctionRegistration;
+        use darkmatter::markdown::compose::expression::function_test_hooks as hooks;
+
+        let registration = FunctionRegistration::builder("member_effect", "function(parameters(void); returns(boolean))")
+            .build()
+            .expect("the test signature compiles");
+        let _effect = hooks::register(registration, std::sync::Arc::new(|_| panic!("passive member check executed a provider")));
+        let text = "{{ map(load_data(\"hosts.yaml\", \"{ name: string }[]\"), h => member_effect() ? h.nmae : h.name) }}\n";
+        hooks::reset_handler_entries();
+        let found = diagnostics(text);
+        assert_eq!(hooks::handler_entries("member_effect"), 0);
+        assert_eq!(hooks::handler_entries("load_data"), 0, "no data file is read");
+        let members: Vec<_> = found
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code
+                    == Some(NumberOrString::String(crate::diagnostics::codes::code::EXPRESSION_UNDECLARED_MEMBER.into()))
+            })
+            .collect();
+        let [member] = members.as_slice() else { panic!("one member warning: {found:#?}") };
+        let column = text.find("nmae").unwrap() as u32;
+        assert_eq!((member.range.start.line, member.range.start.character, member.range.end.character), (0, column, column + 4));
+        assert_eq!(member.severity, Some(DiagnosticSeverity::WARNING));
     }
 }

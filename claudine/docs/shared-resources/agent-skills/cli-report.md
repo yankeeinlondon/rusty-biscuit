@@ -1,9 +1,7 @@
 ```sh
 # reports all available skills grouped by scope (user/repo)
-claudine skills list
-# same as `claudine skills list`
 claudine skills
-# reports skills which match the string passed in
+# reports skills whose names contain the string passed in
 claudine skills <filter-string>
 ```
 
@@ -16,10 +14,10 @@ The amount of reporting detail you will be returned depends on how many skills t
 There are times, however, where you want information on a single skill and in those cases you can run:
 
 ```sh
-claudine skills find <name>
+claudine skills <name>!
 ```
 
-It will look for an explicit match on `name` and if found will provide a full report on that skill. If it doesn't find an exact match it will return an error but include any similar skill names as a part of the "did you mean" section of the error.
+A trailing `!` requires an exact match on `name`, so the full report for that one skill is shown. There are no `list` or `find` subcommands: any word after `claudine skills` is a filter, and `-name` or `!name` excludes matching skills. When nothing matches, Claudine prints `No skills matching: …`.
 
 ## Exceptions
 
@@ -29,4 +27,4 @@ In addition to the skills reporting, any invalid skills or skills which are not 
 
 ## CLI Switches
 
-- `--fix` on both the list and find operations will attempt to fix any exceptions which have been listed
+- `--fix` (alias of `--apply`) attempts to fix exceptions before reporting; it fixes every skill, since a filter narrows only the report

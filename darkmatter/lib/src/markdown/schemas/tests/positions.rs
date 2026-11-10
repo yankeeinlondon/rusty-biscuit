@@ -209,7 +209,7 @@ fn replaced_and_new_paths_use_the_original_source() {
 }
 
 #[test]
-fn unsupported_yaml_keeps_validity_and_top_level_positions() {
+fn an_alias_keeps_validity_and_nested_positions() {
     let api = api("base: \"{ x: number }\"\nother: \"{ x: number }\"\nn: number\n");
     let valid = doc("---\nbase: &b\n  x: 1\nother: *b\n---\n");
     assert!(validate(&api, &valid).valid);
@@ -217,7 +217,13 @@ fn unsupported_yaml_keeps_validity_and_top_level_positions() {
     let invalid = doc("---\nbase: &b\n  x: 1\nother: *b\nn:   oops\n---\n");
     let report = validate(&api, &invalid);
     assert_eq!(report.problems.len(), 1, "{:#?}", report.problems);
-    assert_eq!(position(problem(&report, "/n")), (Some(5), Some(1)));
+    assert_eq!(position(problem(&report, "/n")), (Some(5), Some(6)));
+
+    let through_alias = doc("---\nbase: &b\n  x: oops\nother: *b\n---\n");
+    let report = validate(&api, &through_alias);
+    assert_eq!(report.problems.len(), 2, "{:#?}", report.problems);
+    assert_eq!(position(problem(&report, "/base/x")), (Some(3), Some(6)));
+    assert_eq!(position(problem(&report, "/other/x")), (Some(4), Some(8)));
 }
 
 /// A constructed document is located in its serialized view.

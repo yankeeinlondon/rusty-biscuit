@@ -96,3 +96,9 @@ Update the spec file's ({{spec}}) Frontmatter (keep any other properties that we
 - set the spec file's `reviewed_by` Frontmatter property to "{{ctx.agent}}/{{ctx.model}}"
 - set the spec file's `reviewed_on` Frontmatter property to "{{ctx.today}}"
 - set the spec file's `review_iterations` to `0`
+- set the spec file's `status` Frontmatter property, but only when it is missing or currently `draft-spec` (a spec that is already further along, `on-hold`, or `abandoned` keeps its status):
+    - if your review left one or more items in the spec's "Open Questions" section that need an author ruling, set `status` to `human-in-the-loop`
+    - otherwise set `status` to `finalized-spec`
+- set the spec file's `needs_rulings` Frontmatter property to `true` when open questions remain and `false` otherwise
+    - when `true`, also set `required_rulings` to a list naming each ruling still required (one short line per open question)
+    - when `false`, remove any existing `required_rulings` property

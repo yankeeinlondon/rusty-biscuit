@@ -22,6 +22,10 @@
 //!   subtraction (`foo--bar`) with a reference to the key.
 //! - **rewrite with `+` concatenation** — from a nested-span-in-literal
 //!   diagnostic; applies the rewrite carried in its typed `data` payload.
+//! - **grant a schema slot's read** — from an approval-required slot
+//!   diagnostic; one action per grant its `data.choices` lists, each running
+//!   the `dmls.grantSlotRead` command (no edit: a grant is written to the
+//!   user's grant store or kept in memory, never into the workspace).
 
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, Diagnostic, NumberOrString, Position, Range,
@@ -60,6 +64,10 @@ pub fn code_actions(ctx: &DocumentContext, diagnostics: &[Diagnostic]) -> Vec<Co
         let Some(code_value) = string_code(diag) else {
             continue;
         };
+        if code_value == darkmatter::markdown::schemas::slots::codes::SLOT_APPROVAL_REQUIRED_CODE {
+            out.extend(grant_slot_read_actions(diag).into_iter().map(CodeActionOrCommand::CodeAction));
+            continue;
+        }
         let action = match code_value {
             code::BROKEN_PATH if enabled(ctx.config, category::CREATE_FILE) => {
                 create_missing_markdown_file(ctx, diag)
@@ -103,6 +111,36 @@ pub fn code_actions(ctx: &DocumentContext, diagnostics: &[Diagnostic]) -> Vec<Co
         }
     }
     out
+}
+
+/// One quick fix per grant an approval-required slot diagnostic offers.
+fn grant_slot_read_actions(diag: &Diagnostic) -> Vec<CodeAction> {
+    use crate::diagnostics::slots::{GRANT_SLOT_READ_COMMAND, SlotDiagnosticData};
+    let Some(data) = diag
+        .data
+        .clone()
+        .and_then(|data| serde_json::from_value::<SlotDiagnosticData>(data).ok())
+    else {
+        return Vec::new();
+    };
+    data.choices
+        .into_iter()
+        .filter_map(|choice| {
+            let title = choice.title();
+            let argument = serde_json::to_value(&choice).ok()?;
+            Some(CodeAction {
+                title: title.clone(),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![diag.clone()]),
+                command: Some(lsp_types::Command {
+                    title,
+                    command: GRANT_SLOT_READ_COMMAND.to_string(),
+                    arguments: Some(vec![argument]),
+                }),
+                ..CodeAction::default()
+            })
+        })
+        .collect()
 }
 
 /// Whether a code-action category is enabled (categories are on unless a config
@@ -235,10 +273,14 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
     // correct-by-construction value (YAML-quoted where required) instead of an
     // empty scaffold.
     let shape = crate::providers::frontmatter::known_shape(ctx);
+    let mut scaffolded = false;
     let new_text: String = keys
         .iter()
         .map(|key| match literal_scaffold(shape, key, crate::providers::frontmatter::definitions(ctx)) {
-            Some(value) => format!("\n{key}: {value}"),
+            Some(value) => {
+                scaffolded = true;
+                format!("\n{key}: {value}")
+            }
             None => format!("\n{key}: "),
         })
         .collect();
@@ -247,11 +289,16 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
         .filter(|diag| string_code(diag) == Some(code::SCHEMA_MISSING_REQUIRED))
         .cloned()
         .collect();
-    let title = if keys.len() == 1 {
+    let mut title = if keys.len() == 1 {
         format!("Add required key `{}`", keys[0])
     } else {
         format!("Add {} required keys", keys.len())
     };
+    // A scaffolded literal may be a slot's value, so a fix built while the
+    // slots are not current says so.
+    if scaffolded && let Some(note) = crate::providers::frontmatter::slot_note(ctx) {
+        title.push_str(&format!(" ({note})"));
+    }
     let mut builder = EditBuilder::new();
     builder.edit(
         ctx.uri.clone(),

@@ -36,6 +36,7 @@ mod protocol_fixture_replay;
 mod semantic_fidelity;
 mod sequence_schema;
 mod single_loop_engine;
+mod status_report_caller_files;
 mod test_layout;
 mod tts_phase1_contract;
 mod tts_phase5_contract;

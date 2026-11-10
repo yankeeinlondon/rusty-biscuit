@@ -596,7 +596,10 @@ template the schema did not accept as `deferred` (`ValidationReport::deferred`),
 and the problem is not an unknown or missing key on a collection. A literal
 mistake beside a template therefore fails launch, and so does a malformed
 template (`expression::is_malformed_template`), which no rendering can
-settle. Claudine's `action.yaml` categories, bundles, and `loop` keys select
+settle. A file verdict on a string inside an object a caller supplied
+(`schema::is_nested_caller_file_verdict`) is left to composition too, and never
+drops that object: this validator judges from the document's folder, and only
+composition's projection judges it from the caller's. Claudine's `action.yaml` categories, bundles, and `loop` keys select
 Darkmatter's generated per-verb forms (`<verb>-short`/`-long@darkmatter:lifecycle`;
 a bundle of several verbs, and `loop-bundle`, short only; a category, and
 `loop-single`, short or long). A category is a single-action dictionary

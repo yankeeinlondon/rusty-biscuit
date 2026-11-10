@@ -699,15 +699,18 @@ mod shared_fields {
                 other => panic!("unexpected severity {other}"),
             },
             message: diagnostic["message"].as_str().unwrap().to_string(),
-            source: Some(DiagnosticSource {
-                file: Some(file.to_path_buf()),
-                line: start["line"].as_u64().unwrap() as usize + 1,
-                column: start["character"].as_u64().unwrap() as usize + 1,
-            }),
+            source: Some(DiagnosticSource::at(
+                Some(file.to_path_buf()),
+                start["line"].as_u64().unwrap() as usize + 1,
+                start["character"].as_u64().unwrap() as usize + 1,
+            )),
             expected_type: diagnostic["data"]["expected_type"].as_str().map(str::to_string),
             actual_type: diagnostic["data"]["actual_type"].as_str().map(str::to_string),
             span: None,
             iteration_path: Default::default(),
+            reference_details: None,
+            data_location: None,
+            grants_needed: None,
         }
     }
 
@@ -747,7 +750,7 @@ mod shared_fields {
                 .expect_err("a category 5 call rejects the document");
             let composed = error.call_diagnostic().unwrap_or_else(|| panic!("{label}: no call diagnostic: {error}"));
             assert_eq!(editor, vec![composed.clone()], "{label}");
-            // `md compose --output report-json` writes these records.
+            // `md compose --output json` writes these records.
             assert_eq!(error_diagnostics(&error), editor, "{label}: the report's records");
             assert_eq!(composed.severity, Severity::Error, "{label}");
             assert_eq!(composed.expected_type.as_deref(), Some("number"), "{label}");
@@ -777,7 +780,7 @@ mod shared_fields {
             assert_eq!(error_diagnostics(&error), editor, "{label}: the report's records");
             let [record] = editor.as_slice() else { panic!("{label}: one record: {editor:#?}") };
             assert_eq!(record.code, INCOMPATIBLE, "{label}");
-            assert_eq!(record.source.as_ref().map(|source| source.line), Some(4), "{label}");
+            assert_eq!(record.source.as_ref().and_then(|source| source.line), Some(4), "{label}");
             assert_eq!(record.expected_type.as_deref(), Some("number"), "{label}");
             assert_eq!(record.actual_type.as_deref(), Some("literal true"), "{label}");
         }
@@ -824,7 +827,7 @@ mod shared_fields {
                 assert_eq!(record.severity, Severity::Error);
                 assert_eq!(
                     record.source,
-                    Some(DiagnosticSource { file: Some(workspace.path().join("doc.md")), line: $line, column: $column })
+                    Some(DiagnosticSource::at(Some(workspace.path().join("doc.md")), $line, $column))
                 );
                 assert_eq!(record.expected_type.as_deref(), Some("number"));
                 assert_eq!(record.actual_type.as_deref(), Some("literal true"));
@@ -882,5 +885,81 @@ mod shared_fields {
         let reported: Vec<Diagnostic> = report.warnings.iter().filter(|warning| warning.diagnostic.is_some()).map(warning_diagnostic).collect();
         assert_eq!(reported, editor, "the report's records");
         assert!(composed.iter().all(|diagnostic| diagnostic.severity == Severity::Warning && diagnostic.code == UNCERTAIN));
+    }
+}
+
+/// `try(expr, fallback)` is an ordinary two-parameter call to the passive
+/// check: a wrong argument count or a callback where a value is expected is a
+/// proven error, and a call the catalog lacks is diagnosed inside the
+/// fallback exactly as anywhere else.
+mod try_calls {
+    use super::*;
+
+    /// `(code, start character)` of every error on `line`.
+    fn errors_on(diagnostics: &[Value], line: u64) -> Vec<(String, u64)> {
+        let mut found: Vec<(String, u64)> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["severity"] == json!(ERROR) && diagnostic["range"]["start"]["line"] == json!(line))
+            .map(|diagnostic| {
+                (
+                    diagnostic["code"].as_str().unwrap_or_default().to_string(),
+                    diagnostic["range"]["start"]["character"].as_u64().unwrap(),
+                )
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    fn open_body(body: &str) -> (Vec<Value>, String) {
+        let text = format!("---\ntitle: T\n---\n\n{body}");
+        let workspace = LspWorkspace::new();
+        let mut session = Session::open(&workspace, &text);
+        let diagnostics = session.diagnostics();
+        session.shutdown();
+        (diagnostics, text)
+    }
+
+    fn line_of(text: &str, needle: &str) -> u64 {
+        let offset = text.find(needle).unwrap_or_else(|| panic!("no `{needle}`"));
+        text[..offset].matches('\n').count() as u64
+    }
+
+    #[test]
+    fn try_wrong_arity_is_diagnosed() {
+        let (diagnostics, text) = open_body("a {{ try(1) }}\nb {{ try(1, 2, 3) }}\nc {{ try(1, 2) }}\n");
+        for row in ["a {{", "b {{"] {
+            let line = line_of(&text, row);
+            let codes: Vec<String> = errors_on(&diagnostics, line).into_iter().map(|(code, _)| code).collect();
+            assert_eq!(codes, [INCOMPATIBLE], "{row}: {diagnostics:#?}");
+        }
+        assert!(errors_on(&diagnostics, line_of(&text, "c {{")).is_empty(), "two arguments are fine: {diagnostics:#?}");
+    }
+
+    #[test]
+    fn try_callback_syntax_is_diagnosed() {
+        let (diagnostics, text) = open_body("a {{ try(x => x, 1) }}\nb {{ try(1, x => x) }}\nc {{ try(1, 2) }}\n");
+        // Each error starts at the callback itself.
+        for (row, column) in [("a {{", 9), ("b {{", 12)] {
+            assert_eq!(
+                errors_on(&diagnostics, line_of(&text, row)),
+                [("dm.expression.invalid_callback".to_string(), column)],
+                "{row}: {diagnostics:#?}"
+            );
+        }
+        assert!(errors_on(&diagnostics, line_of(&text, "c {{")).is_empty(), "{diagnostics:#?}");
+    }
+
+    #[test]
+    fn unknown_function_in_try_fallback_is_diagnosed() {
+        let (diagnostics, text) = open_body("a {{ try(1, mystery_fallback(2)) }}\nb {{ try(1, length(\"x\")) }}\n");
+        let line = line_of(&text, "a {{");
+        let column = (text.find("mystery_fallback").unwrap() - text.find("a {{").unwrap()) as u64;
+        assert_eq!(
+            errors_on(&diagnostics, line),
+            [("dm.expression.unknown_function".to_string(), column)],
+            "{diagnostics:#?}"
+        );
+        assert!(errors_on(&diagnostics, line_of(&text, "b {{")).is_empty(), "{diagnostics:#?}");
     }
 }

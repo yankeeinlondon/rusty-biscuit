@@ -465,8 +465,9 @@ fn a_definition_that_fails_to_import_reserves_its_inline_claim() {
     assert!(matches!(registry.claim("roster"), Some(Claim::Reserved { file, .. }) if *file == broken));
     let (kind, cause) = selection_cause(fixture.validate(&document, ROSTER_DOCUMENT));
     assert_eq!(kind, "roster");
-    let KindSelectionCause::Reserved { file, defect } = cause else { panic!("reserved: {cause:?}") };
+    let KindSelectionCause::Reserved { file, defect, code } = cause else { panic!("reserved: {cause:?}") };
     assert_eq!(file, broken);
+    assert_eq!(code, None, "only a slot defect carries a code");
     assert!(defect.contains("absent.yaml"), "{defect}");
 
     // Other documents are unaffected: a shipped kind, and no kind.
@@ -478,6 +479,50 @@ fn a_definition_that_fails_to_import_reserves_its_inline_claim() {
     let own = validated(fixture.validate(&broken, &std::fs::read_to_string(&broken).unwrap()));
     assert_eq!(own.report.problems.len(), 1, "{:?}", own.report.problems);
     assert_eq!(own.report.problems[0].code, ValidationProblemCode::KindCheck);
+}
+
+/// A kind definition never holds `{{ … }}` slots: its claim is broken with
+/// the slot code, whether the slot is written in it or reached through an
+/// import, and the same definition without the slot is healthy.
+#[test]
+fn a_kind_definition_holding_a_slot_is_a_broken_claim_with_the_slot_code() {
+    use darkmatter::markdown::schemas::slots::codes::{SLOT_NOT_ALLOWED_IN_KIND_CODE, slot_prohibition_code};
+    let slotted = "    platform:\n        name: enum({{ load_data(\"./names.yaml\") }}; required)\n";
+    let inline = ROSTER_DEFINITION.replace("    platform:\n        name: string(required)\n", slotted);
+    let imported = ROSTER_DEFINITION.replace("    platform:\n        name: string(required)\n", "    platform: platform@./types.yaml\n");
+    assert_ne!(inline, ROSTER_DEFINITION);
+    assert_ne!(imported, ROSTER_DEFINITION);
+    let types = format!("kind: schema\ntypes:\n{slotted}");
+    for (case, text) in [("control", ROSTER_DEFINITION.to_string()), ("inline", inline), ("import", imported)] {
+        let fixture = Fixture::new();
+        let document = fixture.package().join("roster.yaml");
+        let definition = fixture.repo().join("schemas/roster.yaml");
+        write(&definition, &text);
+        write(&fixture.repo().join("schemas/types.yaml"), &types);
+        write(&fixture.repo().join("schemas/names.yaml"), "- slack\n");
+        let result = fixture.validate(&document, ROSTER_DOCUMENT);
+        if case == "control" {
+            assert!(validated(result).report.valid, "{case}");
+            continue;
+        }
+        let error = result.expect_err(case);
+        assert_eq!(slot_prohibition_code(&error), Some(SLOT_NOT_ALLOWED_IN_KIND_CODE), "{case}: {error}");
+        let (kind, cause) = selection_cause(Err(error));
+        assert_eq!(kind, "roster", "{case}");
+        let KindSelectionCause::Reserved { file, defect, code } = cause else { panic!("{case}: reserved: {cause:?}") };
+        assert_eq!(file, definition, "{case}");
+        assert_eq!(code, Some(SLOT_NOT_ALLOWED_IN_KIND_CODE), "{case}");
+        assert!(defect.contains("a kind definition cannot hold `{{ … }}` slots"), "{case}: {defect}");
+        assert!(defect.contains("load_data"), "{case}: {defect}");
+        // Nothing the slot names was read: the slot was never evaluated.
+        // Other documents are unaffected.
+        assert!(matches!(fixture.validate(&fixture.package().join("n.yaml"), "a: 1\n"), Ok(YamlOutcome::NoSchema)));
+        // The definition's own check names the prohibition.
+        let own = validated(fixture.validate(&definition, &text));
+        assert_eq!(own.report.problems.len(), 1, "{case}: {:?}", own.report.problems);
+        assert_eq!(own.report.problems[0].code, ValidationProblemCode::KindCheck, "{case}");
+        assert!(own.report.problems[0].message.contains("a kind definition cannot hold"), "{case}: {:?}", own.report.problems);
+    }
 }
 
 #[test]

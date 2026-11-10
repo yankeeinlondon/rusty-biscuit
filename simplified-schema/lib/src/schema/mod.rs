@@ -42,6 +42,9 @@ use serde_json::Value;
 
 use crate::outcome::{ValidationFailure, ValidationSuccess};
 use crate::prepared::Prepared;
+use crate::resolve::buffers;
+use crate::simplified::Slot;
+use crate::slots::{self, Attempt, SlotHost, SlotResolutionError};
 use crate::{SchemaAdvisory, SchemaError};
 
 pub use error::SimplifiedSchemaError;
@@ -87,6 +90,16 @@ struct Definition {
     /// The merged lowered JSON Schema of a layered definition. `None` for a
     /// single layer, whose own lowering is the schema.
     merged: Option<Arc<Value>>,
+    /// The unresolved `{{ … }}` slots of every layer, highest precedence
+    /// first; empty for a concrete schema.
+    pending: Vec<Slot>,
+}
+
+impl Definition {
+    fn new(layers: Vec<Arc<Layer>>, receiver: usize, merged: Option<Arc<Value>>) -> Self {
+        let pending = layers.iter().flat_map(|layer| layer.pending_slots()).collect();
+        Self { layers, receiver, merged, pending }
+    }
 }
 
 /// A preparation outcome, kept so a schema that cannot be prepared reports
@@ -140,14 +153,123 @@ impl TryFrom<&str> for SimplifiedSchema {
 impl SimplifiedSchema {
     fn from_layer(layer: Layer) -> Self {
         Self {
-            definition: Arc::new(Definition {
-                layers: vec![Arc::new(layer)],
-                receiver: 0,
-                merged: None,
-            }),
+            definition: Arc::new(Definition::new(vec![Arc::new(layer)], 0, None)),
             revision: 0,
             prepared: Mutex::new(None),
         }
+    }
+
+    /// Whether the schema is concrete: no layer holds an unresolved
+    /// `{{ … }}` slot. A template is inspected and exported as authored;
+    /// lowering, validation, and layering report it unresolved.
+    ///
+    /// ```
+    /// use simplified_schema::SimplifiedSchema;
+    ///
+    /// let template = SimplifiedSchema::try_from("$schema:\n  os: enum(none, {{ load_data('./os.yaml') }})\n")?;
+    /// assert!(!template.is_resolved());
+    /// assert_eq!(template.pending_slots()[0].expression, "load_data('./os.yaml')");
+    /// # Ok::<(), simplified_schema::SimplifiedSchemaError>(())
+    /// ```
+    pub fn is_resolved(&self) -> bool {
+        self.definition.pending.is_empty()
+    }
+
+    /// The unresolved `{{ … }}` slots of every layer in declaration order,
+    /// each once; empty for a concrete schema. Listing them evaluates and
+    /// reads nothing.
+    pub fn pending_slots(&self) -> &[Slot] {
+        &self.definition.pending
+    }
+
+    /// Resolves the template's slots through `host` and returns a new,
+    /// concrete schema: the same construction run again with the slots'
+    /// values substituted right after import expansion, reading the schema
+    /// texts the first build read. The template is never changed, so each
+    /// call starts from it; a concrete schema returns a clone of itself.
+    ///
+    /// Slots are admitted, then evaluated, in the context of the schema's
+    /// binding (none for content), each in its defining file
+    /// ([`Slot::origin`]).
+    ///
+    /// ```
+    /// use serde_json::{Value, json};
+    /// use simplified_schema::{SimplifiedSchema, Slot};
+    /// use simplified_schema::slots::{
+    ///     RefuseTemplateReads, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, TemplateReads,
+    /// };
+    ///
+    /// struct Fixed;
+    /// impl SlotHost for Fixed {
+    ///     fn admit(&self, _: &Slot) -> Result<(), SlotAdmissionError> { Ok(()) }
+    ///     fn resolve(&self, _: &SlotRequest<'_>) -> Result<Value, SlotFailure> { Ok(json!(["macOS", "Linux"])) }
+    ///     fn template_reads(&self) -> std::rc::Rc<dyn TemplateReads> { std::rc::Rc::new(RefuseTemplateReads) }
+    /// }
+    ///
+    /// let template = SimplifiedSchema::try_from("$schema:\n  os: enum(none, {{ os_list }})\n")?;
+    /// let concrete = template.resolve_slots(&Fixed)?;
+    /// assert!(concrete.validate_strict(&json!({ "os": "Linux" })).is_ok());
+    /// assert!(!template.is_resolved(), "the template is unchanged");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// [`SlotResolutionError`]: refused slots, failed evaluations, a value
+    /// that cannot fill its position ([`SchemaError::SlotResult`]), or
+    /// cancellation. Nothing is published.
+    pub fn resolve_slots(&self, host: &dyn SlotHost) -> Result<Self, SlotResolutionError> {
+        if self.is_resolved() {
+            return Ok(self.clone());
+        }
+        let layer = self.top();
+        // Layering refuses a template, so a template has one layer.
+        let rebuild = match (&layer.rebuild, self.definition.layers.len()) {
+            (Some(rebuild), 1) => rebuild.clone(),
+            _ => {
+                return Err(SlotResolutionError::Schema(Box::new(SchemaError::UnresolvedSlots(Box::new(
+                    crate::UnresolvedSlots::new(self.pending_slots().to_vec()),
+                )))));
+            }
+        };
+        let context = layer.binding.as_ref().map_or_else(layer::content_context, |binding| binding.context.clone());
+        let source_name = layer.provenance.path.clone().unwrap_or_else(|| std::path::PathBuf::from(layer::CONTENT));
+        let reads = host.template_reads();
+        let resolved = slots::resolve_with(host, &context, self.pending_slots().to_vec(), |values| {
+            let (rebuilt, refusal) = slots::with_template_reads(std::rc::Rc::clone(&reads), || {
+                buffers::with(&rebuild.buffers, || {
+                    buffers::with_reads_retained(|| slots::with_values(values, || (rebuild.build)()))
+                })
+            });
+            if let Some(refused) = refusal {
+                return Attempt::Refused(vec![refused]);
+            }
+            let layer = match rebuilt {
+                Ok(layer) => layer,
+                Err(SimplifiedSchemaError::Schema(error)) => return Attempt::Failed(error),
+                // The text built once already; only its schema can fail.
+                Err(other) => {
+                    return Attempt::Failed(SchemaError::SchemaDocument {
+                        path: source_name.clone(),
+                        message: other.to_string(),
+                        source: None,
+                        span: None,
+                    });
+                }
+            };
+            let outcome = match layer.lowered.as_ref().err().map(Arc::as_ref) {
+                Some(SchemaError::UnresolvedSlots(unresolved)) => Some(Attempt::Unresolved(unresolved.slots.clone())),
+                Some(SchemaError::SlotResult { slot, kind, property, related }) => Some(Attempt::Failed(SchemaError::SlotResult {
+                    slot: slot.clone(),
+                    kind: kind.clone(),
+                    property: property.clone(),
+                    related: related.clone(),
+                })),
+                _ => None,
+            };
+            outcome.unwrap_or(Attempt::Done(layer))
+        })?;
+        Ok(Self::from_layer(resolved))
     }
 
     /// The definition revision: `0` when built, bumped by each layering call
@@ -200,7 +322,9 @@ impl SimplifiedSchema {
     /// ## Errors
     ///
     /// [`ValidationFailure`] with every problem found, or
-    /// [`ValidationFailure::Unprepared`] when the schema cannot be prepared.
+    /// [`ValidationFailure::Unprepared`] when the schema cannot be prepared;
+    /// for an unresolved template its error is
+    /// [`SchemaError::UnresolvedSlots`] and nothing is judged.
     pub fn validate_strict<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
         self.with_prepared(|prepared| prepared.validate_strict(value))
     }

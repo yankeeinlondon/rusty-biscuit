@@ -105,6 +105,7 @@ const APPLICATION_INPUTS: &[&str] = &[
     "HASH_IGNORE_PROPERTIES",
     "BASELINE_SCHEMA",
     "SCHEMAS_DIR",
+    "OUTPUT_COLUMNS",
 ];
 
 const APPLICATION_PREFIXES: &[&str] = &["DARKMATTER_", "DM_", "MD_"];

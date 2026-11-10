@@ -5,7 +5,7 @@
 //! object.
 //!
 //! Each test copies the artifacts into an isolated fixture directory, validates
-//! every document in one `md` run, and matches the NDJSON records back to their
+//! every document in one `md` run, and matches the JSON file records back to their
 //! documents by file name. Validation is passive, so a second run must report
 //! the same records and leave every document byte for byte unchanged.
 
@@ -89,12 +89,12 @@ fn write_cases(dir: &Path, cases: &[Case]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// One `md schema validate --format json` run over `documents`, keyed by the
+/// One `md schema validate --output json` run over `documents`, keyed by the
 /// record's `file`.
 fn validate(process: &CliProcessFixture, extra: &[&str], documents: &[PathBuf]) -> BTreeMap<String, Value> {
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .args(extra)
         .args(documents)
         .output()
@@ -103,10 +103,9 @@ fn validate(process: &CliProcessFixture, extra: &[&str], documents: &[PathBuf]) 
         matches!(output.status.code(), Some(0 | 1)),
         "md schema validate must validate, not fail to load: {output:?}"
     );
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|line| {
-            let record: Value = serde_json::from_str(line).expect("NDJSON record");
+    common::schema_validate_records(&output.stdout)
+        .into_iter()
+        .map(|record| {
             let file = record["file"].as_str().expect("file").replace('\\', "/");
             let name = file.rsplit('/').next().expect("file name").to_string();
             (name, record)

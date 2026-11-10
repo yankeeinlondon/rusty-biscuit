@@ -159,12 +159,12 @@ fn a_typed_failure_reports_location_and_iteration_path() {
 
 /// The report carries the terminal's code, file, line, column, and path.
 #[test]
-fn report_json_agrees_with_the_terminal_on_the_failure() {
+fn json_output_agrees_with_the_terminal_on_the_failure() {
     let recorder = Recorder::new("collection_blocks_report_parity");
     let document = recorder.document(FAILING_MAP);
 
     let terminal = stderr_of(&recorder.compose(&[]));
-    let output = recorder.compose(&["--output", "report-json"]);
+    let output = recorder.compose(&["--output", "json"]);
 
     let stdout = stdout_of(&output);
     let mut stream = serde_json::Deserializer::from_str(&stdout).into_iter::<Value>();
@@ -193,7 +193,7 @@ fn report_json_agrees_with_the_terminal_on_the_failure() {
     assert!(document.exists());
 }
 
-/// `md compose --output report-json` prints, for a failure inside a repeated
+/// `md compose --output json` prints, for a failure inside a repeated
 /// body, the provenance the library's record carries: the authored file,
 /// line, span, and original item path. The library owns it; the CLI only
 /// collects it.
@@ -209,7 +209,7 @@ macro_rules! report_parity {
             let document = recorder.document(&strings_document("[./ok.md, ./missing.md]", &body));
             let args: &[&str] = $args;
 
-            let output = recorder.compose(&[&["--output", "report-json"], args].concat());
+            let output = recorder.compose(&[&["--output", "json"], args].concat());
             let stdout = stdout_of(&output);
             let report: Value = serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: {stdout}"));
             assert_eq!(output.status.code(), Some(1), "{report:#}");
@@ -279,7 +279,7 @@ fn report_locates_a_later_shell_block_command_in_each_kind() {
         );
         let document = recorder.document(&document_text);
 
-        let output = recorder.compose(&["--output", "report-json"]);
+        let output = recorder.compose(&["--output", "json"]);
         let stdout = stdout_of(&output);
         let report: Value = serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: {stdout}"));
         assert_eq!(output.status.code(), Some(1), "{opener}: {report:#}");

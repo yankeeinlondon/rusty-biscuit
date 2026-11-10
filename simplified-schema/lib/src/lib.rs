@@ -16,7 +16,7 @@
 //!   ([`claimed_values`]);
 //! - [`coercion`] and [`coerce`]: the conversion engine and frontmatter
 //!   conversion against a JSON Schema;
-//! - [`validate`], [`format`], [`file_match`]: compiled validators, the
+//! - [`validate`], [`format`](mod@format), [`file_match`]: compiled validators, the
 //!   `darkmatter-*` formats, and `x-darkmatter-*` keywords;
 //! - [`prepared`] and [`outcome`]: a schema compiled once ([`Prepared`]) and
 //!   its strict and soft validation, which return
@@ -24,6 +24,9 @@
 //! - [`schema`]: the [`SimplifiedSchema`] object, which builds from content
 //!   or a file, validates strictly or softly without a compile step, layers,
 //!   answers type queries, and exports;
+//! - [`property_path`]: the dotted path grammar, its typed walk over a value,
+//!   and the pure edits at a path;
+//! - [`setter_value`]: the shared reader for a value written on a command line;
 //! - [`SchemaError`], in [`errors`].
 //!
 //! A host (Darkmatter) keeps its own policy — baseline selection, schema
@@ -54,11 +57,14 @@ pub mod pending;
 pub mod phase;
 pub mod positions;
 pub mod prepared;
+pub mod property_path;
 pub mod reference;
 pub mod resolve;
 pub mod schema;
 pub mod scope;
+pub mod setter_value;
 pub mod simplified;
+pub mod slots;
 pub mod span;
 pub mod timings;
 pub mod validate;
@@ -80,7 +86,9 @@ pub(crate) use note_work;
 pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
 pub use claims::{ClaimCause, ClaimProblem, claimed_values};
 pub use discriminant::select_literal_discriminant_arm;
-pub use errors::{CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError};
+pub use errors::{
+    CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError, SlotRelated, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,
+};
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, expression_atom, frontmatter_expression_values,
     frontmatter_expression_values_with_definitions, layered_property_shape, nested_property_shape,
@@ -92,7 +100,11 @@ pub use origin::{SchemaOrigin, SchemaOriginKind, SchemaOriginMap};
 pub use outcome::{ValidationFailure, ValidationSuccess};
 pub use phase::SchemaPhase;
 pub use prepared::Prepared;
+pub use property_path::{
+    PathEditError, PropertyPath, PropertyPathError, RemovalPlan, ResolveStop, Resolved, remove_at, set_at,
+};
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
+pub use setter_value::{SetterValue, SetterValueError};
 pub use schema::{
     FunctionView, PathSyntaxError, SchemaProvenance, SimplifiedSchema, SimplifiedSchemaError, TypeDefinition,
 };
@@ -102,8 +114,9 @@ pub use schema::{SchemaSource, repository_scope_catalog};
 pub use simplified::alias_search_work;
 pub use simplified::{
     Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar,
+    DynamicElement, DynamicKind, DynamicList, Slot, TemplateConstraintKind,
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, LocatedDefinitionFailure, LocatedRelated,
-    PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,
+    PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,
     SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
     SchemaReferenceSite, SchemaRoot, SchemaShape, SchemaSourceId, SchemaSourceMap, SchemaSourcePath,
     SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection, SchemaValueEntry, SchemaValueKind,
@@ -116,6 +129,7 @@ pub use simplified::{
     locate_schema_declaration_cursor_in_scalar, locate_schema_value, locate_standalone_definition_failure,
     locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, mapping_separator,
     parse_property_definition, parse_property_definition_with_source, parse_schema_declaration,
+    parse_type_definition_value,
     parse_schema_declaration_with_source, parse_selected_standalone_schema_document, parse_standalone_schema_document,
     parse_yaml_schema,
     suggestions_for_def, suggestions_for_path, to_json_schema, to_json_schema_with_definitions,

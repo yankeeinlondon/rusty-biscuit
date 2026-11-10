@@ -60,6 +60,38 @@ and `walkdir`.
 The default feature set includes URL classification through `file-reference-syntax`,
 but it does not compile the HTTP client stack unless `fetch` is enabled.
 
+## Delimited Text
+
+- `csv` (1.3) and `csv-core` (0.1.13) are optional and gated behind the
+  off-by-default `delimited` feature (included in `full`); a build without it
+  does not depend on either. They serve only `biscuit_file::delimited`.
+  - `csv` decodes each record's cells (quotes removed, doubled quotes
+    collapsed).
+  - `csv-core` runs a second, synchronized pass. Each `read_field` call reports
+    how many source bytes it consumed, and a running total gives each field's
+    raw start in the source text. The `csv` crate cannot supply that: its field
+    ranges index the unescaped record buffer, so after a doubled quote they no
+    longer match the source (in `a,"x""y,z",q` the third field starts at byte
+    11 of the source, not where the buffer puts it).
+  - Both crates accept malformed quoting rather than fail, so the reader checks
+    each raw field itself (see the `delimited` rules in
+    [Data Readers](./topics/data-readers.md)).
+
+  Both were already in the workspace lockfile; darkmatter's library enables the
+  feature.
+
+## Data Locators
+
+- `serde_json` is built with its `raw_value` feature. `locate_json` and
+  `locate_jsonl` (`biscuit_file::data_locations`) walk a pointer by
+  deserializing each container on the path as `&RawValue`, whose address in
+  the source text is the value's byte offset. The crate enables the feature
+  itself rather than relying on another workspace member (Darkmatter also
+  enables it) to unify it in.
+- `locate_toml` uses the `toml` crate's `DeTable::parse` spans and
+  `locate_json5` uses `json-five`'s token spans; both crates were already
+  dependencies, behind the `toml` and `json5` features.
+
 ## Development Only
 
 - `test-toolkit` is a development dependency for the `test_layout` gate in the

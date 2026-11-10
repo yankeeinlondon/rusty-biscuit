@@ -27,6 +27,12 @@ use crate::utils::color::TermColor;
 use crate::utils::layout::{Layout, LayoutTerminalExt};
 
 use self::color::{parse_basic_color, parse_hex_color};
+/// The horizontal rule of a plain render.
+pub(crate) const PLAIN_RULE: &str = "---";
+
+/// The glyph count of a styled horizontal rule under an unbounded width.
+const UNBOUNDED_RULE_GLYPHS: u32 = 3;
+
 use renderable::tree::{
     HrAlignment, HrKind, HrWeight, RenderNode, ThematicBreakAttrs, TreeRenderable,
 };
@@ -190,7 +196,9 @@ impl TerminalRenderable for HorizontalRule {
         // into, then the drawn block is placed within the remaining slack.
         // The tree path applies its own layout around `render_*_tier`, so this
         // wrapper lives on `render` alone and never double-applies.
-        let term_width = term.width();
+        let Some(term_width) = term.columns() else {
+            return self.layout.apply_block_layout_on(&self.render_unbounded(term), term);
+        };
         let inner_width = self.layout.content_width(term_width);
         let inner = if inner_width == term_width {
             Cow::Borrowed(term)
@@ -272,6 +280,21 @@ impl TreeRenderable for HorizontalRule {
 }
 
 impl HorizontalRule {
+    /// The rule on a terminal with no width: nothing fills, so it is
+    /// [`PLAIN_RULE`] in `plain` and otherwise a short fixed rule, never an
+    /// image sized to a guessed width.
+    pub(crate) fn render_unbounded(&self, term: &Terminal) -> String {
+        if term.output_profile().is_plain() {
+            return PLAIN_RULE.to_string();
+        }
+        let mut short = term.clone();
+        short.fixed_width = Some(UNBOUNDED_RULE_GLYPHS);
+        self.clone()
+            .width(UNBOUNDED_RULE_GLYPHS.to_string())
+            .alignment(RuleAlignment::Left)
+            .render_text_tier(&short)
+    }
+
     /// Renders the text tier (Unicode or ASCII glyphs) without attempting
     /// the image tier.
     ///

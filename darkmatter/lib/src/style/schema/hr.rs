@@ -6,6 +6,7 @@
 use renderable::layout::Length;
 use serde::Deserialize;
 
+use super::common::{ComponentEdges, deserialize_optional_component_edges};
 use crate::style::color::{StyleColor, deserialize_optional_color};
 use crate::style::length::deserialize_optional_length;
 
@@ -42,6 +43,8 @@ pub enum HrAlignment {
     Right,
 }
 
+/// `hr` bucket. A rule has no margin, border, emphasis, or word wrap; those
+/// keys are unknown here.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct HrStyle {
@@ -62,6 +65,15 @@ pub struct HrStyle {
     pub alignment: Option<HrAlignment>,
     pub kind: Option<HrKind>,
     pub weight: Option<HrWeight>,
+    /// Padding on all sides; `padding-left`/`padding-right` override its
+    /// horizontal sides within one style layer. Lowered into the rule's
+    /// component padding, which moves the rule inside the content width.
+    #[serde(deserialize_with = "deserialize_optional_component_edges")]
+    pub padding: Option<ComponentEdges>,
+    #[serde(deserialize_with = "deserialize_optional_length")]
+    pub padding_left: Option<Length>,
+    #[serde(deserialize_with = "deserialize_optional_length")]
+    pub padding_right: Option<Length>,
 }
 
 #[cfg(test)]
@@ -111,6 +123,15 @@ mod tests {
         assert_eq!(h.alignment, Some(HrAlignment::Center));
         assert_eq!(h.kind, Some(HrKind::LineStar));
         assert_eq!(h.weight, Some(HrWeight::Medium));
+    }
+
+    #[test]
+    fn parses_padding_and_horizontal_sides() {
+        let h: HrStyle =
+            serde_json::from_str(r#"{"padding": 1, "padding-left": "4ch", "padding-right": 2}"#).unwrap();
+        assert!(h.padding.is_some());
+        assert_eq!(h.padding_left, Some(Length::Ch(4)));
+        assert_eq!(h.padding_right, Some(Length::Ch(2)));
     }
 
     #[test]

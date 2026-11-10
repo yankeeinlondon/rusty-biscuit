@@ -41,6 +41,7 @@ use super::interpolation::{
 };
 use super::interpolation::rewrite::reborrow;
 use super::expression::absence::MissingRoot;
+use super::member_sites::{MemberCandidates, MemberFrame};
 use super::{ComposeContext, ComposeWarning, SharedFrontmatter};
 use super::value_origin::{DataPaths, FrontmatterProvenance};
 use crate::markdown::frontmatter::Frontmatter;
@@ -331,6 +332,7 @@ fn rewrite_value<L: EvaluationLookup>(
                 warning.message = format!("key '{key}': {}", warning.message);
                 warning
             };
+            evaluator.set_member_leaf(super::call_precheck::path_label(&scope.segments));
             let mut scoped = reborrow(&mut scope.before_eval).map(|check| {
                 move |new: &[ComposeWarning]| check(&new.iter().cloned().map(present).collect::<Vec<_>>())
             });
@@ -341,7 +343,12 @@ fn rewrite_value<L: EvaluationLookup>(
                 "frontmatter-interpolation",
                 scoped.as_mut().map(|check| check as &mut dyn FnMut(&[ComposeWarning]) -> Result<(), MarkdownError>),
             )
-            .map_err(|failure| LocatedFrontmatterError::in_string(s, failure))?;
+            .map_err(|failure| {
+                let mut failure = LocatedFrontmatterError::in_string(s, failure);
+                failure.warnings =
+                    failure.warnings.drain(..).map(|warning| warning.in_scope(&scope.display)).collect();
+                failure
+            })?;
             let warnings =
                 warnings.into_iter().map(|warning| warning.in_scope(&scope.display)).collect();
             scope.scanned.push(scope.segments.clone());
@@ -358,8 +365,9 @@ fn rewrite_value<L: EvaluationLookup>(
                 let outcome = rewrite_value(item, evaluator, policy, scope);
                 scope.segments.pop();
                 scope.display = display;
-                let (new_val, count, warnings) =
-                    outcome.map_err(|failure| failure.within(ValuePathSegment::Index(index)))?;
+                let (new_val, count, warnings) = outcome.map_err(|failure| {
+                    failure.within(ValuePathSegment::Index(index)).after(std::mem::take(&mut all_warnings))
+                })?;
                 new_arr.push(new_val);
                 total_count += count;
                 all_warnings.extend(warnings);
@@ -377,8 +385,9 @@ fn rewrite_value<L: EvaluationLookup>(
                 let outcome = rewrite_value(val, evaluator, policy, scope);
                 scope.segments.pop();
                 scope.display = display;
-                let (new_val, count, warnings) = outcome
-                    .map_err(|failure| failure.within(ValuePathSegment::Key(key.clone())))?;
+                let (new_val, count, warnings) = outcome.map_err(|failure| {
+                    failure.within(ValuePathSegment::Key(key.clone())).after(std::mem::take(&mut all_warnings))
+                })?;
                 new_obj.insert(key.clone(), new_val);
                 total_count += count;
                 all_warnings.extend(warnings);
@@ -432,6 +441,7 @@ fn decode_authored_tokens(
                             scanned: s.clone(),
                             span,
                         }),
+                        warnings: Vec::new(),
                     });
                 }
             }
@@ -500,6 +510,10 @@ pub(crate) struct LocatedFrontmatterError {
     /// `None` for a failure that is not about one expression (a rejected
     /// dependency) or whose expression a rescan found in replacement output.
     pub location: Option<FrontmatterExpressionLocation>,
+    /// The warnings the pass had reported before it failed, as the pass's
+    /// report would carry them; the caller adds them to the failing
+    /// document's report. Empty for a policy stop, which carries its own.
+    pub warnings: Vec<ComposeWarning>,
 }
 
 /// The string value holding a failing `{{ … }}`, and the construct's span in
@@ -522,6 +536,7 @@ impl From<MarkdownError> for LocatedFrontmatterError {
         Self {
             error: Box::new(error),
             location: None,
+            warnings: Vec::new(),
         }
     }
 }
@@ -535,7 +550,18 @@ impl LocatedFrontmatterError {
                 scanned: scanned.to_string(),
                 span,
             }),
+            warnings: failure.warnings,
         }
+    }
+
+    /// This failure, after `earlier` were reported by the same pass (see
+    /// [`LocatedInterpolationError::after`]).
+    fn after(mut self, mut earlier: Vec<ComposeWarning>) -> Self {
+        if self.error.blocked_diagnostics().is_none() {
+            earlier.append(&mut self.warnings);
+            self.warnings = earlier;
+        }
+        self
     }
 
     fn within(mut self, segment: ValuePathSegment) -> Self {
@@ -582,8 +608,7 @@ impl FrontmatterExpressionLocation {
     /// `None` when the path does not lead to a scalar that decodes to exactly
     /// [`scanned`](Self::scanned) and is no alias: the value changed after
     /// loading (a schema coercion, a shell expansion) or is authored in a form
-    /// the shared decoder does not model (a flow-collection member spread over
-    /// several lines).
+    /// the shared decoder does not model (a plain flow-collection member).
     pub(crate) fn project(&self, loaded: &str) -> Option<Range<usize>> {
         use simplified_schema::SchemaValueKind;
         use simplified_schema::decode_scalar_node;
@@ -683,11 +708,12 @@ fn key_scoped_error(key: &str, err: MarkdownError) -> MarkdownError {
 
 /// [`key_scoped_error`] for a located failure in the value of top-level `key`.
 fn key_scoped_failure(key: &str, failure: LocatedFrontmatterError) -> LocatedFrontmatterError {
-    let LocatedFrontmatterError { error, location } =
+    let LocatedFrontmatterError { error, location, warnings } =
         failure.within(ValuePathSegment::Key(key.to_string()));
     LocatedFrontmatterError {
         error: Box::new(key_scoped_error(key, *error)),
         location,
+        warnings,
     }
 }
 
@@ -740,7 +766,8 @@ pub(crate) enum FrontmatterPass<'a> {
 /// `provenance`. A data leaf is never scanned, so a seed may contain `{{`.
 ///
 /// `exclude_keys` names top-level keys deferred from every compose-time
-/// resolution pass (DM1). An excluded key is neither classified as seed nor
+/// resolution pass (DM1); `$schema` is always excluded, because its slots are
+/// the slot resolver's to evaluate. An excluded key is neither classified as seed nor
 /// templated — its value survives raw and is invisible to other keys'
 /// resolution. A non-excluded templated key that references an excluded key
 /// is rejected during dependency analysis (DM1a), except through a bare read
@@ -768,6 +795,7 @@ pub(crate) fn interpolate_frontmatter_located(
     exclude_keys: &HashSet<String>,
     name_coercion_keys: &[String],
     before_eval: BeforeEval<'_>,
+    members: Option<std::sync::Arc<MemberCandidates>>,
 ) -> Result<FrontmatterInterpolationReport, LocatedFrontmatterError> {
     interpolate_frontmatter_impl(
         frontmatter,
@@ -780,6 +808,7 @@ pub(crate) fn interpolate_frontmatter_located(
         exclude_keys,
         name_coercion_keys,
         before_eval,
+        members,
     )
 }
 
@@ -806,6 +835,7 @@ pub(crate) fn interpolate_frontmatter(
         resolution_context,
         exclude_keys,
         name_coercion_keys,
+        None,
         None,
     )
     .map_err(|failure| *failure.error)
@@ -853,6 +883,7 @@ pub(crate) fn interpolate_frontmatter_best_effort(
         exclude_keys,
         name_coercion_keys,
         None,
+        None,
     )
     .map_err(|failure| *failure.error)
 }
@@ -862,6 +893,18 @@ fn record_missing_runtime_context(first: &mut Option<MarkdownError>, error: Mark
         *first = Some(error);
     }
 }
+
+/// `exclude_keys` with the document's `$schema` key added.
+fn with_schema_excluded(exclude_keys: &HashSet<String>) -> std::borrow::Cow<'_, HashSet<String>> {
+    if exclude_keys.contains(SCHEMA_KEY) {
+        return std::borrow::Cow::Borrowed(exclude_keys);
+    }
+    let mut excluded = exclude_keys.clone();
+    excluded.insert(SCHEMA_KEY.to_string());
+    std::borrow::Cow::Owned(excluded)
+}
+
+const SCHEMA_KEY: &str = "$schema";
 
 /// Shared implementation behind [`interpolate_frontmatter_located`] and
 /// [`interpolate_frontmatter_best_effort`]. When `best_effort` is `true`, a
@@ -880,7 +923,13 @@ fn interpolate_frontmatter_impl(
     exclude_keys: &HashSet<String>,
     name_coercion_keys: &[String],
     mut before_eval: BeforeEval<'_>,
+    members: Option<std::sync::Arc<MemberCandidates>>,
 ) -> Result<FrontmatterInterpolationReport, LocatedFrontmatterError> {
+    // A `$schema` subtree is schema syntax, and its `{{ … }}` are slots that
+    // only the slot resolver evaluates, after their reads are approved;
+    // interpolating it here would read a slot's targets ungated and turn its
+    // lists into text.
+    let exclude_keys = &with_schema_excluded(exclude_keys);
     // Pass 1 first decodes every authored whole-leaf literal token, so no scan
     // below ever sees one. Excluded (event-time) keys keep their raw text for
     // the caller that evaluates them.
@@ -1069,9 +1118,20 @@ fn interpolate_frontmatter_impl(
     let mut all_warnings = Vec::new();
     let mut missing_roots = Vec::new();
     let mut scanned_leaves: Vec<Vec<ValuePathSegment>> = Vec::new();
-    fn evaluator_for(state: &FrontmatterSeedState, best_effort: bool) -> Evaluator<'_, FrontmatterSeedState> {
+    // A best-effort pass is discovery: it reports no undeclared reads.
+    fn evaluator_for<'s>(
+        state: &'s FrontmatterSeedState,
+        best_effort: bool,
+        members: Option<&std::sync::Arc<MemberCandidates>>,
+    ) -> Evaluator<'s, FrontmatterSeedState> {
         let evaluator = Evaluator::new(state);
-        if best_effort { evaluator } else { evaluator.observing_missing_roots() }
+        match (best_effort, members) {
+            (true, _) => evaluator,
+            (false, None) => evaluator.observing_missing_roots(),
+            (false, Some(members)) => evaluator
+                .observing_missing_roots()
+                .with_member_sites(members.clone(), MemberFrame::Leaf(Default::default())),
+        }
     }
     // Rewrites one templated key's authored leaves; its data leaves pass
     // through untouched.
@@ -1163,7 +1223,7 @@ fn interpolate_frontmatter_impl(
             // Scope the evaluator so its `&state` borrow ends before we mutate
             // `state.data` below.
             let outcome = {
-                let evaluator = evaluator_for(&state, best_effort);
+                let evaluator = evaluator_for(&state, best_effort, members.as_ref());
                 let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves, reborrow(&mut before_eval));
                 missing_roots.extend(
                     evaluator.take_missing_roots().into_iter().map(|root| (key.clone(), root)),
@@ -1183,7 +1243,7 @@ fn interpolate_frontmatter_impl(
                     made_progress = true;
                     continue;
                 }
-                Err(e) => return Err(e),
+                Err(failure) => return Err(keyed_failure(key, failure, all_warnings)),
             };
 
             for w in &mut warnings {
@@ -1246,7 +1306,7 @@ fn interpolate_frontmatter_impl(
         }
 
         let outcome = {
-            let evaluator = evaluator_for(&state, best_effort);
+            let evaluator = evaluator_for(&state, best_effort, members.as_ref());
             let outcome = rewrite_key(key, original, &evaluator, &mut scanned_leaves, reborrow(&mut before_eval));
             missing_roots.extend(
                 evaluator.take_missing_roots().into_iter().map(|root| (key.clone(), root)),
@@ -1261,7 +1321,7 @@ fn interpolate_frontmatter_impl(
                 record_missing_runtime_context(&mut missing_runtime_context, *error.error);
                 continue;
             }
-            Err(e) => return Err(e),
+            Err(failure) => return Err(keyed_failure(key, failure, all_warnings)),
         };
 
         for w in &mut warnings {
@@ -1299,6 +1359,15 @@ fn interpolate_frontmatter_impl(
         deferred_keys,
         provisional_keys,
     })
+}
+
+/// `failure` of top-level `key`, after the `earlier` warnings of the keys
+/// before it, its own named for `key` as a success names them.
+fn keyed_failure(key: &str, mut failure: LocatedFrontmatterError, earlier: Vec<ComposeWarning>) -> LocatedFrontmatterError {
+    for warning in &mut failure.warnings {
+        warning.message = format!("key '{key}': {}", warning.message);
+    }
+    failure.after(earlier)
 }
 
 /// Computes the templated keys that transitively depend on a shell-pending

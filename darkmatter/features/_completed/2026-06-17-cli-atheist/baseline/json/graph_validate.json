@@ -26,7 +26,11 @@
         "message": "Missing local target: ./missing.md",
         "reference": "./missing.md",
         "severity": "error",
-        "source": "/tmp/dm-baseline/errors.md"
+        "column": 1,
+        "section": "errors",
+        "inserted": false,
+        "source": "/tmp/dm-baseline/errors.md",
+        "included_via": []
       }
     ],
     "references_scanned": 1,

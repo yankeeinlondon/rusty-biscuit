@@ -9,8 +9,8 @@
 use crate::common;
 
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::CapturedFrame;
-use common::level2::{SHARED_HARNESS, md_shim, run_with_sentinel_env, wezterm_decision};
+use biscuit_test_harness::{CapturedFrame, shell_path};
+use common::level2::{SHARED_HARNESS, md_shim_word, run_with_sentinel_env, wezterm_decision};
 use serial_test::serial;
 use std::fs;
 use std::path::PathBuf;
@@ -30,7 +30,7 @@ const MISSING_DESCRIBED_REQUIRED: &str =
 /// Writes the fixture, runs `md schema validate` in the shared WezTerm pane,
 /// and returns the captured frame plus the canonical fixture path. Returns
 /// `None` when WezTerm is unavailable so the caller can skip cleanly. Uses
-/// [`md_shim`] so the suite verifies the code under review rather than a stale
+/// [`md_shim_word`] so the suite verifies the code under review rather than a stale
 /// `md` installed on the host.
 fn run_md_schema_validate(file_name: &str, file_body: &str) -> Option<(CapturedFrame, PathBuf)> {
     match wezterm_decision() {
@@ -55,7 +55,7 @@ fn run_md_schema_validate(file_name: &str, file_body: &str) -> Option<(CapturedF
     // into this capture.
     run_with_sentinel_env(harness, "clear", &[]);
 
-    let cmd = format!("{} schema validate {}", md_shim(), file_path.display());
+    let cmd = format!("{} schema validate {}", md_shim_word(), shell_path(&file_path));
     let frame = run_with_sentinel_env(harness, &cmd, &[]);
     // Keep tempdir alive past capture by returning canonical path to caller.
     drop(dir);

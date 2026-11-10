@@ -1,6 +1,6 @@
 ## Overview
 
-The `toc` command extracts heading structure from a markdown document and prints it as a tree or JSON.
+The `toc` command extracts heading structure from a markdown document and prints it as a tree, a linked list, or data.
 
 It is useful for:
 
@@ -17,11 +17,12 @@ It is useful for:
 md toc README.md
 md toc -
 
-# JSON output
-md toc README.md --json
+# A nested list of links, or data for a script
+md toc README.md --output markdown
+md toc README.md --output json
 
-# Verbose tree (verbose is a root flag)
-md -v toc README.md
+# Verbose tree
+md toc README.md -v
 ```
 
 ### Arguments
@@ -30,7 +31,22 @@ md -v toc README.md
 
 ### Options
 
-- `--json`: output TOC as JSON instead of tree text.
+- `--output <terminal|plain|markdown|markdown-plus|html|browser|json|json5|yaml|toml>`: what to print (default: `terminal`).
+- `--width <N|N%|auto|source|unlimited>`: accepted like on every command; tree rows are not wrapped.
+
+### Output
+
+`md toc` accepts both output families. Everything it prints goes to stdout, and on
+a failure a formatted output writes the error to stderr, while a data output writes
+one value to stdout. See [Output and Width](./output-and-width.md) and
+[Data Contracts](./data-contracts.md#other-commands).
+
+| `--output` | What you get |
+|---|---|
+| `terminal` (default), `plain` | the heading tree below; `terminal` falls back to the `plain` bytes on a pipe |
+| `markdown`, `markdown-plus`, `html` | a nested list of links to the headings |
+| `json`, `json5`, `yaml` | the TOC data |
+| `toml` | the TOC data, with each hash as decimal text because the unsigned 64-bit values do not fit a TOML integer |
 
 ### Tree Output (Default)
 
@@ -49,22 +65,21 @@ Example shape:
 
 ### Verbose Mode
 
-Use root verbosity flags, e.g. `md -v toc README.md`.
+Use `-v`, before or after the subcommand: `md toc README.md -v`. It applies to
+formatted outputs only.
 
-Verbose mode adds:
+Verbose mode adds, on stdout:
 
 - per-heading normalized hashes in the tree
-- summary lines on stderr:
+- summary lines:
     - heading count
     - code block count (if present)
     - internal link counts and broken-link count (if present)
-- page hash details on stderr when title metadata exists
+- page hash details when title metadata exists
 
-The renderer also emits leading/trailing blank lines to stderr for spacing.
+### Data Output
 
-### JSON Output
-
-`--json` prints serialized TOC data including:
+A data output prints the serialized TOC data, including:
 
 - document title and page hashes
 - preamble content and hash
@@ -75,10 +90,14 @@ The renderer also emits leading/trailing blank lines to stderr for spacing.
 ## Lessons Learned
 
 - `toc` is intentionally lightweight and does not mutate documents.
-- Verbose output is split across stdout/stderr so tree output remains redirect-friendly.
 - Tab-indented block scalars in frontmatter are handled without polluting heading extraction.
 
 ## Issues
 
 - No built-in `--max-depth` or heading-level include/exclude filters yet.
-- Verbose mode requires root-level `-v` placement (`md -v toc ...`), not `md toc -v ...`.
+
+## Removed spellings
+
+| Removed | Use instead |
+|---|---|
+| `--json` | `--output json` |

@@ -14,6 +14,7 @@ fn parse_lists_operators_and_helpers() {
         line: 4,
         message: "unexpected token".into(),
         span: 3..4,
+        authored: None,
     };
     let out = render(&err);
     assert_contains_all(
@@ -42,6 +43,7 @@ fn eval_points_at_state() {
             function: "length".into(),
             message: "items not found".into(),
         }),
+        authored: None,
     };
     let out = render(&err);
     assert_contains_all(

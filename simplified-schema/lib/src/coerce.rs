@@ -48,8 +48,9 @@ use super::simplified::{DARKMATTER_DEFERRED_KEYWORD, DARKMATTER_OPERANDS_KEYWORD
 use super::validate::{self, ValidatorCache, error_top_level_key};
 use super::ValidationProblem;
 use crate::coercion::{
-    Additional, BindOptions, Bound, ConversionError, Defer, FailureReason, ObjectShape, PathSegment, PatternSlot,
-    PropertySlot, RefSlot, Shape, ShapeRef, TupleShape, TupleSlot, ValueFailure, bind_with,
+    ActualKind, Additional, BindOptions, Bound, ConversionError, Defer, ExpectedType, FailureReason, ObjectShape,
+    PathSegment, PatternSlot, PropertySlot, RefSlot, Shape, ShapeRef, TupleShape, TupleSlot, ValueFailure, bind_with, json_pointer,
+    locate_failures,
 };
 
 /// Process-wide cache of the structural validators conversion compiles to
@@ -184,8 +185,14 @@ enum Conversion {
     Converted(Value),
     /// The core found a converted reading the complete schema rejects.
     Rejected,
-    /// The core could not bind the instance.
-    Failed(ConversionError),
+    /// The core could not bind the instance. `diagnostic` is its partial
+    /// copy ([`partial_copy`]), which validation reports on; `committed`
+    /// keeps only the top-level properties of it the complete schema accepts
+    /// ([`property_wise`]), which write-back commits.
+    Failed {
+        committed: Option<Value>,
+        diagnostic: Option<Value>,
+    },
     /// The schema does not compile; its validator reports why.
     Unavailable,
 }
@@ -221,12 +228,13 @@ fn convert(
                 }
             }
         }
-        Err(error) => match partial_copy(plan, schema, instance, &error, pending, templates).and_then(|candidate| {
-            property_wise(schema, validator, instance, &candidate, pending, templates, &error.failures)
-        }) {
-            Some(committed) => Conversion::Converted(committed),
-            None => Conversion::Failed(error),
-        },
+        Err(error) => {
+            let diagnostic = partial_copy(plan, schema, instance, &error, pending, templates);
+            let committed = diagnostic.as_ref().and_then(|candidate| {
+                property_wise(schema, validator, instance, candidate, pending, templates, &error.failures)
+            });
+            Conversion::Failed { committed, diagnostic }
+        }
     }
 }
 
@@ -303,7 +311,7 @@ impl NestedTemplates {
         let paths: Vec<_> = paths
             .into_iter()
             .map(|path| {
-                let pointer = pointer(&path);
+                let pointer = json_pointer(&path);
                 (path, pointer)
             })
             .collect();
@@ -321,7 +329,7 @@ impl NestedTemplates {
         let mut widened = self.clone();
         for path in settled {
             if !widened.paths.iter().any(|(known, _)| known == path) {
-                widened.paths.push((path.clone(), pointer(path)));
+                widened.paths.push((path.clone(), json_pointer(path)));
             }
         }
         widened
@@ -372,7 +380,7 @@ impl NestedTemplates {
     /// verdict, since it judged the template's text.
     fn fails_within(&self, failures: &[ValueFailure], root: &str) -> bool {
         failures.iter().any(|failure| {
-            let at = pointer(&failure.path);
+            let at = json_pointer(&failure.path);
             if !within(&at, root) && !within(root, &at) {
                 return false;
             }
@@ -530,7 +538,10 @@ pub fn coerce_with_plan(
     shell_pending: &HashSet<String>,
 ) -> CoercionOutcome {
     match convert(plan, json_schema, instance, shell_pending, &NestedTemplates::default()) {
-        Conversion::Converted(value) => CoercionOutcome { value, changed: true },
+        Conversion::Converted(value)
+        | Conversion::Failed {
+            committed: Some(value), ..
+        } => CoercionOutcome { value, changed: true },
         _ => CoercionOutcome::unchanged(instance),
     }
 }
@@ -542,9 +553,11 @@ pub fn coerce_value_against_schema(schema: &Value, value: &Value) -> Value {
     coerce_frontmatter(schema, value).value
 }
 
-/// The working copy validation reports on: the committed conversion when one
-/// exists, otherwise every conversion that succeeds on its own, with each
-/// failing value left as written so the report names only real failures.
+/// The working copy validation reports on: the conversion the complete
+/// schema accepts when the core binds the instance, otherwise every
+/// conversion that succeeds on its own, with each failing value left as
+/// written and each unexpected key or tuple element kept, so the report names
+/// only real failures.
 ///
 /// Never written back anywhere; compose writes back only what
 /// [`coerce_frontmatter_with_pending`] commits.
@@ -581,12 +594,14 @@ pub(crate) fn validation_working_copy<'input>(
 ) -> Cow<'input, Value> {
     let none = HashSet::new();
     match convert(plan, json_schema, instance, &none, templates) {
-        Conversion::Converted(value) => Cow::Owned(value),
-        Conversion::Failed(error) => match partial_copy(plan, json_schema, instance, &error, &none, templates) {
-            Some(copy) => Cow::Owned(copy),
-            None => Cow::Borrowed(instance),
-        },
-        Conversion::Kept | Conversion::Rejected | Conversion::Unavailable => Cow::Borrowed(instance),
+        Conversion::Converted(value)
+        | Conversion::Failed {
+            diagnostic: Some(value), ..
+        } => Cow::Owned(value),
+        Conversion::Failed { diagnostic: None, .. }
+        | Conversion::Kept
+        | Conversion::Rejected
+        | Conversion::Unavailable => Cow::Borrowed(instance),
     }
 }
 
@@ -596,6 +611,14 @@ const PARTIAL_COPY_ROUNDS: usize = 4;
 
 /// Binds again with every failing value treated as already matching and with
 /// presence relaxed, so the values that do convert can be reported converted.
+///
+/// An unexpected object key or tuple element cannot be deferred: the
+/// relaxed shape keeps the closed-object and fixed-tuple rules, so it would
+/// fail again. Each is masked out of the retry input instead, and put back
+/// into the copy at its original place, so judging the copy against the
+/// complete schema still reports it while its converted siblings are judged
+/// converted. The copy is diagnostic: a caller commits only what the
+/// complete schema then accepts.
 fn partial_copy(
     plan: &ConversionPlan,
     json_schema: &Value,
@@ -605,8 +628,10 @@ fn partial_copy(
     templates: &NestedTemplates,
 ) -> Option<Value> {
     let relaxed = plan.relaxed(json_schema);
-    let mut failing: Vec<Vec<PathSegment>> = failing_paths(&error.failures);
+    let FailingPaths { mut failing, mut unexpected } = failing_paths(&error.failures);
     for _ in 0..PARTIAL_COPY_ROUNDS {
+        let masked: Vec<&[PathSegment]> = unexpected.iter().map(Vec::as_slice).collect();
+        let retry = without_entries(instance, &masked);
         let set_aside = failing.clone();
         let pending = pending.clone();
         let defer = move |path: &[PathSegment], _: &Value| {
@@ -616,8 +641,8 @@ fn partial_copy(
             defer: Some(&defer),
             ..BindOptions::default()
         };
-        match bind_with(relaxed, instance, &options) {
-            Ok(bound) => return Some(bound.into_value()),
+        match bind_with(relaxed, &retry, &options) {
+            Ok(bound) => return with_entries(bound.into_value(), instance, &masked),
             Err(again) => {
                 // Only the root's complete-schema assertion is left: its
                 // converted reading is the copy, and the caller judges each
@@ -630,39 +655,138 @@ fn partial_copy(
                 }] = again.failures.as_slice()
                     && path.is_empty()
                 {
-                    return Some(candidate.clone());
+                    return with_entries(candidate.clone(), instance, &masked);
                 }
-                let more: Vec<_> = failing_paths(&again.failures)
-                    .into_iter()
-                    .filter(|path| !failing.contains(path))
-                    .collect();
-                if more.is_empty() {
+                let FailingPaths {
+                    failing: more_failing,
+                    unexpected: more_unexpected,
+                } = failing_paths(&again.failures);
+                let more_failing: Vec<_> = more_failing.into_iter().filter(|path| !failing.contains(path)).collect();
+                let more_unexpected: Vec<_> =
+                    more_unexpected.into_iter().filter(|path| !unexpected.contains(path)).collect();
+                if more_failing.is_empty() && more_unexpected.is_empty() {
                     return None;
                 }
-                failing.extend(more);
+                failing.extend(more_failing);
+                unexpected.extend(more_unexpected);
             }
         }
     }
     None
 }
 
-/// The deepest paths at which a present value failed, looking inside union
-/// options: setting a union aside whole would keep every element under it
-/// unconverted, when only one element failed.
-fn failing_paths(failures: &[ValueFailure]) -> Vec<Vec<PathSegment>> {
-    let mut flat = Vec::new();
-    flatten_failures(failures, &mut flat);
+/// The paths [`partial_copy`] sets aside, never the root: setting it aside
+/// would keep every property as written, and report a value that does
+/// convert as if it could not.
+struct FailingPaths {
+    /// The deepest paths at which a present value failed, looking inside
+    /// union arms ([`locate_failures`]): setting a union aside whole would
+    /// keep every element under it unconverted, when only one element failed.
+    failing: Vec<Vec<PathSegment>>,
+    /// Unexpected object keys and tuple elements, in failure order.
+    unexpected: Vec<Vec<PathSegment>>,
+}
+
+fn failing_paths(failures: &[ValueFailure]) -> FailingPaths {
+    let flat = locate_failures(failures);
     let deeper = |path: &[PathSegment]| {
         flat.iter()
-            .any(|other| other.path.len() > path.len() && other.path.starts_with(path))
+            .any(|other| other.failure.path.len() > path.len() && other.failure.path.starts_with(path))
     };
-    let mut paths: Vec<Vec<PathSegment>> = Vec::new();
-    for failure in &flat {
-        if failure.received.is_some() && !deeper(&failure.path) && !paths.contains(&failure.path) {
-            paths.push(failure.path.clone());
+    let mut paths = FailingPaths {
+        failing: Vec::new(),
+        unexpected: Vec::new(),
+    };
+    for located in &flat {
+        let path = &located.failure.path;
+        let list = match located.expected {
+            ExpectedType::Absent => &mut paths.unexpected,
+            _ => &mut paths.failing,
+        };
+        if !path.is_empty() && located.actual != ActualKind::Missing && !deeper(path) && !list.contains(path) {
+            list.push(path.clone());
         }
     }
     paths
+}
+
+/// The entries of `value` whose path (relative to `value`) begins with
+/// `segment`, as the rest of each path.
+fn entries_below<'p>(masked: &[&'p [PathSegment]], segment: &PathSegment) -> Vec<&'p [PathSegment]> {
+    masked
+        .iter()
+        .filter_map(|path| path.split_first().filter(|(first, _)| *first == segment).map(|(_, rest)| rest))
+        .collect()
+}
+
+/// `value` without the entries at `masked`. Only unexpected entries are
+/// masked, and an unexpected tuple element lies past every declared slot, so
+/// no kept element changes index.
+fn without_entries(value: &Value, masked: &[&[PathSegment]]) -> Value {
+    if masked.is_empty() {
+        return value.clone();
+    }
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .filter_map(|(key, item)| {
+                    let below = entries_below(masked, &PathSegment::Key(key.clone()));
+                    (!below.iter().any(|rest| rest.is_empty())).then(|| (key.clone(), without_entries(item, &below)))
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .enumerate()
+                .filter_map(|(index, item)| {
+                    let below = entries_below(masked, &PathSegment::Index(index));
+                    (!below.iter().any(|rest| rest.is_empty())).then(|| without_entries(item, &below))
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// `copy`, a binding of [`without_entries`]`(original, masked)`, with each
+/// masked entry of `original` back at its original place and in its original
+/// key order. `None` when the copy no longer has the shape to hold one, so a
+/// value missing an unexpected entry is never judged as if it were complete.
+fn with_entries(copy: Value, original: &Value, masked: &[&[PathSegment]]) -> Option<Value> {
+    if masked.is_empty() {
+        return Some(copy);
+    }
+    match (copy, original) {
+        (Value::Object(mut converted), Value::Object(map)) => {
+            let mut out = serde_json::Map::new();
+            for (key, item) in map {
+                let below = entries_below(masked, &PathSegment::Key(key.clone()));
+                if below.iter().any(|rest| rest.is_empty()) {
+                    out.insert(key.clone(), item.clone());
+                } else if let Some(value) = converted.remove(key) {
+                    out.insert(key.clone(), with_entries(value, item, &below)?);
+                }
+            }
+            out.extend(converted);
+            Some(Value::Object(out))
+        }
+        (Value::Array(converted), Value::Array(items)) => {
+            let mut converted = converted.into_iter();
+            let mut out = Vec::with_capacity(items.len());
+            for (index, item) in items.iter().enumerate() {
+                let below = entries_below(masked, &PathSegment::Index(index));
+                if below.iter().any(|rest| rest.is_empty()) {
+                    out.push(item.clone());
+                } else {
+                    out.push(with_entries(converted.next()?, item, &below)?);
+                }
+            }
+            out.extend(converted);
+            Some(Value::Array(out))
+        }
+        _ => None,
+    }
 }
 
 /// A copy of `shape` in which nothing is required, so a missing value does
@@ -761,12 +885,10 @@ pub fn annotate_problems(
     let Err(error) = bind_with(plan.shape(json_schema), instance, &options) else {
         return;
     };
-    let mut failures = Vec::new();
-    flatten_failures(&error.failures, &mut failures);
     let mut reasons: Vec<(String, String)> = Vec::new();
-    for failure in failures {
-        if let Some(reason) = conversion_reason(failure) {
-            let entry = (pointer(&failure.path), reason);
+    for located in error.located_failures() {
+        if let Some(reason) = conversion_reason(located.failure) {
+            let entry = (located.pointer, reason);
             if !reasons.contains(&entry) {
                 reasons.push(entry);
             }
@@ -780,29 +902,6 @@ pub fn annotate_problems(
             .collect();
         if !matching.is_empty() {
             problem.message = format!("{}: {}", problem.message, matching.join("; "));
-        }
-    }
-}
-
-/// Every failure, looking through a union whose only non-`null` option
-/// failed (an optional property is its type or `null`), so that option's own
-/// reason is the one reported. A union with several real options keeps its
-/// own failure: no single option's reason explains it.
-fn flatten_failures<'f>(failures: &'f [ValueFailure], out: &mut Vec<&'f ValueFailure>) {
-    for failure in failures {
-        let only_typed_option = match &failure.reason {
-            FailureReason::NoOptionAccepts { options } => {
-                let mut typed = options.iter().filter(|option| option.expected != "null");
-                match (typed.next(), typed.next()) {
-                    (Some(only), None) => Some(only),
-                    _ => None,
-                }
-            }
-            _ => None,
-        };
-        match only_typed_option {
-            Some(option) => flatten_failures(&option.failures, out),
-            None => out.push(failure),
         }
     }
 }
@@ -825,15 +924,6 @@ fn conversion_reason(failure: &ValueFailure) -> Option<String> {
         }
         _ => None,
     }
-}
-
-fn pointer(path: &[PathSegment]) -> String {
-    path.iter()
-        .map(|segment| match segment {
-            PathSegment::Index(index) => format!("/{index}"),
-            PathSegment::Key(key) => format!("/{}", key.replace('~', "~0").replace('/', "~1")),
-        })
-        .collect()
 }
 
 #[cfg(test)]

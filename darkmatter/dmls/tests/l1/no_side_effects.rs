@@ -465,3 +465,60 @@ fn lifecycle_stacks_are_analyzed_and_never_run() {
         "editor requests over lifecycle stacks must build no effect engine and attempt no network access",
     );
 }
+
+/// A `$schema` holding a `{{ load_data(…) }}` slot is resolved only on the
+/// slot worker: neither before the worker runs (the job is held) nor after
+/// its snapshot is installed does any request evaluate a slot.
+#[test]
+fn schema_slot_requests_evaluate_no_slot_before_or_after_the_worker_resolves_it() {
+    use darkmatter::work_counters::{Work, snapshot};
+    let workspace = LspWorkspace::new();
+    let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+    std::fs::write(root.join("os.yaml"), "- Linux\n").unwrap();
+    let store = root.join("home/.config/darkmatter/schema-read-policy");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(&store, format!("allow file {}\n", root.join("os.yaml").display())).unwrap();
+    let text = "---\n$schema:\n  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }})\nos: Linux\n---\n\nBody {{ os }}\n";
+    let doc = root.join("doc.md");
+    std::fs::write(&doc, text).unwrap();
+    let doc_uri = url::Url::from_file_path(&doc).unwrap();
+    let snapshot_request = darkmatter::markdown::compose::RequestSnapshot::new(&root).with_home(Some(root.join("home")));
+    let mut fixture = LspFixture::start_with_slot_gate(&workspace, snapshot_request);
+    fixture.initialize(passive_initialize_params(&root));
+    let evaluated = || snapshot().get(Work::SlotResolution);
+    let before = evaluated();
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": { "uri": doc_uri.as_str(), "languageId": "markdown", "version": 1, "text": text } }),
+    );
+    fixture.wait_for_event(dmls::StartupEvent::SlotPreparing);
+
+    let drive = |fixture: &mut LspFixture| {
+        for (line, character) in [(2u32, 12u32), (3, 5), (6, 8)] {
+            for method in ["textDocument/hover", "textDocument/completion", "textDocument/definition"] {
+                let response = fixture.request(
+                    method,
+                    json!({ "textDocument": { "uri": doc_uri.as_str() }, "position": { "line": line, "character": character } }),
+                );
+                assert!(response.error.is_none(), "{method} errored: {:?}", response.error);
+            }
+        }
+        let tokens = fixture.request("textDocument/semanticTokens/full", json!({ "textDocument": { "uri": doc_uri.as_str() } }));
+        assert!(tokens.error.is_none());
+    };
+    drive(&mut fixture);
+    assert_eq!(evaluated(), before, "no request evaluates a slot while the worker is held");
+
+    fixture.release_slot_job();
+    assert!(fixture.wait_for_slot_prepared());
+    let resolved = evaluated();
+    assert!(resolved > before, "control: the worker evaluated the slot");
+    drive(&mut fixture);
+    fixture.flush_server();
+    let diagnostics = fixture.wait_for_diagnostics(doc_uri.as_str());
+    assert!(
+        diagnostics.iter().all(|diagnostic| !diagnostic["code"].as_str().unwrap_or("").starts_with("dm.schema.slot_")),
+        "{diagnostics:#?}"
+    );
+    assert_eq!(evaluated(), resolved, "requests serve the installed snapshot without evaluating");
+}

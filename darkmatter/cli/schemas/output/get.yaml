@@ -1,0 +1,50 @@
+# A non-object result (a scalar or a list) is judged under `value`, as TOML
+# writes it. A result with a run diagnostic is always the second arm's object.
+$schema:
+  - <string>: unknown -> the requested property's value, or one per requested key; a missing key is ""
+  # A failure before any result existed.
+  - outcome: enum(success,failure;required)
+    diagnostics: diagnostic[](required)
+    value: unknown -> null when no result existed
+types:
+    diagnostic:
+        code: string(required) -> stable code, e.g. dm.output.fractional_width
+        severity: enum(info,warning,error;required)
+        message: string(required)
+        source: source -> null when no file is known
+        expected_type: string
+        actual_type: string
+        span: span
+        iteration_path: iteration-step[](required)
+        reason: string -> e.g. "file not found"
+        construct: string -> e.g. "hyperlink", "::code"
+        reference: string -> the reference as written
+        failure: string -> file-reference failure class, e.g. no-match
+        included_via: trail-step[] -> outermost first
+        data_location: data-location -> where in a loaded data file the problem is; dm.data.malformed and dm.data.contract_mismatch only
+        grants_needed: grant-needed[] -> any one of these grants would allow the read; dm.schema.slot_approval_required only
+    source:
+        file: string -> null for stdin
+        line: number -> 1-based authored line; null when unknown
+        column: number -> 1-based authored column, in characters; null when unknown
+        section: string -> composed anchor slug of the innermost heading at or before the problem
+        inserted: boolean -> true when an expression, shell step, or replace value created the reference
+    span:
+        start: number(required)
+        end: number(required)
+    iteration-step:
+        collection: string(required)
+        position: unknown(required) -> a number for an index, a string for a key
+    trail-step:
+        file: string(required)
+        line: number -> authored line of the directive; null when the parent was built in memory
+    data-location:
+        file: string(required) -> the resolved data file (portable path) or URL
+        pointer: string -> JSON Pointer of the offending value, e.g. /0; absent when the parser proves none
+        line: number -> 1-based line in the data
+        column: number -> 1-based column in the data, in characters
+        byte_offset: number -> zero-based byte offset of invalid UTF-8; no line or column accompanies it
+    grant-needed:
+        kind: enum(file,dir,url,url-any-query,site;required) -> the grant store's kind word
+        target: string(required) -> the path, URL, or scheme://host[:port] the grant covers
+        scope: enum(once,persisted;required) -> once for this run; persisted writes the user's grant store

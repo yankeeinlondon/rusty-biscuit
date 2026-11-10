@@ -352,7 +352,7 @@ Adds after the main report:
 
 ## JSON Output
 
-All types derive `Serialize`. Passing `--json` emits the full `MarkdownDelta` as pretty-printed JSON with the same structure described above. Key top-level fields:
+All types derive `Serialize`. Passing `--output json` emits the full `MarkdownDelta` as pretty-printed JSON with the same structure described above. Key top-level fields:
 
 - `classification` — string variant of `DocumentChange`
 - `statistics` — all metrics as a flat object

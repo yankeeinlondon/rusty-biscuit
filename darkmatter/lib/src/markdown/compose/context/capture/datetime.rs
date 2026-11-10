@@ -25,11 +25,11 @@ fn capture_timezone_info(fetch: impl FnOnce(bool) -> sniff::os::TimeInfo) -> sni
     fetch(false)
 }
 
-pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
-    use chrono::{Datelike, Local, Utc};
+pub(crate) fn populate_datetime(clock: &super::ClockReading, values: &mut Map<String, Value>) {
+    use chrono::Datelike;
 
-    let now_local = Local::now();
-    let now_utc = Utc::now();
+    let now_local = clock.local();
+    let now_utc = clock.utc();
 
     let today = now_local.date_naive();
     let yesterday = today - chrono::Duration::days(1);
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn populate_datetime_produces_all_expected_keys() {
         let mut values = Map::new();
-        populate_datetime(&mut values);
+        populate_datetime(&super::ClockReading::now(), &mut values);
 
         // Legacy fields
         assert!(values.contains_key("now"));
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn now_carries_zone_offset() {
         let mut values = Map::new();
-        populate_datetime(&mut values);
+        populate_datetime(&super::ClockReading::now(), &mut values);
 
         let now = values.get("now").and_then(Value::as_str).unwrap();
         assert!(
@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn populate_datetime_populates_documented_aliases() {
         let mut values = Map::new();
-        populate_datetime(&mut values);
+        populate_datetime(&super::ClockReading::now(), &mut values);
 
         for (alias, canonical) in [("utc", "now_utc"), ("dow", "day"), ("dow_abbr", "day_abbr")] {
             let alias_value = values
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn populate_datetime_includes_utc_time_variants() {
         let mut values = Map::new();
-        populate_datetime(&mut values);
+        populate_datetime(&super::ClockReading::now(), &mut values);
         let tu = values.get("time_utc").and_then(Value::as_str).unwrap_or("");
         let tmu = values
             .get("time_military_utc")

@@ -7,18 +7,16 @@ use crate::common;
 
 use common::CliProcessFixture;
 
-/// Runs `md schema validate --format json` on `doc` from a repository at the
+/// Runs `md schema validate --output json` on `doc` from a repository at the
 /// fixture's working directory, returning the exit code and the report.
 fn validate(process: &CliProcessFixture, doc: &std::path::Path) -> (Option<i32>, serde_json::Value) {
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .arg(doc)
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let report = serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: stdout {stdout:?}"));
-    (output.status.code(), report)
+    (output.status.code(), common::schema_validate_record(&output.stdout))
 }
 
 #[test]
@@ -65,7 +63,7 @@ fn a_types_only_schema_file_is_refused_with_the_import_hint() {
     let doc = process.write_file("docs/doc.md", "---\n$schema: ../schemas/types.yaml\ntitle: Ship it\n---\nBody\n");
 
     let (code, report) = validate(&process, &doc);
-    assert_eq!(code, Some(2), "{report}");
+    assert_eq!(code, Some(1), "{report}");
     let message = report["message"].as_str().expect("an error message");
     let display = biscuit_file::canonicalize_simplified(&types).unwrap().display().to_string();
     for fragment in [display.as_str(), "is not a valid schema definition", "use a named-type import (`Name@file.yaml`)"] {

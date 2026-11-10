@@ -106,6 +106,7 @@ fn markdown_options(dialect: MarkdownDialect) -> MarkdownRenderOptions {
         dialect,
         strictness: RenderStrictness::Warn,
         style: None,
+        width: renderable::output::Width::Source,
     }
 }
 

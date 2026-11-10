@@ -456,7 +456,7 @@ early caps the wall-clock cost of pathological inputs (a user typing
 ## Setter values
 
 Inside a composition subcommand, a token of shape `name=value` is a
-frontmatter setter override. The completer triggers on the value slot
+frontmatter setter override. The completer triggers on the setter value
 when the value begins with `@` (or a quote followed by `@`). Any other
 leading character returns zero candidates.
 
@@ -507,7 +507,7 @@ claudine compose file.md spec=@<TAB>
 → spec='docs/spec.md'
 ```
 
-**Why Markdown only.** The setter-value slot is contractually a
+**Why Markdown only.** The setter value is contractually a
 Markdown-document reference — composition frontmatter overrides treat
 the resolved path as a Markdown source for body inlining. Surfacing
 non-Markdown files would suggest documents the runtime cannot use,
@@ -702,6 +702,59 @@ property-value completion merge the inline arms rather than declining:
 There is no authored property-order hint for a root union, so names come
 out in arm declaration order.
 
+### Template schemas
+
+A schema can be a **template**: a `{{ … }}` slot fills part of a
+definition when the prompt is composed. A slot inside a constraint is a
+*template constraint* (`enum({{ load_data("./os.yaml", "string[]") }})`);
+a slot standing for a whole type is a *template type*
+(`'{{ load_data("./status.yaml", "{ type: string }").type }}'`).
+Completion treats name and value requests differently:
+
+| You press Tab on | What completion does |
+|------------------|----------------------|
+| a setter name (`stat<TAB>`) | Lists names from the template as written. No slot runs. |
+| the value of a property with no slot (`kind=<TAB>`) | Completes from the written declaration. No slot runs. |
+| the value of a property holding a slot (`os=<TAB>`, `status=<TAB>`) | Resolves the template, then completes from the resolved type. |
+
+```text
+claudine compose doc.md stat<TAB>     → status=
+claudine compose doc.md status=<TAB>  → status='draft'  status='published'
+claudine compose doc.md kind=<TAB>    → kind='a'  kind='b'    # kind: enum(a, b)
+```
+
+Resolving a template reads files, so completion uses only the read
+permissions that never need a question:
+
+- the **automatic grant**: a file in the prompt's repository whose
+  content is exactly what Git has committed;
+- **saved grants** in your grant store
+  (`~/.config/darkmatter/schema-read-policy`), including saved denials.
+
+A Tab never asks and never prints. When a read is not covered (an
+uncommitted or edited file, a file outside the repository with no saved
+grant, a URL), or the template fails to resolve, the property gets no
+schema candidates and the shell's own completion takes over.
+`claudine compose` itself still asks for approval when you run it.
+
+The template resolves as a whole. If any slot in it cannot resolve, every
+property that holds a slot offers nothing, while properties with no slot
+keep completing from their declarations.
+
+```mermaid
+flowchart TD
+    T["property=&lt;TAB&gt;"] --> S{"does the property hold a slot?"}
+    S -->|no| D["complete from the written declaration"]
+    S -->|yes| R["resolve the template with the automatic grant and saved grants only"]
+    R -->|resolved| V["complete from the resolved type"]
+    R -->|"read not granted, or failed"| F["no schema candidates: the shell falls back"]
+```
+
+Names are ordered without resolving anything. A template type's place in
+the required-first order comes from its written suffix:
+`'{{ … }}(required)'` sorts with the required properties, a bare
+`'{{ … }}'` with the optional ones.
+
 ### When the schema is unavailable
 
 If `$schema` cannot be loaded (missing file, unparseable schema, raw
@@ -736,7 +789,7 @@ What you can expect, with a `plan.md` whose `$schema` declares `phase`
 | You type | Offered | Why |
 | --- | --- | --- |
 | `compose plan.md --codex -c low ph<TAB>` | `phase=` | `-c` took `low`; `ph` is Claudine's |
-| `compose plan.md --codex -c low mode=<TAB>` | `mode='fast'`, `mode='slow'` | the setter value slot completes as usual |
+| `compose plan.md --codex -c low mode=<TAB>` | `mode='fast'`, `mode='slow'` | the setter value completes as usual |
 | `compose plan.md --codex -c <TAB>` | nothing | the word is `-c`'s value: it belongs to Codex |
 | `compose plan.md --codex -c ph<TAB>` | nothing | an unfinished value of `-c`, not a setter name |
 | `compose plan.md --codex -c phase=2 ph<TAB>` | nothing | `phase=2` is a declared parameter, so `-c` has no value and the command would fail |
@@ -921,7 +974,7 @@ default completion. The engine emits zero candidates so each shell
 renders whatever its native completion produces (file names on
 bash/zsh/fish).
 
-Value slots on `--append-system-prompt` / `--replace-system-prompt`
+Option values on `--append-system-prompt` / `--replace-system-prompt`
 are **not** covered by the new engine. They resolve to the shell's
 native file completion.
 

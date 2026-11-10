@@ -87,18 +87,11 @@ fn validate_json(process: &CliProcessFixture, declared: &[(&str, &str)], documen
     }
     let output = builder
         .build()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .arg(document)
         .output()
         .expect("run md schema validate");
-    let stdout = String::from_utf8(output.stdout).expect("utf-8 stdout");
-    let record = serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!(
-            "one JSON record expected ({error}); stdout:\n{stdout}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        )
-    });
-    (output.status.code(), record)
+    (output.status.code(), common::schema_validate_record(&output.stdout))
 }
 
 fn problem_paths(record: &Value) -> Vec<&str> {
@@ -253,16 +246,15 @@ fn assert_declarations_validate(presentation: policy::Presentation, half: usize)
     let output = process
         .command_builder()
         .build()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .args(expected.keys())
         .output()
         .expect("run md schema validate");
     assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
-    let stdout = String::from_utf8(output.stdout).expect("utf-8 stdout");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let mut failures = Vec::new();
     let mut seen = 0;
-    for line in stdout.lines() {
-        let record: Value = serde_json::from_str(line).unwrap_or_else(|error| panic!("{error}: {line}"));
+    for record in common::schema_validate_records(&output.stdout) {
         let file = record["file"].as_str().expect("a record names its file");
         let (valid, problems) = &expected[file];
         let actual: std::collections::BTreeSet<_> = record["problems"]
@@ -327,7 +319,7 @@ fn declaration_runs_cover_both_presentations_and_halves_once() {
     assert_eq!(DECLARATION_RUNS.len(), 4);
 }
 /// Duplicate keys and malformed YAML carrying `content_policy`, `rule`, or
-/// `action` fail frontmatter parsing (exit 3) before any schema applies.
+/// `action` fail frontmatter parsing (exit 1) before any schema applies.
 #[test]
 fn schema_validate_reports_damaged_policy_frontmatter_as_a_parse_error() {
     let _ = include_str!("../../../lib/tests/content_policy_fixtures/mod.rs");
@@ -344,13 +336,13 @@ fn schema_validate_reports_damaged_policy_frontmatter_as_a_parse_error() {
     let output = process
         .command_builder()
         .build()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .args(&files)
         .output()
         .expect("run md schema validate");
-    assert_eq!(output.status.code(), Some(3), "{}", String::from_utf8_lossy(&output.stderr));
-    let stdout = String::from_utf8(output.stdout).expect("utf-8 stdout");
-    let records: Vec<Value> = stdout.lines().map(|line| serde_json::from_str(line).expect("a JSON record")).collect();
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let records = common::schema_validate_records(&output.stdout);
     assert_eq!(records.len(), files.len(), "{stdout}");
     for record in &records {
         assert_eq!(record["error"], "frontmatter_parse", "{record}");

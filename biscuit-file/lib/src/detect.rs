@@ -1,7 +1,8 @@
 //! File type detection using magic bytes and extensions.
 //!
-//! This module provides utilities to detect whether a file is TOML, YAML, or PDF
-//! based on its content (magic bytes) and file extension.
+//! This module detects a file's type from its content (magic bytes, which
+//! only identify PDF) and from its file extension, which identifies every
+//! [`FileType`] variant.
 
 use std::path::Path;
 use tracing::{debug, trace};
@@ -19,6 +20,12 @@ pub enum FileType {
     Json,
     /// JSON5 data file.
     Json5,
+    /// JSON Lines data file (`.jsonl` or `.ndjson`).
+    Jsonl,
+    /// Comma-separated values.
+    Csv,
+    /// Tab-separated values.
+    Tsv,
     /// Markdown document.
     Markdown,
     /// PDF document.
@@ -36,6 +43,9 @@ impl FileType {
             Self::Yaml => Some("yaml"),
             Self::Json => Some("json"),
             Self::Json5 => Some("json5"),
+            Self::Jsonl => Some("jsonl"),
+            Self::Csv => Some("csv"),
+            Self::Tsv => Some("tsv"),
             Self::Markdown => Some("md"),
             Self::Pdf => Some("pdf"),
             Self::Unknown => None,
@@ -50,6 +60,9 @@ impl FileType {
             Self::Yaml => Some("application/yaml"),
             Self::Json => Some("application/json"),
             Self::Json5 => Some("application/json5"),
+            Self::Jsonl => Some("application/x-ndjson"),
+            Self::Csv => Some("text/csv"),
+            Self::Tsv => Some("text/tab-separated-values"),
             Self::Markdown => Some("text/markdown"),
             Self::Pdf => Some("application/pdf"),
             Self::Unknown => None,
@@ -77,6 +90,9 @@ impl FileType {
             Self::Yaml => Some(DataFormat::Yaml),
             Self::Json => Some(DataFormat::Json),
             Self::Json5 => Some(DataFormat::Json5),
+            Self::Jsonl => Some(DataFormat::Jsonl),
+            Self::Csv => Some(DataFormat::Csv),
+            Self::Tsv => Some(DataFormat::Tsv),
             Self::Markdown => Some(DataFormat::Markdown),
             Self::Pdf => Some(DataFormat::Pdf),
             Self::Unknown => None,
@@ -91,6 +107,9 @@ impl From<DataFormat> for FileType {
             DataFormat::Yaml => Self::Yaml,
             DataFormat::Json => Self::Json,
             DataFormat::Json5 => Self::Json5,
+            DataFormat::Jsonl => Self::Jsonl,
+            DataFormat::Csv => Self::Csv,
+            DataFormat::Tsv => Self::Tsv,
             DataFormat::Markdown => Self::Markdown,
             DataFormat::Pdf => Self::Pdf,
             DataFormat::Text => Self::Unknown,
@@ -151,8 +170,25 @@ pub fn detect_file_type_from_bytes(bytes: &[u8]) -> FileType {
     FileType::Unknown
 }
 
-/// Detect file type from file extension.
-fn detect_from_extension(path: &Path) -> FileType {
+/// Detect file type from a path's extension alone, without touching the
+/// filesystem.
+///
+/// Matching is case-insensitive (`DATA.CSV` is [`FileType::Csv`]), and
+/// `.ndjson` is an alias of `.jsonl`. A path with no extension, or one this
+/// table does not list, is [`FileType::Unknown`].
+///
+/// ## Examples
+///
+/// ```rust
+/// use std::path::Path;
+/// use biscuit_file::{FileType, detect_from_extension};
+///
+/// assert_eq!(detect_from_extension(Path::new("rows.ndjson")), FileType::Jsonl);
+/// assert_eq!(detect_from_extension(Path::new("DATA.CSV")), FileType::Csv);
+/// assert_eq!(detect_from_extension(Path::new("notes.txt")), FileType::Unknown);
+/// ```
+#[must_use]
+pub fn detect_from_extension(path: &Path) -> FileType {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -163,6 +199,9 @@ fn detect_from_extension(path: &Path) -> FileType {
         Some("yaml" | "yml") => FileType::Yaml,
         Some("json") => FileType::Json,
         Some("json5") => FileType::Json5,
+        Some("jsonl" | "ndjson") => FileType::Jsonl,
+        Some("csv") => FileType::Csv,
+        Some("tsv") => FileType::Tsv,
         Some("md" | "markdown" | "mdx") => FileType::Markdown,
         Some("pdf") => FileType::Pdf,
         _ => FileType::Unknown,
@@ -285,6 +324,9 @@ mod tests {
             FileType::Yaml,
             FileType::Json,
             FileType::Json5,
+            FileType::Jsonl,
+            FileType::Csv,
+            FileType::Tsv,
             FileType::Markdown,
             FileType::Pdf,
         ];
@@ -304,6 +346,9 @@ mod tests {
             FileType::Yaml,
             FileType::Json,
             FileType::Json5,
+            FileType::Jsonl,
+            FileType::Csv,
+            FileType::Tsv,
             FileType::Markdown,
             FileType::Pdf,
         ];
@@ -320,6 +365,9 @@ mod tests {
             FileType::Yaml,
             FileType::Json,
             FileType::Json5,
+            FileType::Jsonl,
+            FileType::Csv,
+            FileType::Tsv,
             FileType::Markdown,
             FileType::Pdf,
         ];

@@ -479,6 +479,53 @@ println!("{}", state.id); // 16 hex digits
   alongside the shared `filesystem.io.*` counters. The CLI is `sniff repo state`
   ([`repo_state.md`](cli/repo_state.md)).
 
+### Per-Path Tracked State
+
+`GitRepo::tracked_state(paths)` answers "is this file a clean, committed file of the repository?"
+for a handful of paths, without the full working-tree status walk `changed_paths` performs. Use it
+when you need a verdict about specific files — Darkmatter, for example, grants a schema expression a
+read of a file automatically only when that file is `Clean`.
+
+```rust
+use sniff::filesystem::git::{GitRepo, TrackedState};
+
+let repo = GitRepo::discover(std::path::Path::new("."))?.unwrap();
+let file = biscuit_file::canonicalize_simplified(std::path::Path::new("docs/intro.md"))?;
+match repo.tracked_state(&[file.clone()])?.remove(0) {
+    TrackedState::Clean { index_blob, .. } => println!("committed as blob {index_blob}"),
+    other => println!("not clean: {other:?}"),
+}
+```
+
+Pass absolute, canonical paths (canonicalize them with `biscuit_file::canonicalize_simplified`);
+the result has one `TrackedState` per input, in the same order:
+
+| State | Meaning |
+|---|---|
+| `Clean { index_blob, head_blob }` | A regular file whose index blob and mode equal `HEAD`'s, and whose worktree bytes hash to the index blob. Both ids are full hex and equal. |
+| `Dirty` | In the index, but changed: staged edit, worktree edit, added but not committed, deleted from disk, mode or type change, or a symbolic link (never followed). |
+| `Untracked` | Not in the index and not ignored. A path that does not exist, and a directory, also report `Untracked`. |
+| `Ignored` | Not in the index and matched by an ignore rule, including a rule on a parent directory. |
+| `Conflicted` | Has unmerged index entries (a merge or rebase stopped on it). |
+| `Filtered` | In the index, but a `filter` attribute applies (for example `filter=lfs` in `.gitattributes`). The disk bytes are not what Git stores, so it is never `Clean`. |
+| `Outside` | Not part of this working tree: outside the root, inside `.git`, or inside a nested repository or submodule. |
+
+"Hashes to the index blob" means after Git's own worktree-to-index conversion. With
+`core.autocrlf=true` (common on Windows) a checked-out file has CRLF line endings while the
+committed blob has LF; the conversion turns CRLF back into LF before hashing, so the file is still
+`Clean`. `GitRepo::worktree_blob_id(path, bytes)` exposes that hash directly: the blob id `bytes`
+would have if written at `path`. External filter drivers (such as Git LFS) are never run, so
+`worktree_blob_id` returns an error for a path with a `filter` attribute, and for a path outside
+the working tree.
+
+Cost: one index read and one `HEAD` tree read per call, then per path an index lookup, a tree
+lookup, an attribute or ignore check, and a metadata probe per parent directory. A tracked file is
+read only when its size matches the size the index recorded (a different size is `Dirty`
+immediately, as in Git); reads count toward `filesystem.io.file_opens` and
+`filesystem.io.bytes_read`, and `git.status_walks` stays at zero. A bare repository fails with
+`SniffError::BareRepository`, like `changed_paths`. Unlike `changed_paths`, a conflict elsewhere
+in the repository does not fail the call; only the conflicted path itself reports `Conflicted`.
+
 ### Focused Git Metadata
 
 `GitRequest.metadata` is an `Option<GitMetadataRequest>` giving fine-grained control over commits,

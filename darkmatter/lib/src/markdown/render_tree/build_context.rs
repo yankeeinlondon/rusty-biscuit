@@ -633,7 +633,7 @@ fn apply_hr_defaults(node: &mut RenderNode, ctx: &TreeBuildContext) {
 
 // ───────────────────── structured link/image directives ────────────────────
 
-/// Parsed structured link directive (`class='...' target='...' style='...'`).
+/// Parsed structured link title (`{ class: '...', target: '...', qp: { ... } }`).
 struct LinkDirective {
     clear_title: bool,
     class: Option<String>,
@@ -642,6 +642,7 @@ struct LinkDirective {
     prompt: Option<String>,
     data: Vec<(String, String)>,
     inline_style: Option<String>,
+    metadata: renderable::output::link_metadata::LinkMetadata,
 }
 
 impl LinkDirective {
@@ -683,6 +684,8 @@ impl LinkDirective {
             }
             node.attrs.retain_non_default_browser();
         }
+
+        node.attrs.set_link_metadata(self.metadata.clone());
 
         // For structured directives, replace the raw title with the plain title
         // (or None) so the browser writer does not leak the raw directive.
@@ -799,6 +802,7 @@ fn parse_link_directive(
             Vec::new()
         },
         inline_style: merged_style,
+        metadata: link.link_metadata().clone(),
     })
 }
 
@@ -1201,7 +1205,7 @@ mod structural_tests {
     fn context_fold_parses_structured_link_class() {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
-        let doc = fold_test("[label](https://example.com \"class='btn'\")\n", &ctx);
+        let doc = fold_test("[label](https://example.com '{ class: \"btn\" }')\n", &ctx);
         let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
             .expect("link node");
         assert!(
@@ -1211,7 +1215,7 @@ mod structural_tests {
         );
         if let NodeKind::Link { title, .. } = &link.kind {
             assert!(
-                title.as_deref() != Some("class='btn'"),
+                title.as_deref() != Some("{ class: \"btn\" }"),
                 "raw directive title must be cleared"
             );
         }
@@ -1222,7 +1226,7 @@ mod structural_tests {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
         let doc = fold_test(
-            "[x](https://example.com \"target='_blank'\")\n",
+            "[x](https://example.com '{ target: \"_blank\" }')\n",
             &ctx,
         );
         let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
@@ -1240,7 +1244,7 @@ mod structural_tests {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
         let doc = fold_test(
-            "[x](https://example.com \"prompt='explain'\")\n",
+            "[x](https://example.com '{ prompt: \"explain\" }')\n",
             &ctx,
         );
         let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))
@@ -1258,7 +1262,7 @@ mod structural_tests {
         let policies = empty_policies();
         let ctx = ctx_for(&policies);
         let doc = fold_test(
-            "[x](https://example.com \"style='color: red'\")\n",
+            "[x](https://example.com '{ style: \"color: red\" }')\n",
             &ctx,
         );
         let link = find_node(&doc.root, &|n| matches!(n.kind, NodeKind::Link { .. }))

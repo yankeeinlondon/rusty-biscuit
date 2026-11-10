@@ -388,3 +388,65 @@ fn private_live_cells_over_one_seed_share_its_definitions_and_keep_writes_apart(
     assert_eq!(right.get("phase"), None);
     assert_eq!(right, seed);
 }
+
+/// `function`'s result for `operands`, evaluated against `frontmatter` in a
+/// fixture whose private directory holds no data files.
+fn action_call(function: &str, frontmatter: Value, operands: Vec<Expr>) -> Result<Value, LifecycleExprError> {
+    let fixture = Fixture::new();
+    let fm: SharedFrontmatter = frontmatter.as_object().cloned().unwrap_or_default().into();
+    let source = fixture._dir.path().join("doc.md");
+    let inputs = StackInputs { source_path: &source, ..fixture.inputs(LifecycleSignal::Success, &fm) };
+    StackExecutor::with_services(inputs, &fixture.effects, &NoCodes).invoke_expression_function(function, &operands, &fm)
+}
+
+fn operand(source: &str) -> Expr {
+    crate::markdown::compose::expression::parse(source).unwrap()
+}
+
+const MISSING_DATA: &str = "load_data('absent.yaml', 'string[]')";
+
+#[test]
+fn try_action_returns_the_selected_value_not_a_boolean() {
+    let fm = json!({ "items": ["a", "b"], "count": 3 });
+    // A template operand routes the call through the operand path.
+    let template = Expr::StringLiteral("n={{ fm.count }}".to_string());
+    assert_eq!(action_call("try", fm.clone(), vec![operand("fm.items"), template.clone()]).unwrap(), json!(["a", "b"]));
+    assert_eq!(action_call("try", fm.clone(), vec![operand("0"), template]).unwrap(), json!(0), "a falsy success");
+    // Without a template operand the shared evaluator runs it, alike.
+    assert_eq!(action_call("try", fm, vec![operand(MISSING_DATA), operand("['x']")]).unwrap(), json!(["x"]));
+}
+
+/// A template operand sends the call down the value-only path, which cannot
+/// run a callback function: the rejection is a contract violation.
+#[test]
+fn callback_function_with_template_operand_is_a_contract_violation() {
+    let template = Expr::StringLiteral("{{ fm.count }}".to_string());
+    let error = action_call("map", json!({ "items": [1], "count": 3 }), vec![operand("fm.items"), template]).unwrap_err();
+    let LifecycleExprError::Evaluate(error) = error else { panic!("an evaluation error: {error:?}") };
+    assert!(matches!(*error, ExpressionError::ContractViolation { ref function, .. } if function == "map"), "{error:?}");
+}
+
+#[test]
+fn try_template_operand_fallback_is_interpolated() {
+    let template = Expr::StringLiteral("n={{ fm.count }}".to_string());
+    let value = action_call("try", json!({ "count": 3 }), vec![operand(MISSING_DATA), template]).unwrap();
+    assert_eq!(value, json!("n=3"));
+}
+
+#[test]
+fn unused_template_operand_is_not_interpolated() {
+    // Interpolating this template fails, so a success proves it never ran.
+    let broken = Expr::StringLiteral("{{ no_such_function() }}".to_string());
+    assert!(action_call("length", json!({}), vec![broken.clone()]).is_err(), "control: interpolating it fails");
+    let value = action_call("try", json!({ "items": ["a"] }), vec![operand("fm.items"), broken]).unwrap();
+    assert_eq!(value, json!(["a"]));
+}
+
+#[test]
+fn template_operand_compose_failure_is_not_recovered() {
+    // The read inside the template fails as subtree composition, not as an
+    // expression failure of `try`'s own operand, so it propagates.
+    let template = Expr::StringLiteral(format!("{{{{ {MISSING_DATA} }}}}"));
+    let error = action_call("try", json!({}), vec![template, operand("'fallback'")]).unwrap_err();
+    assert!(matches!(error, LifecycleExprError::Compose(_)), "{error:?}");
+}

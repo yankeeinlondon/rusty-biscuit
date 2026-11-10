@@ -3,24 +3,25 @@
 //! performance report.
 
 use crate::args::policy::ResolvedPolicy;
-use crate::args::{Cli, OutputFormat};
-use crate::artifact::{
-    OutputArtifact, html_artifact, json_artifact, markdown_plus_artifact,
-    open_output_artifact,
-};
+use crate::args::Cli;
+use crate::artifact::{OutputArtifact, open_output_artifact};
 use crate::io::{load_markdown, open_argument, resolve_file_path};
 use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::rules::{Indentation, ListItemPadding};
+use darkmatter::markdown::compose::setters::{RawSetter, SetterPlan, TokenClass, classify_token};
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 use std::path::{Path, PathBuf};
 use tracing::{info, instrument};
 
 mod lifecycle;
-pub(crate) mod report;
 
-use report::{ClassifiedFailure, ReportSink, ReportedExit};
+use crate::output::report::{ClassifiedFailure, ReportSink, ReportedExit};
+use crate::output::{ResolvedOutput, stderr_report, stderr_terminal};
+use biscuit_terminal::output::OutputTarget;
+use darkmatter::markdown::output::command::ReferenceSummary;
+use renderable::Width;
 
 /// Whether `policy` recovers a missing target of `kind`.
 fn recovers_missing(policy: &ResolvedPolicy, kind: darkmatter::markdown::reference::types::ReferenceKind) -> bool {
@@ -38,67 +39,27 @@ fn recovers_missing(policy: &ResolvedPolicy, kind: darkmatter::markdown::referen
 #[derive(Debug)]
 pub(crate) struct ParsedComposeArgs {
     pub(crate) input: Option<PathBuf>,
-    pub(crate) shorthand_setters: serde_json::Map<String, serde_json::Value>,
-}
-
-fn parse_compose_setter(
-    token: &str,
-) -> Option<std::result::Result<(String, serde_json::Value), String>> {
-    let eq_pos = token.find('=')?;
-    let key = &token[..eq_pos];
-    let raw_value = &token[eq_pos + 1..];
-
-    if key.is_empty() {
-        return Some(Err("setter key must not be empty".to_string()));
-    }
-
-    let mut chars = key.chars();
-    let first = chars.next().unwrap();
-    if !first.is_ascii_alphabetic() && first != '_' {
-        return None;
-    }
-
-    for ch in chars {
-        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-            continue;
-        }
-        return None;
-    }
-
-    let value = parse_shorthand_value(raw_value);
-    Some(Ok((key.to_string(), value)))
-}
-
-fn parse_shorthand_value(raw: &str) -> serde_json::Value {
-    if raw.is_empty() {
-        return serde_json::Value::String(String::new());
-    }
-    match biscuit_file::Json5::from_str(raw) {
-        Ok(parsed) if simplified_schema::numeric::reject_non_finite_json5(&parsed).is_ok() => {
-            parsed.value().clone()
-        }
-        _ => serde_json::Value::String(raw.to_string()),
-    }
+    /// The setters in command-line order, unread: only a document's schema can say
+    /// what a value means.
+    pub(crate) setters: Vec<RawSetter>,
 }
 
 pub(crate) fn parse_compose_positionals(args: &[String]) -> Result<ParsedComposeArgs> {
     let mut input: Option<PathBuf> = None;
-    let mut shorthand_setters = serde_json::Map::new();
+    let mut setters = Vec::new();
 
     for token in args {
-        match parse_compose_setter(token) {
-            Some(Ok((key, value))) => {
-                shorthand_setters.insert(key, value);
+        match classify_token(token) {
+            TokenClass::Setter(setter) => setters.push(setter),
+            TokenClass::EmptyKey => {
+                return Err(eyre!("Invalid setter '{}': setter key must not be empty", token));
             }
-            Some(Err(e)) => {
-                return Err(eyre!("Invalid setter '{}': {}", token, e));
-            }
-            None => {
+            TokenClass::Path => {
                 if input.is_some() {
                     return Err(eyre!(
                         "expected at most one input path, but got multiple: {}",
                         args.iter()
-                            .filter(|t| parse_compose_setter(t).is_none())
+                            .filter(|t| classify_token(t) == TokenClass::Path)
                             .map(|t| t.as_str())
                             .collect::<Vec<_>>()
                             .join(", ")
@@ -109,10 +70,7 @@ pub(crate) fn parse_compose_positionals(args: &[String]) -> Result<ParsedCompose
         }
     }
 
-    Ok(ParsedComposeArgs {
-        input,
-        shorthand_setters,
-    })
+    Ok(ParsedComposeArgs { input, setters })
 }
 
 pub(crate) fn build_remote_read_config(
@@ -141,22 +99,40 @@ pub(crate) fn build_remote_read_config(
     }
 }
 
-/// Refuses `--show` and `--shell` beside `--output report-json`: the report
-/// is the command's only output.
+/// Refuses `--shell` beside a data output or `--show`: `--shell` is a report of
+/// its own, composing nothing there is to open, and a data value is the
+/// command's only output.
 ///
 /// ## Errors
 ///
 /// A clap `ArgumentConflict` usage error.
-pub(crate) fn reject_report_conflicts(show: bool, shell: bool) -> Result<()> {
-    let conflict = [(show, "--show"), (shell, "--shell")].into_iter().find_map(|(set, flag)| set.then_some(flag));
-    match conflict {
-        Some(flag) => Err(crate::args::policy::usage_error(
-            crate::args::policy::PolicyCommand::Compose,
-            clap::error::ErrorKind::ArgumentConflict,
-            format!("the argument '--output report-json' cannot be used with '{flag}'"),
-        )
-        .into()),
-        None => Ok(()),
+pub(crate) fn reject_report_conflicts(output: OutputTarget, shell: bool, show: bool) -> Result<()> {
+    if !shell {
+        return Ok(());
+    }
+    let conflict = if output.is_data() {
+        format!("--output {output}")
+    } else if show {
+        "--show".to_string()
+    } else {
+        return Ok(());
+    };
+    Err(crate::args::policy::usage_error(
+        crate::args::policy::PolicyCommand::Compose,
+        clap::error::ErrorKind::ArgumentConflict,
+        format!("the argument '{conflict}' cannot be used with '--shell'"),
+    )
+    .into())
+}
+
+/// The width composition reflows at, when `--width` asked for one. Without it,
+/// composition's output is what it always was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComposeOutputWidth(Option<Width>);
+
+impl ComposeOutputWidth {
+    pub(crate) fn from_resolved(resolved: &ResolvedOutput) -> Self {
+        Self(resolved.explicit_width.then_some(resolved.options.width))
     }
 }
 
@@ -187,8 +163,8 @@ pub fn run_compose(
     input: Option<&PathBuf>,
     state_json: Option<&str>,
     set_json: Option<&str>,
-    shorthand_setters: serde_json::Map<String, serde_json::Value>,
-    output: OutputFormat,
+    setters: Vec<RawSetter>,
+    output_width: ComposeOutputWidth,
     show: bool,
     include_frontmatter: bool,
     list_spacing: ListItemPadding,
@@ -207,6 +183,9 @@ pub fn run_compose(
 ) -> Result<()> {
     info!("starting compose pipeline");
     use biscuit_terminal::terminal::Terminal;
+
+    // Overlapping setters are settled before any document is read.
+    let setters = SetterPlan::new(setters)?;
     use std::time::Instant;
 
     let cmd_start = perf.then(Instant::now);
@@ -220,6 +199,11 @@ pub fn run_compose(
     // a process-global `LazyLock`, so tests and library hosts that change the
     // cwd/env/attached streams within one process still detect afresh.
     let term_cell: std::cell::OnceCell<Terminal> = std::cell::OnceCell::new();
+    let perf_stage = |name: &str, elapsed: std::time::Duration| {
+        if let Some(sink) = sink {
+            sink.perf_stage(name, elapsed);
+        }
+    };
 
     let launch_dir = request.launch_dir().to_path_buf();
 
@@ -235,6 +219,7 @@ pub fn run_compose(
     };
     let resolved_input = opened_input.as_ref().map(|opened| opened.path().to_path_buf());
     let resolve_input_dur = resolve_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("resolve input", resolve_input_dur);
 
     let load_start = perf.then(Instant::now);
     let md = if let Some(ref resolved) = resolved_input {
@@ -243,7 +228,11 @@ pub fn run_compose(
     } else {
         load_markdown(None, request)?
     };
+    if let Some(sink) = sink {
+        sink.composes(md.source().as_ref());
+    }
     let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("load input", load_input_dur);
     // One context for validation, pre-flight, and compose: the document's own
     // (derived from the launch context, or built at the document when it lies
     // in another repository), or the launch context itself for stdin. It
@@ -268,6 +257,10 @@ pub fn run_compose(
     let ctx_start = perf.then(Instant::now);
     let mut options = ComposeOptions::for_document(&launch_dir, &md);
     let capture_context_dur = ctx_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("capture context", capture_context_dur);
+    if let Some(width) = output_width.0 {
+        options = options.with_output_width(width);
+    }
     if lifecycle.is_some() {
         options = options.with_exclude_keys(lifecycle::event_keys());
     }
@@ -309,7 +302,7 @@ pub fn run_compose(
     }
 
     // Parse --set as JSON or JSON5
-    let mut override_map: serde_json::Map<String, serde_json::Value> =
+    let override_map: serde_json::Map<String, serde_json::Value> =
         if let Some(json_str) = set_json {
             let parsed = biscuit_file::Json5::from_str(json_str)
                 .wrap_err("Invalid JSON/JSON5 in --set argument")?;
@@ -327,19 +320,37 @@ pub fn run_compose(
             serde_json::Map::new()
         };
 
-    for (key, value) in shorthand_setters {
-        override_map.insert(key, value);
+    if !override_map.is_empty() || !setters.is_empty() {
+        options = options.with_file_ref_fallback_dir(&launch_dir);
     }
-
     if !override_map.is_empty() {
-        options = options
-            .with_file_ref_fallback_dir(&launch_dir)
-            .with_set_overrides(serde_json::Value::Object(override_map));
+        options = options.with_set_overrides(serde_json::Value::Object(override_map));
     }
+    if !setters.is_empty() {
+        options = options.with_setters(setters);
+    }
+    // One data memo and read set for the whole command: the reference check,
+    // the lifecycle, pre-flight, and composition below all clone these
+    // options, so a file is read once across them and every pass's reads are
+    // reported together.
+    let data_runtime = darkmatter::markdown::compose::DataRuntime::new();
+    if let Some(sink) = sink {
+        sink.reads_from(&data_runtime);
+    }
+    options = options.with_data_runtime(data_runtime);
     let prepare_request = |options: ComposeOptions| -> Result<ComposeRequest> {
         ComposeRequest::with_context(options, file_resolution_context.clone())
             .wrap_err("Failed to prepare the compose request")
     };
+
+    // The check prepares the document, and a failed preparation fails the run,
+    // so it must judge the document under the same recoveries as composition.
+    options = options.with_allow_ctx_override(policy.recovers("ctx-override"));
+    options = options.with_allow_missing_transclusions(policy.recovers("missing-transclusions"));
+    options = options
+        .with_allow_invalid_frontmatter_assignment(policy.recovers("invalid-frontmatter-assignment"));
+    options = options
+        .with_allow_reassigned_frontmatter_property(policy.recovers("reassigned-frontmatter-property"));
 
     // ── Reference validation ───────────────────────────────────────────
     // Validate before composing so broken references are caught early.
@@ -350,8 +361,17 @@ pub fn run_compose(
     // A lifecycle run checks references after `initialize`, which may create
     // the files the body includes.
     let deferred_report = if resolved_input.is_some() && lifecycle.is_none() {
-        match check_references(&md, &prepare_request(options.clone())?, policy) {
-            ReferenceCheck::Clean => None,
+        let check_request = prepare_request(options.clone())?;
+        let check = check_references(&md, &check_request, policy).inspect_err(|error| {
+            deliver_check_failure_warnings(error, &check_request, &mut pending_triggers, sink, &term_cell);
+        })?;
+        match check {
+            ReferenceCheck::Clean(summary) => {
+                if let Some(sink) = sink {
+                    sink.summary(summary);
+                }
+                None
+            }
             ReferenceCheck::Report(report) => {
                 pending_triggers.hold(&report.trigger_warnings);
                 if let Some(sink) = sink {
@@ -364,18 +384,20 @@ pub fn run_compose(
                 pending_triggers.deliver(sink, None, &term_cell);
                 if let Some(sink) = sink {
                     sink.references(&report);
-                    return Err(ReportedExit(2).into());
+                    perf_stage("validate references", val_start.map(|s| s.elapsed()).unwrap_or_default());
+                    return Err(ReportedExit(1).into());
                 }
-                let term = term_cell.get_or_init(Terminal::default);
-                eprint!("{}", render_reference_report(&report, term));
+                let term = term_cell.get_or_init(stderr_terminal);
+                eprint!("{}", render_reference_report(&report, &launch_dir));
                 eprint!("{}", render_reference_warnings(&report, term));
-                std::process::exit(2);
+                return Err(ReportedExit(1).into());
             }
         }
     } else {
         None
     };
     let validate_refs_dur = val_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("validate references", validate_refs_dur);
 
     // Set source file for relative transclusion resolution
     if let Some(ref resolved) = resolved_input {
@@ -417,7 +439,8 @@ pub fn run_compose(
     // so we can hand it to `compose_preflight_approvals` (and reuse it on
     // the off-chance a future re-preflight needs to run in the same flow).
     let preflight_handler: Option<Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>> =
-        if is_file_input && crate::approval::can_prompt_interactively() {
+        // A data output owns stderr, so nothing may prompt on it.
+        if is_file_input && sink.is_none() && crate::approval::can_prompt_interactively() {
             Some(Arc::new(crate::approval::CliShellApprovalHandler))
         } else {
             None
@@ -426,12 +449,6 @@ pub fn run_compose(
         options = options.with_allow_shell_timeout(true);
     }
     options = options.with_list_spacing(list_spacing);
-    options = options.with_allow_ctx_override(policy.recovers("ctx-override"));
-    options = options.with_allow_missing_transclusions(policy.recovers("missing-transclusions"));
-    options = options
-        .with_allow_invalid_frontmatter_assignment(policy.recovers("invalid-frontmatter-assignment"));
-    options = options
-        .with_allow_reassigned_frontmatter_property(policy.recovers("reassigned-frontmatter-property"));
     options = options.with_perf(perf);
     options = options.with_remote_read_config(remote_config);
     options = options.with_allow_remote_transclusion(true);
@@ -449,6 +466,7 @@ pub fn run_compose(
     options = options.with_shared_remote_fetch();
     let mut compose_request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("build options", build_options_dur);
     let lifecycle_warnings = match &lifecycle {
         Some(config) => {
             lifecycle::reject_incompatible_calls(&md, config, &lifecycle_source, &compose_request, &mut pending_triggers)
@@ -488,15 +506,7 @@ pub fn run_compose(
         return Ok(());
     }
 
-    let document = DocumentOutput {
-        output,
-        show,
-        include_frontmatter,
-        strict_style: policy.denies("style"),
-        cli,
-        input,
-        sink,
-    };
+    let document = ComposedDocument { show, include_frontmatter, sink };
 
     if let Some(config) = lifecycle {
         drop(options_ctx_ref);
@@ -505,12 +515,14 @@ pub fn run_compose(
             request: compose_request,
             config,
             source_path: lifecycle_source,
+            launch_dir: launch_dir.clone(),
             approval_handler: preflight_handler,
             check_references: is_file_input.then_some(policy),
             document,
             verbose: cli.verbose,
             call_warnings: lifecycle_warnings,
             pending_triggers,
+            started: cmd_start,
         });
     }
 
@@ -526,7 +538,16 @@ pub fn run_compose(
     // stages never need to gate against an approval set.
     use darkmatter::markdown::compose::ComposeOperation;
     let options = compose_request.options();
-    if options.is_enabled(ComposeOperation::ShellExpansion)
+    let preflight_failed = |e: darkmatter::markdown::compose::ShellExpansionError, compose_request: &ComposeRequest, pending_triggers: &mut PendingTriggerWarnings| {
+        let mut warnings = compose_request.options().take_preflight_failure_warnings();
+        pending_triggers.merge_into(&mut warnings);
+        match sink {
+            Some(sink) => sink.warnings(&warnings),
+            None => report_failure_trigger_warnings(&warnings, preflight_blocked(&e), &term_cell),
+        }
+        preflight_approval_error(e)
+    };
+    let slot_grants = if options.is_enabled(ComposeOperation::ShellExpansion)
         || options.is_enabled(ComposeOperation::ShellBlocks)
         || options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
     {
@@ -535,7 +556,7 @@ pub fn run_compose(
                 // A trigger only a child composition skips holds is reported
                 // by this walk alone.
                 pending_triggers.hold(&approvals.warnings);
-                if cli.verbose > 0 {
+                if cli.verbose > 0 && sink.is_none() {
                     eprintln!(
                         "pre-flight: {} discovered, {} whitelisted, {} approved",
                         approvals.stats.total_discovered,
@@ -551,18 +572,19 @@ pub fn run_compose(
                         .with_pre_approved_commands(approvals.pre_approved_commands)
                         .with_preflight_graph(approvals.preflight_graph)
                 });
+                approvals.slot_grants
             }
-            Err(e) => {
-                let mut warnings = compose_request.options().take_preflight_failure_warnings();
-                pending_triggers.merge_into(&mut warnings);
-                match sink {
-                    Some(sink) => sink.warnings(&warnings),
-                    None => report_failure_trigger_warnings(&warnings, preflight_blocked(&e), &term_cell),
-                }
-                return Err(preflight_approval_error(e));
-            }
+            Err(e) => return Err(preflight_failed(e, &compose_request, &mut pending_triggers)),
         }
-    }
+    } else {
+        // No shell operation to approve, but a schema template's slot reads
+        // are still asked about before anything resolves.
+        match md.compose_slot_approvals(&compose_request, preflight_handler.clone()) {
+            Ok(grants) => grants,
+            Err(e) => return Err(preflight_failed(e, &compose_request, &mut pending_triggers)),
+        }
+    };
+    compose_request = with_command_slot_session(compose_request, slot_grants, preflight_handler.clone());
 
     let (composed, mut report) = md.compose_with_warnings(&compose_request).map_err(|mut failure| {
         pending_triggers.merge_into(&mut failure.warnings);
@@ -575,6 +597,9 @@ pub fn run_compose(
     pending_triggers.merge_into(&mut report.warnings);
     if let Some(sink) = sink {
         sink.warnings(&report.warnings);
+        if let Some(perf_report) = &report.perf {
+            sink.perf_pipeline(perf_report);
+        }
     }
     // The lifecycle surfaces' call warnings lead: their check ran first.
     report.warnings.splice(0..0, lifecycle_warnings);
@@ -584,12 +609,13 @@ pub fn run_compose(
     // command here, before the document is written. Effects are not undone.
     blocked_diagnostics(&blocking, &report.warnings, &[])?;
     let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("compose pipeline", compose_pipeline_dur);
 
     // Verbose compose summary
-    if cli.verbose > 0 {
+    if cli.verbose > 0 && sink.is_none() {
         use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::{Status, StatusState};
-        let terminal = term_cell.get_or_init(Terminal::default);
+        let terminal = term_cell.get_or_init(stderr_terminal);
         let status = Status::from_prose(format!(
             "Composed <b>{}</b> transclusions, <b>{}</b> interpolations, <b>{}</b> replacements",
             report.transclusions_applied,
@@ -601,11 +627,12 @@ pub fn run_compose(
     }
 
     if cli.verbose > 1
+        && sink.is_none()
         && let Some(perf_report) = &report.perf
     {
         use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::Status;
-        let terminal = term_cell.get_or_init(Terminal::default);
+        let terminal = term_cell.get_or_init(stderr_terminal);
         for metric in &perf_report.metrics {
             let status = Status::from_prose(format!(
                 "<dim>{:20}</dim> {:>8.2}ms",
@@ -624,12 +651,13 @@ pub fn run_compose(
         }
     })?;
     if sink.is_none() {
-        report_compose_diagnostics(&report, deferred_report.as_ref(), &term_cell);
+        report_compose_diagnostics(&report, deferred_report.as_ref(), &launch_dir, &term_cell);
     }
 
+    let elapsed = cmd_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("elapsed", elapsed);
     // Emit perf report to stderr (after all other diagnostics)
-    if perf {
-        let elapsed = cmd_start.map(|s| s.elapsed()).unwrap_or_default();
+    if perf && sink.is_none() {
         let cli_perf = CliComposePerfReport {
             load_input: load_input_dur,
             resolve_input: resolve_input_dur,
@@ -640,7 +668,7 @@ pub fn run_compose(
             compose_pipeline: compose_pipeline_dur,
             elapsed,
         };
-        let rendered = format_compose_perf_report(&cli_perf, report.perf.as_ref());
+        let rendered = format_compose_perf_report(&cli_perf, report.perf.as_ref(), term_cell.get_or_init(stderr_terminal));
         eprint!("\n{rendered}");
     }
 
@@ -650,62 +678,69 @@ pub fn run_compose(
     Ok(())
 }
 
+/// `request` with the command's one schema-slot session attached: built from
+/// the request (its data runtime, so slot reads join the command's read set;
+/// its repository, home, and `--allow host=HOST` values), holding the
+/// run-only `grants` pre-flight gave, and asking `handler` (present only on
+/// an interactive, formatted run) about a computed target no grant decides.
+pub(crate) fn with_command_slot_session(
+    request: ComposeRequest,
+    grants: Vec<darkmatter::markdown::schemas::slots::grants::Grant>,
+    handler: Option<std::sync::Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>>,
+) -> ComposeRequest {
+    use darkmatter::markdown::schemas::slots::SlotSession;
+    let mut session = SlotSession::for_request(&request).with_run_grants(grants);
+    if let Some(handler) = handler {
+        session = session.with_handler(handler);
+    }
+    let session = std::sync::Arc::new(session);
+    request.map_options(|options| options.with_slot_session(session))
+}
+
+/// `request` with a reference-check schema-slot session attached, for a
+/// command that checks references without composing (`md graph`, `md
+/// validate refs`): a template resolves with the automatic and persisted
+/// grants only, nothing is ever asked, and a template a read nobody granted
+/// stops is deferred, as the check defers any value only composition can
+/// judge.
+pub(crate) fn with_reference_check_slot_session(request: ComposeRequest) -> ComposeRequest {
+    use darkmatter::markdown::schemas::slots::{SessionMode, SlotSession};
+    let session = std::sync::Arc::new(SlotSession::for_request(&request).with_mode(SessionMode::ReferenceCheck));
+    request.map_options(|options| options.with_slot_session(session))
+}
+
 /// How `md compose` writes the composed document.
-pub(crate) struct DocumentOutput<'a> {
-    pub(crate) output: OutputFormat,
+pub(crate) struct ComposedDocument<'a> {
     pub(crate) show: bool,
     pub(crate) include_frontmatter: bool,
-    /// `--deny style`: the HTML and MarkdownPlus artifacts reject the
-    /// `style:` issues it selects.
-    pub(crate) strict_style: bool,
-    pub(crate) cli: &'a Cli,
-    pub(crate) input: Option<&'a PathBuf>,
-    /// `--output report-json`: the document goes into the report instead of
-    /// stdout, and the warnings into its diagnostics.
+    /// A data output: the document goes into its envelope instead of stdout,
+    /// and the warnings into its diagnostics.
     pub(crate) sink: Option<&'a ReportSink>,
 }
 
-impl DocumentOutput<'_> {
-    /// The composed document in the requested format.
-    pub(crate) fn artifact(&self, composed: &Markdown) -> Result<OutputArtifact> {
-        match self.output {
-            OutputFormat::Auto | OutputFormat::Markdown => {
-                let content = if self.include_frontmatter {
-                    composed.as_string()
-                } else {
-                    // Frontmatter drives the pipeline; once composition is complete, discard it.
-                    composed.content().to_string()
-                };
-                Ok(OutputArtifact {
-                    content: darkmatter::markdown::render_tree::embedded::without_embedded_metadata(&content),
-                    extension: "md",
-                    label: "markdown",
-                })
-            }
-            // `markdown-plus` routes the composed document through the
-            // MarkdownPlus fold so disclosure blocks emit `<details>` /
-            // `<summary>` inline HTML rather than the DSL verbatim.
-            OutputFormat::MarkdownPlus => markdown_plus_artifact(composed, self.cli, self.input, self.strict_style),
-            OutputFormat::Html => html_artifact(composed, self.cli, self.input, self.strict_style, &self.cli.render.features),
-            OutputFormat::Json => json_artifact(composed),
+impl ComposedDocument<'_> {
+    /// The composed Markdown, which is what every output carries.
+    pub(crate) fn artifact(&self, composed: &Markdown) -> OutputArtifact {
+        let content = if self.include_frontmatter {
+            composed.as_string()
+        } else {
+            // Frontmatter drives the pipeline; once composition is complete, discard it.
+            composed.content().to_string()
+        };
+        OutputArtifact {
+            content: darkmatter::markdown::render_tree::embedded::without_embedded_metadata(&content),
+            extension: "md",
+            label: "markdown",
         }
     }
 
-    /// Whether the document is printed: always for Markdown, and for the
-    /// other formats only when it is not shown instead.
-    pub(crate) fn prints(&self) -> bool {
-        matches!(self.output, OutputFormat::Auto | OutputFormat::Markdown) || !self.show
-    }
-
     fn emit(&self, composed: &Markdown) -> Result<()> {
-        let artifact = self.artifact(composed)?;
+        let artifact = self.artifact(composed);
         if let Some(sink) = self.sink {
             sink.document(artifact.content);
             return Ok(());
         }
-        if self.prints() {
-            println!("{}", artifact.content);
-        }
+        println!("{}", artifact.content);
         if self.show {
             open_output_artifact(&artifact)?;
         }
@@ -715,7 +750,8 @@ impl DocumentOutput<'_> {
 
 /// The outcome of reference validation before composition.
 pub(crate) enum ReferenceCheck {
-    Clean,
+    /// Nothing to report; the totals of what it checked.
+    Clean(ReferenceSummary),
     /// Issues that never fail the run, reported after the content.
     Report(darkmatter::markdown::reference::validate::ReferenceValidationReport),
     /// An error no recovery covers, or a reported issue the deny policy
@@ -733,8 +769,12 @@ pub(crate) enum ReferenceCheck {
 /// running one here would be an effect ahead of the shell-approval walk and
 /// its policy stop (a lifecycle request already carries the document's
 /// whitelist), and would run it again when the document composes.
-pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: &ResolvedPolicy) -> ReferenceCheck {
-    use darkmatter::markdown::compose::ComposeOperation;
+///
+/// ## Errors
+///
+/// The check could not run: a document it had to prepare failed, or a file
+/// reference is invalid. That is a composition failure, never a clean result.
+pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: &ResolvedPolicy) -> Result<ReferenceCheck> {
     use darkmatter::markdown::compose::expression::Severity;
     use darkmatter::markdown::compose::policy::missing_reference_code;
     use darkmatter::markdown::reference::ReferenceGraphOptions;
@@ -742,18 +782,16 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
         ReferenceIssueCode, ReferenceSeverity, ReferenceValidationOptions,
     };
 
-    let passive = request.clone().map_options(|options| options.disable(ComposeOperation::ShellExpansion));
+    let passive = request.clone().map_options(ComposeOptions::for_reference_check);
     let val_options = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&passive));
-    let Ok(report) = md.validate_references(val_options) else {
-        return ReferenceCheck::Clean;
-    };
+    let report = md.validate_references(val_options).map_err(compose_error)?;
     let has_errors = report.issues.iter().any(|i| i.severity == ReferenceSeverity::Error);
     if report
         .issues
         .iter()
         .any(|i| i.severity == ReferenceSeverity::Error && !recovers_missing(policy, i.kind))
     {
-        return ReferenceCheck::Refused(report);
+        return Ok(ReferenceCheck::Refused(report));
     }
     // Warnings (such as a missing link inside inserted data) never fail the
     // run unless denied; report them after the content.
@@ -773,12 +811,35 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
         blocking.blocks(code, severity)
     });
     if blocked {
-        return ReferenceCheck::Refused(report);
+        return Ok(ReferenceCheck::Refused(report));
     }
     if has_errors || has_warnings {
-        return ReferenceCheck::Report(report);
+        return Ok(ReferenceCheck::Report(report));
     }
-    ReferenceCheck::Clean
+    Ok(ReferenceCheck::Clean(ReferenceSummary::from_report(&report)))
+}
+
+/// Delivers what the failed reference check `error` had found before it
+/// stopped: the warnings held so far and those of the documents it prepared.
+pub(crate) fn deliver_check_failure_warnings(
+    error: &color_eyre::eyre::Report,
+    request: &ComposeRequest,
+    pending_triggers: &mut PendingTriggerWarnings,
+    sink: Option<&ReportSink>,
+    term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
+) {
+    let mut warnings = request.options().take_preflight_failure_warnings();
+    pending_triggers.merge_into(&mut warnings);
+    match sink {
+        Some(sink) => sink.warnings(&warnings),
+        None => {
+            let blocking = error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<darkmatter::markdown::MarkdownError>())
+                .and_then(darkmatter::markdown::MarkdownError::blocked_diagnostics);
+            report_failure_trigger_warnings(&warnings, blocking, term_cell);
+        }
+    }
 }
 
 /// Fails with the warnings of `warnings` that `blocking` selects, carrying
@@ -808,19 +869,26 @@ pub(crate) fn blocked_diagnostics(
     }))
 }
 
+/// The report of `report`'s broken references for stderr, empty when it has
+/// none: compose has no success case to announce, and warnings are reported
+/// line by line by [`render_reference_warnings`].
 pub(crate) fn render_reference_report(
     report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
-    term: &biscuit_terminal::terminal::Terminal,
+    launch_dir: &Path,
 ) -> String {
-    use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use darkmatter::markdown::reference::validate::ValidationReportView;
-    ValidationReportView::new(report.clone()).render(term)
+    if report.error_count() == 0 {
+        return String::new();
+    }
+    let mut rendered = stderr_report(&ValidationReportView::new(report.clone()).with_launch_dir(launch_dir));
+    rendered.push('\n');
+    rendered
 }
 
 /// Maps a composition failure to the report `md` prints.
 ///
 /// A shell failure is worded here, so it keeps the shared diagnostics of the
-/// typed error ([`ClassifiedFailure`]) for `--output report-json`.
+/// typed error ([`ClassifiedFailure`]) for a data output.
 pub(crate) fn compose_error(e: darkmatter::markdown::MarkdownError) -> color_eyre::eyre::Report {
     use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
     if matches!(e, darkmatter::markdown::MarkdownError::ShellExpansion(_)) {
@@ -908,7 +976,7 @@ pub(crate) fn report_failure_trigger_warnings(
         if warning.code.as_deref() == Some(SCHEMA_INVALID_TRIGGER_CODE)
             && !blocking.iter().any(|shown| shown.code == warning.code && shown.message == warning.message)
         {
-            let term = term_cell.get_or_init(biscuit_terminal::terminal::Terminal::default);
+            let term = term_cell.get_or_init(stderr_terminal);
             eprintln!("{}", warning_rows(&warning.message, term));
         }
     }
@@ -987,12 +1055,11 @@ pub(crate) fn preflight_blocked(
 pub(crate) fn report_compose_diagnostics(
     report: &darkmatter::markdown::compose::ComposeReport,
     deferred_report: Option<&darkmatter::markdown::reference::validate::ReferenceValidationReport>,
+    launch_dir: &Path,
     term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
 ) {
-    use biscuit_terminal::terminal::Terminal;
-
     if !report.warnings.is_empty() {
-        let term = term_cell.get_or_init(Terminal::default);
+        let term = term_cell.get_or_init(stderr_terminal);
         for warning in &report.warnings {
             // A tolerated file-reference failure keeps its stable class row.
             let prose = match warning.resolution_failure {
@@ -1009,8 +1076,8 @@ pub(crate) fn report_compose_diagnostics(
 
     // Emit deferred validation issues to stderr (allowed but still reported)
     if let Some(report) = deferred_report {
-        let term = term_cell.get_or_init(Terminal::default);
-        let formatted = render_reference_report(report, term);
+        let term = term_cell.get_or_init(stderr_terminal);
+        let formatted = render_reference_report(report, launch_dir);
         if !formatted.is_empty() {
             eprint!("\n{formatted}");
         }
@@ -1018,9 +1085,9 @@ pub(crate) fn report_compose_diagnostics(
     }
 }
 
-/// The report's warnings, one row each: the reference view lists errors
+/// The report's warnings, one row each: compose's reference view lists errors
 /// only, so a warning (a missing link inside text an expression inserted) is
-/// reported line by line.
+/// reported line by line, located at the construct that inserted the text.
 pub(crate) fn render_reference_warnings(
     report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
     term: &biscuit_terminal::terminal::Terminal,
@@ -1031,10 +1098,13 @@ pub(crate) fn render_reference_warnings(
     for issue in report.issues.iter().filter(|i| {
         i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
     }) {
+        let location = issue.origin.authored.as_ref().map_or_else(
+            || "inside inserted text".to_string(),
+            |authored| format!("line {}, column {}, inside inserted text", authored.line, authored.column),
+        );
         let markup = format!(
-            "{} <dim>(line {}, inside inserted text)</dim>",
+            "{} <dim>({location})</dim>",
             Prose::escape_text_outside_code_spans(&issue.message),
-            issue.origin.line,
         );
         rendered.push_str(&warning_rows(&markup, term));
         rendered.push('\n');
@@ -1061,13 +1131,33 @@ fn apply_compose_baseline_schema(
     no_baseline_schema: bool,
     request: &MdRequest,
 ) -> Result<ComposeOptions> {
+    Ok(match compose_baseline(baseline_schema, no_baseline_schema, request)? {
+        ComposeBaseline::None => options,
+        ComposeBaseline::Custom(schema) => options.with_baseline_schema(schema),
+        ComposeBaseline::Darkmatter => options.with_darkmatter_baseline_schema(),
+    })
+}
+
+/// The baseline `md compose` selected.
+enum ComposeBaseline {
+    None,
+    Custom(simplified_schema::SchemaRoot),
+    Darkmatter,
+}
+
+/// Selects the baseline: `--disable baseline-schema`, then `--baseline-schema`,
+/// then a disabling [`NO_BASELINE_SCHEMA_ENV`], then the built-in one. Unlike
+/// `md schema validate`, `BASELINE_SCHEMA` selects nothing here.
+fn compose_baseline(baseline_schema: Option<&PathBuf>, no_baseline_schema: bool, request: &MdRequest) -> Result<ComposeBaseline> {
     if no_baseline_schema {
-        return Ok(options);
+        return Ok(ComposeBaseline::None);
     }
 
     if let Some(path) = baseline_schema {
         let resolved = resolve_file_path(path, request.launch_context()?)?;
-        let raw = std::fs::read_to_string(&resolved)
+        // Read as the schema resolver reads a source, so a completion's read-once
+        // accounting sees it.
+        let raw = simplified_schema::resolve::buffers::read_to_string(&resolved)
             .wrap_err_with(|| format!("Failed to read baseline schema: {}", resolved.display()))?;
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw).wrap_err_with(|| {
             format!(
@@ -1078,25 +1168,38 @@ fn apply_compose_baseline_schema(
         let schema_value = yaml.get("$schema").unwrap_or(&yaml);
         let schema = simplified_schema::parse_yaml_schema(schema_value)
             .wrap_err_with(|| format!("Invalid baseline schema: {}", resolved.display()))?;
-        return Ok(options.with_baseline_schema(schema));
+        return Ok(ComposeBaseline::Custom(schema));
     }
 
-    if env_disables_baseline_schema() {
-        return Ok(options);
+    if disables_baseline_schema(request.snapshot().env().get(NO_BASELINE_SCHEMA_ENV).map(String::as_str)) {
+        return Ok(ComposeBaseline::None);
     }
 
-    Ok(options.with_darkmatter_baseline_schema())
+    Ok(ComposeBaseline::Darkmatter)
+}
+
+/// The schema entry point composition assembles for the baseline flags given, at
+/// the launch context, for a caller with no use for a whole compose request.
+///
+/// ## Errors
+///
+/// As composition refuses the same baseline.
+pub(crate) fn compose_baseline_schemas(baseline_schema: Option<&PathBuf>, no_baseline_schema: bool, request: &MdRequest) -> Result<darkmatter::markdown::schemas::DarkmatterSchemas> {
+    let schemas = darkmatter::markdown::schemas::DarkmatterSchemas::new(request.launch_context()?.clone());
+    Ok(match compose_baseline(baseline_schema, no_baseline_schema, request)? {
+        ComposeBaseline::None => schemas,
+        ComposeBaseline::Custom(schema) => schemas.with_baseline(schema)?,
+        ComposeBaseline::Darkmatter => schemas.with_darkmatter_baseline_json_schema()?,
+    })
 }
 
 /// Environment variable whose truthy value switches the embedded baseline
 /// schema off; see [`disables_baseline_schema`] for the accepted values.
 pub(crate) const NO_BASELINE_SCHEMA_ENV: &str = "DARKMATTER_NO_BASELINE_SCHEMA";
 
-/// Reads [`NO_BASELINE_SCHEMA_ENV`] from the live process environment.
-///
-/// Shared with `md clean`, whose schema resolution is at full compose parity.
-/// `md schema validate` reads the variable from its captured request instead
-/// and applies [`disables_baseline_schema`] to that value.
+/// Reads [`NO_BASELINE_SCHEMA_ENV`] from the live process environment, for
+/// `md clean`. Every other route reads the variable from its captured request and
+/// applies [`disables_baseline_schema`] to that value.
 pub(crate) fn env_disables_baseline_schema() -> bool {
     disables_baseline_schema(std::env::var(NO_BASELINE_SCHEMA_ENV).ok().as_deref())
 }
@@ -1291,10 +1394,14 @@ fn format_metric_line(name: &str, elapsed: std::time::Duration, calls: usize) ->
     }
 }
 
+/// The widest the two-column perf report renders.
+const PERF_REPORT_MAX_COLUMNS: u32 = 120;
+
 /// Builds the full perf report string for the compose command.
 fn format_compose_perf_report(
     cli_perf: &CliComposePerfReport,
     compose_perf: Option<&darkmatter::markdown::compose::ComposePerfReport>,
+    terminal: &biscuit_terminal::terminal::Terminal,
 ) -> String {
     use biscuit_terminal::components::block_quote::BlockQuote;
     use biscuit_terminal::components::prose::{LineBreaks, Prose};
@@ -1359,7 +1466,9 @@ fn format_compose_perf_report(
     };
 
     // ── Title ────────────────────────────────────────────────────────
-    let title = Prose::new("<b><yellow>Compose Performance</yellow></b>").render_optimistic(None);
+    let mut terminal = terminal.clone();
+    terminal.fixed_width = terminal.fixed_width.map(|width| width.min(PERF_REPORT_MAX_COLUMNS));
+    let title = Prose::new("<b><yellow>Compose Performance</yellow></b>").render(&terminal);
 
     // ── Two-column layout ────────────────────────────────────────────
     let columns = TwoColumn::new(
@@ -1369,14 +1478,14 @@ fn format_compose_perf_report(
         .with_left_percent(0.5)
         .with_gap(2);
 
-    let body = columns.render_optimistic(None);
+    let body = columns.render(&terminal);
 
     // ── Wrap in a styled block quote ─────────────────────────────────
     let content = format!("{title}\n{body}");
     let mut rendered = BlockQuote::from(content.trim_end())
         .with_left_block_color(Color::Tailwind(Tailwind::Yellow400))
         .with_border("▌ ")
-        .render_optimistic(None);
+        .render(&terminal);
     if !rendered.ends_with('\n') {
         rendered.push('\n');
     }
@@ -1416,59 +1525,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_compose_setter_rejects_empty_key() {
-        let parsed = parse_compose_setter("=value").expect("expected setter parse result");
-        let err = parsed.expect_err("expected empty-key error");
-        assert_eq!(err, "setter key must not be empty");
-    }
-
-    #[test]
-    fn parse_compose_setter_rejects_numeric_leading_key_as_non_setter() {
-        assert!(parse_compose_setter("9key=value").is_none());
-    }
-
-    #[test]
-    fn parse_compose_setter_accepts_hyphenated_and_private_keys() {
-        let hyphenated = parse_compose_setter("my-key=value")
-            .expect("expected setter")
-            .expect("expected valid setter");
-        assert_eq!(hyphenated.0, "my-key");
-        assert_eq!(hyphenated.1, serde_json::Value::String("value".to_string()));
-
-        let private = parse_compose_setter("_private=true")
-            .expect("expected setter")
-            .expect("expected valid setter");
-        assert_eq!(private.0, "_private");
-        assert_eq!(private.1, serde_json::Value::Bool(true));
-    }
-
-    #[test]
-    fn parse_compose_setter_treats_path_like_keys_as_input_candidates() {
-        assert!(parse_compose_setter("path/key=value").is_none());
-    }
-
-    #[test]
-    fn parse_shorthand_value_parses_primitives_and_falls_back_to_string() {
-        assert_eq!(parse_shorthand_value("true"), serde_json::Value::Bool(true));
-        assert_eq!(parse_shorthand_value("null"), serde_json::Value::Null);
-        assert_eq!(
-            parse_shorthand_value("hello"),
-            serde_json::Value::String("hello".to_string())
-        );
-    }
-
-    #[test]
-    fn parse_shorthand_value_keeps_a_non_finite_number_as_text_not_null() {
-        for raw in ["Infinity", "NaN", "1e400"] {
-            assert_eq!(parse_shorthand_value(raw), serde_json::Value::String(raw.to_string()), "{raw}");
-        }
-    }
-
-    #[test]
     fn parse_compose_positionals_empty_args_have_no_input_or_setters() {
         let parsed = parse_compose_positionals(&[]).expect("expected parse to succeed");
         assert!(parsed.input.is_none());
-        assert!(parsed.shorthand_setters.is_empty());
+        assert!(parsed.setters.is_empty());
     }
 
     #[test]
@@ -1476,14 +1536,18 @@ mod tests {
         let args = vec!["iteration=1".to_string(), "draft=false".to_string()];
         let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
         assert!(parsed.input.is_none());
-        assert_eq!(
-            parsed.shorthand_setters.get("iteration"),
-            Some(&serde_json::json!(1))
-        );
-        assert_eq!(
-            parsed.shorthand_setters.get("draft"),
-            Some(&serde_json::json!(false))
-        );
+        let written: Vec<&str> = parsed.setters.iter().map(|setter| setter.argument.as_str()).collect();
+        assert_eq!(written, ["iteration=1", "draft=false"]);
+    }
+
+    #[test]
+    fn parse_compose_positionals_finds_the_input_on_either_side_of_a_dotted_setter() {
+        for args in [["author.name=Alice", "./a.b=c.md"], ["./a.b=c.md", "author.name=Alice"]] {
+            let args = args.map(String::from);
+            let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
+            assert_eq!(parsed.input, Some(PathBuf::from("./a.b=c.md")));
+            assert_eq!(parsed.setters[0].path.segments(), ["author", "name"]);
+        }
     }
 
     #[test]
@@ -1498,7 +1562,7 @@ mod tests {
         let args = vec!["9key=value".to_string()];
         let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
         assert_eq!(parsed.input, Some(PathBuf::from("9key=value")));
-        assert!(parsed.shorthand_setters.is_empty());
+        assert!(parsed.setters.is_empty());
     }
 
     #[test]
@@ -1577,7 +1641,7 @@ mod tests {
             ..Default::default()
         };
 
-        let rendered = format_compose_perf_report(&cli_perf, Some(&compose_perf));
+        let rendered = format_compose_perf_report(&cli_perf, Some(&compose_perf), &biscuit_terminal::terminal::Terminal::new_optimistic(120));
 
         assert!(rendered.contains("Command Setup"));
         assert!(rendered.contains("Compose Pipeline"));
@@ -1602,7 +1666,7 @@ mod tests {
             elapsed: std::time::Duration::from_millis(1),
         };
 
-        let rendered = format_compose_perf_report(&cli_perf, None);
+        let rendered = format_compose_perf_report(&cli_perf, None, &biscuit_terminal::terminal::Terminal::new_optimistic(120));
 
         assert!(rendered.contains("Command Setup"));
         assert!(!rendered.contains("Compose Pipeline"));

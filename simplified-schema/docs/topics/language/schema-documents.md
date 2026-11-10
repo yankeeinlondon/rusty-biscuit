@@ -280,7 +280,7 @@ let resolved = prepare_embedded_yaml_schema("host/kinds/roster.yaml", KINDS, Shi
 assert_eq!(claimed_values(&resolved, "kind").unwrap(), ["roster"]);
 ```
 
-The `SimplifiedSchema` [content and file factories](../schema-object.md) load
+The `SimplifiedSchema` [content and file factories](../simplified-schema-struct.md) load
 a `yaml-schema` directly (loading a file is not referencing it), and
 `to_simplified_yaml()` writes it back with `kind: yaml-schema`.
 

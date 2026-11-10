@@ -7,10 +7,12 @@ mod css;
 pub mod errors;
 pub mod file_tree;
 mod graph;
+pub(crate) use graph::AuthoredLocator;
 pub(crate) mod html;
 pub(crate) mod local;
 pub mod meta;
 pub(crate) mod provenance;
+mod report;
 pub(crate) mod snapshot;
 pub mod types;
 pub mod validate;
@@ -44,7 +46,12 @@ fn resolve_transclusion_target(
         options.source_opening.as_ref(),
     );
     let reference = biscuit_file::FileReference::new(raw_target)?;
-    Ok(reference.resolve_detailed(&context).into_convenience()?)
+    match reference.resolve_detailed(&context).into_convenience() {
+        // A remote target has no local file to follow; the validator checks it
+        // as a URL.
+        Err(error) if error.resolution_failure() == biscuit_file::ResolutionFailure::UnsupportedRemote => Ok(None),
+        resolved => Ok(resolved?),
+    }
 }
 
 #[allow(dead_code)]
@@ -203,6 +210,8 @@ impl Markdown {
                         DirectiveKind::Code => ReferenceSyntax::DirectiveCode,
                         DirectiveKind::Url => ReferenceSyntax::DirectiveUrl,
                     },
+                    authored: None,
+                    section: None,
                 },
             });
         }
@@ -222,6 +231,8 @@ impl Markdown {
                         line: td.line,
                         span: td.span.clone(),
                         syntax: ReferenceSyntax::DirectiveTocLinking,
+                        authored: None,
+                        section: None,
                     },
                 });
             }
@@ -248,6 +259,8 @@ impl Markdown {
                         line: fd.line,
                         span: fd.span.clone(),
                         syntax: ReferenceSyntax::DirectiveFileLinks,
+                        authored: None,
+                        section: None,
                     },
                 });
             }
@@ -271,6 +284,8 @@ impl Markdown {
                         line: 0, // frontmatter doesn't have meaningful line numbers
                         span: 0..0,
                         syntax: ReferenceSyntax::FrontmatterPrologue,
+                        authored: None,
+                        section: None,
                     },
                 });
             }
@@ -288,6 +303,8 @@ impl Markdown {
                         line: 0,
                         span: 0..0,
                         syntax: ReferenceSyntax::FrontmatterEpilogue,
+                        authored: None,
+                        section: None,
                     },
                 });
             }
@@ -431,15 +448,8 @@ impl Markdown {
         let style_records = html::extract_html_style_blocks(self.content(), &source);
         let mut imports = Vec::new();
         for record in &style_records {
-            if let Some(css_content) = record
-                .attributes
-                .get("css_content")
-                .and_then(|v| v.as_str())
-            {
-                let css_records =
-                    css::extract_css_imports(css_content, &source, record.origin.line);
-                imports.extend(css_records.into_iter().map(ImportReference::from));
-            }
+            let css_records = css::style_references(self.content(), record, css::extract_css_imports);
+            imports.extend(css_records.into_iter().map(ImportReference::from));
         }
         Ok(imports)
     }
@@ -483,15 +493,8 @@ impl Markdown {
         // From @font-face in <style> blocks
         let style_records = html::extract_html_style_blocks(self.content(), &source);
         for record in &style_records {
-            if let Some(css_content) = record
-                .attributes
-                .get("css_content")
-                .and_then(|v| v.as_str())
-            {
-                let font_records =
-                    css::extract_font_face_sources(css_content, &source, record.origin.line);
-                imports.extend(font_records.into_iter().map(ImportReference::from));
-            }
+            let font_records = css::style_references(self.content(), record, css::extract_font_face_sources);
+            imports.extend(font_records.into_iter().map(ImportReference::from));
         }
 
         Ok(imports)

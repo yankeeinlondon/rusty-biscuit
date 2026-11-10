@@ -627,7 +627,6 @@ fn style_page_doc(width: u32, style_yaml: &str, body: &str) -> String {
     use biscuit_terminal::terminal::Terminal;
     use darkmatter::layout::DarkmatterPage;
     use darkmatter::style::{
-        ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides, PageStyleOverrides,
         apply_color_style, apply_component_style, apply_hr_style, apply_list_style,
         apply_page_style, from_frontmatter,
     };
@@ -649,11 +648,11 @@ fn style_page_doc(width: u32, style_yaml: &str, body: &str) -> String {
 
     let term = Terminal::new_optimistic(width);
     let page = DarkmatterPage::new(&term);
-    let page = apply_page_style(page, &style, PageStyleOverrides::default()).unwrap();
-    let page = apply_component_style(page, &style, ComponentStyleOverrides::default()).unwrap();
-    let page = apply_list_style(page, &style, ListStyleOverrides::default()).unwrap();
+    let page = apply_page_style(page, &style).unwrap();
+    let page = apply_component_style(page, &style).unwrap();
+    let page = apply_list_style(page, &style).unwrap();
     let page = apply_color_style(page, &style).unwrap();
-    let page = apply_hr_style(page, &style, HrStyleOverrides::default()).unwrap();
+    let page = apply_hr_style(page, &style).unwrap();
     let body_html = page.render_to_browser(&md).expect("browser render");
     wrap_fragment(&body_html, "#ffffff")
 }
@@ -1324,7 +1323,7 @@ async fn browser_decorated_standalone_document_head_body_placement() {
     // feature-bearing page that exercises every head slot.
     let md: Markdown = concat!(
         "```mermaid\ngraph TD; A --> B\n```\n\n",
-        "[Home](https://example.com \"prompt='go home'\")\n",
+        "[Home](https://example.com '{ prompt: \"go home\" }')\n",
     )
     .into();
     let term = Terminal::new_optimistic(80);
@@ -1596,7 +1595,7 @@ async fn browser_prompted_link_popover_reveals_on_focus() {
         return;
     }
 
-    let md: Markdown = "[Click](https://example.com \"prompt='Extra detail'\")\n".into();
+    let md: Markdown = "[Click](https://example.com '{ prompt: \"Extra detail\" }')\n".into();
     let doc = md.as_html(HtmlOptions::default()).expect("as_html");
 
     let mut harness = ChromeHarness::new();
@@ -1656,10 +1655,10 @@ async fn browser_prompted_link_popover_reveals_on_focus() {
     harness.shutdown().await;
 }
 
-/// The single-quoted popover fixture (`prompt='…'` title). `{PROMPT}` is
+/// The popover fixture (a structured `prompt` title). `{PROMPT}` is
 /// substituted so a test can supply a short or a deliberately long prompt.
 fn popover_doc(prompt: &str) -> Markdown {
-    format!("[Click](https://example.com \"prompt='{prompt}'\")\n").into()
+    format!("[Click](https://example.com '{{ prompt: \"{prompt}\" }}')\n").into()
 }
 
 /// A JS snippet that moves the popover wrapper into a `position:fixed` box

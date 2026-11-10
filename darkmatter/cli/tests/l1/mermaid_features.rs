@@ -7,6 +7,7 @@
 //! page `md` renders (`render::terminal_page`) in-process; the HTML, Markdown,
 //! and JSON cases spawn `md`.
 
+use crate::common::style::{page_inputs, with_presentation};
 use crate::common::{CliProcessFixture, md_file};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_visualized::components::mermaid::PARTIAL_NOTE_ID;
@@ -15,7 +16,7 @@ use clap::Parser;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::ColorDepth;
-use darkmatter_cli::args::{Command, Feature};
+use darkmatter_cli::args::{Command, RenderOptions};
 use darkmatter_cli::render::terminal_page;
 use darkmatter_cli::Cli;
 use test_toolkit::EnvGuard;
@@ -29,11 +30,15 @@ fn parse(args: &[&str]) -> Cli {
     Cli::try_parse_from(std::iter::once("md").chain(args.iter().copied())).expect("valid arguments")
 }
 
-/// The features `md` hands the renderer: the top-level list plus `render`'s.
-fn dispatched_features(cli: &Cli) -> Vec<Feature> {
+/// The render options `md` dispatches: the root's, or `render`'s own (a
+/// root render option before `render` is a usage error).
+fn dispatched(cli: &Cli) -> RenderOptions {
+    if cli.command.is_some() {
+        darkmatter_cli::commands::validate_subcommand_usage(cli).expect("no root render option before a subcommand");
+    }
     match cli.command_or_render() {
-        Command::Render(options) => options.features,
-        _ => cli.render.features.clone(),
+        Command::Render(options) => options,
+        other => panic!("expected render, got {other:?}"),
     }
 }
 
@@ -56,9 +61,13 @@ fn page_for(args: &[&str], doc: &str) -> (darkmatter::layout::DarkmatterPage, Ma
     // A default-layout page detects color from the process, not from `term`,
     // unless its depth is set: pin it so `NO_COLOR` or `TERM=dumb` cannot
     // strip the highlighting these tests assert.
-    let page = terminal_page(&md, None, &cli, &term, false, &dispatched_features(&cli))
-        .expect("terminal page")
-        .with_color_depth(ColorDepth::TrueColor);
+    let options = dispatched(&cli);
+    let style = darkmatter_cli::render::document_style(&md, None, biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
+        .expect("style");
+    let page = with_presentation(&style, &options.features, options.mermaid, |presentation| {
+        terminal_page(None, &page_inputs(), presentation, &term).expect("terminal page")
+    })
+    .with_color_depth(ColorDepth::TrueColor);
     (page, md)
 }
 
@@ -95,7 +104,7 @@ fn is_drawn(output: &str) -> bool {
 fn mermaid_flag_selects_automatic_mermaid_mode() {
     let _env = terminal_process(None);
 
-    for args in [&["--mermaid", "doc.md"][..], &["--mermaid", "render", "doc.md"][..]] {
+    for args in [&["--mermaid", "doc.md"][..], &["render", "--mermaid", "doc.md"][..]] {
         let (page, _) = page_for(args, FLOWCHART_DOC);
         assert_eq!(page.terminal_options().mermaid_mode, MermaidMode::Automatic, "{args:?}");
     }
@@ -115,12 +124,12 @@ fn mermaid_flag_selects_automatic_mermaid_mode() {
 fn mermaid_render_without_a_flag_follows_the_fallback_env() {
     let drawn = {
         let _env = terminal_process(None);
-        terminal(&["--mermaid", "render", "doc.md"], FLOWCHART_DOC)
+        terminal(&["render", "--mermaid", "doc.md"], FLOWCHART_DOC)
     };
     assert!(is_drawn(&drawn), "{drawn}");
 
     let _env = terminal_process(Some("Code-Block"));
-    let source = terminal(&["--mermaid", "render", "doc.md"], FLOWCHART_DOC);
+    let source = terminal(&["render", "--mermaid", "doc.md"], FLOWCHART_DOC);
     assert!(source.contains(FLOWCHART_SOURCE), "{source}");
 }
 
@@ -129,7 +138,7 @@ fn mermaid_no_fallbacks_flag_beats_the_fallback_env() {
     for fallback in [None, Some("text")] {
         let _env = terminal_process(fallback);
         for feature in ["no-mermaid-fallbacks", "no-mermaid-partial-fallbacks"] {
-            let output = terminal(&["--mermaid", "render", "doc.md", "--feature", feature], FLOWCHART_DOC);
+            let output = terminal(&["render", "--mermaid", "doc.md", "--feature", feature], FLOWCHART_DOC);
             assert!(output.contains(FLOWCHART_SOURCE), "{feature} with {fallback:?}:\n{output}");
         }
     }
@@ -179,7 +188,7 @@ fn no_mermaid_rendering_keeps_the_terminal_fence_a_code_block_over_mermaid() {
     let (page, _) = page_for(&["--mermaid", "--feature", "no-mermaid-rendering", "doc.md"], FLOWCHART_DOC);
     assert_eq!(page.terminal_options().mermaid_mode, MermaidMode::Text);
 
-    let code = terminal_raw(&["--mermaid", "render", "doc.md", "--feature", "no-mermaid-rendering"], FLOWCHART_DOC);
+    let code = terminal_raw(&["render", "--mermaid", "doc.md", "--feature", "no-mermaid-rendering"], FLOWCHART_DOC);
     assert!(code.contains("\x1b[38;2;"), "the code block is highlighted:\n{code:?}");
     assert_eq!(code, terminal_raw(&["doc.md"], FLOWCHART_DOC), "the same code block as without --mermaid");
 }
@@ -231,7 +240,7 @@ fn no_mermaid_rendering_keeps_the_markdown_and_json_mermaid_fence() {
 
     let json = spawn(&fixture, &doc, &[&["--output", "json"][..], &feature].concat());
     let value: serde_json::Value = serde_json::from_str(&json).expect("json output");
-    let text = value.to_string();
-    assert!(text.contains(r#""mermaid""#) && text.contains("flowchart LR"), "{json}");
+    let document = value["document"].as_str().expect("the envelope's document");
+    assert!(document.contains("```mermaid\nflowchart LR\n    Alpha --> Beta\n```"), "{json}");
     assert_eq!(json, spawn(&fixture, &doc, &["--output", "json"]));
 }

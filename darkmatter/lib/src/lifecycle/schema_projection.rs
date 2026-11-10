@@ -819,7 +819,10 @@ fn scalar_arms<'h>(
                     (false, true) => return Err(unsupported(atom)),
                 }
             }
-            TypeExpr::Union(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => return Err(unsupported(atom)),
+            // A pending template type has no shape to project into a parameter.
+            TypeExpr::Union(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {
+                return Err(unsupported(atom));
+            }
         }
     }
     if collection {

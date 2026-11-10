@@ -14,6 +14,9 @@ enum InlineRefKind {
 }
 
 /// Extract markdown inline references (links or images) in a single pass.
+///
+/// One that starts inside a raw-text element's body is text, even though
+/// CommonMark parses it; one that starts before the element stays.
 fn extract_inline_refs(
     content: &str,
     source: &ComposeSource,
@@ -72,6 +75,8 @@ fn extract_inline_refs(
                         line,
                         span,
                         syntax: ReferenceSyntax::MarkdownLink,
+                        authored: None,
+                        section: None,
                     },
                     attributes,
                 });
@@ -100,6 +105,8 @@ fn extract_inline_refs(
                         line,
                         span,
                         syntax: ReferenceSyntax::MarkdownImage,
+                        authored: None,
+                        section: None,
                     },
                     attributes,
                 });
@@ -124,6 +131,10 @@ fn extract_inline_refs(
         }
     }
 
+    if !records.is_empty() {
+        let inert = super::html::inert_ranges(content);
+        records.retain(|record| !inert.iter().any(|range| range.contains(&record.origin.span.start)));
+    }
     records
 }
 

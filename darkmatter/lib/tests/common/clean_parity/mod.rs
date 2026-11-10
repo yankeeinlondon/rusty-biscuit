@@ -32,6 +32,12 @@ pub struct ParityCase {
 
 pub const CASES: &[ParityCase] = &[
     ParityCase {
+        name: "legacy-link-title",
+        input: "[Docs](https://example.com/docs \"class='docs-link' target='_blank' data-section='help'\")\n\n```text\n[a](./a.md \"class='x'\")\n```\n",
+        expected: "[Docs](https://example.com/docs '{ class: \"docs-link\", target: \"_blank\", \"data-section\": \"help\" }')\n\n```text\n[a](./a.md \"class='x'\")\n```\n",
+        outcome: ParityOutcome::Changed,
+    },
+    ParityCase {
         name: "repairable-frontmatter",
         input: "---\ntitle: @daily-report\n---\n\n```\ncode\n```\n",
         expected: "---\ntitle: \"@daily-report\"\n---\n\n```text\ncode\n```\n",

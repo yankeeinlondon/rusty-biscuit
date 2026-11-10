@@ -338,7 +338,7 @@ fn format_commit_hash_header(
 pub fn render_hash_section(
     commit: &sniff::filesystem::git::CommitInfo,
     files: &[(std::path::PathBuf, sniff::filesystem::git::DeltaKind)],
-    _verbose: u8,
+    verbose: u8,
     commit_url: Option<&str>,
 ) -> String {
     use sniff::filesystem::git::DeltaKind;
@@ -350,9 +350,10 @@ pub fn render_hash_section(
     let status_title = Prose::new("<b><u>Commit</u></b>");
     writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
 
-    // Header line: [sha] type(scope) at time date by author
+    // Header line: [sha] type(scope) at time date by author. Without OSC 8 the
+    // commit link prints its URL only at `-v`.
     let header = format_commit_hash_header(commit, commit_url);
-    writeln!(out, "{}", Prose::new(header.as_str()).render(&terminal)).unwrap();
+    writeln!(out, "{}", Prose::new(header.as_str()).with_verbosity(verbose).render(&terminal)).unwrap();
 
     // First line of the commit message (description)
     let cc = ConventionalCommit::parse(&commit.message);
@@ -1894,9 +1895,11 @@ mod tests {
                 .expect("main worktree file URL");
             let main_markup = worktree_path_link(&main_dir, &wt_dir);
             assert!(main_markup.contains(&format!("href=\"{main_href}\"")));
+            // Without OSC 8 support the link prints its label alone.
+            let unstyled = biscuit_terminal::utils::escape_codes::strip_escape_codes(&output);
             assert!(
-                output.contains("[../project](file://"),
-                "main worktree label must be relative to the current directory: {output}"
+                unstyled.contains("located at ../project"),
+                "main worktree label must be relative to the current directory: {unstyled}"
             );
             // Rendering may wrap a long URL, so verify its intact value before
             // the terminal renderer applies line wrapping.

@@ -8,7 +8,9 @@ use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::errors::resolution_failure_row;
+use darkmatter::markdown::compose::expression::{Diagnostic, ReferenceDetails, Severity};
+use darkmatter::markdown::compose::report_diagnostics::INPUT_READ_CODE;
+use darkmatter::markdown::errors::{resolution_failure_name, resolution_failure_row};
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
@@ -27,15 +29,25 @@ pub fn load_document(
     path: Option<&PathBuf>,
     request: &MdRequest,
 ) -> Result<(Markdown, Option<PathBuf>)> {
+    let (markdown, opened) = load_opened_document(path, request)?;
+    Ok((markdown, opened.map(OpenedArgument::into_path)))
+}
+
+/// [`load_document`], keeping the opened argument (`None` for stdin), whose
+/// opening spelling derives the document's own context.
+pub fn load_opened_document(
+    path: Option<&PathBuf>,
+    request: &MdRequest,
+) -> Result<(Markdown, Option<OpenedArgument>)> {
     if let Some(p) = path {
         if p.to_str() == Some("-") {
             // Explicit stdin marker
             Ok((read_from_stdin()?, None))
         } else {
-            let resolved = open_argument(p, request)?.into_path();
-            let markdown = Markdown::try_from(resolved.as_path())
-                .wrap_err_with(|| format!("Failed to read file: {:?}", resolved))?;
-            Ok((markdown, Some(resolved)))
+            let opened = open_argument(p, request)?;
+            let markdown = Markdown::try_from(opened.path())
+                .wrap_err_with(|| format!("Failed to read file: {:?}", opened.path()))?;
+            Ok((markdown, Some(opened)))
         }
     } else {
         // No path provided - check if stdin has data
@@ -121,11 +133,16 @@ pub fn open_argument(raw_path: &Path, request: &MdRequest) -> Result<OpenedArgum
 /// ## Errors
 ///
 /// A [`DocumentArgumentError`] of class `InvalidReference` for text that is
-/// not a file reference.
+/// not a file reference, or an argument that is not valid Unicode.
 pub fn parse_argument(raw_path: &Path) -> Result<FileReference> {
-    let raw = raw_path.to_string_lossy();
-    FileReference::new(&raw)
-        .map_err(|source| DocumentArgumentError::new(raw.into_owned(), source).into())
+    // A lossy spelling would name another file; an unrepresentable argument
+    // is refused instead.
+    let Some(raw) = raw_path.to_str() else {
+        let written = raw_path.to_string_lossy().into_owned();
+        let source = FileReferenceError::InvalidSyntax(format!("`{written}` is not valid Unicode"));
+        return Err(DocumentArgumentError::new(written, source).into());
+    };
+    FileReference::new(raw).map_err(|source| DocumentArgumentError::new(raw.to_string(), source).into())
 }
 
 /// Resolves a file argument through biscuit-file's `FileReference` system in
@@ -168,12 +185,18 @@ pub struct DocumentArgumentError {
     argument: String,
     failure: ResolutionFailure,
     source: Option<FileReferenceError>,
+    /// The style setter the argument was probably meant to be.
+    setter_hint: Option<String>,
 }
 
 impl std::fmt::Display for DocumentArgumentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = format!("Failed to load file: {:?}", self.argument);
-        f.write_str(&darkmatter::markdown::errors::with_glob_hint(message, self.failure, &self.argument))
+        f.write_str(&darkmatter::markdown::errors::with_glob_hint(message, self.failure, &self.argument))?;
+        match &self.setter_hint {
+            Some(setter) => write!(f, "; to set a style, write `{setter}`"),
+            None => Ok(()),
+        }
     }
 }
 
@@ -186,17 +209,36 @@ impl std::error::Error for DocumentArgumentError {
 impl DocumentArgumentError {
     /// The error for `argument`, classed by `source`.
     pub fn new(argument: String, source: FileReferenceError) -> Self {
-        Self { argument, failure: source.resolution_failure(), source: Some(source) }
+        Self { argument, failure: source.resolution_failure(), source: Some(source), setter_hint: None }
+    }
+
+    /// This error with `setter` suggested: the argument looks like a
+    /// misspelled style setter (`stlye.ul.x=4`).
+    #[must_use]
+    pub fn with_setter_hint(mut self, setter: String) -> Self {
+        self.setter_hint = Some(setter);
+        self
     }
 
     /// A reference that resolved without error but matched no file.
     pub fn no_match(argument: String) -> Self {
-        Self { argument, failure: ResolutionFailure::NoMatch, source: None }
+        Self { argument, failure: ResolutionFailure::NoMatch, source: None, setter_hint: None }
     }
 
     /// The failure class.
     pub fn resolution_failure(&self) -> ResolutionFailure {
         self.failure
+    }
+
+    /// The record a data output reports: the argument as written, with its class.
+    pub fn diagnostic(&self) -> Diagnostic {
+        let mut diagnostic = crate::output::output_diagnostic(INPUT_READ_CODE, Severity::Error, &self.to_string());
+        diagnostic.reference_details = Some(ReferenceDetails {
+            reference: Some(self.argument.clone()),
+            failure: Some(resolution_failure_name(self.failure).to_string()),
+            ..ReferenceDetails::default()
+        });
+        diagnostic
     }
 }
 
@@ -210,7 +252,10 @@ impl BlockError for DocumentArgumentError {
             body.push(Prose::new(Prose::escape_text_outside_code_spans(&source.to_string())));
         }
         body.push(resolution_failure_row(self.failure));
-        let hint = if let Some(glob_hint) = self.failure.glob_hint(&self.argument) {
+        let setter_hint = self.setter_hint.as_ref().map(|setter| format!("To set a style, write the setter `{setter}`."));
+        let hint = if let Some(setter_hint) = setter_hint.as_deref() {
+            setter_hint
+        } else if let Some(glob_hint) = self.failure.glob_hint(&self.argument) {
             glob_hint
         } else if self.failure == ResolutionFailure::InvalidReference {
             "A relative path stays inside the repository; a file whose name starts with `@`, `&`, `^`, or `!` is spelled with `./` (`./@`)."

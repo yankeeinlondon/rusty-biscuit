@@ -1,5 +1,5 @@
 //! The shared `clean_document` parity cases through `md clean`: printed
-//! output, `--save`, and `--json`'s outcome fields match the library
+//! output, `--save`, and `--output json`'s outcome fields match the library
 //! transaction (and DMLS `textDocument/formatting`, which asserts the same
 //! cases) byte for byte.
 
@@ -19,7 +19,7 @@ fn assert_case(case: &ParityCase) {
     let path = fixture.write_file(format!("cwd/{}.md", case.name), case.input);
 
     let printed = fixture.command().arg("clean").arg(&path).output().unwrap();
-    let json = fixture.command().arg("clean").arg(&path).arg("--json").output().unwrap();
+    let json = fixture.command().arg("clean").arg(&path).args(["--output", "json"]).output().unwrap();
     let report: Value = serde_json::from_slice(&json.stdout)
         .unwrap_or_else(|error| panic!("{}: not JSON ({error})", case.name));
     assert!(json.stderr.is_empty(), "{}: {}", case.name, String::from_utf8_lossy(&json.stderr));
@@ -64,6 +64,7 @@ macro_rules! parity_case_tests {
 }
 
 parity_case_tests! {
+    legacy_link_title => "legacy-link-title",
     repairable_frontmatter => "repairable-frontmatter",
     repair_disabled => "repair-disabled",
     repair_disabled_invalid_yaml => "repair-disabled-invalid-yaml",

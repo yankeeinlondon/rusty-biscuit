@@ -21,6 +21,7 @@ use darkmatter::markdown::compose::expression::{
     parse_spanned, reserved_root_descriptors, static_variable_reads, validate_expression,
 };
 use darkmatter::markdown::schemas::catalog::GlobalCatalog;
+use simplified_schema::expression::scan::expression_region_at;
 use simplified_schema::simplified::serialize_property_atom;
 use simplified_schema::{PropertyDef, TypeExpr};
 use simplified_schema::{DecodedScalar, decode_scalar};
@@ -388,23 +389,8 @@ pub fn scalar_interpolations<'a>(
         return Vec::new();
     }
     let whole_value = is_whole_value_span(scalar);
-    let raw = document.get(entry.value_span.clone());
-    let (projection, analyzed, scan_from) = match (entry.scalar_style, entry.tagged, raw) {
-        (Some(FmScalarStyle::Literal), false, Some(raw)) => {
-            // Skip the block header line, which may carry a comment.
-            let body = raw.find('\n').map_or(raw.len(), |newline| newline + 1);
-            let projection = ScalarProjection {
-                scalar: entry.value_span.clone(),
-                mode: ProjectionMode::Literal { base: entry.value_span.start },
-            };
-            (projection, raw.to_string(), body)
-        }
-        _ => {
-            let Some((projection, analyzed)) = ScalarProjection::for_value(entry, document) else {
-                return Vec::new();
-            };
-            (projection, analyzed, 0)
-        }
+    let Some((projection, analyzed, scan_from)) = interpolation_text(entry, document) else {
+        return Vec::new();
     };
     ExpressionFinder::find_all_plain(&analyzed[scan_from..])
         .into_iter()
@@ -425,6 +411,24 @@ pub fn scalar_interpolations<'a>(
             }
         })
         .collect()
+}
+
+/// The text a string scalar's `{{ … }}` spans are read in, its projection to
+/// authored bytes, and the analyzed offset where spans may begin (past a
+/// literal block's header line, which may carry a comment). `None` for a
+/// non-scalar entry.
+pub fn interpolation_text(entry: &FmEntry, document: &str) -> Option<(ScalarProjection, String, usize)> {
+    match (entry.scalar_style, entry.tagged, document.get(entry.value_span.clone())) {
+        (Some(FmScalarStyle::Literal), false, Some(raw)) if entry.kind == FmValueKind::Scalar => {
+            let body = raw.find('\n').map_or(raw.len(), |newline| newline + 1);
+            let projection = ScalarProjection {
+                scalar: entry.value_span.clone(),
+                mode: ProjectionMode::Literal { base: entry.value_span.start },
+            };
+            Some((projection, raw.to_string(), body))
+        }
+        _ => ScalarProjection::for_value(entry, document).map(|(projection, analyzed)| (projection, analyzed, 0)),
+    }
 }
 
 /// Parses an expression, span-carrying, with the one grammar every surface
@@ -567,14 +571,17 @@ pub fn expression_at(expr: &SpannedExpr, offset: usize) -> Option<&SpannedExpr> 
 /// document offset where it begins. `None` when the cursor is not inside an
 /// interpolation.
 pub fn completion_partial(text: &str, offset: usize) -> Option<(usize, &str)> {
-    let before = &text[..offset];
-    let open = before.rfind("{{")?;
-    // A `}}` between the last `{{` and the cursor closes the region.
-    if before[open..].contains("}}") {
-        return None;
-    }
-    let token_start = identifier_prefix_start(before).max(open + 2);
+    let body_start = expression_body_start(text, offset)?;
+    let token_start = identifier_prefix_start(&text[..offset]).max(body_start);
     Some((token_start, &text[token_start..offset]))
+}
+
+/// The offset just past the `{{` of the complete or still-open expression
+/// holding `offset`, under the shared scanner's string, brace, literal, and
+/// escape rules, so a `}}` or `{{` inside a quoted string neither closes nor
+/// opens a region. `None` outside every expression.
+pub fn expression_body_start(text: &str, offset: usize) -> Option<usize> {
+    expression_region_at(text, offset, &[]).map(|region| region.start + 2)
 }
 
 /// All context-variable descriptors, in catalog display order.
@@ -918,8 +925,58 @@ pub fn scoped_completion_candidates(
             }
         }
     }
+    items.extend(local_member_candidates(partial, &locals, site));
     items.sort_by_key(|item| item.kind != ExprCompletionKind::LocalBinding);
     items
+}
+
+/// The properties of a lexical local's object type after `name.` (or
+/// `local.name.`), typed by the library's [`TypeScope`]: a local whose type
+/// is unknown, such as the elements of a computed `load_data` contract,
+/// offers nothing. Only keys the dotted form reaches as one path are offered.
+fn local_member_candidates(partial: &str, locals: &[String], site: &TypeScope<'_>) -> Vec<ExprCompletion> {
+    let Some((base, member)) = partial.rsplit_once('.') else {
+        return Vec::new();
+    };
+    let root = local_root_name();
+    let path = base.strip_prefix(root).and_then(|rest| rest.strip_prefix('.')).unwrap_or(base);
+    let head = path.split('.').next().unwrap_or(path);
+    if !locals.iter().any(|name| name == head) {
+        return Vec::new();
+    }
+    let Some(ty) = site.type_of_expr(&darkmatter::markdown::compose::expression::Expr::Variable(path.to_string())) else {
+        return Vec::new();
+    };
+    let Shape::Arms { arms, .. } = ty.shape() else {
+        return Vec::new();
+    };
+    let mut keys: Vec<&str> = Vec::new();
+    for arm in arms.iter().filter(|arm| !arm.is_array) {
+        if let TypeExpr::InlineObject(shape) = &arm.ty {
+            for key in shape.properties.keys() {
+                if !keys.contains(&key.as_str()) {
+                    keys.push(key);
+                }
+            }
+        }
+    }
+    keys.into_iter()
+        .filter(|key| key.starts_with(member))
+        .filter_map(|key| {
+            let label = format!("{base}.{key}");
+            let reachable = matches!(
+                parse(&label).map(|expr| expr.kind),
+                Ok(SpannedExprKind::Variable(read)) if read == label
+            );
+            reachable.then(|| ExprCompletion {
+                insert_text: label.clone(),
+                label,
+                kind: ExprCompletionKind::LocalBinding,
+                detail: Some(local_detail(site, &format!("{path}.{key}"))),
+                documentation: None,
+            })
+        })
+        .collect()
 }
 
 /// The lexical scope at a cursor, including unfinished callback bodies.
@@ -1667,7 +1724,7 @@ fn node_with_span<'a>(expr: &'a SpannedExpr, span: &SourceSpan) -> Option<&'a Sp
         .find_map(|child| node_with_span(child, span))
 }
 
-fn children(expr: &SpannedExpr) -> Vec<&SpannedExpr> {
+pub(crate) fn children(expr: &SpannedExpr) -> Vec<&SpannedExpr> {
     match &expr.kind {
         SpannedExprKind::UnaryNot(inner)
         | SpannedExprKind::UnaryMinus(inner)
@@ -1945,6 +2002,55 @@ mod tests {
         assert_eq!(&text[start..], "ctx.to");
         // Closed region offers nothing.
         assert!(completion_partial("value {{ x }} after", 19).is_none());
+    }
+
+    #[test]
+    fn completion_partial_follows_a_nested_type_string_in_an_open_interpolation() {
+        let text = r#"value {{ load_data(f, "{a: {b: string}}") "#;
+        let (start, partial) = completion_partial(text, text.len()).unwrap();
+        assert_eq!((start, partial), (text.len(), ""));
+
+        let typed = format!("{text}|| fm.ti");
+        let (start, partial) = completion_partial(&typed, typed.len()).unwrap();
+        assert_eq!(partial, "fm.ti");
+        assert_eq!(&typed[start..], "fm.ti");
+    }
+
+    #[test]
+    fn completion_partial_ignores_a_closer_inside_a_string() {
+        let text = r#"{{ f("}}") + x"#;
+        let (_, partial) = completion_partial(text, text.len()).unwrap();
+        assert_eq!(partial, "x");
+        // The real closer after the string still closes the region.
+        let closed = r#"{{ f("}}") }} after"#;
+        assert!(completion_partial(closed, closed.len()).is_none());
+    }
+
+    #[test]
+    fn completion_partial_keeps_prose_apostrophes_out_of_later_regions() {
+        let text = "{{ don't }} it's fine {{ x }} and more }} {{ ctx.to";
+        let (start, partial) = completion_partial(text, text.len()).unwrap();
+        assert_eq!(partial, "ctx.to");
+        assert_eq!(start, text.rfind("ctx").unwrap());
+        // Between the second expression and the next opener is prose.
+        let prose = text.find("and more").unwrap();
+        assert!(completion_partial(text, prose).is_none());
+    }
+
+    #[test]
+    fn completion_partial_declines_literals_and_escaped_openers() {
+        let literal = "{{{ ctx.to }}}";
+        assert!(completion_partial(literal, literal.find("to").unwrap()).is_none());
+        let escaped = r"\{{ ctx.to";
+        assert!(completion_partial(escaped, escaped.len()).is_none());
+        let unescaped = r"\\{{ ctx.to";
+        assert_eq!(completion_partial(unescaped, unescaped.len()).unwrap().1, "ctx.to");
+    }
+
+    #[test]
+    fn expression_body_start_skips_a_quoted_opener() {
+        let text = r#"{{ f("{{") + x"#;
+        assert_eq!(expression_body_start(text, text.len()), Some(2));
     }
 
     #[test]
@@ -2405,6 +2511,29 @@ mod tests {
             assert!(!candidates.iter().any(|item| item.label == "p" && item.kind == ExprCompletionKind::FrontmatterKey && source.contains("p =>")));
         }
         assert!(cursor_scope("map([1], p", 10, &site).lexical().is_none());
+    }
+
+    #[test]
+    fn local_member_completion_offers_the_properties_the_library_types() {
+        let declared = darkmatter::markdown::compose::expression::DeclaredTypes::for_schema(None);
+        let site = TypeScope::unguarded(&declared);
+        let members = |source: &str, partial: &str| -> Vec<String> {
+            let scope = cursor_scope(source, source.len(), &site);
+            scoped_completion_candidates(partial, &[], [], &scope)
+                .into_iter()
+                .filter(|item| item.label.starts_with(partial) && item.label.contains('.'))
+                .map(|item| item.label)
+                .collect()
+        };
+        let typed = r#"map(load_data("hosts.yaml", "{ name: string, port: number }[]"), h => h."#;
+        assert_eq!(members(typed, "h."), ["h.name", "h.port"]);
+        assert_eq!(members(&format!("{typed}na"), "h.na"), ["h.name"]);
+        let local = r#"map(load_data("hosts.yaml", "{ name: string }[]"), h => local.h."#;
+        assert_eq!(members(local, "local.h."), ["local.h.name"]);
+        let computed = r#"map(load_data("hosts.yaml", t), h => h."#;
+        assert!(members(computed, "h.").is_empty());
+        let named = r#"map(load_data("hosts.yaml", "Host@./types.yaml[]"), h => h."#;
+        assert!(members(named, "h.").is_empty());
     }
 
     #[test]

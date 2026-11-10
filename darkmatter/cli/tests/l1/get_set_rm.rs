@@ -106,7 +106,7 @@ fn test_get_json5_output() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-json5-output");
     fixture
         .command()
-        .args(["get", "--json5", "-", "title", "count"])
+        .args(["get", "--output", "json5", "-", "title", "count"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -120,7 +120,7 @@ fn test_get_yaml_output() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-yaml-output");
     fixture
         .command()
-        .args(["get", "--yaml", "-", "title"])
+        .args(["get", "--output", "yaml", "-", "title"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -132,7 +132,7 @@ fn test_get_toml_output() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-toml-output");
     fixture
         .command()
-        .args(["get", "--toml", "-", "title", "count"])
+        .args(["get", "--output", "toml", "-", "title", "count"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -186,7 +186,7 @@ fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
 
     let output = fixture
         .command()
-        .args(["get", "-", "phases"])
+        .args(["get", "--output", "plain", "-", "phases"])
         .write_stdin(yaml)
         .output()
         .expect("md get should run");
@@ -213,13 +213,40 @@ fn test_get_rejects_duplicate_keys_through_the_normal_cli_path() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-rejects-duplicate-keys");
     let yaml = "---\nstatus: first\nstatus: second\n---\n# Doc\n";
 
-    fixture
+    let output = fixture
         .command()
         .args(["get", "-", "status"])
         .write_stdin(yaml)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("duplicate entry with key"));
+        .output()
+        .expect("md get should run");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("one JSON report");
+    assert_eq!(report["outcome"], "failure", "{report:#}");
+    assert_eq!(report["value"], serde_json::Value::Null, "{report:#}");
+    assert!(report["diagnostics"].to_string().contains("duplicate entry with key"), "{report:#}");
+}
+
+#[test]
+fn test_get_malformed_frontmatter_reports_the_failure_in_the_default_json_payload() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-malformed-frontmatter-json");
+    let yaml = "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n";
+
+    let output = fixture
+        .command()
+        .args(["get", "-", "phases"])
+        .write_stdin(yaml)
+        .output()
+        .expect("md get should run");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("one JSON report");
+    assert_eq!(report["outcome"], "failure", "{report:#}");
+    assert_eq!(report["value"], serde_json::Value::Null, "{report:#}");
+    assert_eq!(report["diagnostics"][0]["code"], "dm.frontmatter.yaml_parse", "{report:#}");
+    assert_eq!(report["diagnostics"][0]["source"]["line"], 4, "{report:#}");
 }
 
 #[test]
@@ -243,7 +270,7 @@ fn test_get_raw_string_unquoted() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-string-unquoted");
     fixture
         .command()
-        .args(["get", "--raw", "-", "title"])
+        .args(["get", "--output", "plain", "-", "title"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -255,7 +282,7 @@ fn test_get_raw_number() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-number");
     fixture
         .command()
-        .args(["get", "--raw", "-", "count"])
+        .args(["get", "--output", "plain", "-", "count"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -267,7 +294,7 @@ fn test_get_raw_null_returns_empty() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-null-returns-empty");
     fixture
         .command()
-        .args(["get", "--raw", "-", "nonexistent"])
+        .args(["get", "--output", "plain", "-", "nonexistent"])
         .write_stdin("---\nnonexistent: null\n---\n# Doc")
         .assert()
         .success()
@@ -279,7 +306,7 @@ fn test_get_raw_array_one_per_line() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-array-one-per-line");
     fixture
         .command()
-        .args(["get", "--raw", "-", "tags"])
+        .args(["get", "--output", "plain", "-", "tags"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -291,7 +318,7 @@ fn test_get_raw_object_key_value_lines() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-object-key-value-lines");
     fixture
         .command()
-        .args(["get", "--raw", "-", "title", "count"])
+        .args(["get", "--output", "plain", "-", "title", "count"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -580,7 +607,7 @@ fn test_set_then_rm_round_trip_restores_original_bytes() {
             .success();
         fixture
             .command()
-            .args(["get", "--raw"])
+            .args(["get", "--output", "plain"])
             .arg(tmp.path())
             .arg("start_phase")
             .assert()
@@ -615,4 +642,1091 @@ fn test_set_save_indented_root_falls_back_to_reserializing() {
     assert!(updated.contains("title: Indented"));
     assert!(updated.contains("count: 3"));
     assert!(updated.contains("# Content"));
+}
+
+// =============================================================================
+//                              PROPERTY PATHS
+// =============================================================================
+
+const NESTED_DOC: &str = "---\ntitle: Notes\nstyle:\n  page:\n    max-width: 96 # wide\n    alignment: left\nauthor: Ken\nnothing: null\nitems:\n  - name: a\n  - name: b\nletters: [a, b, c, d]\n\"0\": zero\n\"00\": double-zero\nnumbers:\n  \"0\": mapped\n\"dotted.key\": literal\n'C:\\': { name: drive }\n'C:\\dir': windows\n\"\": empty\nénoncé: été\n---\n# Body\n";
+
+fn nested_document(name: &str) -> CliProcessFixture {
+    with_document(name, NESTED_DOC)
+}
+
+fn with_document(name: &str, content: &str) -> CliProcessFixture {
+    let fixture = CliProcessFixture::named(name);
+    fixture.write_file("cwd/doc.md", content);
+    fixture
+}
+
+fn read_document(fixture: &CliProcessFixture) -> String {
+    std::fs::read_to_string(fixture.cwd().join("doc.md")).expect("the document")
+}
+
+/// Runs `md` with `args` and returns its status and the text it wrote.
+fn run_md(fixture: &CliProcessFixture, args: &[&str]) -> (Option<i32>, String, String) {
+    let output = fixture.command().args(args).output().expect("md runs");
+    (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned(), String::from_utf8_lossy(&output.stderr).into_owned())
+}
+
+/// `md get`'s JSON value at `path`.
+fn get_json(fixture: &CliProcessFixture, path: &str) -> serde_json::Value {
+    let (status, stdout, stderr) = run_md(fixture, &["get", "doc.md", path, "--output", "json"]);
+    assert_eq!(status, Some(0), "{stdout}{stderr}");
+    serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: {stdout}"))
+}
+
+/// Runs a mutation that must fail with `status` and leave the source's bytes
+/// alone, returning stderr.
+fn assert_refused(fixture: &CliProcessFixture, args: &[&str], status: i32) -> String {
+    let before = read_document(fixture);
+    let (code, stdout, stderr) = run_md(fixture, args);
+    assert_eq!(code, Some(status), "{args:?}\n{stdout}\n{stderr}");
+    assert_eq!(read_document(fixture), before, "{args:?} must write nothing");
+    stderr
+}
+
+/// `md set --save`, which must succeed, returning the file it left.
+fn set_saved(fixture: &CliProcessFixture, path: &str, value: &str) -> String {
+    let (code, stdout, stderr) = run_md(fixture, &["set", "doc.md", path, value, "--save"]);
+    assert_eq!(code, Some(0), "{path}={value}\n{stdout}\n{stderr}");
+    read_document(fixture)
+}
+
+mod get_paths {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_nested_value_is_read_and_an_ordinary_key_is_unchanged() {
+        let fixture = nested_document("paths-get-nested");
+        assert_eq!(get_json(&fixture, "style.page.max-width"), json!(96));
+        assert_eq!(get_json(&fixture, "title"), json!("Notes"));
+        assert_eq!(get_json(&fixture, "style.page"), json!({ "max-width": 96, "alignment": "left" }));
+    }
+
+    #[test]
+    fn a_dot_always_separates_and_an_escaped_dot_names_a_literal_key() {
+        let fixture = nested_document("paths-get-dotted");
+        assert_eq!(get_json(&fixture, "dotted.key"), json!(""), "one syntactic reading, whatever the document holds");
+        assert_eq!(get_json(&fixture, r"dotted\.key"), json!("literal"));
+    }
+
+    #[test]
+    fn backslashes_follow_the_two_escapes() {
+        let fixture = nested_document("paths-get-backslash");
+        assert_eq!(get_json(&fixture, r"C:\\.name"), json!("drive"), "`C:\\\\` is the key ending in a backslash");
+        assert_eq!(get_json(&fixture, r"C:\dir"), json!("windows"), "a backslash before anything else is itself");
+    }
+
+    #[test]
+    fn the_empty_argument_special_keys_and_unicode_are_ordinary_keys() {
+        let fixture = with_document("paths-get-special", "---\n$schema:\n  title: string\n\"\": empty\nénoncé: été\n---\n# Body\n");
+        assert_eq!(get_json(&fixture, ""), json!("empty"));
+        assert_eq!(get_json(&fixture, "$schema"), json!({ "title": "string" }));
+        assert_eq!(get_json(&fixture, "énoncé"), json!("été"));
+    }
+
+    #[test]
+    fn a_number_is_an_index_on_an_array_and_a_key_on_a_mapping() {
+        let fixture = nested_document("paths-get-numbers");
+        assert_eq!(get_json(&fixture, "items.1.name"), json!("b"));
+        assert_eq!(get_json(&fixture, "numbers.0"), json!("mapped"));
+        assert_eq!(get_json(&fixture, "0"), json!("zero"));
+        assert_eq!(get_json(&fixture, "00"), json!("double-zero"), "`0` and `00` are different mapping keys");
+    }
+
+    #[test]
+    fn an_unreachable_path_is_missing_and_prints_empty() {
+        let fixture = nested_document("paths-get-unreachable");
+        for path in [
+            "items.9",
+            "items.01",
+            "items.-1",
+            "items.-",
+            "items.1234567890123456789012345678901234567890",
+            "author.name",
+            "nothing.deep",
+            "style.absent",
+            "absent.deep",
+        ] {
+            assert_eq!(get_json(&fixture, path), json!(""), "{path}");
+        }
+        let (code, stdout, _) = run_md(&fixture, &["get", "doc.md", "items.9", "--output", "plain"]);
+        assert_eq!((code, stdout.as_str()), (Some(0), "\n"));
+    }
+
+    #[test]
+    fn an_explicit_null_stays_null_in_data_output() {
+        let fixture = nested_document("paths-get-null");
+        assert_eq!(get_json(&fixture, "nothing"), json!(null));
+    }
+
+    #[test]
+    fn several_paths_give_a_flat_object_keyed_as_written() {
+        let fixture = nested_document("paths-get-several");
+        let (code, stdout, stderr) =
+            run_md(&fixture, &["get", "doc.md", "style.page.alignment", "title", r"dotted\.key", "items.9", "--compact", "--output", "json"]);
+        assert_eq!(code, Some(0), "{stderr}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&stdout).unwrap(),
+            json!({ "style.page.alignment": "left", "title": "Notes", r"dotted\.key": "literal", "items.9": "" }),
+        );
+    }
+}
+
+mod malformed_paths {
+    use super::*;
+
+    /// A missing file would fail with status 1, so status 2 proves the path was
+    /// judged before anything was opened.
+    #[test]
+    fn each_command_fails_as_usage_before_reading_anything() {
+        let fixture = CliProcessFixture::named("paths-malformed");
+        for path in ["a.", ".a", "a..b"] {
+            for args in [vec!["get", "missing.md", path], vec!["set", "missing.md", path, "1"], vec!["rm", "missing.md", path]] {
+                let (code, stdout, stderr) = run_md(&fixture, &args);
+                assert_eq!(code, Some(2), "{args:?}\n{stdout}\n{stderr}");
+                assert!(stdout.is_empty(), "{args:?}: {stdout}");
+                assert!(stderr.contains("empty segment"), "{args:?}: {stderr}");
+            }
+        }
+    }
+
+    #[test]
+    fn one_malformed_path_among_good_ones_stops_get_and_rm() {
+        let fixture = nested_document("paths-malformed-among-good");
+        let (code, stdout, _) = run_md(&fixture, &["get", "doc.md", "title", "a..b", "--output", "json"]);
+        assert_eq!((code, stdout.as_str()), (Some(2), ""));
+        assert_refused(&fixture, &["rm", "doc.md", "title", "a."], 2);
+    }
+
+    #[test]
+    fn stdin_is_not_consumed_for_a_malformed_path() {
+        let fixture = CliProcessFixture::named("paths-malformed-stdin");
+        fixture.command().args(["get", "-", "a."]).write_stdin(FM_DOC).assert().code(2).stdout(predicate::str::is_empty());
+    }
+}
+
+mod set_paths {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_nested_edit_keeps_comments_and_spelling_in_the_shared_parent() {
+        let source = "---\nstyle:\n  # about the page\n  page: 'quoted'   # kept\n  width: 0x10\n---\n# Body\n\nkept\n";
+        let fixture = with_document("paths-set-comments", source);
+        let saved = set_saved(&fixture, "style.width", "20");
+        assert_eq!(saved, source.replace("width: 0x10", "width: 20"));
+    }
+
+    #[test]
+    fn a_dotted_path_never_writes_a_literal_key_and_an_escaped_one_does() {
+        let fixture = with_document("paths-set-literal", "---\ntitle: Notes\n---\n# Body\n");
+        let saved = set_saved(&fixture, "a.b", "1");
+        assert_eq!(saved, "---\ntitle: Notes\na:\n  b: 1\n---\n# Body\n");
+
+        let saved = set_saved(&fixture, r"a\.b", "2");
+        assert!(saved.contains("a.b: 2\n"), "{saved}");
+        assert_eq!(get_json(&fixture, r"a\.b"), json!(2));
+        assert_eq!(get_json(&fixture, "a.b"), json!(1));
+
+        let (code, _, stderr) = run_md(&fixture, &["rm", "doc.md", r"a\.b"]);
+        assert_eq!(code, Some(0), "{stderr}");
+        assert_eq!(get_json(&fixture, r"a\.b"), json!(""));
+        assert_eq!(get_json(&fixture, "a.b"), json!(1), "the nested value was not the one named");
+    }
+
+    #[test]
+    fn a_missing_parent_is_created() {
+        let fixture = with_document("paths-set-parent", "---\ntitle: Notes\n---\n# Body\n");
+        set_saved(&fixture, "author.name", "Ken");
+        assert_eq!(get_json(&fixture, "author"), json!({ "name": "Ken" }));
+    }
+
+    #[test]
+    fn a_number_under_a_missing_parent_is_refused() {
+        let fixture = with_document("paths-set-number", "---\ntitle: Notes\n---\n# Body\n");
+        let stderr = assert_refused(&fixture, &["set", "doc.md", "items.0.name", "x", "--save"], 1);
+        assert!(stderr.contains("items.0"), "{stderr}");
+    }
+
+    #[test]
+    fn a_parent_that_cannot_hold_the_key_is_named_with_its_type() {
+        let fixture = nested_document("paths-set-scalar-parent");
+        let stderr = assert_refused(&fixture, &["set", "doc.md", "author.name", "x", "--save"], 1);
+        assert!(stderr.contains("author") && stderr.contains("text"), "{stderr}");
+        let stderr = assert_refused(&fixture, &["set", "doc.md", "nothing.deep", "x", "--save"], 1);
+        assert!(stderr.contains("nothing") && stderr.contains("null"), "{stderr}");
+    }
+
+    #[test]
+    fn a_whole_scalar_or_null_can_be_replaced_by_naming_it() {
+        let fixture = nested_document("paths-set-replace");
+        set_saved(&fixture, "nothing", "{deep:1}");
+        assert_eq!(get_json(&fixture, "nothing.deep"), json!(1));
+        set_saved(&fixture, "author", r#"{name:"Bob"}"#);
+        assert_eq!(get_json(&fixture, "author.name"), json!("Bob"));
+    }
+
+    #[test]
+    fn an_array_element_is_edited_and_an_index_out_of_range_names_the_length() {
+        let fixture = nested_document("paths-set-array");
+        set_saved(&fixture, "items.1.name", "z");
+        assert_eq!(get_json(&fixture, "items"), json!([{ "name": "a" }, { "name": "z" }]));
+
+        let stderr = assert_refused(&fixture, &["set", "doc.md", "items.2.name", "x", "--save"], 1);
+        assert!(stderr.contains("items.2") && stderr.contains("2 element"), "{stderr}");
+        assert_refused(&fixture, &["set", "doc.md", "items.01.name", "x", "--save"], 1);
+        assert_refused(&fixture, &["set", "doc.md", "items.1234567890123456789012345678901234567890", "x", "--save"], 1);
+    }
+
+    #[test]
+    fn a_number_on_a_mapping_is_a_key() {
+        let fixture = nested_document("paths-set-number-key");
+        set_saved(&fixture, "numbers.00", "new");
+        assert_eq!(get_json(&fixture, "numbers"), json!({ "0": "mapped", "00": "new" }));
+    }
+
+    #[test]
+    fn the_empty_top_level_key_can_be_set() {
+        let fixture = nested_document("paths-set-empty-key");
+        set_saved(&fixture, "", "changed");
+        assert_eq!(get_json(&fixture, ""), json!("changed"));
+    }
+
+    #[test]
+    fn repeated_edits_round_trip_through_the_file() {
+        let source = "---\n# top\nnotes:\n  page: { a: 1 }\n  # inner\n  ul:\n    padding: 2 # two\ntitle: Notes\n---\n# Body\n";
+        let fixture = with_document("paths-set-round-trip", source);
+        for padding in ["3", "4"] {
+            set_saved(&fixture, "notes.ul.padding", padding);
+            assert_eq!(get_json(&fixture, "notes.ul.padding").to_string(), padding);
+        }
+        assert_eq!(read_document(&fixture), source.replace("padding: 2 # two", "padding: 4 # two"));
+    }
+
+    #[test]
+    fn a_flow_collection_falls_back_and_still_edits_the_value() {
+        let fixture = with_document("paths-set-flow", "---\nauthor: { name: Ann, email: a@x }\nother: 1\n---\n# Body\n");
+        let saved = set_saved(&fixture, "author.name", "Bob");
+        assert!(saved.ends_with("---\n# Body\n"), "the body keeps its bytes: {saved}");
+        assert_eq!(get_json(&fixture, "author"), json!({ "name": "Bob", "email": "a@x" }));
+        assert_eq!(get_json(&fixture, "other"), json!(1));
+    }
+
+    #[test]
+    fn an_edit_an_alias_reads_is_refused_with_no_fallback() {
+        let fixture = with_document("paths-set-alias", "---\nbase: &shared\n  name: Ann\ncopy: *shared\n---\n# Body\n");
+        let stderr = assert_refused(&fixture, &["set", "doc.md", "base.name", "Bob", "--save"], 1);
+        assert!(stderr.contains("copy"), "names the value that would change: {stderr}");
+    }
+
+    #[test]
+    fn stdin_without_save_prints_the_edited_document() {
+        let fixture = CliProcessFixture::named("paths-set-stdin");
+        fixture
+            .command()
+            .args(["set", "-", "a.b", "1"])
+            .write_stdin("---\na:\n  c: 2 # kept\n---\n# Body\n")
+            .assert()
+            .success()
+            .stdout("---\na:\n  c: 2 # kept\n  b: 1\n---\n# Body\n");
+    }
+
+    #[test]
+    fn the_result_carries_the_path_as_written_and_the_value_as_bound() {
+        let fixture = with_document("paths-set-result", "---\n$schema:\n  a:\n    v: string\n---\n# Body\n");
+        let (code, stdout, stderr) = run_md(&fixture, &["set", "doc.md", "a.v", "1.10", "--output", "json"]);
+        assert_eq!(code, Some(0), "{stderr}");
+        let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(report["property"], "a.v");
+        assert_eq!(report["value"], "1.10");
+        assert_eq!(report["saved"], false);
+    }
+}
+
+mod set_values {
+    use super::*;
+    use serde_json::json;
+
+    const TYPED: &str = "---\n$schema:\n  version: string\n  count: number\n  zip: numberlike\n  flag: boolish\n  either: string | number\n  nums: number[]\n  names: string[]\n  maybe: string\n  author:\n    name: string\n    email: string\n---\n# Body\n";
+
+    #[test]
+    fn a_declared_type_reads_the_text() {
+        let fixture = with_document("values-declared", TYPED);
+        let saved = set_saved(&fixture, "version", "1.10");
+        assert!(saved.contains("version: '1.10'") || saved.contains("version: \"1.10\""), "{saved}");
+        assert_eq!(get_json(&fixture, "version"), json!("1.10"));
+        set_saved(&fixture, "count", "5");
+        assert_eq!(get_json(&fixture, "count"), json!(5));
+    }
+
+    #[test]
+    fn numberlike_boolish_and_unions_follow_the_shared_rules() {
+        let fixture = with_document("values-rules", TYPED);
+        set_saved(&fixture, "zip", "02134");
+        assert_eq!(get_json(&fixture, "zip"), json!("02134"));
+        set_saved(&fixture, "flag", "On");
+        assert_eq!(get_json(&fixture, "flag"), json!("On"));
+        set_saved(&fixture, "flag", "true");
+        assert_eq!(get_json(&fixture, "flag"), json!(true));
+        set_saved(&fixture, "either", "1.10");
+        assert_eq!(get_json(&fixture, "either"), json!("1.10"));
+    }
+
+    #[test]
+    fn an_array_element_reads_through_the_element_type() {
+        let fixture = with_document("values-element", &TYPED.replace("---\n# Body", "nums: [1, 2]\nnames: [a, b]\n---\n# Body"));
+        set_saved(&fixture, "nums.1", "5");
+        assert_eq!(get_json(&fixture, "nums"), json!([1, 5]));
+        set_saved(&fixture, "names.0", "1.10");
+        assert_eq!(get_json(&fixture, "names"), json!(["1.10", "b"]));
+    }
+
+    #[test]
+    fn an_undeclared_key_keeps_the_guess() {
+        let fixture = with_document("values-undeclared", "---\ntitle: Notes\n---\n# Body\n");
+        set_saved(&fixture, "count", "5");
+        assert_eq!(get_json(&fixture, "count"), json!(5));
+        set_saved(&fixture, "ratio", "1.10");
+        assert_eq!(get_json(&fixture, "ratio"), json!(1.1));
+        set_saved(&fixture, "text", "plain words");
+        assert_eq!(get_json(&fixture, "text"), json!("plain words"));
+    }
+
+    #[test]
+    fn containers_read_the_same_in_json5_and_yaml_flow() {
+        let fixture = with_document("values-containers", "---\ntitle: Notes\n---\n# Body\n");
+        set_saved(&fixture, "a", "{a:1}");
+        assert_eq!(get_json(&fixture, "a"), json!({ "a": 1 }));
+        set_saved(&fixture, "b", "{ max-width: 50 }");
+        assert_eq!(get_json(&fixture, "b"), json!({ "max-width": 50 }));
+        set_saved(&fixture, "c", "[1,'two']");
+        assert_eq!(get_json(&fixture, "c"), json!([1, "two"]));
+    }
+
+    #[test]
+    fn a_quoted_string_decodes_once_and_null_is_null() {
+        let fixture = with_document("values-quoted", "---\ntitle: Notes\n---\n# Body\n");
+        set_saved(&fixture, "who", "\"Alice\"");
+        assert_eq!(get_json(&fixture, "who"), json!("Alice"));
+        set_saved(&fixture, "gone", "null");
+        assert_eq!(get_json(&fixture, "gone"), json!(null));
+        set_saved(&fixture, "empty", "");
+        assert_eq!(get_json(&fixture, "empty"), json!(""));
+    }
+
+    #[test]
+    fn an_inadmissible_container_fails_and_never_becomes_text() {
+        let fixture = with_document("values-inadmissible", "---\ntitle: Notes\n---\n# Body\n");
+        for value in ["{a:1,a:2}", "{a:NaN}", "{a:9007199254740993}", "{ a: 1, a: 2, max-width: 3 }"] {
+            let stderr = assert_refused(&fixture, &["set", "doc.md", "meta", value, "--save"], 1);
+            assert!(stderr.contains("meta"), "{value}: {stderr}");
+        }
+    }
+
+    #[test]
+    fn a_failed_value_reports_through_the_data_output_with_no_document() {
+        let fixture = with_document("values-envelope", TYPED);
+        let (code, stdout, stderr) = run_md(&fixture, &["set", "doc.md", "count", "abc", "--save", "--output", "json"]);
+        assert_eq!(code, Some(1), "{stdout}");
+        assert!(stderr.is_empty(), "{stderr}");
+        let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(report["outcome"], "failure");
+        assert_eq!(report["document"], serde_json::Value::Null);
+        assert_eq!(report["saved"], false);
+        assert_eq!(report["property"], "count");
+        assert!(report["diagnostics"][0]["code"].as_str().unwrap().starts_with("dm.schema."), "{report:#}");
+        assert_eq!(report["diagnostics"][0]["source"]["line"], serde_json::Value::Null, "never the old on-disk scalar: {report:#}");
+        assert_eq!(read_document(&fixture), TYPED);
+    }
+
+    #[test]
+    fn a_pending_value_is_written_unevaluated() {
+        let fixture = with_document("values-pending", TYPED);
+        let saved = set_saved(&fixture, "count", "{{ fm.other }}");
+        assert!(saved.contains("{{ fm.other }}"), "{saved}");
+        let saved = set_saved(&fixture, "maybe", "$(touch sentinel)");
+        assert!(saved.contains("$(touch sentinel)"), "{saved}");
+        assert!(!fixture.cwd().join("sentinel").exists(), "nothing runs");
+    }
+}
+
+mod set_validation {
+    use super::*;
+    use serde_json::json;
+
+    /// `count: number` and a missing required `title`.
+    const REQUIRED: &str = "---\n$schema:\n  title: string(required)\n  count: number\n---\n# Body\n";
+
+    #[test]
+    fn a_valid_value_writes_despite_a_problem_elsewhere() {
+        let fixture = with_document("validation-elsewhere", REQUIRED);
+        set_saved(&fixture, "count", "5");
+        assert_eq!(get_json(&fixture, "count"), json!(5));
+    }
+
+    #[test]
+    fn a_value_the_type_rejects_writes_nothing() {
+        let fixture = with_document("validation-rejected", REQUIRED);
+        let stderr = assert_refused(&fixture, &["set", "doc.md", "count", "abc", "--save"], 1);
+        assert!(stderr.contains("count"), "{stderr}");
+    }
+
+    #[test]
+    fn setting_the_missing_key_repairs_the_document() {
+        let fixture = with_document("validation-repair", REQUIRED);
+        set_saved(&fixture, "title", "Notes");
+        let (code, stdout, stderr) = run_md(&fixture, &["schema", "validate", "doc.md"]);
+        assert_eq!(code, Some(0), "{stdout}{stderr}");
+    }
+
+    #[test]
+    fn a_broken_schema_fails_with_an_explanation_and_no_write() {
+        let missing = with_document("validation-missing-schema", "---\n$schema: ./absent.yaml\ncount: 1\n---\n# Body\n");
+        let stderr = assert_refused(&missing, &["set", "doc.md", "count", "2", "--save"], 1);
+        assert!(stderr.contains("absent.yaml"), "{stderr}");
+
+        let malformed = with_document("validation-malformed-schema", "---\n$schema:\n  count: not-a-real-type(\ncount: 1\n---\n# Body\n");
+        assert_refused(&malformed, &["set", "doc.md", "count", "2", "--save"], 1);
+    }
+
+    #[test]
+    fn a_schema_in_a_separate_file_applies() {
+        let fixture = with_document("validation-file-schema", "---\n$schema: ./s.yaml\ncount: 1\n---\n# Body\n");
+        fixture.write_file("cwd/s.yaml", "$schema:\n  count: number\n");
+        assert_refused(&fixture, &["set", "doc.md", "count", "abc", "--save"], 1);
+        set_saved(&fixture, "count", "2");
+        assert_eq!(get_json(&fixture, "count"), json!(2));
+    }
+
+    #[test]
+    fn setting_schema_checks_only_the_reference() {
+        let fixture = with_document("validation-set-schema", "---\ncount: abc\n---\n# Body\n");
+        fixture.write_file("cwd/s.yaml", "$schema:\n  count: number\n");
+        let saved = set_saved(&fixture, "$schema", "./s.yaml");
+        assert!(saved.contains("$schema: ./s.yaml"), "the document fails it, and that does not matter: {saved}");
+        // A reference that resolves to nothing is still a reference.
+        set_saved(&fixture, "$schema", "./absent.yaml");
+        assert_eq!(get_json(&fixture, "$schema"), json!("./absent.yaml"));
+        assert_refused(&fixture, &["set", "doc.md", "$schema", "https://example.invalid/s.yaml", "--save"], 1);
+        // Text is always a name, so only a value that cannot be one is refused.
+        assert_refused(&fixture, &["set", "doc.md", "$schema", "null", "--save"], 1);
+    }
+
+    #[test]
+    fn a_bare_schema_name_stays_a_string_and_an_inline_schema_is_read() {
+        let fixture = with_document("validation-schema-forms", "---\ncount: abc\n---\n# Body\n");
+        set_saved(&fixture, "$schema", "2");
+        assert_eq!(get_json(&fixture, "$schema"), json!("2"));
+        set_saved(&fixture, "$schema", "{count: number}");
+        assert_eq!(get_json(&fixture, "$schema"), json!({ "count": "number" }));
+        assert_refused(&fixture, &["set", "doc.md", "$schema", "{count: not-a-type(}", "--save"], 1);
+    }
+
+    #[test]
+    fn a_nested_key_a_closed_object_does_not_declare_is_refused() {
+        let fixture = with_document("validation-closed", "---\n$schema:\n  author:\n    name: string\nauthor:\n  name: Ann\n---\n# Body\n");
+        assert_refused(&fixture, &["set", "doc.md", "author.mistake", "1", "--save"], 1);
+    }
+
+    #[test]
+    fn a_second_undeclared_key_is_refused_though_the_object_already_has_one() {
+        let fixture = with_document(
+            "validation-second-unknown",
+            "---\n$schema:\n  author:\n    name: string\nauthor:\n  name: Ann\n  old: 1\n---\n# Body\n",
+        );
+        assert_refused(&fixture, &["set", "doc.md", "author.mistake", "1", "--save"], 1);
+        assert_refused(&fixture, &["set", "doc.md", "author.old", "2", "--save"], 1);
+        // A problem elsewhere never blocks an edit.
+        set_saved(&fixture, "author.name", "Bob");
+    }
+
+    #[test]
+    fn a_pattern_key_opens_the_object() {
+        let fixture = with_document(
+            "validation-open",
+            "---\n$schema:\n  author:\n    name: string\n    \"<string>\": unknown\nauthor:\n  name: Ann\n---\n# Body\n",
+        );
+        set_saved(&fixture, "author.mistake", "1");
+        assert_eq!(get_json(&fixture, "author.mistake"), json!("1"));
+    }
+
+    #[test]
+    fn a_required_child_of_a_new_or_replaced_object_blocks() {
+        let fixture = with_document(
+            "validation-ancestor",
+            "---\n$schema:\n  author:\n    name: string(required)\n    email: string(required)\n---\n# Body\n",
+        );
+        assert_refused(&fixture, &["set", "doc.md", "author.name", "Ann", "--save"], 1);
+        assert_refused(&fixture, &["set", "doc.md", "author", "{name:\"Ann\"}", "--save"], 1);
+        set_saved(&fixture, "author", "{name:\"Ann\",email:\"a@x\"}");
+        set_saved(&fixture, "author.name", "Bob");
+        assert_eq!(get_json(&fixture, "author"), json!({ "name": "Bob", "email": "a@x" }));
+    }
+
+    #[test]
+    fn a_literal_tag_narrows_the_declared_type() {
+        let fixture = with_document("validation-union", "---\n$schema: ./s.yaml\nthing:\n  kind: rust\n---\n# Body\n");
+        fixture.write_file(
+            "cwd/s.yaml",
+            "$schema:\n  thing: Rust@this | Go@this\ntypes:\n  Rust:\n    kind: literal(rust; required)\n    edition: string\n  Go:\n    kind: literal(go; required)\n    edition: number\n",
+        );
+        // Under `kind: rust` the edition is text, and under `kind: go` a number.
+        set_saved(&fixture, "thing.edition", "1.10");
+        assert_eq!(get_json(&fixture, "thing.edition"), json!("1.10"));
+        let (code, _, stderr) = run_md(&fixture, &["rm", "doc.md", "thing.edition"]);
+        assert_eq!(code, Some(0), "{stderr}");
+        set_saved(&fixture, "thing.kind", "go");
+        set_saved(&fixture, "thing.edition", "1.10");
+        assert_eq!(get_json(&fixture, "thing.edition"), json!(1.1));
+    }
+
+    #[test]
+    fn a_trigger_selected_by_the_edit_reads_the_value_and_a_broken_trigger_is_only_a_warning() {
+        let fixture = with_document("validation-trigger", "---\nedition: 1.5\nlang: rust\n---\n# Body\n");
+        fixture.write_file("cwd/.git/HEAD", "ref: refs/heads/main\n");
+        fixture.write_file("cwd/.git/config", "[core]\n\trepositoryformatversion = 0\n");
+        std::fs::create_dir_all(fixture.cwd().join(".git/objects")).unwrap();
+        std::fs::create_dir_all(fixture.cwd().join(".git/refs")).unwrap();
+        fixture.write_file(
+            "cwd/schemas/lang.trigger.yaml",
+            "kind: schema-trigger\nmatch:\n  lang: enum(rust; required)\n$schema:\n  edition: string\n",
+        );
+        set_saved(&fixture, "edition", "1.10");
+        assert_eq!(get_json(&fixture, "edition"), json!("1.10"));
+
+        // Leaving the trigger's match leaves its schema: the key is undeclared.
+        set_saved(&fixture, "lang", "go");
+        set_saved(&fixture, "edition", "1.10");
+        assert_eq!(get_json(&fixture, "edition"), json!(1.1));
+
+        fixture.write_file("cwd/schemas/broken.trigger.yaml", "kind: schema-trigger\n");
+        let (code, stdout, stderr) = run_md(&fixture, &["set", "doc.md", "other", "1", "--output", "json"]);
+        assert_eq!(code, Some(0), "{stdout}{stderr}");
+        let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(report["diagnostics"][0]["code"], "dm.schema.invalid_trigger", "{report:#}");
+    }
+}
+
+mod rm_paths {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn removing_a_nested_key_keeps_its_siblings_and_their_comments() {
+        let source = "---\nstyle:\n  # about\n  a: 1 # kept\n  b: 2\n---\n# Body\n";
+        let fixture = with_document("paths-rm-nested", source);
+        fixture.command().args(["rm", "doc.md", "style.b"]).assert().success();
+        assert_eq!(read_document(&fixture), source.replace("  b: 2\n", ""));
+    }
+
+    #[test]
+    fn removing_the_last_child_leaves_the_parent() {
+        let fixture = with_document("paths-rm-last-child", "---\nstyle:\n  page:\n    max-width: 96\nitems: [only]\n---\n# Body\n");
+        let (code, stdout, stderr) = run_md(&fixture, &["rm", "doc.md", "style.page.max-width", "items.0", "--output", "json"]);
+        assert_eq!(code, Some(0), "{stderr}");
+        let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(report["removed"], json!(["style.page.max-width", "items.0"]));
+        assert_eq!(report["remaining"], json!(["style", "items"]), "top-level keys only");
+        assert_eq!(get_json(&fixture, "style"), json!({ "page": {} }));
+        assert_eq!(get_json(&fixture, "items"), json!([]));
+    }
+
+    #[test]
+    fn array_removals_use_original_indexes_in_either_order() {
+        for (name, order) in [("paths-rm-order-a", ["items.0", "items.2"]), ("paths-rm-order-b", ["items.2", "items.0"])] {
+            let fixture = with_document(name, "---\nitems:\n  - a\n  - b\n  - c\n  - d\n---\n# Body\n");
+            let (code, stdout, stderr) = run_md(&fixture, &["rm", "doc.md", order[0], order[1], "--output", "json"]);
+            assert_eq!(code, Some(0), "{stderr}");
+            let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+            assert_eq!(report["removed"], json!(order), "argument order");
+            assert_eq!(get_json(&fixture, "items"), json!(["b", "d"]));
+        }
+    }
+
+    #[test]
+    fn a_duplicate_or_an_ancestor_with_its_descendant_cancels_the_command() {
+        let fixture = nested_document("paths-rm-conflict");
+        for args in [
+            ["style.page", "style.page"],
+            ["style", "style.page.alignment"],
+            ["style.page.alignment", "style"],
+            ["items.0", "items.0.name"],
+        ] {
+            let stderr = assert_refused(&fixture, &["rm", "doc.md", args[0], args[1]], 1);
+            assert!(stderr.contains(args[0]) && stderr.contains(args[1]), "{args:?}: {stderr}");
+        }
+    }
+
+    #[test]
+    fn a_missing_target_cancels_the_whole_command() {
+        let fixture = nested_document("paths-rm-missing");
+        let stderr = assert_refused(&fixture, &["rm", "doc.md", "title", "style.absent"], 1);
+        assert!(stderr.contains("style.absent"), "{stderr}");
+        // The literal key is not reached by the dotted spelling.
+        assert_refused(&fixture, &["rm", "doc.md", "dotted.key"], 1);
+    }
+
+    #[test]
+    fn an_index_out_of_range_or_a_scalar_parent_is_an_error() {
+        let fixture = nested_document("paths-rm-range");
+        let stderr = assert_refused(&fixture, &["rm", "doc.md", "items.9"], 1);
+        assert!(stderr.contains("items.9") && stderr.contains("2 element"), "{stderr}");
+        assert_refused(&fixture, &["rm", "doc.md", "items.01"], 1);
+        let stderr = assert_refused(&fixture, &["rm", "doc.md", "author.name"], 1);
+        assert!(stderr.contains("author"), "{stderr}");
+        assert_refused(&fixture, &["rm", "doc.md", "nothing.deep"], 1);
+    }
+
+    #[test]
+    fn removing_an_anchor_an_alias_needs_is_refused() {
+        let fixture = with_document("paths-rm-alias", "---\nbase: &shared\n  name: Ann\ncopy: *shared\n---\n# Body\n");
+        assert_refused(&fixture, &["rm", "doc.md", "base"], 1);
+    }
+
+    #[test]
+    fn the_empty_key_and_a_required_key_can_be_removed() {
+        let fixture = with_document(
+            "paths-rm-structural",
+            "---\n$schema:\n  title: string(required)\ntitle: Notes\n\"\": empty\n---\n# Body\n",
+        );
+        fixture.command().args(["rm", "doc.md", "", "title"]).assert().success();
+        assert_eq!(get_json(&fixture, "title"), json!(""));
+        assert_eq!(get_json(&fixture, ""), json!(""));
+    }
+}
+
+/// `md set` reads a value through the schema the request selected, not the compiled
+/// one.
+mod set_selected_baseline {
+    use super::*;
+
+    const CUSTOM: &str = "$schema:\n  version: string\n";
+    const JSON: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"version":{"type":"string"}}}"#;
+
+    fn set_markdown(fixture: &CliProcessFixture, env: &[(&str, &str)], key: &str) -> String {
+        let builder = env.iter().fold(fixture.command_builder(), |builder, (key, value)| builder.application_input(key, value));
+        let mut command = builder.build();
+        command.args(["set", "doc.md", key, "1.10", "--output", "markdown"]);
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[test]
+    fn a_custom_baseline_environment_declares_the_type() {
+        let fixture = CliProcessFixture::named("set-custom-baseline-env");
+        fixture.write_file("cwd/doc.md", "---\ntitle: T\n---\n");
+        fixture.write_file("cwd/base.yaml", CUSTOM);
+        let text = set_markdown(&fixture, &[("BASELINE_SCHEMA", "./base.yaml")], "version");
+        assert!(text.contains("version: '1.10'\n"), "{text}");
+    }
+
+    #[test]
+    fn a_raw_json_schema_baseline_environment_declares_the_type() {
+        let fixture = CliProcessFixture::named("set-json-baseline-env");
+        fixture.write_file("cwd/doc.md", "---\ntitle: T\n---\n");
+        fixture.write_file("cwd/base.json", JSON);
+        let text = set_markdown(&fixture, &[("BASELINE_SCHEMA", "./base.json")], "version");
+        assert!(text.contains("version: '1.10'\n"), "{text}");
+    }
+
+    #[test]
+    fn a_disabled_baseline_environment_leaves_a_compiled_key_undeclared() {
+        let fixture = CliProcessFixture::named("set-disabled-baseline-env");
+        fixture.write_file("cwd/doc.md", "---\n$schema:\n  other: string\n---\n");
+        let text = set_markdown(&fixture, &[("DARKMATTER_NO_BASELINE_SCHEMA", "1")], "title");
+        assert!(text.contains("title: 1.1\n"), "{text}");
+    }
+
+    #[test]
+    fn a_document_schema_declares_the_type() {
+        let fixture = CliProcessFixture::named("set-document-schema");
+        fixture.write_file("cwd/doc.md", "---\n$schema:\n  version: string\n---\n");
+        let text = set_markdown(&fixture, &[], "version");
+        assert!(text.contains("version: '1.10'\n"), "{text}");
+    }
+
+    #[test]
+    fn a_raw_json_schema_document_declares_the_type() {
+        let fixture = CliProcessFixture::named("set-raw-document");
+        fixture.write_file("cwd/doc.md", "---\n$schema: ./doc.json\n---\n");
+        fixture.write_file("cwd/doc.json", JSON);
+        let text = set_markdown(&fixture, &[], "version");
+        assert!(text.contains("version: '1.10'\n"), "{text}");
+    }
+}
+
+/// `md set` writes the value its schema judged, whichever way it was typed.
+mod set_declared_values {
+    use super::*;
+    use serde_json::{Value, json};
+
+    const DOCUMENT: &str = concat!(
+        "---\n",
+        "$schema:\n",
+        "  x: unknown\n",
+        "  alias: any\n",
+        "  count: number\n",
+        "  label: string\n",
+        "  flag: boolish\n",
+        "  nums: number[]\n",
+        "  author:\n",
+        "    age: number\n",
+        "    any: unknown\n",
+        "  scores:\n",
+        "    \"<string>\": number\n",
+        "  names:\n",
+        "    \"<string>\": string\n",
+        "  loose:\n",
+        "    \"<string>\": unknown\n",
+        "nums: [1]\n",
+        "author:\n",
+        "  age: 1 # how old\n",
+        "  any: 1\n",
+        "scores: {a: 1}\n",
+        "names: {a: b}\n",
+        "loose: {a: b}\n",
+        "keep: \"as   written\" # stays\n",
+        "---\n",
+        "Body\n",
+    );
+
+    /// What `md set` reports it set.
+    fn set_value(document: &str, extra: &[(&str, &str)], key: &str, value: &str) -> Value {
+        let fixture = CliProcessFixture::named("set-declared-value");
+        fixture.write_file("cwd/doc.md", document);
+        for (name, content) in extra {
+            fixture.write_file(format!("cwd/{name}"), content);
+        }
+        let output = fixture.command().args(["set", "doc.md", key, value, "--output", "json"]).output().unwrap();
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["outcome"], "success", "{key}={value}: {report}");
+        report["value"].clone()
+    }
+
+    #[test]
+    fn unknown_keeps_text_at_any_depth() {
+        for key in ["x", "alias", "author.any", "loose.a", "loose.new"] {
+            assert_eq!(set_value(DOCUMENT, &[], key, "1.10"), json!("1.10"), "{key}");
+        }
+        assert_eq!(set_value(DOCUMENT, &[], "x", "true"), json!("true"));
+    }
+
+    #[test]
+    fn a_container_under_unknown_is_a_container() {
+        assert_eq!(set_value(DOCUMENT, &[], "x", "{a:1}"), json!({ "a": 1 }));
+        assert_eq!(set_value(DOCUMENT, &[], "x", r#""{a:1}""#), json!("{a:1}"));
+    }
+
+    #[test]
+    fn a_quoted_number_is_written_as_a_number_at_any_depth() {
+        for key in ["count", "author.age", "nums.0", "scores.a", "scores.new"] {
+            assert_eq!(set_value(DOCUMENT, &[], key, r#""5""#), json!(5), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_declared_string_keeps_its_spelling_at_any_depth() {
+        for key in ["label", "names.a", "names.new"] {
+            assert_eq!(set_value(DOCUMENT, &[], key, "1.10"), json!("1.10"), "{key}");
+            assert_eq!(set_value(DOCUMENT, &[], key, r#""5""#), json!("5"), "{key}");
+        }
+    }
+
+    #[test]
+    fn boolish_keeps_the_form_it_was_sent_in() {
+        assert_eq!(set_value(DOCUMENT, &[], "flag", "true"), json!(true));
+        assert_eq!(set_value(DOCUMENT, &[], "flag", r#""true""#), json!("true"));
+    }
+
+    #[test]
+    fn an_undeclared_key_keeps_its_guess_and_its_quotes() {
+        assert_eq!(set_value(DOCUMENT, &[], "other", "1.10"), json!(1.1));
+        assert_eq!(set_value(DOCUMENT, &[], "other", r#""5""#), json!("5"));
+    }
+
+    #[test]
+    fn a_problem_elsewhere_does_not_stop_a_quoted_number_converting() {
+        let document = "---\n$schema:\n  count: number\n  title: string(required)\n---\n";
+        assert_eq!(set_value(document, &[], "count", r#""5""#), json!(5));
+    }
+
+    #[test]
+    fn a_rejected_quoted_value_writes_nothing() {
+        let fixture = CliProcessFixture::named("set-quoted-rejected");
+        fixture.write_file("cwd/doc.md", DOCUMENT);
+        let output = fixture.command().args(["set", "doc.md", "count", r#""abc""#, "--save"]).output().unwrap();
+        assert!(!output.status.success(), "{output:?}");
+        assert_eq!(std::fs::read_to_string(fixture.cwd().join("doc.md")).unwrap(), DOCUMENT);
+    }
+
+    #[test]
+    fn a_converted_value_changes_only_its_own_bytes() {
+        let fixture = CliProcessFixture::named("set-quoted-bytes");
+        fixture.write_file("cwd/doc.md", DOCUMENT);
+        let output = fixture.command().args(["set", "doc.md", "author.age", r#""5""#, "--save"]).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let expected = DOCUMENT.replace("  age: 1 # how old\n", "  age: 5 # how old\n");
+        assert_eq!(std::fs::read_to_string(fixture.cwd().join("doc.md")).unwrap(), expected);
+    }
+
+    #[test]
+    fn writing_the_same_value_changes_no_bytes() {
+        let fixture = CliProcessFixture::named("set-same-bytes");
+        fixture.write_file("cwd/doc.md", DOCUMENT);
+        let output = fixture.command().args(["set", "doc.md", "author.age", r#""1""#, "--save"]).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(std::fs::read_to_string(fixture.cwd().join("doc.md")).unwrap(), DOCUMENT);
+    }
+
+    /// A raw JSON Schema's `$ref` and `allOf` project to `unknown`, yet neither
+    /// keeps text: only its validator knows these are numbers. The missing required
+    /// `absent` is a problem elsewhere, which never blocks an edit.
+    mod raw_json_schema {
+        use super::*;
+
+        const SCHEMA: &str = r##"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "$defs": { "number": { "type": "number" }, "text": { "type": "string" } },
+            "properties": {
+                "by_ref": { "$ref": "#/$defs/number" },
+                "text_ref": { "$ref": "#/$defs/text" },
+                "all_of": { "allOf": [{ "type": "number" }, { "minimum": 0 }] },
+                "open": {},
+                "items": { "type": "array", "items": { "$ref": "#/$defs/number" } },
+                "absent": { "type": "string" }
+            },
+            "required": ["absent"]
+        }"##;
+        const RAW_DOCUMENT: &str = "---\n$schema: ./schema.json\nitems: [1]\n---\n";
+
+        fn set_raw(key: &str, value: &str) -> Value {
+            set_value(RAW_DOCUMENT, &[("schema.json", SCHEMA)], key, value)
+        }
+
+        #[test]
+        fn a_number_behind_a_ref_is_written_as_a_number() {
+            for (key, value) in [("by_ref", "5"), ("by_ref", r#""5""#), ("items.0", "5"), ("items.0", r#""5""#)] {
+                assert_eq!(set_raw(key, value), json!(5), "{key}={value}");
+            }
+        }
+
+        #[test]
+        fn a_number_behind_an_all_of_keeps_its_guess() {
+            assert_eq!(set_raw("all_of", "5"), json!(5));
+        }
+
+        #[test]
+        fn text_a_raw_schema_accepts_keeps_its_spelling() {
+            assert_eq!(set_raw("text_ref", "1.10"), json!("1.10"));
+            assert_eq!(set_raw("open", "1.10"), json!("1.10"));
+        }
+
+        /// A required key that `properties` does not declare fails the schema as a
+        /// whole, not any one property.
+        const UNDECLARED_REQUIRED: &str = r##"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "$defs": { "number": { "type": "number" } },
+            "properties": {
+                "by_ref": { "$ref": "#/$defs/number" },
+                "items": { "type": "array", "items": { "$ref": "#/$defs/number" } },
+                "group": { "type": "object", "properties": { "count": { "$ref": "#/$defs/number" } } }
+            },
+            "required": ["ghost"]
+        }"##;
+
+        fn with_undeclared_required(document: &str) -> CliProcessFixture {
+            let fixture = CliProcessFixture::named("set-undeclared-required");
+            fixture.write_file("cwd/doc.md", document);
+            fixture.write_file("cwd/schema.json", UNDECLARED_REQUIRED);
+            fixture
+        }
+
+        fn saved(fixture: &CliProcessFixture, key: &str, value: &str) -> String {
+            let output = fixture.command().args(["set", "doc.md", key, value, "--save"]).output().unwrap();
+            assert!(output.status.success(), "{key}={value}: {output:?}");
+            std::fs::read_to_string(fixture.cwd().join("doc.md")).unwrap()
+        }
+
+        fn refusal_code(fixture: &CliProcessFixture, args: &[&str]) -> Value {
+            let output = fixture.command().args(args).args(["--output", "json"]).output().unwrap();
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+            report["diagnostics"][0]["code"].clone()
+        }
+
+        #[test]
+        fn a_missing_undeclared_key_does_not_block_a_quoted_number_and_a_later_edit_repairs_it() {
+            let fixture = with_undeclared_required("---\n$schema: ./schema.json\n---\n");
+
+            let edited = saved(&fixture, "by_ref", r#""5""#);
+            assert_eq!(edited, "---\n$schema: ./schema.json\nby_ref: 5\n---\n");
+            let validate = || fixture.command().args(["schema", "validate", "doc.md"]).output().unwrap();
+            assert!(!validate().status.success(), "the missing key is still a problem of the document");
+
+            saved(&fixture, "ghost", "here");
+            assert!(validate().status.success());
+        }
+
+        #[test]
+        fn validating_a_document_missing_an_undeclared_key_reports_only_that_key() {
+            let fixture = with_undeclared_required("---\n$schema: ./schema.json\nby_ref: \"5\"\n---\n");
+            let output = fixture.command().args(["schema", "validate", "doc.md", "--output", "json"]).output().unwrap();
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            let text = String::from_utf8_lossy(&output.stdout);
+            assert!(text.contains("ghost"), "{text}");
+            assert!(!text.contains("by_ref"), "a value that converts is not a problem: {text}");
+        }
+
+        #[test]
+        fn a_missing_undeclared_key_does_not_block_a_quoted_number_in_an_array() {
+            let fixture = with_undeclared_required("---\n$schema: ./schema.json\nitems: [1]\n---\n");
+            let edited = saved(&fixture, "items.0", r#""5""#);
+            let frontmatter: Value = serde_yaml_ng::from_str(edited.split("---").nth(1).unwrap()).unwrap();
+            assert_eq!(frontmatter["items"], json!([5]));
+        }
+
+        #[test]
+        fn a_missing_undeclared_key_does_not_block_a_quoted_number_in_an_object() {
+            let fixture = with_undeclared_required("---\n$schema: ./schema.json\n---\n");
+            let edited = saved(&fixture, "group", r#"{count:"5"}"#);
+            let frontmatter: Value = serde_yaml_ng::from_str(edited.split("---").nth(1).unwrap()).unwrap();
+            assert_eq!(frontmatter["group"], json!({ "count": 5 }));
+        }
+
+        #[test]
+        fn a_missing_undeclared_key_does_not_excuse_a_value_that_does_not_fit() {
+            let document = "---\n$schema: ./schema.json\n---\n";
+            let fixture = with_undeclared_required(document);
+            let code = refusal_code(&fixture, &["set", "doc.md", "by_ref", "not-a-number", "--save"]);
+            assert_eq!(code, json!("dm.schema.type_mismatch"));
+            assert_eq!(std::fs::read_to_string(fixture.cwd().join("doc.md")).unwrap(), document);
+        }
+
+        /// The union's arm comes from the document as a whole, which one value's own
+        /// path cannot see: `n` is text in the other arm.
+        #[test]
+        fn a_root_union_reads_a_quoted_number_through_the_arm_the_document_selects() {
+            let schema = r##"{
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$defs": { "number": { "type": "number" }, "text": { "type": "string" } },
+                "anyOf": [
+                    { "type": "object", "properties": { "kind": { "const": "a" }, "n": { "$ref": "#/$defs/number" } }, "required": ["kind"] },
+                    { "type": "object", "properties": { "kind": { "const": "b" }, "n": { "$ref": "#/$defs/text" } }, "required": ["kind"] }
+                ]
+            }"##;
+            let read = |kind: &str| set_value(&format!("---\n$schema: ./schema.json\nkind: {kind}\n---\n"), &[("schema.json", schema)], "n", r#""5""#);
+            assert_eq!(read("a"), json!(5));
+            assert_eq!(read("b"), json!("5"));
+        }
+
+        /// `allOf` drives no conversion anywhere, so a quoted value, which says it is
+        /// a string, stays one. An authored one is refused the same way, and a number
+        /// written unquoted is read as a number.
+        #[test]
+        fn a_quoted_number_behind_an_all_of_is_refused_like_an_authored_one() {
+            let fixture = CliProcessFixture::named("set-all-of-contract");
+            fixture.write_file("cwd/schema.json", SCHEMA);
+            fixture.write_file("cwd/doc.md", RAW_DOCUMENT);
+            let code = refusal_code(&fixture, &["set", "doc.md", "all_of", r#""5""#]);
+            assert_eq!(code, json!("dm.schema.type_mismatch"));
+
+            fixture.write_file("cwd/authored.md", "---\n$schema: ./schema.json\nabsent: x\nall_of: \"5\"\n---\n");
+            let authored = fixture.command().args(["schema", "validate", "authored.md"]).output().unwrap();
+            assert!(!authored.status.success(), "{authored:?}");
+        }
+
+        /// Text that a `$ref`'d string accepts keeps its spelling, whatever that
+        /// string's constraint asks of its content.
+        const CONSTRAINED: &str = r##"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "$defs": {
+                "version": { "type": "string", "pattern": "^[0-9.]+$" },
+                "numberlike": { "type": "string", "format": "darkmatter-numberlike" },
+                "typed": { "type": "string", "enum": ["1.10", "2.0"] },
+                "untyped": { "enum": ["1.10", "2.0"] },
+                "mixed": { "enum": [5, "a"] },
+                "number": { "type": "number" }
+            },
+            "properties": {
+                "version": { "$ref": "#/$defs/version" },
+                "numberlike": { "$ref": "#/$defs/numberlike" },
+                "typed": { "$ref": "#/$defs/typed" },
+                "untyped": { "$ref": "#/$defs/untyped" },
+                "mixed": { "$ref": "#/$defs/mixed" },
+                "number": { "$ref": "#/$defs/number" },
+                "string_all_of": { "allOf": [{ "type": "string" }, { "pattern": "^1" }] }
+            }
+        }"##;
+
+        fn set_constrained(key: &str, value: &str) -> Value {
+            set_value("---\n$schema: ./schema.json\n---\n", &[("schema.json", CONSTRAINED)], key, value)
+        }
+
+        #[test]
+        fn a_ref_to_a_pattern_string_keeps_its_spelling() {
+            assert_eq!(set_constrained("version", "1.10"), json!("1.10"));
+        }
+
+        #[test]
+        fn a_ref_to_a_format_string_keeps_its_spelling() {
+            assert_eq!(set_constrained("numberlike", "0.10"), json!("0.10"));
+        }
+
+        #[test]
+        fn a_ref_to_a_typed_enum_of_strings_keeps_its_spelling() {
+            assert_eq!(set_constrained("typed", "1.10"), json!("1.10"));
+        }
+
+        #[test]
+        fn a_ref_to_an_untyped_enum_of_strings_keeps_its_spelling() {
+            assert_eq!(set_constrained("untyped", "1.10"), json!("1.10"));
+        }
+
+        #[test]
+        fn an_all_of_string_keeps_its_spelling() {
+            assert_eq!(set_constrained("string_all_of", "1.10"), json!("1.10"));
+        }
+
+        #[test]
+        fn a_ref_to_a_number_still_reads_a_number() {
+            assert_eq!(set_constrained("number", "1.10"), json!(1.1));
+        }
+
+        #[test]
+        fn a_ref_to_a_mixed_enum_reads_each_member_as_itself() {
+            assert_eq!(set_constrained("mixed", "5"), json!(5));
+            assert_eq!(set_constrained("mixed", "a"), json!("a"));
+        }
+
+        #[test]
+        fn a_problem_of_the_whole_document_does_not_change_how_text_reads() {
+            let schema = r##"{
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "$defs": { "version": { "type": "string", "pattern": "^[0-9.]+$" } },
+                "properties": { "version": { "$ref": "#/$defs/version" }, "open": {} },
+                "not": { "required": ["bad"] }
+            }"##;
+            let document = "---\n$schema: ./schema.json\nbad: 1\n---\n";
+            assert_eq!(set_value(document, &[("schema.json", schema)], "version", "1.10"), json!("1.10"));
+            assert_eq!(set_value(document, &[("schema.json", schema)], "open", "1.10"), json!("1.10"));
+        }
+
+        #[test]
+        fn text_a_pattern_refuses_is_refused_at_its_own_path() {
+            let fixture = CliProcessFixture::named("set-constrained-refused");
+            fixture.write_file("cwd/schema.json", CONSTRAINED);
+            fixture.write_file("cwd/doc.md", "---\n$schema: ./schema.json\n---\n");
+            let code = refusal_code(&fixture, &["set", "doc.md", "version", "abc"]);
+            assert_eq!(code, json!("dm.schema.constraint"));
+        }
+    }
 }

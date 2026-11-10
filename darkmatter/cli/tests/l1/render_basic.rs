@@ -4,62 +4,88 @@ use common::{CliProcessFixture, md_file};
 use predicates::prelude::*;
 use std::io::Write;
 
-#[test]
-fn default_render_is_an_alias_with_the_same_options() {
-    let fixture = CliProcessFixture::named("render-alias-options");
+/// `md FILE` and `md render FILE` print the same bytes for `format`, with the
+/// same render options applied.
+fn assert_default_render_is_an_alias(format: &str) {
+    let fixture = CliProcessFixture::named(&format!("render-alias-options-{format}"));
     let path = fixture.write_file("cwd/doc.md", "# Alias\n\n- parent\n    - child\n");
-    for format in ["auto", "markdown", "markdown-plus", "html", "json"] {
-        let mut outputs = Vec::new();
-        for prefix in [&[][..], &["render"][..]] {
-            let output = fixture
-                .command()
-                .args(prefix)
-                .arg(&path)
-                .args(["--output", format, "--indent", "2", "--feature", "no-mermaid-rendering"])
-                .assert()
-                .success()
-                .get_output()
-                .clone();
-            assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
-            assert!(!output.stdout.is_empty());
-            outputs.push(output.stdout);
-        }
-        assert_eq!(outputs[0], outputs[1], "format: {format}");
-        if matches!(format, "auto" | "markdown") {
-            assert!(String::from_utf8_lossy(&outputs[0]).contains("- parent\n  - child"));
-        }
+    let mut outputs = Vec::new();
+    for prefix in [&[][..], &["render"][..]] {
+        let output = fixture
+            .command()
+            .args(prefix)
+            .arg(&path)
+            .args(["--output", format, "--indent", "2", "--feature", "no-mermaid-rendering"])
+            .assert()
+            .success()
+            .get_output()
+            .clone();
+        assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(!output.stdout.is_empty());
+        outputs.push(output.stdout);
+    }
+    assert_eq!(outputs[0], outputs[1], "format: {format}");
+    if format == "markdown" {
+        assert!(String::from_utf8_lossy(&outputs[0]).contains("- parent\n  - child"));
     }
 }
 
+/// One test per format, so the spawns spread across cores.
+macro_rules! default_render_alias {
+    ($($name:ident => $format:literal;)+) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_default_render_is_an_alias($format);
+            }
+        )+
+    };
+}
+
+default_render_alias! {
+    default_render_is_an_alias_for_terminal => "terminal";
+    default_render_is_an_alias_for_plain => "plain";
+    default_render_is_an_alias_for_markdown => "markdown";
+    default_render_is_an_alias_for_markdown_plus => "markdown-plus";
+    default_render_is_an_alias_for_html => "html";
+    default_render_is_an_alias_for_json => "json";
+}
+
 #[test]
-fn render_features_are_combined_once_during_normalization() {
+fn render_features_are_never_combined_across_levels() {
     use clap::Parser;
     use darkmatter_cli::args::{Cli, Command, Feature};
 
-    for args in [
-        vec!["md", "doc.md", "--feature", "embed-mermaid-font,no-mermaid-rendering"],
-        vec!["md", "--feature", "embed-mermaid-font", "render", "doc.md", "--feature", "no-mermaid-rendering"],
-    ] {
-        let cli = Cli::try_parse_from(args).unwrap();
-        for _ in 0..2 {
-            let Command::Render(options) = cli.command_or_render() else {
-                panic!("expected render");
-            };
-            assert_eq!(options.features, [Feature::EmbedMermaidFont, Feature::NoMermaidRendering]);
-        }
+    let cli = Cli::try_parse_from(["md", "doc.md", "--feature", "embed-mermaid-font,no-mermaid-rendering"]).unwrap();
+    for _ in 0..2 {
+        let Command::Render(options) = cli.command_or_render() else {
+            panic!("expected render");
+        };
+        assert_eq!(options.features, [Feature::EmbedMermaidFont, Feature::NoMermaidRendering]);
     }
+
+    // A root `--feature` before `render` is a usage error, not a prefix of
+    // `render`'s own list.
+    let cli = Cli::try_parse_from(["md", "--feature", "embed-mermaid-font", "render", "doc.md", "--feature", "no-mermaid-rendering"])
+        .unwrap();
+    let Command::Render(options) = cli.command_or_render() else {
+        panic!("expected render");
+    };
+    assert_eq!(options.features, [Feature::NoMermaidRendering]);
+    assert!(darkmatter_cli::commands::validate_subcommand_usage(&cli).is_err());
 }
 
 #[test]
-fn test_stdin_rendering_auto_non_tty_outputs_markdown() {
-    let fixture = CliProcessFixture::named("test_stdin_rendering_auto_non_tty_outputs_markdown");
+fn test_stdin_rendering_on_a_pipe_outputs_plain_text() {
+    let fixture = CliProcessFixture::named("test_stdin_rendering_on_a_pipe_outputs_plain_text");
     fixture
         .command()
         .arg("-")
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("# Hello"))
+        .stdout(predicate::str::contains("Hello"))
+        .stdout(predicate::str::contains("# Hello").not())
         .stdout(predicate::str::contains("World"));
 }
 
@@ -71,6 +97,7 @@ fn test_file_rendering() {
     fixture
         .command()
         .arg(tmp.path())
+        .args(["--output", "markdown"])
         .assert()
         .success()
         .stdout(predicate::str::contains("# Test File"));
@@ -87,15 +114,16 @@ fn test_file_not_found() {
 }
 
 #[test]
-fn test_output_markdown_alias_text() {
-    let fixture = CliProcessFixture::named("test_output_markdown_alias_text");
+fn test_output_text_alias_is_removed() {
+    let fixture = CliProcessFixture::named("test_output_text_alias_is_removed");
     fixture
         .command()
         .args(["--output", "text", "-"])
         .write_stdin("# Alias Test")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("# Alias Test"));
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains("invalid value 'text'"));
 }
 
 #[test]
@@ -143,20 +171,16 @@ fn test_output_markdown_plus_renders_disclosure_as_html_details() {
 }
 
 #[test]
-fn test_output_json_alias_ast() {
-    let fixture = CliProcessFixture::named("test_output_json_alias_ast");
-    // `--output ast` serializes the render-tree `Document` (`md.as_document()`),
-    // whose node discriminant is `kind` (not `type`); `root` is the top-level
-    // document node.
+fn test_output_ast_value_is_removed() {
+    let fixture = CliProcessFixture::named("test_output_ast_value_is_removed");
     fixture
         .command()
         .args(["--output", "ast", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("\"root\""))
-        .stdout(predicate::str::contains("\"kind\""))
-        .stdout(predicate::str::contains("\"heading\""));
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains("invalid value 'ast'"));
 }
 
 #[test]
@@ -181,7 +205,8 @@ fn test_render_explicit() {
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("# Hello"))
+        .stdout(predicate::str::contains("Hello"))
+        .stdout(predicate::str::contains("# Hello").not())
         .stdout(predicate::str::contains("World"));
 }
 
@@ -197,7 +222,8 @@ fn test_render_default_backward_compat() {
         .arg(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("# Backward"));
+        .stdout(predicate::str::contains("Backward"))
+        .stdout(predicate::str::contains("# Backward").not());
 }
 
 #[test]
@@ -216,12 +242,9 @@ fn test_render_explicit_with_output() {
 fn test_line_numbers_html_output() {
     let fixture = CliProcessFixture::named("test_line_numbers_html_output");
     let input = "```rust\nfn main() {}\n```";
-    // Use `--line-numbers=true` to avoid the optional-arg ambiguity with the
-    // `-` stdin marker positional. The bare form `--line-numbers -` would let
-    // clap consume `-` as the optional value.
     fixture
         .command()
-        .args(["--output", "html", "--line-numbers=true", "-"])
+        .args(["--output", "html", "style.code-block.line-numbers=true", "-"])
         .write_stdin(input)
         .assert()
         .success()
@@ -279,14 +302,17 @@ fn test_block_rendering_transclusion_cycle_non_tty() {
     );
 }
 
+/// The code panel's mode is a document style value (`style.page.code.mode`);
+/// `--code-block` belongs to `md schema about` alone.
 #[test]
-fn render_accepts_code_block_flag() {
-    let fixture = CliProcessFixture::named("render_accepts_code_block_flag");
-    let tmp = md_file("# Title\n\n```rust\nfn main() {}\n```\n");
+fn render_accepts_every_frontmatter_code_mode() {
+    let fixture = CliProcessFixture::named("render_accepts_every_frontmatter_code_mode");
     for mode in ["inverse", "dark", "light", "same"] {
+        let tmp = md_file(&format!(
+            "---\nstyle:\n  page:\n    code:\n      mode: {mode}\n---\n# Title\n\n```rust\nfn main() {{}}\n```\n"
+        ));
         fixture
             .command()
-            .args(["--code-block", mode])
             .arg(tmp.path())
             .assert()
             .success()
@@ -295,13 +321,40 @@ fn render_accepts_code_block_flag() {
 }
 
 #[test]
-fn render_rejects_invalid_code_block_value() {
-    let fixture = CliProcessFixture::named("render_rejects_invalid_code_block_value");
-    let tmp = md_file("# Title\n");
+fn render_rejects_an_invalid_frontmatter_code_mode() {
+    let fixture = CliProcessFixture::named("render_rejects_an_invalid_frontmatter_code_mode");
+    let tmp = md_file("---\nstyle:\n  page:\n    code:\n      mode: sideways\n---\n# Title\n");
     fixture
         .command()
-        .args(["--code-block", "sideways"])
         .arg(tmp.path())
         .assert()
-        .failure();
+        .failure()
+        .stderr(predicate::str::contains("style.page.code.mode"));
+}
+
+/// A removed render flag reaches the binary as clap's ordinary unknown
+/// argument (exit 2, nothing printed). Every removed spelling is enumerated
+/// in-process by `args::cli::tests::removed_render_flags_are_unknown_arguments`;
+/// these cases prove the wiring through `md` and `md render`.
+#[test]
+fn removed_render_flags_are_unknown_arguments() {
+    let fixture = CliProcessFixture::named("removed_render_flags_are_unknown_arguments");
+    let tmp = md_file("# Title\n");
+    for (prefix, flag) in [
+        (&[][..], &["--code-block", "dark"][..]),
+        (&["render"][..], &["--code-block", "dark"][..]),
+        (&[][..], &["--margin", "4"][..]),
+        (&["render"][..], &["--max-width", "40"][..]),
+        (&[][..], &["--code-theme", "nord"][..]),
+    ] {
+        fixture
+            .command()
+            .args(prefix)
+            .arg(tmp.path())
+            .args(flag)
+            .assert()
+            .code(2)
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains(format!("unexpected argument '{}'", flag[0])));
+    }
 }

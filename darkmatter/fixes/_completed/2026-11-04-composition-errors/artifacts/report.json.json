@@ -1,0 +1,224 @@
+{
+  "valid": false,
+  "references_scanned": 10,
+  "references_valid": 4,
+  "issues": [
+    {
+      "code": "MissingLocalTarget",
+      "message": "Missing local target: ./missing-one.md",
+      "severity": "error",
+      "kind": "hyperlink",
+      "reference": "./missing-one.md",
+      "line": 9,
+      "column": 5,
+      "section": "intro-root",
+      "inserted": false,
+      "source": "<root>/root.md",
+      "included_via": []
+    },
+    {
+      "code": "MissingLocalTarget",
+      "message": "Missing local target: ./missing-two.md",
+      "severity": "error",
+      "kind": "hyperlink",
+      "reference": "./missing-two.md",
+      "line": 15,
+      "column": 9,
+      "section": "second",
+      "inserted": false,
+      "source": "<root>/root.md",
+      "included_via": []
+    },
+    {
+      "code": "MissingLocalTarget",
+      "message": "Missing local target: ./missing-three.md",
+      "severity": "error",
+      "kind": "hyperlink",
+      "reference": "./missing-three.md",
+      "line": 22,
+      "column": 13,
+      "section": "second",
+      "inserted": false,
+      "source": "<root>/root.md",
+      "included_via": []
+    },
+    {
+      "code": "MissingLocalTarget",
+      "message": "Missing local target: ./missing-five.md",
+      "severity": "error",
+      "kind": "hyperlink",
+      "reference": "./missing-five.md",
+      "line": 24,
+      "column": 8,
+      "section": "second",
+      "inserted": false,
+      "source": "<root>/root.md",
+      "included_via": []
+    },
+    {
+      "code": "MissingLocalTarget",
+      "message": "Missing local target: ./missing-four.md",
+      "severity": "error",
+      "kind": "hyperlink",
+      "reference": "./missing-four.md",
+      "line": 7,
+      "column": 43,
+      "section": "child-heading",
+      "inserted": false,
+      "source": "<root>/child.md",
+      "included_via": [
+        {
+          "file": "<root>/root.md",
+          "line": 26
+        }
+      ]
+    },
+    {
+      "code": "MissingLocalTarget",
+      "message": "Missing local target: ./missing-ins.md",
+      "severity": "warning",
+      "kind": "hyperlink",
+      "reference": "./missing-ins.md",
+      "line": 9,
+      "column": 7,
+      "section": "child-heading",
+      "inserted": true,
+      "source": "<root>/child.md",
+      "included_via": [
+        {
+          "file": "<root>/root.md",
+          "line": 26
+        }
+      ]
+    }
+  ],
+  "warnings": [],
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "dm.reference.missing_hyperlink",
+      "severity": "error",
+      "message": "Missing local target: ./missing-one.md",
+      "source": {
+        "file": "<root>/root.md",
+        "line": 9,
+        "column": 5,
+        "section": "intro-root",
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 121,
+        "end": 152
+      },
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "hyperlink",
+      "reference": "./missing-one.md",
+      "failure": "no-match",
+      "included_via": []
+    },
+    {
+      "code": "dm.reference.missing_hyperlink",
+      "severity": "error",
+      "message": "Missing local target: ./missing-two.md",
+      "source": {
+        "file": "<root>/root.md",
+        "line": 15,
+        "column": 9,
+        "section": "second",
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 186,
+        "end": 217
+      },
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "hyperlink",
+      "reference": "./missing-two.md",
+      "failure": "no-match",
+      "included_via": []
+    },
+    {
+      "code": "dm.reference.missing_hyperlink",
+      "severity": "error",
+      "message": "Missing local target: ./missing-three.md",
+      "source": {
+        "file": "<root>/root.md",
+        "line": 22,
+        "column": 13,
+        "section": "second",
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 313,
+        "end": 348
+      },
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "hyperlink",
+      "reference": "./missing-three.md",
+      "failure": "no-match",
+      "included_via": []
+    },
+    {
+      "code": "dm.reference.missing_hyperlink",
+      "severity": "error",
+      "message": "Missing local target: ./missing-five.md",
+      "source": {
+        "file": "<root>/root.md",
+        "line": 24,
+        "column": 8,
+        "section": "second",
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 360,
+        "end": 393
+      },
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "hyperlink",
+      "reference": "./missing-five.md",
+      "failure": "no-match",
+      "included_via": []
+    },
+    {
+      "code": "dm.reference.missing_hyperlink",
+      "severity": "error",
+      "message": "Missing local target: ./missing-four.md",
+      "source": {
+        "file": "<root>/child.md",
+        "line": 7,
+        "column": 43,
+        "section": "child-heading",
+        "inserted": false
+      },
+      "expected_type": null,
+      "actual_type": null,
+      "span": {
+        "start": 134,
+        "end": 167
+      },
+      "iteration_path": [],
+      "reason": "file not found",
+      "construct": "hyperlink",
+      "reference": "./missing-four.md",
+      "failure": "no-match",
+      "included_via": [
+        {
+          "file": "<root>/root.md",
+          "line": 26
+        }
+      ]
+    }
+  ]
+}

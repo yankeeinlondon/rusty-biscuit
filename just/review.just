@@ -66,7 +66,7 @@ fix +args:
         spec="$(printf '%s\n' "${matches}" | fzf --select-1 --height=15 --border --border-label 'Choose the spec to fix')"
     fi
 
-    if ! implemented="$(md get --raw "${spec}" implemented)"; then
+    if ! implemented="$(md get --output plain "${spec}" implemented)"; then
         echo -e "{{ red }}ERROR:{{ reset }} could not read the frontmatter of $(just _link "${spec}"); fix the error above before running the review/fix cycle." >&2
         exit 1
     fi
@@ -81,7 +81,7 @@ fix +args:
     # review's `ready`, and a ready review also sets the spec's `completed`.
     latest_review() {
         local iterations
-        iterations="$(md get --raw "${spec}" review_iterations)" || return 1
+        iterations="$(md get --output plain "${spec}" review_iterations)" || return 1
         [[ "${iterations}" =~ ^[0-9]+$ ]] && (( iterations > 0 )) && echo "${dir}/review-${iterations}.md"
         return 0
     }
@@ -89,9 +89,9 @@ fix +args:
     review="$(latest_review)"
     review_ready=""
     if [[ -n "${review}" && -f "${review}" ]]; then
-        review_ready="$(md get --raw "${review}" ready)"
+        review_ready="$(md get --output plain "${review}" ready)"
     fi
-    completed="$(md get --raw "${spec}" completed)"
+    completed="$(md get --output plain "${spec}" completed)"
     if [[ "${review_ready}" == "true" || "${completed}" == "true" ]]; then
         echo -e "$(just _link "${spec}") is already {{ green }}production ready{{ reset }}; nothing to do."
         exit 0
@@ -114,9 +114,9 @@ fix +args:
     # author has not set `human_resolved: true`.
     waiting_on_human() {
         local items
-        items="$(md get --raw "$1" human_in_the_loop)"
+        items="$(md get --output plain "$1" human_in_the_loop)"
         [[ -n "${items}" && "${items}" != "null" && "${items}" != "[]" ]] \
-            && [[ "$(md get --raw "$1" human_resolved)" != "true" ]]
+            && [[ "$(md get --output plain "$1" human_resolved)" != "true" ]]
     }
     collect_rulings() {
         local review="$1"
@@ -155,7 +155,7 @@ fix +args:
         # so the cycle starts with its review.
         review_implemented="true"
         if [[ -n "${review}" && -f "${review}" ]]; then
-            review_implemented="$(md get --raw "${review}" implemented)"
+            review_implemented="$(md get --output plain "${review}" implemented)"
         fi
         if [[ "${review_implemented}" != "true" ]]; then
             echo -e "🛠  cycle ${cycle}/${max_cycles}: implementing the findings of $(just _link "${review}")"
@@ -166,7 +166,7 @@ fix +args:
         claudine compose "@prompts/_reviews/feature-review.md" -y --${review_agent} --model "${review_model}" spec="${spec}"
 
         review="$(latest_review)"
-        ready="$(md get --raw "${review}" ready)"
+        ready="$(md get --output plain "${review}" ready)"
         if [[ "${ready}" == "true" ]]; then
             echo -e "👍 $(just _link "${review}") marked the spec {{ green }}production ready{{ reset }} after ${cycle} cycle(s)"
             exit 0
@@ -179,7 +179,7 @@ fix +args:
             collect_rulings "${review}"
             continue
         fi
-        if [[ "$(md get --raw "${review}" blocked)" == "true" ]]; then
+        if [[ "$(md get --output plain "${review}" blocked)" == "true" ]]; then
             echo -e "{{ red }}ERROR:{{ reset }} $(just _link "${review}") marks every finding blocked but asks for no ruling ({{ italic }}human_in_the_loop{{ reset }} is empty), so another cycle would change nothing." >&2
             exit 1
         fi

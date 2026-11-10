@@ -1,9 +1,15 @@
 //! `md hash` subcommand implementation.
 
+use crate::args::Cli;
 use crate::io::{DocumentArgumentError, load_markdown, parse_argument, read_markdown_text};
+use crate::output::command::{CommandRun, Completed, DataShape};
 use crate::request::MdRequest;
 use biscuit_hash::xx_hash;
+use biscuit_terminal::output::{OutputTarget, WidthRequest};
+use clap::CommandFactory as _;
 use color_eyre::eyre::{Context, Result, eyre};
+use darkmatter::markdown::output::command::{CommandValue, ComparisonData, HashData, HashMode, HashValueData, code_document};
+use darkmatter::markdown::compose::expression::Severity;
 use darkmatter::markdown::hash::{
     Change, ComputedHash, DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashKind, MdHashOptions, StoredHash,
     select_kind,
@@ -14,30 +20,61 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use tracing::instrument;
 
+/// The flags that select what `md hash` computes.
+#[derive(Debug, Clone, Copy)]
+pub struct HashFlags {
+    /// `--kind`.
+    pub kind: Option<MdHashKind>,
+    /// `--body`.
+    pub body: bool,
+    /// `--frontmatter`.
+    pub frontmatter: bool,
+    /// `--save`.
+    pub save: bool,
+    /// `--diff`.
+    pub diff: bool,
+    /// `--strict`.
+    pub strict: bool,
+}
+
+type HashValue = CommandValue<HashData>;
+
+/// A hash result's formatted text, which is the same in every formatted output.
+fn hash_value(data: HashData, text: String) -> HashValue {
+    let terminal = text.clone();
+    CommandValue::new(data, code_document(None, text.trim_end()))
+        .with_terminal(move |_| terminal.clone())
+        .with_markdown(text)
+}
+
 /// Hash a markdown document's frontmatter and/or body.
 ///
 /// The CLI owns environment and flag parsing; the library performs all
-/// computation from an explicit [`MdHashOptions`] bundle. Bare invocation prints
-/// the computed hash and exits `0`. `--diff` reports differences and exits `2`
-/// when any are found; `--save` writes the hash back and exits `0`. Operational
-/// errors propagate on the eyre path (exit `1`).
+/// computation from an explicit [`MdHashOptions`] bundle. Bare invocation
+/// reports the computed hash and exits `0`. `--diff` reports differences and
+/// exits `1` when any are found or nothing is stored; `--save` writes the hash
+/// back and exits `0`. Operational errors exit `1` too.
 ///
 /// When the input is a directory, recursively finds all markdown files, hashes
 /// each in parallel, and produces a single aggregate hash. Directory mode is
 /// bare-hash only: `--save`, `--diff`, and the `structured`/`detailed` kinds are
 /// rejected with a usage error.
 #[instrument(skip_all)]
-#[allow(clippy::too_many_arguments)]
-pub fn run_hash(
-    input: Option<&PathBuf>,
-    kind: Option<MdHashKind>,
-    body: bool,
-    frontmatter: bool,
-    save: bool,
-    diff: bool,
-    strict: bool,
-    request: &MdRequest,
-) -> Result<()> {
+pub fn run_hash(input: Option<&PathBuf>, flags: HashFlags, output: OutputTarget, cli: &Cli, request: &MdRequest) -> Result<()> {
+    let mode = match (flags.save, flags.diff) {
+        (true, _) => HashMode::Save,
+        (_, true) => HashMode::Diff,
+        _ => HashMode::Compute,
+    };
+    let file = input.filter(|path| path.to_str() != Some("-")).map(|path| path.display().to_string());
+    let skeleton = HashData { mode, file: file.clone(), kind: None, computed: None, stored: None, comparison: None, saved: false };
+    let run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::typed(&skeleton))?;
+    let result = hash_result(input, flags, skeleton, request);
+    run.finish(result)
+}
+
+fn hash_result(input: Option<&PathBuf>, flags: HashFlags, base: HashData, request: &MdRequest) -> Result<Completed<HashValue>> {
+    let HashFlags { kind, body, frontmatter, save, diff, strict } = flags;
     let options = resolve_hash_options(kind, body, frontmatter, strict);
 
     // A file argument opens once, here, so single-document mode, `--diff`, and
@@ -45,7 +82,7 @@ pub fn run_hash(
     let opened = match input {
         Some(path) if path.to_str() != Some("-") => match open_hash_argument(path, request)? {
             ReferenceEntry::Directory(directory) => {
-                return run_hash_directory(&directory, &options, save, diff);
+                return run_hash_directory(&directory, &options, save, diff, base);
             }
             ReferenceEntry::File(file) => Some(file),
         },
@@ -64,6 +101,7 @@ pub fn run_hash(
             stored.as_ref(),
             &options,
             chrono::Utc::now(),
+            base,
         );
     }
 
@@ -75,13 +113,19 @@ pub fn run_hash(
     let stored = md.stored_hash(&options)?;
 
     if diff {
-        return run_hash_diff(&md, stored.as_ref(), &options);
+        return run_hash_diff(&md, stored.as_ref(), &options, base);
     }
-    // Bare mode: select the kind (forced, else stored, else simple) and print.
-    let selected = select_kind(stored.map(|s| s.kind), options.forced_kind);
+    // Bare mode: select the kind (forced, else stored, else simple).
+    let selected = select_kind(stored.as_ref().map(|s| s.kind), options.forced_kind);
     let computed = md.compute_hash(selected, &options);
-    print_computed_hash(&computed)?;
-    Ok(())
+    let text = computed_hash_text(&computed)?;
+    let data = HashData {
+        kind: Some(selected),
+        computed: Some(HashValueData::from(&computed)),
+        stored: stored.as_ref().map(HashValueData::from),
+        ..base
+    };
+    Ok(Completed::success(hash_value(data, text)))
 }
 
 /// Resolves [`MdHashOptions`] from flags and the `HASH_PROPERTY` /
@@ -134,51 +178,55 @@ fn parse_ignore_properties(raw: &str, property: &str) -> Vec<String> {
         .collect()
 }
 
-/// Prints a computed hash: the flat string for `fm`/`body`/`simple`/`structured`,
+/// A computed hash's text: the flat string for `fm`/`body`/`simple`/`structured`,
 /// or the nested YAML object for `detailed`.
-fn print_computed_hash(computed: &ComputedHash) -> Result<()> {
+fn computed_hash_text(computed: &ComputedHash) -> Result<String> {
     match computed.flat_string() {
-        Some(flat) => println!("{flat}"),
+        Some(flat) => Ok(format!("{flat}\n")),
         None => {
             let ComputedHash::Detailed(detailed) = computed else {
                 unreachable!("only detailed hashes lack a flat string form");
             };
-            let yaml = serde_yaml_ng::to_string(detailed)
-                .wrap_err("Failed to serialize detailed hash")?;
-            print!("{yaml}");
+            serde_yaml_ng::to_string(detailed).wrap_err("Failed to serialize detailed hash")
         }
     }
-    Ok(())
 }
 
-/// `md hash --diff`: prints a kind-aware explanation and exits `2` when the
-/// document differs from its stored hash (or has none).
-fn run_hash_diff(
-    md: &Markdown,
-    stored: Option<&StoredHash>,
-    options: &MdHashOptions,
-) -> Result<()> {
+/// `md hash --diff`: a kind-aware explanation, failing when the document differs
+/// from its stored hash or has none.
+fn run_hash_diff(md: &Markdown, stored: Option<&StoredHash>, options: &MdHashOptions, base: HashData) -> Result<Completed<HashValue>> {
     let Some(stored) = stored else {
-        println!("No stored hash to compare against");
-        std::process::exit(2);
+        return Ok(Completed::failure(hash_value(base, "No stored hash to compare against\n".to_string())).with_diagnostics(vec![
+            crate::output::output_diagnostic("dm.hash.no_stored_hash", Severity::Error, "No stored hash to compare against"),
+        ]));
     };
 
     // Comparison first: a malformed stored value must fail before anything is
-    // printed. Both calls hash the document under the same stored-policy
+    // reported. Both calls hash the document under the same stored-policy
     // identity, so `--diff` computes that artifact twice.
     let comparison = md.compare_hash(stored, options)?;
     let explanation = md.explain_hash_diff(stored, options)?;
-    println!("{}", explanation.render());
-
-    if comparison.frontmatter_changed || comparison.body_changed {
-        std::process::exit(2);
-    }
-    Ok(())
+    let changed = comparison.frontmatter_changed || comparison.body_changed;
+    let computed = md.compute_hash(stored.kind, options);
+    let data = HashData {
+        kind: Some(stored.kind),
+        computed: Some(HashValueData::from(&computed)),
+        stored: Some(HashValueData::from(stored)),
+        comparison: Some(ComparisonData::from(&comparison)),
+        ..base
+    };
+    let value = hash_value(data, format!("{}\n", explanation.render()));
+    Ok(if changed {
+        let diagnostic = crate::output::output_diagnostic("dm.hash.changed", Severity::Error, "The document differs from its stored hash");
+        Completed::failure(value).with_diagnostics(vec![diagnostic])
+    } else {
+        Completed::success(value)
+    })
 }
 
 /// `md hash --save`: writes the computed hash back into the document's
-/// frontmatter and prints an explanation of what changed. Always exits `0` on
-/// success, whether or not a write was needed.
+/// frontmatter and reports what changed. Always succeeds when the write does,
+/// whether or not a write was needed.
 fn run_hash_save(
     md: &Markdown,
     source: &str,
@@ -186,7 +234,8 @@ fn run_hash_save(
     stored: Option<&StoredHash>,
     options: &MdHashOptions,
     now: chrono::DateTime<chrono::Utc>,
-) -> Result<()> {
+    base: HashData,
+) -> Result<Completed<HashValue>> {
     // A first baseline has nothing to compare against, so it has no explanation.
     // Computed here, before the write below, so it describes the in-memory
     // document against its *previous* stored hash.
@@ -196,22 +245,26 @@ fn run_hash_save(
     };
 
     let stamp = md.stamp_baseline(source, options, now, Change::Detect)?;
+    let saved = stamp.text.is_some();
 
     if let Some(written) = stamp.text {
         std::fs::write(resolved, written)
             .wrap_err_with(|| format!("Failed to write hash to {:?}", resolved))?;
     }
 
-    match explanation {
-        Some(explanation) => println!("{}", explanation.render()),
-        None => {
-            println!(
-                "No stored hash found; wrote initial {} baseline",
-                stamp.decision.kind
-            );
-        }
-    }
-    Ok(())
+    let text = match explanation {
+        Some(explanation) => format!("{}\n", explanation.render()),
+        None => format!("No stored hash found; wrote initial {} baseline\n", stamp.decision.kind),
+    };
+    let computed = md.compute_hash(stamp.decision.kind, options);
+    let data = HashData {
+        kind: Some(stamp.decision.kind),
+        computed: Some(HashValueData::from(&computed)),
+        stored: stored.map(HashValueData::from),
+        saved,
+        ..base
+    };
+    Ok(Completed::success(hash_value(data, text)))
 }
 
 /// Opens a hash argument as the file or directory it names, through the same
@@ -247,19 +300,17 @@ fn run_hash_directory(
     options: &MdHashOptions,
     save: bool,
     diff: bool,
-) -> Result<()> {
+    base: HashData,
+) -> Result<Completed<HashValue>> {
+    let usage = |message: &str| Cli::command().error(clap::error::ErrorKind::ArgumentConflict, message);
     if save || diff {
-        return Err(eyre!(
-            "--save and --diff are not supported when hashing a directory"
-        ));
+        return Err(usage("--save and --diff are not supported when hashing a directory").into());
     }
     if matches!(
         options.forced_kind,
         Some(MdHashKind::Structured | MdHashKind::Detailed)
     ) {
-        return Err(eyre!(
-            "--kind structured and --kind detailed are not supported when hashing a directory"
-        ));
+        return Err(usage("--kind structured and --kind detailed are not supported when hashing a directory").into());
     }
 
     let body_only = options.forced_kind == Some(MdHashKind::Body);
@@ -301,8 +352,8 @@ fn run_hash_directory(
     let combined = per_file_hashes.join("\n");
     let aggregate = xx_hash(&combined);
 
-    if body_only || frontmatter_only {
-        println!("{:016x}", aggregate);
+    let flat = if body_only || frontmatter_only {
+        format!("{:016x}", aggregate)
     } else {
         // Split each per-file "fm-body" hash, aggregate fm and body separately
         let (fm_parts, body_parts): (Vec<&str>, Vec<&str>) = per_file_hashes
@@ -312,10 +363,16 @@ fn run_hash_directory(
 
         let fm_aggregate = xx_hash(&fm_parts.join("\n"));
         let body_aggregate = xx_hash(&body_parts.join("\n"));
-        println!("{:016x}-{:016x}", fm_aggregate, body_aggregate);
-    }
+        format!("{:016x}-{:016x}", fm_aggregate, body_aggregate)
+    };
 
-    Ok(())
+    let data = HashData {
+        mode: HashMode::Directory,
+        kind: Some(kind),
+        computed: Some(HashValueData { kind, value: serde_json::Value::String(flat.clone()), ignored: None }),
+        ..base
+    };
+    Ok(Completed::success(hash_value(data, format!("{flat}\n"))))
 }
 
 #[cfg(test)]
@@ -343,7 +400,8 @@ mod tests {
         let options = MdHashOptions::default();
         let stored = md.stored_hash(&options).unwrap();
 
-        run_hash_save(&md, &source, &file, stored.as_ref(), &options, instant).unwrap();
+        let base = HashData { mode: HashMode::Save, file: None, kind: None, computed: None, stored: None, comparison: None, saved: false };
+        run_hash_save(&md, &source, &file, stored.as_ref(), &options, instant, base).unwrap();
 
         let written = std::fs::read_to_string(&file).unwrap();
         assert!(

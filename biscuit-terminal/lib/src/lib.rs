@@ -45,6 +45,7 @@
 pub mod components;
 pub mod discovery;
 pub mod errors;
+pub mod output;
 pub mod prelude;
 pub mod render_tree;
 pub mod terminal;

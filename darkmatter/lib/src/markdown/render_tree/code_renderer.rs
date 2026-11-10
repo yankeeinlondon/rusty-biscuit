@@ -495,6 +495,29 @@ mod surface_probe {
     }
 }
 
+/// The column count a terminal code band is padded to.
+///
+/// A bounded width is the band width. Under an unbounded width nothing fills: the band is the block's
+/// longest line plus its padding (the left gutter or one-column pad, and a
+/// one-column right pad).
+fn code_band_width(width: renderable::output::Width, value: &str, line_numbers: bool, first_line: usize) -> u32 {
+    if let Some(columns) = width.as_columns() {
+        return columns;
+    }
+    let lines: Vec<&str> = value.lines().collect();
+    let longest = lines
+        .iter()
+        .map(|line| biscuit_terminal::utils::block_constraint::visible_width(line) as usize)
+        .max()
+        .unwrap_or(0);
+    let gutter = if line_numbers {
+        format!("{}", (first_line + lines.len()).saturating_sub(1)).len() + 3
+    } else {
+        1
+    };
+    u32::try_from(gutter + longest + 1).unwrap_or(u32::MAX)
+}
+
 impl CodeRenderer for TerminalCodeRenderer {
     fn render_terminal_code(
         &self,
@@ -537,22 +560,31 @@ impl CodeRenderer for TerminalCodeRenderer {
             base_path: None,
             italic_mode: ItalicMode::Auto,
             dim_mode: DimMode::Auto,
-            max_width: None,
+            width: None,
             mermaid_mode: MermaidMode::Off,
             mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Auto,
+            verbosity: 0,
+            output_profile: None,
             hr_defaults: None,
             code_block_mode: self.code_block_mode,
         };
 
         // Body: the syntax-highlighted code block, padded to the available
-        // width. `context.width()` is already the post-margin content width
+        // width (an unbounded width pads only to the block's longest line plus
+        // its padding). `context.width()` is already the post-margin content width
         // (the tree renderer narrows it in `render_with_layout` before this
         // hook runs and re-applies the left margin afterward), so padding to it
         // — rather than clearing to the physical edge with `\x1b[K` — keeps the
         // block within its margins and the right-aligned language pill flush
         // with the block's right edge. `code_meta` carries any `line-numbering`
         // / `highlight` directive so the body honors them.
+        let band_width = code_band_width(
+            context.width(),
+            value,
+            options.include_line_numbers || code_meta.line_numbering,
+            code_meta.first_line(),
+        );
         let body = render_terminal_code_block(
             value,
             &grammar,
@@ -560,7 +592,7 @@ impl CodeRenderer for TerminalCodeRenderer {
             &options,
             &code_meta,
             color_mode,
-            Some(context.width() as u16),
+            Some(band_width),
             None,
         )
         .ok()?;
@@ -579,7 +611,7 @@ impl CodeRenderer for TerminalCodeRenderer {
                 label,
                 bg_color,
                 color_mode,
-                context.width() as u16,
+                band_width,
             );
             Some(format!("{header}\n{body}"))
         } else {
@@ -654,6 +686,16 @@ impl CodeRenderer for TerminalCodeRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unbounded_code_band_hugs_its_longest_line() {
+        use renderable::output::Width;
+        assert_eq!(code_band_width(Width::Columns(80), "x", false, 1), 80);
+        // One-column left pad, the longest line, one-column right pad.
+        assert_eq!(code_band_width(Width::Unlimited, "ab\nabcdef", false, 1), 8);
+        // A line-number gutter (`N │ `) replaces the left pad.
+        assert_eq!(code_band_width(Width::Source, "ab\nabcdef", true, 9), 2 + 3 + 6 + 1);
+    }
     use crate::markdown::Markdown;
     use renderable::color::ColorDepth;
     use renderable::color::ColorMode as RenderableColorMode;
@@ -718,7 +760,7 @@ last: 4
             // hook before it resolves anything, which would make a
             // "resolved once" assertion pass vacuously.
             color_depth: Some(crate::markdown::output::terminal::ColorDepth::TrueColor),
-            max_width: Some(80),
+            width: Some(renderable::output::Width::Columns(80)),
             ..TerminalOptions::default()
         }
     }
@@ -859,7 +901,7 @@ last: 4
             "render_code_heavy is the frozen 40-fence manifest fixture",
         );
         let context =
-            || TerminalCodeContext::new(120, ColorDepth::TrueColor, RenderableColorMode::Dark);
+            || TerminalCodeContext::new(renderable::output::Width::Columns(120), ColorDepth::TrueColor, RenderableColorMode::Dark);
 
         let terminal_baseline = || {
             let mut out = String::new();
@@ -1140,7 +1182,7 @@ last: 4
         // No `code_theme_name` on the context: the direct surface, where the
         // environment snapshot is the only theme signal.
         let context =
-            || TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
+            || TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Dark);
 
         unsafe { std::env::set_var("CODE_THEME", "github") };
         let github = TerminalCodeRenderer::new()
@@ -1185,7 +1227,7 @@ last: 4
                 code,
                 None,
                 &NodeAttrs::default(),
-                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Dark)
                     .with_code_theme_name(Some("github".into())),
             )
             .expect("github render");
@@ -1195,7 +1237,7 @@ last: 4
                 code,
                 None,
                 &NodeAttrs::default(),
-                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Dark)
                     .with_code_theme_name(Some("dracula".into())),
             )
             .expect("dracula render");
@@ -1220,7 +1262,7 @@ last: 4
                 code,
                 None,
                 &NodeAttrs::default(),
-                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Dark)
                     .with_code_theme_name(Some("github".into())),
             )
             .expect("dark render");
@@ -1230,7 +1272,7 @@ last: 4
                 code,
                 None,
                 &NodeAttrs::default(),
-                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Light)
+                TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Light)
                     .with_code_theme_name(Some("github".into())),
             )
             .expect("light render");
@@ -1250,7 +1292,7 @@ last: 4
                 "$schema:\n  # a string type\n  foo: string\n",
                 None,
                 &yaml_attrs(),
-                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Dark)
                     .with_code_theme_name(Some("one-half".into()))
                     .with_page_surface(Some((192, 202, 245)), Some((26, 27, 38))),
             )
@@ -1300,7 +1342,7 @@ last: 4
                 "$schema:\n  foo: string\n",
                 None,
                 &yaml_attrs(),
-                TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Light)
+                TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Light)
                     .with_code_theme_name(Some("one-half".into()))
                     .with_page_surface(Some((101, 123, 131)), Some((253, 246, 227))),
             )
@@ -1355,7 +1397,7 @@ last: 4
                     code,
                     None,
                     &yaml_attrs(),
-                    TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark)
+                    TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Dark)
                         .with_code_theme_name(Some("one-half".into())),
                 )
                 .expect("render")
@@ -1377,7 +1419,7 @@ last: 4
     fn terminal_code_emits_header_and_highlighted_body() {
         let renderer = TerminalCodeRenderer::new();
         let context =
-            TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
+            TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Dark);
         let out = renderer
             .render_terminal_code(Some("yaml"), "foo: 1\nbar: 2", None, &yaml_attrs(), context)
             .expect("renders");
@@ -1392,7 +1434,7 @@ last: 4
     fn terminal_code_omits_header_when_not_requested() {
         let renderer = TerminalCodeRenderer::new();
         let context =
-            TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
+            TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Dark);
         let out = renderer
             .render_terminal_code(Some("yaml"), "foo: 1", None, &NodeAttrs::default(), context)
             .expect("renders");
@@ -1406,7 +1448,7 @@ last: 4
     #[test]
     fn terminal_code_returns_none_for_color_depth_none() {
         let renderer = TerminalCodeRenderer::new();
-        let context = TerminalCodeContext::new(80, ColorDepth::None, RenderableColorMode::Dark);
+        let context = TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::None, RenderableColorMode::Dark);
         let out =
             renderer.render_terminal_code(Some("rust"), "fn x() {}", None, &yaml_attrs(), context);
         assert!(
@@ -1422,7 +1464,7 @@ last: 4
     fn terminal_code_emits_title_header_from_meta() {
         let renderer = TerminalCodeRenderer::new();
         let context =
-            TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
+            TerminalCodeContext::new(renderable::output::Width::Columns(80), ColorDepth::TrueColor, RenderableColorMode::Dark);
         let out = renderer
             .render_terminal_code(
                 Some("rust"),

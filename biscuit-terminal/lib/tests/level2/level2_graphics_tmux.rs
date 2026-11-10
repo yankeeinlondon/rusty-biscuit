@@ -466,6 +466,6 @@ fn level2_tmux_draws_sixel_itself_at_the_bottom_of_the_viewport() {
     assert_eq!(raw_text[..up].matches("\x1bD").count(), rows, "IND once per row");
     let lines: Vec<&str> = text.lines().collect();
     let image_line = lines.iter().position(|l| l.contains("graphics_image[0]=pixels")).unwrap();
-    let done_line = lines.iter().position(|l| l.contains("graphics_done")).unwrap();
-    assert_eq!(done_line - image_line, rows + 1, "the next text is right below the image:\n{text}");
+    let next_text = lines.iter().position(|l| l.contains("tty_modes_restored=")).unwrap();
+    assert_eq!(next_text - image_line, rows + 1, "the next text is right below the image:\n{text}");
 }

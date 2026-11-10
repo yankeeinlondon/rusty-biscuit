@@ -5,6 +5,7 @@ use markdown::mdast::Node;
 use pulldown_cmark::{Event, Parser};
 use tracing::trace;
 
+use super::reference::html::blank_raw_text_bodies;
 use super::{markdown_parse_options, output};
 use crate::render::{ImageRef, Link};
 
@@ -52,6 +53,8 @@ pub(crate) fn extract_inline_html_links(content: &str) -> Vec<Link> {
         return Vec::new();
     }
 
+    let active = blank_raw_text_bodies(content);
+    let content = active.as_ref();
     match output::parse_mdast(content) {
         Ok(root) => {
             let fragments = collect_html_fragments(&root, content);
@@ -69,6 +72,8 @@ pub(crate) fn extract_inline_html_images(content: &str) -> Vec<ImageRef> {
         return Vec::new();
     }
 
+    let active = blank_raw_text_bodies(content);
+    let content = active.as_ref();
     match output::parse_mdast(content) {
         Ok(root) => {
             let fragments = collect_html_fragments(&root, content);

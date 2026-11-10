@@ -62,11 +62,11 @@ fn set_value_with_malformed_template_still_fails() {
         .expect("md compose should run");
 
     assert!(!output.status.success(), "expected a failure exit status");
-    // The supplier's code span is styled (dim) even without color support.
+    // Off a terminal the supplier's code span keeps its backticks.
     let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("interpolation failed"), "stderr: {stderr}");
     assert!(stderr.contains("note"), "stderr: {stderr}");
-    assert!(stderr.contains("command-line override (--set)"), "stderr: {stderr}");
+    assert!(stderr.contains("command-line override (`--set`)"), "stderr: {stderr}");
     assert!(!stderr.contains("Defined in:"), "stderr: {stderr}");
 }
 
@@ -115,7 +115,7 @@ fn missing_link_inside_inserted_text_warns() {
         .stderr(predicate::str::contains("Missing local target: ./nope.md"))
         .stderr(predicate::str::contains("inside inserted text"));
 
-    fixture.command().arg("compose").arg(&authored_path).assert().code(2);
+    fixture.command().arg("compose").arg(&authored_path).assert().code(1);
 }
 
 #[test]
@@ -339,10 +339,10 @@ fn malformed_literal_token_fails_with_its_location() {
         .expect("md compose should run");
 
     assert!(!output.status.success(), "expected a failure exit status");
-    // The reason's code span is styled (dim) even without color support.
+    // Off a terminal the reason's code span keeps its backticks.
     let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
     assert!(stderr.contains("malformed literal token"), "stderr: {stderr}");
-    assert!(stderr.contains("unsupported literal token version v2"), "stderr: {stderr}");
+    assert!(stderr.contains("unsupported literal token version `v2`"), "stderr: {stderr}");
     assert!(stderr.contains("line: 3, column: 8"), "stderr: {stderr}");
     assert!(!stderr.contains("parse error"), "stderr: {stderr}");
 }

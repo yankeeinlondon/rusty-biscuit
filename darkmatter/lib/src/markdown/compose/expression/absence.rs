@@ -46,6 +46,14 @@
 //! [`static_variable_reads`] applies the same rules to every branch instead,
 //! each under its own side's facts.
 //!
+//! Member reads follow the same rules. [`static_member_reads`] records each
+//! selector below a binding (a dotted segment after a variable's root, a
+//! postfix member name, a string-literal bracket key) from the same walk, so
+//! `server.nmae || "none"`, `is_null((server).nmae)`, and a read a branch
+//! fact proves present are handled exactly as a variable in that position
+//! would be, and a fact about `server.a` covers `server.a.b` but not
+//! `server.c`.
+//!
 //! [`static_access_reads`] is the same read inventory without the absence
 //! classification, for a host that filters reads by its own names: each read
 //! is a variable plus the selectors applied to it, so `fm['key']` and
@@ -91,6 +99,16 @@ impl<'a> AbsenceScope<'a> {
             })
     }
 
+    /// [`Self::handles`] for the postfix or bracket access `expr`
+    /// (`(x).a`, `f(x).a`, `x['a']`): the direct position, or a branch fact
+    /// about the subject `expr` reads or one of its ancestors.
+    pub(crate) fn handles_expr(&self, expr: &super::Expr) -> bool {
+        self.handles_absence
+            || self
+                .facts
+                .is_some_and(|facts| facts.subject(expr).is_some_and(|subject| facts.guards_path_or_ancestor(&subject)))
+    }
+
     /// An ordinary operand: arithmetic, comparison, negation, collection
     /// items, and index expressions.
     pub(crate) fn operand(self) -> Self {
@@ -120,7 +138,11 @@ impl<'a> AbsenceScope<'a> {
     pub(crate) fn call_argument(self, function: &str, index: usize, count: usize) -> Self {
         let logical = short_circuit_polarity(function).is_some();
         Self {
+            // `try` takes `unknown | null` only so that a null operand is a
+            // success; recovering from a failed read is not handling an
+            // absent value, so its operands still warn.
             handles_absence: (logical || !self.consumed_by_call)
+                && !is_recovery(function)
                 && super::functions::inspect_registration(function, |registration| {
                     registration.handles_absence_at(index, count)
                 })
@@ -146,6 +168,12 @@ impl<'a> AbsenceScope<'a> {
             facts: Some(facts),
         }
     }
+}
+
+/// Whether `name` is the lazy recovery form `try`, as the evaluator
+/// dispatches it.
+fn is_recovery(name: &str) -> bool {
+    super::functions::lazy_function(name).is_some_and(|(_, kind)| kind == super::functions::LazyKind::Recover)
 }
 
 /// Whether `name` is the lazy conjunction or disjunction, as the evaluator
@@ -188,9 +216,68 @@ impl StaticVariableRead<'_> {
 /// and every `||` operand, since it cannot know which one runs, each
 /// under its own side's branch facts. It does not parse or evaluate.
 pub fn static_variable_reads(expr: &SpannedExpr) -> Vec<StaticVariableRead<'_>> {
-    let mut reads = Vec::new();
+    let mut reads = StaticReads::default();
     walk_static(expr, AbsenceScope::default(), &mut reads);
-    reads
+    reads.variables
+}
+
+/// One member selector found by [`static_member_reads`]: a dotted segment
+/// of a variable after its root, a segment of a postfix member name, or a
+/// string-literal bracket key.
+#[derive(Debug, Clone)]
+pub(crate) struct StaticMemberRead<'e> {
+    /// The `Variable`, `MemberAccess`, or `Index` node holding the selector.
+    pub node: &'e SpannedExpr,
+    /// The 0-based selector within `node`: for a variable, the segment
+    /// after its root (`server`, `fm.server`, `local.h`); for a postfix
+    /// name, the segment of the name; always 0 for a bracket key.
+    pub step: usize,
+    /// Whether the read's absence is handled, by the rules that apply to
+    /// variable reads: the direct position, or a branch fact about the path
+    /// through this step or one of its ancestors.
+    pub handles_absence: bool,
+}
+
+/// Every member selector of `expr`, classified by the same absence rules as
+/// [`static_variable_reads`] and in the same static walk, every branch and
+/// callback body included. Reads rooted in a lexical local are kept; the
+/// selectors of one node are listed together, in step order.
+pub(crate) fn static_member_reads(expr: &SpannedExpr) -> Vec<StaticMemberRead<'_>> {
+    let mut reads = StaticReads::default();
+    walk_static(expr, AbsenceScope::default(), &mut reads);
+    reads.members
+}
+
+/// The number of leading segments of the variable `path` that name its
+/// binding rather than a member: `fm.<key>` and `local.<name>` take two, bare
+/// `fm` and `local` name no member, and any other root takes one.
+pub(crate) fn variable_root_segments(path: &str) -> Option<usize> {
+    match super::fm_namespace::fm_namespace_path(path) {
+        Some(super::fm_namespace::FmPath::Whole) => return None,
+        Some(super::fm_namespace::FmPath::Member(_)) => return Some(2),
+        None => {}
+    }
+    if root_of(path) == super::binding::LOCAL_ROOT {
+        return path.contains('.').then_some(2);
+    }
+    Some(1)
+}
+
+/// What [`walk_static`] collects.
+#[derive(Default)]
+struct StaticReads<'e> {
+    variables: Vec<StaticVariableRead<'e>>,
+    members: Vec<StaticMemberRead<'e>>,
+}
+
+impl<'e> StaticReads<'e> {
+    fn member(&mut self, node: &'e SpannedExpr, step: usize, handles_absence: bool) {
+        self.members.push(StaticMemberRead {
+            node,
+            step,
+            handles_absence,
+        });
+    }
 }
 
 /// [`static_variable_reads`] for an expression evaluated inside lexical
@@ -214,10 +301,14 @@ pub fn static_variable_reads_in_scope<'e>(expr: &'e SpannedExpr, locals: &[&str]
 /// This is what a callback contributes to document, context, and host
 /// dependencies; its parameters contribute none.
 pub fn static_callback_reads<'e>(callback: &'e SpannedCallback, outer_locals: &[&str]) -> Vec<StaticVariableRead<'e>> {
-    callback_reads(callback, outer_locals, AbsenceScope::default())
+    let mut reads = StaticReads::default();
+    callback_reads(callback, outer_locals, AbsenceScope::default(), &mut reads);
+    reads.variables
 }
 
-fn callback_reads<'e>(callback: &'e SpannedCallback, outer_locals: &[&str], scope: AbsenceScope<'_>) -> Vec<StaticVariableRead<'e>> {
+/// Walks `callback`'s body into `sink`: its free variable reads, and every
+/// member read, a parameter's included.
+fn callback_reads<'e>(callback: &'e SpannedCallback, outer_locals: &[&str], scope: AbsenceScope<'_>, sink: &mut StaticReads<'e>) {
     let mut locals: Vec<&str> = outer_locals.to_vec();
     match &callback.pattern {
         SpannedBindingPattern::Identifier(name) => locals.push(&name.value),
@@ -230,10 +321,11 @@ fn callback_reads<'e>(callback: &'e SpannedCallback, outer_locals: &[&str], scop
         None => super::scope::LexicalTypes::new(bindings),
     };
     let inner = facts.within(lexical);
-    let mut reads = Vec::new();
+    let mut reads = StaticReads::default();
     walk_static(&callback.body, scope.operand().with_facts(&inner), &mut reads);
-    reads.retain(|read| !is_lexical_read(read.path, &locals));
-    reads
+    reads.variables.retain(|read| !is_lexical_read(read.path, &locals));
+    sink.variables.extend(reads.variables);
+    sink.members.extend(reads.members);
 }
 
 fn is_lexical_read(path: &str, locals: &[&str]) -> bool {
@@ -493,15 +585,26 @@ fn child_holding<'e>(expr: &'e SpannedExpr, holds: &impl Fn(&SpannedExpr) -> boo
 fn walk_static<'e>(
     expr: &'e SpannedExpr,
     scope: AbsenceScope<'_>,
-    reads: &mut Vec<StaticVariableRead<'e>>,
+    reads: &mut StaticReads<'e>,
 ) {
     let operand = scope.operand();
     match &expr.kind {
-        SpannedExprKind::Variable(path) => reads.push(StaticVariableRead {
-            path,
-            span: expr.span.clone(),
-            handles_absence: scope.handles(path),
-        }),
+        SpannedExprKind::Variable(path) => {
+            reads.variables.push(StaticVariableRead {
+                path,
+                span: expr.span.clone(),
+                handles_absence: scope.handles(path),
+            });
+            if let Some(root) = variable_root_segments(path) {
+                let mut through = 0;
+                for (index, segment) in path.split('.').enumerate() {
+                    through += segment.len() + usize::from(index > 0);
+                    if index >= root {
+                        reads.member(expr, index - root, scope.handles(&path[..through]));
+                    }
+                }
+            }
+        }
         SpannedExprKind::StringLiteral(_)
         | SpannedExprKind::NumberLiteral(_)
         | SpannedExprKind::BoolLiteral(_) => {}
@@ -526,9 +629,24 @@ fn walk_static<'e>(
         }
         SpannedExprKind::Index { base, index } => {
             walk_static(base, scope, reads);
+            if matches!(index.kind, SpannedExprKind::StringLiteral(_)) {
+                reads.member(expr, 0, scope.handles_expr(&expr.erase()));
+            }
             walk_static(index, operand, reads);
         }
-        SpannedExprKind::MemberAccess { base, .. } => walk_static(base, scope, reads),
+        SpannedExprKind::MemberAccess { base, name } => {
+            walk_static(base, scope, reads);
+            let base = base.erase();
+            let mut through = 0;
+            for (step, segment) in name.split('.').enumerate() {
+                through += segment.len() + usize::from(step > 0);
+                let access = Expr::MemberAccess {
+                    base: Box::new(base.clone()),
+                    name: name[..through].to_string(),
+                };
+                reads.member(expr, step, scope.handles_expr(&access));
+            }
+        }
         SpannedExprKind::LogicalOr { left, right } => {
             walk_static(left, scope.absence_check(), reads);
             let facts = scope.facts().assume(&left.erase(), Polarity::False);
@@ -550,7 +668,7 @@ fn walk_static<'e>(
             for (index, arg) in args.iter().enumerate() {
                 match arg {
                     SpannedCallArgument::Value(value) => walk_static(value, scope.call_argument(name, index, args.len()), reads),
-                    SpannedCallArgument::Callback(callback) => reads.extend(callback_reads(callback, &[], scope)),
+                    SpannedCallArgument::Callback(callback) => callback_reads(callback, &[], scope, reads),
                 }
             }
         }
@@ -582,12 +700,32 @@ pub(crate) fn is_reserved_root(root: &str) -> bool {
 
 /// Receives each evaluated variable read that found no value, is not handled
 /// by its [`AbsenceScope`], and that resolved as an absent document property.
+///
+/// An observer that sets [`OBSERVES_MEMBERS`](Self::OBSERVES_MEMBERS) also
+/// receives every member selector node the evaluator reached
+/// ([`member_read`](Self::member_read)) and the root of each evaluated
+/// expression once it finishes, successfully or not
+/// ([`finish_expression`](Self::finish_expression)).
 pub(crate) trait MissingRootObserver {
     /// `false` only for the no-op observer, so unobserved evaluation skips the
     /// classification check entirely.
     const OBSERVES: bool = true;
 
+    /// Whether the evaluator reports reached member selectors; `false` keeps
+    /// evaluation exactly as it was for every observer but [`Observation`].
+    const OBSERVES_MEMBERS: bool = false;
+
     fn missing_root(&mut self, root: &str);
+
+    /// A dotted variable, a postfix member, or a string-literal bracket key
+    /// was reached, identified by its node's address in the evaluated tree.
+    /// Recorded before the base is evaluated, so a read reached before a
+    /// failure is kept.
+    fn member_read(&mut self, _node: usize) {}
+
+    /// The evaluation of `root` finished; the addresses recorded since the
+    /// last call belong to it.
+    fn finish_expression(&mut self, _root: &Expr) {}
 }
 
 impl MissingRootObserver for () {
@@ -612,6 +750,50 @@ impl MissingRootObserver for Vec<MissingRoot> {
             root: root.to_string(),
             span: None,
         });
+    }
+}
+
+/// The observation of a migrated composition surface: the missing roots, as
+/// a `Vec<MissingRoot>` observer collects them, and the member selectors the
+/// evaluator reached, as node ordinals of the evaluated expression
+/// ([`expr_nodes`](super::member_check::expr_nodes)), which name the same
+/// nodes as a static finding's `node_ordinal`.
+#[derive(Debug, Default)]
+pub(crate) struct Observation {
+    pub(crate) roots: Vec<MissingRoot>,
+    /// Ordinals of the expressions finished so far, each expression's
+    /// distinct and ascending.
+    reached: Vec<usize>,
+    /// Node addresses reached in the expression still being evaluated.
+    addresses: Vec<usize>,
+}
+
+impl Observation {
+    /// The reached ordinals recorded since the last call.
+    pub(crate) fn take_reached(&mut self) -> Vec<usize> {
+        std::mem::take(&mut self.reached)
+    }
+}
+
+impl Extend<MissingRoot> for Observation {
+    fn extend<I: IntoIterator<Item = MissingRoot>>(&mut self, roots: I) {
+        self.roots.extend(roots);
+    }
+}
+
+impl MissingRootObserver for Observation {
+    const OBSERVES_MEMBERS: bool = true;
+
+    fn missing_root(&mut self, root: &str) {
+        self.roots.missing_root(root);
+    }
+
+    fn member_read(&mut self, node: usize) {
+        self.addresses.push(node);
+    }
+
+    fn finish_expression(&mut self, root: &Expr) {
+        self.reached.extend(super::member_check::reached_ordinals(root, &mut self.addresses));
     }
 }
 
@@ -962,5 +1144,235 @@ mod tests {
         assert_eq!(flags, [("title", false), ("other", false)]);
         let plain = static_variable_reads(&expr);
         assert_eq!(plain.len(), 3, "the unscoped inventory still lists the shadowed name");
+    }
+
+    mod member_reads {
+        use super::*;
+        use crate::markdown::compose::expression::parse_spanned;
+
+        /// Each member selector of `source` as `(name, handled)`, in walk
+        /// order: a variable's segment after its root, a postfix segment, or
+        /// a bracket key.
+        fn members(source: &str) -> Vec<(String, bool)> {
+            let expr = parse_spanned(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+            static_member_reads(&expr)
+                .into_iter()
+                .map(|read| {
+                    let name = match &read.node.kind {
+                        SpannedExprKind::Variable(path) => {
+                            let root = variable_root_segments(path).expect("a variable record has a member");
+                            path.split('.').nth(root + read.step).unwrap().to_string()
+                        }
+                        SpannedExprKind::MemberAccess { name, .. } => name.split('.').nth(read.step).unwrap().to_string(),
+                        SpannedExprKind::Index { index, .. } => match &index.kind {
+                            SpannedExprKind::StringLiteral(key) => key.clone(),
+                            other => panic!("unexpected index {other:?}"),
+                        },
+                        other => panic!("unexpected node {other:?}"),
+                    };
+                    (name, read.handles_absence)
+                })
+                .collect()
+        }
+
+        fn rows(expected: &[(&str, bool)]) -> Vec<(String, bool)> {
+            expected.iter().map(|(name, handled)| ((*name).to_string(), *handled)).collect()
+        }
+
+        /// The absence table of the member check, one row per expression,
+        /// for `server: { name: string }`.
+        #[test]
+        fn member_reads_follow_the_absence_table() {
+            for (source, expected) in [
+                ("server.nmae", &[("nmae", false)][..]),
+                ("server.nmae || \"none\"", &[("nmae", true)]),
+                ("server.nmae ? 1 : 0", &[("nmae", true)]),
+                ("is_null(server.nmae)", &[("nmae", true)]),
+                ("min(server.nmae, 5)", &[("nmae", false)]),
+                ("is_empty(trim(server.nmae))", &[("nmae", false)]),
+                ("server.nmae == \"x\" ? 1 : 0", &[("nmae", false)]),
+                ("server.nmae ? server.nmae : \"none\"", &[("nmae", true), ("nmae", true)]),
+                ("server.nmae ? \"some\" : server.nmae", &[("nmae", true), ("nmae", false)]),
+            ] {
+                assert_eq!(members(source), rows(expected), "{source}");
+            }
+        }
+
+        #[test]
+        fn postfix_and_bracket_selectors_follow_the_same_rules() {
+            for (source, expected) in [
+                ("(server).nmae", &[("nmae", false)][..]),
+                ("(server).nmae || \"none\"", &[("nmae", true)]),
+                ("is_null(server[\"nmae\"])", &[("nmae", true)]),
+                ("(server).nmae ? (server).nmae : 0", &[("nmae", true), ("nmae", true)]),
+                ("server[\"nmae\"] ? 0 : server[\"nmae\"]", &[("nmae", true), ("nmae", false)]),
+                ("f(x).a.b", &[("a", false), ("b", false)]),
+                ("(server).a ? (server).a.b : 0", &[("a", true), ("a", true), ("b", true)]),
+                ("(server).a.b ? (server).a : 0", &[("a", true), ("b", true), ("a", false)]),
+            ] {
+                assert_eq!(members(source), rows(expected), "{source}");
+            }
+        }
+
+        #[test]
+        fn a_fact_covers_its_descendants_and_never_a_sibling() {
+            assert_eq!(members("server.a ? server.b : 0"), rows(&[("a", true), ("b", false)]));
+            assert_eq!(members("server.a ? server.a.b : 0"), rows(&[("a", true), ("a", true), ("b", true)]));
+            assert_eq!(members("server ? server.a.b : 0"), rows(&[("a", true), ("b", true)]));
+            assert_eq!(members("is_null(server.a) ? 0 : server.a.b"), rows(&[("a", true), ("a", true), ("b", true)]));
+        }
+
+        /// A directive gate is walked from the default scope: a bare
+        /// condition there is an ordinary read, not a ternary condition.
+        #[test]
+        fn a_gate_scope_handles_nothing() {
+            assert_eq!(members("server.nmae"), rows(&[("nmae", false)]));
+            assert!(!AbsenceScope::default().handles_expr(&parse("(server).nmae").unwrap()));
+        }
+
+        /// `try` recovers failures; it does not handle an absent read.
+        #[test]
+        fn try_arguments_are_ordinary_reads() {
+            assert_eq!(members("try(server.nmae, \"x\")"), rows(&[("nmae", false)]));
+            assert_eq!(members("try(server, {}).nmae"), rows(&[("nmae", false)]));
+        }
+
+        #[test]
+        fn namespace_wrappers_and_locals_name_their_binding_first() {
+            assert_eq!(members("fm.server.nmae"), rows(&[("nmae", false)]));
+            assert_eq!(members("local.h.nmae"), rows(&[("nmae", false)]));
+            assert!(members("fm").is_empty());
+            assert!(members("fm.server").is_empty());
+            assert!(members("local.h").is_empty());
+            assert_eq!(members("fm[\"server\"].nmae"), rows(&[("server", false), ("nmae", false)]));
+            assert_eq!(members("server[\"a.b\"]"), rows(&[("a.b", false)]));
+            assert!(members("server[key]").is_empty(), "a computed key is no selector");
+            assert!(members("hosts[0]").is_empty(), "a numeric index is no selector");
+        }
+
+        /// Member reads in a callback body are kept, a parameter's included,
+        /// and its free variable reads are unchanged.
+        #[test]
+        fn callback_member_reads_include_the_parameters() {
+            assert_eq!(members("map(hosts, h => h.nmae || h.name.x)"), rows(&[("nmae", true), ("name", false), ("x", false)]));
+            let expr = parse_spanned("map(hosts, h => h.nmae || title)").unwrap();
+            let paths: Vec<(&str, bool)> = static_variable_reads(&expr).iter().map(|read| (read.path, read.handles_absence)).collect();
+            assert_eq!(paths, [("hosts", true), ("title", false)]);
+        }
+
+        /// Recording members does not change the variable inventory.
+        #[test]
+        fn static_variable_reads_are_unchanged_by_member_records() {
+            for (source, expected) in [
+                ("server.a.b || x", &[("server.a.b", true, 0..10), ("x", false, 14..15)][..]),
+                ("(server).nmae ? y : z", &[("server", true, 1..7), ("y", false, 16..17), ("z", false, 20..21)]),
+                ("is_null(a['k']) && b.c", &[("a", true, 8..9), ("b.c", true, 19..22)]),
+                ("filter(xs, x => x.ok && fm.y)", &[("xs", true, 7..9), ("fm.y", true, 24..28)]),
+            ] {
+                let expr = parse_spanned(source).unwrap();
+                let reads: Vec<(&str, bool, SourceSpan)> =
+                    static_variable_reads(&expr).into_iter().map(|read| (read.path, read.handles_absence, read.span)).collect();
+                let expected: Vec<(&str, bool, SourceSpan)> = expected.to_vec();
+                assert_eq!(reads, expected, "{source}");
+            }
+        }
+    }
+
+    mod member_observation {
+        use super::*;
+        use crate::markdown::compose::expression::{EvaluationLookup, evaluate_observed};
+        use serde_json::{Value, json};
+
+        /// Resolves a dotted path through one JSON object.
+        struct Json(Value);
+
+        impl EvaluationLookup for Json {
+            fn get(&self, path: &str) -> Option<Value> {
+                path.split('.').try_fold(&self.0, |value, segment| value.get(segment)).cloned()
+            }
+        }
+
+        fn state() -> Json {
+            Json(json!({
+                "server": { "name": "web" },
+                "hosts": [{ "name": "a" }, { "name": "b" }, { "name": "c" }],
+                "empty": [],
+                "yes": true,
+                "no": false,
+            }))
+        }
+
+        /// The ordinals `source` reached, and the result.
+        fn reached(source: &str) -> (Vec<usize>, Result<Value, String>) {
+            let expr = parse(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+            let mut observation = Observation::default();
+            let result = evaluate_observed(&expr, &state(), &mut observation).map_err(|error| error.to_string());
+            (observation.take_reached(), result)
+        }
+
+        #[test]
+        fn each_selector_form_reports_its_own_node() {
+            // Ordinals are pre-order: `(server).nmae` is MemberAccess 0,
+            // Paren 1, Variable 2; `server["nmae"]` is Index 0, Variable 1,
+            // the key 2; in `[server.name, server.nmae]` the items are 1, 2.
+            for (source, expected) in [
+                ("server.nmae", vec![0]),
+                ("(server).nmae", vec![0]),
+                ("server[\"nmae\"]", vec![0]),
+                ("[server.name, server.nmae]", vec![1, 2]),
+                ("server", vec![]),
+                ("hosts[0]", vec![]),
+            ] {
+                assert_eq!(reached(source).0, expected, "{source}");
+            }
+        }
+
+        #[test]
+        fn unevaluated_operands_report_nothing() {
+            // Ternary: condition 1, then 2, else 3.
+            assert_eq!(reached("yes ? server.a : server.b").0, [2]);
+            assert_eq!(reached("no ? server.a : server.b").0, [3]);
+            // `||`: left 1, right 2; a truthy left skips the right.
+            assert_eq!(reached("server.name || server.nmae").0, [1]);
+            assert_eq!(reached("server.nmae || server.other").0, [1, 2]);
+        }
+
+        #[test]
+        fn a_callback_reports_once_per_expression_and_never_over_nothing() {
+            // `map(src, h => h.nmae)`: CallbackCall 0, source 1, body 2.
+            assert_eq!(reached("map(empty, h => h.nmae)").0, Vec::<usize>::new());
+            assert_eq!(reached("map(hosts, h => h.nmae)").0, [2]);
+        }
+
+        #[test]
+        fn a_read_before_a_failure_is_kept() {
+            let (ordinals, result) = reached("upper(server.nmae, 1, 2)");
+            assert!(result.is_err(), "the call must fail: {result:?}");
+            assert_eq!(ordinals, [1]);
+        }
+
+        #[test]
+        fn each_expression_is_separate_and_take_drains() {
+            let first = parse("server.a").unwrap();
+            let second = parse("[1, server.b]").unwrap();
+            let mut observation = Observation::default();
+            evaluate_observed(&first, &state(), &mut observation).unwrap();
+            evaluate_observed(&second, &state(), &mut observation).unwrap();
+            assert_eq!(observation.take_reached(), [0, 2]);
+            assert!(observation.take_reached().is_empty());
+        }
+
+        #[test]
+        fn root_observers_are_unchanged() {
+            let expr = parse("missing.nmae").unwrap();
+            let mut observation = Observation::default();
+            let mut roots: Vec<MissingRoot> = Vec::new();
+            let observed = evaluate_observed(&expr, &state(), &mut observation).unwrap();
+            assert_eq!(evaluate_observed(&expr, &state(), &mut roots).unwrap(), observed);
+            assert_eq!(evaluate_observed(&expr, &state(), &mut ()).unwrap(), observed);
+            assert_eq!(observation.roots, roots);
+            assert_eq!(roots.len(), 1);
+            assert_eq!(observation.take_reached(), [0]);
+        }
     }
 }

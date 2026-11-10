@@ -1952,7 +1952,8 @@ impl TerminalRenderable for FileSystem {
     /// - Error directories (permission denied) are styled red
     /// - Dotfiles are italicized when configured
     fn render(&self, term: &Terminal) -> String {
-        let width = term.width();
+        // With no width, no name has anything to be truncated to.
+        let width = term.columns().unwrap_or(u32::MAX);
         tracing::debug!(
             root = %self.root_path.display(),
             depth = self.max_depth,
@@ -1994,7 +1995,7 @@ impl TerminalRenderable for FileSystem {
             &base_path,
         );
 
-        self.layout.apply_block_layout(&output, width)
+        self.layout.apply_block_layout_on(&output, term)
     }
 
     fn layout(&self) -> &Layout {

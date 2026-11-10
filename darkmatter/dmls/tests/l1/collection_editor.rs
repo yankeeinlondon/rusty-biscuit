@@ -529,7 +529,7 @@ fn composed(workspace: &LspWorkspace, path: &std::path::Path) -> Option<(String,
     let request = ComposeRequest::prepare(options, &snapshot).expect("request");
     let error = Markdown::try_from(path).expect("document loads").compose_with(&request).err()?;
     let first = error_diagnostics(&error).into_iter().next()?;
-    Some((first.code, first.source.map(|source| (source.line, source.column))))
+    Some((first.code, first.source.and_then(|source| source.line.zip(source.column))))
 }
 
 /// Library and editor agree on every static defect: the same code, at the
@@ -713,3 +713,18 @@ callback_projected_diagnostic!(callback_frontmatter_diagnostic_projects_escaped_
     "---\nresult: \"{{ map([true], p => \\\"é\\\" == \\\"é\\\" ? min(p, 5) : 0) }}\"\n---\n");
 callback_projected_diagnostic!(callback_frontmatter_diagnostic_projects_multiline_scalar,
     "---\nresult: |\n  {{ map([true],\n      p -> min(p, 5)) }}\n---\n");
+
+/// The callback scope of an open interpolation starts at its real opener: a
+/// quoted `{{` earlier in the expression does not move it into the string,
+/// so the lambda's parameter is still in scope after it.
+#[test]
+fn a_quoted_opener_does_not_move_the_completion_scope_into_a_string() {
+    let text = document("Quoted {{ map(team, p => \"{{\" + ", "\n");
+    let workspace = LspWorkspace::new();
+    let mut session = Session::open(&workspace, &text);
+
+    let items = session.completion(text.len());
+    let first = items.first().unwrap_or_else(|| panic!("no completions: {:?}", labels(&items)));
+    assert!(first["detail"].as_str().is_some_and(|detail| detail.starts_with("local: ")), "{:?}", labels(&items));
+    session.shutdown();
+}

@@ -274,6 +274,48 @@ fn test_compose_remote_fallback_serves_stale_cache_on_failure() {
     assert_get_requests(&server, &["/stale.md", "/stale.md"]);
 }
 
+/// The stale fallback above covers only a transport failure: a revalidation
+/// redirected to a host the run does not allow is a policy refusal, which
+/// `try` propagates, so the cached value is never printed.
+#[test]
+fn test_compose_remote_fallback_never_serves_stale_cache_over_a_refused_redirect() {
+    let fixture = CliProcessFixture::named(
+        "test_compose_remote_fallback_never_serves_stale_cache_over_a_refused_redirect",
+    );
+    let cache_dir = tempfile::TempDir::new().unwrap();
+    let server = mock_http_server(vec![
+        MockHttpResponse {
+            status: 200,
+            body: "[\"loaded\"]",
+            cache_control: Some("max-age=0"),
+        },
+        MockHttpResponse {
+            status: 302,
+            body: "http://localhost/data.json",
+            cache_control: None,
+        },
+    ]);
+    let url = server.url("/data.json");
+    let input = format!("{{{{ as_json(try(load_data(\"{url}\", \"string[]\"), [])) }}}}\n");
+    let run = || {
+        fixture
+            .command()
+            .args(["compose", "-", "--allow", "host=127.0.0.1", "--cache-root"])
+            .arg(cache_dir.path())
+            .write_stdin(input.clone())
+            .assert()
+    };
+
+    run().success().stdout(predicate::str::contains("[\"loaded\"]"));
+    run()
+        .failure()
+        .stdout(predicate::str::contains("loaded").not())
+        .stderr(predicate::str::contains("blocked by fetch policy"));
+
+    assert_eq!(server.request_count(), 2);
+    assert_get_requests(&server, &["/data.json", "/data.json"]);
+}
+
 #[test]
 fn test_compose_remote_ttl_serves_cached_url_without_second_request() {
     let fixture = CliProcessFixture::named(

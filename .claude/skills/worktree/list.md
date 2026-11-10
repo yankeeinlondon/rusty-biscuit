@@ -149,7 +149,7 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
   `DirtyStatus::Unknown`). `TableFacts::row_statuses` is the one "rows in
   table order, each worktree once" walk shared by the legend and the notes.
 - PR badges link only when `terminal.osc_link_support`: `Table` never breaks
-  inside a word, so a degraded `[text](url)` can leave it no width at all.
+  inside a word, and a URL printed without OSC 8 is one unbreakable word.
 - Match PRs by source repository **and** branch (`PrListing::for_branch`);
   `placement` puts the badge by the PR's target.
 - `TableFacts::badges` shows none for an ignored or unsupported repository.

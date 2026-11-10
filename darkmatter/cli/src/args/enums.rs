@@ -1,61 +1,6 @@
 use biscuit_visualized::components::MermaidFallbackFeature;
 use clap::ValueEnum;
 
-/// Output format for top-level render mode.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum OutputFormat {
-    /// Auto: terminal rendering on TTY, markdown text on non-TTY.
-    Auto,
-    /// Markdown text output.
-    #[value(alias = "text")]
-    Markdown,
-    /// Markdown output enhanced with disclosure blocks rendered as HTML
-    /// details/summary elements. Only the browser render target produces these
-    /// elements; on other targets this falls back to plain Markdown.
-    MarkdownPlus,
-    /// HTML output.
-    #[value(alias = "browser")]
-    Html,
-    /// AST JSON output.
-    #[value(alias = "ast")]
-    Json,
-}
-
-/// Output format for `md compose`: the document formats of
-/// [`OutputFormat`], plus the composition report.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum ComposeOutputFormat {
-    /// Auto: Markdown text (compose never renders to the terminal).
-    Auto,
-    /// Markdown text output.
-    #[value(alias = "text")]
-    Markdown,
-    /// Markdown output with disclosure blocks as HTML details/summary elements.
-    MarkdownPlus,
-    /// HTML output.
-    #[value(alias = "browser")]
-    Html,
-    /// AST JSON output.
-    #[value(alias = "ast")]
-    Json,
-    /// One JSON object: the outcome, every diagnostic, and the Markdown
-    /// document (`null` on failure).
-    ReportJson,
-}
-
-impl ComposeOutputFormat {
-    /// The document format this selects; the report carries Markdown.
-    pub fn document_format(self) -> OutputFormat {
-        match self {
-            Self::Auto => OutputFormat::Auto,
-            Self::Markdown | Self::ReportJson => OutputFormat::Markdown,
-            Self::MarkdownPlus => OutputFormat::MarkdownPlus,
-            Self::Html => OutputFormat::Html,
-            Self::Json => OutputFormat::Json,
-        }
-    }
-}
-
 /// A named opt-in accepted by `md --feature` (the repository's `--feature`
 /// convention: repeatable, comma-separated, case-insensitive).
 ///
@@ -93,17 +38,6 @@ impl Feature {
     }
 }
 
-/// Output format for `md code-block`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum CodeBlockOutput {
-    /// Render as ANSI-styled terminal output.
-    Terminal,
-    /// Render as a `<pre><code class="language-…">…</code></pre>` HTML fragment.
-    Html,
-    /// Re-emit as a Markdown fenced code block.
-    Markdown,
-}
-
 /// Cache-staleness handling for remote URL artifacts.
 ///
 /// Mirrors `darkmatter::markdown::compose::RemoteFreshnessMode`. A closed value
@@ -117,36 +51,10 @@ pub enum RemoteFreshness {
     /// Serve within the freshness lifetime; past it, revalidate with a
     /// conditional GET and fail if revalidation fails.
     Strict,
-    /// Like `strict`, but serve the stale body when revalidation fails on the
-    /// network, except for `no-cache` responses (the default).
+    /// Like `strict`, but serve the stale body when revalidation fails in
+    /// transport (network error or HTTP error status), except for `no-cache`
+    /// responses; a refused request still fails (the default).
     Fallback,
-}
-
-/// Output format for validation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum ValidateOutputFormat {
-    /// Human-readable text.
-    Text,
-    /// JSON output.
-    Json,
-}
-
-/// Output format for `md schema validate`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum SchemaValidateFormat {
-    /// Pretty (terminal) output.
-    Pretty,
-    /// Newline-delimited JSON, one object per file.
-    Json,
-}
-
-/// Output format for `md schema detect`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum SchemaDetectFormat {
-    /// SimplifiedSchema YAML.
-    Yaml,
-    /// JSON Schema (Draft 2020-12).
-    Json,
 }
 
 /// Graph visualization format.
@@ -156,6 +64,17 @@ pub enum GraphFormat {
     Mermaid,
     /// DOT (Graphviz) graph.
     Dot,
+}
+
+impl GraphFormat {
+    /// The value's spelling, which is also its code-block language.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mermaid => "mermaid",
+            Self::Dot => "dot",
+        }
+    }
 }
 
 /// Structural kind for `md hash --kind`.

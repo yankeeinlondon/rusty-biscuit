@@ -646,9 +646,8 @@ fn level2_initialize_proxy_block_auto_detects_tty_color_in_tmux() {
         .filter(|ch| !ch.is_whitespace())
         .collect();
     assert!(
-        normalized_plain.contains("route.md]("),
-        "a terminal without detected OSC 8 support must retain the visible \
-         Markdown link fallback.\nplain:\n{}",
+        normalized_plain.contains("route.md") && !normalized_plain.contains("route.md]("),
+        "a terminal without detected OSC 8 support prints a link's text alone.\nplain:\n{}",
         capture.frame.plain
     );
 

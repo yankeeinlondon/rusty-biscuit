@@ -8,7 +8,7 @@
 
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::{TmuxHarness, tmux_command};
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, capture_settled};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, capture_settled, shell_path, shell_quote};
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
 use serial_test::serial;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -67,10 +67,6 @@ fn run_with_sentinel(harness: &mut TmuxHarness, cmd: &str, colorfgbg: &str) -> C
     }
 }
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 fn md_bin() -> String {
     std::env::var("CARGO_BIN_EXE_md").unwrap_or_else(|_| "md".to_string())
 }
@@ -79,10 +75,10 @@ fn capture_schema_about(harness: &mut TmuxHarness, colorfgbg: &str) -> CapturedF
     run_with_sentinel(harness, "clear", colorfgbg);
     // The broker pane can outlive a prior fixture CWD, so every invocation
     // reestablishes a stable package directory before terminal discovery.
-    let working_dir = shell_quote(&biscuit_test_harness::manifest_dir!().to_string_lossy());
+    let working_dir = shell_path(&biscuit_test_harness::manifest_dir!());
     let command = format!(
         "cd {working_dir} && {} schema about",
-        shell_quote(&md_bin())
+        shell_path(std::path::Path::new(&md_bin()))
     );
     let _visible = run_with_sentinel(harness, &command, colorfgbg);
     capture_scrollback(harness, 300).unwrap_or(_visible)

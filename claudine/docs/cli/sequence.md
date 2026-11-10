@@ -313,7 +313,9 @@ group objects. Claudine no longer injects `CLAUDINE_FAIL_FAST` into a step.
 
 The exit code is `0` when every executed step succeeded, `1` after an
 unhandled failure, and `130` after Ctrl+C, including cancellation on the
-provider review screen. A preflight failure starts no step.
+provider review screen. A looping root sequence that ends through `break`
+exits with that `break`'s `code` (default `0`); see
+[Looping — Breaking out of a loop](../topics/flow-control/looping.md#breaking-out-of-a-loop). A preflight failure starts no step.
 
 ## Interactive sessions
 
@@ -374,6 +376,7 @@ Flags shared with `compose`:
 | Provider | `--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`, `--opencode`, `--qwen`, `--provider <NAME>`, `--exclude <PROVIDER>`, `-m`/`--model <MODEL>` |
 | Session | `-y`/`--yolo` (the provider's auto-approval mode, also set by `CLAUDINE_YOLO`), `-i`/`--interactive`, `--no-interactive`, `--sandbox`, `--include <ENV_NAME>` |
 | Timeouts | `-t`/`--timeout <DURATION>`, `--step-timeout <DURATION>`, `--stall-timeout <DURATION>` |
+| Loops | `--max-iterations <N>` (caps every loop's iterations, overriding `loop.max`; `CLAUDINE_MAX_ITERATIONS` applies when the flag is absent), `--on-rate-limit pause\|abort\|continue` (overrides `loop.on_rate_limit` in a looping prompt document) |
 | Resources | `--mcp`, `--use <ID,…>`, `--strict`, `--repo` |
 | System prompt | `--append-system-prompt`/`--asp <FILE>`, `--replace-system-prompt`/`--rsp <FILE>` |
 | Output | `-o`/`--output <FORMAT>`, `-q`/`--quiet`, `--silent`, `--perf` |

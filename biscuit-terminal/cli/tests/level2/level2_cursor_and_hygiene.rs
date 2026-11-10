@@ -31,13 +31,9 @@ use unicode_width::UnicodeWidthStr;
 /// rather than paying a pane spawn per flavour.
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
-/// Returns the absolute path to a fixture file.
+/// A fixture file's absolute path as one pane-shell word.
 fn fixture_path(name: &str) -> String {
-    manifest_dir!()
-        .join("tests/fixtures")
-        .join(name)
-        .display()
-        .to_string()
+    biscuit_test_harness::shell_path(&manifest_dir!().join("tests/fixtures").join(name))
 }
 
 // ------------------------------------------------------------------

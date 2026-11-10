@@ -81,6 +81,13 @@ Put the gate at the top of the test body.
   a platform with a compile-time exclusion (`#![cfg(unix)]` on the binary),
   never a runtime probe. Operator-selected exclusions (`BISCUIT_TEST_LEVEL`,
   `RUN_LEVEL3`) still skip.
+- **An L1 prerequisite that no CI runner provides** (a program that ships with no
+  platform, such as fish or Elvish) goes behind an opt-in Cargo feature that is
+  absent from both `features` and `local-features`, run by its own area recipe,
+  as `prompt-tests` is. Inside it, `expect_level!` still fails a selected run on
+  an unprovisioned host. Reference: darkmatter-cli's `optional-shell-tests` and
+  `just test-optional-shells`. Document that coverage as unproven wherever the
+  feature is not selected.
 - **Browser:** `if !biscuit_browser_harness::require_browser() { return; }`,
   with `#[serial_test::serial(browser)]`.
 

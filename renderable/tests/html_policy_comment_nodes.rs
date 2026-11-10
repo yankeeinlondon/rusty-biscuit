@@ -195,6 +195,7 @@ fn plain_markdown_writes_comments_without_a_diagnostic() {
             dialect: MarkdownDialect::Markdown,
             strictness,
             style: None,
+            width: renderable::output::Width::Source,
         };
         let rendered = render_markdown_node(&comment, &opts).expect("comment is portable");
         assert_eq!(rendered.output, "`a`<!-- -->`b`", "{strictness:?}");
@@ -205,6 +206,7 @@ fn plain_markdown_writes_comments_without_a_diagnostic() {
         dialect: MarkdownDialect::Markdown,
         strictness: RenderStrictness::Strict,
         style: None,
+        width: renderable::output::Width::Source,
     };
     assert!(matches!(
         render_markdown_node(&tag, &strict),

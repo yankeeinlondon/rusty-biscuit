@@ -5,13 +5,13 @@ use serde_json::Value;
 use sniff::programs::AiCli;
 
 use super::agentic_cli_generated::AGENTIC_CLI_NAMES;
-use super::{BoundCall, FunctionBinding, ResolutionContext};
+use super::{BoundCall, FunctionBinding, SlotClass, ResolutionContext};
 use crate::markdown::compose::context::ContextGroup;
 use crate::markdown::compose::expression::ExpressionError;
 
 const FUNCTION: &str = "has_agentic_cli";
 
-pub(super) const BINDINGS: &[FunctionBinding] = &[FunctionBinding::context(FUNCTION, &[], has_agentic_cli_fn)];
+pub(super) const BINDINGS: &[FunctionBinding] = &[FunctionBinding::context(FUNCTION, &[], has_agentic_cli_fn).slot(SlotClass::Captured)];
 
 /// The `agentic-cli` type admits only roster names, so an unknown name is a
 /// binding error even in a request that never captured the `Agent` group;

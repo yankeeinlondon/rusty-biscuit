@@ -57,13 +57,6 @@ const ALLOWLIST: &[Allowance] = &[
         1,
         "terminal image base when `ImageRenderer::new` is given none (rendering after composition; no production caller passes none)",
     ),
-    allow(
-        Gate::AmbientState,
-        "style/bespoke.rs",
-        "std::env::current_dir",
-        1,
-        "`style.page.stylesheet` of a document with no path reads beside the launch directory (rendering after composition, not a file reference)",
-    ),
 ];
 
 #[test]

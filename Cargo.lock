@@ -1230,6 +1230,8 @@ dependencies = [
  "biscuit-test-harness",
  "bytes",
  "criterion",
+ "csv",
+ "csv-core",
  "dunce",
  "gix",
  "globset",
@@ -1513,6 +1515,7 @@ dependencies = [
  "serial_test",
  "tempfile",
  "unicode-width 0.2.2",
+ "windows-sys 0.61.2",
  "x11rb",
 ]
 
@@ -3291,6 +3294,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+ "url",
+ "xpty",
 ]
 
 [[package]]
@@ -11431,12 +11436,14 @@ version = "0.1.0"
 dependencies = [
  "clap 4.6.1",
  "criterion",
+ "json-five",
  "proptest",
  "pulldown-cmark",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tracing",
+ "unicode-width 0.2.2",
  "url",
 ]
 

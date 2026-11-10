@@ -63,7 +63,7 @@ sanity:
 
 # run tests for biscuit-file packages
 test *args="":
-    @just _test_all "biscuit-file --features fetch; biscuit-file-cli" {{args}}
+    @just _test_all "biscuit-file --features fetch,delimited; biscuit-file-cli" {{args}}
     @just test-minimal {{args}}
 
 # Show this area's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
@@ -146,6 +146,9 @@ lint:
     @echo ""
     @echo -e "Linting {{ BOLD }}biscuit-file{{ RESET }} with {{ ITALIC }}file-reference-syntax{{ RESET }} only"
     @cargo clippy -p biscuit-file --no-default-features --features file-reference-syntax,yaml --all-targets -- -D warnings
+    @echo ""
+    @echo -e "Linting {{ BOLD }}biscuit-file{{ RESET }} with {{ ITALIC }}delimited{{ RESET }}"
+    @cargo clippy -p biscuit-file --features delimited --all-targets -- -D warnings
     @just _lint biscuit-file-cli
 
 # Criterion benches for biscuit-file format parsers.

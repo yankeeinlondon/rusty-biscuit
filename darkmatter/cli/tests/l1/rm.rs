@@ -112,7 +112,7 @@ fn test_rm_with_json_output() {
 
     let output = fixture
         .command()
-        .args(["rm", file.to_str().unwrap(), "author", "--json"])
+        .args(["rm", file.to_str().unwrap(), "author", "--output", "json"])
         .assert()
         .success()
         .get_output()

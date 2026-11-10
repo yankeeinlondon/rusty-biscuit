@@ -1,19 +1,15 @@
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::errors::as_block_error as as_terminal_block_error;
-use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Context, Result};
 use darkmatter::markdown::errors::as_block_error as as_darkmatter_block_error;
-use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter_cli::Cli;
 use darkmatter::markdown::compose::RequestSnapshot;
-use darkmatter_cli::commands::{
-    CleanOptions, run_clean, run_subcommand, validate_subcommand_usage,
-};
+use darkmatter_cli::commands::{run_subcommand, validate_subcommand_usage};
+use darkmatter_cli::output::{stderr_terminal, stderr_text};
 use darkmatter_cli::request::{MdRequest, with_magic_roots};
-use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Initialize tracing subscriber for developer debug output.
@@ -65,7 +61,7 @@ fn main() {
     // exits cleanly instead of panicking on write to a closed pipe.
     reset_sigpipe();
 
-    CompleteEnv::with_factory(Cli::command).complete();
+    CompleteEnv::with_factory(Cli::command).shells(darkmatter_cli::completion_shells::SHELLS).complete();
 
     if let Err(e) = run() {
         // A usage error the policy verbs found after parsing exits as clap's
@@ -73,7 +69,8 @@ fn main() {
         if let Some(usage) = e.downcast_ref::<clap::Error>() {
             usage.exit();
         }
-        // `--output report-json` already wrote the failure to stdout.
+        // The failure is already reported: a data output's value, or the problem
+        // report on stderr.
         if let Some(reported) = e.downcast_ref::<darkmatter_cli::commands::ReportedExit>() {
             std::process::exit(reported.code());
         }
@@ -92,18 +89,12 @@ fn main() {
         });
 
         if let Some(block) = block {
-            // TTY => full terminal detection; non-TTY => optimistic 80-column render.
-            let rendered = if io::stderr().is_terminal() {
-                block.report_block_error(&Terminal::new())
-            } else {
-                block.report_block_error_optimistic(None)
-            };
-            eprintln!("{rendered}");
+            eprintln!("{}", stderr_text(block.report_block_error(&stderr_terminal())));
             std::process::exit(1);
         }
 
         // Fallback: legacy Display-chain renderer.
-        eprintln!("{}", error_chain_prose(&e).render(&Terminal::default()));
+        eprintln!("{}", stderr_text(error_chain_prose(&e).render(&stderr_terminal())));
         std::process::exit(1);
     }
 }
@@ -186,17 +177,21 @@ fn run() -> Result<()> {
 
     reject_removed_flags(std::env::args_os());
     let cli = Cli::parse();
-    init_tracing(cli.debug_level);
+    // A data output says everything in its one value; stderr stays empty.
+    if !cli.requests_data_output() {
+        init_tracing(cli.debug_level);
+    }
+
+    // This prints a fixed listing, which is no command's typed result.
+    if cli.completions.is_some() && cli.render.output.is_some() {
+        Cli::command()
+            .error(clap::error::ErrorKind::ArgumentConflict, "`--output` does not apply to `--completions`")
+            .exit();
+    }
 
     // Handle --completions first (no input needed)
     if let Some(shell) = cli.completions {
         print_completions(shell);
-        return Ok(());
-    }
-
-    // Handle --list-themes (no input needed)
-    if cli.list_themes {
-        list_themes();
         return Ok(());
     }
 
@@ -208,42 +203,11 @@ fn run() -> Result<()> {
 
     if cli.command.is_some() {
         validate_subcommand_usage(&cli)?;
-    } else if cli.save {
-        if !cli.render.deny.is_empty() {
-            Cli::command()
-                .error(clap::error::ErrorKind::ArgumentConflict, "`--deny` does not apply to `--save` (a clean)")
-                .exit();
-        }
-        let options = CleanOptions {
-            save: true,
-            indent: cli.render.indent,
-            verbose: cli.verbose > 0,
-            ..CleanOptions::default()
-        };
-        run_clean(cli.render.input.as_ref(), &options, &request)?;
-        return Ok(());
-    } else if cli.render.input.is_none() && io::stdin().is_terminal() {
-        Cli::command().print_help()?;
-        return Ok(());
     }
 
     run_subcommand(cli.command_or_render(), &cli, &request)?;
 
     Ok(())
-}
-
-/// Lists all available themes with descriptions.
-fn list_themes() {
-    println!("Available themes:\n");
-    for theme_pair in ThemePair::all() {
-        println!(
-            "  {:20} {}",
-            theme_pair.kebab_name(),
-            theme_pair.description(ColorMode::Dark)
-        );
-    }
-    println!("\nUse --theme <name> to set prose theme");
-    println!("Use --code-theme <name> to override code theme");
 }
 
 /// Prints shell completions setup instructions.
@@ -258,10 +222,13 @@ fn print_completions(shell: clap_complete::Shell) {
         Shell::Zsh => (r#"source <(COMPLETE=zsh md)"#, "~/.zshrc"),
         Shell::Fish => (r#"COMPLETE=fish md | source"#, "~/.config/fish/config.fish"),
         Shell::PowerShell => (
-            r#"$env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE"#,
+            // On Windows `md` is a built-in alias of `mkdir`, which outranks `md.exe` and
+            // would prompt for a path here.
+            r#"Remove-Item Alias:md -Force -ErrorAction SilentlyContinue; $env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE"#,
             "$PROFILE",
         ),
-        Shell::Elvish => (r#"eval (E:COMPLETE=elvish md | slurp)"#, "~/.elvish/rc.elv"),
+        // Elvish 0.21 refuses `E:X=y cmd` and no longer reads `~/.elvish/rc.elv`.
+        Shell::Elvish => (r#"with E:COMPLETE = elvish { eval (md | slurp) }"#, "~/.config/elvish/rc.elv"),
         _ => {
             eprintln!("Shell {:?} is not supported for dynamic completions", shell);
             return;
@@ -290,6 +257,8 @@ fn reset_sigpipe() {}
 
 #[cfg(test)]
 mod error_chain_tests {
+    use biscuit_terminal::terminal::Terminal;
+
     use super::*;
 
     #[test]

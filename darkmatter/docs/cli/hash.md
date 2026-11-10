@@ -32,8 +32,11 @@ md hash doc.md --strict
 # Write the computed hash back into the document frontmatter
 md hash doc.md --save
 
-# Report how the document differs from its stored hash (exits 2 on difference)
+# Report how the document differs from its stored hash (exits 1 on difference)
 md hash doc.md --diff
+
+# The result as data, for a script
+md hash doc.md --output json
 
 # Directory aggregate hashing (bare-hash only)
 md hash docs/
@@ -58,6 +61,8 @@ md hash docs/ --body
 - `--diff`: report how the document differs from its stored hash. Conflicts
   with `--save`.
 - `--strict`: disable normalization and hash raw serialized content.
+- `--output <terminal|plain|markdown|markdown-plus|html|browser|json|json5|yaml|toml>`: what to print (default: `terminal`). See [Data Output](#data-output).
+- `--width <N|N%|auto|source|unlimited>`: accepted like on every command. It has no effect, because `md hash` prints no prose.
 
 ### Hash Kinds
 
@@ -207,8 +212,9 @@ again.
   before upgrading/downgrading the stored value; an incomparable kind switch
   rewrites at the forced kind without treating the switch as a content change.
 
-`--save` is not supported for stdin input or for directories. It prints an
-explanation of what changed rather than the raw hash.
+`--save` with stdin fails with exit status 1, and `--save` with a directory is a
+usage error (exit status 2). It prints an explanation of what changed rather than
+the raw hash.
 
 ### Indented Frontmatter
 
@@ -246,9 +252,10 @@ relies on.
 ### `--diff` Behavior
 
 `--diff` reports how the document differs from its stored hash, at the
-resolution the stored kind affords, and never writes. It exits `2` when any
+resolution the stored kind affords, and never writes. It exits `1` when any
 difference is found (or when there is no stored hash, printing
-`No stored hash to compare against`), and `0` when the document is unchanged.
+`No stored hash to compare against`), and `0` when the document is unchanged. The
+report is the deliverable, so it goes to stdout either way.
 
 The report shape follows the stored kind:
 
@@ -291,16 +298,60 @@ appended; it is never counted as a content change.
 - Sorts paths before aggregation for deterministic output.
 
 Directory mode is **bare-hash only**: `--save`, `--diff`, and the `structured`
-and `detailed` kinds are rejected with a usage error. Directory output forms:
+and `detailed` kinds are usage errors (exit status 2). Directory output forms:
 
 - Default: aggregate `<frontmatter_hash>-<body_hash>`
 - `--body` or `--frontmatter`: single aggregate hash
 
-### Exit Codes
+### Data Output
 
-- `0`: bare hash printed, or `--save` completed (whether or not it wrote).
-- `1`: operational error (unreadable file, malformed stored hash, etc.).
-- `2`: `--diff` found differences, or there was no stored hash to compare.
+`md hash` accepts both output families (see
+[Output and Width](./output-and-width.md)). Its formatted outputs print the same text:
+the bare hash, the `--diff` report, or the `--save` explanation. A data output prints
+one value to stdout and nothing to stderr, so a script can read the hashes and the
+comparison without parsing that text:
+
+```json
+{
+  "mode": "diff",
+  "file": "doc.md",
+  "kind": "simple",
+  "computed": { "kind": "simple", "value": "815b0ef5d2011b2d-6c9e5f541a136ed1" },
+  "stored": { "kind": "simple", "value": "815b0ef5d2011b2d-030854cf7785a0ca", "ignored": [] },
+  "comparison": {
+    "kind": "simple",
+    "frontmatter_changed": false,
+    "body_changed": true,
+    "detail": { "level": "coarse" },
+    "ignore_policy": null
+  },
+  "saved": false,
+  "outcome": "failure",
+  "diagnostics": [
+    {
+      "code": "dm.hash.changed",
+      "severity": "error",
+      "message": "The document differs from its stored hash",
+      "source": null, "expected_type": null, "actual_type": null,
+      "span": null, "iteration_path": []
+    }
+  ]
+}
+```
+
+`mode` is `compute`, `diff`, `save`, or `directory`. `--diff` with nothing stored
+reports `dm.hash.no_stored_hash` instead of `dm.hash.changed`. See
+[Data Contracts](./data-contracts.md#other-commands).
+
+### Exit Status
+
+- `0`: bare hash printed, `--save` completed (whether or not it wrote), or `--diff`
+  found no difference.
+- `1`: the command failed: `--diff` found differences or no stored hash, a file
+  could not be read, a stored hash is malformed, `--save` refused, or `--save` was
+  given stdin.
+- `2`: a usage error, such as `--save` with `--diff`, or `--save`, `--diff`, or a
+  `structured` or `detailed` kind with a directory.
 
 ### Normalization Behavior
 
@@ -357,7 +408,7 @@ written in sorted order. Stored hashes are not migrated. To refresh such a
 baseline, check it and save it again:
 
 ```bash
-md hash doc.md --strict --diff   # exits 2: reports a frontmatter change
+md hash doc.md --strict --diff   # exits 1: reports a frontmatter change
 md hash doc.md --strict --save   # writes the new hash, bumps last_updated
 md hash doc.md --strict --diff   # exits 0
 ```
@@ -375,8 +426,3 @@ baseline saved without it (or the reverse) counts as a change and bumps
 - The library reads no environment; the CLI owns all flag and env parsing and
   passes an explicit options bundle to deterministic library APIs.
 - Directory mode is deterministic and optimized for larger doc trees.
-
-## Issues
-
-- There is no structured (`--json`) output mode; bare hash output is plain text
-  (or YAML for `detailed`).

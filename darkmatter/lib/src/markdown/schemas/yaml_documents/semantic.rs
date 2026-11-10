@@ -156,6 +156,10 @@ fn yaml_schema_checks(
             if finding.segments.is_empty() && finding.span.is_none() {
                 finding.segments = vec!["$schema".to_string()];
             }
+            if let SchemaError::UnresolvedSlots(unresolved) = &error {
+                finding.message =
+                    crate::markdown::schemas::slots::codes::slots_not_allowed_message("a kind definition", unresolved);
+            }
             return vec![finding];
         }
     };

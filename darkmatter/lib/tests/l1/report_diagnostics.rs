@@ -43,7 +43,7 @@ fn failure(dir: &Path, name: &str, content: &str) -> (PathBuf, Box<ComposeFailur
 }
 
 fn located(file: &Path, line: usize, column: usize) -> Option<DiagnosticSource> {
-    Some(DiagnosticSource { file: Some(file.to_path_buf()), line, column })
+    Some(DiagnosticSource::at(Some(file.to_path_buf()), line, column))
 }
 
 #[test]
@@ -120,6 +120,9 @@ fn a_warning_keeps_its_record_or_its_code() {
                 actual_type: None,
                 span: None,
                 iteration_path: Default::default(),
+                reference_details: None,
+                data_location: None,
+                grants_needed: None,
             }
         );
     }
@@ -215,7 +218,7 @@ mod passive_history {
             .iter()
             .map(warning_diagnostic)
             .chain(error.map(|error| error_diagnostics(error)).unwrap_or_default())
-            .map(|diagnostic| (diagnostic.code, diagnostic.source.map(|source| source.line)))
+            .map(|diagnostic| (diagnostic.code, diagnostic.source.and_then(|source| source.line)))
             .collect()
     }
 
@@ -300,7 +303,7 @@ mod passive_history {
         assert_eq!(error.earlier_warnings().len(), 1, "{:#?}", error.earlier_warnings());
         let records: Vec<(String, Option<usize>)> = error_diagnostics(&error)
             .into_iter()
-            .map(|diagnostic| (diagnostic.code, diagnostic.source.map(|source| source.line)))
+            .map(|diagnostic| (diagnostic.code, diagnostic.source.and_then(|source| source.line)))
             .collect();
         assert_eq!(records, [row(ALWAYS_FALSE_CALL_CODE, 3), row(INCOMPATIBLE_CALL_CODE, 4)]);
     }
@@ -317,7 +320,7 @@ mod passive_history {
             .map(|diagnostic| {
                 let source = diagnostic.source.expect("every record is located");
                 let file = source.file.expect("a named file");
-                (diagnostic.code, file.file_name().unwrap().to_string_lossy().into_owned(), source.line)
+                (diagnostic.code, file.file_name().unwrap().to_string_lossy().into_owned(), source.line.expect("a line"))
             })
             .collect()
     }

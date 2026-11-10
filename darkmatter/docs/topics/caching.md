@@ -15,8 +15,7 @@ cache, and the two never share a store.
 
 > **Semantic results are never persisted.** Until a `ContentPolicy` defines
 > when cached content becomes stale, no composed or derived result is read
-> from or written to disk (more-context rulings **R18** and **R36**,
-> `darkmatter/fixes/2026-09-16-content-policy-no-cache`). A warm cache cannot
+> from or written to disk. A warm cache cannot
 > replay an earlier run's composed output, warnings, runtime context, or
 > shell/probe output. The persistent semantic-result implementation was
 > deleted, not disabled; see [ContentPolicy](#contentpolicy-prerequisite-for-persisting-semantic-results).
@@ -105,7 +104,7 @@ from:
 
 A transcluded child's context is finalized before its key is computed. The
 child's referenced `ctx.*` groups are added to the request context first (see
-[Context Variables](./context-variables.md#the-request-context-and-its-authority)),
+[Context Variables](./state-management/context-variables.md#the-request-context-and-its-authority)),
 and the lookup and the write both use that one post-extension hash. When a
 child names no group its parent lacks, the parent's phase-wide hash is reused.
 Because one request has one context, a run-local hit cannot hide a missing
@@ -143,6 +142,103 @@ spelling (`::shell --no-cache`, `$(<cmd>)::no-cache`,
 to the HTTP `Cache-Control: no-cache` directive described below. See
 [Shell Expansion](../inline/shell-expansion.md).
 
+### The `load_data` memo
+
+[`load_data`](./loading-data.md) has its own memory-only memo, held by the
+command's `DataRuntime` rather than by `RunLocalCache`. It spans the whole
+command, not one compose run: for `md compose`, the reference check,
+pre-flight, lifecycle events, and composition share it (see
+[Compose Requests](./compose-requests.md#one-data-runtime-per-command)).
+
+It has three layers, each keyed by what changes its answer and nothing more:
+
+```mermaid
+flowchart LR
+    R["raw source<br/>key: file or URL"] --> P["parsed source<br/>key: raw source + format + delimiter"]
+    P --> B["bound result<br/>key: parsed source + contract + header"]
+```
+
+| Layer | Holds | Key |
+| --- | --- | --- |
+| raw source | the text read, with any byte-order mark removed (or a fetched body), or the offset of its first invalid UTF-8 byte | the resolved file (canonical path) or normalized URL |
+| parsed source | the parsed document | the raw source, the effective format, and the effective delimiter (CSV and TSV only) |
+| bound result | the value converted to `as` | the parsed source, the resolved contract, and the effective header (CSV and TSV only) |
+
+The keys use **effective** values: the `format` option or else the format the
+extension names, a delimiter of `,` for CSV and a tab for TSV unless one is
+given, and `header: true` unless `false` is given. So calls that spell the
+same read differently share every layer: no options, `{}`, `null` options,
+`{format: "csv"}` on a `.csv` file, `{delimiter: ","}`, and `{header: true}`
+are one entry, and the aliases `yml` and `ndjson` share entries with `yaml`
+and `jsonl`. A JSON, YAML, TOML, or JSON5 key carries no delimiter or header,
+because those options are refused for such a format before the memo is
+consulted.
+
+| Calls over `f.csv` | `reads` | `parses` | `binds` |
+| --- | --- | --- | --- |
+| `load_data(f, "a[]")` and `load_data(f, "b[]")` | 1 | 1 | 2 |
+| `{delimiter: ","}` and `{delimiter: ";"}` | 1 | 2 | 2 |
+| `{header: true}` and `{header: false}` over a list-row contract | 1 | 1 | 2 |
+| `{format: "csv"}` and `{format: "tsv"}` | 1 | 2 | 2 |
+
+`DataRuntime::stats()` counts the work: `reads` is raw loaders run (a file
+read or a fetched body taken), `parses` documents parsed, `binds` contracts
+validated, and `source_hits` and `bind_hits` the parse and bind lookups the
+memo answered. A raw lookup the memo answers counts nothing, so raw reuse
+shows as `reads` staying flat. A relative named import in `as` is keyed by
+the schema file it resolves to, not by its text.
+
+Each entry is single-flight: concurrent calls for one key wait for the first
+caller's result. A typed failure (malformed data, a contract mismatch) is
+kept too, under its own key and without a call-site location, so every call
+that reuses it reports its own document and line, and a failure under one
+format, delimiter, or header choice never answers a call with another. A
+result that only means "not possible yet" is never kept, so a later call
+tries again.
+
+A [`try`](./darkmatter-expressions.md#recovering-from-read-failures) around a
+call does not change what the memo holds: it keeps the source's own result or
+failure under the keys above, never the fallback. So after
+`try(load_data("bad.yaml", "string[]"), [])`, a later unguarded call on
+`bad.yaml` fails from the memo, and a second `try` with a different fallback
+gets its own fallback, not the first one's. A read deferred by a discovery
+pass, such as a URL the reference check cannot fetch, is not kept as a
+failure. Emptying the memo works as described below.
+
+Every call is observed in the command's
+[observation log](./compose-requests.md#observations), with the hash of the
+bytes its raw source holds, whichever layer answered it. A call inside a
+schema slot passes the slot's read gate before any layer is consulted, so a
+file a document already loaded is never handed to an unapproved slot.
+
+The memo holds in **every** `CacheAccessMode`, `Off` and `Refresh` included.
+Those modes govern the composed-result cache above; repeating a read within
+one command answers no question, so a file is still read once.
+
+The memo is emptied, together with its prepared contracts, after every
+executed command attempt (a frontmatter `$( … )`, a `::shell` line, a shell
+block, or a lifecycle shell step, whether it succeeded or failed) and after
+every lifecycle side effect that ran (`append_line`, `append_jsonl`,
+`ensure_file`, `ensure_dir`, the frontmatter mutations, and `http_post`,
+whether it succeeded or failed), before the next expression evaluates. A
+lifecycle step that did not run, such as one its `when:` guard turned off,
+leaves the memo alone. A shell command answered from
+shell command memoization ran nothing and leaves the memo alone. Emptying the
+memo clears all three layers at once and advances the memo generation once;
+it never removes an entry from the command's read set. A load already in
+flight when the memo is emptied finishes for its own caller but is not kept
+for later ones. A body read that follows a command is evaluated only after
+that command ran, so it reads the file again rather than keeping a value from
+before the command (see
+[Reads after a command](../darkmatter-compose-pipeline.md#reads-after-a-command)).
+
+The memo persists nothing and does not replace the transport cache. A URL's
+body still comes from the [remote transport cache](#remote-transport-cache),
+under the same host policy, freshness rules, and
+[Cache-Control precedence](#cache-control-precedence); the memo only keeps
+the body's text and what was parsed from it. Emptying the memo does not fetch a URL
+again within the same command.
+
 ### Reference analysis
 
 `reference_graph()`, `validate_references()`, `composed_references()`, and
@@ -161,6 +257,48 @@ let request = ComposeRequest::prepare(options, &RequestSnapshot::new(workspace_r
 
 let graph = md.reference_graph(ReferenceGraphOptions::with_compose(&request))?;
 ```
+
+## Schema Slot Resolution Cache
+
+A schema with `{{ … }}` [slots](./schemas/schema-slots.md) is resolved by
+evaluating each slot, which can read data files. So that a program running
+many commands (DMLS, or a library caller composing document after document)
+does not re-evaluate an unchanged template each time, resolved templates are
+kept in a process-wide cache (`markdown/schemas/slots/cache.rs`). Like every
+semantic result it lives in memory only: nothing is written to disk, and a
+new process starts empty.
+
+Within one command, a template is resolved once and pinned for the whole run
+(see [Resolving in a command](./schemas/schema-slots.md#resolving-in-a-command)).
+Across commands, a cached resolution is reused only when all of these hold:
+
+- the template is the same: its `$schema` value or trigger payload and where
+  it was written, the exact text of every schema file it read, and its slots;
+- the request context, the repository the automatic grant was judged
+  against, and the Darkmatter build (slot resolver version and function
+  catalog) are the same;
+- every file it read, every existence answer, and every `ctx` and `env`
+  value it read are unchanged;
+- the requesting command's grants allow every read the resolution made, so
+  a result that needed a grant for one run only is not served to a command
+  without it.
+
+Files are re-checked by `stat` first: a file whose size and modification
+time are unchanged counts as unchanged without being reread, and only a file
+whose `stat` changed is rehashed. A file open in an editor buffer is always
+rehashed, because unsaved edits leave its `stat` alone. A rewrite within the
+clock's resolution that keeps the file's size is therefore not noticed. That
+is the cost of not rehashing every input on every lookup.
+
+Some resolutions are never reused by another command, because their inputs
+cannot be re-checked cheaply: one that called a volatile function (git
+history, a network probe), fetched a URL, or listed a folder or glob.
+
+Failures are cached with their dependencies, like results, so creating a
+missing file or repairing a malformed one is a miss and resolves again. A
+failure that depends on grants (a read needing approval, a denied read, an
+invalid grant store), a `dm.schema.slot_cycle` failure, and a canceled
+resolution are never cached.
 
 ## Remote Transport Cache
 
@@ -225,8 +363,12 @@ lifetime is:
 found entry:
 
 - `Fallback` (default): serve within the lifetime; past it, revalidate with a
-  conditional GET, and serve the stale body if revalidation fails on the
-  network.
+  conditional GET, and serve the stale body if the revalidation request fails
+  in transport (the server cannot be reached or answers with an HTTP error
+  status). Any other revalidation failure is returned, not covered: a refusal
+  by host policy (for example, a redirect to a host the run does not allow),
+  an unsupported redirect scheme, a client that cannot be built, or a new
+  `200` whose body is not UTF-8.
 - `Strict`: serve within the lifetime; past it, revalidate, and fail if
   revalidation fails.
 - `Optimistic`: serve the cached body without revalidation, even when stale.
@@ -237,8 +379,17 @@ previously returned `ETag` or `Last-Modified`. A `304` keeps the cached body
 and refreshes the manifest from the `304`'s headers.
 
 Serving stale data is never an implicit consequence of configuring a cache
-root: it happens only under `Fallback`, only after a failed revalidation, and
-never for `no-cache`.
+root: it happens only under `Fallback`, only after a revalidation that failed
+in transport, and never for `no-cache`.
+
+```bash
+# First run: 127.0.0.1 answers 200 with `max-age=0`; the body is cached.
+md compose doc.md --allow host=127.0.0.1 --cache-root .
+# Second run, same cache: the server now answers 500. The stale body is used.
+# If it instead redirects to `localhost`, a host this run does not allow, the
+# read fails ("blocked by fetch policy") and the cached body is not used.
+md compose doc.md --allow host=127.0.0.1 --cache-root .
+```
 
 ### Cache-Control precedence
 
@@ -313,10 +464,7 @@ No statistic counts directory creation as a write.
 
 Persisting an expensive or agentic semantic result (for example, a website
 summary) requires a `ContentPolicy` that defines when the content becomes
-stale. It does not exist yet. The contract a future implementation must meet is
-recorded in the
-[content-policy-no-cache specification](../../fixes/2026-09-16-content-policy-no-cache/spec.md#contentpolicy-design-constraints).
-In brief:
+stale. It does not exist yet. A future implementation must meet this contract:
 
 - `ContentPolicy` governs content freshness only. It does not grant network
   access, define artifact identity, choose file placement, or permit persisting
@@ -352,5 +500,7 @@ define its own unqualified `ContentPolicy`.
 - `darkmatter/lib/src/markdown/compose/cache/store.rs`
 - `darkmatter/lib/src/markdown/compose/remote_fetch.rs`
 - `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
+- `darkmatter/lib/src/markdown/compose/expression/data/runtime.rs`
+- `darkmatter/lib/src/markdown/schemas/slots/cache.rs`
 - `darkmatter/lib/src/markdown/reference/graph.rs`
 - `darkmatter/lib/tests/semantic_results_never_persist.rs`

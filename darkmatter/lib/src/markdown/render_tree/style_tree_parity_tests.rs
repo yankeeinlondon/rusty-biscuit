@@ -56,8 +56,7 @@ use crate::markdown::Markdown;
 use crate::markdown::highlighting::{ColorMode, ThemePair};
 use crate::markdown::output::{ColorDepth, TerminalOptions};
 use crate::style::{
-    BespokeStyleOverrides, ComponentStyleOverrides, DisclosureStyleOverrides, HrStyleOverrides,
-    ListStyleOverrides, PageStyleOverrides, apply_bespoke_style, apply_color_style,
+    apply_bespoke_style, apply_color_style,
     apply_component_style, apply_disclosure_style, apply_hr_style, apply_list_style,
     apply_page_style, from_frontmatter,
 };
@@ -92,15 +91,15 @@ fn frontmatter_page(md: &Markdown) -> DarkmatterPage {
     let term = Terminal::new_optimistic(u32::from(WIDTH));
     let page = DarkmatterPage::new(&term);
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style frontmatter");
-    let page = apply_page_style(page, &style, PageStyleOverrides::default()).expect("page style");
-    let page = apply_component_style(page, &style, ComponentStyleOverrides::default())
+    let page = apply_page_style(page, &style).expect("page style");
+    let page = apply_component_style(page, &style)
         .expect("component style");
-    let page = apply_list_style(page, &style, ListStyleOverrides::default()).expect("list style");
-    let page = apply_hr_style(page, &style, HrStyleOverrides::default()).expect("hr style");
-    let page = apply_disclosure_style(page, &style, DisclosureStyleOverrides::default())
+    let page = apply_list_style(page, &style).expect("list style");
+    let page = apply_hr_style(page, &style).expect("hr style");
+    let page = apply_disclosure_style(page, &style)
         .expect("disclosure style");
     let page = apply_color_style(page, &style).expect("color style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).expect("bespoke style")
+    apply_bespoke_style(page, &style, crate::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir())).expect("bespoke style")
 }
 
 fn term_opts() -> TerminalOptions {
@@ -148,7 +147,9 @@ fn oracle_doc(md: &Markdown, mutate: impl FnOnce(&mut RenderNode)) -> Document {
 }
 
 fn render_terminal(doc: &Document) -> String {
-    render_page_terminal_document(doc, Vec::new(), &term_opts(), WIDTH, true)
+    let terminal = Terminal::new_optimistic(u32::from(WIDTH));
+    let width = renderable::output::Width::Columns(u32::from(WIDTH));
+    render_page_terminal_document(doc, Vec::new(), &term_opts(), width, Some(&terminal))
         .expect("terminal render")
         .output
 }

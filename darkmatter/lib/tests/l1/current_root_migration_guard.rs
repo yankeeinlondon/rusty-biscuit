@@ -99,7 +99,7 @@ fn has_scanned_extension(path: &Path) -> bool {
 /// 1-based line of every occurrence, per file, keyed by `/`-separated path
 /// relative to `root`. Files without an occurrence are absent.
 fn scan(root: &Path) -> BTreeMap<String, Vec<usize>> {
-    let mut found = BTreeMap::new();
+    let mut files = Vec::new();
     let mut pending = vec![(root.to_path_buf(), false)];
     while let Some((dir, under_prompts)) = pending.pop() {
         let entries = std::fs::read_dir(&dir).unwrap_or_else(|error| panic!("read {}: {error}", dir.display()));
@@ -114,33 +114,51 @@ fn scan(root: &Path) -> BTreeMap<String, Vec<usize>> {
                     pending.push((path, under_prompts || name == "prompts"));
                 }
             } else if kind.is_file() && (under_prompts || has_scanned_extension(&path)) {
-                let text = std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-                let text = String::from_utf8_lossy(&text);
-                // Almost every file has no occurrence; skip the per-line pass for them.
-                if !NEEDLES.iter().any(|needle| text.contains(needle)) {
-                    continue;
-                }
-                let lines: Vec<usize> = text
-                    .lines()
-                    .enumerate()
-                    .flat_map(|(index, line)| {
-                        let hits: usize = NEEDLES.iter().map(|needle| line.matches(needle).count()).sum();
-                        std::iter::repeat_n(index + 1, hits)
-                    })
-                    .collect();
-                if !lines.is_empty() {
-                    let relative = path.strip_prefix(root).expect("under the root");
-                    let key = relative
-                        .components()
-                        .map(|component| component.as_os_str().to_string_lossy())
-                        .collect::<Vec<_>>()
-                        .join("/");
-                    found.insert(key, lines);
-                }
+                files.push(path);
             }
         }
     }
-    found
+
+    // The walk is cheap; reading the workspace's ~165 MB is not, and on a
+    // loaded Windows host a serial read took over ten seconds.
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+    let chunk = files.len().div_ceil(workers).max(1);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = files
+            .chunks(chunk)
+            .map(|paths| scope.spawn(move || paths.iter().filter_map(|path| occurrences(root, path)).collect::<Vec<_>>()))
+            .collect();
+        handles.into_iter().flat_map(|handle| handle.join().expect("scan worker")).collect()
+    })
+}
+
+/// The `/`-separated key and occurrence lines of `path`, or `None` when it
+/// has no occurrence.
+fn occurrences(root: &Path, path: &Path) -> Option<(String, Vec<usize>)> {
+    let text = std::fs::read(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let text = String::from_utf8_lossy(&text);
+    // Almost every file has no occurrence; skip the per-line pass for them.
+    if !NEEDLES.iter().any(|needle| text.contains(needle)) {
+        return None;
+    }
+    let lines: Vec<usize> = text
+        .lines()
+        .enumerate()
+        .flat_map(|(index, line)| {
+            let hits: usize = NEEDLES.iter().map(|needle| line.matches(needle).count()).sum();
+            std::iter::repeat_n(index + 1, hits)
+        })
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let relative = path.strip_prefix(root).expect("under the root");
+    let key = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    Some((key, lines))
 }
 
 #[test]

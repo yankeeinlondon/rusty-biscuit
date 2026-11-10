@@ -79,9 +79,16 @@ every `<TAB>`. The supplement engine applies these rules in order:
 
 - **`KEY=<TAB>` setters** offer schema-aware completion when the prompt
     declares `$schema` (property names before `=`; enum members and
-    `file`-glob paths after `=`). Without a schema, the value slot still
+    `file`-glob paths after `=`). Without a schema, the setter value still
     supports `@`-gated file completion; plain string/number values yield
-    no candidates so shell default behavior kicks in. See
+    no candidates so shell default behavior kicks in. In a template
+    schema (`{{ … }}` slots), names and the values of slot-free properties
+    come from the authored template with nothing evaluated; a value request
+    for a slot-bearing property resolves the whole template through a
+    Darkmatter `SlotSession` in `SessionMode::ReferenceCheck` with no handler
+    (automatic and persisted grants only, never a prompt or a printed line;
+    `schema_completion::setter_value_candidates`), and an ungranted or failed
+    resolution offers nothing. See
     [Shell Completions](completions/shell-completions.md).
 
 Install with `claudine completions <shell>` — regenerate and reinstall
@@ -297,7 +304,7 @@ Constructs a `CompositionExecutionRequest` with `mode: ChainedDocument`, the pre
 | `--model` / `-m`                           | Overrides model selection; highest priority in model chain          |
 | Frontmatter `agent`                        | Hint for provider selection (single string or ordered list)         |
 | Frontmatter `model`                        | Hint for model selection (always forwarded; unrecognized values warn) |
-| Config `favorite_agent`                    | Fallback provider when no explicit flag or frontmatter hint         |
+| Config `preferred_agent` (alias `favorite_agent`) | Fallback provider when no explicit flag or frontmatter hint         |
 
 ##### 6b. Profile and Binary Resolution
 
@@ -765,7 +772,7 @@ Provider selection behaves differently in **TTY** (interactive terminal) and **n
 
 When stdout is a terminal and no explicit `--<provider>` flag is given:
 
-1. **Interactive picker** — a `biscuit-tui` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
+1. **Interactive picker** — a `biscuit-tui` one-shot picker shows all installed providers. Frontmatter `agent` and the config's favorite agent (`preferred_agent`) only influence the **default index** and **row ordering**; they do not bypass the picker.
 
 ### Non-TTY Mode
 
@@ -774,7 +781,7 @@ When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict c
 1. **Explicit flag** (`--provider <slug>`, or its catalog-derived `--<provider>` shorthand boolean) — highest priority
 2. **Singular frontmatter `agent`** — a single provider name in the effective (composed) frontmatter, fuzzy-matched against known providers
 3. **List-valued frontmatter `agent`** — an ordered list of provider names; the first installed provider in the list is chosen
-4. **Config favorite** — `favorite_agent` from `~/.claudine/config.json`
+4. **Config favorite** — `preferred_agent` from `~/.claudine/config.json` (the older key `favorite_agent` is still read; set it with `claudine config set favorite-agent <slug>`)
 5. **Hard error** — if none of the above resolve, the command fails with a structured error
 
 The old "single installed" auto-selection shortcut has been removed. Even when only one provider is installed, non-TTY sessions still require an explicit signal (flag, frontmatter, or favorite).

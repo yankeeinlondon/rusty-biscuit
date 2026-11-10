@@ -27,8 +27,10 @@ surrounding whitespace and line terminators, are preserved byte-for-byte. YAML
 fenced code blocks in the Markdown body are never inspected or changed by the
 YAML analyzer.
 
-Without `--save`, the result is written to stdout and the input file is not
-modified. With `--save`, the result is written back to the input file.
+Without `--save`, the result is written to stdout as Markdown and the input file
+is not modified. With `--save`, the result is written back to the input file.
+Cleaning also migrates legacy `key=value` link titles to JSON5 (see [Migrating link
+titles](#migrating-link-titles)).
 
 It is useful when you want to:
 
@@ -47,8 +49,8 @@ md clean README.md
 md clean -
 cat README.md | md clean
 
-# Emit the v1 diagnostic envelope instead of cleaned Markdown
-md clean README.md --json
+# Print the v1 diagnostic envelope instead of cleaned Markdown
+md clean README.md --output json
 
 # Replace the document's $schema layer for this run
 md clean README.md --schema docs.schema.yaml
@@ -61,10 +63,10 @@ md clean README.md --disable baseline-schema
 md clean README.md --disable schema-triggers
 
 # Join wrapped prose, then re-wrap it to 80 columns
-md clean README.md --fixed-width 80
+md clean README.md --width 80
 
 # Keep source line breaks even if the document asks for unwrap or fixed-width
-md clean README.md --ignore-incidental-newlines
+md clean README.md --width source
 
 # Clean and enforce 2-space nested list indentation
 md clean README.md --indent 2
@@ -78,9 +80,6 @@ md clean README.md --save
 
 # Clean in place with delta report + visual diff
 md clean README.md --save -v
-
-# Shorthand for clean-and-save
-md README.md --save
 ```
 
 ### Arguments
@@ -90,18 +89,22 @@ md README.md --save
 - `--indent <#>`: Sets `indentation` to `2`, `4`, or `8` spaces per nested-list level. For an eight-space step, cleanup uses CommonMark-valid marker padding on parent items when needed to preserve the same list tree.
 - `--compact`: Sets `list-item-padding: none` (no blank lines between sibling list items). Conflicts with `--loose`.
 - `--loose`: Sets `list-item-padding: one` (one blank line between sibling list items). Conflicts with `--compact`.
-- `--fixed-width <#>`: Sets `fixed-width`: join single newlines in prose, then re-wrap prose, including list-item paragraphs, to the target display width.
-- `--ignore-incidental-newlines`: Sets `unwrap: false` and `fixed-width: false`, keeping source single newlines even when the document asks for unwrapping or a width.
-- `--json`: Emit the version-1 diagnostic envelope as the sole stdout payload. The cleaned document, human suggestion report, and save-mode delta report are suppressed.
+- `--width <N|N%|auto|source|unlimited>`: Reflow prose for this run, whatever the document's `fixed-width` and `unwrap` say. See [Width](#width).
+- `--output <terminal|plain|markdown|markdown-plus|html|browser|json|json5|yaml|toml>`: What to print (default: `markdown`). See [Output Modes](#output-modes).
 - `--schema <PATH>`: Replace the document's inline or referenced `$schema` layer with an explicit SimplifiedSchema file. Baseline and matching trigger layers still apply beneath it.
 - `--baseline-schema <PATH>`: Replace the default Darkmatter baseline with an explicit SimplifiedSchema file.
 - `--disable <ID>`: Stop a feature from running. Repeatable; there is no `all`. See [Policy Flags](./policy.md).
     - `baseline-schema`: Disable the default Darkmatter baseline. Conflicts with `--baseline-schema`.
     - `schema-triggers`: Disable repository trigger discovery and bare-name schema-root lookup.
 
-`--fixed-width` and `--ignore-incidental-newlines` cannot be used together.
-Fixed-width reflow starts by removing the source wrapping that
-`--ignore-incidental-newlines` preserves.
+A [schema template](../topics/schemas/schema-slots.md) (a schema whose
+definitions hold `{{ … }}` slots) is resolved before the schema checks run, under
+the same rules as `md compose`: a data file committed in the schema's repository is
+read without asking, any other read is asked about on a terminal, and a data output
+never asks. A read nobody approved leaves the schema's constraints unavailable, so
+the document is never reported clean: the run fails (exit 1) with the slot's
+`dm.schema.slot_approval_required` diagnostic, which names the `grants_needed`, and
+`--save` writes nothing.
 
 Each formatting flag overrides only its own rule, for this run. A rule with no
 flag comes from the document's `style.markdown`, then the built-in default.
@@ -112,13 +115,23 @@ Shell completion notes:
 
 - `[INPUT]` completes markdown files (`.md`, `.dm`) and traversable directories.
 - `--indent` completes to `2`, `4`, or `8`.
-- `--fixed-width` completes common prose widths (`40`, `60`, `80`, `100`, `120`) and accepts any value from `1` through `1000`.
 
 ### Output Modes
 
+`md clean` accepts both output families. Its default is `markdown`, on a terminal
+and on a pipe alike, because its deliverable is the Markdown document itself. An
+explicit formatted output prints the cleaned document in that form, and a data
+output prints the [version-1 envelope](#version-1-json-envelope) instead.
+
+| `--output` | stdout without `--save` | stdout with `--save` | stderr |
+|---|---|---|---|
+| `markdown` (default) | the cleaned document | a delta report | findings and warnings |
+| `terminal`, `plain`, `markdown-plus`, `html` | the cleaned document, rendered | a delta report | findings and warnings |
+| `json`, `json5`, `yaml`, `toml` | the envelope | the envelope | nothing |
+
 **Default mode (no `--save`)**
 
-- Prints cleaned markdown to stdout (the original document when cleanup declines)
+- Prints cleaned Markdown to stdout (the original document when cleanup declines)
 - Does not modify files
 - Prints report-only findings to stderr, in two sections: "frontmatter
   suggestions (not applied)" and "markdown cleanup" (`clean.invalid-rules`,
@@ -129,22 +142,38 @@ Shell completion notes:
 
 **Save mode (`--save`)**
 
-- Requires a file path input (stdin is not supported)
+- Requires a file path input (stdin fails with status 1)
 - Writes cleaned markdown back to the same file
 - Prints a delta-style report instead of cleaned markdown
 - Skips writing when the file is already clean (no changes detected) or when
   cleanup declines
 - With `-v`/`--verbose`, also prints frontmatter/content visual diffs
 
-**JSON mode (`--json`)**
+**A data output (`--output json`, `json5`, `yaml`, `toml`)**
 
-- Prints one version-1 JSON envelope to stdout instead of Markdown or a delta report
-- Suppresses human diagnostics on stderr; findings are in `diagnostics`, and
-  skipped schema triggers are in `warnings`
+- Prints one version-1 envelope to stdout instead of Markdown or a delta report
+- Writes nothing to stderr; findings are in `diagnostics`, and skipped schema
+  triggers are in `warnings`
 - With `--save`, writes the cleaned file and still prints the envelope
 - Reports whole-document `changed`, not merely whether frontmatter was repaired
 - When cleanup declines, reports `changed: false`, `applied: []`, and the
   `clean.fidelity-fallback` finding; stderr stays empty
+
+### Width
+
+`md clean` ignores `OUTPUT_COLUMNS` and the terminal size unless you ask for them,
+and with no `--width` it follows the document's `style.markdown`. An explicit
+`--width` wins over the document's `fixed-width:` and `unwrap:`.
+
+| `--width` | Prose |
+|---|---|
+| (none) | the document's `fixed-width:` and `unwrap:`; by default, authored line breaks stay |
+| `N` | joined, then re-wrapped to `N` display columns, list-item paragraphs included |
+| `source` | authored line breaks stay, even when the document asks for unwrapping or a width |
+| `unlimited` | joined into one line per paragraph |
+| `auto`, `N%` | as `N`, resolved from `OUTPUT_COLUMNS` or the terminal; joined when neither is known |
+
+See [Choosing a width](./output-and-width.md#choosing-a-width).
 
 ### Frontmatter Repair and Schema Precedence
 
@@ -158,7 +187,7 @@ accepted edits are preserved. Non-deterministic findings, including duplicate
 keys and suspicious values, are report-only and never mutate the document.
 
 A report-only schema finding ends with its instance path, the validator's JSON
-Pointer, in both the stderr suggestion and the JSON
+Pointer, in both the stderr suggestion and the data output's
 `message`. The span cannot stand in for it: a node in a flow collection
 (`content_policy: [TimeSensitive, Duration(3mo)]`) has no located span and
 reports the document start.
@@ -245,7 +274,7 @@ differed. It is a report, not an error:
 
 - human mode prints the original document (or, with `--save`, writes
   nothing) and the finding on stderr;
-- `--json` reports `changed: false`, `applied: []`, and the finding;
+- a data output reports `changed: false`, `applied: []`, and the finding;
 - frontmatter repairs from the same run are discarded, so the file is never
   half-cleaned;
 - the exit code is `0`.
@@ -267,9 +296,42 @@ An unusable `style.markdown` value is also report-only: cleanup reports
 `clean.invalid-rules`, ignores the document's `style.markdown`, and formats
 with the flags and defaults.
 
+### Migrating Link Titles
+
+A Markdown link title that is a JSON or JSON5 object is structured data: Darkmatter
+reads its `class`, `style`, `target`, `title`, `prompt`, `data-*`, and `qp` keys.
+Any other title is a plain tooltip. That includes the legacy `key=value` syntax,
+which is not interpreted: a link that uses it renders with that text as its tooltip
+and raises a `dm.link.legacy_structured_title` warning naming the link.
+
+`md clean` rewrites those titles to JSON5:
+
+```md
+<!-- before -->
+[Docs](https://example.com/docs "class='docs-link' target='_blank' data-section='help'")
+
+<!-- after md clean -->
+[Docs](https://example.com/docs '{ class: "docs-link", target: "_blank", "data-section": "help" }')
+```
+
+Three cases do not migrate that way:
+
+| Title | What `md clean` does |
+|---|---|
+| a title with no supported key, such as `"Run x=1 first"` | writes `{ title: "Run x=1 first" }`, so its text survives |
+| a title holding `{{ … }}` | leaves it, because JSON escaping could break the expression; it keeps warning |
+| an image's title, or a reference definition an image also uses | leaves it, because image titles keep their own syntax |
+
+A title that starts with `{` but does not parse is left alone and raises
+`dm.link.malformed_structured_title`. Both codes can be made blocking with
+[`--deny`](./policy.md) on `md compose` and `md render`.
+
 ### Version-1 JSON Envelope
 
-The v1 envelope has seven top-level fields. Diagnostic spans use byte offsets
+This is `md clean`'s data output, the same in `json`, `json5`, `yaml`, and `toml`.
+It reports on the cleanup rather than carrying the cleaned document. The v1 envelope
+has seven top-level fields, and gains `outcome` and `run_diagnostics` when needed
+(see [Data Contracts](./data-contracts.md#other-commands)). Diagnostic spans use byte offsets
 into the whole authored document: offsets are zero-based and end-exclusive;
 lines and byte columns are one-based. `applied` contains only repairs actually
 accepted and applied. Existing v1 fields and enum/code spellings are stable;
@@ -285,7 +347,7 @@ order, and a diagnostic with no candidate repair contains `"repairs": []`.
 ```json
 {
   "version": 1,
-  "source": { "kind": "file", "path": "README.md" },
+  "source": { "kind": "file", "path": "/work/README.md" },
   "frontmatter": {
     "present": true,
     "span": { "start": 4, "end": 25 }
@@ -324,7 +386,8 @@ order, and a diagnostic with no candidate repair contains `"repairs": []`.
 }
 ```
 
-For stdin, `source` is `{ "kind": "stdin", "path": null }`. When no
+`source.path` is the resolved path of the file. For stdin, `source` is
+`{ "kind": "stdin", "path": null }`. When no
 frontmatter is present, `frontmatter` is `{ "present": false }`.
 
 `warnings` lists the schema triggers discovery
@@ -346,7 +409,24 @@ file, or `null` for a trigger embedded in a host program:
 ```
 
 A trigger warning never changes `changed`, `applied`, or the exit status,
-and in `--json` mode it is not repeated on stderr.
+and in a data output it is not repeated on stderr.
+
+`diagnostics` holds this report's positioned rows, so run-level records use a
+separate `run_diagnostics` field. A clean success has neither `outcome` nor
+`run_diagnostics`. A run with a fractional `--width`, or a failed one, adds both:
+
+```json
+"outcome": "success",
+"run_diagnostics": [
+  {
+    "code": "dm.output.fractional_width",
+    "severity": "warning",
+    "message": "--width takes a whole number of columns; using 72 for 72.9",
+    "source": null, "expected_type": null, "actual_type": null,
+    "span": null, "iteration_path": []
+  }
+]
+```
 
 ### Exit Status
 
@@ -354,20 +434,21 @@ and in `--json` mode it is not repeated on stderr.
   and when cleanup declines (`clean.fidelity-fallback`).
 - Exit `1`: cleanup cannot complete, including frontmatter that cannot be
   read even after repair (or with repair turned off), a missing or invalid
-  referenced schema, or `--save` with stdin. Human mode writes the error to
+  referenced schema, or `--save` with stdin. A formatted output writes the error to
   stderr and leaves a save target untouched; the body is not cleaned either.
   When a schema error follows skipped schema triggers, their warnings are
   written to stderr ahead of it.
-- With `--json`, a missing or invalid referenced schema still exits `1` and
-  writes the error to stderr, but stdout first gets the v1 envelope with
-  `diagnostics: []`, `applied: []`, `changed: false`, and the skipped schema
-  triggers in `warnings`; no trigger warning is written to stderr. Other
-  failures before cleanup (a near-miss opening fence, an unreadable input, a
-  `--baseline-schema` that cannot be resolved, `--save` with stdin) print no
-  envelope.
-- With `--json`, unreadable frontmatter still exits `1`, but stdout contains
-  the v1 envelope (including `yaml.parse`, with `applied: []`), stderr is
-  empty, and the file is untouched.
+- Exit `2`: a usage error, such as `--compact` with `--loose`.
+
+A failing data output always writes one value and nothing to stderr:
+
+- When cleanup started, it is the v1 envelope with `applied: []`, `changed: false`,
+  and `outcome: "failure"`, and the file is untouched. Unreadable frontmatter
+  appears as a `yaml.parse` row in `diagnostics`. A missing or invalid referenced
+  schema is a row in `run_diagnostics`.
+- When cleanup could not start (an unreadable input, a `--baseline-schema` that
+  cannot be resolved, `--save` with stdin), it is
+  `{ "outcome": "failure", "diagnostics": [...], "value": null }`.
 
 Frontmatter that strict YAML rejects but Darkmatter reads, such as a bare
 `{{ … }}` value, is not an error: the block is kept as written, `yaml.parse`
@@ -377,11 +458,11 @@ which Darkmatter reads as the same value.
 
 ### Save Mode Constraints
 
-- `--save` with stdin (`-`) returns an error:
-    - `--save requires an input file path (stdin is not supported)`
-- `--save` can be used either:
-    - On the subcommand: `md clean FILE.md --save`
-    - As top-level shorthand: `md FILE.md --save`
+- `--save` with stdin (`-`) fails with exit status 1 and the message
+  `--save requires an input file path (stdin is not supported)`.
+- `--save` belongs to `md clean`: `md clean FILE.md --save`. `md` with no
+  subcommand only renders, so `md FILE.md --save` is a usage error (exit
+  status 2).
 
 ## Transformations Applied
 
@@ -399,7 +480,7 @@ column is what happens when neither the document nor a flag sets the rule.
 | `list-item-padding` | `preserve` | Blank lines between sibling items (`--compact`, `--loose`) |
 | `list-interior-padding` | `preserve` | Blank lines before blocks nested in an item |
 | `unwrap` | off | Joins single newlines inside paragraphs |
-| `fixed-width` | off | Unwraps, then re-wraps prose to a display width (`--fixed-width`) |
+| `fixed-width` | off | Unwraps, then re-wraps prose to a display width (`--width`) |
 
 Everything else is kept as written: list markers (`*`, `-`, `+`, `1.`,
 `1)`), emphasis markers (`*` vs `_`), escapes, blank lines between other
@@ -455,7 +536,7 @@ and should be collapsed before being wrapped to the requested display width.
 Command:
 
 ```bash
-md clean --fixed-width 80 -
+md clean --width 80 -
 ```
 
 Output:
@@ -479,7 +560,7 @@ Input:
 Command:
 
 ```bash
-md clean --fixed-width 24 -
+md clean --width 24 -
 ```
 
 Output:
@@ -505,19 +586,24 @@ by an editor.
 ```
 
 `md clean -` joins the paragraph into one line;
-`md clean --ignore-incidental-newlines -` keeps both lines.
+`md clean --width source -` keeps both lines.
 
 ### Color and Styling
 
-- Default clean output is plain markdown text.
+- Default clean output is Markdown text, on a terminal and on a pipe.
 - Save-mode reporting uses the same symbol-based style as `md delta`.
+
+## Removed Spellings
+
+These are usage errors (exit status 2).
+
+| Removed | Use instead |
+|---|---|
+| `--fixed-width N` | `--width N` |
+| `--ignore-incidental-newlines` | `--width source` |
+| `--json` | `--output json` |
 
 ## Lessons Learned
 
 - Cleanup is formatting-oriented and never changes document meaning; when it cannot show that a result keeps the meaning, it declines and leaves the document unchanged.
 - `clean --save` is built to support in-place workflows while still surfacing exactly what changed.
-- Using `md FILE.md --save` provides a fast top-level shorthand for the same behavior.
-
-## Issues
-
-- No `--output` flag exists for `clean`; output behavior is mode-based (`stdout` vs `--save` report).

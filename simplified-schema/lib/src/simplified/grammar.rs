@@ -14,6 +14,9 @@
 //!                   | tuple
 //!                   | function
 //!                   | reference
+//!                   | template_type
+//! template_type    := slot ( "(" item_constraints ")" )?
+//!                          ( "[]" ( "(" arr_constraints ")" )? )?
 //! tuple            := "tuple" "(" "[" ( element ( "," element )* ","? )? "]"
 //!                     ( ";" item_constraints )? ")"
 //!                     ( "[]" ( "(" arr_constraints ")" )? )?
@@ -59,6 +62,11 @@
 //!                   | "category" "(" name ")"      (name: raw text up to `)`)
 //! arglist          := arg ( "," arg )*
 //! arg              := NUMBER | BARE_WORD | SQUOTED | DQUOTED
+//! slot             := "{{" expression "}}"
+//!                     (a complete `enum`/`suggest` element, the whole
+//!                      argument of `literal`, `default`, `min`, `max`,
+//!                      `pattern`, or a whole type atom (`template_type`);
+//!                      ended by `expression::scan_expression_at`)
 //! fileref          := <biscuit-file file reference> | "this"
 //! description      := <rest-of-top-level-field, trimmed>
 //! ```
@@ -94,6 +102,17 @@
 //! next top-level comma or closing brace (Decision #9). Inline object
 //! nesting is capped at [`MAX_INLINE_OBJECT_DEPTH`] levels (Decision #11).
 //!
+//! A `slot` is recorded, never evaluated: a list holding one is
+//! [`Constraint::Dynamic`], a constraint argument holding one is a template
+//! constraint ([`Constraint::TemplateConstraint`]), a type atom holding one
+//! is a template type ([`TypeExpr::Slot`]), and a list without one keeps its
+//! static constraint. A template type is accepted as a property's type, a
+//! property-level union arm, or a tuple element (its suffix is read like a
+//! reference's); a tuple spread, a `function(...)` signature, and a
+//! `property(...)` declaration refuse it, as does slot text inside a type
+//! name or after `@` ([`SlotPosition`]). A `{{` that does not open an element (quoted, or after other
+//! text in the same word) is ordinary text.
+//!
 //! Errors surface as [`SchemaError::Grammar`] with the byte span of the
 //! offending token.
 
@@ -107,12 +126,13 @@ use crate::errors::{GrammarRelated, SchemaError};
 
 use super::alphanumeric::AlphanumericOption;
 use super::narrowing;
-use super::signature::duplicate_overload;
 use super::types::{
     CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
-    NarrowsClause, NarrowsKind, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
-    SuggestionCandidate, TupleElement, TupleType, TypeExpr, narrows_target_problem,
+    DynamicElement, DynamicKind, DynamicList, NarrowsClause, NarrowsKind, PatternKey, PatternKeyDef, PropertyAtom,
+    PropertyDef, SchemaShape, SimplifiedType, Slot, SuggestionCandidate, TupleElement, TupleType, TypeExpr,
+    TemplateConstraintKind, narrows_target_problem,
 };
+use crate::expression::scan::scan_expression_at;
 
 /// Hard maximum number of nested inline object levels the parser will accept.
 /// Exceeding this depth is a grammar error (Decision #11).
@@ -431,13 +451,28 @@ fn nested_file_reference_end(bytes: &[u8], start: usize, end: usize) -> usize {
         .unwrap_or(top)
 }
 
+/// The end of the `{{ … }}` slot opening at `index`, by the expression
+/// scanner's closing rule, or `None` when no slot opens there.
+fn slot_end(bytes: &[u8], index: usize) -> Option<usize> {
+    if bytes.get(index..index + 2) != Some(b"{{") {
+        return None;
+    }
+    let text = std::str::from_utf8(bytes).ok()?;
+    scan_expression_at(text, index).map(|found| found.end)
+}
+
 /// The index of the `)` closing the constraint argument list whose `(` is at
 /// `open`, or `None` when it is unterminated. Quotes, parentheses, brackets,
-/// and braces nest, as in an inline example's call and result.
+/// and braces nest, as in an inline example's call and result; a `{{ … }}`
+/// slot is skipped whole.
 fn argument_list_end(bytes: &[u8], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut index = open;
     while index < bytes.len() {
+        if let Some(end) = slot_end(bytes, index) {
+            index = end;
+            continue;
+        }
         match bytes[index] {
             b'\'' | b'"' => {
                 index = quoted_end(bytes, index, bytes.len())?;
@@ -457,12 +492,16 @@ fn argument_list_end(bytes: &[u8], open: usize) -> Option<usize> {
     None
 }
 
-/// The first occurrence of `needle` in `bytes[range]` outside quotes and
-/// outside any `(`/`[`/`{` nesting.
+/// The first occurrence of `needle` in `bytes[range]` outside quotes, `{{ … }}`
+/// slots, and any `(`/`[`/`{` nesting.
 fn find_top_level(bytes: &[u8], range: Range<usize>, needle: &[u8]) -> Option<usize> {
     let mut depth = 0usize;
     let mut index = range.start;
     while index < range.end {
+        if let Some(end) = slot_end(bytes, index).filter(|&end| end <= range.end) {
+            index = end;
+            continue;
+        }
         match bytes[index] {
             b'\'' | b'"' => {
                 index = quoted_end(bytes, index, range.end)?;
@@ -517,6 +556,15 @@ enum ListOwner {
 }
 
 impl ListOwner {
+    /// The type a template-constraint slot belongs to: the type keyword, or
+    /// `unknown` where the target is not known while parsing.
+    fn value_target(self) -> SimplifiedType {
+        match self {
+            Self::Type(ty) => ty,
+            _ => SimplifiedType::Unknown,
+        }
+    }
+
     /// Whether the list may open with `alphanumeric` options.
     fn takes_options(self) -> bool {
         matches!(self, Self::Type(SimplifiedType::Alphanumeric) | Self::Reference)
@@ -585,6 +633,7 @@ fn is_constraint_keyword(name: &str) -> bool {
             | "non-null"
             | "mapping"
             | "declared-required"
+            | "container"
             | "forms"
             | "property"
     )
@@ -626,6 +675,9 @@ struct Parser<'a> {
     /// The span of each option the last union read returned, in order; a
     /// group's options share the group's span.
     arm_spans: Vec<Range<usize>>,
+    /// Where a template type read now would stand; a refused position stays
+    /// in force for everything nested inside it.
+    slot_position: SlotPosition,
 }
 
 impl<'a> Parser<'a> {
@@ -638,7 +690,20 @@ impl<'a> Parser<'a> {
             nesting: 0,
             single_group: false,
             arm_spans: Vec::new(),
+            slot_position: SlotPosition::PropertyType,
         }
+    }
+
+    /// Runs `read` with template types standing at `position`, unless an
+    /// enclosing position already refuses them, which stays in force.
+    fn at_slot_position<T>(&mut self, position: SlotPosition, read: impl FnOnce(&mut Self) -> T) -> T {
+        let saved = self.slot_position;
+        if saved.allows() {
+            self.slot_position = position;
+        }
+        let result = read(self);
+        self.slot_position = saved;
+        result
     }
 
     fn enter(&mut self, at: usize) -> Result<(), SchemaError> {
@@ -658,6 +723,12 @@ impl<'a> Parser<'a> {
 
     fn starts_with(&self, text: &str) -> bool {
         self.lex.bytes[self.lex.pos..].starts_with(text.as_bytes())
+    }
+
+    /// Whether the cursor is at a `{{` that [`Self::read_slot`] reads as a
+    /// slot rather than text.
+    fn opens_slot(&self) -> bool {
+        self.starts_with("{{") && !self.starts_with("{{{") && !self.starts_with("{{!data:")
     }
 
     fn err<T>(&self, message: impl Into<String>, span: Range<usize>) -> Result<T, SchemaError> {
@@ -809,28 +880,28 @@ impl<'a> Parser<'a> {
         if let Some(description) = self.parse_top_level_description()? {
             arms.last_mut().expect("a union has an option").description = Some(description);
         }
-        if let Some(duplicate) = second_suggestion_span(&arms) {
-            return self.err_related(
-                "a property definition may contain at most one `suggest` constraint",
+        if let Some(problem) = union_invariant_problem(&arms, true) {
+            return self.union_err(problem);
+        }
+        Ok(arms_to_def(arms))
+    }
+
+    /// The error for a violated union invariant, located over the options
+    /// the last union read returned.
+    fn union_err<T>(&self, problem: UnionInvariant) -> Result<T, SchemaError> {
+        match problem {
+            UnionInvariant::SecondSuggestion(duplicate) => self.err_related(
+                SECOND_SUGGESTION,
                 duplicate.span,
                 vec![GrammarRelated { message: FIRST_SUGGESTION.into(), span: duplicate.first_span, arm: None }],
-            );
+            ),
+            UnionInvariant::DuplicateOverload { message, .. } => self.err(message, 0..self.src.len()),
+            UnionInvariant::Narrows(problem) => self.narrows_err(problem),
+            UnionInvariant::NonNull { arm, message } => {
+                let span = arm.and_then(|index| self.arm_spans.get(index).cloned()).unwrap_or(0..self.src.len());
+                self.err(message, span)
+            }
         }
-        if let Some(message) = duplicate_overload(&arms, None) {
-            return self.err(message, 0..self.src.len());
-        }
-        if let Some(problem) = narrowing::overload_arms_problem(&arms) {
-            return self.narrows_err(problem);
-        }
-        let marked = arms.iter().position(PropertyAtom::marks_non_null);
-        let def = arms_to_def(arms);
-        if let Some(message) = def.non_null_problem() {
-            let span = marked
-                .and_then(|index| self.arm_spans.get(index).cloned())
-                .unwrap_or(0..self.src.len());
-            return self.err(message, span);
-        }
-        Ok(def)
     }
 
     /// Reads one or more `|`-separated options. A parenthesized group without
@@ -875,6 +946,7 @@ impl<'a> Parser<'a> {
     fn parse_arm(&mut self) -> Result<Arm, SchemaError> {
         self.lex.skip_ws();
         match self.lex.peek_byte() {
+            Some(b'{') if self.opens_slot() => Ok(Arm::Atom(self.parse_type_expr()?)),
             Some(b'{') => {
                 let shape = self.parse_inline_object_body(self.object_depth)?;
                 // Postfix `()` and `[]` apply to the inline object as a whole.
@@ -978,7 +1050,7 @@ impl<'a> Parser<'a> {
             }
             if self.starts_with("...") {
                 self.lex.pos += 3;
-                let mut arms = self.parse_union_arms()?;
+                let mut arms = self.at_slot_position(SlotPosition::TupleSpread, Self::parse_union_arms)?;
                 if arms.len() != 1 {
                     return self.err(
                         "a spread names one array type; group a union first, as in `...(string | number)[]`",
@@ -1008,7 +1080,7 @@ impl<'a> Parser<'a> {
                 tuple.spread = Some(Box::new(atom));
             } else {
                 self.reject_named_element()?;
-                let arms = self.parse_union_arms()?;
+                let arms = self.at_slot_position(SlotPosition::TupleElement, Self::parse_union_arms)?;
                 self.lex.skip_ws();
                 let optional = self.lex.peek_byte() == Some(b'?');
                 if optional {
@@ -1032,10 +1104,7 @@ impl<'a> Parser<'a> {
                         element_start..self.lex.pos,
                     );
                 }
-                tuple.elements.push(TupleElement {
-                    def: arms_to_def(arms),
-                    optional,
-                });
+                tuple.elements.push(TupleElement { def: arms_to_def(arms), optional });
             }
             self.lex.skip_ws();
             match self.lex.peek_byte() {
@@ -1175,13 +1244,15 @@ impl<'a> Parser<'a> {
             match (keyword.as_str(), has_args) {
                 ("parameters", true) => {
                     self.lex.pos += 1;
-                    parameters = Some(self.parse_parameters(keyword_span)?);
+                    parameters = Some(
+                        self.at_slot_position(SlotPosition::FunctionParameter, |parser| parser.parse_parameters(keyword_span))?,
+                    );
                     self.lex.skip_ws();
                     self.expect_byte(b')', "expected `)` to close `parameters`")?;
                 }
                 ("returns", true) => {
                     self.lex.pos += 1;
-                    let arms = self.parse_union_arms()?;
+                    let arms = self.at_slot_position(SlotPosition::FunctionReturn, Self::parse_union_arms)?;
                     self.lex.skip_ws();
                     self.expect_byte(b')', "expected `)` after the return type")?;
                     returns = Some(arms_to_def(arms));
@@ -1189,7 +1260,11 @@ impl<'a> Parser<'a> {
                 ("category", true) => {
                     constraints.push(Constraint::Category(self.read_category_name(keyword_span)?));
                 }
-                ("narrows", true) => narrows = Some(self.parse_narrows(keyword_span)?),
+                ("narrows", true) => {
+                    narrows = Some(
+                        self.at_slot_position(SlotPosition::FunctionNarrows, |parser| parser.parse_narrows(keyword_span))?,
+                    );
+                }
                 ("fallible", false) => fallible = true,
                 ("example", true) => match self.parse_example(true, keyword_span)? {
                     ExampleForm::Inline(example) => examples.push(example),
@@ -1662,6 +1737,11 @@ impl<'a> Parser<'a> {
                 let def = self.parse_inline_object_property_value(depth)?;
                 pattern_keys.push(PatternKeyDef { key, def });
             } else {
+                if self.opens_slot() {
+                    let start = self.lex.pos;
+                    let end = slot_end(self.lex.bytes, start).unwrap_or(start + 2);
+                    return self.err(SlotPosition::PropertyKey.refusal().expect("refused"), start..end);
+                }
                 let (name, name_span) = self.read_inline_object_ident()?;
                 if name.is_empty() {
                     return self.err("expected an inline object property name", name_span);
@@ -1781,18 +1861,8 @@ impl<'a> Parser<'a> {
             let description = self.read_inline_object_description()?;
             arms.last_mut().expect("a union has an option").description = Some(description);
         }
-        if let Some(duplicate) = second_suggestion_span(&arms) {
-            return self.err_related(
-                "a property definition may contain at most one `suggest` constraint",
-                duplicate.span,
-                vec![GrammarRelated { message: FIRST_SUGGESTION.into(), span: duplicate.first_span, arm: None }],
-            );
-        }
-        if let Some(message) = duplicate_overload(&arms, None) {
-            return self.err(message, 0..self.src.len());
-        }
-        if let Some(problem) = narrowing::overload_arms_problem(&arms) {
-            return self.narrows_err(problem);
+        if let Some(problem) = union_invariant_problem(&arms, false) {
+            return self.union_err(problem);
         }
         Ok(arms_to_def(arms))
     }
@@ -1842,6 +1912,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_expr(&mut self) -> Result<PropertyAtom, SchemaError> {
+        self.lex.skip_ws();
+        if self.starts_with("{{")
+            && let Some(atom) = self.parse_template_type()?
+        {
+            return Ok(atom);
+        }
         let name_tok = self.next_token(LexMode::Outer)?;
         let (name, name_span) = match name_tok.tok {
             Tok::Ident(s) => (s, name_tok.span),
@@ -1853,6 +1929,11 @@ impl<'a> Parser<'a> {
                 );
             }
         };
+        // `string{{ … }}`: slot text cannot complete a type name.
+        if self.starts_with("{{") {
+            let end = slot_end(self.lex.bytes, self.lex.pos).unwrap_or(self.lex.pos + 2);
+            return self.err(SlotPosition::TypeName.refusal().expect("refused"), name_span.start..end);
+        }
         // An explicit `@` reference is detected before the keyword check so
         // that `string@this` names a local type called `string`.
         if self.looks_like_import_suffix() {
@@ -1913,9 +1994,12 @@ impl<'a> Parser<'a> {
 
         // Enum requires members.
         if matches!(ty, SimplifiedType::Enum)
-            && !item_constraints
-                .iter()
-                .any(|c| matches!(c, Constraint::Members(_)))
+            && !item_constraints.iter().any(|c| {
+                matches!(
+                    c,
+                    Constraint::Members(_) | Constraint::Dynamic(DynamicList { kind: DynamicKind::Members, .. })
+                )
+            })
         {
             return self.err(
                 "`enum` requires a constraint list with at least one member",
@@ -1926,9 +2010,13 @@ impl<'a> Parser<'a> {
         // A `literal` atom without a `LiteralValue` (bare `literal` or
         // `literal()`) is rejected the same way `enum` without members is.
         if matches!(ty, SimplifiedType::Literal)
-            && !item_constraints
-                .iter()
-                .any(|c| matches!(c, Constraint::LiteralValue(_)))
+            && !item_constraints.iter().any(|c| {
+                matches!(
+                    c,
+                    Constraint::LiteralValue(_)
+                        | Constraint::TemplateConstraint { kind: TemplateConstraintKind::Literal, .. }
+                )
+            })
         {
             return self.err("literal requires a value", name_span);
         }
@@ -1965,6 +2053,7 @@ impl<'a> Parser<'a> {
                 | Constraint::Property { .. }
                 | Constraint::Forms(_)
                 | Constraint::DeclaredRequired
+                | Constraint::Container
                     if !is_array_level => {}
                 Constraint::Default(value) => {
                     let Some(default) = value.as_str() else {
@@ -1979,7 +2068,7 @@ impl<'a> Parser<'a> {
                     let value = serde_yaml_ng::Value::String(default.to_string());
                     let result = match ty {
                         SimplifiedType::TypeDefinition => {
-                            super::parse_property_definition(self.property, &value).map(|_| ())
+                            super::parse_type_definition_value(self.property, &value).map(|_| ())
                         }
                         SimplifiedType::Schema => {
                             super::parse_schema_declaration(&value).map(|_| ())
@@ -1998,6 +2087,12 @@ impl<'a> Parser<'a> {
                 }
                 Constraint::MinItems(_) | Constraint::MaxItems(_) | Constraint::Unique
                     if is_array_level => {}
+                Constraint::TemplateConstraint { slot, .. } => {
+                    return self.err(
+                        format!("a `{{{{ … }}}}` slot is not supported on `{}`", ty.as_keyword()),
+                        slot.span.clone(),
+                    );
+                }
                 other => {
                     return self.err(
                         format!(
@@ -2094,6 +2189,31 @@ impl<'a> Parser<'a> {
         name: String,
         explicit: bool,
     ) -> Result<PropertyAtom, SchemaError> {
+        let (constraints, is_array, array_constraints) = self.parse_reference_suffix()?;
+        let ty = if explicit {
+            self.lex.skip_ws();
+            self.expect_byte(b'@', "expected `@` in an imported type reference")?;
+            let reference = self.read_fileref()?;
+            TypeExpr::Imported { name, reference }
+        } else {
+            TypeExpr::local(name)
+        };
+
+        Ok(PropertyAtom {
+            ty,
+            is_array,
+            constraints,
+            array_constraints,
+            description: None,
+        })
+    }
+
+    /// Reads the suffix a reference and a template type share: an optional
+    /// `( … )` list, then an optional `[]` with its own optional list. Both
+    /// lists are parsed with a neutral type, because their meaning depends on
+    /// a target known only after resolution. Returns the item (or value)
+    /// constraints, whether `[]` was written, and the container constraints.
+    fn parse_reference_suffix(&mut self) -> Result<(Vec<Constraint>, bool, Vec<Constraint>), SchemaError> {
         let mut constraints = Vec::new();
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b'(') {
@@ -2116,23 +2236,40 @@ impl<'a> Parser<'a> {
                 self.expect(Tok::RParen)?;
             }
         }
+        Ok((constraints, is_array, array_constraints))
+    }
 
-        let ty = if explicit {
-            self.lex.skip_ws();
-            self.expect_byte(b'@', "expected `@` in an imported type reference")?;
-            let reference = self.read_fileref()?;
-            TypeExpr::Imported { name, reference }
-        } else {
-            TypeExpr::local(name)
+    /// Reads a template type at the cursor, which opens a `{{ … }}` slot:
+    /// the slot, then the suffix a reference takes. `None` when the `{{`
+    /// does not open a slot (`{{{`, `{{!data:`).
+    ///
+    /// The slot is refused, at its span, where the current position does not
+    /// take a template type, and when a type name or `@` follows it directly.
+    fn parse_template_type(&mut self) -> Result<Option<PropertyAtom>, SchemaError> {
+        let Some(slot) = self.read_slot()? else {
+            return Ok(None);
         };
-
-        Ok(PropertyAtom {
-            ty,
+        if let Some(message) = self.slot_position.refusal() {
+            return self.err(message, slot.span);
+        }
+        let rest = &self.lex.bytes[self.lex.pos..];
+        let continues_name = match rest.first() {
+            Some(b'@' | b'_') => true,
+            Some(b'-') => rest.get(1) != Some(&b'>'),
+            Some(byte) => byte.is_ascii_alphanumeric(),
+            None => false,
+        };
+        if continues_name {
+            return self.err(SlotPosition::TypeName.refusal().expect("refused"), slot.span.start..self.lex.pos + 1);
+        }
+        let (constraints, is_array, array_constraints) = self.parse_reference_suffix()?;
+        Ok(Some(PropertyAtom {
+            ty: TypeExpr::Slot(slot),
             is_array,
             constraints,
             array_constraints,
             description: None,
-        })
+        }))
     }
 
     /// Reads the file reference to the right of `@`. Runs to the end of the
@@ -2151,6 +2288,12 @@ impl<'a> Parser<'a> {
         let raw = self.src[start..pos].trim();
         if raw.is_empty() {
             return self.err("expected a file reference after `@`", start..pos);
+        }
+        if let Some(offset) = raw.find("{{") {
+            let at = start + (self.src[start..pos].len() - self.src[start..pos].trim_start().len()) + offset;
+            // The reference ends at a `}`, so the slot's own end is scanned.
+            let end = slot_end(bytes, at).unwrap_or(start + self.src[start..pos].trim_end().len());
+            return self.err(SlotPosition::ImportPath.refusal().expect("refused"), at..end);
         }
         self.lex.pos = pos;
         Ok(raw.to_string())
@@ -2195,8 +2338,8 @@ impl<'a> Parser<'a> {
         // list, if present, is just regular array constraints (min/max/etc.).
         if owner == ListOwner::Type(SimplifiedType::Enum) && !is_array_level {
             let (members, mut tail) = self.parse_enum_members()?;
-            if !members.is_empty() {
-                constraints.push(Constraint::Members(members));
+            if let Some(members) = members_constraint(members) {
+                constraints.push(members);
             }
             constraints.append(&mut tail);
             return Ok(constraints);
@@ -2227,11 +2370,7 @@ impl<'a> Parser<'a> {
             self.lex.skip_ws();
             let constraint_start = self.lex.pos;
             let constraint = self.parse_one_constraint(owner, is_array_level)?;
-            if matches!(constraint, Constraint::Suggest(_))
-                && constraints
-                    .iter()
-                    .any(|existing| matches!(existing, Constraint::Suggest(_)))
-            {
+            if is_suggestion_list(&constraint) && constraints.iter().any(is_suggestion_list) {
                 return self.err(
                     "a property definition may contain at most one `suggest` constraint",
                     constraint_start..self.lex.pos,
@@ -2348,12 +2487,32 @@ impl<'a> Parser<'a> {
     /// Parses members until we either hit the end of the list or a `;`
     /// separator, in which case we hand off to the regular constraint parser
     /// for any trailing `default(...)` / `required` constraints.
-    fn parse_enum_members(&mut self) -> Result<(Vec<String>, Vec<Constraint>), SchemaError> {
+    ///
+    /// A member that opens with `{{` is a slot ([`Self::read_element_slot`]);
+    /// the elements come back in authored order for [`members_constraint`].
+    fn parse_enum_members(&mut self) -> Result<(Vec<DynamicElement>, Vec<Constraint>), SchemaError> {
         let mut members = Vec::new();
         let mut tail = Vec::new();
 
         loop {
             self.lex.skip_ws();
+            if let Some(slot) = self.read_element_slot(SLOT_COMPLETE_ELEMENT)? {
+                members.push(DynamicElement::Slot(slot));
+                match self.lex.peek_byte() {
+                    Some(b',') => {
+                        self.lex.pos += 1;
+                        continue;
+                    }
+                    Some(b';') => {
+                        self.lex.pos += 1;
+                        return Ok((
+                            members,
+                            self.parse_remaining_constraints(ListOwner::Type(SimplifiedType::Enum), tail)?,
+                        ));
+                    }
+                    _ => return Ok((members, tail)),
+                }
+            }
             // Look ahead: if the next token is an ident immediately followed
             // by `(`, treat it as a constraint call (e.g. `default(draft)`).
             // Otherwise it's a positional member.
@@ -2430,7 +2589,7 @@ impl<'a> Parser<'a> {
                     );
                 }
             };
-            members.push(member);
+            members.push(DynamicElement::Member(member));
             self.lex.skip_ws();
             match self.lex.peek_byte() {
                 Some(b',') => {
@@ -2509,6 +2668,30 @@ impl<'a> Parser<'a> {
     /// whitespace already skipped and a non-`)` byte guaranteed.
     fn parse_literal_value(&mut self) -> Result<Vec<Constraint>, SchemaError> {
         self.lex.skip_ws();
+        if let Some(slot) = self.read_slot()? {
+            self.lex.skip_ws();
+            if !matches!(self.lex.peek_byte(), Some(b';' | b')' | b',') | None) {
+                return self.err(SLOT_WHOLE_ARGUMENT, slot.span.start..self.lex.pos + 1);
+            }
+            let constraints = vec![Constraint::TemplateConstraint {
+                kind: TemplateConstraintKind::Literal,
+                target: SimplifiedType::Literal,
+                slot,
+            }];
+            return match self.lex.peek_byte() {
+                Some(b';') => {
+                    self.lex.pos += 1;
+                    self.parse_remaining_constraints(ListOwner::Type(SimplifiedType::Literal), constraints)
+                }
+                Some(b')') => Ok(constraints),
+                Some(b',') => self.err(
+                    "`literal` takes exactly one value; use `enum(...)` for multiple allowed values",
+                    self.lex.pos..self.lex.pos + 1,
+                ),
+                Some(_) => unreachable!("checked above"),
+                None => self.err("unterminated constraint list (missing `)`)", self.lex.pos..self.lex.pos),
+            };
+        }
         let tok = self.next_token(LexMode::ArgList)?;
         let value = match tok.tok {
             // Quoted values are always strings (quoting opts out of typing).
@@ -2617,6 +2800,16 @@ impl<'a> Parser<'a> {
                 )?;
                 Constraint::DeclaredRequired
             }
+            ("container", false) => {
+                self.check_declaration_option(
+                    &keyword,
+                    SimplifiedType::TypeDefinition,
+                    owner,
+                    is_array_level,
+                    &kw_span,
+                )?;
+                Constraint::Container
+            }
             ("forms", true) => {
                 self.check_declaration_option(
                     &keyword,
@@ -2652,7 +2845,7 @@ impl<'a> Parser<'a> {
                 self.check_declaration_option(&keyword, SimplifiedType::Schema, owner, is_array_level, &kw_span)?;
                 self.parse_property_option(kw_span)?
             }
-            ("non-null" | "mapping" | "declared-required", true) => {
+            ("non-null" | "mapping" | "declared-required" | "container", true) => {
                 return self.err(format!("`{keyword}` does not take arguments"), kw_span);
             }
             ("required", true) => {
@@ -2669,8 +2862,18 @@ impl<'a> Parser<'a> {
             }
             ("default", true) => {
                 self.lex.pos += 1; // consume (
-                let args = self.parse_arglist()?;
+                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
+                if let Some(slot) = self.whole_argument_slot(&args)? {
+                    if owner == ListOwner::Type(SimplifiedType::Null) && !is_array_level {
+                        return self.err("a `null` default must be null; it cannot be a `{{ … }}` slot", slot.span);
+                    }
+                    return Ok(Constraint::TemplateConstraint {
+                        kind: TemplateConstraintKind::Default,
+                        target: owner.value_target(),
+                        slot,
+                    });
+                }
                 if args.len() != 1 {
                     return self.err(
                         format!("`default` takes exactly 1 argument, got {}", args.len()),
@@ -2694,8 +2897,15 @@ impl<'a> Parser<'a> {
             }
             ("min", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist()?;
+                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
+                if let Some(slot) = self.whole_argument_slot(&args)? {
+                    return Ok(Constraint::TemplateConstraint {
+                        kind: TemplateConstraintKind::Min,
+                        target: owner.value_target(),
+                        slot,
+                    });
+                }
                 if args.len() != 1 {
                     return self.err(
                         format!("`min` takes exactly 1 argument, got {}", args.len()),
@@ -2715,8 +2925,15 @@ impl<'a> Parser<'a> {
             }
             ("max", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist()?;
+                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
+                if let Some(slot) = self.whole_argument_slot(&args)? {
+                    return Ok(Constraint::TemplateConstraint {
+                        kind: TemplateConstraintKind::Max,
+                        target: owner.value_target(),
+                        slot,
+                    });
+                }
                 if args.len() != 1 {
                     return self.err(
                         format!("`max` takes exactly 1 argument, got {}", args.len()),
@@ -2736,8 +2953,15 @@ impl<'a> Parser<'a> {
             }
             ("pattern", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist()?;
+                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
+                if let Some(slot) = self.whole_argument_slot(&args)? {
+                    return Ok(Constraint::TemplateConstraint {
+                        kind: TemplateConstraintKind::Pattern,
+                        target: owner.value_target(),
+                        slot,
+                    });
+                }
                 if args.len() != 1 {
                     return self.err(
                         format!("`pattern` takes exactly 1 argument, got {}", args.len()),
@@ -2748,7 +2972,7 @@ impl<'a> Parser<'a> {
             }
             ("suggest", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist()?;
+                let args = self.parse_arglist_with(Some(SLOT_COMPLETE_ELEMENT))?;
                 self.expect(Tok::RParen)?;
                 if args.is_empty() {
                     return self.err(
@@ -2772,6 +2996,24 @@ impl<'a> Parser<'a> {
                         );
                     }
                 };
+
+                // A list with a slot keeps every element; duplicates are
+                // dropped after resolution, first occurrence first, since a
+                // slot's values are not known yet.
+                if args.iter().any(|arg| arg.slot.is_some()) {
+                    let elements = args
+                        .into_iter()
+                        .map(|arg| match arg.slot {
+                            Some(slot) => DynamicElement::Slot(slot),
+                            None => DynamicElement::Suggestion(interpret_suggestion(&arg, target)),
+                        })
+                        .collect();
+                    return Ok(Constraint::Dynamic(DynamicList {
+                        kind: DynamicKind::Suggest,
+                        target,
+                        elements,
+                    }));
+                }
 
                 let mut candidates = Vec::with_capacity(args.len());
                 for arg in args {
@@ -2871,7 +3113,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Rejects a declaration option (`mapping`, `property`, `forms`,
-    /// `declared-required`) anywhere but the value list of the one
+    /// `declared-required`, `container`) anywhere but the value list of the one
     /// meta-type that takes it.
     fn check_declaration_option(
         &self,
@@ -2917,7 +3159,7 @@ impl<'a> Parser<'a> {
         self.lex.pos += 1;
         self.lex.skip_ws();
         let declaration_start = self.lex.pos;
-        let declaration = self.parse_type_expr()?;
+        let declaration = self.at_slot_position(SlotPosition::PropertyDeclaration, Self::parse_type_expr)?;
         let declaration_span = declaration_start..self.lex.pos;
         if !matches!(declaration.ty, TypeExpr::Primitive(SimplifiedType::TypeDefinition)) || declaration.is_array {
             return self.err(
@@ -2934,7 +3176,77 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Reads the slot opening at the cursor, if one does: `{{` that is not a
+    /// `{{{` literal or a `{{!data:…}}` token, which stay text. The closing
+    /// `}}` is the one the expression scanner finds ([`scan_expression_at`]);
+    /// the expression must parse. Leaves the cursor just past `}}`.
+    fn read_slot(&mut self) -> Result<Option<Slot>, SchemaError> {
+        let start = self.lex.pos;
+        let rest = &self.src[start..];
+        if !rest.starts_with("{{") || rest.starts_with("{{{") || rest.starts_with("{{!data:") {
+            return Ok(None);
+        }
+        let Some(found) = scan_expression_at(self.src, start) else {
+            if rest[2..].trim_start().starts_with("}}") {
+                let end = start + rest.find("}}").map_or(2, |close| close + 2);
+                return self.err("a `{{ … }}` slot needs an expression", start..end);
+            }
+            return self.err("unterminated `{{ … }}` slot", start..self.src.len());
+        };
+        let inner = &self.src[start + 2..found.end - 2];
+        let expression_start = start + 2 + (inner.len() - inner.trim_start().len());
+        let expression_span = expression_start..expression_start + found.expression.len();
+        if let Err(error) = parse_spanned(&found.expression) {
+            let at = (expression_span.start + error.position).min(expression_span.end);
+            return self.err(
+                format!("invalid `{{{{ … }}}}` slot expression: {}", error.message),
+                at..(at + 1).min(expression_span.end).max(at),
+            );
+        }
+        self.lex.pos = found.end;
+        Ok(Some(Slot {
+            expression: found.expression,
+            span: start..found.end,
+            expression_span,
+            origin: None,
+        }))
+    }
+
+    /// [`Self::read_slot`] for a list element: after the slot and any
+    /// whitespace the cursor must be at `,`, `;`, `)`, or the end, otherwise
+    /// `message` is reported over the slot and the text that follows it.
+    fn read_element_slot(&mut self, message: &'static str) -> Result<Option<Slot>, SchemaError> {
+        let Some(slot) = self.read_slot()? else {
+            return Ok(None);
+        };
+        self.lex.skip_ws();
+        match self.lex.peek_byte() {
+            Some(b',' | b';' | b')') | None => Ok(Some(slot)),
+            Some(_) => self.err(message, slot.span.start..self.lex.pos + 1),
+        }
+    }
+
+    /// The slot of a template constraint (`default`, `min`, `max`, `pattern`):
+    /// `None` when no argument is a slot; an error when a slot shares the
+    /// position with another argument.
+    fn whole_argument_slot(&self, args: &[Arg]) -> Result<Option<Slot>, SchemaError> {
+        let Some(slot) = args.iter().find_map(|arg| arg.slot.as_ref()) else {
+            return Ok(None);
+        };
+        if args.len() != 1 {
+            return self.err(SLOT_WHOLE_ARGUMENT, slot.span.clone());
+        }
+        Ok(Some(slot.clone()))
+    }
+
     fn parse_arglist(&mut self) -> Result<Vec<Arg>, SchemaError> {
+        self.parse_arglist_with(None)
+    }
+
+    /// Reads an argument list. With `slots`, an argument that opens with
+    /// `{{` is a slot ([`Arg::slot`]), and `slots` is the error for text
+    /// that follows it before the next `,` or `)`.
+    fn parse_arglist_with(&mut self, slots: Option<&'static str>) -> Result<Vec<Arg>, SchemaError> {
         let mut args = Vec::new();
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b')') {
@@ -2942,6 +3254,22 @@ impl<'a> Parser<'a> {
         }
         loop {
             self.lex.skip_ws();
+            if let Some(message) = slots
+                && let Some(slot) = self.read_element_slot(message)?
+            {
+                args.push(Arg {
+                    lex: slot.expression.clone(),
+                    number: None,
+                    quoted: false,
+                    span: slot.span.clone(),
+                    slot: Some(slot),
+                });
+                if self.lex.peek_byte() == Some(b',') {
+                    self.lex.pos += 1;
+                    continue;
+                }
+                return Ok(args);
+            }
             let tok = self.next_token(LexMode::ArgList)?;
             let arg = match tok.tok {
                 Tok::Number(n) => Arg {
@@ -2949,18 +3277,21 @@ impl<'a> Parser<'a> {
                     number: Some(n),
                     quoted: false,
                     span: tok.span,
+                    slot: None,
                 },
                 Tok::Word(s) | Tok::Ident(s) => Arg {
                     lex: s,
                     number: None,
                     quoted: false,
                     span: tok.span,
+                    slot: None,
                 },
                 Tok::Quoted(s) => Arg {
                     lex: s,
                     number: None,
                     quoted: true,
                     span: tok.span,
+                    slot: None,
                 },
                 other => {
                     return self.err(format!("expected argument, found `{:?}`", other), tok.span);
@@ -2999,6 +3330,49 @@ struct Arg {
     number: Option<f64>,
     quoted: bool,
     span: Range<usize>,
+    /// The slot this argument is, read only where slots are admitted; `lex`
+    /// then holds its expression text.
+    slot: Option<Slot>,
+}
+
+/// The grammar error for a template constraint whose argument mixes a slot with
+/// other text.
+const SLOT_WHOLE_ARGUMENT: &str = "a `{{ … }}` slot must be the whole argument";
+
+/// The grammar error for a list element that continues after its slot.
+const SLOT_COMPLETE_ELEMENT: &str = "a `{{ … }}` slot must be a complete list element";
+
+/// The constraint an `enum(...)` member list builds: [`Constraint::Members`]
+/// when every element is static, [`Constraint::Dynamic`] when any is a slot,
+/// `None` when there are none.
+fn members_constraint(elements: Vec<DynamicElement>) -> Option<Constraint> {
+    if elements.is_empty() {
+        return None;
+    }
+    if elements.iter().any(|element| matches!(element, DynamicElement::Slot(_))) {
+        return Some(Constraint::Dynamic(DynamicList {
+            kind: DynamicKind::Members,
+            target: SimplifiedType::Enum,
+            elements,
+        }));
+    }
+    let members = elements
+        .into_iter()
+        .map(|element| match element {
+            DynamicElement::Member(member) => member,
+            _ => unreachable!("a list without slots holds only members"),
+        })
+        .collect();
+    Some(Constraint::Members(members))
+}
+
+/// Whether `constraint` is a `suggest(...)` list, static or dynamic: a
+/// property definition may hold one.
+pub(crate) fn is_suggestion_list(constraint: &Constraint) -> bool {
+    matches!(
+        constraint,
+        Constraint::Suggest(_) | Constraint::Dynamic(DynamicList { kind: DynamicKind::Suggest, .. })
+    )
 }
 
 /// What `example(...)` held.
@@ -3065,13 +3439,20 @@ pub(crate) fn second_suggestion_span(arms: &[PropertyAtom]) -> Option<SecondSugg
         .iter()
         .enumerate()
         .flat_map(|(index, atom)| atom.constraints.iter().map(move |constraint| (index, constraint)))
-        .filter_map(|(index, constraint)| match constraint {
-            Constraint::Suggest(candidates) => candidates.first().map(|candidate| (index, candidate.span.clone())),
-            _ => None,
-        });
+        .filter_map(|(index, constraint)| suggestion_list_span(constraint).map(|span| (index, span)));
     let (first_arm, first_span) = suggestions.next()?;
     let (arm, span) = suggestions.next()?;
     Some(SecondSuggestion { arm, span, first_arm, first_span })
+}
+
+/// The authored span of one dynamic-list element: a candidate's argument or
+/// a slot's `{{ … }}`. A static member records no span.
+fn dynamic_element_span(element: &DynamicElement) -> Range<usize> {
+    match element {
+        DynamicElement::Suggestion(candidate) => candidate.span.clone(),
+        DynamicElement::Slot(slot) => slot.span.clone(),
+        DynamicElement::Member(_) => 0..0,
+    }
 }
 
 /// A second `suggest` constraint among a definition's options: where it is,
@@ -3085,6 +3466,159 @@ pub(crate) struct SecondSuggestion {
 
 /// The related-information label of a definition's first `suggest`.
 pub(crate) const FIRST_SUGGESTION: &str = "the first `suggest` constraint";
+
+/// Where a `{{ … }}` template type was written, which decides whether it is
+/// allowed there. The grammar tracks the positions inside a type string; the
+/// YAML-shape layer reports the root, key, and pattern-key positions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SlotPosition {
+    /// A property's type, a nested object property, a named type body, or a
+    /// property-level union arm.
+    PropertyType,
+    /// A positional tuple element.
+    TupleElement,
+    /// A tuple spread (`...T[]`).
+    TupleSpread,
+    /// A `function(...)` parameter.
+    FunctionParameter,
+    /// A `function(...)` return type.
+    FunctionReturn,
+    /// A `function(...)` `narrows(...)` target.
+    FunctionNarrows,
+    /// The declaration of a `property(...)` option.
+    PropertyDeclaration,
+    /// The whole `$schema` root.
+    Root,
+    /// An arm of a root `$schema` union.
+    RootUnionArm,
+    /// A property name.
+    PropertyKey,
+    /// A pattern key (`<starting::…>`, …).
+    PatternKey,
+    /// The file reference after `@`.
+    ImportPath,
+    /// Text joined to a type name or `@`.
+    TypeName,
+}
+
+impl SlotPosition {
+    /// Whether a template type may stand here.
+    pub(crate) fn allows(self) -> bool {
+        matches!(self, Self::PropertyType | Self::TupleElement)
+    }
+
+    /// The position, as the refusal names it.
+    fn describe(self) -> &'static str {
+        match self {
+            Self::PropertyType => "a property's type",
+            Self::TupleElement => "a tuple element",
+            Self::TupleSpread => "a tuple spread (`...T[]`)",
+            Self::FunctionParameter => "a `function(...)` parameter",
+            Self::FunctionReturn => "a `function(...)` return type",
+            Self::FunctionNarrows => "a `function(...)` `narrows(...)` target",
+            Self::PropertyDeclaration => "a `property(...)` declaration",
+            Self::Root => "the whole `$schema` root",
+            Self::RootUnionArm => "an arm of a root `$schema` union",
+            Self::PropertyKey => "a property name",
+            Self::PatternKey => "a pattern key",
+            Self::ImportPath => "an import path (after `@`)",
+            Self::TypeName => "part of a type name",
+        }
+    }
+
+    /// The refusal of a template type written here, or `None` where one is
+    /// allowed. It names the position, lists the allowed positions, and adds
+    /// the nearest permitted rewrite where one exists.
+    pub(crate) fn refusal(self) -> Option<String> {
+        if self.allows() {
+            return None;
+        }
+        let rewrite = match self {
+            Self::Root | Self::RootUnionArm | Self::PropertyKey | Self::PatternKey | Self::ImportPath | Self::TypeName => {
+                " Write the name literally; to choose a type from data, give the property a template type: \
+                 `name: \"{{ … }}\"`."
+            }
+            _ => "",
+        };
+        Some(format!(
+            "a `{{{{ … }}}}` slot was found in {}; template types are not allowed there. A template type is \
+             allowed as a property's type (including nested properties and named type bodies), as a \
+             property-level union arm, or as a tuple element, with an optional suffix such as `[]` or \
+             `(required)`.{rewrite}",
+            self.describe()
+        ))
+    }
+}
+
+/// The end of the `{{ … }}` slot that `text` starts with after leading
+/// whitespace, as the expression scanner closes it; `None` when `text` does
+/// not start with one (a `{{{` or `{{!data:` token is text).
+pub(crate) fn leading_slot_end(text: &str) -> Option<usize> {
+    let start = text.len() - text.trim_start().len();
+    let rest = &text[start..];
+    if !rest.starts_with("{{") || rest.starts_with("{{{") || rest.starts_with("{{!data:") {
+        return None;
+    }
+    scan_expression_at(text, start).map(|found| found.end)
+}
+
+/// The message of a second `suggest` list in one property definition.
+const SECOND_SUGGESTION: &str = "a property definition may contain at most one `suggest` constraint";
+
+/// A violated invariant of one property definition's options, which the
+/// parser and template-type substitution both check
+/// ([`PropertyDef::check_union_invariants`]).
+pub(crate) enum UnionInvariant {
+    /// A second `suggest` list.
+    SecondSuggestion(SecondSuggestion),
+    /// Two `function` overloads with one binding contract; `arm` is the
+    /// later duplicate.
+    DuplicateOverload { arm: usize, message: String },
+    /// A `narrows` clause the overloads cannot carry.
+    Narrows(narrowing::NarrowsProblem),
+    /// `non-null` over a value that admits null; `arm` is the marked option.
+    NonNull { arm: Option<usize>, message: String },
+}
+
+/// The first violated invariant of the options `arms`, in the order the
+/// parser has always checked them. `check_non_null` is off for an inline
+/// object's member, whose `non-null` the resolver judges after expansion.
+pub(crate) fn union_invariant_problem(arms: &[PropertyAtom], check_non_null: bool) -> Option<UnionInvariant> {
+    if let Some(duplicate) = second_suggestion_span(arms) {
+        return Some(UnionInvariant::SecondSuggestion(duplicate));
+    }
+    if let Some((arm, message)) = super::signature::duplicate_overload_arm(arms, None) {
+        return Some(UnionInvariant::DuplicateOverload { arm, message });
+    }
+    if let Some(problem) = narrowing::overload_arms_problem(arms) {
+        return Some(UnionInvariant::Narrows(problem));
+    }
+    if !check_non_null {
+        return None;
+    }
+    let marked = arms.iter().position(PropertyAtom::marks_non_null);
+    let message = if let [atom] = arms { PropertyDef::Single(atom.clone()) } else { PropertyDef::Union(arms.to_vec()) }
+        .non_null_problem()?;
+    Some(UnionInvariant::NonNull { arm: marked, message })
+}
+
+impl UnionInvariant {
+    /// The problem as a [`SchemaError::Grammar`] of `property`, located where
+    /// the problem itself records a span (a template type's returned text
+    /// has no other coordinates).
+    pub(crate) fn into_error(self, property: &str) -> SchemaError {
+        let (message, span, related) = match self {
+            Self::SecondSuggestion(duplicate) => (
+                SECOND_SUGGESTION.to_string(),
+                duplicate.span,
+                vec![GrammarRelated { message: FIRST_SUGGESTION.into(), span: duplicate.first_span, arm: None }],
+            ),
+            Self::DuplicateOverload { message, .. } | Self::NonNull { message, .. } => (message, 0..0, Vec::new()),
+            Self::Narrows(problem) => (problem.message, problem.span, Vec::new()),
+        };
+        SchemaError::Grammar { property: property.to_string(), message, span, related }
+    }
+}
 
 /// Converts the parsed result of an inline example to JSON. Only literals
 /// qualify; numbers are admitted from their written spelling in `src`.
@@ -3122,7 +3656,7 @@ fn interpret_suggestion(arg: &Arg, ty: SimplifiedType) -> SuggestionCandidate {
     interpret_suggestion_parts(&arg.lex, arg.span.clone(), ty)
 }
 
-fn interpret_suggestion_parts(
+pub(crate) fn interpret_suggestion_parts(
     decoded: &str,
     span: Range<usize>,
     ty: SimplifiedType,
@@ -3188,6 +3722,31 @@ pub(crate) fn reinterpret_suggestion_candidates(
         candidates[index] = candidate;
     }
     Ok(())
+}
+
+/// Retargets a deferred reference's dynamic `suggest(...)` list once the
+/// target type is known, as [`reinterpret_suggestion_candidates`] does for a
+/// static one. Duplicates are not an error here: a list with a slot keeps the
+/// first occurrence of each value after resolution.
+pub(crate) fn reinterpret_dynamic_suggestions(list: &mut DynamicList, ty: SimplifiedType) {
+    list.target = ty;
+    for element in &mut list.elements {
+        if let DynamicElement::Suggestion(candidate) = element {
+            *candidate = interpret_suggestion_parts(&candidate.decoded, candidate.span.clone(), ty);
+        }
+    }
+}
+
+/// The span of a `suggest(...)` list's first element, static or dynamic:
+/// where a misplaced list is reported. `None` for any other constraint.
+pub(crate) fn suggestion_list_span(constraint: &Constraint) -> Option<Range<usize>> {
+    match constraint {
+        Constraint::Suggest(candidates) => candidates.first().map(|candidate| candidate.span.clone()),
+        Constraint::Dynamic(DynamicList { kind: DynamicKind::Suggest, elements, .. }) => {
+            elements.first().map(dynamic_element_span)
+        }
+        _ => None,
+    }
 }
 
 /// Normalizes the feature's simple-decimal grammar without converting through
@@ -4743,3 +5302,6 @@ mod narrows_clause_tests {
         assert!(message.contains("`narrows`"), "{message}");
     }
 }
+
+#[cfg(test)]
+mod slot_tests;

@@ -160,10 +160,11 @@ impl OpenedCopy {
     /// `text` and `text` with an added `note: hi` both pass.
     fn assert_open(&self, text: &str) {
         let control = self.validate(text);
+        let definition = std::path::Path::new(&control.definition);
         assert!(
-            control.definition.ends_with("schemas/schema.yaml")
-                || control.definition.ends_with("schemas/yaml-schema.yaml")
-                || control.definition.ends_with("schemas/schema-trigger.yaml"),
+            definition.ends_with("schemas/schema.yaml")
+                || definition.ends_with("schemas/yaml-schema.yaml")
+                || definition.ends_with("schemas/schema-trigger.yaml"),
             "{}",
             control.definition
         );

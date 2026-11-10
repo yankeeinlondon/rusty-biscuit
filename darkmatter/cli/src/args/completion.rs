@@ -32,10 +32,6 @@ pub fn complete_markdown_files_from(
     base_dir: &Path,
     current: &OsStr,
 ) -> Vec<CompletionCandidate> {
-    let current_str = current.to_string_lossy();
-    let mut candidates = Vec::new();
-    let mut seen = BTreeSet::new();
-
     let is_markdown = |p: &Path| {
         p.extension()
             .and_then(|ext| ext.to_str())
@@ -43,10 +39,45 @@ pub fn complete_markdown_files_from(
             .unwrap_or(false)
     };
 
+    let current_str = current.to_string_lossy();
+    let mut candidates = complete_paths_from(base_dir, current, &is_markdown);
     if !current_str.is_empty() && "-".starts_with(current_str.as_ref()) {
-        seen.insert("-".to_string());
         candidates.push(CompletionCandidate::new("-"));
+        candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
     }
+    candidates
+}
+
+/// Completes every file and directory path, for a `file`-typed value rather than
+/// an input document. It enumerates the requested directory and opens nothing.
+pub fn complete_any_files(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_paths_from(Path::new("."), current, &|_| true)
+}
+
+/// Completes a `--style` file: directories, and JSON, JSON5, YAML (`.yaml`,
+/// `.yml`), and TOML files. It enumerates the directory and opens nothing.
+pub fn complete_style_files(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_style_files_from(Path::new("."), current)
+}
+
+pub fn complete_style_files_from(base_dir: &Path, current: &OsStr) -> Vec<CompletionCandidate> {
+    let is_style_file = |path: &Path| {
+        path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
+            ["json", "json5", "yaml", "yml", "toml"].iter().any(|accepted| ext.eq_ignore_ascii_case(accepted))
+        })
+    };
+    complete_paths_from(base_dir, current, &is_style_file)
+}
+
+/// Directories, and the files `accepts` admits, under what `current` has typed.
+fn complete_paths_from(
+    base_dir: &Path,
+    current: &OsStr,
+    accepts: &dyn Fn(&Path) -> bool,
+) -> Vec<CompletionCandidate> {
+    let current_str = current.to_string_lossy();
+    let mut candidates = Vec::new();
+    let mut seen = BTreeSet::new();
 
     let has_trailing_sep = current_str.ends_with('/') || current_str.ends_with('\\');
     let current_path = Path::new(current_str.as_ref());
@@ -85,7 +116,7 @@ pub fn complete_markdown_files_from(
             }
 
             let is_dir = path.is_dir();
-            if !is_dir && !is_markdown(&path) {
+            if !is_dir && !accepts(&path) {
                 continue;
             }
 
@@ -151,10 +182,10 @@ pub fn complete_indent_values(current: &OsStr) -> Vec<CompletionCandidate> {
     candidates
 }
 
-/// Completes common fixed-width wrapping targets.
-pub fn complete_fixed_width_values(current: &OsStr) -> Vec<CompletionCandidate> {
+/// Completes `--width`: its keywords and common columns.
+pub fn complete_width_values(current: &OsStr) -> Vec<CompletionCandidate> {
     let current_str = current.to_string_lossy();
-    let mut candidates: Vec<_> = ["40", "60", "80", "100", "120"]
+    let mut candidates: Vec<_> = ["40", "60", "80", "100", "120", "auto", "source", "unlimited"]
         .into_iter()
         .filter(|value| value.starts_with(current_str.as_ref()))
         .map(CompletionCandidate::new)
@@ -163,12 +194,12 @@ pub fn complete_fixed_width_values(current: &OsStr) -> Vec<CompletionCandidate> 
     candidates
 }
 
-/// Completes theme names for `--theme` / `--code-theme`.
+/// Completes theme names for `md code-block --theme`.
 ///
 /// Enumerates every available [`ThemePair`](ThemePair)
-/// by its kebab-case name (the same set `--list-themes` prints), attaching each
+/// by its kebab-case name (the same set `md list-themes` prints), attaching each
 /// theme's description as completion help. Without this completer the dynamic
-/// completion engine has no value source for the theme flags, so `--theme <tab>`
+/// completion engine has no value source for the flag, so `--theme <tab>`
 /// offers nothing.
 pub fn complete_theme_names(current: &OsStr) -> Vec<CompletionCandidate> {
     let current_str = current.to_string_lossy();
@@ -206,11 +237,11 @@ mod tests {
     }
 
     #[test]
-    fn complete_fixed_width_values_lists_common_widths() {
-        let values = completion_values(complete_fixed_width_values(OsStr::new("")));
-        assert_eq!(values, vec!["100", "120", "40", "60", "80"]);
+    fn complete_width_values_lists_keywords_and_common_widths() {
+        let values = completion_values(complete_width_values(OsStr::new("")));
+        assert_eq!(values, vec!["100", "120", "40", "60", "80", "auto", "source", "unlimited"]);
 
-        let values = completion_values(complete_fixed_width_values(OsStr::new("8")));
+        let values = completion_values(complete_width_values(OsStr::new("8")));
         assert_eq!(values, vec!["80"]);
     }
 
@@ -343,5 +374,25 @@ mod tests {
     fn compose_arg_completion_skips_file_suggestions_for_setters() {
         let values = completion_values(complete_compose_args(OsStr::new("name=Al")));
         assert!(values.is_empty());
+    }
+
+    #[test]
+    fn any_file_completion_admits_what_markdown_completion_skips() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("notes.txt"), "").unwrap();
+        std::fs::write(temp_dir.path().join("guide.md"), "").unwrap();
+        std::fs::create_dir(temp_dir.path().join("sub")).unwrap();
+
+        let any = completion_values(complete_paths_from(temp_dir.path(), OsStr::new(""), &|_| true));
+        assert_eq!(any, ["guide.md", "notes.txt", "sub/"]);
+        let markdown = completion_values(complete_markdown_files_from(temp_dir.path(), OsStr::new("")));
+        assert_eq!(markdown, ["guide.md", "sub/"]);
+    }
+
+    #[test]
+    fn the_stdin_marker_is_offered_only_for_input_documents() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        assert_eq!(completion_values(complete_markdown_files_from(temp_dir.path(), OsStr::new("-"))), ["-"]);
+        assert!(completion_values(complete_paths_from(temp_dir.path(), OsStr::new("-"), &|_| true)).is_empty());
     }
 }

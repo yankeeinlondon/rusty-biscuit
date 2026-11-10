@@ -121,6 +121,29 @@ fn next_event(
     (line, diagnostics)
 }
 
+/// After a configuration change, waits until every refresh the change caused
+/// has run, then checks that each new event for `path` has the level the
+/// threshold now selects.
+///
+/// A change drops the cached document contexts. The document is refreshed
+/// immediately, its trigger registry is prepared again, and installing that
+/// registry refreshes it once more. Under load both refreshes can validate,
+/// so the number of events per change is not fixed.
+fn settled_events(fixture: &mut LspFixture<'_>, logs: &CapturedLogs, uri: &str, path: &Path, seen: &mut usize, slow: bool) {
+    fixture.flush_server();
+    assert!(fixture.take_buffered_diagnostics(uri).is_some(), "the change re-published {uri}");
+    while fixture.take_buffered_diagnostics(uri).is_some() {}
+    let all = events(logs, path);
+    assert!(all.len() > *seen, "the change logged a validation event: {all:#?}");
+    let (level, message) = if slow { (" WARN ", SLOW) } else { ("DEBUG ", FAST) };
+    for line in &all[*seen..] {
+        assert!(line.starts_with(level) && line.contains(message), "{line}");
+        assert_eq!(field_names(line, message), FIELDS, "{line}");
+        assert!(!line.contains(SECRET), "a document value leaked: {line}");
+    }
+    *seen = all.len();
+}
+
 /// The `key` of every `key=value` field after `message`.
 fn field_names(line: &str, message: &str) -> Vec<String> {
     let fields = line.split_once(message).expect("message").1;
@@ -227,10 +250,10 @@ fn the_editor_setting_overrides_the_file_threshold() {
 
     // A configuration change re-publishes every open document.
     session_settings(&fixture, json!(3_600_000));
-    next_event(&mut fixture, &logs, &doc_uri, &doc, &mut seen, false);
+    settled_events(&mut fixture, &logs, &doc_uri, &doc, &mut seen, false);
 
     session_settings(&fixture, json!(-1));
-    next_event(&mut fixture, &logs, &doc_uri, &doc, &mut seen, true);
+    settled_events(&mut fixture, &logs, &doc_uri, &doc, &mut seen, true);
     fixture.shutdown();
 }
 

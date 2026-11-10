@@ -110,53 +110,99 @@ fn assert_no_schema_diagnostic(documents: &[(&str, &str)]) {
     }
 }
 
-/// The depth fixtures `md schema validate` accepts, both depth-six ones
-/// included, raise no schema diagnostic in DMLS; nor does an alias (`speak`,
-/// of `say`) in the innermost `then` and `else` of a depth-four `start`.
+/// One test per fixture `md schema validate` accepts, each opening its one
+/// document in its own session, so the corpus's growth adds tests rather than
+/// time to one test.
+macro_rules! valid_fixture_tests {
+    ($($test:ident => ($name:literal, $text:expr);)*) => {
+        $(
+            #[test]
+            fn $test() {
+                assert_no_schema_diagnostic(&[($name, $text)]);
+            }
+        )*
+    };
+}
+
+valid_fixture_tests! {
+    // The depth fixtures, both depth-six ones included.
+    the_cli_accepted_depth1_raises_no_schema_diagnostic => (
+        "depth1",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth1.md")
+    );
+    the_cli_accepted_depth3_raises_no_schema_diagnostic => (
+        "depth3",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth3.md")
+    );
+    the_cli_accepted_depth5_raises_no_schema_diagnostic => (
+        "depth5",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth5.md")
+    );
+    the_cli_accepted_depth6_raises_no_schema_diagnostic => (
+        "depth6",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth6.md")
+    );
+    the_cli_accepted_depth5_guarded_bundle_raises_no_schema_diagnostic => (
+        "depth5-guarded-bundle",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth5-guarded-bundle.md")
+    );
+    the_cli_accepted_depth4_completion_raises_no_schema_diagnostic => (
+        "depth4-completion",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md")
+    );
+    // The generated-verb fixtures: typed, convertible, and deferred operands,
+    // `ensure_file`'s overloads, the variadic `and`/`or`, and the
+    // numeric-recovery fallbacks the runtime registration binds.
+    the_cli_accepted_generated_verb_typed_value_raises_no_schema_diagnostic => (
+        "generated-verb-typed-value",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-typed-value.md")
+    );
+    the_cli_accepted_generated_verb_convertible_text_raises_no_schema_diagnostic => (
+        "generated-verb-convertible-text",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-convertible-text.md")
+    );
+    the_cli_accepted_generated_verb_deferred_raises_no_schema_diagnostic => (
+        "generated-verb-deferred",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred.md")
+    );
+    the_cli_accepted_ensure_file_overloads_raise_no_schema_diagnostic => (
+        "ensure-file-overloads",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/ensure-file-overloads.md")
+    );
+    the_cli_accepted_variadic_and_or_raises_no_schema_diagnostic => (
+        "variadic-and-or",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/variadic-and-or.md")
+    );
+    the_cli_accepted_generated_verb_numeric_recovery_raises_no_schema_diagnostic => (
+        "generated-verb-numeric-recovery",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-numeric-recovery.md")
+    );
+    // A single-action dictionary in long form at a stack root, in either
+    // branch, and as a loop's one loose verb, as the lifecycle parser accepts it.
+    the_cli_accepted_single_action_root_dictionary_raises_no_schema_diagnostic => (
+        "single-action-root-dictionary",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-root-dictionary.md")
+    );
+    the_cli_accepted_single_action_branch_dictionaries_raise_no_schema_diagnostic => (
+        "single-action-branch-dictionaries",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-branch-dictionaries.md")
+    );
+    the_cli_accepted_single_action_loop_loose_raises_no_schema_diagnostic => (
+        "single-action-loop-loose",
+        include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-loop-loose.md")
+    );
+}
+
+/// An alias (`speak`, of `say`) in the innermost `then` and `else` of a
+/// depth-four `start` raises no schema diagnostic.
 #[test]
-fn the_shared_corpus_valid_depth_fixtures_raise_no_schema_diagnostic() {
+fn a_depth4_alias_in_the_innermost_branches_raises_no_schema_diagnostic() {
     let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
     let alias = depth4
         .replacen("- ensure_file: { file: notes.md, content: \"# Notes\" }", "- speak: \"then alias\"", 1)
         .replacen("- pr_list: { count: 3 }", "- speak: { text: \"else alias\" }", 1);
     assert_eq!(alias.matches("speak").count(), 2, "the alias replaced both innermost items");
-    assert_no_schema_diagnostic(&[
-        ("depth1", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth1.md")),
-        ("depth3", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth3.md")),
-        ("depth5", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth5.md")),
-        ("depth6", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth6.md")),
-        ("depth5-guarded-bundle", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth5-guarded-bundle.md")),
-        ("depth4-completion", depth4),
-        ("depth4-alias", alias.as_str()),
-    ]);
-}
-
-/// The generated-verb fixtures `md schema validate` accepts (typed,
-/// convertible, and deferred operands, `ensure_file`'s overloads, the
-/// variadic `and`/`or`, and the numeric-recovery fallbacks the runtime
-/// registration binds) raise no schema diagnostic in DMLS.
-#[test]
-fn the_shared_corpus_valid_generated_verb_fixtures_raise_no_schema_diagnostic() {
-    assert_no_schema_diagnostic(&[
-        ("generated-verb-typed-value", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-typed-value.md")),
-        ("generated-verb-convertible-text", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-convertible-text.md")),
-        ("generated-verb-deferred", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred.md")),
-        ("ensure-file-overloads", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/ensure-file-overloads.md")),
-        ("variadic-and-or", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/variadic-and-or.md")),
-        ("generated-verb-numeric-recovery", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-numeric-recovery.md")),
-    ]);
-}
-
-/// A single-action dictionary in long form at a stack root, in either
-/// branch, and as a loop's one loose verb raises no schema diagnostic in
-/// DMLS, as `md schema validate` and the lifecycle parser accept it.
-#[test]
-fn the_shared_corpus_single_action_dictionaries_raise_no_schema_diagnostic() {
-    assert_no_schema_diagnostic(&[
-        ("single-action-root-dictionary", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-root-dictionary.md")),
-        ("single-action-branch-dictionaries", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-branch-dictionaries.md")),
-        ("single-action-loop-loose", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/single-action-loop-loose.md")),
-    ]);
+    assert_no_schema_diagnostic(&[("depth4-alias", alias.as_str())]);
 }
 
 /// Asserts DMLS rejects `text` with the set of instance paths in `expected`,
@@ -355,12 +401,10 @@ fn assert_depth4_hovers(hovers: &[(&Vec<String>, &str)], item: &str) {
 
 /// In `start`, four conditionals deep, the innermost `then` completes the
 /// generated canonical verbs and `shell`, and the long-form parameters of
-/// `ensure_file`; hover on the verb and on a parameter answers from the schema
-/// at that depth, including a parameter only a later overload declares
-/// (`content`). The `else` branch is a separate test so neither opens all
-/// nine documents in one session.
+/// `ensure_file`. Hover is a separate test, so no session opens every
+/// document.
 #[test]
-fn depth4_start_then_branch_completes_and_hovers_generated_verbs_and_parameters() {
+fn depth4_start_then_branch_completes_generated_verbs_and_parameters() {
     let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
     let (then_item, then_cursor) = emptied(depth4, "start", "then");
     // A key-less block long form under the verb; flow-mapping keys (`{ fi }`)
@@ -375,16 +419,28 @@ fn depth4_start_then_branch_completes_and_hovers_generated_verbs_and_parameters(
     let found = editor_answers_at(&[
         ("then-item.md", &then_item, then_cursor, Ask::Complete),
         ("then-parameters.md", &then_parameters, after(&then_parameters, &[then_path.as_slice(), &["\n", "co"]].concat()), Ask::Complete),
+    ]);
+    let [then_labels, then_keys] = &found[..] else { panic!("{found:?}") };
+
+    assert_depth4_start_branch_completes_generated_verbs("then", then_labels);
+    assert_eq!(then_keys, &["content"], "the `ensure_file` long-form parameter starting `co`");
+}
+
+/// In `start`, four conditionals deep, hover in the innermost `then` on the
+/// verb and on a parameter answers from the schema at that depth, including a
+/// parameter only a later overload declares (`content`).
+#[test]
+fn depth4_start_then_branch_hovers_generated_verbs_and_parameters() {
+    let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
+    let then_path = innermost("start", "then");
+
+    let found = editor_answers_at(&[
         ("then-verb.md", depth4, at(depth4, &[then_path.as_slice(), &["ensure_file"]].concat()), Ask::Hover),
         ("then-parameter.md", depth4, at(depth4, &[then_path.as_slice(), &["ensure_file", "file:"]].concat()), Ask::Hover),
         ("then-overload.md", depth4, at(depth4, &[then_path.as_slice(), &["content"]].concat()), Ask::Hover),
     ]);
-    let [then_labels, then_keys, then_verb, then_parameter, then_overload] = &found[..] else {
-        panic!("{found:?}")
-    };
+    let [then_verb, then_parameter, then_overload] = &found[..] else { panic!("{found:?}") };
 
-    assert_depth4_start_branch_completes_generated_verbs("then", then_labels);
-    assert_eq!(then_keys, &["content"], "the `ensure_file` long-form parameter starting `co`");
     assert_depth4_hovers(
         &[(then_verb, "ensure_file"), (then_parameter, "file"), (then_overload, "content")],
         "`start[0].then[0].then[0].then[0].then[0]`",
@@ -394,10 +450,9 @@ fn depth4_start_then_branch_completes_and_hovers_generated_verbs_and_parameters(
 
 /// In `start`, four conditionals deep, the innermost `else` completes the
 /// generated canonical verbs and `shell`, and the long-form parameters of
-/// `pr_list`; hover on the verb and on a parameter only a later overload
-/// declares (`count`) answers from the schema at that depth.
+/// `pr_list`.
 #[test]
-fn depth4_start_else_branch_completes_and_hovers_generated_verbs_and_parameters() {
+fn depth4_start_else_branch_completes_generated_verbs_and_parameters() {
     let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
     let (else_item, else_cursor) = emptied(depth4, "start", "else");
     let else_parameters =
@@ -407,73 +462,95 @@ fn depth4_start_else_branch_completes_and_hovers_generated_verbs_and_parameters(
     let found = editor_answers_at(&[
         ("else-item.md", &else_item, else_cursor, Ask::Complete),
         ("else-parameters.md", &else_parameters, after(&else_parameters, &[else_path.as_slice(), &["\n", "c"]].concat()), Ask::Complete),
-        ("else-verb.md", depth4, at(depth4, &[else_path.as_slice(), &["pr_list"]].concat()), Ask::Hover),
-        ("else-parameter.md", depth4, at(depth4, &[else_path.as_slice(), &["count"]].concat()), Ask::Hover),
     ]);
-    let [else_labels, else_keys, else_verb, else_parameter] = &found[..] else {
-        panic!("{found:?}")
-    };
+    let [else_labels, else_keys] = &found[..] else { panic!("{found:?}") };
 
     assert_depth4_start_branch_completes_generated_verbs("else", else_labels);
     assert_eq!(else_keys, &["count"], "the `pr_list` long-form parameter starting `c`");
+}
+
+/// In `start`, four conditionals deep, hover in the innermost `else` on the
+/// verb and on a parameter only a later overload declares (`count`) answers
+/// from the schema at that depth.
+#[test]
+fn depth4_start_else_branch_hovers_generated_verbs_and_parameters() {
+    let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
+    let else_path = innermost("start", "else");
+
+    let found = editor_answers_at(&[
+        ("else-verb.md", depth4, at(depth4, &[else_path.as_slice(), &["pr_list"]].concat()), Ask::Hover),
+        ("else-parameter.md", depth4, at(depth4, &[else_path.as_slice(), &["count"]].concat()), Ask::Hover),
+    ]);
+    let [else_verb, else_parameter] = &found[..] else { panic!("{found:?}") };
+
     assert_depth4_hovers(&[(else_verb, "pr_list"), (else_parameter, "count")], "`start[0].then[0].then[0].then[0].else[0]`");
 }
 
-/// Four conditionals deep, each event keeps its own action profile in both
-/// branches: `initialize` offers the generated verbs but not `shell`, the loop
-/// gate the ordinary profile with `shell`, and `cancelled` its own `stop` but
-/// none of the other flow controls.
+/// The completion labels at `event`'s innermost `then` and `else` in
+/// `depth4`, each emptied to a bare item marker.
+fn depth4_branch_labels(depth4: &str, event: &str) -> [(&'static str, Vec<String>); 2] {
+    let (then_text, then_cursor) = emptied(depth4, event, "then");
+    let (else_text, else_cursor) = emptied(depth4, event, "else");
+    let found = editor_answers_at(&[
+        ("profile-then.md", &then_text, then_cursor, Ask::Complete),
+        ("profile-else.md", &else_text, else_cursor, Ask::Complete),
+    ]);
+    let [then_labels, else_labels] = <[Vec<String>; 2]>::try_from(found).expect("one answer per branch");
+    [("then", then_labels), ("else", else_labels)]
+}
+
+/// Four conditionals deep, `initialize` keeps its own action profile in both
+/// branches: the generated verbs, but not `shell`.
 #[test]
-fn depth4_branches_keep_each_events_profile() {
+fn depth4_initialize_branches_offer_generated_verbs_but_not_shell() {
     let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
-    let positions: Vec<(String, (String, usize))> = ["initialize", "gate", "cancelled"]
-        .into_iter()
-        .flat_map(|event| ["then", "else"].map(|branch| (format!("{event} {branch}"), emptied(depth4, event, branch))))
-        .collect();
-    let names: Vec<String> = (0..positions.len()).map(|index| format!("profile-{index}.md")).collect();
-    let cases: Vec<(&str, &str, usize, Ask)> = positions
-        .iter()
-        .zip(&names)
-        .map(|((_, (text, cursor)), name)| (name.as_str(), text.as_str(), *cursor, Ask::Complete))
-        .collect();
-
-    let found = editor_answers_at(&cases);
-    let labels: BTreeMap<&str, &Vec<String>> =
-        positions.iter().map(|(label, _)| label.as_str()).zip(found.iter()).collect();
-    for branch in ["then", "else"] {
-        let initialize = labels[format!("initialize {branch}").as_str()];
+    for (branch, initialize) in depth4_branch_labels(depth4, "initialize") {
         for verb in ["ensure_file", "pr_list", "set_frontmatter", "say", "when"] {
-            assert!(has(initialize, verb), "initialize {branch}: `{verb}` in {initialize:?}");
+            assert!(has(&initialize, verb), "initialize {branch}: `{verb}` in {initialize:?}");
         }
-        assert!(!has(initialize, "shell"), "initialize {branch} is shell-free: {initialize:?}");
+        assert!(!has(&initialize, "shell"), "initialize {branch} is shell-free: {initialize:?}");
+    }
+}
 
-        let gate = labels[format!("gate {branch}").as_str()];
+/// Four conditionals deep, the loop gate keeps the ordinary profile with
+/// `shell` in both branches.
+#[test]
+fn depth4_loop_gate_branches_offer_the_ordinary_profile_with_shell() {
+    let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
+    for (branch, gate) in depth4_branch_labels(depth4, "gate") {
         for verb in ["ensure_file", "pr_list", "set_frontmatter", "shell", "say", "retry", "when"] {
-            assert!(has(gate, verb), "gate {branch}: `{verb}` in {gate:?}");
-        }
-
-        let cancelled = labels[format!("cancelled {branch}").as_str()];
-        for verb in ["stop", "shell", "say", "pr_list", "when"] {
-            assert!(has(cancelled, verb), "cancelled {branch}: `{verb}` in {cancelled:?}");
-        }
-        for verb in ["retry", "resume", "proxy", "prep", "skip", "error", "break", "defer"] {
-            assert!(!has(cancelled, verb), "cancelled {branch} does not offer `{verb}`: {cancelled:?}");
+            assert!(has(&gate, verb), "gate {branch}: `{verb}` in {gate:?}");
         }
     }
 }
 
-/// Schema validation, completion, and hover over lifecycle stacks that would
-/// create files, run a shell, and call expression functions execute none of
-/// it. They run in process on this thread, so the recording test function and
-/// the per-thread handler counters see every expression-function entry; the
-/// process-wide counters see any effect engine or network attempt.
+/// Four conditionals deep, `cancelled` keeps its own `stop` in both branches
+/// but none of the other flow controls.
 #[test]
-fn claudine_schema_validation_and_editor_requests_run_no_actions() {
+fn depth4_cancelled_branches_offer_stop_but_no_other_flow_control() {
     let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
-    let generated = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred.md");
-    let nullable = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/optional-nonnullable-null.md");
-    let variadic = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/variadic-and-or.md");
+    for (branch, cancelled) in depth4_branch_labels(depth4, "cancelled") {
+        for verb in ["stop", "shell", "say", "pr_list", "when"] {
+            assert!(has(&cancelled, verb), "cancelled {branch}: `{verb}` in {cancelled:?}");
+        }
+        for verb in ["retry", "resume", "proxy", "prep", "skip", "error", "break", "defer"] {
+            assert!(!has(&cancelled, verb), "cancelled {branch} does not offer `{verb}`: {cancelled:?}");
+        }
+    }
+}
 
+/// Asserts schema validation, completion, and hover over the documents
+/// `build` returns execute none of the lifecycle actions in them, and that
+/// none of the `sentinels` it returns (paths an action would create) exists.
+/// `build` receives a function spelling a name inside the workspace.
+///
+/// The requests run in process on this thread, so the recording test function
+/// and the per-thread handler counters see every expression-function entry;
+/// the process-wide counters see any effect engine or network attempt.
+fn assert_editor_requests_run_no_actions(
+    min_answered: usize,
+    build: impl FnOnce(&dyn Fn(&str) -> String) -> (Vec<(&'static str, String)>, Vec<String>),
+) {
     #[cfg(feature = "effects-instrumentation")]
     let before = (darkmatter::effects::engine_build_count(), darkmatter::effects::network_attempt_count());
     #[cfg(feature = "effects-instrumentation")]
@@ -491,18 +568,7 @@ fn claudine_schema_validation_and_editor_requests_run_no_actions() {
     let workspace = LspWorkspace::new();
     let fixture = Fixture::new(workspace.path());
     let spelled = |name: &str| workspace.path().join(name).to_string_lossy().replace('\\', "/");
-    let (ensured, touched, gated) = (spelled("ENSURED_AT_DEPTH_4"), spelled("TOUCHED_AT_DEPTH_4"), spelled("GATE_ENSURED"));
-    let acting = depth4
-        .replacen("ctx.level == 1", "recorded()", 4)
-        .replacen(
-            "- ensure_file: { file: notes.md, content: \"# Notes\" }",
-            &format!("- ensure_file: {{ file: \"{ensured}\", content: \"{{{{ recorded() }}}}\" }}"),
-            1,
-        )
-        .replacen("- pr_list: { count: 3 }", &format!("- shell: \"touch {touched}\""), 1)
-        .replacen("- ensure_file: notes.md", &format!("- ensure_file: \"{gated}\""), 1);
-    assert!(acting.contains("TOUCHED_AT_DEPTH_4") && acting.contains("GATE_ENSURED"), "{acting}");
-    let documents = [("acting.md", acting.as_str()), ("generated.md", generated), ("nullable.md", nullable), ("variadic.md", variadic)];
+    let (documents, sentinels) = build(&spelled);
 
     let config = DmlsConfig::default();
     let contexts = RepositoryContexts::new(fixture.snapshot());
@@ -511,7 +577,8 @@ fn claudine_schema_validation_and_editor_requests_run_no_actions() {
     let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
     let repo = [fixture.repo()];
     let mut answered = 0;
-    for (name, text) in documents {
+    for (name, text) in &documents {
+        let (name, text) = (*name, text.as_str());
         let path = fixture.document(name, text);
         let uri: Uri = uri_of(&path).parse().unwrap();
         let resolution = contexts.for_document(&path);
@@ -549,9 +616,9 @@ fn claudine_schema_validation_and_editor_requests_run_no_actions() {
             }
         }
     }
-    assert!(answered >= 15, "the editor requests reached the stacks: {answered}");
+    assert!(answered >= min_answered, "the editor requests reached the stacks: {answered}");
 
-    for sentinel in [&ensured, &touched, &gated] {
+    for sentinel in &sentinels {
         assert!(!Path::new(sentinel).exists(), "{sentinel} was created: a lifecycle action ran");
     }
     #[cfg(feature = "effects-instrumentation")]
@@ -576,4 +643,46 @@ fn claudine_schema_validation_and_editor_requests_run_no_actions() {
             "validation and editor requests built no effect engine and attempted no network access",
         );
     }
+}
+
+
+/// The editor requests that find their needle in each test's documents: a
+/// lower count means a fixture edit moved the stacks out of reach.
+const ACTING_MIN_ANSWERED: usize = 8;
+const GENERATED_MIN_ANSWERED: usize = 7;
+
+/// A depth-four stack that would create files, run a shell, and call an
+/// expression function in templates and conditions runs none of it under
+/// schema validation and editor requests.
+#[test]
+fn claudine_depth4_acting_stacks_run_no_actions_under_editor_requests() {
+    let depth4 = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/depth4-completion.md");
+    assert_editor_requests_run_no_actions(ACTING_MIN_ANSWERED, |spelled| {
+        let (ensured, touched, gated) = (spelled("ENSURED_AT_DEPTH_4"), spelled("TOUCHED_AT_DEPTH_4"), spelled("GATE_ENSURED"));
+        let acting = depth4
+            .replacen("ctx.level == 1", "recorded()", 4)
+            .replacen(
+                "- ensure_file: { file: notes.md, content: \"# Notes\" }",
+                &format!("- ensure_file: {{ file: \"{ensured}\", content: \"{{{{ recorded() }}}}\" }}"),
+                1,
+            )
+            .replacen("- pr_list: { count: 3 }", &format!("- shell: \"touch {touched}\""), 1)
+            .replacen("- ensure_file: notes.md", &format!("- ensure_file: \"{gated}\""), 1);
+        assert!(acting.contains("TOUCHED_AT_DEPTH_4") && acting.contains("GATE_ENSURED"), "{acting}");
+        (vec![("acting.md", acting)], vec![ensured, touched, gated])
+    });
+}
+
+/// Generated verbs with deferred operands, an optional non-nullable `null`,
+/// and the variadic `and`/`or` evaluate none of their calls under schema
+/// validation and editor requests.
+#[test]
+fn claudine_generated_verb_calls_run_no_actions_under_editor_requests() {
+    let generated = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/generated-verb-deferred.md");
+    let nullable = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/optional-nonnullable-null.md");
+    let variadic = include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/variadic-and-or.md");
+    assert_editor_requests_run_no_actions(GENERATED_MIN_ANSWERED, |_| {
+        let documents = [("generated.md", generated), ("nullable.md", nullable), ("variadic.md", variadic)];
+        (documents.map(|(name, text)| (name, text.to_string())).to_vec(), Vec::new())
+    });
 }

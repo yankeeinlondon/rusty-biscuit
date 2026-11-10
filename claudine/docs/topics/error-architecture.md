@@ -279,7 +279,7 @@ original five fields keep their names, order, and values:
 | Field | Supplied today | Notes |
 |-------|----------------|-------|
 | `reference` | ✅ | the raw, unresolved reference |
-| `kind` | ✅ | reference-kind slug: `not_found`, `malformed`, `found_elsewhere`, `remote_not_enabled` |
+| `kind` | ✅ | reference-kind slug: `not_found`, `malformed`, `found_elsewhere`, `remote_not_enabled`, `remote_denied` (a remote host the fetch policy does not allow) |
 | `base_dir` | ✅ | **compatibility projection** — see below |
 | `suggestions` | ✅ | the same did-you-mean list the human block shows |
 | `fallback_dir` | ✅ | **compatibility projection** — see below |

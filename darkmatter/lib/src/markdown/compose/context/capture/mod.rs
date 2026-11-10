@@ -3,6 +3,7 @@
 mod agent;
 mod capabilities;
 mod changes;
+mod clock;
 mod datetime;
 mod docs;
 mod document;
@@ -42,15 +43,20 @@ pub(crate) struct DocumentSeed<'a> {
     /// `ctx.timestamp_ms` of the snapshot being extended, when it already
     /// captured date/time.
     pub(crate) timestamp_ms: Option<i64>,
+    /// The clock reading of the snapshot being extended, so a group captured
+    /// later reads the same instant as the date functions already did.
+    pub(crate) clock: Option<ClockReading>,
 }
 
 pub(crate) use document::{NONCE_AREA, RootDocument};
 #[cfg(test)]
 pub(crate) use document::test_seam::with_forced_nonce_failure;
+pub(crate) use clock::{CapturedClock, ClockReading};
 pub(crate) use observations::CapturedObservations;
 pub(crate) use git::{fetch_recent_commits, render_recent_commits};
 pub use capabilities::DeferredCapabilities;
 pub use groups::{ContextGroup, ContextRequirements};
+pub(crate) use groups::function_group;
 pub use snapshot::ContextCaptureEvidence;
 #[cfg(test)]
 pub(crate) use snapshot::{GIT_DISCOVERY_COUNT, REPOSITORY_DISCOVERY_COUNT};
@@ -143,14 +149,17 @@ fn populate_capture(
     seed: DocumentSeed<'_>,
 ) -> CaptureResult {
     let mut values = Map::new();
-    let mut observations = CapturedObservations::default();
+    // One clock reading per snapshot: `ctx.now`, `ctx.today`, and the date
+    // functions all read it.
+    let clock = seed.clock.unwrap_or_else(ClockReading::now);
+    let mut observations = CapturedObservations::default().with_clock(clock);
 
     if requirements.contains(ContextGroup::Invocation) {
         invocation::populate_invocation(&cap, &mut values);
     }
 
     if requirements.contains(ContextGroup::DateTime) {
-        datetime::populate_datetime(&mut values);
+        datetime::populate_datetime(&clock, &mut values);
     }
 
     if requirements.contains(ContextGroup::Git) {
@@ -221,6 +230,34 @@ fn populate_capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ctx.now` and the date functions read one instant: the capture seeds
+    /// the observations' clock with the reading `now` was formatted from.
+    #[test]
+    fn the_captured_date_values_and_the_date_functions_share_one_reading() {
+        let (values, _, _, _, observations) = capture_runtime_context_for_content(Path::new(""), "{{ ctx.now }}");
+        let reading = observations.clock().reading();
+        let now = reading.local().format("%Y-%m-%dT%H:%M:%S%:z").to_string();
+        assert_eq!(values.get("now"), Some(&Value::String(now)));
+        assert_eq!(values.get("timestamp_ms").and_then(Value::as_i64), Some(reading.utc().timestamp_millis()));
+    }
+
+    /// A snapshot extended with a group later still reads its first instant.
+    #[test]
+    fn a_later_capture_of_a_snapshot_keeps_its_clock_reading() {
+        let reading = ClockReading::now();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let seed = DocumentSeed { clock: Some(reading), ..DocumentSeed::default() };
+        let (values, _, _, _, observations) = capture_runtime_context_for_requirements_with_cwd(
+            Path::new(""),
+            &ContextRequirements::from_groups([ContextGroup::DateTime]),
+            Ok(std::path::PathBuf::new()),
+            seed,
+            HashMap::new(),
+        );
+        assert_eq!(observations.clock().reading(), reading);
+        assert_eq!(values.get("timestamp_ms").and_then(Value::as_i64), Some(reading.utc().timestamp_millis()));
+    }
 
     #[test]
     fn content_without_runtime_context_only_populates_datetime() {

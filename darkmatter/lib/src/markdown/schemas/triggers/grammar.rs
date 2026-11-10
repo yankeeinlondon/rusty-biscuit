@@ -489,6 +489,15 @@ fn parse_child_list(at: &str, value: &YamlValue) -> Result<Vec<MatchExpr>, Schem
 /// rejecting forbidden constraints and imported types.
 fn parse_property_condition_atom(name: &str, value: &YamlValue) -> Result<PropertyAtom, SchemaError> {
     let def = parse_property_condition_def(name, value)?;
+    // Matching is passive and decides which payloads apply before anything
+    // could resolve a slot, so a condition never holds one, at any depth;
+    // only a payload may. Named as a slot, not as the keyword it fills.
+    if !simplified_schema::slots::definition_slots(&def).is_empty() {
+        return Err(SchemaError::TriggerForbiddenConstraint {
+            property: name.to_string(),
+            constraint: "`{{ … }}` slot (only a trigger's payload may hold slots)".into(),
+        });
+    }
     match def {
         PropertyDef::Single(atom) => {
             enforce_match_safe(name, &atom)?;
@@ -624,6 +633,7 @@ pub fn is_match_safe_constraint(constraint: &Constraint) -> bool {
             | Constraint::Property { .. }
             | Constraint::Forms(_)
             | Constraint::DeclaredRequired
+            | Constraint::Container
     )
 }
 
@@ -795,6 +805,32 @@ mod tests {
             err,
             SchemaError::TriggerForbiddenConstraint { .. }
         ));
+    }
+
+    /// Only a trigger's payload may hold `{{ … }}` slots: a match condition
+    /// holding one, at any position or depth, is refused naming the slot
+    /// (never the keyword it fills, which may be an allowed one like `min`).
+    #[test]
+    fn rejects_a_slot_in_a_match_condition() {
+        parse_match_conditions(&yaml("os: enum(macOS, Linux)")).expect("control: a literal enum matches");
+        for (case, text, property) in [
+            ("enum", "os: enum({{ env.OS }})", "os"),
+            ("enum mixed with literals", "os: enum(macOS, {{ env.OS }})", "os"),
+            ("template constraint allowed as a literal", "count: number(min({{ env.MIN }}))", "count"),
+            ("array items", "tags: enum({{ env.TAGS }})[]", "tags"),
+            ("nested object", "config:\n    os: enum({{ env.OS }})", "config"),
+            ("union arm", "os:\n    - string\n    - enum({{ env.OS }})", "os"),
+            ("inside a group", "group:\n    - os: enum({{ env.OS }})\n    - kind: literal(a)", "os"),
+        ] {
+            let error = parse_match_conditions(&yaml(text)).expect_err(case);
+            match &error {
+                SchemaError::TriggerForbiddenConstraint { property: found, constraint } => {
+                    assert_eq!(found, property, "{case}");
+                    assert!(constraint.contains("slot"), "{case}: {constraint}");
+                }
+                other => panic!("{case}: {other:?}"),
+            }
+        }
     }
 
     #[test]

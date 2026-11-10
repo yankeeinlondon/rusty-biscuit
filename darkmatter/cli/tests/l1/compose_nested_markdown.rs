@@ -33,6 +33,37 @@ fn compose_nested_markdown_shares_context_and_root_relative_transclusion() {
     assert!(stdout.contains("NESTED PART CONTENT"), "{stdout}");
 }
 
+/// A `path=value` setter outranks `--state` in nested content as it does in
+/// the root and in a `::file` child, so no overridden value leaks through
+/// `as_markdown`.
+#[test]
+fn compose_setter_reaches_nested_markdown_like_a_transcluded_child() {
+    let fixture = CliProcessFixture::named("compose_setter_reaches_nested_markdown");
+    fixture.write_file("cwd/docs/child.md", "file-child=[{{ name }}]\n");
+    let document = fixture.write_file(
+        "cwd/docs/root.md",
+        "---\nname: authored\n---\nroot=[{{ name }}]\n\n\
+         {{ as_markdown(\"nested=[{{ name }}]\") }}\n\n\
+         {{ as_markdown(\"::file ./child.md\") }}\n\n\
+         ::file ./child.md\n",
+    );
+
+    let output = fixture
+        .command()
+        .arg("compose")
+        .arg(&document)
+        .args(["--state", r#"{"name":"state"}"#, "name=setter"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("root=[setter]"), "{stdout}");
+    assert!(stdout.contains("nested=[setter]"), "{stdout}");
+    assert_eq!(stdout.matches("file-child=[setter]").count(), 2, "{stdout}");
+    assert!(!stdout.contains("[state]") && !stdout.contains("[authored]"), "{stdout}");
+}
+
 /// AC32: preflight approval discovers a nested command without composing it,
 /// and the command runs as often as the same command written in the body.
 #[cfg(unix)]

@@ -661,12 +661,19 @@ impl<'a> TransclusionEngine<'a> {
                 // A directive in a repeated body reads the frame of its copy.
                 let lookup = crate::markdown::compose::site_scope::SiteLookup::new(&document, scopes, None);
                 crate::markdown::compose::site_scope::SiteHook::enter(&lookup, directive.span.start);
+                // A failure names the file line, not the rewritten body's.
+                let site = crate::markdown::compose::conditions::ConditionSite {
+                    span: &directive.span,
+                    body_line: directive.line,
+                    opener: &|span| crate::markdown::compose::site_scope::authored_opener(self.markdown, origin, span),
+                    current: &|| self.markdown.source_context_for_errors(),
+                };
                 for warning in
                     crate::markdown::compose::conditions::collect_condition_context_warnings(
                         expr, &lookup, "condition",
                     )
                 {
-                    report.add_warning(warning.at_line(directive.line));
+                    report.add_warning(site.locate_warning(warning));
                 }
                 // A blocking finding of an earlier directive, or of this
                 // condition's context check, stops before this condition
@@ -674,22 +681,35 @@ impl<'a> TransclusionEngine<'a> {
                 if let Some(watch) = watch.as_deref_mut() {
                     watch.check(report)?;
                 }
-                let mut missing = Vec::new();
-                let should_include =
-                    crate::markdown::compose::conditions::evaluate_condition_observed(
-                        expr,
-                        &lookup,
-                        directive.line,
-                        self.markdown.source_context_for_errors(),
-                        &mut missing,
-                    )
-                    .map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
-                report.add_unknown_root_candidates("condition", missing, |_| {
+                let mut observation = crate::markdown::compose::expression::absence::Observation::default();
+                // A failing condition still reports what it read before
+                // failing; its own error then outranks a policy stop.
+                let should_include = site.evaluate(expr, &lookup, &mut observation);
+                report.add_unknown_root_candidates("condition", std::mem::take(&mut observation.roots), |_| {
                     crate::markdown::compose::unknown_identifiers::directive_locus(
                         self.markdown,
                         directive.line,
                     )
                 });
+                if let Some(members) =
+                    crate::markdown::compose::member_sites::BodyMembers::new(&report.member_candidates, origin, options)
+                {
+                    let start = crate::markdown::compose::call_precheck::condition_start(
+                        self.markdown.content(),
+                        directive.span.start,
+                        expr,
+                    );
+                    report.add_warnings(members.warnings(start, expr, &mut observation));
+                    // A blocking member read stops before the directive
+                    // composes its target.
+                    if should_include.is_ok()
+                        && let Some(watch) = watch.as_deref_mut()
+                    {
+                        watch.check(report)?;
+                    }
+                }
+                let should_include =
+                    should_include.map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
                 if !should_include {
                     let mut fixed_report = ComposeReport::new();
                     fixed_report.transclusions_skipped = 1;
@@ -1854,18 +1874,32 @@ pub(crate) fn apply_directive_set_overlay(
 /// The options a local Markdown child composes with, given its parent's
 /// options and the parent's effective state (`parent_data`).
 ///
-/// This is the single derivation of a child's inputs. Pre-flight discovery
-/// walks the transclusion graph with it, and composition executes with it, so
-/// a command a child interpolates from inherited state has the same bytes in
-/// the approval set as when it runs. The parent's values reach the child as
-/// data defaults ([`child_inherited_origin`]): the parent already scanned
-/// every authored value once.
+/// [`inherited_child_options`] with the child's own source file.
 pub(crate) fn markdown_child_options(
     parent: &crate::markdown::compose::ComposeRequest,
     parent_data: &crate::markdown::compose::SharedFrontmatter,
     directive_options: &transclusion::BlockOptions,
     path: &Path,
     opening: Option<SourceOpening>,
+) -> crate::markdown::compose::ComposeRequest {
+    inherited_child_options(parent, parent_data, directive_options).with_accepted_source_file(path.to_path_buf(), opening)
+}
+
+/// The inputs every nested child (a `::file` child or `as_markdown` content)
+/// inherits from the document that nests it, before the child's source is
+/// chosen.
+///
+/// This is the single derivation of a child's inputs. Pre-flight discovery
+/// walks the graph with it, and composition executes with it, so a command a
+/// child interpolates from inherited state has the same bytes in the approval
+/// set as when it runs. The request's `--set` overrides and setters stay on
+/// the child, and the parent's effective state reaches it as data defaults
+/// ([`child_inherited_origin`]): the parent already scanned every authored
+/// value once.
+pub(crate) fn inherited_child_options(
+    parent: &crate::markdown::compose::ComposeRequest,
+    parent_data: &crate::markdown::compose::SharedFrontmatter,
+    directive_options: &transclusion::BlockOptions,
 ) -> crate::markdown::compose::ComposeRequest {
     // Prologue/epilogue are scoped to the defining document — never propagate.
     // ctx is captured fresh per-document by EffectiveStateBuilder, so the
@@ -1891,7 +1925,7 @@ pub(crate) fn markdown_child_options(
     });
     child_options.external_state = Some(Value::Object(inherited));
     child_options.inherited_origin = child_inherited_origin(directive_options);
-    child_options.with_accepted_source_file(path.to_path_buf(), opening)
+    child_options
 }
 
 /// Origin of what a transcluded child receives from the directive that

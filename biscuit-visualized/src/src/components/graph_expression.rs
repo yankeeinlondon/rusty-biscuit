@@ -259,7 +259,7 @@ impl GraphExpression {
         let (output, png_path, cache_hit) = self.render_to_image(term)?;
         // Graphs are block-cohesive (image escapes or expression fallback) —
         // align as a block.
-        let output = self.layout.apply_block_layout(&output, term.width());
+        let output = self.layout.apply_block_layout_on(&output, term);
 
         Ok(GraphRenderResult {
             output,
@@ -364,6 +364,8 @@ impl GraphExpression {
         &self,
         term: &Terminal,
     ) -> Result<(String, PathBuf, bool), GraphRenderError> {
+        // A graph has no measured size before it is rendered at a target width,
+        // so with no terminal width this falls to `Terminal::width`'s number.
         let dims = TerminalImage::resolve_dimensions_for(&self.width, &self.layout, term.width());
         let (target_width_px, row_height_px) = display_pixels(dims.image_width, term.cell_size());
         let background = display_background(self.background, term);
@@ -436,7 +438,7 @@ impl GraphExpression {
 impl TerminalRenderable for GraphExpression {
     fn render(&self, term: &Terminal) -> String {
         let content = self.render_raw(term);
-        self.layout.apply_block_layout(&content, term.width())
+        self.layout.apply_block_layout_on(&content, term)
     }
 
     fn as_any(&self) -> &dyn Any {

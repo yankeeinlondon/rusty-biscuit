@@ -69,6 +69,12 @@ const UNGUARDED: &[Unguarded] = &[
         count: 1,
         reason: "each lifecycle event's call check starts from its declarations alone; `walk_stack_scoped` adds its guards",
     },
+    Unguarded {
+        path: "markdown/schemas/slots/session.rs",
+        item: "resolve_contract_slots",
+        count: 1,
+        reason: "not a type scope: `resolve::buffers::unguarded` lifts the outer slot's schema-read guard so a contract template's slots read under their own approvals",
+    },
 ];
 
 /// The functions the type-narrowing inventory named as static decisions:
@@ -210,6 +216,10 @@ fn baseline() -> Vec<(&'static str, String)> {
         (
             "lifecycle/validate.rs",
             "pub fn lifecycle_call_checks() { let site = TypeScope::unguarded(&event); }".to_string(),
+        ),
+        (
+            "markdown/schemas/slots/session.rs",
+            "pub(crate) fn resolve_contract_slots() { simplified_schema::resolve::buffers::unguarded(|| {}); }".to_string(),
         ),
     ];
     for entry in UNGUARDED {

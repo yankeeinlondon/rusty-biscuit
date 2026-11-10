@@ -77,8 +77,7 @@ use crate::layout::DarkmatterPage;
 use crate::markdown::Markdown;
 use crate::markdown::output::{HtmlOptions, TerminalOptions};
 use crate::style::{
-    BespokeStyleOverrides, ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides,
-    PageStyleOverrides, apply_bespoke_style, apply_color_style, apply_component_style,
+    apply_bespoke_style, apply_color_style, apply_component_style,
     apply_hr_style, apply_list_style, apply_page_style, from_frontmatter,
 };
 
@@ -89,7 +88,7 @@ use crate::style::{
 /// - **alpha background paint:** `block-quote.bg-color: red-500/50`;
 /// - **alpha foreground paint:** `block-quote.color: slate-200/50`;
 /// - **page-inheriting color:** `page.color: slate-200` (attached to the root);
-/// - **page-frame padding/max-width:** `page.top-padding` / `page.left-padding`
+/// - **page-frame padding/max-width:** `page.padding-top` / `page.padding-left`
 ///   / `page.max-width` (viewport concerns owned by the page frame);
 /// - **component policy layout (alignment + fixed/max width):**
 ///   `table.alignment: center` + `table.width: 40`, `block-quote.max-width: 50`;
@@ -105,8 +104,8 @@ const STYLED_CORPUS: &str = "\
 style:
     page:
         color: slate-200
-        top-padding: 1
-        left-padding: 2
+        padding-top: 1
+        padding-left: 2
         max-width: 100
     block-quote:
         bg-color: red-500/50
@@ -140,7 +139,7 @@ style:
 1. First
 2. Second
 
-[Click](https://example.com \"class='btn' style='color: blue;' target='_blank' prompt='Run it' data-id='42'\")
+[Click](https://example.com '{ class: \"btn\", style: \"color: blue;\", target: \"_blank\", prompt: \"Run it\", \"data-id\": \"42\" }')
 
 ![A](./local.png \"style='color: green;'\")
 
@@ -160,14 +159,14 @@ fn styled_page(md: &Markdown) -> DarkmatterPage {
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
 
     let page =
-        apply_page_style(page, &style, PageStyleOverrides::default()).expect("apply_page_style");
-    let page = apply_component_style(page, &style, ComponentStyleOverrides::default())
+        apply_page_style(page, &style).expect("apply_page_style");
+    let page = apply_component_style(page, &style)
         .expect("apply_component_style");
     let page =
-        apply_list_style(page, &style, ListStyleOverrides::default()).expect("apply_list_style");
-    let page = apply_hr_style(page, &style, HrStyleOverrides::default()).expect("apply_hr_style");
+        apply_list_style(page, &style).expect("apply_list_style");
+    let page = apply_hr_style(page, &style).expect("apply_hr_style");
     let page = apply_color_style(page, &style).expect("apply_color_style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+    apply_bespoke_style(page, &style, crate::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .expect("apply_bespoke_style")
 }
 
@@ -307,7 +306,7 @@ fn styled_terminal_path_does_zero_renderable_owned_hint_roundtrips() {
     let hr_owned = resolve_hr_defaults(&md, &page.hr_defaults());
     let ctx = build_context(&page, &hr_owned);
     let opts = TerminalOptions {
-        max_width: Some(80),
+        width: Some(renderable::output::Width::Columns(80)),
         ..TerminalOptions::default()
     };
 

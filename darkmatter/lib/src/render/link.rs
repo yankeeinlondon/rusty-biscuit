@@ -13,6 +13,9 @@ use std::hash::{Hash, Hasher};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::SourceContext;
+use renderable::output::link_metadata::{
+    LinkMetadata, LinkTitle, LinkTitleNotice, StructuredTitle, parse_link_title, query_href,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -20,13 +23,9 @@ use crate::render::stylesheet::{CssStyle, StylesheetBlockError, StylesheetError}
 use crate::render::metadata_codec::{self, MetadataPolicy};
 use crate::render::reference_parse;
 
-/// BEL character used by OSC 8 hyperlinks.
-const BEL: &str = "\x07";
-/// OSC 8 hyperlink start sequence.
-const LINK_START: &str = "\x1b]8;;";
 /// OSC 8 hyperlink end sequence.
 const LINK_END: &str = "\x1b]8;;\x07";
-/// Marker used for markdown metadata payload titles.
+/// Marker of the encoded metadata package older versions wrote as a title.
 const MARKDOWN_METADATA_MARKER: &str = "darkmatter:link:v1";
 /// Env var used to control markdown metadata behavior.
 const LINK_METADATA_ENV: &str = "LINK_METADATA";
@@ -295,6 +294,8 @@ pub struct Link {
     title: Option<String>,
     prompt: Option<String>,
     data: BTreeMap<String, String>,
+    metadata: LinkMetadata,
+    title_notice: Option<LinkTitleNotice>,
 }
 
 impl Eq for Link {}
@@ -315,33 +316,68 @@ impl Link {
             title: None,
             prompt: None,
             data: BTreeMap::new(),
+            metadata: LinkMetadata::default(),
+            title_notice: None,
         })
     }
 
-    /// Creates a link and parses the markdown title segment as title or structured metadata.
+    /// Creates a link and interprets `title` (the text between the title
+    /// delimiters, already unescaped).
+    ///
+    /// A JSON5 object is structured data; any other title is a plain tooltip.
+    /// A title that was meant to be structured but is not (a broken object, a
+    /// leftover `key=value` title) stays plain and sets [`Self::title_notice`];
+    /// `key=value` attributes are not applied.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::render::Link;
+    ///
+    /// let link = Link::with_title_parsed("Docs", "./a.md", "{ class: 'x', qp: { line: 14 } }")?;
+    /// assert_eq!(link.class(), Some("x"));
+    /// assert_eq!(link.to_html(), r#"<a href="./a.md?line=14" class="x">Docs</a>"#);
+    /// # Ok::<(), darkmatter::render::link::LinkError>(())
+    /// ```
     pub fn with_title_parsed(
         display: impl Into<String>,
         link: impl Into<String>,
         title: &str,
     ) -> Result<Self, LinkError> {
         let mut result = Self::new(display, link)?;
+        result.apply_title(title);
+        Ok(result)
+    }
+
+    fn apply_title(&mut self, title: &str) {
         let title = title.trim();
         if title.is_empty() {
-            return Ok(result);
+            return;
         }
-
         if let Some(metadata) = decode_markdown_metadata(title) {
-            result.apply_markdown_metadata(metadata);
-            return Ok(result);
+            self.apply_markdown_metadata(metadata);
+            return;
         }
-
-        if is_structured_mode(title) {
-            parse_structured_props(&mut result, title);
-        } else {
-            result.title = normalize_optional(parse_title_value(title));
+        let parsed = parse_link_title(title);
+        self.title_notice = parsed.notice;
+        match parsed.title {
+            LinkTitle::Plain(text) => self.title = normalize_optional(text),
+            LinkTitle::Structured(structured) => self.apply_structured_title(structured),
         }
+    }
 
-        Ok(result)
+    fn apply_structured_title(&mut self, structured: StructuredTitle) {
+        self.metadata = structured.link_metadata();
+        let StructuredTitle { title, class, style, target, prompt, data, .. } = structured;
+        let named = [("title", title), ("class", class), ("style", style), ("target", target), ("prompt", prompt)];
+        for (key, value) in named {
+            if let Some(value) = value {
+                apply_structured_prop(self, key, value);
+            }
+        }
+        for (key, value) in data {
+            apply_structured_prop(self, &key, value);
+        }
     }
 
     /// Sets display text.
@@ -402,6 +438,12 @@ impl Link {
     /// Sets optional prompt text.
     pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.prompt = normalize_optional(prompt.into());
+        self
+    }
+
+    /// Sets the transport metadata (`qp`).
+    pub fn with_link_metadata(mut self, metadata: LinkMetadata) -> Self {
+        self.metadata = metadata;
         self
     }
 
@@ -489,6 +531,18 @@ impl Link {
         &self.data
     }
 
+    /// The transport metadata (`qp`), which [`Self::to_html`] and
+    /// [`Self::to_terminal`] lower to query and OSC 8 parameters.
+    pub fn link_metadata(&self) -> &LinkMetadata {
+        &self.metadata
+    }
+
+    /// What was wrong with the title this link was parsed from. Reported,
+    /// never printed: composition turns it into a located warning.
+    pub fn title_notice(&self) -> Option<&LinkTitleNotice> {
+        self.title_notice.as_ref()
+    }
+
     /// Parses style into property-value map for diagnostics.
     pub fn parsed_style(&self) -> Option<BTreeMap<String, String>> {
         self.style_css().map(|style| parse_css_style(&style))
@@ -507,10 +561,7 @@ impl Link {
     /// Renders an OSC 8 hyperlink with capability fallback.
     pub fn to_terminal(&self) -> String {
         if biscuit_terminal::discovery::detection::osc8_link_support() {
-            format!(
-                "{}{}{}{}{}",
-                LINK_START, self.link_to, BEL, self.display, LINK_END
-            )
+            self.to_terminal_unchecked()
         } else {
             format!("{} [{}]", self.display, self.link_to)
         }
@@ -518,16 +569,18 @@ impl Link {
 
     /// Renders an OSC 8 hyperlink without capability checks.
     pub fn to_terminal_unchecked(&self) -> String {
-        format!(
-            "{}{}{}{}{}",
-            LINK_START, self.link_to, BEL, self.display, LINK_END
-        )
+        let (uri, params) = if self.metadata.is_empty() {
+            (self.link_to.as_str(), String::new())
+        } else {
+            biscuit_terminal::render_tree::osc8_parameters(&self.link_to, &self.metadata)
+        };
+        format!("\x1b]8;{params};{uri}\x07{}{LINK_END}", self.display)
     }
 
     /// Renders as HTML `<a ...>...</a>`.
     pub fn to_html(&self) -> String {
         let mut attrs = Vec::new();
-        attrs.push(format!(r#"href="{}""#, html_escape(&self.link_to)));
+        attrs.push(format!(r#"href="{}""#, html_escape(&self.html_href())));
 
         if let Some(class) = &self.class {
             attrs.push(format!(r#"class="{}""#, html_escape(class)));
@@ -575,11 +628,11 @@ impl Link {
 
     /// Renders Markdown with policy-driven metadata handling.
     ///
-    /// When extended metadata exists (class/style/target/prompt/data):
+    /// When extended metadata exists (class/style/target/prompt/data/qp):
     /// - `with_inline=true` => inline HTML
     /// - env `LINK_METADATA=inline` => inline HTML
     /// - env `LINK_METADATA=strip` => strip metadata
-    /// - otherwise => lossless metadata payload in markdown title
+    /// - otherwise => a JSON5 structured title, which parses back losslessly
     pub fn to_markdown(&self, with_inline: bool) -> String {
         if !self.has_extended_metadata() {
             return self.render_markdown_basic(self.title_plain().as_deref());
@@ -588,12 +641,7 @@ impl Link {
         match metadata_policy(with_inline) {
             MetadataPolicy::Inline => self.to_html(),
             MetadataPolicy::Strip => self.render_markdown_basic(self.title_plain().as_deref()),
-            MetadataPolicy::Lossless => {
-                let encoded = self
-                    .to_markdown_metadata_package()
-                    .and_then(|pkg| encode_markdown_metadata(&pkg));
-                self.render_markdown_basic(encoded.as_deref())
-            }
+            MetadataPolicy::Lossless => self.render_markdown_titled(&self.structured_title().to_markdown_title()),
         }
     }
 
@@ -635,7 +683,7 @@ impl Link {
             .and_then(|p| normalize_optional(strip_ansi_sequences(p)))?;
 
         let id = generate_popover_id(&self.link_to, &self.display);
-        let mut attrs = vec![format!(r#"href="{}""#, html_escape(&self.link_to))];
+        let mut attrs = vec![format!(r#"href="{}""#, html_escape(&self.html_href()))];
 
         if let Some(class) = &self.class {
             attrs.push(format!(r#"class="{}""#, html_escape(class)));
@@ -690,42 +738,47 @@ impl Link {
             || self.target.is_some()
             || self.prompt.is_some()
             || !self.data.is_empty()
+            || !self.metadata.is_empty()
+    }
+
+    fn html_href(&self) -> Cow<'_, str> {
+        if self.metadata.is_empty() {
+            Cow::Borrowed(&self.link_to)
+        } else {
+            Cow::Owned(query_href(&self.link_to, &self.metadata))
+        }
     }
 
     fn render_markdown_basic(&self, title: Option<&str>) -> String {
-        let display = escape_markdown_display(&self.display_plain());
-        let href = escape_markdown_url(&self.link_to);
-
-        if let Some(title) = title {
-            let escaped_title = title.replace('"', "\\\"");
-            format!("[{display}]({href} \"{escaped_title}\")")
-        } else {
-            format!("[{display}]({href})")
+        match title {
+            Some(title) => self.render_markdown_titled(&format!("\"{}\"", title.replace('"', "\\\""))),
+            None => format!(
+                "[{}]({})",
+                escape_markdown_display(&self.display_plain()),
+                escape_markdown_url(&self.link_to)
+            ),
         }
     }
 
-    fn to_markdown_metadata_package(&self) -> Option<LinkMarkdownMetadataPackage> {
-        if !self.has_extended_metadata() {
-            return None;
-        }
+    /// `title` is the whole Markdown title, delimiters included.
+    fn render_markdown_titled(&self, title: &str) -> String {
+        let display = escape_markdown_display(&self.display_plain());
+        let href = escape_markdown_url(&self.link_to);
+        format!("[{display}]({href} {title})")
+    }
 
-        let package = LinkMarkdownMetadataPackage {
-            marker: MARKDOWN_METADATA_MARKER.to_string(),
+    fn structured_title(&self) -> StructuredTitle {
+        StructuredTitle {
+            title: self.title_plain(),
             class: self.class.clone(),
             style: self.style_css(),
             target: self.target.as_ref().map(ToString::to_string),
-            title: self.title_plain(),
             prompt: self
                 .prompt
                 .as_ref()
                 .and_then(|p| normalize_optional(strip_ansi_sequences(p))),
-            data: self.data.clone(),
-        };
-
-        if package.has_payload() {
-            Some(package)
-        } else {
-            None
+            data: self.data.iter().map(|(key, value)| (format!("data-{key}"), value.clone())).collect(),
+            query: self.metadata.query.clone(),
         }
     }
 
@@ -851,33 +904,24 @@ fn metadata_policy(with_inline: bool) -> MetadataPolicy {
     metadata_codec::metadata_policy(with_inline, LINK_METADATA_ENV)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The encoded metadata title older versions wrote. Read for round-trip
+/// compatibility; a link now writes a JSON5 title instead.
+#[derive(Debug, Clone, Deserialize)]
 struct LinkMarkdownMetadataPackage {
     #[serde(rename = "__link_ref")]
     marker: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     class: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     style: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     target: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     prompt: Option<String>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default)]
     data: BTreeMap<String, String>,
-}
-
-impl LinkMarkdownMetadataPackage {
-    fn has_payload(&self) -> bool {
-        self.class.is_some()
-            || self.style.is_some()
-            || self.target.is_some()
-            || self.title.is_some()
-            || self.prompt.is_some()
-            || !self.data.is_empty()
-    }
 }
 
 fn parse_html_link(input: &str) -> Result<Link, LinkError> {
@@ -1039,22 +1083,7 @@ fn parse_markdown_link(input: &str) -> Result<Link, LinkError> {
 
     let mut link = Link::new(display, url)?;
 
-    let trailing = trailing.trim();
-    if trailing.is_empty() {
-        return Ok(link);
-    }
-
-    if let Some(metadata) = decode_markdown_metadata(&parse_title_value(trailing)) {
-        link.apply_markdown_metadata(metadata);
-        return Ok(link);
-    }
-
-    if is_structured_mode(trailing) {
-        parse_structured_props(&mut link, trailing);
-    } else {
-        link.title = normalize_optional(parse_title_value(trailing));
-    }
-
+    link.apply_title(&parse_title_value(trailing));
     Ok(link)
 }
 
@@ -1078,14 +1107,40 @@ fn extract_url(content: &str) -> (String, &str) {
     reference_parse::extract_markdown_url(content)
 }
 
-fn is_structured_mode(content: &str) -> bool {
-    reference_parse::is_structured(content)
+/// What the removed `key=value` title syntax meant: the values the old parser
+/// kept, as the structured title that means the same. `md clean` is its only
+/// caller; nothing else reads `key=value` as attributes.
+///
+/// A title holding no supported key carried no attributes, so its text is kept
+/// as the tooltip rather than lost.
+pub(crate) fn legacy_structured_title(raw: &str) -> StructuredTitle {
+    let mut title = StructuredTitle::default();
+    reference_parse::parse_structured(raw, |key, value| {
+        let key = key.to_ascii_lowercase();
+        let slot = match key.as_str() {
+            "title" => &mut title.title,
+            "class" => &mut title.class,
+            "style" => &mut title.style,
+            "target" => &mut title.target,
+            "prompt" => &mut title.prompt,
+            _ if key.starts_with("data-") && key.len() > "data-".len() => {
+                title.data.insert(key, value);
+                return;
+            }
+            _ => return,
+        };
+        *slot = normalize_optional(value);
+    });
+    if title.is_empty() {
+        title.title = normalize_optional(raw.to_string());
+    }
+    title
 }
 
-fn parse_structured_props(link: &mut Link, content: &str) {
-    reference_parse::parse_structured(content, |key, value| {
-        apply_structured_prop(link, key, value);
-    });
+/// Whether `title` is the encoded metadata package older versions wrote, which
+/// is base64 and so can look like a `key=value` title.
+pub(crate) fn is_encoded_metadata_title(title: &str) -> bool {
+    decode_markdown_metadata(title).is_some()
 }
 
 fn apply_structured_prop(link: &mut Link, key: &str, value: String) {
@@ -1139,10 +1194,6 @@ fn decode_markdown_url(value: &str) -> String {
 
 fn escape_markdown_url(value: &str) -> String {
     reference_parse::escape_markdown_url(value)
-}
-
-fn encode_markdown_metadata(value: &LinkMarkdownMetadataPackage) -> Option<String> {
-    metadata_codec::encode(value)
 }
 
 fn decode_markdown_metadata(value: &str) -> Option<LinkMarkdownMetadataPackage> {
@@ -1381,8 +1432,10 @@ mod tests {
             .with_data("id", "abc");
 
         let markdown = original.to_markdown(false);
-        assert!(markdown.starts_with("[Example](https://example.com \""));
-        assert!(!markdown.contains("Tooltip"));
+        assert_eq!(
+            markdown,
+            r#"[Example](https://example.com '{ title: "Tooltip", class: "chip", style: "margin-top: 10px;", target: "_blank", prompt: "Prompt", "data-id": "abc" }')"#,
+        );
 
         let parsed = Link::try_from(markdown.as_str()).expect("roundtrip markdown should parse");
         assert_eq!(parsed.class(), Some("chip"));
@@ -1455,9 +1508,9 @@ mod tests {
     }
 
     #[test]
-    fn parse_markdown_structured_mode_legacy() {
+    fn parse_markdown_structured_mode_json5() {
         let link = Link::try_from(
-            r#"[Click](https://example.com class="btn" target=_blank prompt="go" data-id=42)"#,
+            r#"[Click](https://example.com '{ class: "btn", target: "_blank", prompt: "go", "data-id": 42 }')"#,
         )
         .expect("structured markdown should parse");
 
@@ -1465,10 +1518,24 @@ mod tests {
         assert_eq!(link.target(), Some(&LinkTarget::Blank));
         assert_eq!(link.prompt(), Some("go"));
         assert_eq!(link.data().get("id"), Some(&"42".to_string()));
+        assert_eq!(link.title_notice(), None);
     }
 
     #[test]
-    fn with_title_parsed_supports_structured_and_title_modes() {
+    fn a_legacy_key_value_trailer_is_a_plain_title_with_a_notice() {
+        let link = Link::try_from(
+            r#"[Click](https://example.com class="btn" target=_blank prompt="go" data-id=42)"#,
+        )
+        .expect("markdown should parse");
+
+        assert_eq!(link.class(), None);
+        assert_eq!(link.target(), None);
+        assert_eq!(link.title(), Some(r#"class="btn" target=_blank prompt="go" data-id=42"#));
+        assert_eq!(link.title_notice(), Some(&LinkTitleNotice::Legacy));
+    }
+
+    #[test]
+    fn with_title_parsed_supports_json5_and_title_modes() {
         let title_mode = Link::with_title_parsed("Click", "https://example.com", "Simple")
             .expect("link should build");
         assert_eq!(title_mode.title(), Some("Simple"));
@@ -1476,7 +1543,7 @@ mod tests {
         let structured = Link::with_title_parsed(
             "Click",
             "https://example.com",
-            "class='btn' target='_blank'",
+            "{ class: 'btn', target: '_blank' }",
         )
         .expect("link should build");
         assert_eq!(structured.class(), Some("btn"));

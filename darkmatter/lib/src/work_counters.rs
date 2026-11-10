@@ -89,6 +89,12 @@ pub enum Work {
     /// [`check_standalone_named_types`](crate::markdown::schemas::resolve::check_standalone_named_types)
     /// (an editor's schema-authoring state). The threads are recorded.
     StandaloneImportCheck,
+    /// A schema slot evaluated by Darkmatter's slot host (a resolution-cache
+    /// hit evaluates none).
+    SlotResolution,
+    /// A cached slot resolution's input file read again to confirm its bytes
+    /// are unchanged.
+    SlotInputRehash,
 }
 
 impl Work {
@@ -119,6 +125,8 @@ impl Work {
         Work::YamlContractPreparation,
         Work::YamlKindCheck,
         Work::StandaloneImportCheck,
+        Work::SlotResolution,
+        Work::SlotInputRehash,
     ];
 
     /// Whether [`add`] records the thread this work ran on.

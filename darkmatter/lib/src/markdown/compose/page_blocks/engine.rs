@@ -3,10 +3,14 @@
 use std::ops::Range;
 
 use super::types::{PageBlockError, PageBlockRegion};
-use crate::markdown::compose::conditions;
+use crate::markdown::compose::conditions::{self, ConditionSite};
+use crate::markdown::compose::site_scope::AuthoredOpener;
 use crate::markdown::compose::expression::EvaluationLookup;
 use crate::markdown::compose::ComposeReport;
 use crate::markdown::compose::body_origin::TextEdit;
+use crate::markdown::compose::call_precheck::condition_start;
+use crate::markdown::compose::expression::absence::Observation;
+use crate::markdown::compose::member_sites::BodyMembers;
 use crate::markdown::compose::context::report::CandidateLocus;
 use biscuit_terminal::errors::SourceContext;
 use tracing::debug;
@@ -23,7 +27,7 @@ pub fn render_page_blocks<L: EvaluationLookup>(
     report: &mut ComposeReport,
     ctx: SourceContext,
 ) -> Result<String, PageBlockError> {
-    render_page_blocks_with_edits(content, regions, state, report, ctx, &mut |_| false)
+    render_page_blocks_with_edits(content, regions, state, report, ctx, &|_| None, None, &mut |_| false)
         .map(|rendered| rendered.map_or_else(String::new, |(output, _)| output))
 }
 
@@ -33,12 +37,18 @@ pub fn render_page_blocks<L: EvaluationLookup>(
 ///
 /// `stop` is asked before each condition is evaluated, given the report so
 /// far; `Ok(None)` means it answered `true` and no later condition ran.
+/// `opener` is the [`authored_opener`](crate::markdown::compose::site_scope::authored_opener)
+/// of a region's span, when the body's map proves one. `members` turns the
+/// member selectors a condition reached into warnings.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
     content: &str,
     regions: &[PageBlockRegion],
     state: &L,
     report: &mut ComposeReport,
     ctx: SourceContext,
+    opener: AuthoredOpener<'_>,
+    members: Option<&BodyMembers<'_>>,
     stop: &mut dyn FnMut(&ComposeReport) -> bool,
 ) -> Result<Option<(String, Vec<TextEdit>)>, PageBlockError> {
     debug!(region_count = regions.len(), "page_blocks: rendering");
@@ -53,26 +63,16 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
 
         let condition = match &region.options.when_expr {
             Some(expr) => {
+                let site = ConditionSite { span: &region.span, body_line: region.start_line, opener, current: &|| ctx.clone() };
                 for warning in
                     conditions::collect_condition_context_warnings(expr, state, "condition")
                 {
-                    report.add_warning(warning.at_line(region.start_line));
+                    report.add_warning(site.locate_warning(warning));
                 }
                 if stop(report) {
                     return Ok(None);
                 }
-                let mut missing = Vec::new();
-                let condition = conditions::evaluate_condition_observed(
-                    expr,
-                    state,
-                    region.start_line,
-                    ctx.clone(),
-                    &mut missing,
-                )?;
-                report.add_unknown_root_candidates("condition", missing, |_| {
-                    CandidateLocus::BodyLine(region.start_line)
-                });
-                condition
+                evaluate_when(content, &region.span, region.start_line, expr, &site, state, report, members)?
             }
             None => true, // No when → treated as enabled
         };
@@ -87,6 +87,8 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
                 state,
                 report,
                 &ctx,
+                opener,
+                members,
                 &mut edits,
                 stop,
             )?
@@ -111,6 +113,33 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
     Ok(Some((output, edits)))
 }
 
+/// Evaluates the `when` condition `expr` of the region at `span` (on
+/// one-based body `line`), adding the undeclared reads and the reached
+/// undeclared members it reported to `report`, a failing condition's
+/// included.
+#[allow(clippy::too_many_arguments)]
+fn evaluate_when<L: EvaluationLookup>(
+    content: &str,
+    span: &Range<usize>,
+    line: usize,
+    expr: &str,
+    site: &ConditionSite<'_>,
+    state: &L,
+    report: &mut ComposeReport,
+    members: Option<&BodyMembers<'_>>,
+) -> Result<bool, PageBlockError> {
+    let mut observation = Observation::default();
+    let condition = site.evaluate(expr, state, &mut observation);
+    report.add_unknown_root_candidates("condition", std::mem::take(&mut observation.roots), |_| {
+        CandidateLocus::BodyLine(line)
+    });
+    if let Some(members) = members {
+        let start = condition_start(content, span.start, expr);
+        report.add_warnings(members.warnings(start, expr, &mut observation));
+    }
+    Ok(condition?)
+}
+
 fn removed(edits: &mut Vec<TextEdit>, range: Range<usize>) {
     if !range.is_empty() {
         edits.push(TextEdit::authored(range, 0));
@@ -127,6 +156,8 @@ fn render_body<L: EvaluationLookup>(
     state: &L,
     report: &mut ComposeReport,
     ctx: &SourceContext,
+    opener: AuthoredOpener<'_>,
+    members: Option<&BodyMembers<'_>>,
     edits: &mut Vec<TextEdit>,
     stop: &mut dyn FnMut(&ComposeReport) -> bool,
 ) -> Result<Option<String>, PageBlockError> {
@@ -143,26 +174,16 @@ fn render_body<L: EvaluationLookup>(
 
         let condition = match &child.options.when_expr {
             Some(expr) => {
+                let site = ConditionSite { span: &child.span, body_line: child.start_line, opener, current: &|| ctx.clone() };
                 for warning in
                     conditions::collect_condition_context_warnings(expr, state, "condition")
                 {
-                    report.add_warning(warning.at_line(child.start_line));
+                    report.add_warning(site.locate_warning(warning));
                 }
                 if stop(report) {
                     return Ok(None);
                 }
-                let mut missing = Vec::new();
-                let condition = conditions::evaluate_condition_observed(
-                    expr,
-                    state,
-                    child.start_line,
-                    ctx.clone(),
-                    &mut missing,
-                )?;
-                report.add_unknown_root_candidates("condition", missing, |_| {
-                    CandidateLocus::BodyLine(child.start_line)
-                });
-                condition
+                evaluate_when(content, &child.span, child.start_line, expr, &site, state, report, members)?
             }
             None => true,
         };
@@ -176,6 +197,8 @@ fn render_body<L: EvaluationLookup>(
                 state,
                 report,
                 ctx,
+                opener,
+                members,
                 edits,
                 stop,
             )?
@@ -394,7 +417,7 @@ mod tests {
         let regions = parse_page_blocks(content, source.clone()).unwrap();
         let mut report = ComposeReport::default();
         let (output, edits) =
-            render_page_blocks_with_edits(content, &regions, &state, &mut report, source, &mut |_| false)
+            render_page_blocks_with_edits(content, &regions, &state, &mut report, source, &|_| None, None, &mut |_| false)
                 .unwrap()
                 .expect("nothing stops the rendering");
 

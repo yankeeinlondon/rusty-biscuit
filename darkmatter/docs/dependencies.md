@@ -10,14 +10,14 @@ on feature unification from other crates:
   `as_json5`, and SimplifiedSchema → JSON Schema output keep the order the
   author wrote. Cargo unifies the feature into every package that links
   `darkmatter`. Outputs that publish alphabetical keys sort explicitly:
-  `md schema validate --format json`, Claudine's OpenCode/Kilo inline config,
+  `md schema validate --output json`, Claudine's OpenCode/Kilo inline config,
   and `sniff`'s JSON output. Hashes that must ignore key order (see
   [Canonical JSON Hashing](#canonical-json-hashing)) sort through
   `biscuit-hash` instead. Insertion order is not always source order: a map a function
   builds keeps the order it was built in. A new consumer that needs a stable
   order sorts explicitly rather than relying on the map.
   - Written order is intentional where a reader sees it:
-    `md schema detect --format json` lists properties in the order the
+    `md schema detect --output json-schema` lists properties in the order the
     documents wrote them (with `$schema` first), a mapping converted to text
     for a `json`/`yaml` property or a `json` parameter keeps its key order
     (`{ b: 1, a: 2 }` becomes `{"b":1,"a":2}`), and `keys()`/`values()`
@@ -78,6 +78,20 @@ filter does not first compile binaries and native/browser dependencies that it
 will never execute. CI enables the tier features for its reusable all-tier
 build; `just test-l2`, `just test-l3`, and `just test-browser` enable only the
 features their tier requires.
+
+## Windows Console Test Dependency
+
+- `xpty` (development, Windows only, `darkmatter-cli`) opens the windowless
+  ConPTY pseudoconsole that PowerShell's real Tab test types into. The workspace
+  already builds it for `worktree-cli`, `claudine-cli`, and `biscuit-terminal`.
+
+## Real-terminal Hyperlink Expectations
+
+- `url` (development, `darkmatter-cli`) — the Level-2 error tests spell the
+  `file://` hyperlink they expect with `Url::from_file_path`, the same
+  conversion the renderer uses, so a Windows drive path is expected as
+  `file:///C:/…` rather than a hand-built `file://C:\…`. The library already
+  depends on it.
 
 ## Source-guard Test Dependencies
 
@@ -159,6 +173,21 @@ features their tier requires.
   `biscuit-file`'s defaults, so the call site survives a change to that
   default set. JSON output uses `serde_json` directly; no second JSON5
   implementation is carried here.
+
+## Data Loading (`load_data`)
+
+- `biscuit-file` with the `delimited` feature supplies the strict CSV/TSV
+  reader (`read_delimited`) behind `load_data`. That feature is off in
+  `biscuit-file`'s defaults and brings in `csv` and `csv-core`, so it is named
+  explicitly in `lib/Cargo.toml`.
+- The other readers and locators need no extra feature: `read_json_lines`,
+  `detect_from_extension`, `source_position`, and `locate_json`,
+  `locate_jsonl`, `locate_toml`, and `locate_json5` (the last two through the
+  `toml` and `json5` features already enabled). Finding where a value was
+  written belongs to `biscuit-file`, beside each format's parser; Darkmatter
+  only asks for an offset and turns it into a line and column. YAML positions
+  come from `simplified-schema`'s position map instead, because the YAML loader
+  is shared with frontmatter.
 
 ## Shell Directive Execution
 
@@ -281,7 +310,7 @@ protocol-focused:
 
 ## CLI (`darkmatter/cli`)
 
-- `serde` (`derive`) — the `md clean --json` diagnostic envelope. The
+- `serde` (`derive`) — the `md clean --output json` diagnostic envelope. The
   per-diagnostic body is `biscuit_file::YamlDiagnostic`'s own `Serialize`, so
   the wire format stays pinned to the shared diagnostic vocabulary; the derive
   is only needed for the CLI-local envelope and stage tag that wrap it.

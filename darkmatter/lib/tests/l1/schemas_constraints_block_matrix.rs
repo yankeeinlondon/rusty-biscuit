@@ -502,7 +502,12 @@ impl Matrix {
     }
 }
 
-fn walk_matrix(format: Format) {
+const MATRIX_PARTS: usize = 2;
+
+/// Walks the `part`th of [`MATRIX_PARTS`] runs of consecutive columns.
+fn walk_matrix(format: Format, part: usize) {
+    let all = columns();
+    let columns = all.chunks(all.len().div_ceil(MATRIX_PARTS)).nth(part).expect("a non-empty part");
     let dir = tempfile::tempdir().expect("temp dir");
     let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
     let mut matrix = Matrix {
@@ -514,14 +519,14 @@ fn walk_matrix(format: Format) {
     };
     let mut failures = Vec::new();
     let mut table = String::new();
-    for column in columns() {
+    for column in columns {
         for (row, edit, expect) in &column.rows {
             for site in [Site::Reused, Site::Inline] {
                 let probes = match site {
                     Site::Reused => &column.reuse_probes,
                     Site::Inline => &column.inline_probes,
                 };
-                let observed = matrix.observe(&column, edit, site);
+                let observed = matrix.observe(column, edit, site);
                 let label = format!("{format:?} / {} / {row} / {site:?}", column.name);
                 writeln!(table, "{label}: {observed:?}").unwrap();
                 let verdicts = |pick: fn(&Probe) -> bool| Observed::Verdicts(probes.iter().map(pick).collect());
@@ -557,12 +562,25 @@ fn walk_matrix(format: Format) {
     assert!(failures.is_empty(), "{} cell(s) failed:\n{}", failures.len(), failures.join("\n"));
 }
 
+// Each format's columns are split across two tests that run in parallel:
+// every cell writes fresh files, and one walk per format took over 5 s on a
+// loaded Windows host.
 #[test]
-fn constraints_block_matrix_yaml() {
-    walk_matrix(Format::Yaml);
+fn constraints_block_matrix_yaml_part_1() {
+    walk_matrix(Format::Yaml, 0);
 }
 
 #[test]
-fn constraints_block_matrix_json_form() {
-    walk_matrix(Format::Json);
+fn constraints_block_matrix_yaml_part_2() {
+    walk_matrix(Format::Yaml, 1);
+}
+
+#[test]
+fn constraints_block_matrix_json_form_part_1() {
+    walk_matrix(Format::Json, 0);
+}
+
+#[test]
+fn constraints_block_matrix_json_form_part_2() {
+    walk_matrix(Format::Json, 1);
 }

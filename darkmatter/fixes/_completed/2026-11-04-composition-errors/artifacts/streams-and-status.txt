@@ -1,0 +1,13 @@
+invocation                                                 status stderr-bytes
+md compose ok.md --output json                                  0            0
+md compose root.md --output json                                1            0
+md compose root.md --output json -v --perf                      1            0
+md compose root.md --output toml                                1            0
+md compose root.md                                              1          549
+md compose ok.md --output plain                                 2          145
+md render ok.md --output json                                   0            0
+md validate refs root.md --output json                          1            0
+md graph root.md --validate --output json                       1            0
+md hash ok.md --diff --output json                              1            0
+md get ok.md --raw                                              2          169
+md --bogus-flag                                                 2          196

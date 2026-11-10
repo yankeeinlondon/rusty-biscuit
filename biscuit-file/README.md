@@ -9,6 +9,7 @@ A Rust library and CLI for working with files and file formats.
 - **Read Markdown frontmatter** -- Extract and convert the YAML or TOML metadata block from Markdown files
 - [**Analyze and repair YAML source**](./lib/README.md#yaml-source-analysis-and-repair) -- produce span-aware diagnostics, inspect certainty, and safely apply deterministic edits
 - **Detect file types** -- Automatically identify files using extensions and magic bytes
+- [**Read JSON Lines and CSV/TSV**](./docs/topics/data-readers.md) -- parse one JSON value per line, or strictly read delimited rows (opt-in `delimited` feature), keeping every record's line and byte offsets
 - [**File Resolution**](./docs/topics/file-references.md) -- resolves the file path of a passed in file using a set of smart and consistent path based logic
 - [**Glob references**](./docs/topics/file-references.md#glob-references-globreference) -- match a set of files with a file-reference prefix plus a glob, most local first (`GlobReference::new(["^**/*spec*.md", "!&**/_completed/**"])`)
 - [**Portable references**](#portable-references) -- write the link to a file that keeps working when the document, repository, or host moves (`docs/x.md`, `./x.md`, `&docs/x.md`, `~/x.md`, `{{VAR}}/x.md`)
@@ -167,3 +168,8 @@ See [Home](./docs/topics/file-references.md#home-) and
 | TOML                   | yes  | yes   |
 | Markdown (frontmatter) | yes  | --    |
 | PDF                    | yes  | --    |
+| JSON Lines (library)   | yes  | --    |
+| CSV, TSV (library)     | yes  | --    |
+
+`bf` converts only the first six; it detects JSON Lines, CSV, and TSV and
+rejects them. See [Data Formats and Readers](./docs/topics/data-readers.md).

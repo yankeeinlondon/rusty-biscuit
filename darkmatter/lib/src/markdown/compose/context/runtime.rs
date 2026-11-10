@@ -218,7 +218,7 @@ impl ComposeContext {
             super::capture::capture_runtime_context_for_seeded_requirements(
                 base_dir,
                 &requirements,
-                super::capture::DocumentSeed { root: Some(&root), timestamp_ms: None },
+                super::capture::DocumentSeed { root: Some(&root), timestamp_ms: None, clock: None },
             );
         Self::from_values(
             values,
@@ -256,7 +256,7 @@ impl ComposeContext {
                 base_dir,
                 requirements,
                 evidence,
-                super::capture::DocumentSeed { root: root.as_deref(), timestamp_ms: None },
+                super::capture::DocumentSeed { root: root.as_deref(), timestamp_ms: None, clock: None },
             );
         let context = Self::from_values(
             values,
@@ -457,6 +457,7 @@ impl ComposeContext {
             return;
         }
         let inner = std::sync::Arc::make_mut(&mut self.inner);
+        let adopted = super::capture::ContextRequirements::from_groups(adoptable.iter().copied());
         for group in adoptable {
             for key in group.projected_keys() {
                 if let Some(value) = source.inner.values.get(key) {
@@ -465,7 +466,7 @@ impl ComposeContext {
             }
             inner.captured = inner.captured.clone().with(group);
         }
-        inner.observations.fill_from(&source.inner.observations, groups);
+        inner.observations.fill_from(&source.inner.observations, &adopted);
         for diagnostic in &source.inner.capture_diagnostics {
             if !inner.capture_diagnostics.contains(diagnostic) {
                 inner.capture_diagnostics.push(diagnostic.clone());
@@ -490,6 +491,7 @@ impl ComposeContext {
         let seed = super::capture::DocumentSeed {
             root: self.inner.root.as_deref(),
             timestamp_ms: self.inner.values.get("timestamp_ms").and_then(serde_json::Value::as_i64),
+            clock: Some(self.inner.observations.clock().reading()),
         };
         let (mut values, mut diagnostics, mut timings, environment, observations) =
             capture(&self.inner.anchor, &missing, seed);

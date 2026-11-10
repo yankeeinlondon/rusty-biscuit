@@ -93,7 +93,7 @@ DMLS searches the same five [schema roots](./definition.md#schema-roots) as `md`
 
 ### Claudine documents
 
-Claudine's trigger bundle consists of seven ordinary disk files in
+Claudine's trigger bundle consists of eight ordinary disk files in
 `claudine/schemas/`:
 
 | File | Kind | Holds |
@@ -102,6 +102,7 @@ Claudine's trigger bundle consists of seven ordinary disk files in
 | `lifecycle.yaml` | library (`kind: schema`) | the recursive lifecycle stack families and the `loop:` block type |
 | `sequence-types.yaml` | library (`kind: schema`) | recursive sequence tasks and group containers |
 | `linking.yaml` | library (`kind: schema`) | the linking keys of a skill, command, or agent |
+| `document.yaml` | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that `claudine.yaml` and `inline-compose.yaml` import |
 | `claudine.yaml` | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, for a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model` |
 | `inline-compose.yaml` | trigger (`kind: schema-trigger`) | inline-compose's document metadata, for a non-null `prompt` with no non-null `sequence` |
 | `sequence.yaml` | trigger (`kind: schema-trigger`) | sequence steps and root metadata, for a non-null `sequence` |
@@ -110,13 +111,13 @@ DMLS needs no configuration for them. A document whose package area is
 `claudine/` finds them through the package-area root, so a misspelled verb, a
 malformed long form, or a `shell` action in `initialize` is a diagnostic with
 no `$schema` in the document. Anywhere else, put a complete bundle of regular
-files (all seven, so their relative imports resolve) in the repository root's
+files (all eight, so their relative imports resolve) in the repository root's
 `schemas/`, the folder an absolute `SCHEMAS_DIR` names, or `~/schemas`. A
 symlinked trigger file is ignored, and `$schema: claudine.yaml` fails, because
 a trigger activates by placement and match, never by reference. Copy the
 companion `globals.yaml` host catalog and `globals.lifecycle.json` artifact too
 for Claudine-specific expression globals and event analysis; they are separate
-from the seven-file trigger bundle.
+from the eight-file trigger bundle.
 
 DMLS reads these files **only from disk**: it has no Claudine dependency and
 registers no embedded bundle. The `claudine` binary carries its own embedded
@@ -128,6 +129,27 @@ to the action verbs, `mode:` to `append`/`replace`, and hovering `max_turns`
 describes it.
 [Claudine's Schemas](../../../../claudine/docs/topics/schemas.md) describes
 what the files check and how the CLI resolves them.
+
+### Templates (schemas with slots)
+
+A `$schema` or matched trigger payload holding `{{ … }}` slots is resolved
+off the request path, by a background worker of its own, and requests serve
+its last resolution from memory: nothing a slot names is read or evaluated
+while you type. Until the first resolution arrives, completion offers the
+template's literal parts and diagnostics report `dm.schema.slot_pending`; an
+unapproved read is a `dm.schema.slot_approval_required` warning whose quick
+fixes grant it.
+
+A property whose whole type is a slot (a
+[template type](./schema-slots.md#template-types), such as
+`status: "{{ … }}(required)"`) is shown as declared with its type pending:
+hover names the property and says "type pending", completion offers its key
+but no nested keys, values, defaults, or requiredness, and static union arms
+beside it keep their own completions. Once the worker resolves the template,
+the property behaves exactly as the returned type written in place would. If
+a later resolution fails, the last resolved answers are marked stale and no
+current "valid" diagnostic is published. See
+[Schema Slots: In the editor](./schema-slots.md#in-the-editor).
 
 ## YAML Documents
 
@@ -230,7 +252,7 @@ the route's failure to prepare, published once on its token as in Markdown
 frontmatter. A bare name resolves in the inline `$schema` alone: a sibling
 `types` key is data, never a library of named types, so a `$schema`
 property naming one of its entries is a `dm.schema.invalid_type_definition`
-error on that name, as `md schema validate` reports it (exit `2`). Write the
+error on that name, as `md schema validate` reports it (exit `1`). Write the
 file as `kind: schema` to give it a `types` table.
 
 Values are judged softly, as `md` judges them: `port: "8080"` satisfies
@@ -339,6 +361,7 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 | `dm.style.unknown_key` / `dm.style.deprecated_key`             | `style:` surface problems                                                                             |
 | `dm.expression.malformed` / `dm.expression.unknown_function`   | expression-typed frontmatter values that do not parse or call an unknown function (errors)            |
 | `dm.expression.undeclared_property`                            | an expression reads an undeclared document property (advisory warning; the property is valid)         |
+| `dm.expression.undeclared_member`                              | an expression reads a member its value's known object type does not declare (advisory warning)        |
 
 The severity policy follows one guiding principle: *diagnose edit-time problems, not compose-time ones*. A document is a template; values arrive at compose time via CLI `--set`, seeds, `$(...)` expansion, or an interactive prompt. So:
 
@@ -470,7 +493,7 @@ With the cursor after `ma`, DMLS offers the same constraints it offers once the 
 Completion is a merged provider chain (substrate → wiki → frontmatter → DSL), so a schema-driven candidate and a Markdown candidate can coexist in one response. Within frontmatter, the effective schema drives:
 
 - **schema keys** — not-yet-present property keys at any nesting depth an inline object declares, with required keys marked
-- **enum values** — the declared choices for an `enum(...)` property
+- **enum values** — the declared choices for an `enum(...)` property, and for each item of an array of one (`enum(fit, fill)[]`, or `os[]` where `os` is a named `enum(...)` type): on a `- ` line, and inside a flow list such as `[macOS, ]`. A `suggest(...)` on the array takes precedence. An unclosed `[` leaves the frontmatter unparseable, so nothing is offered until the bracket closes (editors close it as you type)
 - **boolish scaffolds** — the accepted spellings for `boolish` properties
 - **file paths** — workspace-relative path completion inside `file(...)` values
 - **`style.*` keys** — the style descriptor catalog when the cursor is inside the opaque `style` object

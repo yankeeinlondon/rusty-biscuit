@@ -131,9 +131,12 @@ fn a_two_digit_gutter_on_the_state_drawing_shows_the_source() {
     assert!(widest <= 14, "widest row {widest}: {unnumbered}");
     assert!(unnumbered.lines().count() >= 10, "the gutter needs two digits: {unnumbered}");
 
-    // Numbered, each row would be 12 + 2 + 3 = 17 cells.
-    let (numbered, _) = render(&fence(STATE), &options(14, true));
-    assert!(numbered.contains("Idle --> Running"), "{numbered}");
+    // Numbered, each row would be 12 + 2 + 3 = 17 cells, so the fence shows
+    // its source; a styled terminal cuts each code row at the width.
+    let (numbered, widest) = render(&fence(STATE), &options(14, true));
+    assert!(numbered.lines().any(|row| row.trim_end().ends_with("stateDiagr")), "the first source row, cut at the width: {numbered}");
+    assert!(!drawn(&numbered), "{numbered}");
+    assert!(widest <= 14, "widest row {widest}: {numbered}");
 }
 
 #[test]

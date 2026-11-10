@@ -18,7 +18,9 @@
 //! ```
 
 mod format;
+mod scan;
 mod types;
 
 pub use format::{to_json5_compact, to_json5_pretty};
+pub use scan::{Json5DuplicateKey, Json5Number, Json5Scan, json5_is_well_formed, json5_scan};
 pub use types::{Json5, Json5Error, Json5Source};

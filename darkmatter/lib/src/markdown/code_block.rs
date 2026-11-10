@@ -430,7 +430,7 @@ pub(crate) fn render_code_block_for_terminal(
     options: &super::output::terminal::TerminalOptions,
     page_mode: ColorMode,
     code_block_mode: CodeBlockMode,
-    width: Option<u16>,
+    width: Option<u32>,
 ) -> Result<(Option<String>, String), crate::markdown::MarkdownError> {
     let _ = code_block_mode.resolve(page_mode);
     let grammar = LanguageGrammar::from_token_or_plain_text(language);

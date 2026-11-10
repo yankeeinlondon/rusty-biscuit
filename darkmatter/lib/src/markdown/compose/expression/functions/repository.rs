@@ -3,13 +3,13 @@
 
 use serde_json::Value;
 
-use super::{BoundCall, FunctionBinding, ResolutionContext, required_text, resolve_path_shape};
+use super::{BoundCall, FunctionBinding, SlotClass, ResolutionContext, required_text, resolve_path_shape};
 use crate::markdown::compose::context::ContextGroup;
 use crate::markdown::compose::expression::ExpressionError;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding::context("package_area", &[], package_area_fn),
-    FunctionBinding::context("package", &[], package_fn),
+    FunctionBinding::context("package_area", &[], package_area_fn).slot(SlotClass::Captured),
+    FunctionBinding::context("package", &[], package_fn).slot(SlotClass::Captured),
 ];
 
 fn package_area_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {

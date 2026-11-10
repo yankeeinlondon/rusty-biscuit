@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::ExpressionError;
-use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+use super::{ExpressionError, RemoteReadKind};
+use crate::markdown::compose::remote_fetch::{RemoteFetchFailure, RemoteFetchRuntime};
 
 /// Caller-owned identity retained after a schema-selected file value is projected.
 #[derive(Clone, Debug)]
@@ -56,6 +56,9 @@ pub struct ResolutionContext {
     /// Run-local remote-fetch runtime for URL-typed arguments. `None` disables
     /// remote reads in expression functions.
     pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
+    /// The command's `load_data` memo and read-set sink. A standalone context
+    /// owns an isolated one; the compose builders share the request's.
+    pub(crate) data: super::data::DataRuntime,
     /// Run-local memoization and single-flight slots for normalized provider calls.
     pub(crate) provider_queries: Arc<Mutex<HashMap<String, ProviderQuerySlot>>>,
     /// Captured context values (e.g. `ctx.agent`) available to read-side
@@ -105,6 +108,9 @@ pub struct ResolutionContext {
     pub(crate) caller_file_provenance: HashMap<String, CallerFileProvenance>,
     /// Caller record selected from the source expression for the active filesystem call.
     pub(crate) active_caller_file_provenance: Option<CallerFileProvenance>,
+    /// The read gate of a schema slot's evaluation; `None` everywhere else,
+    /// which leaves every read as it is (see [`super::read_gate`]).
+    pub(crate) slot_gate: Option<Arc<dyn super::read_gate::ReadGate>>,
 }
 
 /// Unit tests that never resolve a file use an empty `cwd`.
@@ -125,6 +131,7 @@ impl ResolutionContext {
             package_area: context.package_area().map(Path::to_path_buf),
             file_ref_fallback_dir: None,
             remote_fetch: None,
+            data: Default::default(),
             provider_queries: Arc::new(Mutex::new(HashMap::new())),
             ctx_values: Map::new(),
             observations: Default::default(),
@@ -139,6 +146,7 @@ impl ResolutionContext {
             iteration: super::iteration::IterationBudget::new(Default::default()),
             caller_file_provenance: HashMap::new(),
             active_caller_file_provenance: None,
+            slot_gate: None,
         }
     }
 
@@ -230,6 +238,123 @@ impl ResolutionContext {
         self
     }
 
+    /// Asks the slot gate, when one is set, whether `function` may make the
+    /// read `kind` of `location` names; without a gate every read is allowed
+    /// and `location` is never built.
+    ///
+    /// ## Errors
+    ///
+    /// [`ExpressionError::SlotReadRefused`] when the gate refuses.
+    pub(crate) fn authorize_slot_read(
+        &self,
+        function: &str,
+        kind: super::functions::ReadKind,
+        location: impl FnOnce() -> Option<super::read_gate::ReadLocation>,
+    ) -> Result<(), ExpressionError> {
+        let Some(gate) = &self.slot_gate else {
+            return Ok(());
+        };
+        let Some(location) = location() else {
+            return Ok(());
+        };
+        let target = super::read_gate::ReadTarget { function: function.to_string(), kind, location, observed_hash: None };
+        gate.check(&target).map_err(|refusal| ExpressionError::SlotReadRefused { target: Box::new(target), refusal })
+    }
+
+    /// Runs `resolve`, a schema resolution `function` makes (a contract's
+    /// imports, the schema of a page it validates), with the slot gate asked
+    /// before each schema file is opened; without a gate this is `resolve()`.
+    ///
+    /// Returns `resolve`'s result with the first refusal, an
+    /// [`ExpressionError::SlotReadRefused`]: the refused file was never
+    /// opened, and the caller reports the refusal in place of whatever
+    /// `resolve` made of the failed read.
+    pub(crate) fn gate_schema_reads<T>(&self, function: &str, resolve: impl FnOnce() -> T) -> (T, Option<ExpressionError>) {
+        let Some(gate) = &self.slot_gate else {
+            return (resolve(), None);
+        };
+        let refused: std::rc::Rc<std::cell::RefCell<Option<ExpressionError>>> = std::rc::Rc::default();
+        let guard: simplified_schema::resolve::buffers::ReadGuard = std::rc::Rc::new({
+            let (gate, refused, function) = (Arc::clone(gate), std::rc::Rc::clone(&refused), function.to_string());
+            move |path: &Path| {
+                // After one refusal the resolution is failing; nothing more is read.
+                if refused.borrow().is_some() {
+                    return false;
+                }
+                let target = super::read_gate::ReadTarget {
+                    function: function.clone(),
+                    kind: super::functions::ReadKind::Content,
+                    location: super::read_gate::ReadLocation::Local(path.to_path_buf()),
+                    observed_hash: None,
+                };
+                match gate.check(&target) {
+                    Ok(()) => true,
+                    Err(refusal) => {
+                        *refused.borrow_mut() = Some(ExpressionError::SlotReadRefused { target: Box::new(target), refusal });
+                        false
+                    }
+                }
+            }
+        });
+        let resolved = simplified_schema::resolve::buffers::guarded(guard, resolve);
+        (resolved, refused.take())
+    }
+
+    /// Asks the slot gate about each input in `observed` that `function`
+    /// observed, before its result reaches the slot.
+    ///
+    /// ## Errors
+    ///
+    /// [`ExpressionError::SlotReadRefused`] for the first input refused.
+    pub(crate) fn authorize_slot_observations(
+        &self,
+        function: &str,
+        observed: &[super::data::Observation],
+    ) -> Result<(), ExpressionError> {
+        let Some(gate) = &self.slot_gate else {
+            return Ok(());
+        };
+        for observation in observed {
+            // A listing by pattern is judged by the folders it lists below,
+            // as `find_files` judged it before listing; a relative pattern
+            // names no folder by itself.
+            if observation.kind == super::data::ObservationKind::Glob {
+                let roots = super::functions::glob_listing_roots(&observation.entry, self);
+                if !roots.is_empty() {
+                    for root in roots {
+                        let target = super::read_gate::ReadTarget {
+                            function: function.to_string(),
+                            kind: super::functions::ReadKind::Listing,
+                            location: super::read_gate::ReadLocation::Local(root),
+                            observed_hash: observation.hash,
+                        };
+                        gate.check(&target)
+                            .map_err(|refusal| ExpressionError::SlotReadRefused { target: Box::new(target), refusal })?;
+                    }
+                    continue;
+                }
+            }
+            // An input the gate cannot name is refused, never skipped.
+            let (target, verdict) = match super::read_gate::ReadTarget::from_observation(function, observation) {
+                Some(target) => {
+                    let verdict = gate.check(&target);
+                    (target, verdict)
+                }
+                None => (
+                    super::read_gate::ReadTarget {
+                        function: function.to_string(),
+                        kind: super::functions::ReadKind::Content,
+                        location: super::read_gate::ReadLocation::Glob(observation.entry.clone()),
+                        observed_hash: observation.hash,
+                    },
+                    Err(super::read_gate::GateRefusal::approval_required()),
+                ),
+            };
+            verdict.map_err(|refusal| ExpressionError::SlotReadRefused { target: Box::new(target), refusal })?;
+        }
+        Ok(())
+    }
+
     /// Returns the captured value for a context key, if present.
     pub(crate) fn ctx_value(&self, key: &str) -> Option<&Value> {
         self.ctx_values.get(key)
@@ -305,24 +430,46 @@ impl ResolutionContext {
     ///
     /// - `Ok(Some(body))` when the URL was fetched.
     /// - `Ok(None)` when no remote-fetch runtime is attached.
-    /// - `Err` when the URL is malformed, denied by policy, or the fetch failed.
-    pub(crate) fn fetch_remote_text(&self, raw: &str) -> Result<Option<String>, String> {
+    /// - [`RemoteTextError::Denied`] when the fetch policy does not allow the
+    ///   URL's host, and [`RemoteTextError::Failed`] when the URL is malformed
+    ///   or the fetch failed.
+    pub(crate) fn fetch_remote_text(&self, raw: &str) -> Result<Option<String>, RemoteTextError> {
         let Some(rf) = self.remote_fetch.as_ref() else {
             return Ok(None);
         };
-        let url = url::Url::parse(raw).map_err(|e| format!("invalid URL {raw:?}: {e}"))?;
-        if let Ok(Some(body)) = rf.get_content(&url) {
+        let url = url::Url::parse(raw).map_err(|e| {
+            RemoteTextError::Failed(RemoteFetchFailure::new(RemoteReadKind::InvalidReference, format!("invalid URL {raw:?}: {e}")))
+        })?;
+        if let Ok(Some(body)) = rf.get_content_typed(&url) {
             return Ok(Some(body));
         }
         // Not pre-registered (or a prior probe found no slot): register the
         // evaluated URL now and block on its fetch.
         rf.register_nested(url.clone());
-        match rf.get_content(&url) {
+        match rf.get_content_typed(&url) {
             Ok(Some(body)) => Ok(Some(body)),
-            Ok(None) => Err(format!("remote URL {raw:?} could not be fetched")),
-            Err(e) => Err(e),
+            // Registration always leaves a slot, so a missing one is the
+            // runtime's own failure, never the source's.
+            Ok(None) => Err(RemoteTextError::Failed(RemoteFetchFailure::new(
+                RemoteReadKind::Infrastructure,
+                format!("remote URL {raw:?} could not be fetched"),
+            ))),
+            // A host the policy refuses is never requested; checking the
+            // policy first keeps such a failure from ever being typed
+            // `Transport`.
+            Err(_) if url.host_str().is_some_and(|host| !rf.policy().is_allowed(host)) => Err(RemoteTextError::Denied),
+            Err(e) => Err(RemoteTextError::Failed(e)),
         }
     }
+}
+
+/// Why [`ResolutionContext::fetch_remote_text`] returned no text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RemoteTextError {
+    /// The run's fetch policy does not allow the URL's host.
+    Denied,
+    /// Any other failure, typed and worded by the remote runtime.
+    Failed(RemoteFetchFailure),
 }
 
 /// Returns `true` when the argument is an HTTP(S) URL (handled remotely rather
@@ -654,7 +801,75 @@ mod tests {
         })
         .await
         .unwrap();
-        assert!(result.is_err());
+        assert_eq!(result, Err(super::RemoteTextError::Denied));
+    }
+
+    /// A failed fetch from an allowed host keeps its typed kind through
+    /// `fetch_remote_text`, and its message is the runtime's string adapter's
+    /// text, unchanged.
+    #[tokio::test]
+    async fn fetch_remote_text_keeps_the_failed_fetch_kind() {
+        use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+        use biscuit_file::file_reference::fetch::FetchPolicy;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/broken.json"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/binary.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0xff, 0xfe, 0x00]))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/moved.json"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", "https://denied.example/x.json"))
+            .mount(&server)
+            .await;
+
+        let rt = RemoteFetchRuntime::with_policy(FetchPolicy::deny_all().allow_host("127.0.0.1"));
+        let ctx = ResolutionContext { remote_fetch: Some(rt.clone()), ..ResolutionContext::at("/tmp") };
+        let uri = server.uri();
+        let results = tokio::task::spawn_blocking(move || {
+            ["broken.json", "binary.json", "moved.json"]
+                .map(|name| {
+                    let raw = format!("{uri}/{name}");
+                    let typed = ctx.fetch_remote_text(&raw);
+                    let text = rt.get_content(&url::Url::parse(&raw).unwrap());
+                    (name, typed, text)
+                })
+        })
+        .await
+        .unwrap();
+
+        for (name, typed, text) in results {
+            let Err(super::RemoteTextError::Failed(failure)) = typed else { panic!("{name}: {typed:?}") };
+            let expected = match name {
+                "moved.json" => RemoteReadKind::Policy,
+                _ => RemoteReadKind::Transport,
+            };
+            assert_eq!(failure.kind, expected, "{name}: {failure}");
+            assert_eq!(text, Err(failure.message.clone()), "{name}: the string adapter is unchanged");
+        }
+    }
+
+    /// A URL that does not parse is an invalid reference, never transport.
+    #[test]
+    fn fetch_remote_text_types_an_unparsable_url_as_an_invalid_reference() {
+        use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
+        use biscuit_file::file_reference::fetch::FetchPolicy;
+
+        let rt = RemoteFetchRuntime::with_policy(FetchPolicy::deny_all());
+        let ctx = ResolutionContext { remote_fetch: Some(rt), ..ResolutionContext::at("/tmp") };
+        let Err(super::RemoteTextError::Failed(failure)) = ctx.fetch_remote_text("https://[bad") else {
+            panic!("an unparsable URL must fail")
+        };
+        assert_eq!(failure.kind, RemoteReadKind::InvalidReference);
+        assert!(failure.message.starts_with("invalid URL \"https://[bad\""), "{failure}");
     }
 
     #[test]

@@ -1095,3 +1095,222 @@ fn shipped_review_router_reaches_the_review_route_past_the_absent_spec_guard() {
         "an unsupplied optional input must not crash a routing guard; stderr:\n{stderr}"
     );
 }
+
+/// A file value inside a whole object a caller supplied: launch pre-validation
+/// and composition judge it from the launch directory, as they do a top-level
+/// one, while a document sits in a folder of its own.
+mod nested_supplied_file {
+    use super::*;
+
+    const UNION_SCHEMA: &str = "kind: schema\n\
+        types:\n  node:\n    avatar: file(eager; match(./assets/*.png))\n    children: node[]\n\
+        $schema:\n  - kind: literal(image)\n    author: node\n  - kind: literal(other)\n    title: string(required)\n";
+
+    struct Launch {
+        fixture: CliProcessFixture,
+        directory: std::path::PathBuf,
+        document: std::path::PathBuf,
+    }
+
+    impl Launch {
+        fn new(name: &str, relative_launch: &str, document: &str) -> Self {
+            let fixture = CliProcessFixture::named(name);
+            fixture.initialize_repository();
+            fixture.seed_user_config();
+            install_goose(&fixture);
+            let directory = fixture.cwd().join(relative_launch);
+            let document_path = directory.join("sub/doc.md");
+            write(&document_path, document);
+            write(&directory.join("assets/avatar.png"), "launch");
+            Self { fixture, directory, document: document_path }
+        }
+
+        fn run(&self, setter: &str) -> assert_cmd::assert::Assert {
+            // Escape: a caller's relative file resolves from this launch directory.
+            self.fixture
+                .command_builder()
+                .ambient_context(&self.directory)
+                .build()
+                .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+                .args(["compose", "--goose", self.document.to_str().unwrap(), setter])
+                .assert()
+        }
+
+        fn assert_accepts_the_launch_file(&self, setter: &str) {
+            self.run(setter).success();
+            self.assert_prompt_holds_the_launch_file();
+        }
+
+        fn assert_prompt_holds_the_launch_file(&self) {
+            let prompt = std::fs::read_to_string(self.fixture.home().join("provider-prompt")).unwrap();
+            // The stub records its whole argument list: the prompt, then `--system`.
+            let rendered = prompt
+                .split_once("AVATAR=")
+                .and_then(|(_, rest)| rest.split_once(" --system"))
+                .map(|(value, _)| value)
+                .unwrap_or_else(|| panic!("no avatar rendered; prompt:\n{prompt}"));
+            assert_eq!(
+                canonical_portable(std::path::Path::new(rendered)),
+                canonical_portable(&self.directory.join("assets/avatar.png")),
+                "prompt:\n{prompt}"
+            );
+        }
+
+        fn refusal(&self, setter: &str) -> String {
+            let output = self.run(setter).failure();
+            assert!(!self.fixture.home().join("provider-prompt").exists());
+            strip_ansi(&String::from_utf8_lossy(&output.get_output().stderr))
+        }
+    }
+
+    const BODY: &str = "AVATAR={{ author.avatar }}\n";
+    const OBJECT: &str = r#"author={"avatar":"assets/avatar.png"}"#;
+    const OBJECT_WITH_CHILDREN: &str = r#"author={"avatar":"assets/avatar.png","children":[]}"#;
+
+    #[test]
+    fn under_an_optional_inline_property() {
+        let launch = Launch::new(
+            "nested-file-optional",
+            "launch",
+            &format!("---\n$schema:\n  author:\n    avatar: file(eager)\n---\n{BODY}"),
+        );
+        launch.assert_accepts_the_launch_file(OBJECT);
+    }
+
+    #[test]
+    fn under_a_required_inline_property() {
+        let launch = Launch::new(
+            "nested-file-required",
+            "launch",
+            &format!("---\n$schema:\n  author:\n    avatar: file(required; eager)\n---\n{BODY}"),
+        );
+        launch.assert_accepts_the_launch_file(OBJECT);
+    }
+
+    #[test]
+    fn under_a_root_union_with_a_named_type() {
+        let launch = Launch::new(
+            "nested-file-union",
+            "launch",
+            &format!("---\n$schema: ../s.yaml\nkind: image\n---\n{BODY}"),
+        );
+        write(&launch.directory.join("s.yaml"), UNION_SCHEMA);
+        launch.assert_accepts_the_launch_file(OBJECT_WITH_CHILDREN);
+    }
+
+    /// Launching at the repository root, a document's bare reference also finds
+    /// the file through the repository tier, so the verdict that would differ is
+    /// `match` rather than existence.
+    #[test]
+    fn under_a_named_type_when_the_repository_also_finds_it() {
+        let launch = Launch::new(
+            "nested-file-repository-tier",
+            ".",
+            &format!("---\n$schema: ../s.yaml\nkind: image\n---\n{BODY}"),
+        );
+        write(&launch.directory.join("s.yaml"), UNION_SCHEMA);
+        launch.assert_accepts_the_launch_file(OBJECT_WITH_CHILDREN);
+    }
+
+    #[test]
+    fn only_in_the_documents_folder_is_refused() {
+        let launch = Launch::new(
+            "nested-file-document-only",
+            "launch",
+            &format!("---\n$schema:\n  author:\n    avatar: file(eager)\n---\n{BODY}"),
+        );
+        write(&launch.directory.join("sub/doc-only.png"), "document");
+        let stderr = launch.refusal(r#"author={"avatar":"doc-only.png"}"#);
+        assert!(stderr.contains("doc-only.png"), "{stderr}");
+    }
+
+    #[test]
+    fn only_in_the_documents_folder_is_refused_under_a_required_property() {
+        let launch = Launch::new(
+            "nested-file-document-only-required",
+            "launch",
+            &format!("---\n$schema:\n  author:\n    avatar: file(required; eager)\n---\n{BODY}"),
+        );
+        write(&launch.directory.join("sub/doc-only.png"), "document");
+        let stderr = launch.refusal(r#"author={"avatar":"doc-only.png"}"#);
+        assert!(stderr.contains("doc-only.png"), "{stderr}");
+    }
+
+    #[test]
+    fn outside_the_glob_is_refused() {
+        let launch = Launch::new(
+            "nested-file-outside-glob",
+            "launch",
+            &format!("---\n$schema: ../s.yaml\nkind: image\n---\n{BODY}"),
+        );
+        write(&launch.directory.join("s.yaml"), UNION_SCHEMA);
+        write(&launch.directory.join("other/outside.png"), "launch");
+        let stderr = launch.refusal(r#"author={"avatar":"other/outside.png","children":[]}"#);
+        assert!(stderr.contains("other/outside.png"), "{stderr}");
+    }
+
+    #[test]
+    fn missing_everywhere_is_refused_under_an_optional_property() {
+        let launch = Launch::new(
+            "nested-file-missing",
+            "launch",
+            &format!("---\n$schema:\n  author:\n    avatar: file(eager)\n---\n{BODY}"),
+        );
+        let stderr = launch.refusal(r#"author={"avatar":"nowhere.png"}"#);
+        assert!(stderr.contains("nowhere.png"), "{stderr}");
+    }
+
+    #[test]
+    fn through_a_sequence_prompt_task() {
+        let launch = Launch::new(
+            "nested-file-sequence",
+            "launch",
+            &format!("---\n$schema:\n  author:\n    avatar: file(eager)\n---\n{BODY}"),
+        );
+        let sequence = launch.directory.join("sub/sequence.md");
+        write(&sequence, "---\nsequence:\n  - name: step\n    prompt: doc.md\n---\nSequence.\n");
+        // Escape: a caller's relative file resolves from this launch directory.
+        launch
+            .fixture
+            .command_builder()
+            .ambient_context(&launch.directory)
+            .build()
+            .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+            .args(["sequence", "--goose", sequence.to_str().unwrap(), OBJECT])
+            .assert()
+            .success();
+        launch.assert_prompt_holds_the_launch_file();
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    #[test]
+    fn a_refusal_names_the_launch_directory() {
+        let launch = Launch::new(
+            "nested-file-refusal-base",
+            "launch",
+            &format!("---\n$schema:\n  author:\n    avatar: file(eager)\n---\n{BODY}"),
+        );
+        let (stderr, diagnostic) = run_compose_failure(
+            &launch.fixture,
+            &launch.directory,
+            &launch.document,
+            &[r#"author={"avatar":"nowhere.png"}"#],
+        );
+        assert_eq!(diagnostic["code"], "composition.invalid_file_reference", "{stderr}");
+        assert_eq!(
+            canonical_portable(std::path::Path::new(diagnostic["detail"]["base_dir"].as_str().unwrap_or_default())),
+            canonical_portable(&launch.directory),
+            "{stderr}"
+        );
+    }
+
+    #[test]
+    fn a_top_level_file_is_the_control() {
+        let launch = Launch::new(
+            "nested-file-top-level-control",
+            "launch",
+            "---\n$schema:\n  avatar: file(eager)\n---\nAVATAR={{ avatar }}\n",
+        );
+        launch.assert_accepts_the_launch_file("avatar=assets/avatar.png");
+    }
+}

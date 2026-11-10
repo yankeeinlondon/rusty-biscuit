@@ -108,6 +108,11 @@ pub struct BrowserRenderOptions {
     /// `<style>`/`<script>` into a wrapper). The default is `false`: the standard
     /// full-document path resolves and injects into `<head>` itself.
     pub defer_feature_injection: bool,
+    /// The output width prose containers are constrained to. `Columns(n)`
+    /// caps prose at `n` characters (`ch`) with ordinary word wrapping;
+    /// `Source` and `Unlimited` add no prose constraint. Code overflow and
+    /// tables are independent of it.
+    pub width: crate::output::Width,
 }
 
 impl Default for BrowserRenderOptions {
@@ -122,6 +127,7 @@ impl Default for BrowserRenderOptions {
             feature_resolver: Rc::new(DefaultFeatureResolver),
             feature_context: FeatureContext::default(),
             defer_feature_injection: false,
+            width: crate::output::Width::Source,
         }
     }
 }
@@ -221,6 +227,7 @@ pub fn render_browser_document(
     if let Some(page_options) = opts.page.clone() {
         page.apply_page_options(page_options);
     }
+    apply_prose_width(&mut page, opts.width);
     // Install the render's resolver/context so the returned page resolves its
     // features (via `HtmlPage::render`) with the same policy the streaming path
     // uses. Resolving here as well surfaces an unresolved browser feature at
@@ -467,6 +474,7 @@ fn stream_browser_document(
     if let Some(page_options) = opts.page.clone() {
         head_page.apply_page_options(page_options);
     }
+    apply_prose_width(&mut head_page, opts.width);
 
     Ok(StreamedDocument {
         body,
@@ -700,7 +708,7 @@ impl Writer<'_> {
                 url,
                 title,
                 children,
-            } => self.render_link(node, url, title.as_deref(), children),
+            } => self.render_link(node, &link_href(node, url), title.as_deref(), children),
             NodeKind::Image { url, title, alt } => {
                 Ok(self.render_image(node, url, title.as_deref(), alt))
             }
@@ -1801,7 +1809,7 @@ impl StreamWriter<'_> {
                 url,
                 title,
                 children,
-            } => self.write_link(node, url, title.as_deref(), children),
+            } => self.write_link(node, &link_href(node, url), title.as_deref(), children),
             NodeKind::Image { url, title, alt } => {
                 self.write_image(node, url, title.as_deref(), alt);
                 Ok(())
@@ -2580,14 +2588,37 @@ impl StreamWriter<'_> {
     }
 }
 
-/// Returns the concatenated text content of the first `<h1>` the browser
-/// renderer would emit for `root`, or `None` when the tree produces no `<h1>`.
+/// The elements [`BrowserRenderOptions::width`] constrains: prose blocks,
+/// never code blocks or tables. `:where` keeps the rule's specificity at
+/// zero, so any authored page or component style wins over it.
+const PROSE_SELECTOR: &str = ":where(p, li, blockquote, dl, h1, h2, h3, h4, h5, h6)";
+
+/// Caps prose at `n` `ch` for [`Width::Columns`]; other widths add nothing.
 ///
-/// This mirrors [`HtmlPage::first_h1_text`] on the equivalent fragment tree so
-/// [`render_browser_document_html`] can supply the same `<title>` fallback
-/// without building fragments. An `<h1>` is produced by a depth-1
-/// [`NodeKind::Heading`] or by a depth-1 [`NodeKind::Section`]'s heading; the
-/// scan is document-order and descends container children.
+/// [`Width::Columns`]: crate::output::Width::Columns
+fn apply_prose_width(page: &mut HtmlPage, width: crate::output::Width) {
+    use crate::stylesheet::{CssRule, CssSizing, CssSizingProp, CssStyle, CssUnit};
+    if let crate::output::Width::Columns(columns) = width {
+        let style = CssStyle::new().add(
+            CssSizingProp::MaxWidth,
+            CssSizing::dimension(columns as f32, CssUnit::Ch),
+        );
+        page.push_page_rule(CssRule::new(PROSE_SELECTOR, style));
+    }
+}
+
+/// The `href` a link writes. A link carrying
+/// [`LinkMetadata`](crate::output::link_metadata::LinkMetadata) moves its
+/// `#fragment` and its `qp` entries into the query string
+/// ([`query_href`](crate::output::link_metadata::query_href)); any other link
+/// keeps `url` as is.
+fn link_href<'a>(node: &RenderNode, url: &'a str) -> std::borrow::Cow<'a, str> {
+    match node.attrs.link_metadata() {
+        Some(metadata) => std::borrow::Cow::Owned(crate::output::link_metadata::query_href(url, metadata)),
+        None => std::borrow::Cow::Borrowed(url),
+    }
+}
+
 /// Whether the document root carries no renderable [`Style`](crate::style::Style).
 ///
 /// When `true` the document folds emit the root's children directly as page
@@ -2597,6 +2628,14 @@ fn root_style_is_empty(root: &RenderNode) -> bool {
     root.attrs.style_ref().is_none_or(|s| s.is_empty())
 }
 
+/// Returns the concatenated text content of the first `<h1>` the browser
+/// renderer would emit for `root`, or `None` when the tree produces no `<h1>`.
+///
+/// This mirrors [`HtmlPage::first_h1_text`] on the equivalent fragment tree so
+/// [`render_browser_document_html`] can supply the same `<title>` fallback
+/// without building fragments. An `<h1>` is produced by a depth-1
+/// [`NodeKind::Heading`] or by a depth-1 [`NodeKind::Section`]'s heading; the
+/// scan is document-order and descends container children.
 fn tree_first_h1_text(root: &RenderNode) -> Option<String> {
     match &root.kind {
         NodeKind::Heading { depth, children } if depth.get() == 1 => {

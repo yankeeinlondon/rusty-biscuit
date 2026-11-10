@@ -1511,7 +1511,7 @@ mod remote_transclusion_tests {
             .await
             .expect_err("a denied remote read must not read as a missing file");
         assert!(
-            format!("{error:?}").contains("remote read denied"),
+            error.to_string().contains("remote read denied"),
             "unexpected error: {error:?}"
         );
     }
@@ -2003,10 +2003,12 @@ mod file_links_compose {
             base_path: None,
             italic_mode: ItalicMode::Always,
             dim_mode: DimMode::Always,
-            max_width: Some(100),
+            width: Some(renderable::output::Width::Columns(100)),
             mermaid_mode: MermaidMode::Off,
             mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Always,
+            verbosity: 0,
+            output_profile: None,
             hr_defaults: None,
             code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };

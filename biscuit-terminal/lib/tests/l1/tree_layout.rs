@@ -33,8 +33,8 @@ fn terminal_renderer_resolves_percent_margin_against_width() {
     let root = RenderNode::root(vec![para]);
 
     let mut opts = TerminalRenderOptions::default();
-    opts.context.width = 80;
-    opts.context.available_width = 80;
+    opts.context.width = renderable::output::Width::Columns(80);
+    opts.context.available_width = renderable::output::Width::Columns(80);
     let rendered = render_terminal_node(&root, &opts).unwrap();
     let first = rendered.output.lines().next().unwrap_or_default();
     let lead = first.len() - first.trim_start().len();

@@ -592,3 +592,63 @@ fn resolve_target_in_context_reads_only_the_context() {
         Err(FileReferenceError::RelativeContextDirectory { .. })
     ));
 }
+
+/// `interpolated_payload` expands placeholders from the context's captured
+/// environment, never the process's, and reads no filesystem (the anchor
+/// directory does not exist).
+mod interpolated_payload {
+    use std::collections::HashMap;
+
+    use biscuit_file::{FileReference, FileReferenceError, FileResolutionContext};
+
+    fn context() -> FileResolutionContext {
+        let env = HashMap::from([
+            ("DATA_FILE".to_string(), "optional.yaml".to_string()),
+            ("DATA_EXT".to_string(), "yaml".to_string()),
+            ("DATA_DIR".to_string(), "nested".to_string()),
+        ]);
+        FileResolutionContext::from_snapshot("/nonexistent-interpolated-payload-anchor", None, env)
+    }
+
+    fn expand(raw: &str) -> Result<String, FileReferenceError> {
+        FileReference::new(raw).unwrap_or_else(|e| panic!("`{raw}`: {e}")).interpolated_payload(&context())
+    }
+
+    #[test]
+    fn plain_payload_is_unchanged() {
+        assert_eq!(expand("%optional.yaml").unwrap(), "optional.yaml");
+        assert_eq!(expand("@/docs/x.md").unwrap(), "docs/x.md");
+    }
+
+    #[test]
+    fn variable_supplies_the_whole_name() {
+        assert_eq!(expand("%{{DATA_FILE}}").unwrap(), "optional.yaml");
+    }
+
+    #[test]
+    fn variable_supplies_the_extension() {
+        assert_eq!(expand("%optional.{{DATA_EXT}}").unwrap(), "optional.yaml");
+    }
+
+    #[test]
+    fn variable_supplies_a_directory() {
+        assert_eq!(expand("./{{DATA_DIR}}/optional.yaml").unwrap(), "./nested/optional.yaml");
+    }
+
+    #[test]
+    fn unset_variable_is_missing() {
+        let error = expand("%{{UNSET_FOR_INTERPOLATED_PAYLOAD}}.yaml").unwrap_err();
+        assert!(
+            matches!(&error, FileReferenceError::MissingEnvironmentVariable { name } if name == "UNSET_FOR_INTERPOLATED_PAYLOAD"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn url_keeps_an_unset_variable_verbatim() {
+        assert_eq!(
+            expand("https://example.com/{{UNSET_FOR_INTERPOLATED_PAYLOAD}}/{{DATA_FILE}}").unwrap(),
+            "https://example.com/{{UNSET_FOR_INTERPOLATED_PAYLOAD}}/optional.yaml"
+        );
+    }
+}

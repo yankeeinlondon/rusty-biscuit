@@ -17,7 +17,7 @@ Before evaluating a document, Darkmatter checks calls against the available
 schema declarations and enclosing guards. The [call-check guide](../inline/call-check.md)
 explains which calls are rejected and which receive warnings. For command-line
 control of those warnings, see [diagnostic policy](../cli/policy.md); scripts
-can collect the result with [composition reports](../cli/report-json.md).
+can collect the result with a [data output](../cli/data-contracts.md).
 
 ### Availability across every surface
 
@@ -75,6 +75,14 @@ The principles worth carrying around:
 - **One implementation, every surface.** The same lexer, parser, and AST serve
   body interpolation, frontmatter, `when=` conditions, `$()` ternaries, and the
   language server. A grammar change is never local to one surface.
+- **A `}}` inside a string or a nested `{ … }` does not end an expression.**
+  Scanning skips quoted strings and counts single braces, so
+  `{{ "}}" }}` is the text `}}`, `{{ {a: {b: 1}} }}` is an object, and
+  `{{ load_data(f, "{ a: { b: string }}") }}` is one call. The longer
+  reading is used only when it parses and the reading that ends at the
+  first `}}` does not, so prose such as `{{ don't }} it's fine {{ x }}`
+  still finds `don't` and `x`. See
+  [Interpolation § Where an Expression Ends](../inline/interpolation.md#where-an-expression-ends).
 - **Parsing is context-free.** Nothing in these stages reads frontmatter, the
   filesystem, or the function catalog. The same text always yields the same AST;
   an unknown variable or an unknown function is an *evaluation* concern, not a
@@ -106,6 +114,10 @@ The principles worth carrying around:
   the advisory `dm.expression.undeclared_property` once, unless the expression
   handles the absence (`x || "d"`, `x ? … : …`, `is_null(x)`). See
   [Interpolation § Missing Variables](../inline/interpolation.md#missing-variables).
+  A **member** that a value's known object type does not declare
+  (`server.nmae` when `server` is `{ name: string }`) is also `null`, with its
+  own advisory, `dm.expression.undeclared_member`; see
+  [Misspelled members](#misspelled-members).
 
 Full detail lives under [Parsing](./schemas/parsing/index.md):
 [scanning](./schemas/parsing/scanning.md), [lexing](./schemas/parsing/lexing.md), and
@@ -164,12 +176,16 @@ flowchart TD
     D -- no --> DN["null<br/>(advisory dm.expression.undeclared_property)"]
 ```
 
+The diagram classifies the **root** only. Each member selected after the root
+(`.name`, `["name"]`) is checked separately against the root's known type; see
+[Misspelled members](#misspelled-members).
+
 A missing document property is a valid lookup, not an error, so an optional
 input needs no `||` fallback to be legal: `{{ plan ? 'plan: ' + plan : '' }}`
 renders empty when `plan` is unset. Use a fallback only to choose a default
 (`{{ title || 'Untitled' }}`). Compose reports an unhandled read of a property
 nothing declares as the advisory `dm.expression.undeclared_property`; it is a
-warning and never stops composition.
+warning and stops composition only when `--deny` selects it.
 
 An expression is evaluated once, where it is written. Whatever it returns is
 **data**: if a value, a file read, or a shell command yields text that contains
@@ -471,6 +487,11 @@ the table above says:
   `f64`: `9007199254740993` is an error ("cannot be represented exactly").
   See [Numbers](./numbers.md)
 - boolean literals: `true`, `false`
+- array and object literals: `[1, 2]`, `{a: 1, b: [2, 3]}`. An object
+  literal can be the whole expression, nested braces included:
+  `{{ {a: {b: 1}} }}` is the object `{a: {b: 1}}`. Three opening braces are
+  still an [interpolation literal](#interpolation-literals), whatever
+  follows: `{{{a: 1}}}` is the text `{{a: 1}}`, not an object
 - parentheses for grouping: `(env.AGENT == "claude" || env.AGENT == "opencode")`
 
 ## Interpolation Literals
@@ -528,6 +549,250 @@ access returns `null` and never errors.
 | `config["key"]` where `config` is a string | `null` |
 | `obj["missing"]` | `null` |
 | `obj[0]` where `obj` is an object | `null` |
+
+### Misspelled members
+
+When a value's type is known, Darkmatter checks each member you select from
+it. A name the type does not declare is almost always a typo, so composition
+and the editor (DMLS) report it as the advisory
+`dm.expression.undeclared_member`:
+
+```markdown
+---
+$schema:
+  server: "{ name: string, port: number }"
+server: { name: web, port: 80 }
+---
+{{ server.nmae }}
+```
+
+```text
+Member 'nmae' is not declared by the known object type of 'server' at docs/page.md:6.
+```
+
+The warning never changes the value: the lookup still returns `null`, and the
+span renders empty, exactly as it did before the check existed. The message
+says the **known type** does not declare the member; it does not promise the
+lookup always fails, because data supplied at run time can differ from its
+declared type. Under the default policy the warning never stops composition;
+`md compose --deny dm.expression.undeclared_member` (or `--deny all`) makes it
+block (see [Policy](../cli/policy.md#diagnostics---deny)).
+
+The same check covers every value with a known type, not only frontmatter:
+
+```markdown
+{{ map(load_data("hosts.yaml", "{ name: string, port: number }[]"), h => h.nmae) }}
+{{ map(try(load_data("hosts.yaml", "{ name: string }[]"), []), h => h.nmae) }}
+{{ { name: "web" }.nmae }}
+```
+
+Each line reports `nmae`. A `try(...)` result has the type of either of its
+arguments, so its items are checked; `try` is not an absence guard.
+
+#### When a member is reported
+
+Darkmatter looks at the type of the value the member is read from (its
+**base**) at the place it is read, after any guard has narrowed it. It
+ignores `null` alternatives, then reports the member only when all three hold:
+
+1. the base has at least one non-null alternative;
+2. every non-null alternative is an object whose property names are known and
+   closed;
+3. none of those objects declares the member.
+
+| Base type at the read | Member | Result |
+| --- | --- | --- |
+| `{ name: string }` | `nmae` | warning |
+| `{ name: string }` | `name` | silent, even when an optional `name` is unset |
+| `{ name: string } \| null` | `nmae` | warning |
+| `null` | `nmae` | silent: there is no object to check against |
+| `{ name: string } \| { port: number }` | `name` | silent: one alternative declares it |
+| `{ name: string } \| { port: number }` | `nmae` | warning |
+| `{ name: string } \| string` | `nmae` | silent: not every alternative is an object |
+| `unknown`, `any`, bare `object`, or a dictionary | any | silent |
+
+An open object, an object with pattern keys, or a named type that cannot be
+resolved is unknown, and an unknown alternative keeps the read silent. The
+check is about declarations, not data: a declared optional member is never
+reported, and nothing is evaluated or read to decide. Where the type comes
+from:
+
+| Base | Type used |
+| --- | --- |
+| a frontmatter property (`server`, `fm.server`) | the property's type in the effective schema |
+| a `load_data(file, as)` call with a literal `as` | the contract; a named import inside it (`Host@./types.yaml`) is unknown |
+| a `load_data` call with a computed `as` | unknown: never reported |
+| a callback parameter (`h` in `map(hosts, h => …)`) or a `::map`/`::filter` item | the source's element type |
+| a function result, a literal object | the function's declared return type, the literal's shape |
+| a `local.*` binding | the binding's type |
+| a host global (`seq`, `loop`, `err`), a reserved namespace (`ctx`, `env`, `current`) | never checked |
+
+`fm` and `local` are wrappers, not objects, so `fm.nmae` is a root read (see
+[Missing Variables](../inline/interpolation.md#missing-variables)); the value
+they select is checked, so `fm.server.nmae` reports `nmae`.
+
+#### Access forms
+
+Every way of selecting a constant member is checked the same way:
+
+| Expression | Reported member |
+| --- | --- |
+| `server.nmae`, `(server).nmae`, `fm.server.nmae` | `nmae` |
+| `server["nmae"]` | `nmae`, ranged at the quoted key |
+| `server["a.b"]` | the single key `a.b`: a bracket key is never split at its dots |
+| `hosts[0].nmae`, `load_data("h.yaml", "{ name: string }[]")[0].nmae` | `nmae`: an index on an array keeps its element type |
+| `server.nmae.length` | `nmae` only: after an undeclared step the type is unknown, so later names are not reported |
+| `server[key].nmae` | nothing for `server[key]` (a computed key is not checked); `key` itself is an ordinary read |
+| `sever.name` | only the root advisory `dm.expression.undeclared_property` for `sever` |
+
+#### Handled absence
+
+A member read follows the same absence rules as a root read (see
+[Missing Variables](../inline/interpolation.md#missing-variables)): a read
+that already handles a missing value stays silent. For
+`server: "{ name: string }"`:
+
+| Expression | Result |
+| --- | --- |
+| `server.nmae` | warning |
+| `server.nmae \|\| "none"` | silent: the primary of a fallback |
+| `title \|\| server.nmae` | warning when the right-hand side is evaluated |
+| `server.nmae && server.port` | silent: an `&&` operand is a direct argument to `and`, which accepts `null` |
+| `server.nmae ? 1 : 0` | silent: a ternary condition |
+| `is_null(server.nmae)` | silent: a direct argument to a parameter that accepts `null` |
+| `min(server.nmae, 5)` | warning: `min` does not accept `null` |
+| `is_empty(trim(server.nmae))` | warning: the read is an argument of a nested call |
+| `server.nmae == "x" ? 1 : 0` | warning: a comparison operand is an ordinary read |
+| `server.nmae ? server.nmae : "none"` | silent: the true branch is reached only when the member is present |
+| `server.nmae ? "some" : server.nmae` | warning for the false branch's read |
+| `::block when="server.nmae"` | warning: a directive condition is an ordinary read, since a misspelled gate silently hides content |
+
+Handling the absence only silences the warning; it does not declare the
+member.
+
+#### Composition reports what runs; the editor reports every branch
+
+Composition reports a member only when the expression actually reads it. A
+ternary branch that was not chosen, the right-hand side of a `||` whose left
+side held a value, and a callback over an empty list report nothing. The
+editor reports every authored read in every branch and callback body, because
+it runs nothing:
+
+```markdown
+{{ server.port > 0 ? server.name : server.nmae }}
+```
+
+`md compose` is silent here (the false branch never runs); DMLS underlines
+`nmae`. Both use the same classification, so whenever both report a read, the
+code, message, severity, and position agree.
+
+```mermaid
+flowchart TD
+    S["constant member selector,<br/>e.g. nmae in server.nmae"] --> T{"base type known at the read?<br/>(schema, contract, callback, literal)"}
+    T -- "no, or any alternative unknown" --> Q["silent"]
+    T -- yes --> O{"every non-null alternative<br/>a closed object?"}
+    O -- no --> Q
+    O -- yes --> D{"any alternative<br/>declares the member?"}
+    D -- yes --> Q
+    D -- no --> A{"absence handled?<br/>(fallback, condition, null-accepting argument, guard)"}
+    A -- yes --> Q
+    A -- no --> W{"who is checking?"}
+    W -- "DMLS" --> E["warning on every branch"]
+    W -- "md compose" --> R{"was the selector<br/>evaluated?"}
+    R -- yes --> C["warning, once per authored site"]
+    R -- no --> Q
+```
+
+Composition checks members in:
+
+- frontmatter and body `{{ … }}` interpolation, including inline callbacks
+  such as `map(hosts, h => h.nmae)`;
+- `::block` conditions and `::file`/`::code` `when=` conditions;
+- `::map`/`::filter` gates, callbacks (`sort=`, `while=`, `until=`, …), and
+  region bodies;
+- the condition and the chosen value of a frontmatter `$( … )` ternary.
+
+A `{{ … }}` placeholder inside one of these expressions is checked as its own
+interpolation, and it does not hide the expression's other selectors. The
+frontmatter value and the body directive below each report `nmae` once, at
+the place it is written:
+
+```yaml
+pick: "$( server.nmae == '{{ expected }}' ? echo yes : '' )"
+```
+
+```markdown
+::file ./notes.md when="server.nmae != '{{ expected }}'"
+```
+
+This holds while the placeholder sits inside a quoted string and the text it
+fills in contains neither that quote nor a backslash. A placeholder that
+builds the expression itself, such as `server.{{ key }}`, is not checked for
+members.
+
+It does not check a whole-value `::file {{ … }}`, `::code`, or `::url` target
+(a `null` target already warns that the directive was skipped), lifecycle
+stacks, or `expression`-typed frontmatter values, which it stores without
+evaluating. The editor checks body and frontmatter `{{ … }}` spans,
+directive conditions, collection gates and callbacks, `expression`-typed
+frontmatter values, and the condition and both value branches of a
+frontmatter `$( … )` ternary; it does not check lifecycle stacks. It never
+runs the command, so it reports a misspelled member in the branch a run
+would not choose too:
+
+```yaml
+# composition chooses `echo yes` and stays silent; the editor warns on `nmae`
+pick: "$( server.port > 0 ? echo yes : fm.server.nmae )"
+```
+
+Like composition, the editor skips a ternary piece whose placeholder builds
+the expression itself (`$( server.nmae == {{ expected }} ? … )`).
+
+#### When composition fails
+
+A member read before a failure is still reported with the failure. That holds
+when the failure is in the same expression, a later expression in the same
+text, a later frontmatter key, or a later stage. Here `nmae` is read before the
+data file turns out to be missing, so the failed composition carries one
+`dm.expression.undeclared_member` warning beside its error:
+
+```markdown
+::file ./notes.md when="[server.nmae, load_data('absent.yaml', 'string[]')]"
+```
+
+When a frontmatter `$( … )` ternary piece fails while composition prepares it,
+only that piece's members are reported. The run has not yet decided which
+branch it would choose.
+
+`md compose` checks references before it composes, and that check reports no
+member warnings. When the check is the first step to reach a failing
+expression (a body or frontmatter `{{ … }}`, or a `::block` condition), the
+run stops there and the member warning is not reported. Conditions on
+`::file` and `::code` are evaluated only during composition, so they keep it.
+
+#### One warning per place it is written
+
+A member warning is keyed by the document and the position of the selector
+as written. A callback that runs for a hundred items, a frontmatter value
+evaluated in more than one pass, and a child document included twice each
+give one warning per misspelled selector. Two places that both spell `h.nmae`
+each get their own warning, even when `h` has the same type in both, and the
+same selector in two different child documents is reported once for each
+document. The position always points at the authored text, even after earlier
+stages have rewritten the document.
+
+#### Schemas that are still being resolved
+
+A schema can hold dynamic slots, `{{ … }}` placeholders that are filled in
+when the schema is resolved (see
+[Schema slots](./schemas/schema-slots.md)). A slot never changes which
+members an object declares, so the editor checks members against the
+unresolved schema as soon as you type, before any resolved schema exists. A
+property whose whole type is still waiting on a slot is unknown and stays
+silent. Composition always resolves the schema before it evaluates any
+expression, so it checks members against the resolved schema; a composition
+that cannot resolve its schema fails with `dm.schema.slot_pending` before any
+member warning exists.
 
 ## Namespaces
 
@@ -836,6 +1101,11 @@ it agrees with boolean OR on every input; returning the operand is what lets
 | `"" \|\| "bar"` | `"bar"` | true |
 | `false \|\| 0` | `0` | false |
 
+`||` supplies a default for a falsy value, not for a failure. An operand that
+fails to evaluate (a missing file passed to `frontmatter(…)` or `load_data(…)`)
+is an error, and the error stops the expression; wrap the read in `try(…)`
+instead (see [Recovering from read failures](#recovering-from-read-failures)).
+
 Because the value is the same everywhere, a defaulted collection works inside a
 condition exactly as it does inside `{{ … }}`:
 
@@ -855,6 +1125,167 @@ surface. `or(…)` is how to ask for a boolean OR explicitly. `&&` is not
 value-returning because that would change interpolated output — `{{ x && 'yes' }}`
 renders `true`, and an operand-returning `&&` would render `yes` — while giving
 conditions nothing they lack: a condition only asks whether `a && b` is truthy.
+
+## Recovering from read failures
+
+This section covers `try(expr, fallback)`, the way to give a value to a read
+that may fail. The common case is an optional data file: a document should use
+the file when it is there and a default when it is not.
+
+```md
+{{ as_json(try(load_data("optional.yaml", "string[]"), [])) }}
+```
+
+With `optional.yaml` holding `- a`, this renders `["a"]`; with no such file it
+renders `[]`. The signature and catalog examples are on the generated
+[`try` function page](../functions/try.md).
+
+`try` looks like a function call but evaluates its arguments itself, the way
+`and(…)` and `or(…)` do. A call runs in four steps:
+
+1. Evaluate `expr` once, in the current scope and request context.
+2. If it succeeds, return its value unchanged. `fallback` is never evaluated.
+3. If it fails with a **recoverable read failure** (listed below), evaluate
+   `fallback` once, in the same scope, and return its value.
+4. If it fails in any other way, the failure propagates as it would without
+   `try`. `fallback` is never evaluated.
+
+```mermaid
+flowchart TD
+    E["evaluate expr"] --> S{result}
+    S -->|success, any value| V["return expr's value"]
+    S -->|recoverable read failure| F["evaluate fallback<br/>in the same scope"]
+    F --> FV["return fallback's value<br/>(or its failure)"]
+    S -->|any other failure| P["propagate the failure"]
+```
+
+### Which failures `try` recovers
+
+A **read failure** is a problem with the data a read function was asked to
+read, as opposed to a problem with the request itself. Only these are
+recovered; everything else propagates:
+
+| Recovered | Propagated |
+| --- | --- |
+| a data source names a file that does not exist | a malformed file reference, or an `as` type that is not valid |
+| an ordinary local read fails (the file cannot be read) | an imported contract that is missing or invalid: the schema `as` imports is not the data source |
+| an allowed remote read fails in transport: an HTTP error status such as `500`, a refused connection, a body that is not valid UTF-8 | `dm.data.unsupported_format`, `dm.data.invalid_options`, `dm.data.not_a_container`, `dm.data.row_shape_conflict`, `dm.data.this_import_rejected` |
+| `dm.data.malformed`: the file cannot be parsed | parse errors, unknown functions, invalid callbacks, and calls the [call check](../inline/call-check.md) rejects |
+| `dm.data.contract_mismatch`: the data does not fit `as` | policy refusals: a denied remote host (even when a cached copy exists), a redirect to a denied host, a warning made blocking by `--deny`, and schema slot refusals (approval required, denied, forbidden binding or function) |
+| | iteration and nested-composition limits, missing request context, unavailable host bindings |
+| | arithmetic failures, provider failures (such as `pr_list` with no remote), path-boundary refusals, glob failures, and a failure inside a nested composition such as `as_markdown` |
+
+`load_data` is the main data source; any read function whose failure is a
+missing file or a remote transport failure counts. The decision is made from
+the kind of failure, never from the function's name or the message text, and a
+kind of failure that is not on the left is not recovered.
+
+A request that is invalid for the format it asks for fails the same way
+when the file is missing: an extension that names no readable format
+(`dm.data.unsupported_format`), options that cannot apply to the format
+(`dm.data.invalid_options`), and a contract that cannot describe CSV or TSV
+rows (`dm.data.row_shape_conflict`). So
+`try(load_data("optional.xyz", "string[]"), [])` is still an error. Name the
+format to make a missing file an ordinary miss; see
+[Loading Data](./loading-data.md#files-that-may-be-missing).
+
+### Falsy values are successes
+
+`try` reacts to failures, not to values. A read that returns `null`, `false`,
+`0`, `""`, `[]`, or `{}` has succeeded, so the fallback is not used:
+
+```text
+try(null, 7)    ⇒ null
+try(0, 7)       ⇒ 0
+```
+
+Use `||` to replace a falsy value (see [Logical OR](#logical-or)). The two
+combine: `try(load_data(f, "string[]"), []) || ["default"]` covers both a
+missing file and an empty one.
+
+### When the fallback fails
+
+A `try` does not catch its own fallback's failure: the fallback's error is
+reported with its normal code. An enclosing `try` can catch it, if that
+failure is recoverable:
+
+```text
+try(load_data("a.yaml", "string[]"), load_data("b.yaml", "string[]"))
+    a missing, b missing → fails: b's missing-file error
+try(try(load_data("a.yaml", "string[]"), load_data("b.yaml", "string[]")), [])
+    a missing, b missing → []
+```
+
+Recovery does not undo or retry anything. Files already read, callback items
+already visited, and the iteration budget already spent stay spent, and the
+budget is shared by both arguments. A fallback that inserts text inserts it
+as data; it is never scanned for `{{ … }}` again.
+
+### Whole result or one item
+
+Where `try` sits in a callback decides what the fallback replaces. Around the
+whole `map`, one failing item replaces the entire result:
+
+```md
+{{ try(map(files, f => load_data(f, "string[]")), []) }}
+```
+
+Inside the callback, only the failing item is replaced and the walk continues:
+
+```md
+{{ map(files, f => try(load_data(f, "string[]"), [])) }}
+```
+
+With `files: [a.yaml, missing.yaml]`, the first call's value is `[]` and the
+second's is a list holding `a.yaml`'s value followed by `[]`. The fallback sees the
+callback's locals, so `f => try(load_data(f, "string[]"), [f])` can use `f`.
+A failure that propagates out of a callback keeps its item position.
+
+### Where `try` works
+
+`try` works on every surface that evaluates expressions: body and frontmatter
+interpolation, `::block` conditions, transclusion `when=` and target
+expressions, inline `map` and `filter` callbacks, `::map` callbacks and
+`::filter` predicates, region `when=`, shell-template expressions, lifecycle
+expressions in `md` and Claudine (`message`, `set`, `when:`), and `{{ }}`
+slots inside a schema. It cannot be a `::map` or `::filter` source, which must
+be a name or dotted path. A failing lifecycle shell command is not an
+expression failure and is not caught.
+
+In a schema slot, `try` keeps the slot's rules: a missing file inside the
+repository recovers without a grant, but a read outside it still needs one,
+and an approval refusal propagates. See
+[Schema Slots in Darkmatter](./schemas/schema-slots.md).
+
+### Reporting, discovery, and types
+
+- **No report for a recovered failure.** A recovered cause produces no error
+  or warning in formatted output or in the `--output json` envelope. Earlier,
+  unrelated warnings stay and still obey `--deny`.
+- **Not an absence guard.** `try` handles failures, not missing properties:
+  `try(titel, "x")` still warns that `titel` is undeclared, and its value is
+  `null`, not `"x"`.
+- **Discovery passes defer.** `md compose` checks references, and shell
+  approval walks the document, before composition. A real recoverable failure
+  there chooses the fallback and the pass continues. A read the pass cannot
+  perform (the reference check has no network permission, for example) is
+  deferred instead: the fallback is not chosen, and composition later reads the
+  real value. Both arguments are inspected for dependencies and approvals, so a
+  command only the fallback needs is still listed. `try` around one read does
+  not excuse another, unguarded read of the same missing file.
+- **The type is a union.** The call check, DMLS, and callback item typing see
+  `try`'s type as the union of both arguments' types. A literal `[]` fallback
+  adds nothing when the other argument is an array type that accepts an empty
+  list, so `try(load_data("optional.yaml", "{ a: string }[]"), [])` stays
+  `{ a: string }[]` and member completion works in a later callback. A
+  non-empty array, a fixed-length tuple, or an object gets the ordinary union.
+  `try` proves nothing for guards. Both arguments go through the
+  [call check](../inline/call-check.md), so a provably invalid call in a
+  fallback that never runs still rejects the document.
+
+How the data memo and read set behave under `try`, and the `format` escape
+for an unrecognized extension, are in
+[Loading Data](./loading-data.md#files-that-may-be-missing).
 
 ## Comparison Operators
 
@@ -1090,6 +1521,7 @@ recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …
 | Date Arithmetic | `older_than(date1, date2, diff)` | Returns true when date1 is at least the given duration older (earlier) than date2. | `older_than("2024-06-01", "2024-06-20", "14d")` ⇒ `true` |
 | Logical | `and(...)` | Returns true when every argument is truthy, evaluating them in order and stopping at the first falsy one. | `and(true, true)` ⇒ `true` |
 | Logical | `or(...)` | Returns true when any argument is truthy, evaluating them in order and stopping at the first truthy one. | `or(false, true)` ⇒ `true` |
+| Logical | `try(expr, fallback)` | Returns the value of expr. Only when expr fails with a recoverable read failure (a missing or unreadable source, malformed or contract-mismatched data, or an allowed remote read that fails in transport) is fallback evaluated and returned instead; every other failure propagates. Any value expr produces, including a falsy one such as null, false, 0, or an empty string, list, or object, is a success. | `try(null, 7)` ⇒ `null`<br>`try(0, 7)` ⇒ `0` |
 | Type Conversion | `number(x, [fallback])` | Converts a number or numeric text to a number. When `x` cannot convert (malformed text, null, a boolean, a list, an object, or a number that cannot be held exactly), a supplied `fallback` is returned instead; without one the call is a type error. The fallback must itself be a number. | `number("42")` ⇒ `42`<br>`number("4")` ⇒ `4`<br>`number(" 4 ")` ⇒ `4`<br>`number("pear", 7)` ⇒ `7`<br>`number(null, 7)` ⇒ `7`<br>`number(true, 7)` ⇒ `7`<br>`number([], 7)` ⇒ `7`<br>`number("9007199254740993", 7)` ⇒ `7`<br>`number("pear")` ⇒ `error`<br>`number("4", "x")` ⇒ `error`<br>`number()` ⇒ `error` |
 | Filesystem | `absolute(file)` | Returns the absolute path a file reference names, in native spelling. A missing target returns the first location it would be resolved at, so the result does not prove the file exists. Rejects HTTP(S) URLs; null passes through. | `absolute("fixture.md")` ⇒ `"/path/to/fixture.md"` (display only: resolves to an absolute path of the resolution context, which is not portable) |
 | Filesystem | `basename(file)` | Returns the final path component, including its extension; null passes through. | `basename("sub/note.md")` ⇒ `"note.md"` |
@@ -1116,6 +1548,7 @@ recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …
 | Filesystem | `join(left, right)` | Joins two path strings with normalized separators and validates the result as a path; HTTP(S) arguments are rejected. Null passes through. | `join("sub", "note.md")` ⇒ `"sub/note.md"` |
 | Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text and its absolute path as the destination. HTTP(S) URLs are rejected because they need a description; null passes through. | `link("fixture.md")` ⇒ `"[fixture.md](/path/to/fixture.md)"` (display only: result includes an absolute path, which is not portable) |
 | Filesystem | `link(target, desc)` | Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its text; null passes through. | `link("fixture.md", "Fixture")` ⇒ `"[Fixture](/path/to/fixture.md)"` (display only: result includes an absolute destination path, which is not portable) |
+| Filesystem | `load_data(file, as, [options])` | Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file and returns its data converted to the container type `as` describes, or fails naming where the data breaks that type. CSV and TSV rows become objects keyed by the header, or lists of cells, as `as`'s element type says. The optional `options` object chooses how the file is read: `format` (`yaml`, `json`, `jsonl`, `csv`, `tsv`, `toml`, `json5`, or the aliases `yml` and `ndjson`) overrides the extension; `delimiter`, one ASCII character other than a double quote, CR, or LF, separates CSV cells (default a comma; TSV accepts only a tab); `header: false` reads every CSV or TSV record as a row by position, which needs a list-row contract (default `true`). `delimiter` or `header` on a non-tabular format is an error. Null passes through without reading anything. | `load_data("fixture.yaml", "string[]")` ⇒ `["macOS", "Linux", "Windows"]`<br>`load_data("fixture.json", "{name: string, tags: string[]}")` ⇒ `{name: "Ada", tags: ["math", "engines"]}`<br>`load_data("fixture.jsonl", "{id: number, ok: boolean}[]")` ⇒ `[{id: 1, ok: true}, {id: 2, ok: false}]`<br>`load_data("fixture.csv", "{name: string, active: boolean, stars: number}[]")` ⇒ `[{name: "Ada", active: true, stars: 1000}, {name: "Grace", active: false, stars: 250}]`<br>`load_data("fixture.tsv", "tuple([string, number])[]")` ⇒ `[["web", 8080], ["db", 5432]]`<br>`load_data("fixture.toml", "{package: {name: string, version: string}}")` ⇒ `{package: {name: "demo", version: "1.0.0"}}`<br>`load_data("fixture.json5", "{hosts: string[]}")` ⇒ `{hosts: ["alpha", "beta"]}`<br>`load_data("fixture-headerless.csv", "tuple([string, number])[]", {header: false})` ⇒ `[["web", 8080], ["db", 5432]]`<br>`load_data("fixture-semicolon.txt", "{name: string, port: number}[]", {format: "csv", delimiter: ";"})` ⇒ `[{name: "web", port: 8080}, {name: "db", port: 5432}]`<br>`load_data("fixture-export", "{name: string, tags: string[]}", {format: "json"})` ⇒ `{name: "Ada", tags: ["math", "engines"]}`<br>`load_data(null, "string[]")` ⇒ `null` |
 | Filesystem | `markdown_body_empty(file)` | Returns true when the Markdown file's body holds only whitespace; null is false. | `markdown_body_empty("fixture.md")` ⇒ `false` |
 | Filesystem | `markdown_title(file)` | Returns the Markdown file's frontmatter `title`, else its first H1 heading, else null; null passes through. | `markdown_title("fixture.md")` ⇒ `"Fixture Title"` |
 | Filesystem | `parent_dir(file)` | Returns the directory segment immediately above the basename, or empty text when there is none; null passes through. | `parent_dir("sub/note.md")` ⇒ `"sub"` |
@@ -1156,7 +1589,7 @@ recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …
 | Network | `ipv6([filter])` | Returns the host's IPv6 addresses, excluding loopback and link-local; scoped addresses keep their %scope suffix. Filters behave as in ipv4. | `ipv6("::1/128")` ⇒ `["::1"]` (display only: result depends on the host interfaces) |
 | Network | `ping(address, [timeout])` | Sends one ICMP echo to an IP address and returns true when it replies within `timeout` milliseconds (default 100, at most 60000). Returns null with a warning when the address is not granted through --allow host=HOST, false when there is no reply, and an error when the host cannot send ICMP. | `ping("192.168.1.1", 250)` ⇒ `true` (display only: result depends on the network and the ICMP grant) |
 | Network | `ping_under(address, timeout, [attempts])` | Sends `attempts` ICMP echoes (default 3) one after another, each with a timeout of `timeout` milliseconds. Returns true when every reply arrives in time, false when none does, and "unstable" otherwise. Consent and error rules match ping. | `ping_under("192.168.1.1", 50, 5)` ⇒ `"unstable"` (display only: result depends on the network and the ICMP grant) |
-| Composition | `as_markdown(content)` | Composes the text as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown; null passes through. | `as_markdown("::file ./intro.md")` ⇒ `"# Introduction"` (display only: result depends on the transcluded file) |
+| Composition | `as_markdown(content)` | Composes the text as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown; the content inherits the calling document's values as a `::file` child does; null passes through. | `as_markdown("::file ./intro.md")` ⇒ `"# Introduction"` (display only: result depends on the transcluded file) |
 <!-- END GENERATED FUNCTION TABLE -->
 
 ### `date()` format tokens
@@ -1315,10 +1748,18 @@ runs no function.
 | `markdown_body_empty(path)` | whether another file's body is empty | yes (body only) |
 | `validate_schema(path)` | a file against its declared `$schema` | yes (body only) |
 | `validate_schema(path, obj)` | the file's frontmatter with `obj` merged over it, validated in memory | yes (body only) |
+| `load_data(path, as, [options])` | a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file, converted to the type `as` | yes (body only) |
 | `absolute(path)` | the absolute path a reference names, existing or not | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
 | `has_command(cmd)` | whether a command is runnable on the host | **no** |
 | `find_files(pattern)` | every file a glob reference matches | **no** |
+
+`load_data(path, as)` reads structured data rather than a Markdown file. Its
+`as` argument is a quoted type definition (`"string[]"`), and the data must fit
+it. An optional third argument chooses how the file is read:
+`load_data("rows.txt", "tuple([string, number])[]", {format: "csv", delimiter: ";", header: false})`.
+Formats, options, CSV rows, optional files, and failures are described in
+[Loading Data](./loading-data.md).
 
 `frontmatter(path, …)` and `markdown_title(path)` decode a stored
 [literal token](../inline/interpolation.md#literal-tokens) to the text it
@@ -1329,7 +1770,9 @@ unchanged.
 
 `has_command(cmd)` is a `PATH`/executable existence probe: it reports whether
 `cmd` can be run on the host and **never executes** it, so it needs no command
-whitelisting. A bare name (`git`) triggers an OS-native `PATH` search; an
+whitelisting. A bare name (`git`) triggers an OS-native search of the `PATH`
+in the composition's captured environment (the environment the request was
+started with, never a `PATH` the process changed later); an
 absolute path (`/usr/bin/git`) must both exist and be executable. On Windows the
 search honors `PATHEXT`; on Unix the executable bit is required. Symlinked
 executables are followed, and directories are rejected.
@@ -1674,8 +2117,15 @@ cicd_list({ statuses: ["failed", "cancelled"], branch: "main", limit: 10 })
 
 ## Timezone & Date Behavior
 
-- The local system timezone is detected using the `sniff` library (already a
-  Darkmatter dependency).
+- Each composition reads the clock **once**. `ctx.now`, `ctx.today`, the
+  relative validators (`is_today`, …), `date()`'s optional year, and the
+  offset conversion in `date_delta`/`older_than`/`newer_than` all use that one
+  reading, so a run that crosses midnight still sees one date, and
+  `{{ is_today(ctx.today) }}` is always `true`.
+- The local timezone is the host's UTC offset at that reading. A datetime with
+  an offset from another season is converted with this offset, not with the
+  daylight saving rule for its own date. The timezone name (`ctx.timezone`,
+  `ctx.timezone_iana`) is detected with the `sniff` library.
 - Default behavior for date/datetime operators uses the **local timezone**.
 - UTC variants (`*Utc`) are provided for every date/datetime operator.
 - Datetime values with **no offset**:

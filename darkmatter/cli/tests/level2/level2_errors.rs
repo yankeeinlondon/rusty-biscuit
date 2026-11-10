@@ -9,8 +9,8 @@ use crate::common;
 
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, capture_settled};
-use common::level2::md_shim;
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, capture_settled, shell_path};
+use common::level2::md_shim_word;
 use serial_test::serial;
 use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -93,7 +93,7 @@ fn run_md_compose_named(
     // into this capture.
     run_with_sentinel(harness, "clear");
 
-    let cmd = format!("{} compose {}", md_shim(), file_path.display());
+    let cmd = format!("{} compose {}", md_shim_word(), shell_path(&file_path));
     let frame = run_with_sentinel(harness, &cmd);
     // Keep tempdir alive past capture by returning canonical path to caller.
     drop(dir);
@@ -130,7 +130,7 @@ fn run_md_compose_with_sibling(
 
     run_with_sentinel(harness, "clear");
 
-    let cmd = format!("{} compose {}", md_shim(), file_path.display());
+    let cmd = format!("{} compose {}", md_shim_word(), shell_path(&file_path));
     let frame = run_with_sentinel(harness, &cmd);
     // Keep tempdir (and the on-disk sibling) alive past capture.
     drop(dir);
@@ -175,7 +175,7 @@ fn run_md_compose_with_nested_siblings(
 
     run_with_sentinel(harness, "clear");
 
-    let cmd = format!("{} compose {}", md_shim(), file_path.display());
+    let cmd = format!("{} compose {}", md_shim_word(), shell_path(&file_path));
     let frame = run_with_sentinel(harness, &cmd);
     drop(dir);
     Some((frame, canonical))
@@ -216,7 +216,7 @@ fn level2_error_header_contains_osc8_hyperlink() {
     // The header should contain something like
     // `\x1b]8;;file:///...unterminated.md\x07unterminated.md\x1b]8;;\x07`.
     // Use the canonicalized path because macOS /var is a symlink to /private/var.
-    let expected_url = format!("file://{}", canonical.to_string_lossy());
+    let expected_url = String::from(url::Url::from_file_path(&canonical).expect("absolute file URL"));
     assert!(
         frame.raw.contains(&format!("\x1b]8;;{}", expected_url)),
         "expected raw output to contain OSC8 hyperlink sequence for {}. raw:\n{}",
@@ -247,7 +247,7 @@ fn level2_schema_validation_block_renders_styled_link_and_bullet() {
     // OSC8 hyperlink to the source file in the styled header/body. macOS
     // aliases `/var` to `/private/var`; the binary embeds whichever spelling
     // the user passed on the command line, so accept either form.
-    let canonical_url = format!("file://{}", canonical.to_string_lossy());
+    let canonical_url = String::from(url::Url::from_file_path(&canonical).expect("absolute file URL"));
     let aliased_url = canonical_url.replacen("file:///private", "file://", 1);
     let osc8_canonical = format!("\x1b]8;;{}", canonical_url);
     let osc8_aliased = format!("\x1b]8;;{}", aliased_url);

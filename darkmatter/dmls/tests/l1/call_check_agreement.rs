@@ -68,6 +68,11 @@ const CORPUS: &[(&str, &str, &str, bool)] = &[
     ("shadowed_outer", "", "::map team \"{ flag } => flag\"\n{{ min(flag, 5) }}\n::end-map", false),
     ("dead_region", "", "::filter team \"p => p\" when=\"false\"\n{{ min(p.active, 5) }}\n::end-filter", true),
     ("escaped_callback", "", "::filter team \"p => p.flag == \\\"é\\\" && min(p.active, 5) > 0\"\nbody\n::end-filter", true),
+    // `load_data`'s options object: a key the declared shape lacks is a
+    // proven call error before anything is read; a null file with valid
+    // options composes to null.
+    ("load_data_unknown_option", "", "{{ load_data('rows.json', 'string[]', {quote: 1}) }}", true),
+    ("load_data_null_file_options", "", "{{ load_data(null, 'string[]', {format: 'json'}) }}", false),
 ];
 
 /// Retained text: a `boolish` may hold `"1"` and a `numberlike` always
@@ -130,6 +135,7 @@ agreement_groups! {
     composition_and_the_editor_reject_the_same_documents_fourth_group: 18..24,
     composition_and_the_editor_reject_the_same_collection_documents: 24..30,
     composition_and_the_editor_reject_the_same_collection_documents_second_group: 30..33,
+    composition_and_the_editor_reject_the_same_load_data_documents: 33..35,
 }
 
 #[test]

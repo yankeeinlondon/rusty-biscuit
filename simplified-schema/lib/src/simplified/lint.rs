@@ -20,14 +20,16 @@
 //! including argument quotes. These spans are projected through YAML quoting
 //! and escaping before lint results are returned.
 
+use std::borrow::Cow;
+
 use jsonschema::error::ValidationErrorKind;
 use serde_json::Value;
 
 use crate::{errors::SchemaError, span::SourceSpan};
 
 use super::{
-    Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot,
-    SimplifiedType, TypeExpr,
+    Constraint, DynamicKind, DynamicList, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot,
+    SimplifiedType, TypeExpr, TemplateConstraintKind,
     convert::suggestion_target_schema,
     query::{Alternative, flattened_alternatives},
 };
@@ -103,7 +105,10 @@ pub struct SuggestionLintProblem {
 /// a property's one `suggest(...)` list sits on a single alternative.
 /// Candidates on a named-type reference (`Name(suggest(…))`) are skipped
 /// until the schema is resolved; lint the resolved schema to judge them
-/// against the referenced type.
+/// against the referenced type. In a template only the literal candidates
+/// of a list with `{{ … }}` slots are judged (the slots' values are not
+/// known); none are when another slot (`min`, `pattern`, …) shapes the
+/// target.
 ///
 /// ## Errors versus lint
 ///
@@ -177,6 +182,8 @@ fn lint_property(
             // passive lint never performs; linting the resolved schema judges its
             // candidates against the resolved target.
             TypeExpr::Imported { .. } => {}
+            // A pending template type has no candidates until it resolves.
+            TypeExpr::Slot(_) => {}
             // Flattening never yields a union atom; tuple positions and
             // function signatures carry no suggestions to lint.
             TypeExpr::Union(_) | TypeExpr::Tuple(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {}
@@ -204,13 +211,17 @@ fn lint_candidates(
     property_path: &[String],
     problems: &mut Vec<SuggestionLintProblem>,
 ) -> Result<(), SchemaError> {
-    let atom = alternative.atom;
-    let Some(candidates) = atom.constraints.iter().find_map(|constraint| match constraint {
-        Constraint::Suggest(candidates) => Some(candidates),
-        _ => None,
-    }) else {
+    let stored = alternative.atom;
+    let Some(candidates) = stored.suggestion_candidates() else {
         return Ok(());
     };
+    // A template's literal candidates are judged against the atom without its
+    // slots; a slot that shapes the target itself (`min`, `pattern`, …)
+    // leaves nothing to judge them against until it is resolved.
+    let Some(atom) = lint_target_atom(stored) else {
+        return Ok(());
+    };
+    let atom = atom.as_ref();
 
     let property = property_path.join(".");
     let target = suggestion_target_schema(&property, atom)?;
@@ -218,7 +229,7 @@ fn lint_candidates(
     let is_number = matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Number));
     let mut siblings: Option<Vec<jsonschema::Validator>> = None;
 
-    for candidate in candidates {
+    for candidate in candidates.iter() {
         let reason = if is_number && candidate.canonical_decimal.is_none() {
             Some(SuggestionLintReason::InvalidDecimalSyntax)
         } else if is_number && candidate.interpreted.is_string() {
@@ -251,6 +262,30 @@ fn lint_candidates(
         }
     }
     Ok(())
+}
+
+/// The atom a candidate list is linted against: `atom` itself when it holds
+/// no slot; `atom` without its dynamic `suggest` list and slot `default`,
+/// which do not shape the values it accepts; `None` when another slot does.
+fn lint_target_atom(atom: &PropertyAtom) -> Option<Cow<'_, PropertyAtom>> {
+    let dynamic = |constraint: &Constraint| matches!(constraint, Constraint::Dynamic(_) | Constraint::TemplateConstraint { .. });
+    if !atom.constraints.iter().chain(&atom.array_constraints).any(dynamic) {
+        return Some(Cow::Borrowed(atom));
+    }
+    let advisory = |constraint: &Constraint| {
+        matches!(
+            constraint,
+            Constraint::Dynamic(DynamicList { kind: DynamicKind::Suggest, .. })
+                | Constraint::TemplateConstraint { kind: TemplateConstraintKind::Default, .. }
+        )
+    };
+    if atom.constraints.iter().chain(&atom.array_constraints).any(|c| dynamic(c) && !advisory(c)) {
+        return None;
+    }
+    let mut concrete = atom.clone();
+    concrete.constraints.retain(|constraint| !advisory(constraint));
+    concrete.array_constraints.retain(|constraint| !advisory(constraint));
+    Some(Cow::Owned(concrete))
 }
 
 /// Validators for every other alternative at `alternative`'s insertion site

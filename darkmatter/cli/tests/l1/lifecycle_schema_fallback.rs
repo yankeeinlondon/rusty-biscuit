@@ -3,24 +3,21 @@
 //! An action `md` does not run (`say`) passes untyped, while a malformed
 //! supported action and a forbidden one are schema errors at their event.
 
+use crate::common;
 use crate::common::CliProcessFixture;
 use serde_json::Value;
 
-/// The NDJSON record `md schema validate --format json` writes for one
+/// The file record `md schema validate --output json` writes for one
 /// document whose frontmatter is `frontmatter`, and the exit status.
 fn validate(name: &str, frontmatter: &str) -> (Option<i32>, Value) {
     let fixture = CliProcessFixture::named(name);
     fixture.write_file("cwd/doc.md", &format!("---\n{frontmatter}---\nBody\n"));
     let output = fixture
         .command()
-        .args(["schema", "validate", "--format", "json", "doc.md"])
+        .args(["schema", "validate", "--output", "json", "doc.md"])
         .output()
         .expect("md runs");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let line = stdout.lines().next().unwrap_or_else(|| {
-        panic!("no record; stderr: {}", String::from_utf8_lossy(&output.stderr));
-    });
-    (output.status.code(), serde_json::from_str(line).expect("an NDJSON record"))
+    (output.status.code(), common::schema_validate_record(&output.stdout))
 }
 
 /// The JSON pointers of the record's problems.

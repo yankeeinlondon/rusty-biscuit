@@ -2,10 +2,15 @@
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
+use darkmatter::markdown::compose::expression::functions::ReadKind;
 use darkmatter::markdown::compose::shell_expansion::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
 };
+use darkmatter::markdown::schemas::slots::grants::{
+    Grant, GrantDecision, GrantScope, GrantTarget, SlotGrantDecision, SlotGrantRequest,
+};
 use std::io::{self, BufRead, IsTerminal, Write};
+use std::path::PathBuf;
 
 /// CLI approval handler that prompts the user interactively on stderr.
 ///
@@ -24,6 +29,178 @@ impl ShellApprovalHandler for CliShellApprovalHandler {
         let mut stdin = stdin.lock();
 
         approve_with_io(&request, &mut stdin, &mut stderr)
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn approve_slot_reads(
+        &self,
+        requests: &[SlotGrantRequest],
+    ) -> Result<Vec<SlotGrantDecision>, ShellExpansionError> {
+        let stderr = io::stderr();
+        let stdin = io::stdin();
+        let mut stderr = stderr.lock();
+        let mut stdin = stdin.lock();
+
+        approve_slot_reads_with_io(requests, &mut stdin, &mut stderr)
+    }
+}
+
+/// Asks about each of `requests` in turn over `input` and `output`, one
+/// numbered prompt per read, listing exactly the request's choices.
+///
+/// This is the slot prompt's testing seam, as [`approve_with_io`] is the
+/// shell prompt's. A number that names no listed choice asks again; ended
+/// input answers this and every later request with "deny for this run".
+///
+/// ## Errors
+///
+/// `PolicyIo` when reading the answer or writing the prompt fails.
+#[allow(clippy::result_large_err)]
+pub fn approve_slot_reads_with_io<R: BufRead, W: Write>(
+    requests: &[SlotGrantRequest],
+    input: &mut R,
+    output: &mut W,
+) -> Result<Vec<SlotGrantDecision>, ShellExpansionError> {
+    let mut decisions = Vec::with_capacity(requests.len());
+    let mut ended = false;
+    for request in requests {
+        if ended {
+            decisions.push(deny_for_this_run(request));
+            continue;
+        }
+        let decision = ask_slot_read(request, input, output)?;
+        ended = decision.is_none();
+        decisions.push(decision.unwrap_or_else(|| deny_for_this_run(request)));
+    }
+    Ok(decisions)
+}
+
+/// The "deny for this run" answer to `request`; unanswered when it offers
+/// none (no grant can allow the read).
+fn deny_for_this_run(request: &SlotGrantRequest) -> SlotGrantDecision {
+    request
+        .choices
+        .iter()
+        .find(|grant| grant.decision == GrantDecision::Deny && grant.scope == GrantScope::Once)
+        .map_or(SlotGrantDecision::Unanswered, SlotGrantDecision::from_grant)
+}
+
+/// One prompt; `None` when the input ended.
+#[allow(clippy::result_large_err)]
+fn ask_slot_read<R: BufRead, W: Write>(
+    request: &SlotGrantRequest,
+    input: &mut R,
+    output: &mut W,
+) -> Result<Option<SlotGrantDecision>, ShellExpansionError> {
+    if request.choices.is_empty() {
+        return Ok(Some(SlotGrantDecision::Unanswered));
+    }
+    let io_error = |source| ShellExpansionError::PolicyIo {
+        path: request.schema.clone().unwrap_or_else(|| PathBuf::from("<stdin>")),
+        source,
+    };
+    loop {
+        write_slot_prompt(output, request).map_err(io_error)?;
+        let mut answer = String::new();
+        if input.read_line(&mut answer).map_err(io_error)? == 0 {
+            return Ok(None);
+        }
+        let picked = answer
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .and_then(|number| number.checked_sub(1))
+            .and_then(|index| request.choices.get(index));
+        match picked {
+            Some(grant) => return Ok(Some(SlotGrantDecision::from_grant(grant))),
+            None => {
+                let err_msg = Prose::new(format!(
+                    "<red>Invalid choice. Please enter 1-{}.</red>",
+                    request.choices.len()
+                ))
+                .render_optimistic(None);
+                writeln!(output, "  {err_msg}").map_err(io_error)?;
+            }
+        }
+    }
+}
+
+fn write_slot_prompt<W: Write>(output: &mut W, request: &SlotGrantRequest) -> io::Result<()> {
+    let label = |text: &str| Prose::new(format!("<dim>{text:<9}</dim>")).render_optimistic(None);
+    let header = Prose::new("\u{26a0}  <bold><yellow>Schema Read Approval Required</yellow></bold>")
+        .render_optimistic(None);
+    let verb = match request.kind {
+        ReadKind::Content => "reads",
+        ReadKind::Probe => "checks",
+        ReadKind::Listing => "lists",
+    };
+    let read = Prose::new(format!(
+        "<bold>{}()</bold> {verb} <bold><cyan>{}</cyan></bold>",
+        escape_prose(&request.function),
+        escape_prose(&request.location.to_string())
+    ))
+    .render_optimistic(None);
+
+    write!(output, "\n  {header}\n")?;
+    if let Some(schema) = &request.schema {
+        let schema = Prose::new(format!("<bold>{}</bold>", escape_prose(&schema.display().to_string())))
+            .render_optimistic(None);
+        writeln!(output, "  {} {schema}", label("Schema:"))?;
+    }
+    writeln!(output, "  {} {read}\n", label("Read:"))?;
+
+    let sep = Prose::new("<dim>\u{2502}</dim>").render_optimistic(None);
+    let labels: Vec<String> = request.choices.iter().map(|grant| slot_choice_label(grant, request)).collect();
+    let width = labels.iter().map(String::len).max().unwrap_or(0);
+    for (index, (grant, text)) in request.choices.iter().zip(&labels).enumerate() {
+        let color = match (grant.decision, grant.scope) {
+            (GrantDecision::Allow, GrantScope::Persisted) => "green",
+            (GrantDecision::Allow, GrantScope::Once) => "cyan",
+            (GrantDecision::Deny, GrantScope::Once) => "yellow",
+            (GrantDecision::Deny, GrantScope::Persisted) => "red",
+        };
+        let number = Prose::new(format!("<{color}>{}</{color}>", index + 1)).render_optimistic(None);
+        let effect = Prose::new(format!("<dim>({})</dim>", escape_prose(&slot_choice_effect(grant))))
+            .render_optimistic(None);
+        writeln!(output, "  {number} {sep} {text:<width$}  {effect}")?;
+    }
+    writeln!(output)?;
+    let prompt_arrow = Prose::new("<bold>></bold>").render_optimistic(None);
+    write!(output, "  {prompt_arrow} ")?;
+    output.flush()
+}
+
+/// What a choice covers, in words: the folder of a file read is "this
+/// file's folder", of a listing "this folder".
+fn slot_choice_label(grant: &Grant, request: &SlotGrantRequest) -> String {
+    let what = match &grant.target {
+        GrantTarget::File(_) => "this file",
+        GrantTarget::Dir(_) if request.kind == ReadKind::Listing => "this folder",
+        GrantTarget::Dir(_) => "this file's folder",
+        GrantTarget::Url(_) => "this exact URL",
+        GrantTarget::UrlAnyQuery(_) => "this URL with any query",
+        GrantTarget::Site { .. } => "this site",
+    };
+    match (grant.decision, grant.scope) {
+        (GrantDecision::Allow, GrantScope::Once) => format!("Allow {what} for this run"),
+        (GrantDecision::Allow, GrantScope::Persisted) => format!("Always allow {what}"),
+        (GrantDecision::Deny, GrantScope::Persisted) => format!("Always deny {what}"),
+        (GrantDecision::Deny, GrantScope::Once) => "Deny for this run".to_string(),
+    }
+}
+
+/// What choosing a line does, naming the grant-store line a persisted
+/// choice saves.
+fn slot_choice_effect(grant: &Grant) -> String {
+    match grant.scope {
+        GrantScope::Persisted => format!(
+            "saves \"{} {} {}\" to the schema read grants",
+            grant.decision.word(),
+            grant.target.kind_word(),
+            grant.target
+        ),
+        GrantScope::Once if grant.decision == GrantDecision::Deny => "the slot fails; this run only".to_string(),
+        GrantScope::Once => format!("{}; this run only", grant.target),
     }
 }
 
@@ -642,5 +819,125 @@ mod tests {
         let (decision, _) = session(&request, "");
 
         assert_eq!(decision, ShellApprovalDecision::Deny);
+    }
+
+    mod slot_reads {
+        use super::*;
+        use darkmatter::markdown::compose::expression::read_gate::ReadLocation;
+
+        fn grant(decision: GrantDecision, target: GrantTarget, scope: GrantScope) -> Grant {
+            Grant { decision, target, scope }
+        }
+
+        fn file_request() -> SlotGrantRequest {
+            let file = PathBuf::from("/repo/data/os.yaml");
+            let dir = PathBuf::from("/repo/data");
+            let allow = GrantDecision::Allow;
+            SlotGrantRequest {
+                function: "load_data".into(),
+                kind: ReadKind::Content,
+                location: ReadLocation::Local(file.clone()),
+                schema: Some(PathBuf::from("/repo/schemas/sandbox.yaml")),
+                choices: vec![
+                    grant(allow, GrantTarget::File(file.clone()), GrantScope::Once),
+                    grant(allow, GrantTarget::File(file.clone()), GrantScope::Persisted),
+                    grant(allow, GrantTarget::Dir(dir.clone()), GrantScope::Once),
+                    grant(allow, GrantTarget::Dir(dir), GrantScope::Persisted),
+                    grant(GrantDecision::Deny, GrantTarget::File(file.clone()), GrantScope::Persisted),
+                    grant(GrantDecision::Deny, GrantTarget::File(file), GrantScope::Once),
+                ],
+            }
+        }
+
+        fn ask(requests: &[SlotGrantRequest], answers: &str) -> (Vec<SlotGrantDecision>, String) {
+            let mut input = Cursor::new(answers.as_bytes().to_vec());
+            let mut output = Vec::new();
+            let decisions = approve_slot_reads_with_io(requests, &mut input, &mut output).unwrap();
+            (decisions, strip_ansi(&String::from_utf8(output).unwrap()))
+        }
+
+        #[test]
+        fn every_choice_is_numbered_and_names_what_it_saves() {
+            let (decisions, prompt) = ask(&[file_request()], "2\n");
+            assert_eq!(
+                decisions,
+                [SlotGrantDecision::Allow {
+                    target: GrantTarget::File(PathBuf::from("/repo/data/os.yaml")),
+                    scope: GrantScope::Persisted
+                }]
+            );
+            assert!(prompt.contains("Schema Read Approval Required"), "{prompt}");
+            assert!(prompt.contains("/repo/schemas/sandbox.yaml"), "{prompt}");
+            assert!(prompt.contains("load_data() reads /repo/data/os.yaml"), "{prompt}");
+            for (number, label) in [
+                (1, "Allow this file for this run"),
+                (2, "Always allow this file"),
+                (3, "Allow this file's folder for this run"),
+                (4, "Always allow this file's folder"),
+                (5, "Always deny this file"),
+                (6, "Deny for this run"),
+            ] {
+                assert!(prompt.contains(&format!("{number} \u{2502} {label}")), "{label}: {prompt}");
+            }
+            assert!(prompt.contains("saves \"allow file /repo/data/os.yaml\" to the schema read grants"), "{prompt}");
+            assert!(prompt.contains("saves \"deny file /repo/data/os.yaml\""), "{prompt}");
+        }
+
+        #[test]
+        fn deny_for_this_run_is_a_choice_and_the_answer_to_ended_input() {
+            let deny_once = SlotGrantDecision::Deny {
+                target: GrantTarget::File(PathBuf::from("/repo/data/os.yaml")),
+                scope: GrantScope::Once,
+            };
+            let (picked, _) = ask(&[file_request()], "6\n");
+            assert_eq!(picked, std::slice::from_ref(&deny_once));
+            // Input ends before the first answer: this and every later
+            // request are denied for the run, and only one prompt is shown.
+            let (ended, prompt) = ask(&[file_request(), file_request()], "");
+            assert_eq!(ended, [deny_once.clone(), deny_once]);
+            assert_eq!(prompt.matches("Schema Read Approval Required").count(), 1);
+        }
+
+        #[test]
+        fn a_number_naming_no_choice_asks_again() {
+            let (decisions, prompt) = ask(&[file_request()], "0\n9\n1\n");
+            assert_eq!(
+                decisions,
+                [SlotGrantDecision::Allow {
+                    target: GrantTarget::File(PathBuf::from("/repo/data/os.yaml")),
+                    scope: GrantScope::Once
+                }]
+            );
+            assert_eq!(prompt.matches("Invalid choice. Please enter 1-6.").count(), 2);
+        }
+
+        #[test]
+        fn a_url_read_offers_the_url_its_queryless_form_and_the_site() {
+            let url = biscuit_file::url::Url::parse("https://example.com/os.yaml?v=2").unwrap();
+            let mut stripped = url.clone();
+            stripped.set_query(None);
+            let allow = GrantDecision::Allow;
+            let request = SlotGrantRequest {
+                function: "load_data".into(),
+                kind: ReadKind::Content,
+                location: ReadLocation::Remote(url.clone()),
+                schema: None,
+                choices: vec![
+                    grant(allow, GrantTarget::Url(url.clone()), GrantScope::Once),
+                    grant(allow, GrantTarget::UrlAnyQuery(stripped), GrantScope::Once),
+                    grant(
+                        allow,
+                        GrantTarget::Site { scheme: "https".into(), host: "example.com".into(), port: None },
+                        GrantScope::Once,
+                    ),
+                    grant(GrantDecision::Deny, GrantTarget::Url(url), GrantScope::Once),
+                ],
+            };
+            let (_, prompt) = ask(&[request], "4\n");
+            for label in ["Allow this exact URL for this run", "Allow this URL with any query for this run", "Allow this site for this run"] {
+                assert!(prompt.contains(label), "{label}: {prompt}");
+            }
+            assert!(!prompt.contains("Schema:"), "an inline schema names no file");
+        }
     }
 }

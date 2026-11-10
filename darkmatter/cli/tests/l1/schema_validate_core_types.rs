@@ -5,7 +5,7 @@
 //! `shell` (criterion 7).
 //!
 //! Each test validates every document in one `md` process and matches the
-//! NDJSON records back to their documents by file name.
+//! JSON file records back to their documents by file name.
 
 use crate::common;
 
@@ -125,15 +125,14 @@ fn null_admitting_presence_matches_the_phase_a_table_end_to_end() {
 fn assert_validity(process: &CliProcessFixture, cases: &[(&str, String, bool)]) {
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .args(cases.iter().map(|(name, ..)| *name))
         .output()
         .expect("md runs");
     assert_eq!(output.status.code(), Some(1), "some cases are invalid");
-    let records: BTreeMap<String, Value> = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|line| {
-            let record: Value = serde_json::from_str(line).expect("NDJSON record");
+    let records: BTreeMap<String, Value> = common::schema_validate_records(&output.stdout)
+        .into_iter()
+        .map(|record| {
             (record["file"].as_str().expect("file").to_string(), record)
         })
         .collect();

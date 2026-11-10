@@ -26,7 +26,7 @@ hr_waves_tail_anchor
     // rasterizes to an image and no glyph reaches a text row (review-1
     // finding 3). The assertion is also anchored between sentinels so a stray
     // `~` from the shell prompt cannot satisfy it.
-    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
+    let Some((frame, _)) = run_md_env(body, "style.max-width=60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
 
@@ -83,12 +83,12 @@ hr_weight_tail_anchor
     // cannot accidentally match the (per-invocation distinct) command echo
     // (review-1 finding 3).
     let Some((frame_thick, _)) =
-        run_md_env(body_thick, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+        run_md_env(body_thick, "style.max-width=60", &[("TERMINAL_IMAGES", "0")])
     else {
         return;
     };
     let Some((frame_thin, _)) =
-        run_md_env(body_thin, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+        run_md_env(body_thin, "style.max-width=60", &[("TERMINAL_IMAGES", "0")])
     else {
         return;
     };
@@ -169,7 +169,7 @@ hr_color_tail_anchor
     // rule row — and the foreground SGR this test asserts — never appears. The
     // color is a text-rule property, so it must be exercised on the text tier
     // (review-1 finding 3).
-    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
+    let Some((frame, _)) = run_md_env(body, "style.max-width=60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
 
@@ -216,7 +216,7 @@ hr_bg_tail_anchor
     // Force the text tier so the rule paints as a real row (see the color test):
     // a graphics-capable terminal would rasterize the styled HR to an image and
     // the background SGR would never reach a text row (review-1 finding 3).
-    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
+    let Some((frame, _)) = run_md_env(body, "style.max-width=60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
 
@@ -279,11 +279,11 @@ hr_align_tail_anchor
     // leading whitespace, so the indent comparison this test makes is only
     // meaningful on the text rule (review-1 finding 3).
     let Some((frame_center, _)) =
-        run_md_env(centered, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+        run_md_env(centered, "style.max-width=60", &[("TERMINAL_IMAGES", "0")])
     else {
         return;
     };
-    let Some((frame_left, _)) = run_md_env(left, "--max-width 60", &[("TERMINAL_IMAGES", "0")])
+    let Some((frame_left, _)) = run_md_env(left, "style.max-width=60", &[("TERMINAL_IMAGES", "0")])
     else {
         return;
     };
@@ -339,7 +339,7 @@ hr_width_tail_anchor
     // Force the text tier: a rasterized HR encodes its width in pixels, so the
     // visible-glyph-count cap this test asserts only applies to the text rule
     // (review-1 finding 3).
-    let Some((frame, _)) = run_md_env(body, "--max-width 60", &[("TERMINAL_IMAGES", "0")]) else {
+    let Some((frame, _)) = run_md_env(body, "style.max-width=60", &[("TERMINAL_IMAGES", "0")]) else {
         return;
     };
     let Some((plain, _)) =

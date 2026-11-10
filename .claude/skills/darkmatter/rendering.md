@@ -42,9 +42,31 @@ assembly. It cannot inspect component kinds or rewrite their content.
 `renderable::layout::Layout` and alpha-bearing `PaintColor`. Parsed
 `StyleColor` must not survive beyond the parser/apply boundary.
 
-`CliStyleClaims` records only flags explicitly supplied by the user. Merge
-claims with frontmatter as presentation policy; do not let CLI defaults
-silently override authored styles.
+Precedence is decided once, by `prepare_style_layers`, field by field, in
+layer order: defaults < the document's `style:` < each `--style` file in
+order < the setters (one layer, wherever they sit on the line). The CLI path
+is `render_style::prepare_cli_style_inputs` (schema selection, file and
+setter layers) → `prepare_render_style` (adds `document_style_layer`) →
+`PreparedStyle` → `apply_prepared_style`. Each layer is admitted against the
+effective schema and normalized (shorthands by specificity, alignment
+broadcast) before the merge, so specificity is per layer and order wins
+across layers; schema-admitted keys the descriptor does not know land in
+`PreparedStyle::retained`, never in rendering. The `apply_*_style` functions take no override masks and
+apply every field of the effective style they receive; do not reintroduce a
+claim or mask type to protect one source from another. Test "override beats
+document" with two layers, never by pre-setting page state.
+
+A merged `PreparedStyle` (from `prepare_style_layers`) reaches a page only
+through `style::apply_prepared_style(page, &prepared, StyleAssetResolver,
+&PresentationDefaults)`: preparation is passive, this call executes assets.
+`page.stylesheet` is a `FileReference` resolved in the winning field's
+`StyleOrigin.context` (never `current_dir`), read only by
+`StyleAssetResolver::for_target(Html | MarkdownPlus)`; HTTP(S) stays a
+`<link>`. Themes, code-block mode, and line numbers resolve after the merge
+through `PresentationDefaults` built from the request snapshot's `THEME` /
+`CODE_THEME`, never the process environment. Component `padding` lowers
+before `padding-left`/`padding-right`, so a side alone keeps inherited
+vertical padding.
 
 Kebab-case keys are canonical. Supported snake-case compatibility aliases emit
 deprecation warnings and become errors in strict-style mode. Width and
@@ -116,7 +138,7 @@ Full doc: `darkmatter/docs/rendering/mermaid.md#embedded-font`.
   frontmatter key. `md --feature
   embed-mermaid-font` (`args::Feature`, lowered by
   `render::apply_features` inside `artifact::html_page`) sets it on every
-  HTML page `md` builds (`render`, implicit render, `compose --output html`);
+  HTML page `md` builds (`render`, implicit render);
   `md`'s HTML is never static SVG today, so the output is unchanged.
 - `code_renderer.rs` renders each static diagram with
   `with_embedded_font(true)` + `render_to_svg_with_font` and collects its

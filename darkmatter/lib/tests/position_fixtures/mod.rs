@@ -173,8 +173,46 @@ $schema:\n\
     }],
 };
 
+/// Each use of a failing anchor is located at its `*name` token; the
+/// anchored original at the failing value inside it.
+pub const ALIAS_USE: PositionCase = PositionCase {
+    name: "alias_use",
+    document: "---\n\
+base: &b {port: x}\n\
+one: *b\n\
+two: *b\n\
+$schema:\n\
+\x20 base: \"{ port: number }\"\n\
+\x20 one: \"{ port: number }\"\n\
+\x20 two: \"{ port: number }\"\n\
+---\n\
+Body\n",
+    expected: &[
+        ExpectedStart { path: "/base/port", kind: "type", offending_property: None, line: 2, column: 17 },
+        ExpectedStart { path: "/one/port", kind: "type", offending_property: None, line: 3, column: 6 },
+        ExpectedStart { path: "/two/port", kind: "type", offending_property: None, line: 4, column: 6 },
+    ],
+};
+
+/// An alias that conforms leaves an unrelated failure beside it located.
+pub const ALIAS_BESIDE_UNRELATED_FAILURE: PositionCase = PositionCase {
+    name: "alias_beside_unrelated_failure",
+    document: "---\n\
+base: &b {port: 1}\n\
+servers:\n\
+\x20 - *b\n\
+\x20 - {port: x}\n\
+$schema:\n\
+\x20 base: \"{ port: number }\"\n\
+\x20 servers: \"{ port: number }[]\"\n\
+---\n\
+Body\n",
+    expected: &[ExpectedStart { path: "/servers/1/port", kind: "type", offending_property: None, line: 5, column: 12 }],
+};
+
 /// Every case, for suites that walk them all.
-pub const CASES: &[PositionCase] = &[ACCEPTANCE, BLOCK_LIST, FLOW, NON_ASCII_PREFIX, ROOT_MISSING];
+pub const CASES: &[PositionCase] =
+    &[ACCEPTANCE, BLOCK_LIST, FLOW, NON_ASCII_PREFIX, ROOT_MISSING, ALIAS_USE, ALIAS_BESIDE_UNRELATED_FAILURE];
 
 /// The byte offset of a 1-based line and 1-based UTF-8 byte column in
 /// `text`. A line ends at `\n`, so the same call addresses LF and CRLF text.

@@ -53,3 +53,24 @@ pub struct Document {
     /// The root node of the render tree.
     pub root: RenderNode,
 }
+
+impl Document {
+    /// A document with no registered sources and no metadata around `root`.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{Document, RenderNode};
+    ///
+    /// let document = Document::new(RenderNode::root(vec![RenderNode::text("hi")]));
+    /// assert!(document.metadata.frontmatter.is_none());
+    /// ```
+    #[must_use]
+    pub fn new(root: RenderNode) -> Self {
+        Self {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root,
+        }
+    }
+}

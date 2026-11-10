@@ -8,7 +8,7 @@ use serial_test::serial;
 fn level2_margin_renders_blank_top_rows() {
     // Use a recognizable heading marker so we can anchor the output without
     // depending on parsing the command echo (which may wrap across pane lines).
-    let Some((frame, _)) = run_md("# UniqueMarginMarker\n", "-m 2 --max-width 40") else {
+    let Some((frame, _)) = run_md("# UniqueMarginMarker\n", "style.margin=2 style.max-width=40") else {
         return;
     };
 
@@ -55,13 +55,13 @@ fn level2_page_bg_subtle_emits_bg_sgr() {
     // Use a multi-row body so padded background rows are guaranteed to fall
     // inside the captured viewport.
     let body = "# Subtle\n\nLine one.\n\nLine two.\n";
-    let Some((frame, _)) = run_md(body, "--page-bg subtle --padding 2 --max-width 40") else {
+    let Some((frame, _)) = run_md(body, "style.page.background=subtle style.padding=2 style.max-width=40") else {
         return;
     };
 
     assert!(
         raw_has_background_sgr(&frame.raw),
-        "expected a background SGR for --page-bg subtle. raw len={}, plain:\n{}",
+        "expected a background SGR for style.page.background=subtle. raw len={}, plain:\n{}",
         frame.raw.len(),
         frame.plain
     );
@@ -71,13 +71,13 @@ fn level2_page_bg_subtle_emits_bg_sgr() {
 #[serial(level2_terminal)]
 fn level2_page_bg_pronounced_emits_bg_sgr() {
     let body = "# Pronounced\n\nLine one.\n\nLine two.\n";
-    let Some((frame, _)) = run_md(body, "--page-bg pronounced --padding 2 --max-width 40") else {
+    let Some((frame, _)) = run_md(body, "style.page.background=pronounced style.padding=2 style.max-width=40") else {
         return;
     };
 
     assert!(
         raw_has_background_sgr(&frame.raw),
-        "expected a background SGR for --page-bg pronounced. raw len={}",
+        "expected a background SGR for style.page.background=pronounced. raw len={}",
         frame.raw.len()
     );
     // Pronounced should also reset attributes so following content (the next
@@ -91,10 +91,10 @@ fn level2_page_bg_pronounced_emits_bg_sgr() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_max_width_caps_visible_content_columns() {
-    // Long paragraph; with --max-width 40 every wrapped line must fit in 40
+    // Long paragraph; with style.max-width=40 every wrapped line must fit in 40
     // columns. Anchor on a unique sentinel so we can locate the output region.
     let body = "Sentinel_paragraph Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore.\n";
-    let Some((frame, _)) = run_md(body, "--max-width 40") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=40") else {
         return;
     };
 
@@ -115,7 +115,7 @@ fn level2_max_width_caps_visible_content_columns() {
         let visible = rtrim(line).chars().count();
         assert!(
             visible <= 40,
-            "wrap line +{offset} exceeds --max-width 40, got {visible} cols: {line:?}"
+            "wrap line +{offset} exceeds style.max-width=40, got {visible} cols: {line:?}"
         );
     }
 }
@@ -124,7 +124,7 @@ fn level2_max_width_caps_visible_content_columns() {
 #[serial(level2_terminal)]
 fn level2_line_numbers_true_renders_gutter() {
     let body = "```rust\nfn main() {}\nlet x = 1;\n```\n";
-    let Some((frame, _)) = run_md(body, "--line-numbers=true --max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.code-block.line-numbers=true style.max-width=60") else {
         return;
     };
 
@@ -146,7 +146,7 @@ fn level2_line_numbers_true_renders_gutter() {
 #[serial(level2_terminal)]
 fn level2_line_numbers_false_omits_gutter() {
     let body = "```rust\nfn main() {}\nlet x = 1;\n```\n";
-    let Some((frame, _)) = run_md(body, "--line-numbers=false --max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.code-block.line-numbers=false style.max-width=60") else {
         return;
     };
 
@@ -154,7 +154,7 @@ fn level2_line_numbers_false_omits_gutter() {
     // Pages of regular code don't otherwise emit U+2502.
     assert!(
         !frame.plain.contains('│'),
-        "did not expect gutter '│' with --line-numbers=false. plain:\n{}",
+        "did not expect gutter '│' with style.code-block.line-numbers=false. plain:\n{}",
         frame.plain
     );
 }
@@ -163,7 +163,7 @@ fn level2_line_numbers_false_omits_gutter() {
 #[serial(level2_terminal)]
 fn level2_end_to_end_layout_dimensions() {
     // Cross-component end-to-end capture: a small page with multiple
-    // components rendered under a complete set of layout flags. Verifies
+    // components rendered under a complete set of layout setters. Verifies
     // visible row dimensions and the top/bottom margin behavior at once.
     let body = "\
 # E2E heading\n\
@@ -178,7 +178,7 @@ Some prose paragraph.\n\
 
     let Some((frame, _)) = run_md(
         body,
-        "-m 2 --padding 1 --max-width 40 --page-bg subtle --align-block-quotes left",
+        "style.margin=2 style.padding=1 style.max-width=40 style.page.background=subtle style.block-quote.alignment=left",
     ) else {
         return;
     };
@@ -245,7 +245,7 @@ style:\n  page:\n    color: red-500\n---\n\
 - BulletItem\n\n\
 | Hdr |\n|---|\n| Cell |\n";
 
-    let Some((frame, _)) = run_md_env(body, "--max-width 40", &[("TERM", "dumb")]) else {
+    let Some((frame, _)) = run_md_env(body, "style.max-width=40", &[("TERM", "dumb")]) else {
         return;
     };
 

@@ -6,14 +6,20 @@
 //! `md code-block` direct output equals a fenced code block in a
 //! `DarkmatterPage` for the same parameters.
 //!
-//! The terminal-output tests assert structural invariants (ANSI escapes
-//! present, the language label appears, a specified line is highlighted)
-//! rather than byte-exact strings so the suite stays stable across
+//! A piped `md code-block` is a plain fence, so styling (ANSI escapes, title
+//! row, gutter, highlighted lines, theme) is proven by rendering a
+//! [`CodeBlock`] in-process for a color terminal. Those tests assert structural
+//! invariants rather than byte-exact strings so the suite stays stable across
 //! downstream rendering tweaks while still failing on real regressions.
 
 use crate::common;
 
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::terminal::Terminal;
 use common::CliProcessFixture;
+use darkmatter::markdown::CodeBlock;
+use darkmatter::markdown::dsl::{CodeBlockMeta, parse_highlight_spec};
+use darkmatter::markdown::highlighting::ThemePair;
 use predicates::prelude::*;
 use std::io::Write;
 
@@ -27,6 +33,11 @@ fn code_file(content: &str, suffix: &str) -> tempfile::NamedTempFile {
     tmp.write_all(content.as_bytes()).unwrap();
     tmp.flush().unwrap();
     tmp
+}
+
+/// A block as a color terminal shows it.
+fn styled(block: &CodeBlock) -> String {
+    TerminalRenderable::render(block, &Terminal::new_optimistic(80))
 }
 
 /// Strips ANSI CSI escapes (`ESC[ … letter`) from a string.
@@ -54,9 +65,9 @@ fn strip_ansi(s: &str) -> String {
     out
 }
 
-/// Strips ANSI and asserts the result contains a substring. Returns the
-/// stripped string so callers can chain further assertions without
-/// re-stripping.
+/// Strips ANSI (none reaches a pipe) and asserts the result contains a
+/// substring. Returns the stripped string so callers can chain further
+/// assertions without re-stripping.
 fn assert_ansi_contains(stdout: &[u8], needle: &str) -> String {
     let raw = String::from_utf8_lossy(stdout);
     let plain = strip_ansi(&raw);
@@ -117,12 +128,8 @@ fn code_block_renders_rust_file_with_explicit_language() {
         .args(["--language", "rust"])
         .assert()
         .success();
-    let stdout = output.get_output().stdout.clone();
-    let raw = String::from_utf8_lossy(&stdout);
-    assert!(raw.contains("\x1b["), "expected ANSI in output");
-    let plain = assert_ansi_contains(&stdout, "main");
-    assert!(plain.contains("println"));
-    assert!(plain.contains("hi"));
+    let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
+    assert_eq!(stdout, "```rust\nfn main() {\n    println!(\"hi\");\n}\n```\n");
 }
 
 #[test]
@@ -188,10 +195,8 @@ fn code_block_renders_literal_content_with_language_flag() {
         ])
         .assert()
         .success();
-    let stdout = output.get_output().stdout.clone();
-    let raw = String::from_utf8_lossy(&stdout);
-    assert!(raw.contains("\x1b["), "expected ANSI in output");
-    assert_ansi_contains(&stdout, "main");
+    let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
+    assert_eq!(stdout, "```rust\nfn main() { println!(\"hi\"); }\n```\n");
 }
 
 #[test]
@@ -296,75 +301,43 @@ fn code_block_unknown_language_renders_as_text() {
 
 #[test]
 fn code_block_title_appears_in_header_row() {
-    let process = CliProcessFixture::new();
-    process
-        .command()
-        .args([
-            "code-block",
-            "fn main() {}",
-            "--language",
-            "rust",
-            "--title",
-            "Greeting",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Greeting"));
+    let block = CodeBlock::new("fn main() {}").with_fence_language("rust").with_meta(CodeBlockMeta {
+        title: Some("Greeting".to_string()),
+        ..CodeBlockMeta::default()
+    });
+
+    assert!(strip_ansi(&styled(&block)).contains("Greeting"));
 }
 
 #[test]
 fn code_block_line_numbering_renders_gutter() {
-    let process = CliProcessFixture::new();
-    let output = process
-        .command()
-        .args([
-            "code-block",
-            "fn a() {}\nfn b() {}\nfn c() {}",
-            "--language",
-            "rust",
-            "--line-numbering",
-        ])
-        .assert()
-        .success();
-    let stdout = output.get_output().stdout.clone();
-    let raw = String::from_utf8_lossy(&stdout);
-    assert!(raw.contains("\x1b["), "expected ANSI in output");
-    let plain = strip_ansi(&raw);
-    // The "1" gutter marker should appear in the body (as part of "1 │").
-    assert!(
-        plain.contains('1'),
-        "expected gutter to include line 1, got: {plain:?}"
-    );
+    let block = CodeBlock::new("fn a() {}\nfn b() {}\nfn c() {}").with_fence_language("rust").with_meta(CodeBlockMeta {
+        line_numbering: true,
+        ..CodeBlockMeta::default()
+    });
+
+    let plain = strip_ansi(&styled(&block));
+
+    // The source holds no digit, so these can only be gutter markers.
+    assert!(plain.contains('1') && plain.contains('3'), "expected gutter lines 1 to 3, got: {plain:?}");
 }
 
 #[test]
 fn code_block_highlight_range_changes_panel_background() {
-    let process = CliProcessFixture::new();
     // The highlight background color differs from the default panel
     // background, so two captures with different highlight lines must
     // differ. This locks in the rendering plumbing reaching the body.
-    let make_block = |highlight: &str| {
-        let mut cmd = process.command();
-        cmd.args([
-            "code-block",
-            "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}",
-            "--language",
-            "rust",
-            "--line-numbering",
-            "--highlight",
-            highlight,
-        ]);
-        cmd
+    let render = |highlight: &str| {
+        styled(&CodeBlock::new("fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}").with_fence_language("rust").with_meta(
+            CodeBlockMeta {
+                line_numbering: true,
+                highlight: parse_highlight_spec(highlight).unwrap(),
+                ..CodeBlockMeta::default()
+            },
+        ))
     };
 
-    let highlight_first = make_block("1").assert().success();
-    let highlight_last = make_block("4").assert().success();
-    let stdout1 = String::from_utf8(highlight_first.get_output().stdout.clone()).unwrap();
-    let stdout4 = String::from_utf8(highlight_last.get_output().stdout.clone()).unwrap();
-    assert_ne!(
-        stdout1, stdout4,
-        "different highlight ranges must produce different ANSI backgrounds"
-    );
+    assert_ne!(render("1"), render("4"), "different highlight ranges must produce different ANSI backgrounds");
 }
 
 #[test]
@@ -534,14 +507,28 @@ fn code_block_markdown_output_preserves_highlight() {
 
 #[test]
 fn code_block_terminal_output_contains_ansi() {
+    let block = CodeBlock::new("fn main() {}").with_fence_language("rust");
+
+    let rendered = styled(&block);
+
+    assert!(rendered.contains("\x1b["), "expected ANSI in {rendered:?}");
+    assert!(strip_ansi(&rendered).contains("fn main"));
+}
+
+#[test]
+fn code_block_on_a_pipe_is_a_plain_fence_with_no_escape_bytes() {
     let process = CliProcessFixture::new();
-    // Default output is terminal; ANSI escapes should be present.
-    process
-        .command()
-        .args(["code-block", "fn main() {}", "--language", "rust"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\x1b["));
+    let output = process
+        .command_builder()
+        .rendering_input("FORCE_COLOR", "1")
+        .rendering_input_removed("NO_COLOR")
+        .build()
+        .args(["code-block", "fn main() {}", "--language", "rust", "--theme", "nord", "--line-numbering"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "```rust\nfn main() {}\n```\n");
 }
 
 // =============================================================================
@@ -550,41 +537,23 @@ fn code_block_terminal_output_contains_ansi() {
 
 #[test]
 fn code_block_theme_override_changes_terminal_output() {
-    let process = CliProcessFixture::new();
-    // review-1 finding 1: `--theme` must actually reach the renderer and
-    // change the resolved terminal output — not be a silent no-op. `github`
-    // and `nord` are distinct themes, so their highlighted SGR colors must
-    // differ for the same source.
-    let capture = |theme: &str| {
-        let mut cmd = process.command();
-        cmd.args([
-            "code-block",
-            "fn demo() -> usize { 42 }",
-            "--language",
-            "rust",
-            "--theme",
-            theme,
-        ]);
-        cmd.assert().success()
+    // review-1 finding 1: a pinned theme must actually reach the renderer and
+    // change the resolved terminal output — not be a silent no-op. `Github`
+    // and `Nord` are distinct themes, so their highlighted SGR colors must
+    // differ for the same source. The CLI's `--theme` plumbing is proven by
+    // `code_block_theme_override_changes_html_output`.
+    let capture = |theme: ThemePair| {
+        styled(&CodeBlock::new("fn demo() -> usize { 42 }").with_fence_language("rust").with_theme(theme))
     };
 
-    let github = capture("github");
-    let nord = capture("nord");
-    let stdout_github = String::from_utf8(github.get_output().stdout.clone()).unwrap();
-    let stdout_nord = String::from_utf8(nord.get_output().stdout.clone()).unwrap();
-    assert!(stdout_github.contains("\x1b["));
-    assert!(stdout_nord.contains("\x1b["));
+    let github = capture(ThemePair::Github);
+    let nord = capture(ThemePair::Nord);
+    assert!(github.contains("\x1b["));
+    assert!(nord.contains("\x1b["));
     // The plain-text body survives the strip, proving the renderer ran.
-    let plain_github = strip_ansi(&stdout_github);
-    let plain_nord = strip_ansi(&stdout_nord);
-    assert!(plain_github.contains("fn demo"));
-    assert!(plain_nord.contains("fn demo"));
-    // The whole point of the override: two distinct themes must not collapse
-    // to identical ANSI output. A no-op `--theme` would make these equal.
-    assert_ne!(
-        stdout_github, stdout_nord,
-        "distinct --theme values must produce distinct terminal output",
-    );
+    assert!(strip_ansi(&github).contains("fn demo"));
+    assert!(strip_ansi(&nord).contains("fn demo"));
+    assert_ne!(github, nord, "distinct themes must produce distinct terminal output");
 }
 
 #[test]
@@ -632,39 +601,6 @@ fn code_block_theme_override_changes_html_output() {
 // =============================================================================
 
 #[test]
-fn code_block_theme_env_changes_terminal_output_without_flag() {
-    let process = CliProcessFixture::new();
-    // review-2 finding 1: with no `--theme`, the `THEME` env var must drive the
-    // resolved code theme on the direct `md code-block` terminal surface. The
-    // page path bakes env in at construction, but the page-less direct surface
-    // resolves env in the render hook. `github` and `nord` are distinct themes,
-    // so their highlighted ANSI must differ for the same source.
-    let capture = |theme: &str| {
-        let mut cmd = process
-            .command_builder()
-            .rendering_input_removed("NO_COLOR")
-            .rendering_input_removed("CODE_THEME")
-            .rendering_input("THEME", theme)
-            .build();
-        cmd.args([
-            "code-block",
-            "fn demo() -> usize { 42 }",
-            "--language",
-            "rust",
-        ]);
-        cmd.assert().success()
-    };
-
-    let github = String::from_utf8(capture("github").get_output().stdout.clone()).unwrap();
-    let nord = String::from_utf8(capture("nord").get_output().stdout.clone()).unwrap();
-    assert!(github.contains("\x1b[") && nord.contains("\x1b["));
-    assert_ne!(
-        github, nord,
-        "THEME must drive the code-block terminal theme when --theme is absent",
-    );
-}
-
-#[test]
 fn code_block_code_theme_env_changes_html_output_without_flag() {
     let process = CliProcessFixture::new();
     // review-2 finding 1: `CODE_THEME` must drive the resolved code theme on the
@@ -699,11 +635,11 @@ fn code_block_code_theme_env_changes_html_output_without_flag() {
 fn code_block_theme_flag_wins_over_theme_env() {
     let process = CliProcessFixture::new();
     // review-2 finding 1: an explicit `--theme` must override `THEME`, so the
-    // resolved output is identical regardless of the env value.
-    let capture = |env_theme: &str| {
+    // resolved output is identical regardless of the env value. HTML carries
+    // the theme on a pipe.
+    let capture = |env_theme: &str, flag_theme: &str| {
         let mut cmd = process
             .command_builder()
-            .rendering_input_removed("NO_COLOR")
             .rendering_input_removed("CODE_THEME")
             .rendering_input("THEME", env_theme)
             .build();
@@ -712,18 +648,21 @@ fn code_block_theme_flag_wins_over_theme_env() {
             "fn demo() -> usize { 42 }",
             "--language",
             "rust",
+            "--output",
+            "html",
             "--theme",
-            "nord",
+            flag_theme,
         ]);
-        cmd.assert().success()
+        String::from_utf8(cmd.assert().success().get_output().stdout.clone()).unwrap()
     };
 
-    let with_github_env = String::from_utf8(capture("github").get_output().stdout.clone()).unwrap();
-    let with_nord_env = String::from_utf8(capture("nord").get_output().stdout.clone()).unwrap();
+    let with_github_env = capture("github", "nord");
     assert_eq!(
-        with_github_env, with_nord_env,
+        with_github_env,
+        capture("nord", "nord"),
         "--theme must win over THEME, making the output env-independent",
     );
+    assert_ne!(with_github_env, capture("github", "github"), "the flag selects the theme");
 }
 
 // =============================================================================
@@ -748,9 +687,10 @@ fn code_block_html_output_matches_fenced_markdown_fence() {
     // render the same code to the HTML target through `render_html_code_block`,
     // so the `.code-block` fragment must be byte-for-byte identical — not merely
     // both containing the wrapper and body, which cannot catch a real
-    // theme/metadata divergence between the two paths. An explicit `--theme`
-    // pins the theme on both invocations so the comparison is independent of
-    // any ambient `CODE_THEME` / `THEME`.
+    // theme/metadata divergence between the two paths. An explicit theme
+    // (`--theme` here, `style.page.code.theme` on the fence) pins it on both
+    // invocations so the comparison is independent of any ambient
+    // `CODE_THEME` / `THEME`.
     let code = "fn a() {}\nfn b() {}\n";
 
     let direct = process
@@ -771,7 +711,7 @@ fn code_block_html_output_matches_fenced_markdown_fence() {
 
     let fence = process
         .command()
-        .args(["--output", "html", "--code-theme", "one-half"])
+        .args(["--output", "html", "style.page.code.theme=one-half"])
         .write_stdin(format!("```rust\n{code}```\n"))
         .assert()
         .success();

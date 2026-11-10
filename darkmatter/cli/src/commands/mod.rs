@@ -1,81 +1,68 @@
 //! Subcommand dispatch for the `md` CLI.
 
 use crate::args::policy::{self, PolicyCommand};
-use crate::args::{Cli, Command as CliCommand, ComposeOutputFormat, OutputFormat, SchemaTarget};
-use crate::io::load_markdown;
+use crate::args::{Cli, Command as CliCommand, SchemaTarget};
+use crate::output::report::ReportSink;
+use crate::output::{OutputEnvironment, resolve_output, stderr_warning};
+use biscuit_terminal::output::WidthRequest;
 use crate::request::MdRequest;
-use biscuit_terminal::components::renderable::TerminalRenderable as _;
-use biscuit_terminal::terminal::Terminal;
-use color_eyre::eyre::{Context, Result, eyre};
-use darkmatter::markdown::toc::TocTree;
+use clap::CommandFactory as _;
+use color_eyre::eyre::Result;
 use tracing::instrument;
 
 mod code_block;
-mod compose;
+pub(crate) mod compose;
 mod clean;
+mod delta;
 mod frontmatter;
 mod graph;
 mod hash;
-mod render;
+pub mod list_themes;
+pub mod render;
 pub mod schema;
+mod toc;
 mod trigger_findings;
 mod validate;
 
-use code_block::run_code_block;
-use compose::{CollectionLimits, build_remote_read_config, parse_compose_positionals, run_compose};
+use code_block::{CodeBlockFlags, run_code_block};
+use compose::{CollectionLimits, ComposeOutputWidth, build_remote_read_config, parse_compose_positionals, run_compose};
 use frontmatter::{run_edit, run_get, run_rm, run_set};
-use hash::run_hash;
+use hash::{HashFlags, run_hash};
 
 pub use clean::{CleanOptions, CleanSchemaFlags, run_clean};
-pub use compose::report::ReportedExit;
-use render::run_render;
+pub use crate::output::report::ReportedExit;
+pub use render::{dispatch_render, run_render};
 
 /// Validates that top-level CLI options are not combined with subcommands.
+///
+/// Every root render argument counts, setters included; shared controls
+/// (`--width`, `-v`, `--debug`, `--magic-root`) do not.
 pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
-    let mut conflicts = Vec::new();
-
-    if cli.render.input.is_some() {
-        conflicts.push("[INPUT]");
-    }
-    if cli.render.output != OutputFormat::Auto {
-        conflicts.push("--output");
-    }
-    if cli.render.indent.is_some() {
-        conflicts.push("--indent");
-    }
-    if cli.render.show {
-        conflicts.push("--show");
-    }
-    if cli.save {
-        conflicts.push("--save");
-    }
-    if !cli.render.deny.is_empty() {
-        conflicts.push("--deny");
-    }
+    let conflicts = cli.render.has_explicit_arguments();
 
     if conflicts.is_empty() {
         Ok(())
     } else {
-        Err(eyre!(
-            "subcommands cannot be combined with top-level options: {}",
-            conflicts.join(", ")
-        ))
+        Err(Cli::command()
+            .error(
+                clap::error::ErrorKind::ArgumentConflict,
+                format!("subcommands cannot be combined with top-level options: {}", conflicts.join(", ")),
+            )
+            .into())
     }
 }
 
 #[instrument(skip_all)]
 pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Result<()> {
     match command {
-        CliCommand::Render(options) => run_render(&options, cli, request)?,
+        CliCommand::Render(options) => dispatch_render(&options, cli, request, &OutputEnvironment::detect())?,
         CliCommand::Clean {
             input,
             save,
             indent,
             compact,
             loose,
-            fixed_width,
-            ignore_incidental_newlines,
-            json,
+            output,
             schema,
             baseline_schema,
             disable,
@@ -91,10 +78,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 save,
                 indent,
                 list_item_padding: clean::resolve_list_spacing(compact, loose),
-                fixed_width,
-                ignore_incidental_newlines,
                 verbose: cli.verbose > 0,
-                json,
+                output: Some(output),
                 schema: CleanSchemaFlags {
                     schema,
                     baseline_schema,
@@ -102,7 +87,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                     no_schema_triggers: policy.disables("schema-triggers"),
                 },
             };
-            run_clean(input.as_ref(), &options, request)?;
+            run_clean(input.as_ref(), &options, cli, request)?;
         }
         CliCommand::Compose {
             args,
@@ -129,7 +114,6 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             remote_freshness,
             cache_root,
         } => {
-            let parsed = parse_compose_positionals(&args)?;
             let mode = clean::resolve_list_spacing(compact, loose)
                 .unwrap_or(darkmatter::markdown::cleanup::rules::ListItemPadding::Preserve);
             let policy = policy::resolve_for(
@@ -146,170 +130,75 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 remote_refresh,
                 remote_freshness,
             );
-            let report = output == ComposeOutputFormat::ReportJson;
-            if report {
-                compose::reject_report_conflicts(show, shell)?;
+            let resolved = resolve_output(
+                output,
+                cli.width,
+                WidthRequest::Source,
+                cli.verbose,
+                &OutputEnvironment::detect(),
+            )?;
+            compose::reject_report_conflicts(output, shell, show)?;
+            let sink = output.is_data().then(|| {
+                let file = parse_compose_positionals(&args)
+                    .ok()
+                    .and_then(|parsed| parsed.input)
+                    .filter(|path| path.to_str() != Some("-"))
+                    .map(|path| path.display().to_string());
+                ReportSink::new(&resolved, file, show, perf)
+            });
+            if sink.is_none()
+                && let Some(warning) = &resolved.width_warning
+            {
+                stderr_warning(warning);
             }
-            let sink = report.then(compose::report::ReportSink::default);
-            let result = run_compose(
-                parsed.input.as_ref(),
-                state.as_deref(),
-                set.as_deref(),
-                parsed.shorthand_setters,
-                output.document_format(),
-                show,
-                frontmatter,
-                mode,
-                indent,
-                &policy,
-                baseline_schema.as_ref(),
-                timeout,
-                CollectionLimits { max_iteration_visits, max_expansion_bytes },
-                shell,
-                perf,
-                remote_config,
-                cache_root.as_ref(),
-                cli,
-                request,
-                sink.as_ref(),
-            );
+            let result = parse_compose_positionals(&args).and_then(|parsed| {
+                run_compose(
+                    parsed.input.as_ref(),
+                    state.as_deref(),
+                    set.as_deref(),
+                    parsed.setters,
+                    ComposeOutputWidth::from_resolved(&resolved),
+                    show,
+                    frontmatter,
+                    mode,
+                    indent,
+                    &policy,
+                    baseline_schema.as_ref(),
+                    timeout,
+                    CollectionLimits { max_iteration_visits, max_expansion_bytes },
+                    shell,
+                    perf,
+                    remote_config,
+                    cache_root.as_ref(),
+                    cli,
+                    request,
+                    sink.as_ref(),
+                )
+            });
             match sink {
                 Some(sink) => sink.finish(result)?,
                 None => result?,
             }
         }
-        CliCommand::Toc { input, json } => {
-            let md = load_markdown(input.as_ref(), request)?;
-            let toc = md.toc();
-
-            if json {
-                println!("{}", serde_json::to_string_pretty(&toc)?);
-            } else {
-                // Detect the terminal only on the human-rendered branch so
-                // `md toc --json` never pays terminal detection (finding 3).
-                let term = Terminal::new();
-                let mut tree = TocTree::new(toc);
-                if cli.verbose > 0 {
-                    tree = tree.verbose();
-                }
-                print!("{}", tree.render(&term));
-            }
+        CliCommand::ListThemes { output } => list_themes::run_list_themes(output, cli)?,
+        CliCommand::Toc { input, output } => toc::run_toc(input.as_ref(), output, cli, request)?,
+        CliCommand::Delta { base, updated, output } => delta::run_delta(&base, &updated, output, cli, request)?,
+        CliCommand::Get { input, props, output, compact } => run_get(&input, &props, output, compact, cli, request)?,
+        CliCommand::Set { input, prop, value, save, output } => run_set(&input, &prop, &value, save, output, cli, request)?,
+        CliCommand::Rm { input, props, output } => run_rm(&input, &props, output, cli, request)?,
+        CliCommand::Edit { file, output } => run_edit(&file, output, cli, request)?,
+        CliCommand::Hash { input, kind, body, frontmatter, save, diff, strict, output } => {
+            let flags = HashFlags { kind: kind.map(Into::into), body, frontmatter, save, diff, strict };
+            run_hash(input.as_ref(), flags, output, cli, request)?;
         }
-        CliCommand::Delta {
-            base,
-            updated,
-            json,
-        } => {
-            let base_md = load_markdown(Some(&base), request)
-                .wrap_err_with(|| format!("Failed to read base file: {:?}", base))?;
-            let updated_md = load_markdown(Some(&updated), request)
-                .wrap_err_with(|| format!("Failed to read updated file: {:?}", updated))?;
-            let delta = base_md.delta(&updated_md);
-
-            if json {
-                println!("{}", serde_json::to_string_pretty(&delta)?);
-            } else {
-                use darkmatter::markdown::delta::DeltaReport;
-
-                // `delta` is already an owned `MarkdownDelta`, and neither
-                // document is used after this point, so move them into the
-                // report instead of cloning two full documents.
-                let mut report = DeltaReport::new(delta).with_documents(base_md, updated_md);
-                if cli.verbose > 0 {
-                    report = report.verbose();
-                }
-                print!("{}", report.render(&Terminal::new()));
-            }
-        }
-        CliCommand::Get {
-            input,
-            props,
-            json5,
-            yaml,
-            toml,
-            raw,
-            compact,
-        } => {
-            run_get(&input, &props, json5, yaml, toml, raw, compact, request)?;
-        }
-        CliCommand::Set {
-            input,
-            prop,
-            value,
-            save,
-        } => {
-            run_set(&input, &prop, &value, save, request)?;
-        }
-        CliCommand::Rm { input, props, json } => {
-            run_rm(&input, &props, json, cli, request)?;
-        }
-        CliCommand::Edit { file } => {
-            run_edit(&file, request)?;
-        }
-        CliCommand::Hash {
-            input,
-            kind,
-            body,
-            frontmatter,
-            save,
-            diff,
-            strict,
-        } => {
-            run_hash(
-                input.as_ref(),
-                kind.map(Into::into),
-                body,
-                frontmatter,
-                save,
-                diff,
-                strict,
-                request,
-            )?;
-        }
-        CliCommand::Validate { target } => {
-            validate::run_validate(target, request)?;
-        }
-        CliCommand::Graph {
-            input,
-            follow,
-            validate,
-            json,
-        } => {
-            graph::run_graph(&input, follow, validate, json, request)?;
-        }
-        CliCommand::CodeBlock {
-            input,
-            file,
-            content,
-            language,
-            theme,
-            title,
-            line_numbering,
-            highlight,
-            output,
-        } => {
-            run_code_block(
-                &input,
-                file,
-                content,
-                language.as_deref(),
-                theme,
-                title.as_deref(),
-                line_numbering,
-                highlight.as_deref(),
-                output,
-                cli,
-                request,
-            )?;
+        CliCommand::Validate { target } => validate::run_validate(target, cli, request)?,
+        CliCommand::Graph { input, follow, validate, output } => graph::run_graph(&input, follow, validate, output, cli, request)?,
+        CliCommand::CodeBlock { input, file, content, language, theme, title, line_numbering, highlight, output } => {
+            let flags = CodeBlockFlags { force_file: file, force_content: content, language, theme, title, line_numbering, highlight };
+            run_code_block(&input, &flags, output, cli, request)?;
         }
         CliCommand::Schema { target } => match target {
-            SchemaTarget::Validate {
-                inputs,
-                schema,
-                format,
-                quiet,
-                disable,
-            } => {
+            SchemaTarget::Validate { inputs, schema, output, quiet, disable } => {
                 let policy = policy::resolve_for(
                     PolicyCommand::SchemaValidate,
                     &[],
@@ -317,28 +206,18 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                     &disable,
                     schema.is_some().then_some("--schema <PATH>"),
                 )?;
-                schema::run_validate(
-                    &inputs,
-                    schema.as_deref(),
-                    policy.disables("baseline-schema"),
-                    format,
+                let options = schema::ValidateOptions {
+                    schema: schema.as_deref(),
+                    no_baseline_schema: policy.disables("baseline-schema"),
+                    no_schema_triggers: policy.disables("schema-triggers"),
                     quiet,
-                    policy.disables("schema-triggers"),
-                    cli.verbose,
-                    request,
-                )?;
+                    output,
+                };
+                schema::run_validate(&inputs, &options, cli, request)?;
             }
-            SchemaTarget::Detect {
-                files,
-                format,
-                merge,
-            } => {
-                schema::run_detect(&files, format, merge, request)?;
-            }
-            SchemaTarget::About => {
-                schema::run_about(cli.verbose > 0, cli.code_block.into())?;
-            }
-            SchemaTarget::Triggers { file } => schema::run_triggers(&file, request)?,
+            SchemaTarget::Detect { files, output, merge } => schema::run_detect(&files, output, merge, cli, request)?,
+            SchemaTarget::About { output, code_block } => schema::run_about(output, code_block.into(), cli)?,
+            SchemaTarget::Triggers { file, output } => schema::run_triggers(&file, output, cli, request)?,
         },
     }
 

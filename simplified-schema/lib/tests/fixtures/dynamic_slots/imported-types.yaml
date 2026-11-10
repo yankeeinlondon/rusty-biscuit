@@ -1,0 +1,4 @@
+kind: schema
+description: a slot reached through an imported named type; resolved in its defining file's folder the members are FreeBSD and Haiku, never this folder's macOS, Linux, Windows
+$schema:
+    host_os: platform(required)@./nested/platform-types.yaml

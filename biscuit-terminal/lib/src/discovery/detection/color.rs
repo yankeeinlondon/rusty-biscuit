@@ -262,6 +262,18 @@ impl From<&ColorDepth> for RenderColorDepth {
     }
 }
 
+impl From<RenderColorDepth> for ColorDepth {
+    fn from(depth: RenderColorDepth) -> Self {
+        match depth {
+            RenderColorDepth::None => ColorDepth::None,
+            RenderColorDepth::Minimal => ColorDepth::Minimal,
+            RenderColorDepth::Basic => ColorDepth::Basic,
+            RenderColorDepth::Enhanced => ColorDepth::Enhanced,
+            RenderColorDepth::TrueColor => ColorDepth::TrueColor,
+        }
+    }
+}
+
 impl From<ColorMode> for RenderColorMode {
     fn from(mode: ColorMode) -> Self {
         match mode {

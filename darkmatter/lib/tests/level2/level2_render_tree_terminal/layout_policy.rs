@@ -199,7 +199,7 @@ fn level2_percent_page_frame_offset_and_width_in_real_terminal() {
 
     let sentinel = "Sentinel_pct_frame";
     let body = format!(
-        "---\nstyle:\n    page:\n        left-margin: 25%\n        max-width: 50%\n---\n\n\
+        "---\nstyle:\n    page:\n        margin-left: 25%\n        max-width: 50%\n---\n\n\
          {sentinel} lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod \
          tempor incididunt ut labore et dolore magna aliqua ut enim ad minim veniam.\n"
     );
@@ -211,7 +211,6 @@ fn level2_percent_page_frame_offset_and_width_in_real_terminal() {
     let page = darkmatter::style::apply_page_style(
         DarkmatterPage::new(&term),
         &style,
-        darkmatter::style::PageStyleOverrides::default(),
     )
     .expect("apply percentage page style");
     let rendered = page.render(&md).expect("decorated percent frame must render");
@@ -220,8 +219,7 @@ fn level2_percent_page_frame_offset_and_width_in_real_terminal() {
     let path = dir.path().join("percent_frame.ansi");
     fs::write(&path, rendered).unwrap();
 
-    run_with_sentinel(harness, "clear");
-    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+    let frame = run_with_sentinel(harness, &format!("{CLEAR_SCREEN}; cat {}", shell_path(&path)));
 
     // The rendered paragraph is the sentinel row plus its wrapped continuations;
     // every content row carries the resolved left margin as leading spaces.

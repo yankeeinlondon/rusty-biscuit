@@ -3,12 +3,12 @@ use serde_json::Value;
 use sniff::remote::{CiCdJob, CiCdJobQuery, CiCdJobReference, GitProvider, QueryValues};
 
 use super::escape::{collapse_and_escape, markdown_destination};
-use super::{BoundCall, FunctionBinding, ResolutionContext};
+use super::{BoundCall, FunctionBinding, SlotClass, ResolutionContext};
 use crate::markdown::compose::expression::{ExpressionError, ProviderFailureKind};
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding::context("cicd", &[], cicd_fn),
-    FunctionBinding::context("cicd_list", &["cicdlist"], cicd_list_fn),
+    FunctionBinding::context("cicd", &[], cicd_fn).slot(SlotClass::Rejected),
+    FunctionBinding::context("cicd_list", &["cicdlist"], cicd_list_fn).slot(SlotClass::Rejected),
 ];
 
 fn cicd_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {

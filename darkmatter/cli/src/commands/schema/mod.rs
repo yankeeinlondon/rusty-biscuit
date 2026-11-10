@@ -8,5 +8,5 @@ pub mod triggers;
 
 pub use about::run_about;
 pub use detect::run_detect;
-pub use validate::run_validate;
+pub use validate::{ValidateOptions, run_validate};
 pub use triggers::run_triggers;

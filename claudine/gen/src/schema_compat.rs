@@ -346,5 +346,8 @@ fn describe_atom(atom: &PropertyAtom) -> String {
         TypeExpr::Tuple(_) => format!("tuple{suffix}"),
         TypeExpr::Function(_) => format!("function{suffix}"),
         TypeExpr::Ref(key) => format!("{name}{suffix}", name = key.name),
+        // Generation needs a known type; an unresolved template type is
+        // reported as the unsupported shape it is.
+        TypeExpr::Slot(slot) => format!("template type `{{{{ {} }}}}`{suffix}", slot.expression),
     }
 }

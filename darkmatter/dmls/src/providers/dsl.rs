@@ -40,6 +40,8 @@ use super::DocumentContext;
 use super::collections as collections_provider;
 use super::frontmatter;
 use super::location::line_range;
+use super::option_argument;
+use super::type_definition_argument::{self, Site};
 use crate::diagnostics::call_check;
 use crate::diagnostics::codes::{code, source};
 use crate::context::{ReferenceTarget, resolution_failure_data};
@@ -51,6 +53,22 @@ use crate::workspace::file_path_to_uri;
 
 /// Directive-name, directive-option, and interpolation completions.
 pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
+    // A type-definition string argument completes as a type definition; in
+    // frontmatter the frontmatter provider offers those items.
+    if let Some(items) = type_definition_argument::completion(ctx, offset, Site::Body) {
+        return items;
+    }
+    if type_definition_argument::claims(ctx, offset, Site::Frontmatter) {
+        return Vec::new();
+    }
+    // A declared-shape object argument completes its keys and enumerated
+    // values; in frontmatter the frontmatter provider offers those items.
+    if let Some(items) = option_argument::completion(ctx, offset, Site::Body) {
+        return items;
+    }
+    if option_argument::claims(ctx, offset, Site::Frontmatter) {
+        return Vec::new();
+    }
     let line_start = ctx.text[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let prefix = &ctx.text[line_start..offset];
 
@@ -222,8 +240,7 @@ fn interpolation_completions(
     let host = expressions::host_global_candidates(partial, &host_catalogs(ctx));
     // Callback locals extend the enclosing directive scope only at this cursor.
     let candidates = with_site_scope(ctx, Some(token_start), |site| {
-        let prefix = &ctx.text[..offset];
-        let start = prefix.rfind("{{").map_or(token_start, |start| start + 2);
+        let start = expressions::expression_body_start(ctx.text, offset).unwrap_or(token_start);
         let scope = expressions::cursor_scope(&ctx.text[start..offset], offset - start, site);
         expressions::scoped_completion_candidates(partial, &frontmatter_keys, host, &scope)
     });
@@ -428,10 +445,13 @@ pub(super) fn lower_candidates(candidates: impl IntoIterator<Item = expressions:
 /// Hover for a directive, interpolation, frontmatter `$()` value, or
 /// interpolation literal.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    if let Some(hover) = type_definition_argument::hover(ctx, offset, Site::Body) {
+        return Some(hover);
+    }
     // A collection opener's source and callbacks are typed by the library's
     // region scopes; its keyword falls through to the catalog hover.
     if let Some(hover) = collections_provider::hover(ctx, offset) {
-        return Some(hover);
+        return Some(frontmatter::with_slot_marker(ctx, hover));
     }
     if let Some(hover) = directive_hover(ctx, offset) {
         return Some(hover);
@@ -443,7 +463,7 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         return Some(hover);
     }
     if let Some(hover) = interpolation_hover(ctx, offset) {
-        return Some(hover);
+        return Some(frontmatter::with_slot_marker(ctx, hover));
     }
     frontmatter_shell_hover(ctx, offset)
 }
@@ -478,6 +498,11 @@ fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         lines.push(shell_verdict_markdown(&command.value, ctx));
         if let Some(line) = shell_hole_type_line(ctx, offset) {
             lines.push(format!("\n{line}"));
+            // The hole's type is read from the document's schema.
+            return Some(frontmatter::with_slot_marker(
+                ctx,
+                markup_hover(ctx, directive.span.clone(), lines.join("\n")),
+            ));
         }
     }
 
@@ -1049,7 +1074,7 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
 /// A call to an unknown function is an `ERROR`: compose fails on it.
 ///
 /// Every call in a body interpolation or a directive's `when` condition also
-/// gets the design-time call check ([`call_check`]), typed at its site under
+/// gets the design-time call and member checks ([`call_check`]), typed at its site under
 /// the enclosing `::block when` guards.
 fn expression_diagnostics(
     ctx: &DocumentContext,
@@ -1064,9 +1089,9 @@ fn expression_diagnostics(
     let unguarded = TypeScope::unguarded(&declared);
     let guards = collections::scopes(ctx.text);
     let strict = ctx.config.expressions.strict;
-    let calls = |expr: &SpannedExpr, at: usize, project: &dyn Fn(SourceSpan) -> SourceSpan| {
+    let calls = |expr: &SpannedExpr, text: &str, at: usize, project: &dyn Fn(SourceSpan) -> SourceSpan| {
         let site = guards.scope_at(unguarded.clone(), at);
-        call_check::call_diagnostics(expr, &site, strict)
+        call_check::call_diagnostics(expr, text, &site, strict)
             .into_iter()
             .filter_map(|found| {
                 let range = ctx.source_map.byte_range_to_lsp(project(found.span.clone()))?;
@@ -1097,7 +1122,7 @@ fn expression_diagnostics(
                 Some(2) if authored.get(1..authored.len() - 1) == Some(value.value.as_str()) => Some(value.span.start + 1),
                 _ => None,
             };
-            out.extend(calls(&expr, directive.span.start, &|span: SourceSpan| match base {
+            out.extend(calls(&expr, &value.value, directive.span.start, &|span: SourceSpan| match base {
                 Some(base) => base + span.start..base + span.end,
                 None => value.span.clone(),
             }));
@@ -1123,7 +1148,7 @@ fn expression_diagnostics(
             }
             Ok(expr) => {
                 let base = interpolation.inner.start;
-                out.extend(calls(&expr, base, &|span: SourceSpan| base + span.start..base + span.end));
+                out.extend(calls(&expr, &interpolation.text, base, &|span: SourceSpan| base + span.start..base + span.end));
                 for (name, span) in expressions::unknown_function_calls(&expr, &interpolation.text) {
                     if let Some(range) =
                         ctx.source_map.byte_range_to_lsp(base + span.start..base + span.end)

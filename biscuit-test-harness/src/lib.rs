@@ -433,14 +433,17 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
 /// `unset ENV BASH_ENV` in [`login_shell_script`], because POSIX `sh`, `dash`,
 /// and `ksh` source whatever `$ENV` names rather than a fixed rc path.
 pub(crate) fn interactive_rc_suppression_flags(shell: &str) -> &'static [&'static str] {
-    let name = Path::new(shell)
-        .file_name()
-        .map_or_else(|| shell.to_string(), |n| n.to_string_lossy().into_owned());
-    match name.as_str() {
+    match shell_file_name(shell).as_str() {
         "bash" => &["--norc"],
         "zsh" => &["-f"],
         _ => &[],
     }
+}
+
+fn shell_file_name(shell: &str) -> String {
+    Path::new(shell)
+        .file_name()
+        .map_or_else(|| shell.to_string(), |n| n.to_string_lossy().into_owned())
 }
 
 /// Builds the `-c` script for the outer login shell.
@@ -458,6 +461,13 @@ pub(crate) fn login_shell_script(shell: &str, augment_path: bool) -> String {
     for flag in interactive_rc_suppression_flags(shell) {
         script.push(' ');
         script.push_str(flag);
+    }
+    // Under ConPTY, readline's redraw of each typed character made typing
+    // superlinear in line length: 65 characters took 0.49 s and 317 took
+    // 5.8 s, against 0.05 s and 0.16 s with line editing off (2026-11-09).
+    // The harness types whole lines, so it never uses the editing.
+    if cfg!(windows) && shell_file_name(shell) == "bash" {
+        script.push_str(" --noediting");
     }
     script.push_str(" -i");
     script
@@ -514,14 +524,39 @@ pub(crate) fn login_shell_argv(shell: &str, augment_path: bool) -> Vec<String> {
 /// terminal started for its own reasons, and the harness must drive the shell
 /// *it* configured, not that one.
 pub(crate) fn login_shell_command_line(shell: &str, augment_path: bool) -> String {
-    let script = single_quoted(&login_shell_script(shell, augment_path));
+    let script = shell_quote(&login_shell_script(shell, augment_path));
     format!("exec {shell} -l -c {script} {shell}")
 }
 
-/// Wraps `s` in single quotes, escaping embedded ones with the POSIX `'\''`
-/// trick.
-fn single_quoted(s: &str) -> String {
+/// A pane-shell command that clears the screen and scrollback, the bytes
+/// `clear` writes for an xterm-compatible terminal.
+///
+/// `printf` is a builtin in bash and zsh, so this starts no process: in a
+/// Cygwin pane under parallel load each fork costs a tenth of a second or
+/// more, and `clear` also fails outright for a `TERM` its terminfo lacks.
+pub const CLEAR_SCREEN: &str = r"printf '\033[H\033[2J\033[3J'";
+
+/// Wraps `s` in single quotes for a POSIX pane shell, escaping embedded ones
+/// with the `'\''` trick.
+pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Spells `path` as one POSIX pane-shell word.
+///
+/// Every pane command goes through a POSIX shell — Cygwin or Git Bash on
+/// Windows. An unquoted native path loses its backslashes there (`C:\Users\x`
+/// arrives as `C:Usersx`), and Cygwin's bash opens a quoted `C:\…` file
+/// argument but cannot run one as the command word. On Windows the word is
+/// therefore spelled with `/` (`'C:/Users/x/md.exe'`), which both shells run
+/// and open and every Windows program accepts.
+pub fn shell_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        shell_quote(&text.replace('\\', "/"))
+    } else {
+        shell_quote(&text)
+    }
 }
 
 /// Sets the conventional color-forcing env vars on `cmd` so the
@@ -660,6 +695,71 @@ pub fn capture_settled(harness: &mut impl TerminalHarness) -> io::Result<Capture
     }
 }
 
+/// Runs `cmd` (with `env` prefixed to it), prints `sentinel` on a row of its
+/// own afterwards, and returns a settled capture showing that row.
+///
+/// Completion is observed through a temp file the line touches last, not by
+/// capturing: each capture is a terminal client call, and parallel test
+/// processes share a terminal's client budget (two at a time for WezTerm), so
+/// polling the pane while a command ran slowed every other test. The line is
+/// sent without the [`TerminalHarness::settle`] sleep for the same reason.
+///
+/// ## Errors
+///
+/// `TimedOut`, with the last capture in the message, when the sentinel row is
+/// not on screen within `timeout`; otherwise any send or capture error.
+pub fn run_to_sentinel(
+    harness: &mut impl TerminalHarness,
+    cmd: &str,
+    env: &[(&str, &str)],
+    sentinel: &str,
+    timeout: Duration,
+) -> io::Result<CapturedFrame> {
+    static DONE_FILES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let done = std::env::temp_dir().join(format!(
+        "biscuit-pane-done-{}-{}",
+        std::process::id(),
+        DONE_FILES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    // The echo spells the sentinel inside quotes, so only printf's output is
+    // a row that equals it.
+    let line = format!(
+        "{cmd}; printf '\\n%s\\n' {}; : > {}",
+        shell_quote(sentinel),
+        shell_path(&done)
+    );
+    harness.send_text(command_line_with_env(&line, env).as_bytes())?;
+    let shows_sentinel =
+        |frame: &CapturedFrame| frame.plain.lines().any(|row| row.trim() == sentinel);
+
+    let deadline = Instant::now() + timeout;
+    while !done.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if std::fs::remove_file(&done).is_ok() {
+        let frame = capture_settled(harness)?;
+        if shows_sentinel(&frame) {
+            return Ok(frame);
+        }
+    }
+    loop {
+        let frame = harness.capture()?;
+        if shows_sentinel(&frame) {
+            return Ok(frame);
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "no {sentinel} row after {timeout:?}; last capture:\n{}",
+                    frame.plain
+                ),
+            ));
+        }
+        std::thread::sleep(CAPTURE_POLL);
+    }
+}
+
 /// How long [`send_command_settled`] waits for the pane to show a sent line
 /// before settling anyway.
 ///
@@ -771,15 +871,30 @@ pub(crate) fn process_is_alive(pid: u32) -> bool {
         // process exists and may be signalled.
         libc::pid_t::try_from(pid).is_ok_and(|pid| unsafe { libc::kill(pid, 0) } == 0)
     }
-    #[cfg(not(unix))]
+    // Never a `kill -0` child here: on Windows `kill` is Cygwin's or MSYS's,
+    // which reads a Cygwin pid, so every live native owner looked dead and each
+    // spawn's sweep killed the panes of the tests running beside it.
+    #[cfg(windows)]
     {
-        Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
+        use windows_sys::Win32::Foundation::{
+            CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
+        };
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        // SAFETY: `OpenProcess` takes no pointers; a non-null handle is closed
+        // exactly once below, and `code` outlives the call that writes it.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                // A process another account owns exists but refuses the query.
+                return GetLastError() == ERROR_ACCESS_DENIED;
+            }
+            let mut code = 0u32;
+            let queried = GetExitCodeProcess(handle, &mut code) != 0;
+            CloseHandle(handle);
+            queried && code == STILL_ACTIVE as u32
+        }
     }
 }
 
@@ -1179,8 +1294,13 @@ mod tests {
     #[test]
     fn login_shell_script_suppresses_interactive_rc_for_bash() {
         let script = login_shell_script("bash", true);
+        let tail = if cfg!(windows) {
+            "exec \"$0\" --norc --noediting -i"
+        } else {
+            "exec \"$0\" --norc -i"
+        };
         assert!(
-            script.ends_with("exec \"$0\" --norc -i"),
+            script.ends_with(tail),
             "bash's inner interactive shell must skip ~/.bashrc; got {script}"
         );
     }
@@ -1256,8 +1376,8 @@ mod tests {
     }
 
     #[test]
-    fn single_quoted_escapes_embedded_single_quotes() {
-        assert_eq!(single_quoted("it's"), r"'it'\''s'");
+    fn shell_quote_escapes_embedded_single_quotes() {
+        assert_eq!(shell_quote("it's"), r"'it'\''s'");
     }
 
     /// `PATH` augmentation belongs to the outer *login* shell: profile files

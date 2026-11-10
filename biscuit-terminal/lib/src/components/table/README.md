@@ -223,7 +223,7 @@ and would otherwise move borders beyond their measured columns.
 | Method | When to Use |
 |--------|-------------|
 | `render(term_width)` | Optimistic path -- assumes full terminal capabilities. Falls back to 80 columns when `term_width` is `None`. |
-| `render(term)` | Conservative path -- receives a `Terminal` reference for capability-aware decisions. Uses `term.width()` for sizing. |
+| `render(term)` | Conservative path -- receives a `Terminal` reference for capability-aware decisions. Uses `term.columns()` for sizing; a terminal with no columns gets natural column widths. |
 
 Both paths call `render_content()` to produce raw table text, then pass it through `Layout::apply_block_layout()` which applies:
 

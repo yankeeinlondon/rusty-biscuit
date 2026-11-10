@@ -57,7 +57,7 @@ The schema can live in two places:
   A document then writes `$schema: ./schemas/page.yaml` in place of the
   mapping.
 
-From Rust, the [`SimplifiedSchema` object](../schema-object.md) builds from
+From Rust, the [`SimplifiedSchema` object](../simplified-schema-struct.md) builds from
 either form and validates values:
 
 ```rust
@@ -107,6 +107,10 @@ assert!(page.validate_strict(&json!({ "tags": ["changelog"] })).is_err()); // `t
   how each is checked against its definition.
 - [Subtyping](./subtyping.md): whether one type accepts only values another
   type also accepts.
+- [Slots](./slots.md): `{{ … }}` expressions that supply `enum`/`suggest`
+  elements and `literal`, `default`, `min`, `max`, and `pattern` values, and
+  what a schema holding one (a template) reports, and how a host resolves it
+  into a concrete schema.
 - [Conversion](../conversion.md): exactly which almost-right values soft
   validation converts, and how unions choose an arm.
 - [Diagnostics](../diagnostics.md): the typed errors a schema or a value

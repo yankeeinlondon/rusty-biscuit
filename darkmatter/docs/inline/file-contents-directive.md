@@ -1,5 +1,18 @@
 # File Contents Directive
 
+> **Status: planned.** Nothing on this page is implemented yet. Composition
+> does not read a `<< …` value today: `contents: "<< ./some-content.md"`
+> stays the literal string `<< ./some-content.md`, and `{{ contents }}`
+> prints that text.
+>
+> To get a file's data into an expression today, use the
+> [expression functions](../topics/darkmatter-expressions.md#functions):
+> `frontmatter("./some-content.md")` for another document's frontmatter,
+> `load_data("./data.yaml", "<type>")` for a YAML, JSON, TOML, or CSV file
+> checked against a type, and `as_markdown("::file ./some-content.md")` for
+> the composed body. `as_markdown` composes the Markdown text it is given, so
+> it takes a `::file` directive, not a bare path.
+
 ## Directive Overview
 
 The file contents directive allows you to assign _text_ content from a file into a Frontmatter variable. An example of what this would look like is:

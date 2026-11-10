@@ -12,11 +12,12 @@ use serde_yaml_ng::Value as YamlValue;
 
 use super::SimplifiedSchemaError;
 use crate::embedded::ShippedSources;
+use crate::resolve::buffers::{self, SourceBuffers};
 use crate::resolve::{self, InlineOwner, ReferenceStack, ResolvedSchema};
 use crate::simplified::standalone::visit_def;
 use crate::simplified::{
     Constraint, DefinitionTable, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SchemaArm, SchemaCategory, SchemaDeclaration,
-    SchemaRoot, SchemaShape, StandaloneSchemaEnvelope, TypeExpr, parse_keyed_declaration,
+    SchemaRoot, SchemaShape, Slot, StandaloneSchemaEnvelope, TypeExpr, parse_keyed_declaration, project_keyed_declaration_spans,
     parse_standalone_schema_document, to_json_schema_with_definitions,
 };
 use crate::{SchemaAdvisory, SchemaError};
@@ -37,6 +38,59 @@ pub(super) struct Layer {
     /// The file context of a file-backed schema; `None` for content.
     pub(super) binding: Option<Binding>,
     pub(super) provenance: SchemaProvenance,
+    /// How to build this layer again under slot values; set only on a
+    /// template layer.
+    pub(super) rebuild: Option<Rebuild>,
+}
+
+/// A template layer's own construction, run again by
+/// [`super::SimplifiedSchema::resolve_slots`] inside a slot-value scope,
+/// with `buffers` (the open buffers of the first build and every schema text
+/// it read) in force, so the rebuild reads exactly what the first build did.
+#[derive(Clone)]
+pub(super) struct Rebuild {
+    pub(super) build: Arc<dyn Fn() -> Result<Layer, SimplifiedSchemaError> + Send + Sync>,
+    pub(super) buffers: SourceBuffers,
+}
+
+impl std::fmt::Debug for Rebuild {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Rebuild").finish_non_exhaustive()
+    }
+}
+
+/// A layer constructor: the text, the file it came from, and its binding.
+type Build = fn(&str, Option<PathBuf>, Option<Binding>) -> Result<Layer, SimplifiedSchemaError>;
+
+/// Runs `build` and, when the layer is a template, keeps how to run it
+/// again: the text (copied only then), the layer's own path and binding, and
+/// the schema texts the build read. A build inside a slot-value scope is a
+/// rebuild and keeps nothing.
+fn rebuildable(
+    text: &str,
+    path: Option<PathBuf>,
+    binding: Option<Binding>,
+    build: Build,
+) -> Result<Layer, SimplifiedSchemaError> {
+    if crate::slots::active_values().is_some() {
+        return build(text, path, binding);
+    }
+    let mut buffers = buffers::current();
+    let (layer, sources) = buffers::recording(|| build(text, path, binding));
+    let mut layer = layer?;
+    if !layer.pending_slots().is_empty() {
+        for (path, text) in sources {
+            buffers.insert(&path, text);
+        }
+        let text: Arc<str> = Arc::from(text);
+        let path = layer.provenance.path.clone();
+        let binding = layer.binding.clone();
+        layer.rebuild = Some(Rebuild {
+            build: Arc::new(move || build(&text, path.clone(), binding.clone())),
+            buffers,
+        });
+    }
+    Ok(layer)
 }
 
 /// The form the schema was written in.
@@ -128,10 +182,11 @@ pub(crate) fn content_context() -> FileResolutionContext {
 
 /// Where a declaration was authored, which decides its named types'
 /// namespaces.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Site<'a> {
-    /// A Markdown document's frontmatter `$schema`, as `yaml`.
-    Document { yaml: &'a YamlValue },
+    /// A Markdown document's frontmatter `$schema`, as `yaml`, located in
+    /// the document when its text proves where it is.
+    Document { yaml: &'a YamlValue, located: Option<crate::simplified::LocatedSchemaValue> },
     /// A standalone schema document.
     File,
 }
@@ -140,10 +195,10 @@ impl Layer {
     /// Content: Markdown when it opens with a frontmatter block, otherwise a
     /// YAML (or JSON) document.
     pub(super) fn from_content(text: &str) -> Result<Self, SimplifiedSchemaError> {
-        match biscuit_file::frontmatter::extract_frontmatter_block(text)? {
+        rebuildable(text, None, None, |text, _, _| match biscuit_file::frontmatter::extract_frontmatter_block(text)? {
             Some(frontmatter) => Self::from_frontmatter(frontmatter.yaml, frontmatter.yaml_span.start, None, None),
-            None => Self::from_yaml_document(text, None, None),
-        }
+            None => Self::build_yaml_document(text, None, None),
+        })
     }
 
     /// A Markdown document: its frontmatter `$schema`; the body is ignored.
@@ -153,6 +208,11 @@ impl Layer {
         path: Option<PathBuf>,
         binding: Option<Binding>,
     ) -> Result<Self, SimplifiedSchemaError> {
+        rebuildable(text, path, binding, Self::build_markdown)
+    }
+
+    #[cfg(feature = "file")]
+    fn build_markdown(text: &str, path: Option<PathBuf>, binding: Option<Binding>) -> Result<Self, SimplifiedSchemaError> {
         match biscuit_file::frontmatter::extract_frontmatter_block(text)? {
             Some(frontmatter) => Self::from_frontmatter(frontmatter.yaml, frontmatter.yaml_span.start, path, binding),
             None => Err(missing_schema(path.as_deref(), "the document has no frontmatter block")),
@@ -179,23 +239,36 @@ impl Layer {
         let Some(value) = frontmatter.as_mapping().and_then(|mapping| mapping.get("$schema")) else {
             return Err(missing_schema(path.as_deref(), "the frontmatter has no `$schema`"));
         };
+        let mut declaration = parse_keyed_declaration(value, yaml_text, "$schema", yaml_offset).map_err(|failure| {
+            failure.into_document_error(path.as_deref().unwrap_or(Path::new(CONTENT)), "invalid frontmatter `$schema`")
+        })?;
+        // Candidate and slot spans point into the Markdown document, as a
+        // standalone document's point into its file.
+        project_keyed_declaration_spans(&mut declaration, yaml_text, "$schema", yaml_offset)?;
         let authored = AuthoredSchema {
-            declaration: parse_keyed_declaration(value, yaml_text, "$schema", yaml_offset).map_err(|failure| {
-                failure.into_document_error(
-                    path.as_deref().unwrap_or(Path::new(CONTENT)),
-                    "invalid frontmatter `$schema`",
-                )
-            })?,
+            declaration,
             local_types: None,
             envelope: StandaloneSchemaEnvelope::Pure,
             categories: None,
         };
-        resolve_authored(authored, Site::Document { yaml: value }, path, binding)
+        // A root union's inline arms are parsed again when one arm is a
+        // file reference; each projects through the same located value.
+        let located = crate::simplified::LocatedSchemaValue::locate(yaml_text, "$schema", yaml_offset, value);
+        resolve_authored(authored, Site::Document { yaml: value, located }, path, binding)
     }
 
     /// A standalone schema document, or a raw JSON Schema written in YAML or
     /// JSON (a mapping whose `$schema` is a JSON Schema dialect URI).
+    #[cfg(feature = "file")]
     pub(super) fn from_yaml_document(
+        text: &str,
+        path: Option<PathBuf>,
+        binding: Option<Binding>,
+    ) -> Result<Self, SimplifiedSchemaError> {
+        rebuildable(text, path, binding, Self::build_yaml_document)
+    }
+
+    fn build_yaml_document(
         text: &str,
         path: Option<PathBuf>,
         binding: Option<Binding>,
@@ -258,6 +331,7 @@ impl Layer {
             lowered: Ok(Arc::new(json)),
             binding,
             provenance: SchemaProvenance { path, ..SchemaProvenance::default() },
+            rebuild: None,
         }
     }
 }
@@ -316,11 +390,12 @@ fn resolve_authored(
                 lowered: Err(Arc::new(unavailable)),
                 binding: None,
                 provenance,
+                rebuild: None,
             });
         }
         let root = authored.schema().expect("a declaration with no external reference is inline");
         let context = content_context();
-        let expansion = resolve::expand_named_types_searched(
+        let mut expansion = resolve::expand_named_types_searched(
             root,
             authored.local_types.as_ref(),
             Path::new(""),
@@ -330,15 +405,20 @@ fn resolve_authored(
             shipped,
             &mut BTreeSet::new(),
         )?;
-        let lowered = to_json_schema_with_definitions(&expansion.schema, &expansion.definitions)
-            .map(Arc::new)
-            .map_err(Arc::new);
+        let site = crate::slots::ExpansionSite {
+            base_dir: Path::new(""),
+            schema_roots: &[],
+            request_context: &context,
+            shipped,
+        };
+        let lowered = lower_expanded(&mut expansion.schema, &mut expansion.definitions, &site, &mut provenance);
         return Ok(Layer {
             authored: Authored::Simplified(Box::new(authored)),
             typed: Some(Typed { root: expansion.schema, definitions: expansion.definitions }),
             lowered,
             binding: None,
             provenance,
+            rebuild: None,
         });
     };
 
@@ -354,22 +434,23 @@ fn resolve_authored(
                 context,
                 &mut stack,
                 shipped,
-            )?)
+            ))
         }
         (SchemaDeclaration::Schema(SchemaRoot::Union(arms)), site)
             if arms.iter().any(|arm| matches!(arm, SchemaArm::FileRef(_))) =>
         {
             let mut stack = ReferenceStack::default();
             Some(match site {
-                Site::Document { yaml } => resolve::resolve_root_union(
+                Site::Document { yaml, located } => resolve::resolve_root_union(
                     yaml.as_sequence().expect("a parsed root union is a sequence"),
                     InlineOwner::Document,
+                    located.as_ref(),
                     base_dir,
                     &[],
                     context,
                     &mut stack,
                     shipped,
-                )?,
+                ),
                 Site::File => resolve::resolve_standalone_root_union(
                     arms.clone(),
                     authored.local_types.as_ref(),
@@ -379,10 +460,26 @@ fn resolve_authored(
                     context,
                     &mut stack,
                     shipped,
-                )?,
+                ),
             })
         }
         _ => None,
+    };
+    // A whole-file reference or root-union arm that reaches a template is
+    // still a valid schema: it is kept, unlowered, for explicit resolution.
+    let whole = match whole {
+        Some(Err(unresolved @ SchemaError::UnresolvedSlots(_))) => {
+            let typed = authored.schema().map(|root| Typed { root: root.clone(), definitions: Arc::default() });
+            return Ok(Layer {
+                authored: Authored::Simplified(Box::new(authored)),
+                typed,
+                lowered: Err(Arc::new(unresolved)),
+                binding: Some(binding),
+                provenance,
+                rebuild: None,
+            });
+        }
+        whole => whole.transpose()?,
     };
     if let Some(resolved) = whole {
         let ResolvedSchema {
@@ -407,12 +504,13 @@ fn resolve_authored(
             lowered: Ok(Arc::new(json_schema)),
             binding: Some(binding),
             provenance,
+            rebuild: None,
         });
     }
 
     let root = authored.schema().expect("an inline declaration");
     let mut searched = BTreeSet::new();
-    let expansion = resolve::expand_named_types_searched(
+    let mut expansion = resolve::expand_named_types_searched(
         root,
         authored.local_types.as_ref(),
         base_dir,
@@ -422,15 +520,18 @@ fn resolve_authored(
         shipped,
         &mut searched,
     )?;
-    let lowered = match to_json_schema_with_definitions(&expansion.schema, &expansion.definitions) {
-        Ok(mut json) => {
+    provenance.imports = expansion.imports;
+    let site = crate::slots::ExpansionSite { base_dir, schema_roots: &[], request_context: context, shipped };
+    let lowered = match lower_expanded(&mut expansion.schema, &mut expansion.definitions, &site, &mut provenance) {
+        Ok(json) => {
+            let mut json = Arc::unwrap_or_clone(json);
             provenance.examples =
                 resolve::resolve_document_examples(&mut json, base_dir, defining_file, &[], context, &mut searched)?;
             Ok(Arc::new(json))
         }
-        Err(error) => Err(Arc::new(error)),
+        Err(error) => Err(error),
     };
-    provenance.imports = expansion.imports;
+    searched.extend(std::mem::take(&mut provenance.searched));
     provenance.searched = searched.into_iter().collect();
     Ok(Layer {
         authored: Authored::Simplified(Box::new(authored)),
@@ -438,7 +539,32 @@ fn resolve_authored(
         lowered,
         binding: Some(binding),
         provenance,
+        rebuild: None,
     })
+}
+
+/// Lowers an expanded declaration, substituting slot values first when a
+/// slot-value scope is running (a rebuild). A lowering failure is kept, not
+/// raised: a template's is [`SchemaError::UnresolvedSlots`], a refused slot
+/// value's [`SchemaError::SlotResult`].
+///
+/// A template type's returned definition expands from `site`; the files it
+/// read and probed are added to `provenance`.
+fn lower_expanded(
+    root: &mut SchemaRoot,
+    definitions: &mut Arc<DefinitionTable>,
+    site: &crate::slots::ExpansionSite<'_>,
+    provenance: &mut SchemaProvenance,
+) -> Result<Arc<Value>, Arc<SchemaError>> {
+    if crate::slots::has_dynamic(root, definitions) {
+        let late = crate::slots::apply_active(root, Arc::make_mut(definitions), site).map_err(Arc::new)?;
+        let mut searched: BTreeSet<PathBuf> = std::mem::take(&mut provenance.searched).into_iter().collect();
+        let mut examples = std::mem::take(&mut provenance.examples);
+        late.merge_into(&mut provenance.imports, &mut examples, &mut searched);
+        provenance.examples = examples;
+        provenance.searched = searched.into_iter().collect();
+    }
+    to_json_schema_with_definitions(root, definitions).map(Arc::new).map_err(Arc::new)
 }
 
 impl AuthoredSchema {
@@ -519,6 +645,17 @@ pub(super) fn json_declares(json: &Value, key: &str) -> bool {
 }
 
 impl Layer {
+    /// The unresolved `{{ … }}` slots of this layer, in declaration order.
+    /// A layer whose resolution stopped at a template (a whole-file
+    /// reference to one) has no typed form; its error lists them.
+    pub(super) fn pending_slots(&self) -> Vec<Slot> {
+        match (&self.typed, self.lowered.as_ref().err().map(|error| error.as_ref())) {
+            (_, Some(SchemaError::UnresolvedSlots(unresolved))) => unresolved.slots.clone(),
+            (Some(typed), _) => crate::slots::collect_slots(&typed.root, &typed.definitions),
+            (None, _) => Vec::new(),
+        }
+    }
+
     /// The object named type `name` of this layer as a schema of its own:
     /// the expanded type for validation and queries, and, for export, the
     /// authored type with the whole authored table beside it, so the
@@ -553,7 +690,7 @@ impl Layer {
             envelope: StandaloneSchemaEnvelope::Pure,
             categories: None,
         };
-        let (root, definitions) = match expanded_def.and_then(object) {
+        let (mut root, mut definitions) = match expanded_def.and_then(object) {
             Some(shape) => (SchemaRoot::Single(shape), Arc::clone(&typed.definitions)),
             // Expand the selection against the table it came from.
             None => {
@@ -573,17 +710,42 @@ impl Layer {
                 (expansion.schema, expansion.definitions)
             }
         };
+        let mut provenance = self.provenance.clone();
         let lowered = match &self.lowered {
             // An unpreparable source stays unpreparable for the same reason.
-            Err(error) if self.binding.is_none() => Err(Arc::clone(error)),
-            _ => to_json_schema_with_definitions(&root, &definitions).map(Arc::new).map_err(Arc::new),
+            Err(error) if self.binding.is_none() && !matches!(error.as_ref(), SchemaError::UnresolvedSlots(_)) => {
+                Err(Arc::clone(error))
+            }
+            _ => {
+                let context = self.binding.as_ref().map_or_else(content_context, |binding| binding.context.clone());
+                let base_dir = self.binding.as_ref().map_or_else(PathBuf::new, |binding| binding.base_dir.clone());
+                let site = crate::slots::ExpansionSite {
+                    base_dir: &base_dir,
+                    schema_roots: &[],
+                    request_context: &context,
+                    shipped: ShippedSources::NONE,
+                };
+                lower_expanded(&mut root, &mut definitions, &site, &mut provenance)
+            }
         };
-        Ok(Self {
+        let mut layer = Self {
             authored: Authored::Simplified(Box::new(selected)),
             typed: Some(Typed { root, definitions }),
             lowered,
             binding: self.binding.clone(),
-            provenance: self.provenance.clone(),
-        })
+            provenance,
+            rebuild: None,
+        };
+        // A selection from a template rebuilds its source, then selects.
+        if let Some(parent) = &self.rebuild
+            && !layer.pending_slots().is_empty()
+        {
+            let (build, name) = (Arc::clone(&parent.build), name.to_string());
+            layer.rebuild = Some(Rebuild {
+                build: Arc::new(move || build()?.select(&name)),
+                buffers: parent.buffers.clone(),
+            });
+        }
+        Ok(layer)
     }
 }

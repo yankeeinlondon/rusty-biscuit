@@ -12,7 +12,9 @@ use crate::common;
 use common::CliProcessFixture;
 
 const NO_SCHEMA: &str = "doesn't have a schema definition so is valid by default.";
-const HAS_SCHEMA: &str = "has a schema definition and is valid.";
+const TRIGGER_ONLY: &str =
+    "does not have an explicit schema definition but it is valid based on the trigger schema summary.trigger.yaml.";
+const INLINE_ONLY: &str = "has a schema definition and is valid based on its inline $schema.";
 
 fn write(fixture: &CliProcessFixture, relative: &str, content: &str) -> PathBuf {
     let path = fixture.cwd().join(relative);
@@ -36,7 +38,7 @@ fn stdout(output: &Output) -> String {
 }
 
 #[test]
-fn an_assignment_that_activates_a_trigger_is_worded_as_having_a_schema() {
+fn an_assignment_that_activates_a_trigger_names_the_trigger() {
     let fixture = CliProcessFixture::named("schema-validate-summary-trigger");
     assert!(fixture.initialize_repository());
     write(
@@ -61,7 +63,7 @@ fn an_assignment_that_activates_a_trigger_is_worded_as_having_a_schema() {
     );
     assert_eq!(assigned.status.code(), Some(0), "{}", stdout(&assigned));
     assert!(
-        stdout(&assigned).contains(HAS_SCHEMA),
+        stdout(&assigned).contains(TRIGGER_ONLY),
         "{}",
         stdout(&assigned)
     );
@@ -79,5 +81,5 @@ fn a_pending_shell_value_is_valid_against_its_document_schema() {
     let output = validate(&fixture, &[], &document);
 
     assert_eq!(output.status.code(), Some(0), "{}", stdout(&output));
-    assert!(stdout(&output).contains(HAS_SCHEMA), "{}", stdout(&output));
+    assert!(stdout(&output).contains(INLINE_ONLY), "{}", stdout(&output));
 }

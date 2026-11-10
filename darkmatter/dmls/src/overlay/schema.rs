@@ -7,7 +7,8 @@
 //! zero Claudine-specific code), and the document's own `$schema` on top. The
 //! library ([`darkmatter::markdown::schemas`]) remains the semantic authority;
 //! this module only decides *which* baselines apply and hands the layered
-//! result to [`DarkmatterSchemas::effective_for`].
+//! result to [`DarkmatterSchemas::site_schema_for`], whose pending-template
+//! answer becomes an [`AssemblyError`] carrying the document template.
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -22,8 +23,8 @@ use darkmatter::markdown::schemas::resolve::resolve_schema;
 use simplified_schema::resolve::merge_baseline;
 use simplified_schema::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, darkmatter_base_json_schema_ref, effective_property_shape,
-    triggers::TriggerRegistry,
+    DarkmatterSchemas, DocumentTemplate, EffectiveSchema, SiteSchema, darkmatter_base_json_schema_ref,
+    effective_property_shape, triggers::TriggerRegistry,
 };
 use simplified_schema::{
     DefKey, Definition, DefinitionTable, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaAdvisory,
@@ -887,6 +888,10 @@ fn meta_schema_kinds(definition: &PropertyDef, definitions: &dyn DefinitionLooku
         let kind = match atom.ty {
             TypeExpr::Primitive(SimplifiedType::TypeDefinition) => MetaSchemaKind::TypeDefinition,
             TypeExpr::Primitive(SimplifiedType::Schema) => MetaSchemaKind::Schema,
+            // A pending template type activates no schema authoring: whether
+            // it returns `type-definition` or `schema` is unknown until it
+            // resolves, and a resolved schema serves the returned type.
+            TypeExpr::Slot(_) => continue,
             _ => continue,
         };
         if !kinds.contains(&kind) {
@@ -952,6 +957,21 @@ pub struct SchemaBundle {
     /// schema exists, so [`EffectiveSchema::definition`] cannot see these
     /// tables; the bundle's [`DefinitionLookup`] searches them after it.
     pub extension_definitions: Vec<Arc<DefinitionTable>>,
+    /// Whether a layer of the effective schema is a template whose slots
+    /// were resolved (served from the slot worker's pinned snapshot).
+    pub templated: bool,
+}
+
+/// How [`assemble`] treats a template layer.
+#[derive(Clone, Copy)]
+pub(crate) enum SlotUse<'a> {
+    /// No session: a template stays [`SchemaError::UnresolvedSlots`].
+    None,
+    /// Serve only what `session` already pinned (the request path: nothing
+    /// is evaluated, nothing a slot names is read).
+    Pins(&'a Arc<darkmatter::markdown::schemas::slots::SlotSession>),
+    /// Resolve through `session` (the slot worker).
+    Resolve(&'a Arc<darkmatter::markdown::schemas::slots::SlotSession>),
 }
 
 /// Every [`TypeExpr::Ref`] an editor walk meets in the bundle's shapes is
@@ -977,6 +997,23 @@ impl DefinitionLookup for NoDefinitions {
     }
 }
 
+/// Why [`assemble`] produced no bundle.
+#[derive(Debug)]
+pub(crate) struct AssemblyError {
+    pub(crate) error: SchemaError,
+    /// The document layer of a schema whose slots are unresolved
+    /// ([`SchemaError::UnresolvedSlots`]), which types expression sites
+    /// until a snapshot is served; `None` for every other failure and for a
+    /// document layer with no SimplifiedSchema root.
+    pub(crate) template: Option<Arc<DocumentTemplate>>,
+}
+
+impl From<SchemaError> for AssemblyError {
+    fn from(error: SchemaError) -> Self {
+        Self { error, template: None }
+    }
+}
+
 /// Assembles the effective schema for a document.
 ///
 /// ## Returns
@@ -986,17 +1023,20 @@ impl DefinitionLookup for NoDefinitions {
 ///
 /// ## Errors
 ///
-/// Propagates [`SchemaError`] from extension loading, baseline merging, `$schema`
+/// Propagates [`SchemaError`] ([`AssemblyError::error`]) from extension loading, baseline merging, `$schema`
 /// resolution, or validator construction so the caller can range a
-/// `dm.schema.prepare` / `dm.schema.invalid_schema_shape` diagnostic.
-pub fn assemble(
+/// `dm.schema.prepare` / `dm.schema.invalid_schema_shape` diagnostic. A
+/// template left unresolved is [`SchemaError::UnresolvedSlots`] with its
+/// [`AssemblyError::template`].
+pub(crate) fn assemble(
     doc_path: &Path,
     document_text: &str,
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
     trigger_registry: Option<TriggerRegistry>,
     file_context: &FileResolutionContext,
-) -> Result<Option<SchemaBundle>, SchemaError> {
+    slots: SlotUse<'_>,
+) -> Result<Option<SchemaBundle>, AssemblyError> {
     let combined =
         ValidationStage::Resolve.time(|| combined_baseline(doc_path, config, workspace_roots, file_context))?;
 
@@ -1023,8 +1063,22 @@ pub fn assemble(
     if let Some(registry) = trigger_registry {
         schemas = schemas.with_trigger_registry(registry);
     }
+    schemas = match slots {
+        SlotUse::None => schemas,
+        SlotUse::Pins(session) => schemas.with_slot_session(Arc::clone(session)).with_slot_pins_only(true),
+        SlotUse::Resolve(session) => schemas.with_slot_session(Arc::clone(session)),
+    };
 
-    match schemas.effective_for(&md)? {
+    let effective = match schemas.site_schema_for(&md)? {
+        SiteSchema::Effective(effective) => effective,
+        SiteSchema::Template { template, unresolved } => {
+            return Err(AssemblyError {
+                error: SchemaError::UnresolvedSlots(unresolved),
+                template: template.map(Arc::new),
+            });
+        }
+    };
+    match effective {
         Some(effective) => Ok(Some(SchemaBundle {
             advisories: effective.advisories().to_vec(),
             effective,
@@ -1032,6 +1086,8 @@ pub fn assemble(
             extension_shapes,
             extension_dependencies: dependencies,
             extension_definitions,
+            // Only a served snapshot can make a template assemble.
+            templated: !matches!(slots, SlotUse::None) && !schemas.pending_templates_for(&md).is_empty(),
         })),
         None => Ok(None),
     }
@@ -1120,7 +1176,11 @@ fn load_extension_schema(
     // Drive resolution through the same file-reference path a `$schema` string
     // uses, so YAML/JSON disambiguation matches document references.
     let value = Value::String(path.to_string_lossy().into_owned());
-    resolve_schema(&value, &base_dir, context)
+    // An extension is a baseline layer: it applies before any slot could be
+    // resolved, so a template is refused as a baseline would be.
+    resolve_schema(&value, &base_dir, context).map_err(|error| {
+        darkmatter::markdown::schemas::slots::codes::refuse_slots_in_extension(&path, error)
+    })
 }
 
 /// Resolves an extension's configured path: relative paths anchor on the first
@@ -1207,6 +1267,7 @@ mod tests {
             &[PathBuf::from("/w")],
             None,
             &crate::context::test_support::workspace_context(),
+            SlotUse::None,
         )
         .expect("assembles")
         .expect("has frontmatter");
@@ -1225,6 +1286,7 @@ mod tests {
             &[PathBuf::from("/w")],
             None,
             &crate::context::test_support::workspace_context(),
+            SlotUse::None,
         )
         .expect("assembles");
         assert!(bundle.is_none());
@@ -1242,6 +1304,7 @@ mod tests {
             &[PathBuf::from("/w")],
             None,
             &crate::context::test_support::workspace_context(),
+            SlotUse::None,
         );
         // Outside `.claude/**`: extension never loaded, assembly succeeds.
         assert!(outside.is_ok());

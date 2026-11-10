@@ -61,6 +61,7 @@ fn main() {
 ## Modules
 
 - `terminal` - Main `Terminal` struct with all capabilities
+- `output` - Prints a `renderable::CommandOutput` as any `--output` target and resolves `--width` ([guide](../docs/output.md))
 - `discovery::detection` - Low-level detection functions
 - `discovery::os_detection` - OS and Linux distribution detection
 - `discovery::fonts` - Font name/size detection via config parsing

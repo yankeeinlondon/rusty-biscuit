@@ -394,7 +394,7 @@ fn owned_surface_is_derived_from_clap_and_non_empty() {
 mod owned_value_options;
 
 /// The completion matrix enumerates these spellings, so it covers every
-/// value slot exactly when they match the clap-derived surface.
+/// option value exactly when they match the clap-derived surface.
 #[test]
 fn the_completion_matrix_lists_every_owned_value_option() {
     let listed: HashSet<String> = owned_value_options::OWNED_VALUE_OPTIONS

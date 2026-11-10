@@ -45,16 +45,35 @@ $schema:
 ## Meta-type options
 
 - `schema(mapping)`, `schema(property(NAME, type-definition(...)))`,
-  `type-definition(forms(...))`, `type-definition(declared-required)`; the
+  `type-definition(forms(...))`, `type-definition(declared-required)`,
+  `type-definition(container)`; the
   grammar rejects them off their meta-type, on arrays, and on named-type
   references (`grammar.rs::check_declaration_option`).
 - Judged parse-only on the authored declaration in `format.rs`
   (`SchemaOptions::judge`, `TypeDefinitionOptions::judge`): reference carriers
-  and arms are skipped, named-type alternatives pass `forms` provisionally.
+  and arms are skipped, named-type alternatives pass `forms` and `container`
+  provisionally.
+- `container` is `Constraint::Container` in the grammar and serializer; it
+  judges with `simplified::narrowing::container_admission`
+  (`Container` / `Provisional` / `NotContainer`); `denotes_container` is true
+  only for `Container`. Both walk `query::flattened_alternatives`, drop `null`
+  arms, and need one container arm. The YAML list `[string, number]` is a
+  union, never a tuple. A type-definition *value* is parsed by
+  `simplified::parse_type_definition_value` (the meta-type keyword, a
+  `type-definition` default, Darkmatter's `load_data` contract, trigger
+  matcher, and DMLS): a string holding a bracket list that the grammar
+  rejects is re-read as that YAML list, so `"[string, number]"` is the same
+  union; malformed text keeps the grammar error. A schema declaration's own
+  string keeps `parse_property_definition`. Tests:
+  `tests/l1/container_contracts.rs`.
 - JSON payload (`convert.rs::semantic_type_fragment`): `true`, or
   `{"mapping": true, "property": [{"name", "declaration"}]}` /
-  `{"forms": [...], "declaredRequired": true}`. Tests:
+  `{"forms": [...], "declaredRequired": true, "container": true}`. Tests:
   `tests/l1/declaration_narrowing.rs`, grammar in `declaration_grammar.rs`.
+- Adding an option touches Darkmatter's lists too: the call-binding
+  translator (`call_binding/translate.rs`), trigger match-safety and matcher
+  (`triggers/{grammar,matcher}.rs`), and the `about.rs` descriptors that drive
+  `md schema about` and DMLS completion.
 - One payload builder and one judge, reused by hosts (Darkmatter's
   call-binding translator and trigger matcher): `simplified::
   declaration_options_payload(property, constraints)` and

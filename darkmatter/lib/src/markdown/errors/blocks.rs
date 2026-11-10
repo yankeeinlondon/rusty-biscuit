@@ -310,12 +310,16 @@ pub(crate) fn interpolation_block(
         None => "A document expression".to_string(),
     };
 
+    // A refused host was reported as a generic evaluation failure before it
+    // was typed, and still renders as one. A contract import renders like the
+    // data file it belongs to.
+    let file_reference = cause.file_reference_diagnostic().filter(|diagnostic| diagnostic.kind != FileRefFailure::RemoteDenied);
     match cause {
         ExpressionError::Callback { function, position, source: inner } => {
             interpolation_block(key, expression, source, inner)
                 .hint(format!("Callback: {function}[{position}]"))
         }
-        ExpressionError::FileReference(diagnostic) => {
+        _ if let Some(diagnostic) = file_reference => {
             let headline = match diagnostic.kind {
                 FileRefFailure::RemoteNotEnabled => "remote reference not enabled",
                 _ => "invalid file path",
@@ -615,6 +619,19 @@ pub(crate) fn parameter_binding_block(
         .hint("Use `file(eager)` when the reference needs filesystem search or recursive matching.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::Setter`].
+pub(crate) fn setter_block(argument: &str, path: &str, reason: &str) -> StatusBlock {
+    let body = format!(
+        "<dim>Setter:</dim> <inverse>{}</inverse>\n<dim>Path:</dim> {}\n{}",
+        Prose::escape_text(argument),
+        Prose::escape_text(path),
+        Prose::escape_text_outside_code_spans(reason),
+    );
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "invalid setter"))
+        .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
 ///
 /// When `problems` is empty the failure represents a schema *preparation*
@@ -780,6 +797,31 @@ mod tests {
             rendered: String::new(),
             origin_key: Some(key.to_string()),
         }
+    }
+
+    /// A refused host became a typed file-reference failure; its message and
+    /// block stay those of the untyped failure it replaced.
+    #[test]
+    fn a_denied_remote_host_renders_as_the_evaluation_failure_it_replaced() {
+        use crate::markdown::compose::expression::FileReferenceDiagnostic;
+
+        let denied = ExpressionError::FileReference(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "https://blocked.example/doc.md".to_string(),
+            kind: FileRefFailure::RemoteDenied,
+            cwd: PathBuf::from("/repo"),
+            fallback_dir: None,
+            source: None,
+            caller: None,
+        });
+        let untyped = ExpressionError::Other {
+            function: "frontmatter".to_string(),
+            message: "remote read denied for host 'blocked.example'".to_string(),
+        };
+        assert_eq!(denied.to_string(), untyped.to_string());
+        let source = effective_source("doc");
+        let block = |cause| render_block(&interpolation_block(None, "frontmatter(url)", &source, cause));
+        assert_eq!(block(&denied), block(&untyped));
     }
 
     #[test]
@@ -1256,6 +1298,7 @@ mod tests {
             instance_path: simplified_schema::JsonPointer::parse("/title"),
             schema_path: None,
             offending_property: None,
+            offending_properties: Vec::new(),
             file_reference: None,
             caller_file: None,
         }

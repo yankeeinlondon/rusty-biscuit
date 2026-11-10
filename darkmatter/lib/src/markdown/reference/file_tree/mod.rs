@@ -295,7 +295,10 @@ impl TerminalRenderable for FileTree {
         match &self.model {
             Some(model) => {
                 let raw = render::render_model(model, term, self.show_root);
-                self.layout.apply_layout(&raw, term.width())
+                match term.columns() {
+                    Some(columns) => self.layout.apply_layout(&raw, columns),
+                    None => self.layout.apply_block_layout_on(&raw, term),
+                }
             }
             None => {
                 if cfg!(debug_assertions) {

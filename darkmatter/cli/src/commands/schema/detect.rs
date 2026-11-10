@@ -1,42 +1,48 @@
 //! `md schema detect` implementation.
 
-use crate::args::SchemaDetectFormat;
-use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::TerminalRenderable;
-use biscuit_terminal::terminal::Terminal;
-use color_eyre::eyre::Result;
-use darkmatter::markdown::Markdown;
-use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{DetectOptions, detect_schema_with_contexts, schema_to_yaml};
-use simplified_schema::to_json_schema;
-
+use crate::args::Cli;
+use crate::args::output::SchemaDetectOutput;
+use crate::commands::code_block::code_value;
 use crate::io::{DocumentArgumentError, open_argument};
+use crate::output::command::{CommandRun, Completed, DataShape};
+use crate::output::output_diagnostic;
+use crate::output::report::ClassifiedFailure;
 use crate::request::MdRequest;
-use biscuit_terminal::errors::BlockError as _;
+use biscuit_file::FileResolutionContext;
+use biscuit_terminal::output::WidthRequest;
+use color_eyre::eyre::{Context, Result, eyre};
+use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
+use darkmatter::markdown::compose::report_diagnostics::{FRONTMATTER_PARSE_CODE, INPUT_READ_CODE};
+use darkmatter::markdown::output::command::{CommandValue, DetectData, DetectedFile};
+use darkmatter::markdown::schemas::{DetectOptions, detect_schema_with_contexts, schema_to_yaml};
+use darkmatter::markdown::{CodeBlock, Markdown};
+use serde_json::Value;
+use simplified_schema::{SchemaRoot, to_json_schema};
 use std::path::{Path, PathBuf};
 
 /// Run `md schema detect`.
 ///
-/// Exits with `0` on success, `3` when at least one input file's
-/// frontmatter cannot be parsed (matching the validate convention), and
-/// `2` when conversion to JSON Schema fails (only possible with
-/// `--format json`).
+/// Prints the inferred SimplifiedSchema as YAML in a code block, as data with a
+/// data output, or as JSON Schema with `json-schema`. Several inputs without
+/// `--merge` give one schema per input. An input that cannot be read or parsed
+/// fails the run (exit `1`) and reports every such input; so does a schema with
+/// no JSON Schema form.
 ///
 /// Each document infers `file` values in its own context
 /// ([`MdRequest::document_context`] from its opening reference), never the
 /// launch context, so a document in another repository, outside every
 /// repository, or named through a symlinked spelling classifies its
 /// references as it resolves them.
-pub fn run_detect(
-    files: &[PathBuf],
-    format: SchemaDetectFormat,
-    merge: bool,
-    request: &MdRequest,
-) -> Result<()> {
-    let terminal = Terminal::default();
+pub fn run_detect(files: &[PathBuf], output: SchemaDetectOutput, merge: bool, cli: &Cli, request: &MdRequest) -> Result<()> {
+    let run = CommandRun::begin(output.target(), cli.width, WidthRequest::Auto, cli.verbose, DataShape::Bare)?;
+    let result = detect_value(files, output, merge, request);
+    run.finish(result)
+}
+
+fn detect_value(files: &[PathBuf], output: SchemaDetectOutput, merge: bool, request: &MdRequest) -> Result<Completed<CommandValue<DetectData>>> {
     let mut docs: Vec<Markdown> = Vec::with_capacity(files.len());
     let mut contexts: Vec<FileResolutionContext> = Vec::with_capacity(files.len());
-    let mut any_parse_error = false;
+    let mut failures: Vec<Diagnostic> = Vec::new();
 
     for file in files {
         match load_document(file, request) {
@@ -45,38 +51,65 @@ pub fn run_detect(
                 contexts.push(context);
             }
             Err(LoadError::Unopened(err)) => {
-                match err.chain().find_map(|cause| cause.downcast_ref::<DocumentArgumentError>()) {
-                    Some(argument) => eprintln!("{}", argument.report_block_error(&terminal)),
-                    None => emit_error_line(&terminal, file, &format!("{err:#}")),
-                }
-                any_parse_error = true;
+                failures.push(match err.chain().find_map(|cause| cause.downcast_ref::<DocumentArgumentError>()) {
+                    Some(argument) => argument.diagnostic(),
+                    None => output_diagnostic(INPUT_READ_CODE, Severity::Error, &format!("{}: {err:#}", file.display())),
+                });
             }
             Err(LoadError::Parse(err)) => {
-                emit_error_line(&terminal, file, &err);
-                any_parse_error = true;
+                failures.push(output_diagnostic(FRONTMATTER_PARSE_CODE, Severity::Error, &format!("{}: {err}", file.display())));
             }
         }
     }
-
-    if any_parse_error {
-        std::process::exit(3);
+    if !failures.is_empty() {
+        let summary = failures.iter().map(|failure| failure.message.as_str()).collect::<Vec<_>>().join("\n");
+        return Err(ClassifiedFailure::report(eyre!("{summary}"), failures));
     }
 
     if merge || docs.len() <= 1 {
         let refs: Vec<&Markdown> = docs.iter().collect();
         let schema = detect_schema_with_contexts(&refs, DetectOptions { merge }, &contexts);
-        emit_schema(format, files, &schema);
-    } else {
-        // Without --merge, emit one schema per file with a header comment.
-        for ((file, md), context) in files.iter().zip(docs.iter()).zip(contexts) {
-            let schema =
-                detect_schema_with_contexts(&[md], DetectOptions { merge: false }, &[context]);
-            print_header(format, file);
-            emit_schema(format, std::slice::from_ref(file), &schema);
-        }
+        let value = schema_value(&schema, output)?;
+        let source = source_text(&schema, &value, output)?;
+        return Ok(Completed::success(code_value(DetectData::Single(value), code_block(&source, output))));
     }
 
-    Ok(())
+    let mut entries = Vec::with_capacity(docs.len());
+    let mut combined = String::new();
+    for ((file, md), context) in files.iter().zip(docs.iter()).zip(contexts) {
+        let schema = detect_schema_with_contexts(&[md], DetectOptions { merge: false }, &[context]);
+        let value = schema_value(&schema, output)?;
+        combined.push_str(&format!("# --- {} ---\n{}", file.display(), source_text(&schema, &value, output)?));
+        if !combined.ends_with('\n') {
+            combined.push('\n');
+        }
+        entries.push(DetectedFile { file: file.display().to_string(), schema: value });
+    }
+    Ok(Completed::success(code_value(DetectData::Files { files: entries }, code_block(&combined, output))))
+}
+
+fn code_block(source: &str, output: SchemaDetectOutput) -> CodeBlock {
+    let language = if output == SchemaDetectOutput::JsonSchema { "json" } else { "yaml" };
+    CodeBlock::new(source.trim_end().to_string()).with_fence_language(language)
+}
+
+/// `schema` as data: the SimplifiedSchema, or for `json-schema` its Draft 2020-12
+/// form.
+fn schema_value(schema: &SchemaRoot, output: SchemaDetectOutput) -> Result<Value> {
+    match output {
+        SchemaDetectOutput::JsonSchema => to_json_schema(schema).map_err(|error| eyre!("could not build JSON Schema: {error}")),
+        SchemaDetectOutput::Target(_) => {
+            serde_yaml_ng::from_str(&schema_to_yaml(schema)).wrap_err("could not read the detected schema as data")
+        }
+    }
+}
+
+/// `schema`'s text in its formatted code block.
+fn source_text(schema: &SchemaRoot, value: &Value, output: SchemaDetectOutput) -> Result<String> {
+    match output {
+        SchemaDetectOutput::JsonSchema => serde_json::to_string_pretty(value).wrap_err("could not serialize JSON Schema"),
+        SchemaDetectOutput::Target(_) => Ok(schema_to_yaml(schema)),
+    }
 }
 
 enum LoadError {
@@ -105,66 +138,4 @@ fn load_document(
         .document_context(Some(opened.reference()), &document_path)
         .map_err(LoadError::Unopened)?;
     Ok((markdown, context))
-}
-
-fn emit_schema(
-    format: SchemaDetectFormat,
-    sources: &[PathBuf],
-    schema: &simplified_schema::SchemaRoot,
-) {
-    match format {
-        SchemaDetectFormat::Yaml => {
-            // Source-file header is helpful when the result is piped or
-            // copied into a doc — kept on a single comment line.
-            if !sources.is_empty() {
-                let joined = sources
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                println!("# detected from: {joined}");
-            }
-            print!("{}", schema_to_yaml(schema));
-        }
-        SchemaDetectFormat::Json => match to_json_schema(schema) {
-            Ok(value) => match serde_json::to_string_pretty(&value) {
-                Ok(text) => println!("{text}"),
-                Err(err) => {
-                    emit_json_error(&format!("could not serialise JSON Schema: {err}"));
-                    std::process::exit(2);
-                }
-            },
-            Err(err) => {
-                emit_json_error(&format!("could not build JSON Schema: {err}"));
-                std::process::exit(2);
-            }
-        },
-    }
-}
-
-fn print_header(format: SchemaDetectFormat, file: &Path) {
-    if matches!(format, SchemaDetectFormat::Yaml) {
-        println!("# --- {} ---", file.display());
-    }
-}
-
-fn emit_error_line(terminal: &Terminal, file: &Path, err: &str) {
-    let body = format!(
-        "<red><b>Error:</b></red> {}: {}",
-        escape_prose(&file.display().to_string()),
-        escape_prose(err)
-    );
-    eprintln!("{}", Prose::new(body).render(terminal));
-}
-
-fn emit_json_error(message: &str) {
-    let terminal = Terminal::default();
-    let body = format!("<red><b>Error:</b></red> {}", escape_prose(message));
-    eprintln!("{}", Prose::new(body).render(&terminal));
-}
-
-/// Escape text so it renders exactly as written inside Prose markup; code
-/// spans it marks with backticks stay literal.
-fn escape_prose(input: &str) -> String {
-    Prose::escape_text_outside_code_spans(input)
 }

@@ -35,6 +35,7 @@ fn opts(dialect: MarkdownDialect, strictness: RenderStrictness) -> MarkdownRende
         dialect,
         strictness,
         style: None,
+        width: renderable::output::Width::Source,
     }
 }
 

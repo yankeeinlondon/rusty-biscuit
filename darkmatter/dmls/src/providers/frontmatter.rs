@@ -22,10 +22,10 @@ use darkmatter::markdown::schemas::{
     block_constraint_descriptors, schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors,
 };
 use simplified_schema::{
-    Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
+    Constraint, JsonPointer, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
     SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, DecodedScalar, decode_plain_scalar_node, decode_scalar,
     locate_schema_declaration_cursor, locate_schema_declaration_cursor_in_scalar, mapping_separator,
-    locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, parse_property_definition,
+    locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, parse_type_definition_value,
     parse_schema_declaration, flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
@@ -37,6 +37,8 @@ use lsp_types::{
 };
 
 use super::DocumentContext;
+use super::option_argument;
+use super::type_definition_argument::{self, Site};
 use crate::overlay::{
     FmEntry, FmEntryRole, FmPathSegment, FmValueKind, FrontmatterAst, SchemaAuthoringState,
     doc_links, expressions, format_dotted,
@@ -65,10 +67,36 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
 /// only, so short-circuiting there would silently discard every sibling arm's
 /// candidates. Semantic items lead so the pure-`type-definition` ordering is
 /// unchanged, and `dedup_completions` keeps first-seen order.
+///
+/// Every ordinary candidate is projected from the served schema, so each
+/// carries the [`slot_note`] when that schema's slots are not current. The
+/// schema-authoring candidates (type keywords, constraints) come from the
+/// SimplifiedSchema grammar, never from a resolution, and are left as they are.
 pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
+    if let Some(items) = type_definition_argument::completion(ctx, offset, Site::Frontmatter) {
+        return items;
+    }
+    if let Some(items) = option_argument::completion(ctx, offset, Site::Frontmatter) {
+        return items;
+    }
     let mut items = meta_schema_completion(ctx, offset).unwrap_or_default();
-    items.extend(schema_completion(ctx, offset));
+    items.extend(with_slot_notes(ctx, schema_completion(ctx, offset)));
     dedup_completions(items)
+}
+
+/// `items` with the [`slot_note`] appended to each one's `detail`; labels,
+/// edits, and order are kept.
+fn with_slot_notes(ctx: &DocumentContext, mut items: Vec<CompletionItem>) -> Vec<CompletionItem> {
+    let Some(note) = slot_note(ctx) else {
+        return items;
+    };
+    for item in &mut items {
+        item.detail = Some(match item.detail.take() {
+            Some(detail) if !detail.is_empty() => format!("{detail} · {note}"),
+            _ => note.to_string(),
+        });
+    }
+    items
 }
 
 /// The ordinary (non-semantic) frontmatter completion candidates: schema keys,
@@ -101,7 +129,7 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
             if let Some(items) = union_item_completions(ctx, ast, offset, line_start, indent, trimmed) {
                 return items;
             }
-            if let Some(items) = block_array_suggestions(ctx, offset, line_start, indent, trimmed) {
+            if let Some(items) = block_array_item_completions(ctx, offset, line_start, indent, trimmed) {
                 return items;
             }
             nested_key_completions(ctx, ast, offset, line_start, indent, trimmed)
@@ -152,7 +180,7 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
         let start = state.token_span.start;
         match kind {
             MetaSchemaKind::TypeDefinition => {
-                items.extend(type_definition_completions(ctx, start, offset, &state));
+                items.extend(type_definition_completions(ctx, start, offset, &state, NamedTypes::Offered));
             }
             MetaSchemaKind::Schema => {
                 items.extend(schema_value_completions(ctx, start, offset, &state.token));
@@ -431,13 +459,26 @@ fn semantic_owner_kinds(
     Some(owner.kinds.clone())
 }
 
+/// Whether type-definition completion offers the document's named types.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NamedTypes {
+    /// `Name@this` and the imports of this document's `$schema`, for a value
+    /// authored inside that schema's document.
+    Offered,
+    /// Neither: an expression argument has no schema document, so
+    /// `Name@this` has no target there, and an import relative to the
+    /// `$schema` file need not resolve from the calling document.
+    Withheld,
+}
+
 /// Completion for a cursor inside a `type-definition` value, dispatched on the
 /// structural role the shared parser-state authority reports.
-fn type_definition_completions(
+pub(crate) fn type_definition_completions(
     ctx: &DocumentContext,
     start: usize,
     offset: usize,
     state: &SchemaCursor,
+    named_types: NamedTypes,
 ) -> Vec<CompletionItem> {
     let partial = state.token.as_str();
     match &state.role {
@@ -522,6 +563,9 @@ fn type_definition_completions(
         {
             items.push(completion);
         }
+    }
+    if named_types == NamedTypes::Withheld {
+        return items;
     }
     let local = passive_namespace_names(ctx).into_iter().map(|name| {
         (
@@ -837,8 +881,14 @@ fn block_constraint_key_completions(
     )
 }
 
+/// The words every editor view uses for a property whose template type has
+/// not resolved.
+const TYPE_PENDING: &str = "type pending";
+
 /// A shape's not-yet-present property keys, filtered by `partial` and marked
-/// `(required)`, as `FIELD` completions with an eager `key: ` text edit.
+/// `(required)` (or [`TYPE_PENDING`], whose presence is not known until its
+/// template type resolves), as `FIELD` completions with an eager `key: `
+/// text edit.
 fn shape_key_completions(
     ctx: &DocumentContext,
     offset: usize,
@@ -852,8 +902,11 @@ fn shape_key_completions(
         .iter()
         .filter(|(name, _)| name.starts_with(partial) && !present.contains(&name.as_str()))
         .filter_map(|(name, def)| {
-            let required = is_required(def);
-            let detail = required.then(|| "(required)".to_string());
+            let detail = match def.requiredness() {
+                Requiredness::Required => Some("(required)".to_string()),
+                Requiredness::Pending => Some(TYPE_PENDING.to_string()),
+                Requiredness::Optional => None,
+            };
             item(
                 ctx,
                 start,
@@ -900,7 +953,7 @@ fn value_completions(
     if partial.trim_start().starts_with('[') {
         let (element_partial, element_start) = flow_array_element(partial, start);
         return suggestion_completions(ctx, &path, element_start, offset, &element_partial)
-            .unwrap_or_default();
+            .unwrap_or_else(|| array_item_value_completions(ctx, &path, element_start, offset, &element_partial));
     }
 
     // Suggestion candidates for scalar values (checked before enum/boolish/file
@@ -914,13 +967,31 @@ fn value_completions(
     let Some(def) = memo.def_at(&segments) else {
         return Vec::new();
     };
+    def_value_completions(ctx, def, start, offset, partial, event)
+}
 
+/// The value candidates `def` offers for a scalar written from `start` to the
+/// cursor: preselected `literal(x)` values, expression completions, then enum
+/// members, boolish scaffolds, and file paths from every arm.
+fn def_value_completions(
+    ctx: &DocumentContext,
+    def: &PropertyDef,
+    start: usize,
+    offset: usize,
+    partial: &str,
+    event: Option<&crate::overlay::event_views::StackEvent>,
+) -> Vec<CompletionItem> {
     let mut items = Vec::new();
 
     // Each authored `literal(x)` value, preselected, with YAML insertion text
     // matching the value's scalar type. A union-typed reference contributes
     // its arms, and a recursive reference its definition's.
-    let alternatives = resolved_alternatives(def, definitions(ctx));
+    // A pending template type offers nothing until it resolves; static
+    // sibling arms still offer theirs.
+    let alternatives: Vec<_> = resolved_alternatives(def, definitions(ctx))
+        .into_iter()
+        .filter(|alternative| !alternative.atom.is_pending_type())
+        .collect();
     for atom in alternatives.iter().map(|alternative| alternative.atom) {
         if let Some(value) = atom.literal_value() {
             let insert = yaml_scalar_literal(value);
@@ -1065,7 +1136,7 @@ fn expression_candidates(
     crate::providers::dsl::with_site_scope(ctx, None, |site| {
         let prefix = &ctx.text[..offset];
         let line_start = prefix.rfind('\n').map_or(0, |at| at + 1);
-        let start = prefix.rfind("{{").filter(|at| *at >= line_start).map(|at| at + 2)
+        let start = expressions::expression_body_start(ctx.text, offset).filter(|at| *at >= line_start + 2)
             .or_else(|| prefix[line_start..].find(':').map(|at| line_start + at + 1))
             .unwrap_or(token_start);
         let expression = ctx.text[start..offset].trim_start();
@@ -1296,14 +1367,14 @@ fn scalar_inventory<'c>(ctx: &DocumentContext<'c>) -> impl Iterator<Item = (usiz
 }
 
 /// The scalar entry whose authored value span contains `offset`.
-fn cursor_scalar(ast: &FrontmatterAst, offset: usize) -> Option<usize> {
+pub(crate) fn cursor_scalar(ast: &FrontmatterAst, offset: usize) -> Option<usize> {
     ast.entries()
         .iter()
         .position(|entry| entry.kind == FmValueKind::Scalar && entry.value_span.contains(&offset))
 }
 
 /// The Expression-typed value at entry `index`, when `typing` decoded one.
-fn expression_value<'a>(ast: &'a FrontmatterAst, index: usize, typing: &'a ScalarTyping) -> Option<ExpressionValue<'a>> {
+pub(crate) fn expression_value<'a>(ast: &'a FrontmatterAst, index: usize, typing: &'a ScalarTyping) -> Option<ExpressionValue<'a>> {
     let ExpressionTyping::Decoded { text, projection } = &typing.expression else {
         return None;
     };
@@ -1418,6 +1489,12 @@ fn suggestion_completions(
     let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
     let def = memo.def_at(&segments)?;
     let query = suggestions_for_def(leaf, def)?;
+    // A pending template type with no `suggest(...)` anywhere in `def` has no
+    // candidates yet: the static arms' values are offered instead.
+    let suggests = flattened_alternatives(def).iter().any(|alternative| alternative.atom.suggestion_candidates().is_some());
+    if !suggests {
+        return None;
+    }
     let items: Vec<CompletionItem> = query
         .items
         .iter()
@@ -1437,9 +1514,11 @@ fn suggestion_completions(
     Some(items)
 }
 
-/// Detects a block-sequence item (`- value`) and returns suggestion completions
-/// when the enclosing property is suggestion-eligible.
-fn block_array_suggestions(
+/// Detects a block-sequence item (`- value`) and returns its candidates: the
+/// property's `suggest(...)` candidates when it is suggestion-eligible, else
+/// the item definition's values ([`array_item_value_completions`]). `None`
+/// when neither offers anything, so nested-key completion runs instead.
+fn block_array_item_completions(
     ctx: &DocumentContext,
     offset: usize,
     line_start: usize,
@@ -1456,7 +1535,33 @@ fn block_array_suggestions(
     let ancestors = enclosing_path(ctx, offset, line_start, indent);
     let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     let item_start = line_start + indent + marker_len;
-    suggestion_completions(ctx, &path, item_start, offset, after_dash)
+    if let Some(items) = suggestion_completions(ctx, &path, item_start, offset, after_dash) {
+        return Some(items);
+    }
+    let items = array_item_value_completions(ctx, &path, item_start, offset, after_dash);
+    (!items.is_empty()).then_some(items)
+}
+
+/// The value candidates for one scalar item of the array at `path`, from the
+/// item definition its array arms describe (an `enum(...)[]` or a named
+/// `os[]` whose `os` is an enum offers the members). Empty when `path` is not
+/// an array or its item has nothing to offer.
+fn array_item_value_completions(
+    ctx: &DocumentContext,
+    path: &[&str],
+    start: usize,
+    offset: usize,
+    partial: &str,
+) -> Vec<CompletionItem> {
+    let segments = key_segments(path);
+    let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
+    let Some(def) = memo.def_at(&segments) else {
+        return Vec::new();
+    };
+    let Some(item_def) = array_item_def(&array_item_atoms(def, definitions(ctx))) else {
+        return Vec::new();
+    };
+    def_value_completions(ctx, &item_def, start, offset, partial, None)
 }
 
 /// Completion for one block-sequence item of an array whose items are a union
@@ -1659,6 +1764,41 @@ fn style_key_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
 /// property's schema type/constraints/default/description, or a `ctx.*`
 /// generated-key annotation.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    let hover = frontmatter_hover(ctx, offset)?;
+    Some(with_slot_marker(ctx, hover))
+}
+
+/// The note every editor response projected from the document's schema
+/// carries when that schema is a template whose slots are not served
+/// current: still being resolved (only its literal parts are known), or
+/// being refreshed (what is shown is the last resolution's). `None` when the
+/// slots are current or the schema has none.
+pub(crate) fn slot_note(ctx: &DocumentContext) -> Option<&'static str> {
+    let status = ctx.overlay?.slots.as_ref()?;
+    if status.unresolved {
+        Some("Schema slots pending: only the schema's literal parts are known.")
+    } else if status.refreshing {
+        Some("Schema slots stale: refreshing; shown from their last resolution.")
+    } else {
+        None
+    }
+}
+
+/// `hover` with the [`slot_note`], in italics, after its contents.
+pub(crate) fn with_slot_marker(ctx: &DocumentContext, mut hover: Hover) -> Hover {
+    let Some(note) = slot_note(ctx) else {
+        return hover;
+    };
+    if let lsp_types::HoverContents::Markup(markup) = &mut hover.contents {
+        markup.value.push_str(&format!("\n\n_{note}_"));
+    }
+    hover
+}
+
+fn frontmatter_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    if let Some(hover) = type_definition_argument::hover(ctx, offset, Site::Frontmatter) {
+        return Some(hover);
+    }
     // A `$schema` string or root-union string item is a file reference, not
     // a type definition, so it is answered before the schema-authoring hover.
     if let Some(hover) = schema_value_hover::schema_value_hover(ctx, offset) {
@@ -1782,7 +1922,7 @@ fn frontmatter_definition_hover(
     let source = ctx.text.get(entry.value_span.clone())?;
     let source = dedent_spanned_yaml(source, source_column(ctx.text, entry.value_span.start));
     let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
-    let definition = parse_property_definition(&entry.key, &yaml).ok()?;
+    let definition = parse_type_definition_value(&entry.key, &yaml).ok()?;
     markup_hover(
         ctx,
         entry.key_span.clone()?,
@@ -1812,7 +1952,7 @@ fn dedent_spanned_yaml(source: &str, indent: usize) -> String {
     normalized
 }
 
-fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
+pub(crate) fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
     let mut denoted = Vec::new();
     for atom in atoms_of(def) {
         let mut name = match &atom.ty {
@@ -1825,6 +1965,8 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
             TypeExpr::Tuple(_) => "tuple".to_string(),
             TypeExpr::Function(_) => "function".to_string(),
             TypeExpr::Ref(key) => key.name.clone(),
+            // A template type's definition is not known until it resolves.
+            TypeExpr::Slot(_) => TYPE_PENDING.to_string(),
         };
         if atom.is_array && !matches!(atom.ty, TypeExpr::Imported { .. }) {
             name.push_str("[]");
@@ -2063,6 +2205,7 @@ fn alternative_line(alternative: &PropertyAtom, definitions: &dyn DefinitionLook
         TypeExpr::Tuple(_) => "- **tuple".to_string(),
         TypeExpr::Function(_) => "- **function".to_string(),
         TypeExpr::Ref(key) => format!("- **{}", key.name),
+        TypeExpr::Slot(_) => format!("- **{TYPE_PENDING}"),
     };
     if alternative.is_array && !matches!(alternative.ty, TypeExpr::Imported { .. }) {
         line.push_str("[]");
@@ -2139,6 +2282,9 @@ fn stored_union_type_line(atom: &PropertyAtom, definitions: &dyn DefinitionLooku
 /// interpolation hover's `**Expression**` block) use this to avoid repeating
 /// the name.
 pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn DefinitionLookup) -> Option<String> {
+    if def.has_pending_type() {
+        return Some(pending_hover_details(def, definitions));
+    }
     let atom = primary_atom(def)?;
     let mut lines = Vec::new();
 
@@ -2154,6 +2300,8 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
             format!("Type: **{}{}**", ty.as_keyword(), suffix)
         }
         TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
+        // Answered by `pending_hover_details` above.
+        TypeExpr::Slot(_) => format!("Type: **{TYPE_PENDING}**"),
         TypeExpr::Tuple(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
             let spelled = simplified_schema::simplified::serialize_property_atom(&PropertyAtom {
                 description: None,
@@ -2211,6 +2359,30 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
         lines.push(description.clone());
     }
     Some(lines.join("\n\n"))
+}
+
+/// The hover details of a property whose template type has not resolved:
+/// [`TYPE_PENDING`], each static sibling arm of a property-level union, and
+/// what the author wrote beside the slot (`eager`, a description). No
+/// requiredness, values, or default are claimed, since the returned type
+/// decides them.
+fn pending_hover_details(def: &PropertyDef, definitions: &dyn DefinitionLookup) -> String {
+    let mut lines = match def {
+        PropertyDef::Single(atom) => {
+            let suffix = if atom.is_array { "[]" } else { "" };
+            vec![format!("Type: **{TYPE_PENDING}{suffix}**")]
+        }
+        PropertyDef::Union(atoms) => {
+            let alternatives: Vec<&PropertyAtom> = atoms.iter().collect();
+            vec![format!("Type: one of:\n{}", alternative_lines(&alternatives, definitions))]
+        }
+    };
+    lines.extend(eager_hover_line(def));
+    if let PropertyDef::Single(PropertyAtom { description: Some(description), .. }) = def {
+        lines.push(String::new());
+        lines.push(description.clone());
+    }
+    lines.join("\n\n")
 }
 
 /// Hover content for a `ctx.*` generated key (read-only, Darkmatter-owned).
@@ -2874,7 +3046,8 @@ fn inline_object_shape<'a>(
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => None,
+        | TypeExpr::Ref(_)
+        | TypeExpr::Slot(_) => None,
     })
 }
 
@@ -2899,9 +3072,10 @@ fn declares_constraint(def: &PropertyDef, predicate: fn(&Constraint) -> bool) ->
 }
 
 /// Whether a property is required, by the library's shared presence
-/// calculation: a null-admitting whole value is never required.
+/// calculation: a null-admitting whole value is never required, and a
+/// pending template type is not known to be until it resolves.
 fn is_required(def: &PropertyDef) -> bool {
-    def.is_required()
+    def.requiredness() == Requiredness::Required
 }
 
 /// Whether any arm of a property declares `eager`, at item or array level.
@@ -2926,9 +3100,21 @@ fn eager_hover_line(def: &PropertyDef) -> Option<String> {
 }
 
 /// The enum members declared on an atom, if any.
-fn enum_members(atom: &PropertyAtom) -> Option<&[String]> {
+///
+/// An unresolved template's `enum(...)` holding slots offers its literal
+/// members alone (a resolved schema has no slot left).
+fn enum_members(atom: &PropertyAtom) -> Option<Vec<&String>> {
     atom.constraints.iter().find_map(|constraint| match constraint {
-        Constraint::Members(members) => Some(members.as_slice()),
+        Constraint::Members(members) => Some(members.iter().collect()),
+        Constraint::Dynamic(list) if list.kind == simplified_schema::simplified::DynamicKind::Members => Some(
+            list.elements
+                .iter()
+                .filter_map(|element| match element {
+                    simplified_schema::simplified::DynamicElement::Member(member) => Some(member),
+                    _ => None,
+                })
+                .collect(),
+        ),
         _ => None,
     })
 }
@@ -3227,7 +3413,7 @@ fn relativize(base_dir: &Path, target: &Path) -> String {
 }
 
 /// A Markdown hover over `span`.
-fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Option<Hover> {
+pub(crate) fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Option<Hover> {
     let range = ctx.source_map.byte_range_to_lsp(span);
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -3244,6 +3430,9 @@ mod schema_value_hover;
 
 #[cfg(test)]
 mod sequence_tests;
+
+#[cfg(test)]
+mod enum_item_tests;
 
 #[cfg(test)]
 mod snapshot_tests;
@@ -4744,8 +4933,8 @@ mod tests {
     #[test]
     fn meta_type_constraint_lists_offer_their_declaration_options() {
         for (declaration, offered, withheld) in [
-            ("type-definition(", ["forms", "declared-required", "non-null"], ["mapping", "property"]),
-            ("schema(", ["mapping", "property", "non-null"], ["forms", "declared-required"]),
+            ("type-definition(", &["forms", "declared-required", "container", "non-null"][..], &["mapping", "property"][..]),
+            ("schema(", &["mapping", "property", "non-null"][..], &["forms", "declared-required", "container"][..]),
         ] {
             let text = format!("---\n$schema:\n  p: {declaration}\n---\n\nbody\n");
             let labels = top_level_labels_after(&text, declaration);

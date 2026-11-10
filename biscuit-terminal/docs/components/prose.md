@@ -277,6 +277,32 @@ cell, `InlineContent`, a `StatusBlock` body). A link node built by other code,
 such as a darkmatter document, reaches the terminal with its destination
 unchanged, because its producer owns the base directory.
 
+**Links a terminal cannot click.** Without OSC 8 support, and always in plain
+output, a link prints its text only; with `-v` (a render verbosity of 1 or
+more) it prints `text <url>`. A link whose text is its URL prints the URL
+once. An image prints `IMAGE[alt]`, or `image: alt <path>` with `-v`. A URL
+printed this way is one unbreakable word: when it does not fit it moves to a
+line of its own, and when it is wider than the line it overflows rather than
+being split.
+
+```text
+See the docs <https://example.com/a/very/long/path/to/the/documentation.html>
+```
+
+**Structured titles.** A link title that is a JSON5 object is structured data,
+read by `renderable::output::link_metadata::parse_link_title`; any other title
+is a tooltip. Its `qp` object carries query parameters, which an OSC 8 link
+writes as parameters (`line=14:column=83:heading=intro`) beside a bare
+`file://` URI with no query or fragment:
+
+```md
+[types.md:14:83](/repo/types.md#intro '{ qp: { line: 14, column: 83 } }')
+```
+
+A title that starts with `{` but is not a JSON5 object, or a leftover
+`key=value` title, stays a tooltip; the problem is recorded on the link for
+the caller to report, never printed.
+
 ### Code spans
 
 A backtick run opens a code span when a later run of the same length closes
@@ -589,14 +615,20 @@ and **inline code** on a terminal that cannot style.
 
 ### OSC 8 Hyperlinks
 
-When `Terminal.osc_link_support == false`, a link emits a Markdown-style
-fallback instead of the OSC 8 escape sequence pair. This keeps both the
-visible description and the URL on screen.
+When `Terminal.osc_link_support == false`, a link follows the
+[non-clickable link rule](../output.md#links-and-images-that-cannot-be-clickable)
+instead of writing the OSC 8 escape sequence pair: its text alone by default,
+and its URL as well when asked for with `.with_verbosity(1)` (`-v` on a CLI).
 
-| Capability | Input | Output |
-|------------|-------|--------|
-| `osc_link_support == true` | `<a href="https://example.com">click here</a>` | `\x1b]8;;https://example.com\x1b\\click here\x1b]8;;\x1b\\` |
-| `osc_link_support == false` | `<a href="https://example.com">click here</a>` | `[click here](https://example.com)` |
+| Capability | Verbosity | Input | Output |
+|------------|-----------|-------|--------|
+| `osc_link_support == true` | any | `<a href="https://example.com">click here</a>` | `\x1b]8;;https://example.com\x1b\\click here\x1b]8;;\x1b\\` |
+| `osc_link_support == false` | 0 | `<a href="https://example.com">click here</a>` | `click here` |
+| `osc_link_support == false` | 1 or more | `<a href="https://example.com">click here</a>` | `click here <https://example.com>` |
+
+A link whose text is its URL prints the URL once at every verbosity. A low
+capability terminal therefore shows no link URL unless the reader passes `-v`,
+so keep anything a reader must see in the link's text.
 
 The fallback never emits the OSC 8 introducer (`\x1b]8;;`), verified by
 Level-1 PTY tests against a spoofed `TERM_PROGRAM=Apple_Terminal` profile.
@@ -631,6 +663,11 @@ is still distinguishable:
 The fence uses the same safe-fence rule as the Markdown target. An OSC 8
 link alone does not count as styling. After inline code, the surrounding
 style (a red sentence, an enclosing link) continues.
+
+Removing styling does not remove meaning: in `plain` output, inline code keeps
+its backticks and a fenced code block keeps its fences and language tag, so a
+reader or a script can still tell code from prose. See
+[Code](../output.md#code).
 
 ## CLI
 

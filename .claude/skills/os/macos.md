@@ -419,12 +419,33 @@ no longer watches files, so its user docs no longer describe fseventsd.
     graph tests from 7.8-15 s each to 1.0-2.5 s, all running together. A
     package with font-measuring tests that overrun on macOS adds its tests
     to that script's filter.
+  - The script leaves out `browser_` tests because they launch Chrome, so a
+    browser test that measures fonts in-process still pays the full scan.
+    At 1,220,311 `deps` entries (2026-11-07),
+    `darkmatter`'s `browser_embedded_mermaid_font_draws_every_label` spent
+    35 s in its Rust render alone and timed out at nextest's 30 s. Run
+    outside nextest it passes in about 42 s. A timeout there says how big
+    `target/debug/deps` is, not that the code regressed.
 - **L1 timeouts when heavy jobs run at the same time.** Sniff's CoreAudio and
   network-interface probes, and tree-hugger's corpus tests, can exceed the
   30 s L1 budget when they run beside Clippy, other compiles, or other suites
   at default concurrency. If unrelated tests slow down together, finish the
   competing work and rerun with bounded workers (`--test-threads 4`) before
   you change timeouts or suspect a code defect.
+
+## `CDPATH` redirects a relative `cd`
+
+The dev Mac's shell sets `CDPATH` to the workspace and `~/coding/*` folders, with no
+`.` entry, and the Bash tool inherits it. So `mkdir repo; cd repo` in a scratch folder
+lands in `~/coding/personal/repo` when that exists, and whatever follows runs there:
+on 2026-11-06 a probe's `git init` re-initialized that unrelated repository (harmless,
+but it rewrote `.git/config` and added a sample hook). The tell is `cd` printing a
+path. In a scratch script, use absolute paths, `git -C /abs/path`, or `cd ./repo`,
+which `CDPATH` never rewrites. In a worktree it also leaves the worktree: on
+2026-11-08 `cd darkmatter` issued from inside `<worktree>/darkmatter` landed in the
+main checkout's `darkmatter/`, so a `just test` there tested the wrong tree and
+passed. Check the test count, or `pwd`, before trusting a gate. The shell's aliases differ too: `c`, for one, is an
+alias, so a script that defines helper functions runs under `/bin/bash`.
 
 ## Diagnosing a slow host
 

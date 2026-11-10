@@ -1,10 +1,10 @@
 //! Apply parsed [`StyleFrontmatter`] onto a [`DarkmatterPage`] builder.
 //!
-//! This module lowers the page-level subset of the parsed style AST
-//! (`style.page.*`) into the existing [`DarkmatterPage`] builder calls. It is
-//! the integration point used by `darkmatter-cli` after CLI flags have already
-//! been applied: `apply_page_style` honors [`PageStyleOverrides`] so that
-//! frontmatter fields claimed by CLI arguments are skipped.
+//! This module lowers the parsed style AST into [`DarkmatterPage`] builder
+//! calls. The style it receives is already effective: precedence between the
+//! document, style files, and setters was decided field by field when the
+//! layers were merged by [`prepare_style_layers`](super::prepare_style_layers),
+//! so every `apply_*` function applies each present field unconditionally.
 //!
 //! ## Length lowering
 //!
@@ -15,137 +15,21 @@
 //!   post-padding content width for `max-width`.
 //! - [`Length::Css(_)`] → [`StyleApplyError::InvalidCssLength`].
 
+use std::sync::Arc;
+
+use biscuit_file::FileReferenceError;
 use biscuit_terminal::components::horizontal_rule::{RuleAlignment, RuleStyle, RuleWeight};
 use renderable::layout::{Length, TargetValue, Width};
 use thiserror::Error;
 
 use crate::layout::{DarkmatterPage, PageComponent};
-use crate::style::schema::{CommonStyle, StyleFrontmatter};
+use crate::style::bespoke::{StyleAssetResolver, apply_bespoke_knobs, apply_stylesheet};
+use crate::style::layer::PreparedStyle;
+use crate::style::presentation::PresentationDefaults;
+use crate::style::schema::{CommonStyle, ComponentEdges, StyleFrontmatter};
 #[cfg(test)]
 use crate::style::schema::WidthOrMode;
 use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight};
-
-/// Field-level CLI overrides for page-level style.
-///
-/// Each `true` value means the corresponding `style.page.*` frontmatter field
-/// must be ignored because a CLI flag already claimed it. Constructed by
-/// `darkmatter-cli` from the parsed CLI args using the same shorthand
-/// expansion rules as `apply_cli_layout_flags` (e.g. `--margin` claims all four
-/// margin sides, `--mx` claims left + right).
-///
-/// The component-specific alignment fields
-/// (`align_images`, `align_lists`, `align_block_quotes`, `align_tables`,
-/// `align_code_blocks`) record CLI claims made by the corresponding
-/// `--align-*` flags. When set, the `style.page.alignment` broadcast skips
-/// that component so component-specific CLI alignment is preserved.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PageStyleOverrides {
-    pub margin_top: bool,
-    pub margin_right: bool,
-    pub margin_bottom: bool,
-    pub margin_left: bool,
-    pub padding_top: bool,
-    pub padding_right: bool,
-    pub padding_bottom: bool,
-    pub padding_left: bool,
-    pub max_width: bool,
-    pub background: bool,
-    /// `style.page.bg-color` claimed by a CLI flag (e.g. `--page-bg-color`).
-    pub background_color: bool,
-    pub alignment: bool,
-    pub align_images: bool,
-    pub align_lists: bool,
-    pub align_ul: bool,
-    pub align_ol: bool,
-    pub align_li: bool,
-    pub align_block_quotes: bool,
-    pub align_tables: bool,
-    pub align_code_blocks: bool,
-}
-
-/// Field-level CLI overrides for the non-list component buckets wired by
-/// sub-spec #3 (`style.table.*`, `style.images.*`, `style.block-quote.*`).
-///
-/// Each `true` value means the corresponding frontmatter field must be ignored
-/// because a CLI flag already claimed it. Constructed by `darkmatter-cli` from
-/// the parsed CLI args using the same global-then-component-specific
-/// precedence as [`PageStyleOverrides`]: global `--alignment` sets every
-/// `*_alignment` field, global `--fill` sets every `*_fill` field, and
-/// component-specific flags (e.g. `--align-tables`, `--fill-images`) set only
-/// their own field.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ComponentStyleOverrides {
-    pub tables_alignment: bool,
-    pub tables_fill: bool,
-    pub images_alignment: bool,
-    pub images_fill: bool,
-    pub block_quotes_alignment: bool,
-    pub block_quotes_fill: bool,
-    pub code_blocks_alignment: bool,
-    pub code_blocks_fill: bool,
-}
-
-impl PageStyleOverrides {
-    /// Returns `true` when `component` has been claimed by a component-specific
-    /// CLI alignment flag and must therefore be skipped by a
-    /// `style.page.alignment` broadcast.
-    fn alignment_claimed_for(&self, component: PageComponent) -> bool {
-        match component {
-            PageComponent::Images => self.align_images,
-            PageComponent::Ul => self.align_ul || self.align_lists,
-            PageComponent::Ol => self.align_ol || self.align_lists,
-            PageComponent::Li => self.align_li || self.align_lists,
-
-            PageComponent::BlockQuotes => self.align_block_quotes,
-            PageComponent::Tables => self.align_tables,
-            PageComponent::CodeBlocks => self.align_code_blocks,
-            PageComponent::Hr => false,
-            PageComponent::Hyperlinks => false,
-            PageComponent::Disclosure => false,
-        }
-    }
-}
-
-/// Field-level CLI overrides for list component style (`style.ul.*`,
-/// `style.ol.*`, `style.li.*`).
-///
-/// Each `true` value means the corresponding frontmatter field must be ignored
-/// because a CLI flag already claimed it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ListStyleOverrides {
-    pub ul_alignment: bool,
-    pub ul_fill: bool,
-    pub ul_left_margin: bool,
-    pub ol_alignment: bool,
-    pub ol_fill: bool,
-    pub li_alignment: bool,
-    pub li_fill: bool,
-}
-
-/// Field-level CLI overrides for HR component style (`style.hr.*`).
-///
-/// Each `true` value means the corresponding frontmatter field must be ignored
-/// because a CLI flag already claimed it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct HrStyleOverrides {
-    pub alignment: bool,
-    pub fill: bool,
-    pub color: bool,
-    pub bg_color: bool,
-}
-
-/// Field-level CLI overrides for disclosure component style
-/// (`style.disclosure.*`).
-///
-/// Each `true` value means the corresponding frontmatter field must be ignored
-/// because a CLI flag already claimed it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DisclosureStyleOverrides {
-    pub alignment: bool,
-    pub fill: bool,
-    pub color: bool,
-    pub bg_color: bool,
-}
 
 /// Errors produced when lowering parsed [`StyleFrontmatter`] onto a
 /// [`DarkmatterPage`].
@@ -167,7 +51,7 @@ pub enum StyleApplyError {
     /// A component bucket (`table`, `images`, or `block-quote`) set both
     /// `width` and `max-width`. `DarkmatterPage` stores both as separate
     /// `renderable::layout::Layout` fields, but the v1 schema treats them as
-    /// mutually exclusive within one bucket to keep CLI precedence predictable.
+    /// mutually exclusive within one bucket so one field decides the width.
     #[error(
         "`style.{bucket}.width` and `style.{bucket}.max-width` are mutually exclusive"
     )]
@@ -208,6 +92,22 @@ pub enum StyleApplyError {
     #[error("failed to read stylesheet `{path}`: {reason}")]
     StylesheetRead { path: String, reason: String },
 
+    /// `style.page.stylesheet` is not a valid file reference, or resolving
+    /// it failed (an escape from its tree, a missing anchor, an I/O probe
+    /// failure). The [`FileReferenceError`] is the error's source and
+    /// [`StyleApplyError::file_reference_error`].
+    #[error("could not resolve stylesheet `{reference}`: {error}")]
+    StylesheetReference {
+        reference: String,
+        #[source]
+        error: SharedFileReferenceError,
+    },
+
+    /// A `style.page.stylesheet` has no recorded origin, so there is no
+    /// context to resolve it in.
+    #[error("no file context to resolve stylesheet `{reference}` in")]
+    StylesheetContextMissing { reference: String },
+
     /// The value of `style.page.stylesheet` was empty.
     #[error("empty stylesheet value")]
     EmptyStylesheet,
@@ -222,9 +122,49 @@ pub enum StyleApplyError {
     #[error("invalid meta shape at `{path}`: {reason}")]
     InvalidMetaShape { path: String, reason: String },
 
-    /// `style.page.code.theme` specified an unknown theme name.
-    #[error("invalid code theme: `{value}`")]
-    InvalidCodeTheme { value: String },
+}
+
+impl StyleApplyError {
+    pub(crate) fn stylesheet_reference(reference: &str, error: FileReferenceError) -> Self {
+        Self::StylesheetReference {
+            reference: reference.to_string(),
+            error: SharedFileReferenceError(Arc::new(error)),
+        }
+    }
+
+    /// The file-reference failure behind a stylesheet error, for a diagnostic
+    /// that names its class (`ResolutionFailure`).
+    pub fn file_reference_error(&self) -> Option<&FileReferenceError> {
+        match self {
+            Self::StylesheetReference { error, .. } => Some(&error.0),
+            _ => None,
+        }
+    }
+}
+
+/// A [`FileReferenceError`] shared so [`StyleApplyError`] stays `Clone` and
+/// comparable; two are equal when they say the same thing.
+#[derive(Debug, Clone)]
+pub struct SharedFileReferenceError(pub Arc<FileReferenceError>);
+
+impl PartialEq for SharedFileReferenceError {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0.to_string() == other.0.to_string()
+    }
+}
+
+impl std::fmt::Display for SharedFileReferenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+// Transparent: the wrapper displays as its error, so it reports that error's
+// own source rather than repeating it in an error chain.
+impl std::error::Error for SharedFileReferenceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
 }
 
 /// Lower a [`Length`] onto a [`renderable::layout::Length`] for component
@@ -249,11 +189,50 @@ fn length_to_layout_length(
     }
 }
 
+/// Lower a bucket's `padding`, then its `padding-left`/`padding-right`, onto
+/// `edges`, returning whether anything was set.
+///
+/// A side overrides only its own edge, so a bucket that sets only
+/// `padding-left` keeps the policy's inherited top, bottom, and right
+/// padding.
+fn lower_padding(
+    edges: &mut renderable::layout::Edges,
+    style: &CommonStyle,
+    bucket: &'static str,
+) -> Result<bool, StyleApplyError> {
+    lower_padding_sides(
+        edges,
+        style.padding.as_ref(),
+        style.padding_left.as_ref(),
+        style.padding_right.as_ref(),
+        bucket,
+    )
+}
+
+/// Applies `padding` to every edge, then each horizontal side over it.
+fn lower_padding_sides(
+    edges: &mut renderable::layout::Edges,
+    padding: Option<&ComponentEdges>,
+    left: Option<&Length>,
+    right: Option<&Length>,
+    bucket: &'static str,
+) -> Result<bool, StyleApplyError> {
+    if let Some(padding) = padding {
+        *edges = padding.as_edges().clone();
+    }
+    if let Some(left) = left {
+        edges.left = TargetValue::universal(length_to_layout_length(left, bucket, "padding-left")?);
+    }
+    if let Some(right) = right {
+        edges.right = TargetValue::universal(length_to_layout_length(right, bucket, "padding-right")?);
+    }
+    Ok(padding.is_some() || left.is_some() || right.is_some())
+}
+
 /// Apply parsed page-level style onto a [`DarkmatterPage`] builder.
 ///
-/// CLI overrides suppress frontmatter for overlapping fields. The returned
-/// page has active `style.page.*` settings applied. Warnings remain owned by
-/// the parser; suppression is handled by the active wiring phase.
+/// Every `style.page.*` field present in `style` is applied. Warnings remain
+/// owned by the parser.
 ///
 /// ## Errors
 ///
@@ -264,7 +243,6 @@ fn length_to_layout_length(
 pub fn apply_page_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: PageStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let Some(page_style) = style.page.as_ref() else {
         return Ok(page);
@@ -274,65 +252,44 @@ pub fn apply_page_style(
 
     // Store horizontal margins as the authored `Length` so the frame resolves
     // percentages per target (terminal cells vs. browser `%`).
-    if !overrides.margin_left
-        && let Some(len) = page_style.left_margin.as_ref()
-    {
-        page = page.with_margin_left_length(horizontal_length(len, "left-margin")?);
+    if let Some(len) = page_style.margin_left.as_ref() {
+        page = page.with_margin_left_length(horizontal_length(len, "margin-left")?);
     }
-    if !overrides.margin_right
-        && let Some(len) = page_style.right_margin.as_ref()
-    {
-        page = page.with_margin_right_length(horizontal_length(len, "right-margin")?);
+    if let Some(len) = page_style.margin_right.as_ref() {
+        page = page.with_margin_right_length(horizontal_length(len, "margin-right")?);
     }
 
     // Vertical margins (already u16 row counts in the schema).
-    if !overrides.margin_top
-        && let Some(rows) = page_style.top_margin
-    {
+    if let Some(rows) = page_style.margin_top {
         page = page.with_margin_top(rows);
     }
-    if !overrides.margin_bottom
-        && let Some(rows) = page_style.bottom_margin
-    {
+    if let Some(rows) = page_style.margin_bottom {
         page = page.with_margin_bottom(rows);
     }
 
     // Horizontal padding — authored `Length`, resolved per target.
-    if !overrides.padding_left
-        && let Some(len) = page_style.left_padding.as_ref()
-    {
-        page = page.with_padding_left_length(horizontal_length(len, "left-padding")?);
+    if let Some(len) = page_style.padding_left.as_ref() {
+        page = page.with_padding_left_length(horizontal_length(len, "padding-left")?);
     }
-    if !overrides.padding_right
-        && let Some(len) = page_style.right_padding.as_ref()
-    {
-        page = page.with_padding_right_length(horizontal_length(len, "right-padding")?);
+    if let Some(len) = page_style.padding_right.as_ref() {
+        page = page.with_padding_right_length(horizontal_length(len, "padding-right")?);
     }
 
     // Vertical padding.
-    if !overrides.padding_top
-        && let Some(rows) = page_style.top_padding
-    {
+    if let Some(rows) = page_style.padding_top {
         page = page.with_padding_top(rows);
     }
-    if !overrides.padding_bottom
-        && let Some(rows) = page_style.bottom_padding
-    {
+    if let Some(rows) = page_style.padding_bottom {
         page = page.with_padding_bottom(rows);
     }
 
     // Page background.
-    if !overrides.background
-        && let Some(bg) = page_style.background
-    {
+    if let Some(bg) = page_style.background {
         page = page.with_page_background(bg);
     }
 
-    // Page background color — claimed by `--page-bg-color` so the
-    // frontmatter value is skipped.
-    if !overrides.background_color
-        && let Some(bg_color) = page_style.bg_color.as_ref()
-    {
+    // Page background color.
+    if let Some(bg_color) = page_style.bg_color.as_ref() {
         page = page.with_page_bg_color(bg_color.to_paint_color());
     }
 
@@ -340,9 +297,7 @@ pub fn apply_page_style(
     // post-margin / post-padding content width; the resolved value is validated
     // here (a percent that rounds to zero cells is rejected) while the `Length`
     // itself is retained so the browser can emit it as `%`.
-    if !overrides.max_width
-        && let Some(len) = page_style.max_width.as_ref()
-    {
+    if let Some(len) = page_style.max_width.as_ref() {
         let resolved = lower_max_width(len, &page)?;
         if resolved == 0 {
             return Err(StyleApplyError::InvalidMaxWidth);
@@ -350,17 +305,13 @@ pub fn apply_page_style(
         page = page.with_max_width_length(horizontal_length(len, "max-width")?);
     }
 
-    // Alignment broadcasts to every page component not already claimed by a
-    // component-specific CLI flag (`--align-images`, `--align-tables`, ...).
-    if !overrides.alignment
-        && let Some(alignment) = page_style.alignment
-    {
+    // Alignment broadcasts to every page component; a component bucket's own
+    // alignment, applied later, overrides it.
+    if let Some(alignment) = page_style.alignment {
         for component in PageComponent::ALL {
-            if !overrides.alignment_claimed_for(component) {
-                let mut policy = page.component_policy(component).cloned().unwrap_or_default();
-                policy.layout.alignment = alignment;
-                page = page.with_component_policy(component, policy);
-            }
+            let mut policy = page.component_policy(component).cloned().unwrap_or_default();
+            policy.layout.alignment = alignment;
+            page = page.with_component_policy(component, policy);
         }
     }
 
@@ -370,14 +321,8 @@ pub fn apply_page_style(
 /// Apply parsed component-level style (`style.table.*`, `style.images.*`,
 /// `style.block-quote.*`) onto a [`DarkmatterPage`] builder.
 ///
-/// `overrides` carries the field-level CLI claims constructed by
-/// `darkmatter-cli`; for any field where the corresponding bool is `true`,
-/// the matching frontmatter value is skipped so the CLI flag stays in effect.
-///
-/// Should be called **after** [`apply_page_style`] so that component-specific
-/// frontmatter alignment can override a `style.page.alignment` broadcast
-/// (page broadcast is applied first as the default; component frontmatter
-/// then overrides it for any component not claimed by a CLI flag).
+/// Should be called **after** [`apply_page_style`] so that a component's own
+/// alignment overrides a `style.page.alignment` broadcast.
 ///
 /// ## Errors
 ///
@@ -388,7 +333,6 @@ pub fn apply_page_style(
 pub fn apply_component_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: ComponentStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let mut page = page;
 
@@ -398,8 +342,6 @@ pub fn apply_component_style(
             "table",
             PageComponent::Tables,
             &table.common,
-            overrides.tables_alignment,
-            overrides.tables_fill,
         )?;
     }
 
@@ -409,8 +351,6 @@ pub fn apply_component_style(
             "images",
             PageComponent::Images,
             &images.common,
-            overrides.images_alignment,
-            overrides.images_fill,
         )?;
     }
 
@@ -420,8 +360,6 @@ pub fn apply_component_style(
             "block-quote",
             PageComponent::BlockQuotes,
             &block_quote.common,
-            overrides.block_quotes_alignment,
-            overrides.block_quotes_fill,
         )?;
     }
 
@@ -431,8 +369,6 @@ pub fn apply_component_style(
             "code-block",
             PageComponent::CodeBlocks,
             &code_block.common,
-            overrides.code_blocks_alignment,
-            overrides.code_blocks_fill,
         )?;
     }
 
@@ -441,10 +377,6 @@ pub fn apply_component_style(
 
 /// Apply parsed list-level style (`style.ul.*`, `style.ol.*`, `style.li.*`)
 /// onto a [`DarkmatterPage`] builder.
-///
-/// `overrides` carries the field-level CLI claims constructed by
-/// `darkmatter-cli`; for any field where the corresponding bool is `true`,
-/// the matching frontmatter value is skipped so the CLI flag stays in effect.
 ///
 /// Should be called **after** [`apply_page_style`] and [`apply_component_style`]
 /// so that list-specific frontmatter can override broader broadcasts.
@@ -458,7 +390,6 @@ pub fn apply_component_style(
 pub fn apply_list_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: ListStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let mut page = page;
 
@@ -468,13 +399,9 @@ pub fn apply_list_style(
             "ul",
             PageComponent::Ul,
             &ul.common,
-            overrides.ul_alignment,
-            overrides.ul_fill,
         )?;
 
-        if !overrides.ul_left_margin
-            && let Some(left_margin) = ul.left_margin.as_ref()
-        {
+        if let Some(left_margin) = ul.left_margin.as_ref() {
             let len = length_to_layout_length(left_margin, "ul", "left-margin")?;
             let mut policy = page.component_policy(PageComponent::Ul)
                 .cloned()
@@ -490,8 +417,6 @@ pub fn apply_list_style(
             "ol",
             PageComponent::Ol,
             &ol.common,
-            overrides.ol_alignment,
-            overrides.ol_fill,
         )?;
     }
 
@@ -501,8 +426,6 @@ pub fn apply_list_style(
             "li",
             PageComponent::Li,
             &li.common,
-            overrides.li_alignment,
-            overrides.li_fill,
         )?;
     }
 
@@ -512,8 +435,7 @@ pub fn apply_list_style(
 /// Apply parsed color and background-color style onto a [`DarkmatterPage`]
 /// builder.
 ///
-/// Color has no CLI override in this sub-spec, so frontmatter is the only
-/// source. Should be called **after** [`apply_page_style`],
+/// Should be called **after** [`apply_page_style`],
 /// [`apply_component_style`], and [`apply_list_style`].
 ///
 /// Page-level `color`/`bg-color` are applied first as inherited defaults;
@@ -590,10 +512,6 @@ fn apply_common_color(
 
 /// Apply parsed HR style (`style.hr.*`) onto a [`DarkmatterPage`] builder.
 ///
-/// `overrides` carries the field-level CLI claims; for any field where the
-/// corresponding bool is `true`, the matching frontmatter value is skipped so
-/// the CLI flag stays in effect.
-///
 /// ## Errors
 ///
 /// - [`StyleApplyError::ComponentWidthConflict`] when both `width` and
@@ -603,32 +521,38 @@ fn apply_common_color(
 pub fn apply_hr_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: HrStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let Some(hr) = style.hr.as_ref() else {
         return Ok(page);
     };
     let mut page = page;
 
-    // Validate exclusivity of width vs max-width unconditionally.
     if hr.width.is_some() && hr.max_width.is_some() {
         return Err(StyleApplyError::ComponentWidthConflict { bucket: "hr" });
     }
 
-    if !overrides.fill {
-        if let Some(width) = hr.width.as_ref() {
-            let s = lower_length_to_hr_width(width, "hr", "width")?;
-            page = page.with_hr_width(s);
-        } else if let Some(max_width) = hr.max_width.as_ref() {
-            let s = lower_length_to_hr_width(max_width, "hr", "max-width")?;
-            page = page.with_hr_width(s);
-        }
+    if let Some(width) = hr.width.as_ref() {
+        let s = lower_length_to_hr_width(width, "hr", "width")?;
+        page = page.with_hr_width(s);
+    } else if let Some(max_width) = hr.max_width.as_ref() {
+        let s = lower_length_to_hr_width(max_width, "hr", "max-width")?;
+        page = page.with_hr_width(s);
     }
 
-    if !overrides.alignment
-        && let Some(alignment) = hr.alignment
-    {
+    if let Some(alignment) = hr.alignment {
         page = page.with_hr_alignment(alignment);
+    }
+
+    // A rule's padding moves it inside the content width.
+    let mut policy = page.component_policy(PageComponent::Hr).cloned().unwrap_or_default();
+    if lower_padding_sides(
+        &mut policy.layout.padding,
+        hr.padding.as_ref(),
+        hr.padding_left.as_ref(),
+        hr.padding_right.as_ref(),
+        "hr",
+    )? {
+        page = page.with_component_policy(PageComponent::Hr, policy);
     }
 
     if let Some(kind) = hr.kind {
@@ -639,15 +563,11 @@ pub fn apply_hr_style(
         page = page.with_hr_weight(weight);
     }
 
-    if !overrides.color
-        && let Some(color) = hr.color.as_ref()
-    {
+    if let Some(color) = hr.color.as_ref() {
         page = page.with_component_color(PageComponent::Hr, color.to_paint_color());
     }
 
-    if !overrides.bg_color
-        && let Some(bg_color) = hr.bg_color.as_ref()
-    {
+    if let Some(bg_color) = hr.bg_color.as_ref() {
         page = page.with_component_bg_color(PageComponent::Hr, bg_color.to_paint_color());
     }
 
@@ -714,10 +634,6 @@ pub fn map_hr_alignment(alignment: HrAlignment) -> RuleAlignment {
 /// Apply parsed disclosure component style (`style.disclosure.*`) onto a
 /// [`DarkmatterPage`] builder.
 ///
-/// `overrides` carries the field-level CLI claims; for any field where the
-/// corresponding bool is `true`, the matching frontmatter value is skipped so
-/// the CLI flag stays in effect.
-///
 /// ## Errors
 ///
 /// - [`StyleApplyError::ComponentWidthConflict`] when both `width` and
@@ -727,7 +643,6 @@ pub fn map_hr_alignment(alignment: HrAlignment) -> RuleAlignment {
 pub fn apply_disclosure_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
-    overrides: DisclosureStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let Some(disclosure) = style.disclosure.as_ref() else {
         return Ok(page);
@@ -738,8 +653,6 @@ pub fn apply_disclosure_style(
         "disclosure",
         PageComponent::Disclosure,
         &disclosure.common,
-        overrides.alignment,
-        overrides.fill,
     )
 }
 
@@ -752,18 +665,15 @@ fn apply_list_bucket(
     bucket: &'static str,
     component: PageComponent,
     style: &CommonStyle,
-    alignment_claimed: bool,
-    fill_claimed: bool,
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let mut policy = page.component_policy(component).cloned().unwrap_or_default();
     let mut changed = false;
 
-    // Validate exclusivity of width vs max-width unconditionally.
     match (style.width.as_ref(), style.max_width.as_ref()) {
         (Some(_), Some(_)) => {
             return Err(StyleApplyError::WidthMaxWidthConflict { bucket });
         }
-        (Some(width), None) if !fill_claimed => {
+        (Some(width), None) => {
             let width = width.as_width().clone();
             policy.layout.width = match width {
                 Width::Fixed(tv) => {
@@ -780,7 +690,7 @@ fn apply_list_bucket(
             };
             changed = true;
         }
-        (None, Some(max_width)) if !fill_claimed => {
+        (None, Some(max_width)) => {
             let len = length_to_layout_length(max_width, bucket, "max-width")?;
             policy.layout.max_width = Some(TargetValue::universal(len));
             changed = true;
@@ -788,9 +698,7 @@ fn apply_list_bucket(
         _ => {}
     }
 
-    if !alignment_claimed
-        && let Some(alignment) = style.alignment
-    {
+    if let Some(alignment) = style.alignment {
         policy.layout.alignment = alignment;
         changed = true;
     }
@@ -800,8 +708,7 @@ fn apply_list_bucket(
         changed = true;
     }
 
-    if let Some(padding) = style.padding.as_ref() {
-        policy.layout.padding = padding.as_edges().clone();
+    if lower_padding(&mut policy.layout.padding, style, bucket)? {
         changed = true;
     }
 
@@ -833,27 +740,20 @@ fn apply_list_bucket(
 /// `"block-quote"`) used in diagnostic messages. `component` is the matching
 /// [`PageComponent`] for alignment/fill storage.
 ///
-/// `alignment_claimed` and `fill_claimed` are the bucket's two CLI claim
-/// bits from [`ComponentStyleOverrides`].
 fn apply_common_style(
     page: DarkmatterPage,
     bucket: &'static str,
     component: PageComponent,
     style: &CommonStyle,
-    alignment_claimed: bool,
-    fill_claimed: bool,
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let mut policy = page.component_policy(component).cloned().unwrap_or_default();
     let mut changed = false;
 
-    // Validate exclusivity of width vs max-width unconditionally — a CLI fill
-    // claim chooses which value wins for rendering, but it never makes an
-    // ambiguous frontmatter bucket valid.
     match (style.width.as_ref(), style.max_width.as_ref()) {
         (Some(_), Some(_)) => {
             return Err(StyleApplyError::ComponentWidthConflict { bucket });
         }
-        (Some(width), None) if !fill_claimed => {
+        (Some(width), None) => {
             let width = width.as_width().clone();
             policy.layout.width = match width {
                 Width::Fixed(tv) => {
@@ -870,7 +770,7 @@ fn apply_common_style(
             };
             changed = true;
         }
-        (None, Some(max_width)) if !fill_claimed => {
+        (None, Some(max_width)) => {
             let len = length_to_layout_length(max_width, bucket, "max-width")?;
             policy.layout.max_width = Some(TargetValue::universal(len));
             changed = true;
@@ -878,9 +778,7 @@ fn apply_common_style(
         _ => {}
     }
 
-    if !alignment_claimed
-        && let Some(alignment) = style.alignment
-    {
+    if let Some(alignment) = style.alignment {
         policy.layout.alignment = alignment;
         changed = true;
     }
@@ -890,8 +788,7 @@ fn apply_common_style(
         changed = true;
     }
 
-    if let Some(padding) = style.padding.as_ref() {
-        policy.layout.padding = padding.as_edges().clone();
+    if lower_padding(&mut policy.layout.padding, style, bucket)? {
         changed = true;
     }
 
@@ -917,6 +814,57 @@ fn apply_common_style(
     }
 }
 
+/// Apply an effective style, prepared from its layers, onto a
+/// [`DarkmatterPage`].
+///
+/// This is the page-construction entry for a [`PreparedStyle`]: every
+/// layer was validated and merged by
+/// [`prepare_style_layers`](super::prepare_style_layers), passively, and this
+/// is where assets are executed. It sets, in order:
+///
+/// 1. the presentation `defaults` resolves over the merged style (prose and
+///    code themes, code-block mode, line numbers; see
+///    [`PresentationDefaults`]);
+/// 2. page, component, list, rule, disclosure, and color style;
+/// 3. the bespoke knobs, with `style.page.stylesheet` resolved by `assets`
+///    in the context of the layer that won that field: the document's for a
+///    document value, a style file's own, or the launch context for a
+///    setter. A later style file that sets other fields does not move it.
+///
+/// Precedence was decided field by field by the layer order when the style
+/// was prepared; nothing here overrides it.
+///
+/// ## Errors
+///
+/// Any [`StyleApplyError`] the individual `apply_*` functions return,
+/// including a stylesheet that cannot be resolved or read by a target that
+/// reads one.
+pub fn apply_prepared_style(
+    page: DarkmatterPage,
+    prepared: &PreparedStyle,
+    assets: StyleAssetResolver,
+    defaults: &PresentationDefaults,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let style = prepared.style();
+    let page = defaults.resolve(style).apply_to(page);
+    let page = apply_page_style(page, style)?;
+    let page = apply_component_style(page, style)?;
+    let page = apply_list_style(page, style)?;
+    let page = apply_hr_style(page, style)?;
+    let page = apply_disclosure_style(page, style)?;
+    let page = apply_color_style(page, style)?;
+    let page = apply_bespoke_knobs(page, style)?;
+    let Some(sheet) = style.page.as_ref().and_then(|page| page.stylesheet.as_deref()) else {
+        return Ok(page);
+    };
+    // Preparation records an origin for every merged leaf; a style built some
+    // other way has no context to resolve its stylesheet in.
+    let origin = prepared
+        .origin("page.stylesheet")
+        .ok_or_else(|| StyleApplyError::StylesheetContextMissing { reference: sheet.trim().to_string() })?;
+    apply_stylesheet(page, style, assets, &origin.context)
+}
+
 /// Validate a horizontal page-frame [`Length`] for storage, rejecting CSS units.
 ///
 /// `Zero` / `Ch` / `Percent` pass through unchanged so the frame can resolve
@@ -932,15 +880,19 @@ fn horizontal_length(length: &Length, field: &'static str) -> Result<Length, Sty
 /// Resolve `style.page.max-width` against the content width after margins
 /// and padding have been applied.
 ///
-/// Reads the page's current margin + padding state (which already reflects
-/// CLI flags and any frontmatter margins/padding applied above in
-/// [`apply_page_style`]).
+/// Reads the page's current margin + padding state, which already reflects
+/// the margins and padding applied above in [`apply_page_style`].
 fn lower_max_width(length: &Length, page: &DarkmatterPage) -> Result<u16, StyleApplyError> {
     match length {
         Length::Zero => Ok(0),
         Length::Ch(n) => Ok(u16::try_from(*n).unwrap_or(u16::MAX)),
         Length::Percent(p) => {
-            let terminal_width = page.terminal_width();
+            // Without a width there is no base for the percent and nothing to
+            // reject; the frame resolves it to no cap.
+            let Some(columns) = page.terminal_width().as_columns() else {
+                return Ok(u16::MAX);
+            };
+            let terminal_width = u16::try_from(columns).unwrap_or(u16::MAX);
             let consumed = edges_horizontal_ch(page.page_margin(), terminal_width)
                 .saturating_add(edges_horizontal_ch(page.page_padding(), terminal_width));
             let content = terminal_width.saturating_sub(consumed);
@@ -979,49 +931,6 @@ mod tests {
     use biscuit_terminal::terminal::Terminal;
     use renderable::layout::{Alignment, Length};
 
-    fn align_policy(alignment: renderable::layout::Alignment) -> ComponentPolicy {
-        let mut policy = ComponentPolicy::default();
-        policy.layout.alignment = alignment;
-        policy
-    }
-
-    #[allow(dead_code)]
-    fn pad_policy(n: u16) -> ComponentPolicy {
-        let mut policy = ComponentPolicy::default();
-        policy.layout.padding = renderable::layout::Edges::x(renderable::layout::Length::ch(u32::from(n)));
-        policy
-    }
-
-    fn max_width_policy(n: u16) -> ComponentPolicy {
-        let mut policy = ComponentPolicy::default();
-        policy.layout.max_width = Some(renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n))));
-        policy
-    }
-
-    #[allow(dead_code)]
-    fn explicit_width_policy(n: u16) -> ComponentPolicy {
-        let mut policy = ComponentPolicy::default();
-        policy.layout.width = renderable::layout::Width::Fixed(renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n))));
-        policy
-    }
-
-    #[allow(dead_code)]
-    fn indent_policy(n: u16) -> ComponentPolicy {
-        let mut policy = ComponentPolicy::default();
-        policy.layout.padding = renderable::layout::Edges {
-            left: renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n))),
-            ..renderable::layout::Edges::default()
-        };
-        policy
-    }
-
-    #[allow(dead_code)]
-    fn left_margin_policy(n: u16) -> ComponentPolicy {
-        let mut policy = ComponentPolicy::default();
-        policy.layout.margin.left = renderable::layout::TargetValue::universal(renderable::layout::Length::ch(u32::from(n)));
-        policy
-    }
-
     fn edge_ch(tv: &renderable::layout::TargetValue<renderable::layout::Length>) -> u16 {
         match tv {
             renderable::layout::TargetValue::Universal(renderable::layout::Length::Ch(n)) => u16::try_from(*n).unwrap_or(u16::MAX),
@@ -1044,11 +953,11 @@ mod tests {
     fn apply_for_test(yaml: &str) -> DarkmatterPage {
         let style: StyleFrontmatter = serde_yaml_ng::from_str(yaml).expect("valid test yaml");
         let page = page(80);
-        let page = apply_page_style(page, &style, PageStyleOverrides::default()).unwrap();
-        let page = apply_component_style(page, &style, ComponentStyleOverrides::default()).unwrap();
-        let page = apply_list_style(page, &style, ListStyleOverrides::default()).unwrap();
+        let page = apply_page_style(page, &style).unwrap();
+        let page = apply_component_style(page, &style).unwrap();
+        let page = apply_list_style(page, &style).unwrap();
         let page = apply_color_style(page, &style).unwrap();
-        apply_hr_style(page, &style, HrStyleOverrides::default()).unwrap()
+        apply_hr_style(page, &style).unwrap()
     }
 
     // ---------- Phase 2: ComponentPolicy direct-lowering tests ----------
@@ -1173,7 +1082,7 @@ mod tests {
     fn no_page_block_returns_page_unchanged() {
         let p = page(80);
         let style = StyleFrontmatter::default();
-        let out = apply_page_style(p.clone(), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(p.clone(), &style).unwrap();
         assert_eq!(out.page_margin(), p.page_margin());
         assert_eq!(out.page_padding(), p.page_padding());
         assert_eq!(out.max_width(), p.max_width());
@@ -1182,20 +1091,20 @@ mod tests {
     #[test]
     fn length_ch_lowers_to_u16() {
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Ch(4)),
+            margin_left: Some(Length::Ch(4)),
             ..PageStyle::default()
         });
-        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style).unwrap();
         assert_eq!(edge_ch(&out.page_margin().left), 4);
     }
 
     #[test]
     fn length_zero_lowers_to_zero() {
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Zero),
+            margin_left: Some(Length::Zero),
             ..PageStyle::default()
         });
-        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style).unwrap();
         assert_eq!(edge_ch(&out.page_margin().left), 0);
     }
 
@@ -1204,10 +1113,10 @@ mod tests {
         // The page frame now retains the authored `Length`; the terminal
         // resolves the percent (10% of 80 = 8) and the browser emits `10%`.
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Percent(10.0)),
+            margin_left: Some(Length::Percent(10.0)),
             ..PageStyle::default()
         });
-        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style).unwrap();
         assert_eq!(
             out.page_margin().left,
             renderable::layout::TargetValue::universal(Length::Percent(10.0)),
@@ -1219,55 +1128,36 @@ mod tests {
     fn length_css_for_terminal_layout_returns_error() {
         use renderable::stylesheet::CssSizing;
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Css(CssSizing::px(10.0))),
+            margin_left: Some(Length::Css(CssSizing::px(10.0))),
             ..PageStyle::default()
         });
-        let err = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap_err();
+        let err = apply_page_style(page(80), &style).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::InvalidCssLength {
-                field: "left-margin"
+                field: "margin-left"
             }
         );
     }
 
     #[test]
-    fn cli_override_true_skips_frontmatter_field() {
-        // Frontmatter says 4ch; override claims margin_left so it should be
-        // ignored.
+    fn margin_left_applies_frontmatter() {
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Ch(4)),
+            margin_left: Some(Length::Ch(4)),
             ..PageStyle::default()
         });
-        let overrides = PageStyleOverrides {
-            margin_left: true,
-            ..PageStyleOverrides::default()
-        };
-        // Start with margin_left already set by some prior CLI step.
-        let p = page(80).with_margin_left(7);
-        let out = apply_page_style(p, &style, overrides).unwrap();
-        assert_eq!(edge_ch(&out.page_margin().left), 7, "CLI override should win");
-    }
-
-    #[test]
-    fn cli_override_false_applies_frontmatter() {
-        let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Ch(4)),
-            ..PageStyle::default()
-        });
-        let overrides = PageStyleOverrides::default();
-        let out = apply_page_style(page(80), &style, overrides).unwrap();
+        let out = apply_page_style(page(80), &style).unwrap();
         assert_eq!(edge_ch(&out.page_margin().left), 4);
     }
 
     #[test]
     fn vertical_margin_row_count_applied() {
         let style = style_with_page(PageStyle {
-            top_margin: Some(1),
-            bottom_margin: Some(0),
+            margin_top: Some(1),
+            margin_bottom: Some(0),
             ..PageStyle::default()
         });
-        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style).unwrap();
         assert_eq!(edge_ch(&out.page_margin().top), 1);
         assert_eq!(edge_ch(&out.page_margin().bottom), 0);
     }
@@ -1277,12 +1167,12 @@ mod tests {
         // 10% left margin + 10% right margin of 100 = 10 + 10 = 20.
         // Content width = 100 - 20 = 80. 50% of 80 = 40.
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Percent(10.0)),
-            right_margin: Some(Length::Percent(10.0)),
+            margin_left: Some(Length::Percent(10.0)),
+            margin_right: Some(Length::Percent(10.0)),
             max_width: Some(Length::Percent(50.0)),
             ..PageStyle::default()
         });
-        let out = apply_page_style(page(100), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(100), &style).unwrap();
         assert_eq!(out.max_width(), Some(40));
     }
 
@@ -1294,48 +1184,8 @@ mod tests {
             max_width: Some(Length::Percent(50.0)),
             ..PageStyle::default()
         });
-        let err = apply_page_style(p, &style, PageStyleOverrides::default()).unwrap_err();
+        let err = apply_page_style(p, &style).unwrap_err();
         assert_eq!(err, StyleApplyError::InvalidMaxWidth);
-    }
-
-    #[test]
-    fn page_alignment_broadcast_skips_components_claimed_by_cli() {
-        // Component-specific CLI alignment (`--align-tables right`) must
-        // survive a `style.page.alignment: center` broadcast — the broadcast
-        // is a default for unclaimed components, not an override.
-        use crate::layout::PageComponent;
-        let style = style_with_page(PageStyle {
-            alignment: Some(Alignment::Center),
-            ..PageStyle::default()
-        });
-        let overrides = PageStyleOverrides {
-            align_tables: true,
-            ..PageStyleOverrides::default()
-        };
-        // Simulate the CLI having applied `--align-tables right` before us.
-        let starting = page(80).with_component_policy(PageComponent::Tables, align_policy(renderable::layout::Alignment::Right));
-        let out = apply_page_style(starting, &style, overrides).unwrap();
-        assert_eq!(
-            out.component_policy(PageComponent::Tables).map(|p| p.layout.alignment).unwrap_or_default(),
-            renderable::layout::Alignment::Right,
-            "component-specific CLI alignment must survive page broadcast",
-        );
-        // Unclaimed components still receive the page default.
-        for component in [
-            PageComponent::Images,
-            PageComponent::Ul,
-            PageComponent::Ol,
-            PageComponent::Li,
-            PageComponent::BlockQuotes,
-            PageComponent::CodeBlocks,
-        ] {
-            assert_eq!(
-                out.component_policy(component).map(|p| p.layout.alignment).unwrap_or_default(),
-                renderable::layout::Alignment::Center,
-                "unclaimed component should adopt page broadcast: {:?}",
-                component,
-            );
-        }
     }
 
     #[test]
@@ -1345,7 +1195,7 @@ mod tests {
             alignment: Some(Alignment::Center),
             ..PageStyle::default()
         });
-        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style).unwrap();
         for component in PageComponent::ALL {
             assert_eq!(
                 out.component_policy(component).map(|p| p.layout.alignment).unwrap_or_default(),
@@ -1357,40 +1207,25 @@ mod tests {
     }
 
     #[test]
-    fn background_applies_when_not_overridden() {
+    fn background_applies() {
         let style = style_with_page(PageStyle {
             background: Some(PageBackground::Subtle),
             ..PageStyle::default()
         });
-        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style).unwrap();
         assert_eq!(out.page_background(), PageBackground::Subtle);
-    }
-
-    #[test]
-    fn background_override_skips_frontmatter() {
-        let style = style_with_page(PageStyle {
-            background: Some(PageBackground::Subtle),
-            ..PageStyle::default()
-        });
-        let overrides = PageStyleOverrides {
-            background: true,
-            ..PageStyleOverrides::default()
-        };
-        let out = apply_page_style(page(80), &style, overrides).unwrap();
-        // Original page_background was Transparent (default).
-        assert_eq!(out.page_background(), PageBackground::Transparent);
     }
 
     #[test]
     fn padding_lowers_horizontal_and_vertical() {
         let style = style_with_page(PageStyle {
-            left_padding: Some(Length::Ch(3)),
-            right_padding: Some(Length::Ch(3)),
-            top_padding: Some(1),
-            bottom_padding: Some(1),
+            padding_left: Some(Length::Ch(3)),
+            padding_right: Some(Length::Ch(3)),
+            padding_top: Some(1),
+            padding_bottom: Some(1),
             ..PageStyle::default()
         });
-        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style).unwrap();
         assert_eq!(edge_ch(&out.page_padding().left), 3);
         assert_eq!(edge_ch(&out.page_padding().right), 3);
         assert_eq!(edge_ch(&out.page_padding().top), 1);
@@ -1439,7 +1274,7 @@ mod tests {
         let p = page(80);
         let style = StyleFrontmatter::default();
         let out =
-            apply_component_style(p.clone(), &style, ComponentStyleOverrides::default()).unwrap();
+            apply_component_style(p.clone(), &style).unwrap();
         for component in PageComponent::ALL {
             assert_eq!(
                 out.component_policy(component).map(|p| p.layout.alignment),
@@ -1469,7 +1304,7 @@ mod tests {
             ..CommonStyle::default()
         });
         let out =
-            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+            apply_component_style(page(80), &style).unwrap();
         assert_eq!(
             out.component_policy(PageComponent::Tables).map(|p| p.layout.alignment).unwrap_or_default(),
             renderable::layout::Alignment::Right
@@ -1483,7 +1318,7 @@ mod tests {
             ..CommonStyle::default()
         });
         let out =
-            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+            apply_component_style(page(80), &style).unwrap();
         assert_eq!(
             out.component_policy(PageComponent::Tables).unwrap().layout.max_width,
             Some(renderable::layout::TargetValue::universal(renderable::layout::Length::Percent(50.0)))
@@ -1497,7 +1332,7 @@ mod tests {
             ..CommonStyle::default()
         });
         let out =
-            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+            apply_component_style(page(80), &style).unwrap();
         assert_eq!(
             out.component_policy(PageComponent::Tables).unwrap().layout.width,
             renderable::layout::Width::Fixed(renderable::layout::TargetValue::universal(renderable::layout::Length::ch(40)))
@@ -1512,7 +1347,7 @@ mod tests {
             ..CommonStyle::default()
         });
         let out =
-            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+            apply_component_style(page(80), &style).unwrap();
         assert_eq!(
             out.component_policy(PageComponent::Images).map(|p| p.layout.alignment).unwrap_or_default(),
             renderable::layout::Alignment::Center
@@ -1530,7 +1365,7 @@ mod tests {
             ..CommonStyle::default()
         });
         let out =
-            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+            apply_component_style(page(80), &style).unwrap();
         assert_eq!(
             out.component_policy(PageComponent::BlockQuotes).unwrap().layout.max_width,
             Some(renderable::layout::TargetValue::universal(renderable::layout::Length::Percent(75.0)))
@@ -1545,7 +1380,7 @@ mod tests {
             ..CommonStyle::default()
         });
         let err =
-            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap_err();
+            apply_component_style(page(80), &style).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::ComponentWidthConflict { bucket: "table" }
@@ -1560,7 +1395,7 @@ mod tests {
             ..CommonStyle::default()
         });
         let err =
-            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap_err();
+            apply_component_style(page(80), &style).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("`style.block-quote.width`"),
@@ -1579,7 +1414,7 @@ mod tests {
             max_width: Some(Length::Percent(50.0)),
             ..CommonStyle::default()
         });
-        let err = apply_disclosure_style(page(80), &style, DisclosureStyleOverrides::default())
+        let err = apply_disclosure_style(page(80), &style)
             .unwrap_err();
         assert_eq!(
             err,
@@ -1597,7 +1432,7 @@ mod tests {
             ..CommonStyle::default()
         });
         let err =
-            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap_err();
+            apply_component_style(page(80), &style).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::ComponentInvalidCssLength {
@@ -1608,61 +1443,13 @@ mod tests {
     }
 
     #[test]
-    fn cli_alignment_override_suppresses_frontmatter() {
-        let style = style_with_table(CommonStyle {
-            alignment: Some(Alignment::Right),
-            ..CommonStyle::default()
-        });
-        let overrides = ComponentStyleOverrides {
-            tables_alignment: true,
-            ..ComponentStyleOverrides::default()
-        };
-        // Simulate CLI having already applied `--align-tables left` earlier.
-        let starting = page(80).with_component_policy(PageComponent::Tables, align_policy(renderable::layout::Alignment::Left));
-        let out = apply_component_style(starting, &style, overrides).unwrap();
-        assert_eq!(
-            out.component_policy(PageComponent::Tables).map(|p| p.layout.alignment).unwrap_or_default(),
-            renderable::layout::Alignment::Left,
-            "CLI alignment claim should suppress frontmatter alignment",
-        );
-    }
-
-    #[test]
-    fn cli_fill_override_does_not_mask_frontmatter_width_conflict() {
-        // Regression: a document with both `width` and `max-width` in the same
-        // component bucket is always invalid, even when the user passes a CLI
-        // fill flag that would otherwise claim the bucket. The CLI overrides
-        // the rendered value but does not paper over ambiguous frontmatter.
-        let style = style_with_table(CommonStyle {
-            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
-            max_width: Some(Length::Percent(50.0)),
-            ..CommonStyle::default()
-        });
-        let overrides = ComponentStyleOverrides {
-            tables_fill: true,
-            ..ComponentStyleOverrides::default()
-        };
-        let err = apply_component_style(page(80), &style, overrides).unwrap_err();
-        assert_eq!(
-            err,
-            StyleApplyError::ComponentWidthConflict { bucket: "table" }
-        );
-    }
-
-    #[test]
-    fn cli_fill_images_override_does_not_mask_frontmatter_width_conflict() {
-        // Same regression as `cli_fill_override_does_not_mask_frontmatter_width_conflict`
-        // but for the component-specific `--fill-images` claim path.
+    fn images_width_and_max_width_conflict() {
         let style = style_with_images(CommonStyle {
             width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(30))))),
             max_width: Some(Length::Ch(40)),
             ..CommonStyle::default()
         });
-        let overrides = ComponentStyleOverrides {
-            images_fill: true,
-            ..ComponentStyleOverrides::default()
-        };
-        let err = apply_component_style(page(80), &style, overrides).unwrap_err();
+        let err = apply_component_style(page(80), &style).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::ComponentWidthConflict { bucket: "images" }
@@ -1670,32 +1457,10 @@ mod tests {
     }
 
     #[test]
-    fn cli_fill_override_suppresses_frontmatter() {
-        let style = style_with_images(CommonStyle {
-            max_width: Some(Length::Percent(50.0)),
-            ..CommonStyle::default()
-        });
-        let overrides = ComponentStyleOverrides {
-            images_fill: true,
-            ..ComponentStyleOverrides::default()
-        };
-        // Simulate CLI having already applied a fill earlier.
-        let starting =
-            page(80).with_component_policy(PageComponent::Images, max_width_policy(30));
-        let out = apply_component_style(starting, &style, overrides).unwrap();
-        assert_eq!(
-            out.component_policy(PageComponent::Images).unwrap().layout.max_width,
-            Some(renderable::layout::TargetValue::universal(renderable::layout::Length::ch(30))),
-            "CLI fill claim should suppress frontmatter width / max-width",
-        );
-    }
-
-    #[test]
     fn component_alignment_overrides_page_broadcast() {
-        // Simulate the integration order: `apply_page_style` ran first and
-        // broadcast `center` to every component, then `apply_component_style`
-        // sees `style.table.alignment: right` with no CLI claim and must
-        // override the broadcast for tables only.
+        // `apply_page_style` runs first and broadcasts `center` to every
+        // component; `style.table.alignment: right` then overrides the
+        // broadcast for tables only.
         let page_style = PageStyle {
             alignment: Some(Alignment::Center),
             ..PageStyle::default()
@@ -1706,8 +1471,8 @@ mod tests {
         });
         style.page = Some(page_style);
 
-        let p = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
-        let out = apply_component_style(p, &style, ComponentStyleOverrides::default()).unwrap();
+        let p = apply_page_style(page(80), &style).unwrap();
+        let out = apply_component_style(p, &style).unwrap();
 
         assert_eq!(
             out.component_policy(PageComponent::Tables).map(|p| p.layout.alignment).unwrap_or_default(),
@@ -1728,41 +1493,6 @@ mod tests {
                 "untouched components keep page broadcast: {component:?}",
             );
         }
-    }
-
-    #[test]
-    fn page_broadcast_wins_when_cli_claimed_component_alignment() {
-        // If the CLI claimed `--align-tables`, `apply_page_style` already
-        // skipped the broadcast for tables; `apply_component_style` must also
-        // honor the claim and skip the frontmatter alignment, leaving the
-        // pre-existing CLI value intact.
-        let page_style = PageStyle {
-            alignment: Some(Alignment::Center),
-            ..PageStyle::default()
-        };
-        let mut style = style_with_table(CommonStyle {
-            alignment: Some(Alignment::Right),
-            ..CommonStyle::default()
-        });
-        style.page = Some(page_style);
-        let page_overrides = PageStyleOverrides {
-            align_tables: true,
-            ..PageStyleOverrides::default()
-        };
-        let component_overrides = ComponentStyleOverrides {
-            tables_alignment: true,
-            ..ComponentStyleOverrides::default()
-        };
-
-        let starting = page(80).with_component_policy(PageComponent::Tables, align_policy(renderable::layout::Alignment::Left));
-        let p = apply_page_style(starting, &style, page_overrides).unwrap();
-        let out = apply_component_style(p, &style, component_overrides).unwrap();
-
-        assert_eq!(
-            out.component_policy(PageComponent::Tables).map(|p| p.layout.alignment).unwrap_or_default(),
-            renderable::layout::Alignment::Left,
-            "CLI alignment must survive both broadcast and component frontmatter",
-        );
     }
 
     #[test]
@@ -1788,7 +1518,7 @@ mod tests {
         });
 
         let out =
-            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+            apply_component_style(page(80), &style).unwrap();
 
         assert_eq!(
             out.component_policy(PageComponent::Tables).map(|p| p.layout.alignment).unwrap_or_default(),
@@ -1843,7 +1573,7 @@ mod tests {
             CommonStyle::default(),
             Some(Length::Ch(4)),
         );
-        let out = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap();
+        let out = apply_list_style(page(80), &style).unwrap();
         let policy = out.component_policy(PageComponent::Ul).unwrap();
         assert_eq!(
             policy.layout.margin.left,
@@ -1857,7 +1587,7 @@ mod tests {
             alignment: Some(Alignment::Right),
             ..CommonStyle::default()
         });
-        let out = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap();
+        let out = apply_list_style(page(80), &style).unwrap();
         assert_eq!(
             out.component_policy(PageComponent::Ol).map(|p| p.layout.alignment).unwrap_or_default(),
             renderable::layout::Alignment::Right
@@ -1870,7 +1600,7 @@ mod tests {
             width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(30))))),
             ..CommonStyle::default()
         });
-        let out = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap();
+        let out = apply_list_style(page(80), &style).unwrap();
         assert_eq!(
             out.component_policy(PageComponent::Li).unwrap().layout.width,
             renderable::layout::Width::Fixed(renderable::layout::TargetValue::universal(renderable::layout::Length::ch(30)))
@@ -1887,7 +1617,7 @@ mod tests {
             },
             None,
         );
-        let err = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap_err();
+        let err = apply_list_style(page(80), &style).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::WidthMaxWidthConflict { bucket: "ul" }
@@ -1901,7 +1631,7 @@ mod tests {
             max_width: Some(Length::Ch(60)),
             ..CommonStyle::default()
         });
-        let err = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap_err();
+        let err = apply_list_style(page(80), &style).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::WidthMaxWidthConflict { bucket: "ol" }
@@ -1915,7 +1645,7 @@ mod tests {
             max_width: Some(Length::Ch(60)),
             ..CommonStyle::default()
         });
-        let err = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap_err();
+        let err = apply_list_style(page(80), &style).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::WidthMaxWidthConflict { bucket: "li" }
@@ -1929,47 +1659,13 @@ mod tests {
             CommonStyle::default(),
             Some(Length::Css(CssSizing::px(10.0))),
         );
-        let err = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap_err();
+        let err = apply_list_style(page(80), &style).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::ComponentInvalidCssLength {
                 bucket: "ul",
                 field: "left-margin",
             }
-        );
-    }
-
-    #[test]
-    fn overrides_suppress_frontmatter() {
-        let style = style_with_ul(
-            CommonStyle {
-                alignment: Some(Alignment::Right),
-                width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
-                ..CommonStyle::default()
-            },
-            Some(Length::Ch(4)),
-        );
-        let overrides = ListStyleOverrides {
-            ul_alignment: true,
-            ul_fill: true,
-            ul_left_margin: true,
-            ..ListStyleOverrides::default()
-        };
-        let mut starting_policy = align_policy(renderable::layout::Alignment::Left);
-        starting_policy.layout.max_width = Some(renderable::layout::TargetValue::universal(renderable::layout::Length::ch(30)));
-        let starting = page(80).with_component_policy(PageComponent::Ul, starting_policy);
-        let out = apply_list_style(starting, &style, overrides).unwrap();
-        assert_eq!(
-            out.component_policy(PageComponent::Ul).map(|p| p.layout.alignment).unwrap_or_default(),
-            renderable::layout::Alignment::Left
-        );
-        assert_eq!(
-            out.component_policy(PageComponent::Ul).unwrap().layout.max_width,
-            Some(renderable::layout::TargetValue::universal(renderable::layout::Length::ch(30)))
-        );
-        assert_eq!(
-            out.component_policy(PageComponent::Ul).unwrap().layout.margin.left,
-            renderable::layout::TargetValue::universal(renderable::layout::Length::Zero)
         );
     }
 
@@ -1989,7 +1685,7 @@ mod tests {
     fn hr_style_empty_returns_page_unchanged() {
         let p = page(80);
         let style = StyleFrontmatter::default();
-        let out = apply_hr_style(p.clone(), &style, HrStyleOverrides::default()).unwrap();
+        let out = apply_hr_style(p.clone(), &style).unwrap();
         assert_eq!(out.hr_kind(), None);
         assert_eq!(out.hr_weight(), None);
         assert_eq!(out.hr_alignment(), None);
@@ -2002,7 +1698,7 @@ mod tests {
             kind: Some(HrKind::Waves),
             ..HrStyle::default()
         });
-        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        let out = apply_hr_style(page(80), &style).unwrap();
         assert_eq!(out.hr_kind(), Some(HrKind::Waves));
     }
 
@@ -2012,7 +1708,7 @@ mod tests {
             weight: Some(HrWeight::Thick),
             ..HrStyle::default()
         });
-        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        let out = apply_hr_style(page(80), &style).unwrap();
         assert_eq!(out.hr_weight(), Some(HrWeight::Thick));
     }
 
@@ -2022,7 +1718,7 @@ mod tests {
             alignment: Some(HrAlignment::Center),
             ..HrStyle::default()
         });
-        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        let out = apply_hr_style(page(80), &style).unwrap();
         assert_eq!(out.hr_alignment(), Some(HrAlignment::Center));
     }
 
@@ -2032,7 +1728,7 @@ mod tests {
             width: Some(Length::Percent(50.0)),
             ..HrStyle::default()
         });
-        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        let out = apply_hr_style(page(80), &style).unwrap();
         assert_eq!(out.hr_width(), Some("50%"));
     }
 
@@ -2042,7 +1738,7 @@ mod tests {
             max_width: Some(Length::Ch(40)),
             ..HrStyle::default()
         });
-        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        let out = apply_hr_style(page(80), &style).unwrap();
         assert_eq!(out.hr_width(), Some("40ch"));
     }
 
@@ -2053,7 +1749,7 @@ mod tests {
             max_width: Some(Length::Percent(50.0)),
             ..HrStyle::default()
         });
-        let err = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap_err();
+        let err = apply_hr_style(page(80), &style).unwrap_err();
         assert_eq!(err, StyleApplyError::ComponentWidthConflict { bucket: "hr" });
     }
 
@@ -2070,7 +1766,7 @@ mod tests {
             color: Some(color.clone()),
             ..HrStyle::default()
         });
-        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        let out = apply_hr_style(page(80), &style).unwrap();
         assert_eq!(
             out.color_for(PageComponent::Hr),
             Some(&paint)
@@ -2090,7 +1786,7 @@ mod tests {
             bg_color: Some(color.clone()),
             ..HrStyle::default()
         });
-        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        let out = apply_hr_style(page(80), &style).unwrap();
         assert_eq!(
             out.bg_color_for(PageComponent::Hr),
             Some(&paint)
@@ -2104,60 +1800,13 @@ mod tests {
             width: Some(Length::Css(CssSizing::px(10.0))),
             ..HrStyle::default()
         });
-        let err = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap_err();
+        let err = apply_hr_style(page(80), &style).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::ComponentInvalidCssLength {
                 bucket: "hr",
                 field: "width",
             }
-        );
-    }
-
-    #[test]
-    fn hr_overrides_suppress_frontmatter() {
-        let style = style_with_hr(HrStyle {
-            alignment: Some(HrAlignment::Right),
-            width: Some(Length::Ch(40)),
-            color: Some(crate::style::color::StyleColor {
-                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Red500),
-                opacity: None,
-            }),
-            bg_color: Some(crate::style::color::StyleColor {
-                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Blue500),
-                opacity: None,
-            }),
-            ..HrStyle::default()
-        });
-        let overrides = HrStyleOverrides {
-            alignment: true,
-            fill: true,
-            color: true,
-            bg_color: true,
-        };
-        let starting = page(80)
-            .with_hr_alignment(HrAlignment::Left)
-            .with_hr_width("30ch")
-            .with_component_color(PageComponent::Hr, renderable::style::PaintColor::new(
-                renderable::color::Color::Tailwind(renderable::color::Tailwind::Green500),
-            ))
-            .with_component_bg_color(PageComponent::Hr, renderable::style::PaintColor::new(
-                renderable::color::Color::Tailwind(renderable::color::Tailwind::Yellow500),
-            ));
-        let out = apply_hr_style(starting, &style, overrides).unwrap();
-        assert_eq!(out.hr_alignment(), Some(HrAlignment::Left));
-        assert_eq!(out.hr_width(), Some("30ch"));
-        assert_eq!(
-            out.color_for(PageComponent::Hr),
-            Some(&renderable::style::PaintColor::new(
-                renderable::color::Color::Tailwind(renderable::color::Tailwind::Green500),
-            ))
-        );
-        assert_eq!(
-            out.bg_color_for(PageComponent::Hr),
-            Some(&renderable::style::PaintColor::new(
-                renderable::color::Color::Tailwind(renderable::color::Tailwind::Yellow500),
-            ))
         );
     }
 

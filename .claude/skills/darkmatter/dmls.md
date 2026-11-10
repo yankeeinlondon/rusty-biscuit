@@ -9,6 +9,7 @@ workspace, completion, hover, and diagnostic work.
 - [Passive-analysis contract](#passive-analysis-contract)
 - [File-resolution contexts](#file-resolution-contexts)
 - [Features](#features)
+- [Schema slots](#schema-slots)
 - [Whole YAML documents](#whole-yaml-documents)
 - [Undeclared properties and unknown functions](#undeclared-properties-and-unknown-functions)
 - [Call diagnostics](#call-diagnostics)
@@ -160,7 +161,13 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   server preparations overlap (one worker thread;
   `work_counters::peak_concurrent_registry_scans` proves it in tests). A
   `didChangeConfiguration` with an unchanged effective config invalidates no
-  registry and schedules nothing (`update_config`); `is_fresh` comparing the
+  registry and schedules nothing (`update_config`). A *changed* one drops
+  the cached contexts. An open document is then refreshed immediately and
+  again when its re-prepared registry installs, so under load one change
+  can log two validations. A test that counts per-change events must
+  `flush_server`, drain the buffered diagnostics, and judge every new
+  event, never "exactly one" (`validation_timing_log::settled_events`).
+  `is_fresh` comparing the
   context re-prepares a document whose context rebuilt differently. Test
   seams: `StartupHooks::registry_gate` holds each job,
   `registry_probe_gate` (`LspFixture::start_with_registry_probe_gate`,
@@ -199,10 +206,11 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   (unversioned) warning before any open; wait for the versioned one.
 - The graph takes `&dyn DocumentContexts` (`WorkspaceIndex::new(contexts)`):
   `arena::locate` takes the first planned candidate when it is a graph
-  document (listed or open; no probe), else asks
-  `context::resolve_reference`, else, only on a clean `NoMatch`, a later
-  graph-document candidate (an unsaved buffer); an `Io` probe failure stays a
-  broken path. An existing file outside the list is `EdgeTarget::File`, never
+  document (listed or open; no probe), else resolves through
+  `FileReference::resolve_detailed_with_presence` with graph documents as the
+  presence predicate, so a candidate holding no file that is a graph document
+  (an unsaved buffer) matches at its own place in the order, before any later
+  candidate's file; an `Io` probe failure stays a broken path. An existing file outside the list is `EdgeTarget::File`, never
   a broken link; the list decides graph documents, never existence. A
   Markdown `File` target an open document needs (`prepare_targets`, hover,
   definition, anchor completion) is parsed as a dependency
@@ -501,7 +509,12 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 - Frontmatter and schema diagnostics with source spans.
 - Schema-aware completion for keys, values, suggestions, literal-discriminated
   union arms, and named types (local names bare, `name@this` only for a
-  built-in collision, imports with their target).
+  built-in collision, imports with their target). An item of a single-arm
+  scalar array (`enum(...)[]`, named `os[]`) is completed from the item
+  definition (`array_item_def(array_item_atoms(..))`) through the same
+  `def_value_completions` a scalar value uses, on `- ` lines and in flow
+  lists; `suggest(...)` wins, and union/object arrays keep
+  `union_item_completions`. Never add a second enum-member path.
 - Named-type references (`overlay/named_types.rs`,
   `providers/frontmatter/named_references.rs`, `diagnostics/named_types.rs`):
   hover and go-to-definition on bare, `@this`, and cross-file spellings;
@@ -529,6 +542,33 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   the top-level references of the hovered type.
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
+- Type-definition string arguments (`providers/type_definition_argument.rs`):
+  a string argument whose catalog parameter type is `type-definition`
+  (`load_data`'s `as`; chosen by `function_type.parameters`, never by name)
+  gets `frontmatter::type_definition_completions` (`NamedTypes::Withheld`:
+  no `Name@this`) and `meta_schema_definition_hover_body`. It is found with
+  `expression_region_at`'s `string_start`, then the shared parser (a
+  recovered prefix when the text does not parse); positions map through the
+  lexer's escapes and `ScalarProjection`. `frontmatter.rs` and `dsl.rs`
+  dispatch to it first for their `Site`; the DSL completion declines a
+  frontmatter-claimed cursor so items are not duplicated. Callback members
+  after `h.` come from `scoped_completion_candidates`' local-member step,
+  typed only by `TypeScope`.
+- Declared-shape object arguments (`providers/option_argument.rs`):
+  an object literal that is a whole argument of a call whose catalog
+  parameter (after dropping `null`) is an inline object (`load_data`'s
+  `options`) completes its keys (not yet written, inserting `key: `), its
+  `enum` members (quoted; bare inside an open quote), and `true`/`false`
+  for a `boolean`; any other value returns `None` so expression completion
+  runs. Keys and members come from `TypeExpr::InlineObject(shape)`, never a
+  list; plain `object` parameters (`pr_list`) are unclaimed. The frame is
+  recovered from `lex_spanned` tokens up to the cursor's partial (not a
+  parse), over the same analyzed text as type-definition arguments
+  (`type_definition_argument::expression_text`, which carries the
+  Expression-typed value's synthetic-opener `shift`). Dispatched right after
+  the type-definition check at both sites. Option diagnostics need no DMLS
+  code: the library ranges `dm.data.invalid_options` and a binder refusal on
+  argument 2.
 - Hover/documentation from typed descriptor catalogs.
 - Hover shows the local narrowed type ("Type here") at body sites and
   inside expressions: `providers/dsl.rs::with_site_scope` builds
@@ -661,6 +701,77 @@ Frontmatter `$( … )` suffixes follow the same rule: completion, hover, and the
 `frontmatter_shell_values` strips a quoted scalar's quotes before parsing,
 because the YAML span includes them.
 
+## Schema slots
+
+User-facing contract: `darkmatter/docs/topics/schemas/schema-slots.md#in-the-editor`.
+Code: `dmls/src/slot_jobs.rs`, `overlay/mod.rs::schema_for`,
+`diagnostics/slots.rs`, `router.rs` (`after_message`, `execute_command`).
+
+- A template is resolved **only** on the `dmls-slots` worker thread
+  (`spawn_slot_worker`), never on the registry lane and never on a request.
+  Each job builds a fresh `SlotSession::for_context` (Full mode, **no**
+  handler, in-memory once grants, `with_cancel`, `with_slot_limits(DMLS_SLOT_LIMITS)`)
+  and runs `overlay::resolve_slot_templates` inside `buffers::with`. Its
+  session captures a slot's `Repo`/`Network`/`Agent` observation from
+  `job.context` on the worker when the slot first calls `package()`,
+  `ipv4()`, `has_agentic_cli()`, … (`schema_slots_editor::captured_functions`).
+- Requests serve the installed session through `schema::SlotUse::Pins`
+  (`DarkmatterSchemas::with_slot_pins_only`): no evaluation, no read a slot
+  names. `tests/l1/no_side_effects.rs` pins this with the
+  `Work::SlotResolution` counter.
+- `SlotSnapshots` (on `OverlayState::slots()`) holds per document the
+  installed session, its failure, its reads (with `stat`), `stale`, and the
+  in-flight `seq`. `schema_for` records demands (pins missed and not already
+  resolved for this base key, or stale); the router drains them after every
+  message (`dispatch_slot_jobs`); `install` drops an older `seq` or a canceled
+  job. A pins miss with an installed failure keeps showing that failure.
+  An installed slot **failure** still serves the template's literal parts:
+  `schema_for` runs one passive `assemble(.., SlotUse::None)` to recover
+  `template_shape`/`template` (the failed session's error carries no
+  `PendingSchema`). The view's `generation` is part of the schema cache key.
+- Invalidation: `note_schema_buffer` (open/change/close of any path),
+  watched changes, saves (`recheck_stats` in `ServerRescan` or the schema
+  watch fallback), grants, `dmls.refreshSchemaSlots`, and
+  `didChangeConfiguration` (`invalidate_all`). Watches: one `RelativePattern`
+  per recorded path (`slot_watch_registration`, id
+  `dmls-schema-slot-watchers`), plus `.git/index` and `HEAD` when a read lies
+  in the repository.
+- Diagnostics: `slots::failure_diagnostics` ranges a slot written in the
+  document at the record's own `span` (the library projects it into the
+  document through every YAML carrier), only when
+  `report_diagnostics::template_slot_text` says the resolution read the
+  buffer's current text; otherwise at the `$schema` value. `slot_approval_required`
+  carries `data.choices` that `code_actions::grant_slot_read_actions` turns
+  into `Command` quick fixes (`dmls.grantSlotRead`). Completion reads
+  `SlotStatus::template_shape` (literal members of `Constraint::Dynamic`)
+  until a snapshot serves.
+- Template types (`TypeExpr::Slot`, a property whose whole type is a slot)
+  are pending in that literal shape: `providers/frontmatter.rs` reads
+  presence through `PropertyDef::requiredness()` (never `is_required`, which
+  would trust a `(required)` suffix), so key completion's detail is
+  `TYPE_PENDING`; `schema_hover_details` hands a pending definition to
+  `pending_hover_details` (no Required/values/default; union arms listed);
+  `def_value_completions` skips pending atoms; `suggestion_completions`
+  returns `None` when no arm has `suggest(...)`, because
+  `suggestions_for_def` answers a pending type with an empty pending query
+  that would otherwise hide static arms. Worker and watches needed no
+  change: returned imports are `Observation`s (`slot_reads`). Tests:
+  `schema_slots_editor::template_types`, `slot_jobs::tests::a_template_type_job_*`.
+- Stale/pending status: `providers/frontmatter.rs::slot_note` is the one
+  source of the note. Every response projected from the served schema
+  carries it: `frontmatter::completion` appends it to each ordinary
+  candidate's `detail` (`with_slot_notes`, at the boundary every builder
+  feeds, never inside one), frontmatter hover and the schema-reading DSL
+  hovers (`{{ … }}`, collection openers, a `::shell` hole) through
+  `with_slot_marker`, and an "Add required key" fix that scaffolds a
+  literal through its title. Schema-authoring candidates (type keywords,
+  constraints) come from the grammar and stay undecorated. Pinned by
+  `schema_slots_editor::stale_responses`.
+- Test seams: `StartupHooks::slot_gate`, `LspFixture::start_with_slot_gate`,
+  `release_slot_job`, `wait_for_slot_prepared`, and the
+  `StartupEvent::{SlotJobQueued, SlotPreparing, SlotPrepared}` events. Tests:
+  `tests/l1/schema_slots_editor.rs`, `slot_jobs::tests`.
+
 ## Whole YAML documents
 
 User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
@@ -683,8 +794,9 @@ User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
   resolver read and `select_schema_file` probe consults the thread's
   snapshot; never add a DMLS-side read path). Invalidation is the trigger
   scope's, plus `TriggerRegistries::set_buffer` from
-  `didOpen`/`didChange`/`didClose` (`ServerState::note_schema_buffer`: YAML
-  and `.json` buffers, since a JSON file can be a `$schema` target), which
+  `didOpen`/`didChange`/`didClose` (`ServerState::note_schema_buffer`: every
+  buffer, whatever its extension, since what a slot or import reads is known
+  only once it runs; never filter it by extension), which
   marks stale scopes whose `deps.kind_sources` (root files and imports) read
   that file with other text, and, for a path never read, kind scopes it
   could join (`joins_kind_sources`: directly inside a searched or absent
@@ -878,7 +990,10 @@ keep agreeing. User docs:
 [`dmls/docs/diagnostics.md#call-diagnostics`](../../../darkmatter/dmls/docs/diagnostics.md#call-diagnostics).
 
 - **Types.** Every site's `TypeScope` is built over
-  `DeclaredTypes::new(effective.simplified)` (declaration-only), never the
+  `call_check::declared_types(ctx)`: `DeclaredTypes::for_schema` of the
+  effective schema (declaration-only), or `DeclaredTypes::for_template` of the
+  pending template kept in `SlotStatus.template` while slots are unresolved
+  and no snapshot is served, never the
   static-frontmatter layer (which hover's `with_site_scope` uses): a set
   `maybe: 3` does not remove `null`. Enclosing `::block` guards narrow
   through `BodyGuards::scope_at`; ternary and `&&` branches narrow inside the
@@ -891,6 +1006,19 @@ keep agreeing. User docs:
   walks must cover the same surfaces.
 - **Ranges.** The argument's span, or the call's for arity, ambiguity, or no
   matching overload. The message is the library's `CallFinding.message`.
+- **Undeclared members.** `call_check::call_diagnostics` is the one choke
+  point: it appends `expression_member_diagnostics` (every branch and callback
+  body, independent of `strict`, `data` types `null`) to the call findings, so
+  every surface that shows call diagnostics (body spans, `when=`, collection
+  gates/callbacks in `providers/collections.rs`, frontmatter `{{ }}` and
+  expression-typed values) shows member warnings. Lifecycle stacks use
+  `stack_call_diagnostics` (calls only). A top-level frontmatter `$( … )`
+  ternary's pieces go through `call_check::member_diagnostics` (members only,
+  as composition does not call-check them) from
+  `diagnostics/frontmatter.rs::shell_member_diagnostics`, inventoried by the
+  library's `FrontmatterShellTernary::member_pieces` (the precheck uses the
+  same list, so both skip a piece whose placeholder is outside a string);
+  both value branches are checked. Tests: `tests/l1/undeclared_member.rs`.
 - **Setting.** `ExpressionsConfig { strict }` in `config/mod.rs`:
   `[expressions] strict` in `.dmls.toml`, `dmls.expressions.strict` from
   `didChangeConfiguration` (DMLS never pulls `workspace/configuration`).

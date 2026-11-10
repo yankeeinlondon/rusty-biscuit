@@ -75,7 +75,7 @@ Authors will also **encounter** the following forms in the wild. They are docume
       - repo's root directory
     - The key difference from the magic path is that it does **not** reach into the user's home directory as a fallback. This is by design of course but it can also help to avoid a common pitfall when accidentally running into a security violation or an unwanted human-in-the-loop intervention because the current agent is happy to operate on repo file but not on user scoped files.
 - `vault:` **Obsidian Vault(s)**
-    - this is made reference to here as this will soon be added but currently this is "FUTURE SCOPE"
+    - implemented by biscuit-file: a `vault:` (or `vault::`) reference searches the explicitly registered vault roots in the order added, then the directories in the `$VAULT` environment variable (split on the platform path separator); with neither, resolution fails as a vault-not-configured error rather than a miss
 
 
 > **Note:** the `@`, `&`, and `^` sigils are _defensively_ coded so that a following `/` character has no impact

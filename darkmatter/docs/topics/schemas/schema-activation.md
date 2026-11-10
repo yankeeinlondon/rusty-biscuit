@@ -12,9 +12,12 @@ This document describes the intended behavior. The current implementation does
 not yet support the complete activation model or predicate family described in
 [Authoring Schemas](./authoring-schemas.md#schema-triggers).
 
-The current trigger parser uses OR for a top-level list. The documented authoring
-model uses AND between top-level conditions and OR within an explicit `group`.
-Existing rules need a deliberate migration that preserves their meaning.
+Combining conditions works as documented: a top-level `match` list is AND, and
+OR is an explicit `group` (see
+[Combining conditions](./schema-targeting.md#combining-conditions)). Property
+conditions, `$path`, and the `all`, `group`, `none`, and `min-match`
+combinators are supported. The file, executable, host, time, and expression
+predicates described in the authoring guide are **planned**.
 
 Schema documents can separate an exported `$schema` from reusable `types`
 in the same file. Local references use that type table, while explicit

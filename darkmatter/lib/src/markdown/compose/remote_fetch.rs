@@ -20,8 +20,12 @@ use url::Url;
 use super::ComposeWarning;
 use super::cache::FileStore;
 use super::cache::remote_cache::{RemoteCacheConfig, RemoteOutcomeEvent, fetch_with_cache};
-use super::expression::ExpressionError;
+use super::expression::{ExpressionError, RemoteReadKind};
 use super::remote::{RemoteReadConfig, RemoteReadError};
+
+mod error;
+
+pub(crate) use error::RemoteFetchFailure;
 
 /// Default cache config for test constructors: no TTL override, no forced
 /// refresh, and the default (`Fallback`) freshness mode.
@@ -40,8 +44,8 @@ enum FetchSlot {
     InFlight,
     /// Fetch completed successfully with the response body as UTF-8 text.
     Ready { body: String },
-    /// Fetch failed — the error message is stored for all waiters.
-    Failed(String),
+    /// Fetch failed — the typed failure is stored for all waiters.
+    Failed(RemoteFetchFailure),
 }
 
 struct SlotGuard {
@@ -478,6 +482,14 @@ impl RemoteFetchRuntime {
         }
     }
 
+    /// A separate runtime with this one's concurrency cap, transport cache,
+    /// and freshness settings, but `policy` for hosts and no shared fetch
+    /// state: the runtime schema slots fetch through, whose hosts are the
+    /// slot grants', so a slot grant never widens the document's reads.
+    pub(crate) fn with_other_policy(&self, policy: FetchPolicy) -> Self {
+        Self::build(policy, self.inner.concurrency, self.inner.store.clone(), self.inner.cache_config)
+    }
+
     /// Shares one normalized provider result across every surface in this run.
     pub(crate) fn cached_provider_query(
         &self,
@@ -554,7 +566,7 @@ impl RemoteFetchRuntime {
 
         if let Err(err) = self.check_allowed(&url) {
             let slot = Arc::new(SlotGuard {
-                state: Mutex::new(FetchSlot::Failed(err.to_string())),
+                state: Mutex::new(FetchSlot::Failed(err.into())),
                 notify: Condvar::new(),
             });
             self.inner.slots.entry(key).or_insert(slot);
@@ -580,8 +592,10 @@ impl RemoteFetchRuntime {
                         let mut stats = inner.stats.lock().unwrap();
                         stats.failures += 1;
                     }
-                    *slot.state.lock().unwrap() =
-                        FetchSlot::Failed("failed to initialize remote fetch runtime".to_string());
+                    *slot.state.lock().unwrap() = FetchSlot::Failed(RemoteFetchFailure::new(
+                        RemoteReadKind::Infrastructure,
+                        "failed to initialize remote fetch runtime",
+                    ));
                     slot.notify.notify_all();
                     return;
                 };
@@ -607,7 +621,10 @@ impl RemoteFetchRuntime {
                             )
                             .await
                         }
-                        None => Err("failed to initialize remote fetch client".to_string()),
+                        None => Err(RemoteFetchFailure::new(
+                            RemoteReadKind::Infrastructure,
+                            "failed to initialize remote fetch client",
+                        )),
                     };
                     task_inner.in_flight.fetch_sub(1, Ordering::SeqCst);
                     if !cache_warnings.is_empty() {
@@ -661,9 +678,15 @@ impl RemoteFetchRuntime {
     /// Blocks the calling thread until the URL's fetch completes, then
     /// returns the body text.
     ///
-    /// Returns an error string if the fetch failed or was denied by policy.
-    /// Returns `None` if the URL was never registered.
+    /// Returns the failure's message if the fetch failed or was denied by
+    /// policy. Returns `None` if the URL was never registered.
     pub fn get_content(&self, url: &Url) -> Result<Option<String>, String> {
+        self.get_content_typed(url).map_err(|failure| failure.message)
+    }
+
+    /// [`get_content`](Self::get_content) with the failure kept typed, for
+    /// callers that classify it (expression reads).
+    pub(crate) fn get_content_typed(&self, url: &Url) -> Result<Option<String>, RemoteFetchFailure> {
         let key = url.to_string();
         let slot = match self.inner.slots.get(&key) {
             Some(s) => s,
@@ -2169,6 +2192,46 @@ mod persistent_cache_tests {
         let stats = rt.stats();
         assert_eq!((stats.failures, stats.stale_served, stats.cache_hits), (1, 0, 0));
         assert_eq!(conditional_hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// Fallback serves a stale body only over a transport failure. A
+    /// revalidation refused by policy (a redirect to a host the run does not
+    /// allow) fails with its policy kind; an HTTP 500 on the same seeded entry
+    /// is the transport control and is served stale.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fallback_serves_stale_only_over_a_transport_failure() {
+        let refused = MockServer::start().await;
+        let location = format!("http://localhost:{}/doc.md", refused.address().port());
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", location.as_str()))
+            .mount(&refused)
+            .await;
+        let failing = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(500)).mount(&failing).await;
+        let cfg = config(None, true, RemoteFreshnessMode::Fallback);
+
+        for (server, expected) in [(&refused, Err(RemoteReadKind::Policy)), (&failing, Ok("seeded"))] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = temp_store(&dir);
+            let url = Url::parse(&format!("{}/doc.md", server.uri())).unwrap();
+            seed_entry(&store, &url, "seeded", "max-age=3600");
+
+            let rt = run_once(&store, cfg, &url);
+            let read = rt.get_content_typed(&url);
+            let stats = rt.stats();
+            match expected {
+                Err(kind) => {
+                    let failure = read.expect_err("a refused revalidation is not served stale");
+                    assert_eq!(failure.kind, kind, "{failure}");
+                    assert!(failure.message.contains("blocked by fetch policy"), "{failure}");
+                    assert_eq!((stats.failures, stats.stale_served), (1, 0));
+                }
+                Ok(body) => {
+                    assert_eq!(read.unwrap().as_deref(), Some(body));
+                    assert_eq!((stats.failures, stats.stale_served), (0, 1));
+                }
+            }
+        }
     }
 
     /// A revalidation answered with `no-store` (as a `304` or a new `200`)

@@ -29,7 +29,7 @@ use super::simplified::query::{
     suggestions_by_resolved_alternative, yaml_double_quote,
 };
 use super::simplified::{
-    Constraint, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    Constraint, DefinitionTable, DynamicElement, DynamicKind, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SchemaRoot, TypeExpr, to_json_schema_with_definitions,
 };
 use super::validate::ValidatorCache;
@@ -76,8 +76,13 @@ pub struct AlternativeCompletion {
     pub keys: Vec<AlternativeKey>,
     /// Values of the applicable scalar alternatives — `enum` members,
     /// `literal(...)` values, and lint-valid `suggest(...)` candidates —
-    /// deduplicated by insertion text in alternative order.
+    /// deduplicated by insertion text in alternative order. In a template a
+    /// list's literal elements are offered and its slots are not.
     pub values: Vec<AlternativeValue>,
+    /// Whether an applicable scalar alternative holds an unresolved
+    /// `{{ … }}` slot among the values it offers, so `values` is not every
+    /// value there is.
+    pub pending: bool,
 }
 
 /// One key offered by an inline-object alternative.
@@ -370,6 +375,7 @@ where
         selected_arm,
         keys: Vec::new(),
         values: Vec::new(),
+        pending: false,
     };
     for (arm, atom) in alternatives.iter().enumerate() {
         if selected_arm.is_some_and(|selected| selected != arm) || !applies_to(atom, value) {
@@ -383,7 +389,11 @@ where
                     .find(|(alternative, _)| std::ptr::eq(alternative.atom, *atom))
                     .map_or(&[][..], |(_, items)| items.as_slice());
                 add_values(&mut completion.values, atom, arm, suggested);
+                completion.pending |= atom.has_pending_values();
             }
+            // A template type's shape is pending: it offers nothing yet and
+            // says so, rather than looking like a type with no values.
+            TypeExpr::Slot(_) => completion.pending = true,
             // An unresolved import has no shape to offer; flattening never
             // yields a union; a reference left here could not be opened.
             TypeExpr::Imported { .. }
@@ -515,10 +525,20 @@ fn add_values(
         }
     }
     for constraint in &atom.constraints {
-        if let Constraint::Members(members) = constraint {
-            for member in members {
-                push(member.clone(), yaml_double_quote(member));
+        match constraint {
+            Constraint::Members(members) => {
+                for member in members {
+                    push(member.clone(), yaml_double_quote(member));
+                }
             }
+            Constraint::Dynamic(list) if list.kind == DynamicKind::Members => {
+                for element in &list.elements {
+                    if let DynamicElement::Member(member) = element {
+                        push(member.clone(), yaml_double_quote(member));
+                    }
+                }
+            }
+            _ => {}
         }
     }
     for item in suggested {

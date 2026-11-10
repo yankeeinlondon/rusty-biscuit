@@ -196,6 +196,13 @@ as a `git diff --cached --binary <base>` built with a temporary
   `cross-check` sends `bash -lc 'bash "$0"' <script>` instead. Suspect this
   whenever a login-shell remote command reports a failure that the output
   contradicts.
+- **`build-linux` can run out of memory linking Darkmatter's archive.** A
+  `just cross-check darkmatter --os linux` compile builds every target together,
+  `browser` included, and the kernel kills `ld` (`collect2: fatal error: ld
+  terminated with signal 9`); SSH then stops answering for minutes. The cause is
+  the host, not the change. Do not retry the archive build: a build flag selects
+  plain nextest, so `--features effects-instrumentation,work-counters --test l1`
+  links only L1 (2026-11-05).
 - **A `wsl` leg times out on port 22 while `BUILD_WIN` answers.** The guest
   is stopped, not unreachable. `ssh "$BUILD_WIN" 'wsl.exe -l -v'` shows
   `Stopped`, and `ssh "$BUILD_WIN" 'wsl.exe -d <distro> -e true'` boots it.

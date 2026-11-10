@@ -318,4 +318,5 @@ For more information on either the library or CLI refer to more detailed documen
 
 - [Biscuit Terminal Library](./lib/README.md) for details on how to use `biscuit-terminal` programmatically
 - [The Biscuit Terminal CLI](./cli/README.md) for details on how to leverage `biscuit-terminal` from the terminal
+- [Command output dispatch](./docs/output.md) for printing a command's result with `write_output` as any `--output` target, at any `--width`
 - [The `bt` CLI reference](./docs/cli.md) for how the Mermaid commands fall back to text or source without images, their `--feature` flags, and `bt`'s code highlighting

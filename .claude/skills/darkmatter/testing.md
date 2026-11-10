@@ -159,10 +159,21 @@ create-file fix except for a broken Markdown link). Compare failures only by `Re
 `MarkdownError::resolution_failure()` walks the cause chain (nested children,
 `TocLinkingError::Unresolved`, schema `file` values), a tolerated failure's
 `ComposeWarning::resolution_failure` carries it, and `md` renders it as a
-`failure: <kebab-class>` row on every block and warning
+`failure: <kebab-class>` row on every block and warning except the reference
+report, whose reason phrase states it
 (`darkmatter/docs/errors/file-reference-failures.md` is its user contract);
 Claudine's prompt-argument errors carry the same row
 (`CompositionError::resolution_failure`).
+
+## Reference report in a real terminal
+
+`cli/tests/level2/level2_reference_report.rs` proves what a pane shows on each
+route that prints the report: `md validate refs`, `md graph --validate`, and a
+`md compose` refusal on stderr with stdout redirected. Style is read per cell by
+replaying the capture's SGR. tmux gets the owned, resized panes; its capture
+carries no hyperlinks, so the location's OSC 8 link is checked on WezTerm, which
+orders link parameters itself. Byte contracts (plain, data, exit codes) stay in
+Level 1 (`lib/tests/l1/reference_report.rs`, `cli/tests/l1/reference_report.rs`).
 
 ## DMLS full-graph oracle
 
@@ -203,3 +214,65 @@ when changing the oracle.
   Claudine's `collection_host_compat` tests prepare dependency gates against
   fixture-owned specs and execute the initialize event with its host binding
   view, without providers or shells.
+
+## Proving a passive path has no effects
+
+Completion, and anything else that must not evaluate, needs a positive assertion and a
+control as well as the absence: a document that fails to parse also runs nothing, so "no
+sentinel" alone passes for the wrong reason. `cli/tests/l1/path_completion.rs` is the example.
+
+- Use the `darkmatter-argv-recorder` program as the sentinel, approved in the fixture's
+  whitelist. It exists on every platform, and `read_argv_records` shows exactly what ran.
+- Compare the whole fixture workspace before and after, which also catches a cache write.
+- Run the control afterward: composing the same document runs the recorder, and the mock
+  server answers an allowed composition.
+- To count work, `work_counters` is on `darkmatter-cli`'s dev-dependency, so a CLI unit test
+  can read it, and `simplified_schema::resolve::observed::collect` lists the schema files
+  read. The baseline schema costs hundreds of expression parses on a first use, so compare
+  warmed runs instead of asserting zero.
+- Real Tabs live in `cli/tests/level2/level2_path_completion.rs`: `spawn_program` through
+  `env -i` with a fixed `PATH`, so no developer configuration reaches the shell. Assert the
+  whole finished line, since `capture-pane` trims a trailing space, then run it.
+
+## `load_data` tests
+
+- Library: `lib/tests/l1/load_data_execution.rs` (results, typed
+  `DataError`, read set), `load_data_diagnostics.rs` (projected records:
+  code, call-site `source`, `data_location`, expected/actual types, reference
+  fields), `load_data_passive.rs` (passive verdicts and static typing; no
+  filesystem context, so nothing can be read), and `load_data_runtime.rs`
+  (one runtime across passes, the memo-emptying rule, remote policy, every
+  surface's read set). The options suites: `load_data_options_passive.rs`
+  (passive option verdicts and their ranges), `load_data_options.rs`
+  (execution matrix, aliases, memo counts per layer), `load_data_headerless.rs`
+  (`header: false` rows and positions), `load_data_options_remote.rs`
+  (extensionless URL with `format`, host policy over a warmed memo),
+  `load_data_options_slots.rs` (observations, slot gate, generation over all
+  three layers), and DMLS `dmls/tests/l1/option_arguments.rs` (option key and
+  value completion, ranged diagnostics). The catalog's option examples are
+  pinned by `catalog/tests.rs::load_data_function_page_shows_option_examples`.
+  CLI: `cli/tests/l1/load_data.rs` (one route per
+  loader family and the envelopes); read-set and mismatch conformance lives
+  in `output_envelope.rs`, not repeated there.
+- Every fixture is a temporary directory and every request is anchored
+  there. A command that rewrites a data file uses `git config --file`
+  (in-place, valid TOML, `git` on every host), not a shell-specific write.
+- Prove memo reuse with a caller-attached runtime
+  (`ComposeOptions::with_data_runtime`) and `DataRuntime::stats()`
+  (`reads`, `parses`, `binds`, `source_hits`, `bind_hits`,
+  `contract_preparations`), never with timing.
+- CSV/TSV readers live in biscuit-file's feature-gated `l1-delimited` target;
+  its `just test` enables `delimited`, so a bare `cargo nextest -p
+  biscuit-file` without the feature skips them.
+
+## Documented `md` examples
+
+`cli/tests/l1/docs_style_examples.rs` parses every `md` command in the sh
+fences of the render-surface docs (`docs/cli/*`, `cli/README.md`,
+`layouts-and-style.md`, `docs/rendering/{style,mermaid,code-highlighting}.md`)
+through `Cli`, `validate_subcommand_usage`, and render/setter preparation,
+prepares each YAML fence with a root `style:` with no warning allowed, and
+pins `docs/cli/index.md`'s `md --help` sample to the generated help. An
+example that shows a usage failure carries `# exit 2` or `# usage error` and
+must fail; a runtime failure goes in a `text` fence. A new doc that shows
+render commands gets its own `#[test]` with `include_str!` inside it.

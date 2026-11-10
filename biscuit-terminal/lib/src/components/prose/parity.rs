@@ -303,14 +303,18 @@ fn terminal_link_osc8_when_supported() {
 }
 
 #[test]
-fn terminal_link_markdown_fallback_when_unsupported() {
+fn terminal_link_prints_its_text_alone_when_unsupported() {
     let terminal = Terminal::builder()
         .width(200)
         .osc_link_support(false)
         .build();
     assert_eq!(
         term_caps(r#"<a href="https://example.com">link</a>"#, &terminal),
-        "[link](https://example.com)"
+        "link"
+    );
+    assert_eq!(
+        term_caps(r#"<a href="https://example.com">https://example.com</a>"#, &terminal),
+        "https://example.com"
     );
 }
 

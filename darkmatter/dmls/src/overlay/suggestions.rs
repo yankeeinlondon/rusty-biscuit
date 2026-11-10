@@ -147,11 +147,13 @@ fn collect_reference_candidates(schema: &SchemaRoot, out: &mut Vec<(SourceSpan, 
                     TypeExpr::InlineObject(nested) => walk_shape(nested, out),
                     // Only the resolver produces a union type; an authored
                     // schema writes the reference itself.
+                    // A pending template type has no candidates of its own.
                     TypeExpr::Union(_)
                     | TypeExpr::Primitive(_)
                     | TypeExpr::Tuple(_)
                     | TypeExpr::Function(_)
-                    | TypeExpr::Ref(_) => {}
+                    | TypeExpr::Ref(_)
+                    | TypeExpr::Slot(_) => {}
                 }
             }
         }

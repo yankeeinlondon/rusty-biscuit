@@ -16,7 +16,7 @@ prompt: |-
 
     If there are sections you feel should be added to this structure please add them. In addition to the `last_updated` frontmatter of this document, please also set the `blast_radius` property as a list of source code files which are 
     involved in the "mermaid" functionality.
-last_updated: 2026-10-24
+last_updated: 2026-11-07
 blast_radius:
   - darkmatter/lib/src/mermaid/mod.rs
   - darkmatter/lib/src/mermaid/theme.rs
@@ -136,7 +136,7 @@ width, margins, padding, a background, or line numbers) and
 `TerminalOptions::max_width` never change that answer:
 
 ```sh
-BISCUIT_GRAPHICS=none md --mermaid README.md --line-numbers   # text drawings, never images
+BISCUIT_GRAPHICS=none md --mermaid README.md style.code-block.line-numbers=true   # text drawings, never images
 ```
 
 The hook sizes the diagram to the columns the fence occupies (a list item's
@@ -461,17 +461,16 @@ body that is not a plain declaration list) fails closed.
 
 # CLI Switches
 
-The following `md` CLI flags (defined under [`darkmatter/cli/src/args/`](../../cli/src/args/mod.rs) and wired up in [`render.rs`](../../cli/src/render.rs), [`artifact.rs`](../../cli/src/artifact.rs), and [`commands/validate.rs`](../../cli/src/commands/validate.rs)) affect mermaid rendering. Unless otherwise noted, they belong to the top-level `md [FILE]` render command.
+The following `md` CLI flags (defined under [`darkmatter/cli/src/args/`](../../cli/src/args/mod.rs) and wired up in [`render.rs`](../../cli/src/render.rs), [`artifact.rs`](../../cli/src/artifact.rs), and [`commands/validate.rs`](../../cli/src/commands/validate.rs)) affect mermaid rendering. Unless otherwise noted, they belong to `md render`, and so to `md [FILE]`, which is the same command. The `style.…=VALUE` rows are style setters: positional words, not flags.
 
 | Flag                              | Applies to                | Behavior                                                                                                                                                                                                                                                                             |
 |-----------------------------------|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--mermaid`                       | Terminal                  | Sets `MermaidMode::Image` for terminal rendering. Without this flag mermaid blocks render as syntax-highlighted code (`MermaidMode::Off`). Falls back to the code block if the terminal does not show images (or `TERMINAL_IMAGES=0`) or if rendering fails. It does not change HTML output. |
-| `--output <FORMAT>`               | All targets               | Selects the output target (`auto`, `markdown` / `text`, `markdown-plus`, `html` / `browser`, `json` / `ast`). Only `auto` (a TTY) and `html` exercise the mermaid renderers; the others emit the source unchanged.                                                                   |
+| `--mermaid`                       | Terminal                  | Sets `MermaidMode::Automatic` for terminal rendering: an image where the terminal shows pixels, otherwise a text drawing when the diagram has one, otherwise the code block (see the mode table above). Without this flag mermaid blocks render as syntax-highlighted code (`MermaidMode::Off`). It does not change HTML output. |
+| `--output <TARGET>`               | All targets               | Selects the output target (`terminal`, the default; `plain`; `markdown`; `markdown-plus`; `html`; or the data formats `json`, `json5`, `yaml`, `toml`). Only `terminal` on a TTY and `html` exercise the mermaid renderers; the others emit the source unchanged.                   |
 | `--show`                          | All targets               | Writes the selected output to a temp file and opens it in the default app. With `--output html` this is the practical way to view rendered diagrams in a browser.                                                                                                                    |
-| `--theme <NAME>`                  | All targets               | Selects the prose `ThemePair`. It does not change diagram colors: the terminal and static-SVG palettes come from the terminal, and the interactive palette from the page's light or dark mode.                                                                                      |
-| `--code-theme <NAME>`             | All targets               | Selects the code `ThemePair` used for the code-block rendering of mermaid fences (`Off`, `Text`, and the fallback).                                                                                                                                                                |
+| `style.page.theme=NAME`           | All targets               | Selects the prose `ThemePair`. It does not change diagram colors: the terminal and static-SVG palettes come from the terminal, and the interactive palette from the page's light or dark mode.                                                                                      |
+| `style.page.code.theme=NAME`      | All targets               | Selects the code `ThemePair` used for the code-block rendering of mermaid fences (`Off`, `Text`, and the fallback).                                                                                                                                                                |
 | `--feature embed-mermaid-font` | Browser (static SVG) | Sets `HtmlOptions::embed_mermaid_font` for HTML output (see [Embedded font](#embedded-font)). It acts only on static-SVG diagrams, which `md`'s HTML output does not produce today, so the page is unchanged; the `--feature` convention is described in [`md render`](../cli/render.md#features). |
-| `--list-themes`                   | n/a                       | Lists available themes and exits without rendering.                                                                                                                                                                                                                                  |
 | `md validate refs <FILE> --graph mermaid` | Mermaid *source emission* | Not a renderer switch, but worth flagging: this path prints the document's transclusion graph as raw mermaid flowchart source via `ReferenceGraph::to_mermaid`. The output is unrendered text suitable for piping into another mermaid renderer. |
 
 ```sh

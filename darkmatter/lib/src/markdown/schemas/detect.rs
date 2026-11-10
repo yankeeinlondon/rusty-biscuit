@@ -435,7 +435,8 @@ fn primitive(ty: &TypeExpr) -> Option<SimplifiedType> {
         | TypeExpr::Union(_)
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
-        | TypeExpr::Ref(_) => None,
+        | TypeExpr::Ref(_)
+        | TypeExpr::Slot(_) => None,
     }
 }
 

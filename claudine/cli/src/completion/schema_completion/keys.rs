@@ -7,8 +7,9 @@ use std::collections::HashSet;
 
 use biscuit_file::{FileReference, YamlValue};
 
+#[cfg(test)]
 use darkmatter::markdown::schemas::EffectiveSchema;
-use simplified_schema::{PropertyDef, SchemaArm, SchemaRoot};
+use simplified_schema::{PropertyDef, Requiredness, SchemaArm, SchemaRoot};
 
 use crate::completion::fuzzy;
 use crate::completion::scopes::ScopeContext;
@@ -33,13 +34,26 @@ use super::CommittedPrompt;
 ///
 /// Each candidate is rendered with a trailing `=` so accepting it leaves the
 /// cursor positioned to start typing the value.
+#[cfg(test)]
 pub(crate) fn property_names(
     effective: &EffectiveSchema,
     partial: &str,
     supplied: &HashSet<String>,
     declared_order: &[String],
 ) -> Vec<String> {
-    let defs = collect_property_defs(effective);
+    property_names_in(effective.simplified.as_ref(), partial, supplied, declared_order)
+}
+
+/// [`property_names`] over the declarations `declarations` (an effective
+/// schema's, or a pending template's, whose property names are known before
+/// its slots resolve).
+pub(crate) fn property_names_in(
+    declarations: Option<&SchemaRoot>,
+    partial: &str,
+    supplied: &HashSet<String>,
+    declared_order: &[String],
+) -> Vec<String> {
+    let defs = collect_property_defs(declarations);
     if defs.is_empty() {
         return Vec::new();
     }
@@ -246,8 +260,8 @@ fn name_matches(name: &str, partial: &str) -> bool {
 /// every inline arm's properties, deduplicated by name in first-seen (arm)
 /// order, so a `spec`-or-`design` root union offers both names. Unresolved
 /// [`SchemaArm::FileRef`] arms are skipped.
-fn collect_property_defs(effective: &EffectiveSchema) -> Vec<(&String, &PropertyDef)> {
-    let Some(simplified) = effective.simplified.as_ref() else {
+fn collect_property_defs(declarations: Option<&SchemaRoot>) -> Vec<(&String, &PropertyDef)> {
+    let Some(simplified) = declarations else {
         return Vec::new();
     };
     match simplified {
@@ -269,6 +283,13 @@ fn collect_property_defs(effective: &EffectiveSchema) -> Vec<(&String, &Property
     }
 }
 
+/// Whether `def` sorts with the required properties. A template type's
+/// presence is pending until it resolves, and names never resolve, so its
+/// authored `(required)` suffix alone decides the order.
 fn is_required(def: &PropertyDef) -> bool {
-    def.is_required()
+    match def.requiredness() {
+        Requiredness::Required => true,
+        Requiredness::Optional => false,
+        Requiredness::Pending => def.is_required(),
+    }
 }

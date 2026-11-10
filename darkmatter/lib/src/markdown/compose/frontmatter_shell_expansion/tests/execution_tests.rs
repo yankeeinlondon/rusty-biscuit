@@ -41,6 +41,7 @@ fn execute_frontmatter_shell_expansion(
         &mut provenance,
         &test_ctx(),
         None,
+        None,
     )
 }
 
@@ -1089,4 +1090,30 @@ fn preflight_excludes_safe_function_branch_from_approval() {
         super::directive_reachable_pipelines(&directive, &fm, &options, &test_ctx()).unwrap();
     assert_eq!(pipelines.len(), 1);
     assert_eq!(pipelines[0].actions[0].command.executable, "cat");
+}
+
+/// A `}}` inside a quoted string of an argument interpolation stays inside
+/// the masked expression, so the authored shape keeps its `&&` chain and
+/// matches the resolved command instead of reading as a quote breakout.
+#[test]
+fn argument_interpolation_with_a_quoted_closer_keeps_the_command_shape() {
+    let temp_dir = TempDir::new().unwrap();
+    let mut fm = fm_from_json(json!({
+        "out": "$(echo }} && echo done)"
+    }));
+    let mut snapshot = std::collections::HashMap::new();
+    snapshot.insert("out".to_string(), "$(echo {{ upper(\"}}\") }} && echo done)".to_string());
+
+    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+        policy_root: Some(temp_dir.path().to_path_buf()),
+        approval_handler: Some(Arc::new(MockApproval)),
+        ..Default::default()
+    });
+    let mut runtime = make_runtime();
+
+    let report = execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
+        .unwrap_or_else(|err| panic!("the command shape must survive masking: {err}"));
+    assert_eq!(report.replacements, 1);
+    let out = fm.as_map().get("out").and_then(|value| value.as_str()).unwrap();
+    assert!(out.starts_with("}}") && out.ends_with("done"), "{out:?}");
 }

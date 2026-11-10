@@ -1,6 +1,6 @@
 # Expression Evaluation Rules
 
-Detail behind the "Testing and verification" section of [SKILL.md](SKILL.md): the expression grammar gate, inserted-text rules, failure policy, undeclared properties, host bindings, and warning identity.
+Detail behind the "Testing and verification" section of [SKILL.md](SKILL.md): the expression grammar gate, inserted-text rules, failure policy, undeclared properties, host bindings, warning identity, and [`load_data`](#load_data-data-files).
 
 The expression-grammar corpus gate is
 `lib/tests/prompts/dasherized_identifier_corpus.rs`, opt-in through the
@@ -110,6 +110,45 @@ and DMLS both read it.
   if they grow.
   User docs: `darkmatter/docs/inline/call-check.md`.
 
+**Undeclared member check** (`expression/member_check.rs`,
+`dm.expression.undeclared_member`, Warning). One passive classifier decides
+every constant member selector (dotted variable segment, postfix `.name`,
+string-literal bracket key; a bracket key is one key even with dots):
+`expression_member_findings(expr, text, &TypeScope)` → `MemberFinding
+{ member, subject, span, node_ordinal }`, and `expression_member_diagnostics`
+→ `ExpressionDiagnostic`. The library owns the code
+(`UNDECLARED_MEMBER_CODE`), message (`MemberFinding::message`: "Member 'x' is
+not declared by the known object type of 'subject'."), severity, and span (the
+member name; a bracket key's quotes included). Never build them elsewhere.
+- **Verdict.** The base is typed by `call_check::expression_type` under the
+  read's branch facts, plus one local rule (`base_type`): a constant index or
+  member on a value with no variable path (`load_data(…)[0].nmae`) projects
+  like a path. `scope/projection.rs::declares_member` walks the base's arms
+  (ignoring `null`): `MemberDeclaration::Undeclared` only when every non-null
+  arm is a closed object and none declares the name; open, pattern-key,
+  scalar, dictionary, unknown, or unresolvable-ref arms keep it silent. A
+  chain stops at its first undeclared or unknown step (no cascade). `fm`,
+  `local`, reserved namespaces, host globals, and `null` bases are never
+  checked; a value selected through `fm`/`local` is.
+- **Absence** is the root rules unchanged (`absence::static_member_reads`):
+  fallback primary, ternary condition, `| null` direct argument (so `&&`
+  operands, which bind `and`'s `unknown | null`), and branch facts silence a
+  read; the right-hand side of `||` and comparison operands do not.
+- **Types for a site** come from `DeclaredTypes::for_site(&SiteSchema)`
+  (`DarkmatterSchemas::site_schema_for`): the resolved effective schema, or,
+  while a layer holds unresolved slots, the document **template**
+  (`SiteSchema::Template`, `DeclaredTypes::for_template`). Slots never change
+  declared properties; a constraint waiting on a slot is unknown, never the
+  literals beside it. Trigger/baseline-only properties are unknown in a
+  template. The call check uses the same layer.
+- Consumers: DMLS checks every branch ([dmls.md](dmls.md#call-diagnostics));
+  composition warns only for reached selectors
+  ([compose.md](compose.md#undeclared-members-dmexpressionundeclared_member)).
+  Tests: `lib/tests/l1/member_check.rs` (type, absence, form rows),
+  `lib/tests/l1/compose_member_warnings.rs`, `cli/tests/l1/compose_member_warnings.rs`,
+  `dmls/tests/l1/undeclared_member.rs` (editor/library agreement per surface).
+  User docs: `darkmatter/docs/topics/darkmatter-expressions.md#misspelled-members`.
+
 **Function binding** (`expression/call_binding/`). Ordinary value calls bind
 through the shared coercion engine before their handler runs; handlers are
 `PureFn = fn(&BoundCall) -> Result<Value, String>` and
@@ -121,9 +160,23 @@ whole contract, and a handler that needs the caller's original form declares
 `ExpressionError::Call(CallBindingError)`; only `ImplementationContract` (a
 handler returning a value outside its declared `returns`, checked by
 `check_return` without conversion) is authoring-fatal. Null reaches a
-parameter only through an explicit `| null`. `and`/`or` are lazy
-(`LazyCall`): the precheck visits every argument, the runtime binds only the
-ones it evaluates. Callback registrations bind the source through the same
+parameter only through an explicit `| null`. `and`/`or`/`try` are lazy:
+the precheck visits every argument, the runtime binds only the ones it
+evaluates. Each lazy name maps explicitly to a `functions::LazyKind`
+(`All`, `Any`, `Recover`) with no default arm, so a new lazy binding must add
+its own kind (`functions::lazy_function` maps `try` to `Recover`, the third
+lazy kind). `and`/`or` bind through `LazyCall`; `try` (`Recover`) is
+`expression/mod.rs::evaluate_recovery` and, for lifecycle template operands,
+`lifecycle/executor.rs::call_recovery`: it binds only the selected operand
+(`bind_callback_value` at its index, then `check_lazy_return`), and only
+`is_recoverable_read_failure()` selects the fallback (a template operand's
+`Compose` failure propagates). `try` is not a guard (`scope/facts.rs`
+returns the scope unchanged) and its `unknown | null` operands do not handle
+absence (`absence.rs::is_recovery`), so undeclared-property warnings inside
+it remain. Its static type (`call_check.rs::try_type`) is the union of both
+operands, except that an authored `[]` adds nothing when the other operand's
+type provably accepts `[]` (`alternative_accepts_in` with the scope's
+definitions). Callback registrations bind the source through the same
 engine; the evaluator owns item frames and body execution, with no eager
 callback handler. User docs: "Function Calls: Bind, Then Compute" in
 `simplified-schema/docs/topics/conversion.md`.
@@ -387,3 +440,188 @@ Passive callback frames retain declaration locations through
 `LexicalTypes::span_of_name`. These are expression-relative byte ranges and
 survive dropping the parsed callback; a shadowing binding without a span does
 not borrow an outer binding’s location.
+
+## Function registration facts and the captured clock
+
+Every `FunctionBinding` (`functions/mod.rs`) carries a `SlotClass`
+(`Pure`, `InputReading`, `Captured`, `Volatile`, `Rejected`) and, for an
+input reader, a `ReadFact { kind: Content | Probe | Listing, remote }`
+(`.reads(..)`, `.reads_or_fetches(..)`, `.slot(..)`). `pure(..)` is `Pure`,
+`lazy`/`callback` `Pure` (their operands decide), a `context(..)` handler must
+declare one or the registry refuses to build; `the_call_table_covers_every_input_reading_function`
+and `every_binding_declares_its_slot_class` guard the table. `read_fact`/`slot_class`
+resolve a name as dispatch does (case folded, alias, a test or host function
+shadows the built-in and is `Pure`). `compose/remote.rs::fetches_url` (URL
+pre-fetch discovery, `calls_read_side_function`) derives from `ReadFact::remote`;
+there is no hand-kept list.
+
+The date functions are `FunctionBinding::clock(..)` handlers
+(`ClockFn(&BoundCall, &ClockReading)`): they read the request's one
+`context::capture::ClockReading` (`CapturedObservations::clock()`, seeded from
+the capture that formatted `ctx.now`; a `DocumentSeed::clock` keeps it across
+later group captures), never `Local::now`; offsets convert with the captured
+fixed offset. Without a resolution context a call reads the clock once.
+`has_command`/`has_binary` search the captured environment's `PATH`
+(`which::which_in`). `no_handler_source_reads_the_live_clock_or_process_state`
+greps the handler sources.
+
+## `load_data` (data files)
+
+`load_data(file: file | null, as: type-definition(container), options?:
+{format, delimiter, header} | null)` reads YAML, JSON, JSONL/NDJSON, CSV, TSV,
+TOML, or JSON5 and returns the value fully converted to `as`, or fails; a
+partial value is never returned. `options` is a closed inline object in the
+catalog (`schemas/partials/functions.yaml`): `format` is an `enum` of the
+seven names plus the aliases `yml`/`ndjson` (normalized to `yaml`/`jsonl` in
+`options.rs::format_from_name`, so they share memo entries and messages name
+the canonical format); `delimiter` is one ASCII byte other than `"`, CR, LF
+(`delimiter_byte`); TSV accepts only a tab, and a tab on CSV stays CSV;
+`delimiter`/`header` (even `header: true`) on a non-tabular format is
+`dm.data.invalid_options`. Unknown keys, wrong value types, and bad format
+names are the binder's `dm.expression.incompatible_call` at argument 2.
+A computed options value's `invalid_options` is located at the whole call
+(execution keeps no per-argument position); a literal one is always caught
+passively first, at argument 2. Catalog examples read
+`catalog/example_data/` (`EXAMPLE_DATA_FILES`), which now includes an
+extensionless `fixture-export` (fenced as `text` on the generated page). User docs:
+`darkmatter/docs/topics/loading-data.md` (behavior) and
+`docs/cli/data-contracts.md` (`data_location`, `read_set`, the `dm.data.*`
+codes). Code: `compose/expression/data/` (`load.rs` is the function;
+`contract.rs`, `parse.rs`, `locate.rs`, `runtime.rs`, `error.rs`). The
+command-scoped memo and read set are in [requests.md](requests.md#data-runtime-and-read-set).
+
+- **Recoverable read failures** (`error.rs::ExpressionError::is_recoverable_read_failure`):
+  the one classifier the `try(expr, fallback)` special form uses. True only for a
+  `FileReference` (or `Data(DataError::FileReference)`) miss that is
+  `NotFound`/`FoundElsewhere` with no cause or an `Io` cause,
+  `DataError::Malformed`, `DataError::ContractMismatch`, and `RemoteRead`
+  with `RemoteReadKind::Transport`. Everything else is false, including
+  `unsupported_format`, `invalid_options`, `ContractImport`, `NestedData`,
+  `SlotReadRefused`, tree escapes and missing anchors (also labeled
+  `NotFound`), and `Provider`. The match is exhaustive (no `_` arm), so a new
+  variant must be classified on purpose, and it defaults to `false` unless it
+  is a typed missing-file or transport failure of the data source; it is
+  independent of `is_authoring_fatal`. `Callback { source }` delegates to its
+  cause. Never recover by function name or message, and never by matching the
+  generic `Other` variant (always `false`): give a recoverable failure its own
+  typed variant. Callers: `expression/mod.rs::evaluate_recovery` (every
+  composition surface) and `lifecycle/executor.rs::call_recovery` (lifecycle
+  operands, `md` and Claudine); pinned by the variant table
+  `every_variant_is_classified_and_callbacks_delegate` in `error.rs` and
+  `data/provenance_tests.rs`. Behavior:
+  [Recovering from read failures](../../../darkmatter/docs/topics/darkmatter-expressions.md#recovering-from-read-failures).
+- **Call order** (`load.rs`): a `null` file returns `null` before anything
+  else (options included); read the options (`options.rs::DataOptions`,
+  aliases `yml`/`ndjson` normalized there); prepare the contract; resolve the
+  file, run the slot gate, record it in the read set; then the request
+  checks in `load.rs::plan_read`, the one helper both a present and a missing
+  source use: pick the effective
+  format (`options.format`, else `load.rs::data_format_of` on the extension,
+  a URL's path included, shared with the call check); `check_applicability`
+  (`delimiter`/`header` only on CSV/TSV, TSV tab only); pick the CSV/TSV row
+  mode and, for `header: false`, `require_positional_rows`. A local miss runs
+  `plan_read` first (`check_absent_request`) against every resolution
+  candidate's extension (a `%` search: the authored text's) and reports the
+  first refusal unless some candidate accepts, so an invalid request is never
+  a miss `try` absorbs; it reads, probes, and canonicalizes nothing extra.
+  Then fetch a URL
+  through `fetch_remote_text` (host policy before any memo layer); then the
+  raw, parse, and bind memo layers. Observe the read once per call after the
+  parse layer (the raw entry's hash, `None` on a read or parse failure).
+- **Options passively** (`call_check.rs::load_data_problem`): in execution
+  order — a literal bad `delimiter`, the contract, applicability to the
+  *provable* format (a literal `format`, else a literal file's extension
+  when no computed member can set `format`), the row rules. An object
+  literal mixing literal and computed members is
+  `ArgumentType::PartialObject` (classified as `Typed`), so its literal
+  members are still judged. `dm.data.invalid_options` is ranged at argument
+  2; options the binder refuses get no data problem, and when it refuses the
+  file or `as`, only a step-2 contract problem may replace its error. An
+  unknown (computed) `as` skips the contract and row steps only: the
+  delimiter and applicability checks never depend on it, so never return
+  early on one unknown argument. Every message comes
+  from `options::invalid_options_message`, so passive and execution text
+  match. Only `tuple([…])[]` gives list rows: nested arrays (`string[][]`)
+  are not in the grammar.
+- **Contract** (`contract.rs::prepare_contract`): `as` is a quoted string
+  parsed by `parse_property_definition`; a document-local name (`Name`,
+  `Name@this`) at any depth is `dm.data.this_import_rejected`, while imported
+  types may recurse internally. The definition is wrapped in a synthetic
+  one-property `SchemaRoot`, expanded with `expand_named_types` against the
+  document's schema roots, and translated with
+  `shape_from_property_def_with_definitions`. The bare shape is bound (no
+  optional-null wrapper), so `string[]` rejects `null`. A malformed schema or
+  unknown exported type is `DataError::ContractSchema { written, source }`
+  (projected as `dm.expression.evaluation_failure`); a missing import stays in
+  the file-reference family, naming the import.
+- **Container checking is the library's.** Passively and at execution the
+  verdict comes from simplified-schema: `narrowing::container_admission`
+  on the text (named imports `Provisional`), then `denotes_container` on the
+  resolved definition. A computed scalar `as` reaches `dm.data.not_a_container`
+  through `FunctionBinding::refining_binding_errors`
+  (`load.rs::refine_binding_error`), not the binder's type error. Every `as`
+  carrier goes through `contract.rs::written_contract` (a string as written;
+  a list or mapping, from frontmatter or an expression literal, as its
+  canonical text) and `parse_type_definition_value`, so `"[string, number]"`,
+  `t: [string, number]`, and `["string", "number"]` are all the union
+  `string | number` and fail with `not_a_container`. A computed `as` the
+  checker types as string literals (a callback over a literal list) is judged
+  passively per literal (`call_check.rs::load_data_problem`).
+- **CSV/TSV rows** (`contract.rs::classify_rows`, `RowMode::{Object, List}`):
+  every non-null arm and array/tuple element must agree; object/dictionary
+  elements read rows by header, list/tuple elements by position (header row
+  skipped); anything else, or a tuple with no elements, is
+  `dm.data.row_shape_conflict`. The first row is a header unless
+`header: false`, which reads every record as a list row (an object-row
+contract is `RowShapeConflict::HeaderlessObjectRows`, same code; the logical
+row view in `error.rs::TabularSource` keeps pointers and positions counted
+from the first record). Rows are
+  built per contract at bind time from the memoized table, so the
+  object-mode duplicate/empty-header error is per contract.
+- **Numbers and formats** (`parse.rs`): JSON/JSONL through
+  `numeric::admit_json_text_numbers`, JSON5 through `admit_json5_text_numbers`
+  and `reject_non_finite_json5`, TOML by walking `Toml::value()` with
+  `admit_integer`/`admit_f64` (biscuit-file's lenient `Toml::as_json_value` is
+  untouched), YAML through `schemas/yaml_documents/load.rs::load_yaml_document`
+  with custom tags rejected on this path only. An inadmissible number is
+  `dm.data.malformed`, located where the parser proves it. One UTF-8 BOM is
+  stripped before parsing and locating.
+- **Codes** (`data/error.rs`, `DATA_DIAGNOSTIC_CODES`, all errors and
+  authoring-fatal, never in the warning-only `COMPOSE_DIAGNOSTIC_CODES`):
+  `dm.data.not_a_container`, `row_shape_conflict`, `this_import_rejected`,
+  `unsupported_format`, `malformed`, `contract_mismatch`, `invalid_options`
+  (never has a `data_location`: it is decided before any read). File failures stay
+  `dm.expression.evaluation_failure` with the file-reference fields (a failed
+  allowed-host fetch is `ExpressionError::RemoteRead`: `unreachable`/`io`). A literal
+  file plus literal contract is checked passively (`CallCheck::data_problem`).
+- **Mismatch records** come only from
+  `ConversionError::located_failures()` (null arms dropped, one reachable arm
+  descended, ambiguous or same-kind unions one record, JSON Pointer paths).
+  Projection (`report_diagnostics.rs`) caps them at `CONTRACT_RECORD_CAP` (20)
+  plus one overflow record at the call site with no `data_location`. Order:
+  level by level by source offset (YAML by authored index), then unlocated
+  values, then missing members, engine order breaking ties.
+- **Locating is biscuit-file's** (`data/locate.rs` only asks): `locate_json`,
+  `locate_jsonl`, `locate_toml`, `locate_json5`, `json5_parse_error_offset`,
+  raw `DelimitedField::offset` for CSV/TSV, then `source_position` for the
+  1-based line and character column. YAML uses simplified-schema's
+  `PositionMap::byte_range`, never its top-level fallback: an alias and
+  everything below it is placed at its `*name` token, a flow collection
+  spanning lines is located, and only a layout the map cannot prove (an
+  anchored key `&k a: 1`) reports pointers only. `<<` is a literal key; an
+  unexpected `<<` record's message adds `report_diagnostics::MERGE_KEY_HINT`
+  (YAML only). A missing
+  value keeps its own pointer but is positioned at its parent. Pointer-only
+  is for contract mismatches alone: a YAML refusal made after parsing (second
+  document, non-string key, tag) is located by
+  `schemas/yaml_documents/marks.rs`, an event-mark pass that follows aliases.
+- **Typed literal returns** (`call_check.rs::expression_type`): a literal
+  `as` types the call as its bare shape (named references `unknown`, explicit
+  null arms kept, `| null` added when `file` may be null, `null` for a literal
+  `null` file), which flows into `map`/`filter` callback locals. The
+  **Undeclared member check** above applies to these shapes as to any typed
+  value: `h.nmae` against `{ name: string }[]` elements warns; a named
+  reference (`unknown`) or a computed `as` stays silent.
+- Tests: `lib/tests/l1/load_data_{execution,diagnostics,passive,runtime}.rs`,
+  `cli/tests/l1/load_data.rs`; biscuit-file's opt-in readers in its
+  `l1-delimited` target.

@@ -4,8 +4,9 @@
 //!
 //! Each case under `tests/fixtures/schema_validate_baseline/<case>/` carries its
 //! input document (`doc.md` plus any referenced schema file) and two checked-in
-//! snapshots: `expected.json` (the `--format json` line) and `expected.pretty`
-//! (the default pretty rendering with color disabled). The host-specific
+//! snapshots: `expected.json` (the `--output json` file record) and `expected.pretty`
+//! (the pretty rendering with color disabled, at `-v` so the document link
+//! prints its destination). The host-specific
 //! `file://` document URL in the pretty snapshot is stored as the `{DOC_URL}`
 //! placeholder and the rendered URL is normalized back to it, so the remaining
 //! bytes — wording, ordering, indentation, arm prefixes, line annotations, and
@@ -57,10 +58,10 @@ fn read_snapshot(case: &str, name: &str) -> String {
 }
 
 fn normalize_document_url(mut output: String) -> String {
-    let href_start = output.find("(file://").expect("document link should exist") + 1;
+    let href_start = output.find("<file://").expect("document link should exist") + 1;
     let href_end = href_start
         + output[href_start..]
-            .find(')')
+            .find('>')
             .expect("document link should be closed");
     output.replace_range(href_start..href_end, "{DOC_URL}");
     output
@@ -78,15 +79,16 @@ fn schema_validate_legacy_json_output_is_byte_identical() {
             .command_builder()
             .ambient_context(&work)
             .build()
-            .args(["schema", "validate", "--format", "json", "doc.md"])
+            .args(["schema", "validate", "--output", "json", "doc.md"])
             .output()
             .unwrap();
 
-        let stdout = String::from_utf8(output.stdout).unwrap();
-        assert_eq!(
-            stdout, expected,
-            "JSON output drifted for legacy case `{case}`"
-        );
+        let record = common::schema_validate_record(&output.stdout);
+        let expected_record: serde_json::Value = serde_json::from_str(&expected).unwrap();
+        assert_eq!(record, expected_record, "JSON output drifted for legacy case `{case}`");
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let expected_outcome = if expects_success { None } else { Some("failure") };
+        assert_eq!(report["outcome"].as_str(), expected_outcome, "legacy case `{case}`: {report}");
         assert_eq!(
             output.status.success(),
             expects_success,
@@ -108,7 +110,9 @@ fn schema_validate_legacy_pretty_output_is_byte_identical() {
             .ambient_context(&work)
             .rendering_input("NO_COLOR", "1")
             .build()
-            .args(["schema", "validate", "doc.md"])
+            // `-v`: a link the output cannot make clickable prints its
+            // destination only when verbose.
+            .args(["-v", "schema", "validate", "doc.md"])
             .output()
             .unwrap();
 

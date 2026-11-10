@@ -42,7 +42,7 @@ The `Markdown` struct is the central type in Darkmatter's library. It represents
 From this foundation, it offers methods spanning five functional areas: construction, frontmatter management, content extraction, transformation, and output rendering.
 
 ```rust
-use darkmatter::Markdown;
+use darkmatter::markdown::Markdown;
 
 let md: Markdown = r#"---
 title: Getting Started
@@ -73,7 +73,7 @@ Both fields are private; access is provided through dedicated methods.
 Creates a document with content only (empty frontmatter).
 
 ```rust
-use darkmatter::Markdown;
+use darkmatter::markdown::Markdown;
 
 let md = Markdown::new("# Hello\n\nSome content.");
 ```
@@ -83,7 +83,7 @@ let md = Markdown::new("# Hello\n\nSome content.");
 Creates a document with explicit frontmatter and content.
 
 ```rust
-use darkmatter::{Markdown, Frontmatter};
+use darkmatter::markdown::{Frontmatter, Markdown};
 
 let fm = Frontmatter::new();
 let md = Markdown::with_frontmatter(fm, "# Hello");
@@ -94,7 +94,7 @@ let md = Markdown::with_frontmatter(fm, "# Hello");
 Fetches markdown from a URL via HTTP GET and parses frontmatter automatically.
 
 ```rust
-use darkmatter::Markdown;
+use darkmatter::markdown::Markdown;
 use url::Url;
 
 let url = Url::parse("https://example.com/doc.md").unwrap();
@@ -106,7 +106,7 @@ let md = Markdown::from_url(&url).await?;
 The most common construction path. Auto-detects and parses YAML frontmatter if present.
 
 ```rust
-use darkmatter::Markdown;
+use darkmatter::markdown::Markdown;
 
 let md: Markdown = "---\ntitle: Example\n---\n# Content".into();
 ```
@@ -116,7 +116,7 @@ let md: Markdown = "---\ntitle: Example\n---\n# Content".into();
 Loads a markdown file from disk. Returns `MarkdownError` on I/O failure.
 
 ```rust
-use darkmatter::Markdown;
+use darkmatter::markdown::Markdown;
 use std::path::Path;
 
 let md = Markdown::try_from(Path::new("./README.md"))?;
@@ -163,7 +163,7 @@ the selected strategy below.
 | `MergeStrategy::PreferDocument` | Document values win |
 
 ```rust
-use darkmatter::MergeStrategy;
+use darkmatter::markdown::MergeStrategy;
 
 md.fm_merge_with(
     serde_json::json!({"author": "Ken", "draft": false}),
@@ -192,7 +192,7 @@ md.fm_set_defaults(serde_json::json!({
 
 ## Document References
 
-A document can reference external assets through hyperlinks, images, transclusions, inline CSS/scripts/fonts, and meta tags. Darkmatter provides both **local** (single-document) and **graph-aware** (transclusion-following) APIs for reference discovery, plus a validation engine.
+A document can reference external assets through hyperlinks, images, media, frames, transclusions, inline CSS/scripts/fonts, and meta tags. Darkmatter provides both **local** (single-document) and **graph-aware** (transclusion-following) APIs for reference discovery, plus a validation engine.
 
 ### Reference Categories
 
@@ -200,6 +200,8 @@ A document can reference external assets through hyperlinks, images, transclusio
 |----------|----------------|-------------|
 | Hyperlinks | `[text](url)` | `<a href="url">` |
 | Images | `![alt](src)` | `<img src="url">` |
+| Media | -- | `<video src="url">`, `<audio src="url">`, `<source src="url">` |
+| Frames | -- | `<iframe src="url">` |
 | Transclusions | `::file`, `::code`, `::url`, `::file-links` | -- |
 | CSS | -- | `<style>`, `@import` |
 | Scripts | -- | `<script>`, `<script src="...">` |
@@ -229,6 +231,8 @@ Path resolution uses the same `FileReference` semantics as the graph builder and
 Graph methods follow transclusion directives recursively and collect references at each node.
 
 **`transclusion_graph(options) -> MarkdownResult<ReferenceGraph>`** builds a transclusion-only graph (no link/image extraction at leaf nodes).
+
+Each graph record's `origin` has two coordinate frames. `line` and `span` index the prepared body (frontmatter removed, `replace:` values, `{{ … }}`, and `::block` regions applied). `authored` is the position in the loaded file: `line`, character `column`, byte `span`, and `inserted`, which is `true` when an expression, a shell step, or a `replace:` value wrote the reference, so the position names that construct. For example, a `[x](./x.md)` that `{{ link }}` wrote on line 9, column 7 reports `authored: { line: 9, column: 7, inserted: true }`. `authored` is `None` for a document built in memory or fetched from a URL. `section` is the final anchor slug of the nearest heading at or before the reference, and is available for those documents too.
 
 **`reference_graph(options) -> MarkdownResult<ReferenceGraph>`** builds a full reference graph (transclusions + all reference types at each node).
 
@@ -281,7 +285,7 @@ Single-document variants (no transclusion traversal):
 
 **`merge_meta_into_frontmatter(overwrite) -> MarkdownResult<usize>`** copies meta tag values into the document's frontmatter. Returns the number of keys inserted or updated.
 
-**`set_meta_tag(key, value) -> usize`** sets a `<meta>` tag in the document content. If a tag with the same key already exists, it is updated in place regardless of attribute order, extra whitespace, or additional attributes. Otherwise, a new tag is appended. Returns 0 for insert, 1 for update.
+**`set_meta_tag(key, value) -> usize`** sets a `<meta>` tag in the document content. If a tag with the same key already exists, it is updated in place regardless of attribute order, extra whitespace, or additional attributes. A `<meta>` written in a code block, an HTML comment, or a raw-text element such as `<textarea>` is text rather than a tag, so it is left alone. Otherwise, a new tag is appended. Returns 0 for insert, 1 for update.
 
 Key-to-attribute mapping:
 
@@ -368,6 +372,8 @@ if md.has_inline_html() {
 
 Extracts HTML `<a>` tags from the markdown body as typed [`Link`](./Link.md) structs. This complements `links()`, which remains Markdown-syntax only.
 
+Text inside a raw-text element such as `<script>` or `<textarea>` is not a link, here or in `links()`.
+
 ```rust
 let html_links = md.inline_html_links();
 for link in &html_links {
@@ -389,6 +395,8 @@ for img in &images {
 ### `inline_html_image_references() -> Vec<ImageRef>`
 
 Extracts HTML `<img>` tags from the markdown body as typed [`ImageRef`](./ImageRef.md) structs. This complements `image_references()`, which remains Markdown-syntax only.
+
+Text inside a raw-text element such as `<script>` or `<textarea>` is not an image, here or in `image_references()`.
 
 ```rust
 let html_images = md.inline_html_image_references();

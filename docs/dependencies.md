@@ -7,6 +7,24 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-file/lib` adds optional `csv` 1.3 and `csv-core` 0.1.13
+  (2026-11-07) behind its off-by-default `delimited` feature (in `full`), for
+  the strict CSV/TSV reader `biscuit_file::delimited`. `csv` decodes the
+  records; `csv-core` reports how many source bytes each field consumed, which
+  gives each field's raw byte offset (the `csv` crate's own field ranges index
+  its unescaped buffer). Both were already in the lockfile through
+  `biscuit-tui`'s CLI (it resolves `csv` 1.4.0), so no package is added. Builds
+  without `delimited` do not depend on either. `darkmatter/lib` enables
+  `delimited`.
+- `renderable` adds `json-five` 0.3 (2026-11-05) for structured link titles
+  (`renderable::output::link_metadata`): one JSON5 interpretation of a title
+  that Prose and Darkmatter share. It is the parser `biscuit-file` already
+  uses (the lockfile resolves 0.3.1), so the graph gains one edge and no
+  package, and `renderable` does not take a `biscuit-file` dependency.
+- `renderable` adds `unicode-width` 0.2 (2026-11-05) so the Markdown fold
+  measures display columns when it wraps paragraphs for an output width
+  (`Width::Columns`). Many workspace crates already use it (the lockfile
+  resolves 0.2.2), so the graph gains one edge and no package.
 - `simplified-schema/lib` is a new workspace crate (2026-10-30) that owns the
   SimplifiedSchema language, extracted from Darkmatter. It depends on
   `biscuit-file` (`yaml`, `json5`, `file-reference-syntax`; full
@@ -69,13 +87,16 @@
   `research`, `sniff-cli`, `playa-cli`, `biscuit-icon-cli`,
   `biscuit-speaks-cli`), so `serde_json` maps there keep insertion order.
   Outputs with an alphabetical-key contract sort explicitly (`sniff`'s JSON
-  output, `md schema validate --format json`, the `md hash` frontmatter hash,
+  output, `md schema validate --output json`, the `md hash` frontmatter hash,
   Claudine's OpenCode/Kilo inline config); any new consumer that needs a
   stable order must sort too. Written order is intended elsewhere:
-  `md schema detect --format json` and JSON text produced for `json`-typed
+  `md schema detect --output json-schema` and JSON text produced for `json`-typed
   values keep the order the author wrote. No crate is added. See
   `darkmatter/docs/dependencies.md`, which also covers how Darkmatter's
   custom JSON Schema formats read in other validators.
+- `biscuit-file` enables `serde_json`'s `raw_value` feature (2026-11-07) for
+  its data locators (`biscuit_file::data_locations`), which find a JSON
+  pointer's byte offset in source text. See `biscuit-file/docs/dependencies.md`.
 - `biscuit-visualized` drops `mermaid-rs-renderer` (2026-10-22): Merman,
   already in the graph under its `image` feature, is now its only Mermaid
   backend. `merman` is a git dependency on Ken's fork
@@ -519,6 +540,8 @@
 - `biscuit-file/lib` uses `url` for HTTP(S) file-reference classification and
   gates `reqwest`, `bytes`, and `tokio` behind the off-by-default `fetch`
   feature for policy-enforced HTTP access.
+- `biscuit-file/lib` gates `csv` and `csv-core` behind the off-by-default
+  `delimited` feature for its strict CSV/TSV reader.
 - `darkmatter/lib` enables `biscuit-file/fetch` and uses `reqwest`, `tokio`,
   and `url` for remote URL composition, persistent remote cache revalidation,
   and side-effect `http_post` host-policy enforcement.
@@ -1541,6 +1564,18 @@ This is a Rust workspace with the following modules:
     _Fast JSON serialization/deserialization using serde. Any build that reaches `biscuit-visualized`'s `image` feature also gets `preserve_order` (an insertion-ordered `Map`) and `float_roundtrip`, enabled by `merman-core` and unified by Cargo._
 
     _Tags: json, serialization_
+
+- [csv](https://github.com/BurntSushi/rust-csv) _v1.3_ [📄](https://docs.rs/csv)
+
+    _RFC 4180 CSV reader and writer. `biscuit-file` decodes CSV/TSV records with it behind the optional `delimited` feature._
+
+    _Tags: csv, parsing, serialization_
+
+- [csv-core](https://github.com/BurntSushi/rust-csv/tree/master/csv-core) _v0.1.13_ [📄](https://docs.rs/csv-core)
+
+    _Allocation-free CSV parser underneath `csv`. `biscuit-file`'s `delimited` feature uses its per-field consumed-byte counts for raw source offsets._
+
+    _Tags: csv, parsing_
 
 - [jsonc-parser](https://github.com/dprint/jsonc-parser) _v0.33.2_ [📄](https://docs.rs/jsonc-parser)
 

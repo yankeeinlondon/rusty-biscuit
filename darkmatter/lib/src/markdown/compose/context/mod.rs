@@ -29,3 +29,4 @@ pub use diagnostics::ContextMergeDiagnostic;
 pub use merge::merge_ctx;
 pub use repository_scope::repository_scope_catalog;
 pub(crate) use repository_scope::PackageMatch;
+pub(crate) use repository_scope::RepositoryObservation;

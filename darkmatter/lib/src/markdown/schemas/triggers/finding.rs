@@ -201,7 +201,8 @@ fn reason(cause: &SchemaError) -> String {
 /// Every variant is classified, so a new one must decide whether it names a
 /// file. A named-type failure names the file that wrote the reference, or,
 /// for a reference written in the trigger, the import whose types were
-/// searched. Variants without a typed path name none: a missing reference
+/// searched. An unresolved template names the file defining its first slot
+/// written in a file, and a refused slot value its slot's file. Variants without a typed path name none: a missing reference
 /// (`NoMatch`, `Unresolved`) has no file to point at, and a chain or count
 /// (`ReferenceCycle`, `ImportCycle`, `Aggregate`) is spelled out in the
 /// message instead.
@@ -214,6 +215,20 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
         | SchemaError::UnsupportedJsonDialect { path, .. }
         | SchemaError::InvalidJsonSchema { path, .. } => path,
         SchemaError::TriggerPayloadCycle { payload_path, .. } => payload_path,
+        // A slot reached through an import names the file that defined it.
+        SchemaError::UnresolvedSlots(unresolved) => unresolved.slots.iter().find_map(|slot| slot.origin.as_ref())?,
+        // A refused slot value names the file the slot was written in.
+        SchemaError::SlotResult { slot, .. } | SchemaError::SlotReadRefused { slot, .. } => slot.origin.as_ref()?,
+        // A failed resolution names the file of the first slot it reports.
+        SchemaError::SlotResolution(failure) => {
+            let slot = match failure.error.as_ref() {
+                simplified_schema::slots::SlotResolutionError::Refused(refused) => refused.first().map(|(slot, _)| slot),
+                simplified_schema::slots::SlotResolutionError::Failed(failed) => failed.first().map(|(slot, _)| slot),
+                simplified_schema::slots::SlotResolutionError::Schema(schema) => return related_path(schema, trigger),
+                _ => None,
+            };
+            slot?.origin.as_ref()?
+        }
         SchemaError::TriggerPayloadCompile { payload_path, .. }
         | SchemaError::TriggerPayloadNotMergeable { payload_path, .. } => payload_path.as_ref()?,
         SchemaError::UnknownNamedType { site, namespace, .. } => {

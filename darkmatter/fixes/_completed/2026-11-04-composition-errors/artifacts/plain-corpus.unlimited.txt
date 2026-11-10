@@ -1,0 +1,41 @@
+Plain Corpus
+
+A soft-broken paragraph that continues here and ends here.
+
+A long paragraph that keeps going well past any narrow width, so that it has to wrap more than once at forty columns and at eighty columns too, while under an unlimited width it stays on a single line from its first word all the way through to its very last word.
+
+Run `md compose` with bold words and italic words.
+
+```yaml
+name: string(required)
+```
+
+┌──────┬──────┐
+│ Name │ Type │
+├──────┼──────┤
+│ id   │ ulid │
+└──────┴──────┘
+
+---
+
+> Quoted text keeps a visible marker.
+
+- Item one
+  - Nested item
+- Item two
+
+1. First
+2. Second
+
+See the docs and https://example.com/same.
+
+IMAGE[A diagram]
+
+Disclosure summary
+
+Disclosure body.
+
+```mermaid
+flowchart LR
+    A --> B
+```

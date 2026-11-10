@@ -71,7 +71,7 @@ with the rejection:
 
 The pre-flight walk that `md compose` runs before approving shell commands
 checks the same surfaces, so it rejects the same call with the same earlier
-warnings ([Report output](../cli/report-json.md#which-diagnostics-in-which-order)).
+warnings ([Data contracts](../cli/data-contracts.md#which-diagnostics-in-which-order)).
 
 ## The five argument categories
 
@@ -326,6 +326,7 @@ document's values:
 | a call (`length(count)`) | the function's declared `returns` type; for overloads, the union over every overload the argument count can select |
 | `x \|\| y` | `x`'s type without `null`, joined with `y`'s |
 | `c ? a : b` | the two branch types joined, each under the guard |
+| `try(expr, fallback)` | the two argument types joined, `null` included when `expr` can succeed with it; see [A `try` call](#a-try-call) |
 
 ```markdown
 ---
@@ -357,6 +358,39 @@ $schema:
 Joined types are normalized one way everywhere: `unknown` absorbs every
 other type, duplicates collapse, and the order of arms and keys never
 changes the result (`string | number` and `number | string` are one type).
+
+### A `try` call
+
+[`try(expr, fallback)`](../functions/try.md) returns `fallback` only when
+`expr` fails to read its data (see
+[Recovering from read failures](../topics/darkmatter-expressions.md#recovering-from-read-failures)).
+The check cannot know whether that will happen, so it treats the call as
+either branch:
+
+- **Both arguments are checked.** A call that can never bind rejects the
+  document even in a fallback that will never run, as it does in an untaken
+  ternary branch:
+
+  ```markdown
+  {{ try(load_data("names.yaml", "string[]"), min(true, 5)) }}  <- rejected
+  ```
+
+- **The result is the union of both branches.** `try(maybe, 'none')` is
+  `number | null | string` for `maybe: number`: a successful `null` is kept,
+  because `try` replaces failures, not empty values.
+- **An empty-array fallback keeps the item type.** When one argument is a
+  literal `[]` and the other is an array that accepts it, the `[]` adds
+  nothing, so callback locals stay typed and member completion works:
+
+  ```markdown
+  {{ map(try(load_data("optional.yaml", "{ a: string }[]"), []), row => row.a) }}
+  ```
+
+  The result here is `{ a: string }[]`. An array constrained to be non-empty,
+  a fixed-length tuple, or an object cannot hold `[]`, so it gets the ordinary
+  union instead.
+- **It proves nothing.** `try` is not a guard: `::block when="try(is_number(x), false)"`
+  does not make `x` a number inside the block, as `when="is_number(x)"` would.
 
 ## Calls inside callbacks
 

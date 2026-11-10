@@ -77,7 +77,7 @@ ignored elsewhere.
 | --- | --- | --- |
 | `x-darkmatter-url-scheme` | `url(scheme(...))` | The URL's scheme is one of the listed schemes, compared case-insensitively. Emitted beside `format: uri`. |
 | `x-darkmatter-integer` | `number(integer)` | The whole number lies below 2^64 in magnitude. Emitted beside `"type": "integer"`, which has no such ceiling. Its only legal value is `true`. |
-| `x-darkmatter-type-definition` | `type-definition`, `type-definition(forms(...); declared-required)` | The value (a string, mapping, or sequence) is a valid SimplifiedSchema property definition that satisfies the payload's options. Parse-only; nothing is resolved. See [Declaration-option payloads](#declaration-option-payloads). |
+| `x-darkmatter-type-definition` | `type-definition`, `type-definition(forms(...); declared-required; container)` | The value (a string, mapping, or sequence) is a valid SimplifiedSchema property definition that satisfies the payload's options. Parse-only; nothing is resolved. See [Declaration-option payloads](#declaration-option-payloads). |
 | `x-darkmatter-schema` | `schema`, `schema(mapping; property(...))` | The value is a valid `$schema` declaration that satisfies the payload's options. Parse-only; referenced files are not read. See [Declaration-option payloads](#declaration-option-payloads). |
 | `x-darkmatter-match` | `file(match(...))` on a file property of a [root-union](./language/unions.md#root-level-unions) arm | An existing file named by the value matches the arm's globs, so a file outside them rules the arm out. On an ordinary property `match(...)` only suggests and is not emitted. Needs a file context. |
 | `x-darkmatter-match-property` | beside `x-darkmatter-match`, inside an arm's copy of a recursive definition | Names the top-level property the copy types (`null` below a pattern key). It carries data for `x-darkmatter-match` and checks nothing itself. |
@@ -117,10 +117,13 @@ lowers `contract` to:
 | `property: [{ "name", "declaration" }]` | `x-darkmatter-schema` | each `property(NAME, type-definition(...))` | Every inline mapping, or inline root-union arm, declares `name`, and its declaration satisfies `declaration`, itself a type-definition payload (`true` for a bare `type-definition`). Reference carriers and reference arms are skipped. |
 | `forms: ["literal", ...]` | `x-darkmatter-type-definition`, or a `declaration` | `forms(literal, ...)` | Every top-level alternative is a non-array atom with a listed type keyword; a `literal` or `enum` one denotes non-empty strings, and a named-type alternative passes. |
 | `declaredRequired: true` | `x-darkmatter-type-definition`, or a `declaration` | `declared-required` | The definition is `required`, with no alternative that admits null. |
+| `container: true` | `x-darkmatter-type-definition`, or a `declaration` | `container` | Every non-null alternative is a list, tuple, object, or dictionary, and at least one exists; a named-type alternative passes. |
 
 Raw JSON Schema may write the payload directly and is judged exactly like a
-lowered one. A malformed payload (`false`, an unknown key such as `closed`, a
-non-boolean `mapping`, a `property` that is not an array) makes the schema
+lowered one. An absent or `false` flag (`declaredRequired`, `container`)
+leaves its check off. A malformed payload (`false`, an unknown key such as `closed`, a
+non-boolean `mapping`, `declaredRequired`, or `container` (`null` included), a
+`property` that is not an array) makes the schema
 fail to prepare, with an error naming the keyword.
 
 ## Annotations

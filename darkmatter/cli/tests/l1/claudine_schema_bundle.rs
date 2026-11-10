@@ -43,20 +43,19 @@ fn repository(process: &CliProcessFixture, bundle: &[(&str, &str)], documents: &
         .collect()
 }
 
-/// One `md schema validate --format json` run, keyed by document name. Each
+/// One `md schema validate --output json` run, keyed by document name. Each
 /// document compiles its own effective schema, so the baseline is left out to
 /// keep the run inside the L1 budget; no row depends on it.
 fn validate(process: &CliProcessFixture, documents: &[PathBuf]) -> (Option<i32>, BTreeMap<String, Value>) {
     let output = process
         .command()
-        .args(["schema", "validate", "--disable", "baseline-schema", "--format", "json"])
+        .args(["schema", "validate", "--disable", "baseline-schema", "--output", "json"])
         .args(documents)
         .output()
         .expect("md runs");
-    let records = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|line| {
-            let record: Value = serde_json::from_str(line).expect("NDJSON record");
+    let records = common::schema_validate_records(&output.stdout)
+        .into_iter()
+        .map(|record| {
             let file = record["file"].as_str().expect("file").replace('\\', "/");
             let name = file.rsplit('/').next().expect("file name").trim_end_matches(".md").to_string();
             (name, record)

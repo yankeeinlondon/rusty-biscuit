@@ -1,144 +1,101 @@
 //! `md validate` subcommand implementation.
 
-use crate::args::{GraphFormat, ValidateOutputFormat, ValidateTarget};
+use crate::args::{Cli, GraphFormat, ValidateTarget};
 use crate::io::open_argument;
+use crate::output::command::{CommandRun, Completed, DataShape};
 use crate::request::MdRequest;
-use color_eyre::eyre::{Context, Result, eyre};
+use biscuit_terminal::output::WidthRequest;
+use color_eyre::eyre::{Context, Result};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
+use darkmatter::markdown::compose::expression::Diagnostic;
+use darkmatter::markdown::compose::report_diagnostics::reference_issue_diagnostic;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, ComposeSource};
+use darkmatter::markdown::output::command::{CommandValue, GraphNotation, GraphNotationData, code_document};
 use darkmatter::markdown::reference::ReferenceGraphOptions;
-use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
+use darkmatter::markdown::reference::validate::{
+    ReferenceReportVisibility, ReferenceSeverity, ReferenceValidationOptions, ReferenceValidationReport, ValidationReportView,
+};
 use tracing::{info, instrument};
 
-#[instrument(skip_all, fields(command = "validate"))]
-pub(crate) fn run_validate(target: ValidateTarget, request: &MdRequest) -> Result<()> {
-    info!("starting reference validation");
-
-    match target {
-        ValidateTarget::Refs {
-            input,
-            remote,
-            fragments,
-            timeout,
-            fail_fast,
-            format,
-            show_all,
-            graph,
-        } => {
-            let opened = open_argument(&input, request)?;
-            let md = Markdown::try_from(opened.path())
-                .wrap_err_with(|| format!("Failed to load {}", input.display()))?;
-            let context = opened.document_context(request)?;
-            let validation_request = ComposeRequest::with_context(
-                ComposeOptions::for_document(request.launch_dir(), &md),
-                context,
-            )
-            .wrap_err("Failed to prepare the validation request")?;
-
-            // If --graph requested, print graph and exit
-            if let Some(graph_format) = graph {
-                let graph_options = ReferenceGraphOptions::with_compose(&validation_request);
-                let ref_graph = md
-                    .reference_graph(graph_options)
-                    .wrap_err("Failed to build reference graph")?;
-
-                match graph_format {
-                    GraphFormat::Mermaid => println!("{}", ref_graph.to_mermaid()),
-                    GraphFormat::Dot => println!("{}", ref_graph.to_dot()),
-                }
-                return Ok(());
-            }
-
-            let options = ReferenceValidationOptions {
-                graph: ReferenceGraphOptions::with_compose(&validation_request),
-                validate_remote: remote,
-                remote_timeout: std::time::Duration::from_secs(timeout),
-                validate_fragments: fragments,
-                fail_fast,
-            };
-
-            let report = md
-                .validate_references(options)
-                .wrap_err("Reference validation failed")?;
-
-            match format {
-                ValidateOutputFormat::Text => {
-                    print_validation_report_text(&report, &input, show_all);
-                }
-                ValidateOutputFormat::Json => {
-                    // Serialize the library `ReferenceValidationReport`
-                    // directly. This is the same serde shape emitted by
-                    // `md graph --validate --json`'s `validation` block,
-                    // so the two CLI surfaces share one contract and
-                    // cannot drift (review-2 finding #2). The shape is
-                    // pinned by the baseline fixtures under
-                    // `darkmatter/features/2026-06-17-cli-atheist/baseline/json/`.
-                    println!("{}", serde_json::to_string_pretty(&report)?);
-                }
-            }
-
-            if report.is_valid() {
-                Ok(())
-            } else {
-                Err(eyre!("{} error(s) found", report.error_count()))
-            }
-        }
-    }
+/// The error issues of a failed `report`, as run diagnostics.
+pub(crate) fn report_failure_diagnostics(report: &ReferenceValidationReport) -> Vec<Diagnostic> {
+    report
+        .issues
+        .iter()
+        .filter(|issue| issue.severity == ReferenceSeverity::Error)
+        .map(reference_issue_diagnostic)
+        .collect()
 }
 
-/// Prints the validation report in the legacy plain-text shape.
-///
-/// `md validate refs`'s text output is the *primary* per-issue report: it
-/// lists every issue (not just errors), it includes the scan/valid/issue
-/// counts at the top, and it stays readable in CI logs that strip ANSI.
-/// That is a different role from
-/// [`ValidationReportView`](darkmatter::markdown::reference::validate::ValidationReportView),
-/// which is a styled error-only summary used as a footer by
-/// `md graph --validate`. Routing `--format text` through the view would
-/// silently drop warnings, info-severity issues, the count header, and
-/// the success case (`ValidationReportView` renders empty when there are
-/// no errors), so the two surfaces are intentionally separate.
-fn print_validation_report_text(
-    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
-    input: &std::path::Path,
-    show_all: bool,
-) {
-    use darkmatter::markdown::reference::validate::ReferenceSeverity;
+#[instrument(skip_all, fields(command = "validate"))]
+pub(crate) fn run_validate(target: ValidateTarget, cli: &Cli, request: &MdRequest) -> Result<()> {
+    info!("starting reference validation");
 
-    println!("References scanned: {}", report.references_scanned);
-    println!("Valid: {}", report.references_valid);
-    println!("Issues: {}", report.issues.len());
+    let ValidateTarget::Refs { input, remote, fragments, timeout, fail_fast, output, show_all, graph } = target;
+    let mut run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::Object)?;
 
-    if !report.issues.is_empty() {
-        println!();
+    let prepared = (|| {
+        let opened = open_argument(&input, request)?;
+        let md = Markdown::try_from(opened.path()).wrap_err_with(|| format!("Failed to load {}", input.display()))?;
+        let context = opened.document_context(request)?;
+        // Every document the graph prepares shares one data memo and read set.
+        let options = ComposeOptions::for_document(request.launch_dir(), &md).with_shared_data_runtime();
+        let validation_request = ComposeRequest::with_context(options, context)
+            .wrap_err("Failed to prepare the validation request")?;
+        let validation_request = crate::commands::compose::with_reference_check_slot_session(validation_request);
+        Ok::<_, color_eyre::Report>((opened, md, validation_request))
+    })();
+    if let Ok((opened, ..)) = &prepared {
+        run.set_document(opened.path());
     }
 
-    for issue in &report.issues {
-        let severity = match issue.severity {
-            ReferenceSeverity::Error => "ERROR",
-            ReferenceSeverity::Warning => "WARN ",
-            ReferenceSeverity::Info => "INFO ",
-        };
-
-        let source = match &issue.origin.source {
-            darkmatter::markdown::compose::ComposeSource::File(p) => p
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| input.display().to_string()),
-            _ => input.display().to_string(),
-        };
-
-        println!(
-            "{severity}  {source}:{line}  {message}",
-            line = issue.origin.line,
-            message = issue.message
-        );
+    // `--graph` prints the diagram alone, with no validation.
+    if let Some(format) = graph {
+        let result = prepared.and_then(|(_, md, validation_request)| graph_value(&md, &validation_request, format));
+        return run.finish(result);
     }
 
-    if show_all && !report.warnings.is_empty() {
-        println!();
-        for warning in &report.warnings {
-            println!("WARN   {warning}");
+    let result = prepared.and_then(|(opened, md, validation_request)| {
+        let options = ReferenceValidationOptions {
+            graph: ReferenceGraphOptions::with_compose(&validation_request),
+            validate_remote: remote,
+            remote_timeout: std::time::Duration::from_secs(timeout),
+            validate_fragments: fragments,
+            fail_fast,
+        };
+        let report = md.validate_references(options).wrap_err("Reference validation failed")?;
+        let failure = (!report.is_valid()).then(|| report_failure_diagnostics(&report));
+        let mut view = ValidationReportView::new(report)
+            .with_root_source(ComposeSource::File(opened.path().to_path_buf()))
+            .with_launch_dir(request.launch_dir())
+            .with_visibility(ReferenceReportVisibility::All);
+        if show_all {
+            view = view.with_reference_listing();
         }
-    }
+        Ok(match failure {
+            Some(diagnostics) => Completed::failure(view).with_diagnostics(diagnostics),
+            None => Completed::success(view),
+        })
+    });
+    run.finish(result)
+}
+
+/// The diagram `--graph` selects: printed as its source in a terminal, and a
+/// code block in Markdown and HTML.
+fn graph_value(
+    md: &Markdown,
+    validation_request: &ComposeRequest,
+    format: GraphFormat,
+) -> Result<Completed<CommandValue<GraphNotationData>>> {
+    let graph = md
+        .reference_graph(ReferenceGraphOptions::with_compose(validation_request))
+        .wrap_err("Failed to build reference graph")?;
+    let source = match format {
+        GraphFormat::Mermaid => graph.to_mermaid(),
+        GraphFormat::Dot => graph.to_dot(),
+    };
+    let prose = code_document(Some(format.as_str()), &source);
+    let terminal = source.clone();
+    let data = GraphNotationData { graph: GraphNotation { format: format.as_str(), source } };
+    Ok(Completed::success(CommandValue::new(data, prose).with_terminal(move |_| terminal.clone())))
 }

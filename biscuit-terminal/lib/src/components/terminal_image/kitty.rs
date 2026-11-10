@@ -35,11 +35,10 @@ impl TerminalImage {
         &self,
         term: &crate::terminal::Terminal,
     ) -> Result<KittyGeometry<'_>, TerminalImageError> {
-        let term_width = term.width().max(1);
         let pixels = self.pixels()?;
         let (pixel_width, pixel_height) = pixels.size();
         let cell = term.cell_size();
-        let dims = self.resolve_dimensions_for_image(term_width, cell, pixel_width);
+        let dims = self.dimensions_on(term, pixel_width);
         let target_cells = dims.image_width;
 
         let (cell_pixel_width, cell_pixel_height) = cell

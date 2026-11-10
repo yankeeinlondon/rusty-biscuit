@@ -595,3 +595,159 @@ fn base_style_markdown_defaults_match_the_runtime_defaults() {
     ];
     assert!(sources.iter().all(|source| *source == RuleSource::Default));
 }
+
+/// The `style:` value of `frontmatter` through the runtime parser:
+/// `Some(warnings)` when it parses, `None` when it is rejected.
+fn runtime_style(frontmatter: &str) -> Option<Vec<darkmatter::style::StyleWarning>> {
+    let md: Markdown = format!("---\n{frontmatter}---\nBody\n").as_str().into();
+    darkmatter::style::from_frontmatter(md.frontmatter()).ok().map(|(_, warnings)| warnings)
+}
+
+/// The shipped `style.yaml` and the runtime style parser accept and reject
+/// the same values. "Accept" on the runtime side means the strict parse
+/// succeeds: a value that parses but carries an unknown-key or deprecation
+/// warning is one the schema rejects too.
+#[test]
+fn base_style_schema_agrees_with_the_runtime_style_parser() {
+    let cases: &[(&str, bool)] = &[
+        // Page spacing in CSS order, under `page` and at the top level.
+        ("page: {margin-left: 2ch, margin-right: '10%', margin-top: 1, margin-bottom: 0}", true),
+        ("page: {padding-left: 2, padding-right: 2ch, padding-top: 65535, padding-bottom: 0}", true),
+        ("{margin-left: 2ch, padding-top: 1, max-width: 80ch, alignment: center}", true),
+        ("page: {margin-top: 65536}", false),
+        ("page: {margin-top: -1}", false),
+        ("page: {margin-top: 1.5}", false),
+        ("page: {margin-top: ''}", false),
+        ("page: {margin-top: 2ch}", false),
+        // Removed spellings are unknown keys.
+        ("page: {left-margin: 2ch}", false),
+        ("page: {left_margin: 2ch}", false),
+        ("page: {top-padding: 1}", false),
+        ("{bottom-margin: 1}", false),
+        ("page: {margin_left: 2ch}", false),
+        // Shorthands: a value setting a vertical side is a row count.
+        ("{margin: 2, padding: 0}", true),
+        ("page: {margin: 2, padding: 0}", true),
+        ("{margin: '10%'}", false),
+        ("page: {padding: 2ch}", false),
+        ("{mx: '10%', px: 2ch, ml: 3, mr: 1ch, pl: '5%', pr: 0}", true),
+        ("page: {mx: '10%', py: 1, my: 0, mt: 1, mb: 2, pt: 3, pb: 4}", true),
+        ("{my: 2ch}", false),
+        ("page: {py: 70000}", false),
+        ("{mt: -1}", false),
+        ("{mb: 1.5}", false),
+        // The page content cap must be positive.
+        ("page: {max-width: 1}", true),
+        ("page: {max-width: '0.5%'}", true),
+        ("page: {max-width: 0}", false),
+        ("page: {max-width: '0'}", false),
+        ("page: {max-width: 0ch}", false),
+        ("page: {max-width: '0%'}", false),
+        ("{max-width: 0}", false),
+        // Themes validate through `ThemePair::try_from`.
+        ("page: {theme: github}", true),
+        ("page: {theme: Base16-Ocean}", true),
+        ("{theme: onehalf, code: {theme: vs-dark}}", true),
+        ("page: {code: {theme: DRACULA}}", true),
+        ("page: {theme: ''}", false),
+        ("page: {code: {theme: ''}}", false),
+        // Code-block mode and line numbers.
+        ("page: {code: {mode: inverse}}", true),
+        ("{code: {mode: same}}", true),
+        ("page: {code: {mode: auto}}", false),
+        ("page: {code: {mode: Dark}}", false),
+        ("code-block: {line-numbers: false}", true),
+        ("code-block: {line-numbers: [true]}", false),
+        // Component horizontal padding sides.
+        ("table: {padding: 0, padding-left: 4, padding-right: 2ch}", true),
+        ("ul: {padding-left: 4}", true),
+        ("block-quote: {padding-right: '10%'}", true),
+        ("hyperlinks: {local-style: {padding-left: 1}}", true),
+        ("table: {padding_left: 4}", false),
+        // Horizontal rules: real padding, and no unhonored keys.
+        ("hr: {padding: 1, padding-left: 4ch, padding-right: 2}", true),
+        ("hr: {margin: 1}", false),
+        ("hr: {border: true}", false),
+        ("hr: {emphasis: {bold: true}}", false),
+        ("hr: {word-wrap: wrap}", false),
+        // Compound unions and the open metadata object still agree.
+        ("table: {border: thick}", true),
+        ("table: {border: false}", true),
+        ("table: {border: {left: true, style: dotted, weight: thin}}", true),
+        ("table: {border: wavy}", false),
+        ("page: {meta: {description: A page, keywords: style}}", true),
+        ("{meta: {description: A page}}", true),
+        ("page: {meta: description}", false),
+        // `ul.left-margin` keeps its name.
+        ("ul: {left-margin: 4ch}", true),
+        // Cleanup rules are unchanged.
+        ("markdown: {fixed-width: 80, indentation: 2, list-item-padding: one}", true),
+        ("markdown: {indentation: 3}", false),
+    ];
+    let mut disagreements = Vec::new();
+    for (style, expected) in cases {
+        let yaml = format!("style:\n  {style}\n");
+        let report = validate_with_base(&yaml);
+        let runtime = runtime_style(&yaml);
+        let runtime_valid = runtime.as_ref().is_some_and(|warnings| !warnings.iter().any(|w| w.is_schema_issue()));
+        assert!(
+            Markdown::try_from_content(format!("---\n{yaml}---\n")).is_ok_and(|md| md.frontmatter().as_map().contains_key("style")),
+            "{style}: case must be valid YAML with a `style` key"
+        );
+        if report.valid != *expected || runtime_valid != *expected {
+            disagreements.push(format!(
+                "{style}: expected {expected}, schema {} {:?}, runtime {runtime_valid} {runtime:?}",
+                report.valid, report.problems
+            ));
+        }
+    }
+    assert!(disagreements.is_empty(), "{}", disagreements.join("\n"));
+
+    // Deliberate gaps: the schema declares a theme as a non-empty string with
+    // the canonical names as suggestions (aliases such as `Base16-Ocean` must
+    // validate, so it cannot be an enum), and a horizontal length's string
+    // arm does not encode the length grammar. The runtime parser rejects
+    // these; the schema admits them.
+    for style in ["page: {theme: neon}", "page: {theme: 5}", "disclosure: {padding-left: -1}", "{mx: 2px}"] {
+        let yaml = format!("style:\n  {style}\n");
+        assert!(validate_with_base(&yaml).valid, "{style}: schema admits it");
+        assert!(runtime_style(&yaml).is_none(), "{style}: runtime rejects it");
+    }
+}
+
+/// Completion offers the canonical theme names in `ThemePair::all()` order.
+#[test]
+fn base_style_theme_suggestions_are_the_canonical_theme_names() {
+    use darkmatter::markdown::highlighting::ThemePair;
+    use simplified_schema::Constraint;
+
+    let simplified_schema::SchemaRoot::Single(root) = darkmatter_base_schema() else {
+        panic!("base schema must be a single object shape");
+    };
+    let expected: Vec<String> = ThemePair::all().iter().map(|theme| theme.kebab_name().to_string()).collect();
+    for path in [&["style", "page", "theme"][..], &["style", "page", "code", "theme"], &["style", "theme"], &["style", "code", "theme"]] {
+        let mut shape = &root;
+        let (leaf, parents) = path.split_last().expect("non-empty path");
+        for parent in parents {
+            let Some(PropertyDef::Single(atom)) = shape.properties.get(*parent) else {
+                panic!("{path:?}: `{parent}` must be a single object property");
+            };
+            let TypeExpr::InlineObject(nested) = &atom.ty else {
+                panic!("{path:?}: `{parent}` must be an inline object");
+            };
+            shape = nested;
+        }
+        let Some(PropertyDef::Single(theme)) = shape.properties.get(*leaf) else {
+            panic!("{path:?}: theme must be a single property");
+        };
+        let suggested = theme
+            .constraints
+            .iter()
+            .find_map(|constraint| match constraint {
+                Constraint::Suggest(candidates) => Some(candidates.iter().map(|c| c.decoded.clone()).collect::<Vec<_>>()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{path:?}: theme must declare suggestions"));
+        assert_eq!(suggested, expected, "{path:?}");
+    }
+}
