@@ -140,11 +140,29 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   process, and falls back to plain `git` for other layouts or a
   `<top>\etc\git-bash.config`. `where.exe git` lists both; the first is the
   launcher.
+- **Git for Windows 2.56 moved x86_64 from `mingw64` to `ucrt64`** (the
+  hosted `windows-latest` image has it; `MSYSTEM=UCRT64`). Code that
+  hardcodes `mingw64` misses it. Some hosts also put `<top>\<prefix>\bin`
+  (the real binary) first on `PATH` instead of `<top>\cmd`; reproduce a
+  failure of that shape on a rig by prepending `<top>\mingw64\bin` to a
+  process-scoped `PATH`. `worktree::git::command()` treats that as a direct
+  entry and runs it with the inherited environment. gix-path 0.12 (gix 0.84)
+  reads `EXEPATH` only for `clangarm64`/`mingw64`/`mingw32`, so on `ucrt64`
+  it still runs `git --exec-path` and reports `<top>` as the system prefix
+  (0.14, gix 0.89+, adds `ucrt64`). gix 0.90 replaced its typed error enums
+  (`gix::discover::Error`) with `gix_error::Error`, so that upgrade is an API
+  migration across every gix consumer, not a version bump.
+- **Reproduce the hosted `ucrt64` layout without touching the rig's shared
+  install:** download `PortableGit-<version>-64-bit.7z.exe` from the
+  git-for-windows releases and run it with `-o<dir> -y`. It unpacks, then
+  hangs in its post-install `git-bash.exe` with no desktop; stop that
+  process. `<dir>\cmd` and `<dir>\ucrt64\bin` then work as the launcher and
+  direct entries.
 - **The first `gix` open in a process starts three processes** unless
   `EXEPATH` is set: gix-path runs `git --exec-path` through the launcher to
   find the system config (launcher, real `git.exe`, `conhost.exe`; cached per
   process). Git Bash sets `EXEPATH`; SSH, PowerShell, and CI shells do not, so
-  `wt` sets it to the launcher layout's `<top>` in `main`. In a short-lived
+  `wt` sets it to the installation's `<top>` in `main`. In a short-lived
   process that opens no other repository, "read it in-process" turns one
   `rev-parse` into three. Diagnose with `GIT_TRACE2_EVENT=<dir>` (one file per
   git process, with `cmd_ancestry`; a parent that wrote no trace is the

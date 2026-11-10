@@ -74,9 +74,11 @@ facts and traps, not user docs.
   (`crate::git::command()` inside the library, `worktree::git::command()`
   elsewhere). On Windows it starts the real `git.exe` behind Git for Windows'
   `cmd\git.exe` launcher with the environment the launcher would set, so
-  each call is one process creation instead of two (`lib/src/git/program.rs`;
-  the os skill's `windows.md` has the launcher facts). Counting is the
-  caller's job as before.
+  each call is one process creation instead of two; when `PATH` names
+  `<prefix>\bin\git.exe` directly it runs that with the inherited
+  environment (`lib/src/git/program.rs`, `docs/git-for-windows.md`; the os
+  skill's `windows.md` has the launcher facts). Counting is the caller's job
+  as before.
 - **Read repository metadata through `git_metadata`, not a git process.**
   Origin URL, default branch, branch-name validity, `core.sshCommand`, ref
   targets and branch tips, `branch.<name>.*`, and the common directory are
