@@ -73,7 +73,7 @@ fn md_shim_path_is_absolute_temp_dir_link() {
         shim.is_absolute(),
         "md_shim returned {shim:?}; expected an absolute path",
     );
-    // The shim lives at `<temp_dir>/dm-md-shim-<pid>/md[.exe]`. A bare
+    // The shim lives at `<temp_dir>/dm-md-shim-<key>/md[.exe]`. A bare
     // `md` is a single path segment with no parent directory.
     assert!(
         shim.parent().is_some(),

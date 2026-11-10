@@ -64,20 +64,33 @@ pub fn md_bin() -> &'static Path {
 /// hosts where symlink creation requires elevated privileges or Developer
 /// Mode (notably Windows). See [`link_or_copy`] for the fallback ladder
 /// (review-3 finding).
+///
+/// One shim directory serves every test process that runs the same built
+/// binary, `<temp>/dm-md-shim-<xxHash of md_bin's path>`, so worktrees never
+/// share one. A directory per process was never removed, and hundreds
+/// accumulated in the temp dir.
 pub fn md_shim() -> &'static str {
     static SHIM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     SHIM.get_or_init(|| {
-        let dir = std::env::temp_dir().join(format!("dm-md-shim-{}", std::process::id()));
+        let key = biscuit_hash::xx_hash(&md_bin().to_string_lossy());
+        let dir = std::env::temp_dir().join(format!("dm-md-shim-{key:016x}"));
         fs::create_dir_all(&dir).expect("create md shim dir");
         // On Windows the shim path needs the `.exe` suffix so the pane
         // resolves it as an executable. On Unix a bare `md` suffices.
-        #[cfg(windows)]
-        let link = dir.join("md.exe");
-        #[cfg(not(windows))]
-        let link = dir.join("md");
-        // Idempotent across reruns within the same pid: replace any stale link.
-        let _ = fs::remove_file(&link);
-        link_or_copy(md_bin(), &link).expect("create md shim");
+        let name = if cfg!(windows) { "md.exe" } else { "md" };
+        let link = dir.join(name);
+        if !is_same_binary(&link, md_bin()) {
+            // Staged beside the shim and renamed over it, so a test process
+            // running in parallel never finds the shim missing or half
+            // written. Windows refuses to replace a copy that is running;
+            // the check below then decides whether the one in place serves.
+            let staged = dir.join(format!("{name}.{}.tmp", std::process::id()));
+            let _ = fs::remove_file(&staged);
+            link_or_copy(md_bin(), &staged).expect("create md shim");
+            if fs::rename(&staged, &link).is_err() {
+                let _ = fs::remove_file(&staged);
+            }
+        }
         // Fail fast if the shim does not actually point at the Cargo-built
         // binary. This catches environment-specific issues (broken link,
         // stale temp dir, permission problems) before the Level 2 pane
