@@ -246,7 +246,7 @@ flowchart TD
 
 | Consumer | How it resolves | Touches disk? |
 |---|---|---|
-| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is a **graph document** (a Markdown file in the workspace file list, an open buffer, or a parsed dependency); otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer when nothing matched (never past an I/O failure) | Only when the first candidate is not a graph document |
+| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is a **graph document** (a Markdown file in the workspace file list, an open buffer, or a parsed dependency); otherwise the file resolver in candidate order, where a candidate with no file that is an open, unsaved buffer matches at its own place, before any later candidate's file (never past an I/O failure) | Only when the first candidate is not a graph document |
 | Single-target features (directive links, definition and hover, transclusion diagnostics, frontmatter navigation, the create-missing-file action) | `resolve_reference`: the first planned candidate that exists, else the first candidate as the place a new file would go | Yes, as composition does |
 | Anchor completion | The first planned candidate that is a graph document; otherwise `resolve_reference`, when it finds a Markdown file | Reads that one document if it has not been parsed |
 

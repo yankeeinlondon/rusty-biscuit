@@ -10,9 +10,11 @@
 //! - with no schema roots, or for any other form, the reference resolves
 //!   through `biscuit-file` from the referencing document's folder.
 //!
-//! A location probed while a [`buffers`] snapshot is in force selects an
-//! open buffer there when no file exists at it, so a file that exists only
-//! in the editor is found where it would be once saved.
+//! While a [`buffers`] snapshot is in force, an open buffer at a location
+//! that holds no file is a match there, in the search's own order: a file
+//! that exists only in the editor is found where it would be once saved, and
+//! wins over every later location, which is then neither admitted nor
+//! probed. A recursive (`%`) reference walks only the disk.
 //!
 //! Besides the selected file, the selection reports every location it
 //! probed, in order, and the path a missing reference would be created at,
@@ -122,7 +124,10 @@ pub fn select_schema_file(
 ) -> SchemaFileSelection {
     let trimmed = reference.trim();
     let mut probes = Probes::default();
-    let outcome = select(trimmed, base_dir, schema_roots, request_context, &mut probes);
+    let outcome = match select(trimmed, base_dir, schema_roots, request_context, None, &mut probes) {
+        Ok(outcome) => outcome,
+        Err(_) => unreachable!("an ungated selection admits every location"),
+    };
     observed::record_probes(&probes.attempted);
     SchemaFileSelection {
         reference: trimmed.to_string(),
@@ -131,120 +136,125 @@ pub fn select_schema_file(
     }
 }
 
-/// [`select_schema_file`], with `admit` asked for every location the
-/// selection may probe before any is probed: each candidate the reference
-/// plans, for a bare name each schema root's entry and the sibling beside
-/// the referencing document. Only the import engine expanding a template
-/// type's returned definition selects this way.
+/// [`select_schema_file`], with `admit` asked about each location
+/// immediately before it is probed. The search order and first-match stop
+/// are the ungated selection's, so a location the ordered search never
+/// reaches (a later schema root, a later candidate, the sibling of a name a
+/// root holds) is never asked about. Only the import engine expanding a
+/// template type's returned definition selects this way.
 ///
 /// ## Errors
 ///
-/// The first error `admit` returns, and [`SchemaError::Unresolved`] for a
-/// reference whose candidates cannot be planned; nothing is probed then.
+/// The first error `admit` returns, with the locations probed before it;
+/// nothing further is probed.
 pub(crate) fn select_schema_file_checked(
     reference: &str,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &FileResolutionContext,
     admit: &dyn Fn(&Path) -> Result<(), SchemaError>,
-) -> Result<SchemaFileSelection, SchemaError> {
+) -> Result<SchemaFileSelection, Refused> {
     let trimmed = reference.trim();
-    let planned = planned_probes(trimmed, base_dir, schema_roots, request_context)
-        .map_err(|source| SchemaError::Unresolved { reference: trimmed.to_string(), source })?;
-    for candidate in planned {
-        admit(&candidate)?;
+    let mut probes = Probes::default();
+    let outcome = select(trimmed, base_dir, schema_roots, request_context, Some(admit), &mut probes);
+    observed::record_probes(&probes.attempted);
+    match outcome {
+        Ok(outcome) => Ok(SchemaFileSelection {
+            reference: trimmed.to_string(),
+            outcome,
+            attempted: probes.attempted,
+        }),
+        Err(error) => Err(Refused { error: Box::new(error), attempted: probes.attempted }),
     }
-    let selection = select_schema_file(reference, base_dir, schema_roots, request_context);
-    // The plan and the probes agree; a location probed off the plan is
-    // judged now, so its result cannot be used if it was not allowed.
-    for probed in &selection.attempted {
-        admit(probed)?;
-    }
-    Ok(selection)
 }
 
-/// Every location [`select`] may probe for `trimmed`, without probing. A
-/// URL plans none: it is refused without a probe.
-fn planned_probes(
-    trimmed: &str,
-    base_dir: &Path,
-    schema_roots: &[PathBuf],
-    request_context: &FileResolutionContext,
-) -> Result<Vec<PathBuf>, FileReferenceError> {
-    let file_ref = FileReference::new(trimmed)?;
-    if file_ref.class().kind == FileReferenceKind::Url {
-        return Ok(Vec::new());
-    }
-    #[cfg(not(feature = "file"))]
-    {
-        let _ = (base_dir, schema_roots, request_context);
-        Ok(Vec::new())
-    }
-    #[cfg(feature = "file")]
-    {
-        let plan = |file_ref: &FileReference, context: &FileResolutionContext, anchor: &Path| {
-            let plan = file_ref.candidate_plan_with_order(context, biscuit_file::CandidatePlanOrder::Resolution)?;
-            Ok::<_, FileReferenceError>(
-                plan.into_iter()
-                    .map(|candidate| {
-                        let path = candidate.path();
-                        if path.is_absolute() { path.to_path_buf() } else { anchor.join(path) }
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        };
-        if !schema_roots.is_empty() && is_bare_name(&file_ref) {
-            let explicit = FileReference::new(&format!("./{}", file_ref.raw()))?;
-            let mut planned = Vec::new();
-            for root in schema_roots {
-                planned.extend(plan(&explicit, &request_context.for_trusted_external_cwd(root), root)?);
-            }
-            planned.push(base_dir.join(trimmed));
-            return Ok(planned);
-        }
-        plan(&file_ref, &request_context.for_cwd(base_dir), base_dir)
-    }
+/// A gated selection stopped by its admission.
+#[derive(Debug)]
+pub(crate) struct Refused {
+    /// What the admission returned.
+    pub(crate) error: Box<SchemaError>,
+    /// The locations probed before the refusal, in probe order.
+    pub(crate) attempted: Vec<PathBuf>,
 }
+
+/// The admission asked about a location before it is probed; `None` admits
+/// everything.
+type Admit<'a> = Option<&'a dyn Fn(&Path) -> Result<(), SchemaError>>;
 
 fn select(
     trimmed: &str,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &FileResolutionContext,
+    admit: Admit<'_>,
     probes: &mut Probes,
-) -> SelectionOutcome {
+) -> Result<SelectionOutcome, SchemaError> {
     let file_ref = match FileReference::new(trimmed) {
         Ok(file_ref) => file_ref,
-        Err(error) => return SelectionOutcome::Failed(SelectionFailure::Resolution(error)),
+        Err(error) => return Ok(SelectionOutcome::Failed(SelectionFailure::Resolution(error))),
     };
     if file_ref.class().kind == FileReferenceKind::Url {
-        return SelectionOutcome::Failed(SelectionFailure::Remote);
+        return Ok(SelectionOutcome::Failed(SelectionFailure::Remote));
     }
     #[cfg(not(feature = "file"))]
     {
-        let _ = (base_dir, schema_roots, request_context, probes);
-        SelectionOutcome::Failed(SelectionFailure::Resolution(FileReferenceError::ResolutionUnavailable {
+        let _ = (base_dir, schema_roots, request_context, admit, probes);
+        Ok(SelectionOutcome::Failed(SelectionFailure::Resolution(FileReferenceError::ResolutionUnavailable {
             reference: file_ref.raw().to_string(),
-        }))
+        })))
     }
     #[cfg(feature = "file")]
     {
         if !schema_roots.is_empty() && is_bare_name(&file_ref) {
-            return select_in_roots(&file_ref, trimmed, base_dir, schema_roots, request_context, probes);
+            return select_in_roots(&file_ref, trimmed, base_dir, schema_roots, request_context, admit, probes);
         }
-        let detailed = file_ref.resolve_detailed(&request_context.for_cwd(base_dir));
-        let probed: Vec<PathBuf> = detailed.probed_paths().collect();
-        probes.extend(probed.iter().cloned());
-        match detailed.into_convenience() {
+        let detailed = resolve_admitted(&file_ref, &request_context.for_cwd(base_dir), admit, probes)?;
+        Ok(match detailed.into_convenience() {
             Ok(Some(path)) => SelectionOutcome::Found(path),
-            Ok(None) => match buffers::first_open(&probed) {
-                Some(open) => SelectionOutcome::Found(open),
-                None => SelectionOutcome::Missing {
-                    bare_name: false,
-                    creation: first_planned_candidate(&file_ref, base_dir, request_context),
-                },
+            Ok(None) => SelectionOutcome::Missing {
+                bare_name: false,
+                creation: first_planned_candidate(&file_ref, base_dir, request_context),
             },
             Err(error) => SelectionOutcome::Failed(SelectionFailure::Resolution(error)),
+        })
+    }
+}
+
+/// Resolves `file_ref` in `context`, asking `admit` before each probe, and
+/// records what was probed (also when a refusal stopped the search). An open
+/// buffer at an admitted candidate holding no file matches there.
+#[cfg(feature = "file")]
+fn resolve_admitted(
+    file_ref: &FileReference,
+    context: &FileResolutionContext,
+    admit: Admit<'_>,
+    probes: &mut Probes,
+) -> Result<biscuit_file::DetailedResolution, SchemaError> {
+    let mut admitted = Vec::new();
+    let detailed = file_ref.resolve_detailed_with_presence(
+        context,
+        |path| {
+            if let Some(admit) = admit {
+                admit(path)?;
+            }
+            admitted.push(path.to_path_buf());
+            Ok(())
+        },
+        buffers::is_open,
+    );
+    match detailed {
+        Ok(detailed) => {
+            probes.extend(detailed.probed_paths());
+            Ok(detailed)
+        }
+        Err(refusal) => {
+            // A direct reference probed every location admitted before the
+            // refused one; a recursive one walks nothing until all its roots
+            // are admitted.
+            if !file_ref.class().recursive {
+                probes.extend(admitted.into_iter());
+            }
+            Err(refusal)
         }
     }
 }
@@ -259,7 +269,8 @@ fn select(
 /// environment and reads no ambient state; it crosses the trust boundary
 /// because a schema root (configuration, `~`) may lie outside the request's
 /// repository. A root that cannot be checked fails the selection rather than
-/// letting a later root's file win.
+/// letting a later root's file win. The sibling beside the referencing
+/// document is checked (and admitted) only once every root missed.
 #[cfg(feature = "file")]
 fn select_in_roots(
     file_ref: &FileReference,
@@ -267,37 +278,36 @@ fn select_in_roots(
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &FileResolutionContext,
+    admit: Admit<'_>,
     probes: &mut Probes,
-) -> SelectionOutcome {
+) -> Result<SelectionOutcome, SchemaError> {
     let explicit = match FileReference::new(&format!("./{}", file_ref.raw())) {
         Ok(explicit) => explicit,
-        Err(error) => return SelectionOutcome::Failed(SelectionFailure::Resolution(error)),
+        Err(error) => return Ok(SelectionOutcome::Failed(SelectionFailure::Resolution(error))),
     };
     for root in schema_roots {
-        let detailed = explicit.resolve_detailed(&request_context.for_trusted_external_cwd(root));
-        let probed: Vec<PathBuf> = detailed.probed_paths().collect();
-        probes.extend(probed.iter().cloned());
+        let detailed =
+            resolve_admitted(&explicit, &request_context.for_trusted_external_cwd(root), admit, probes)?;
         match detailed.into_convenience() {
-            Ok(Some(path)) => return SelectionOutcome::Found(path),
-            Ok(None) => {
-                if let Some(open) = buffers::first_open(&probed) {
-                    return SelectionOutcome::Found(open);
-                }
-            }
-            Err(error) => return SelectionOutcome::Failed(SelectionFailure::Resolution(error)),
+            Ok(Some(path)) => return Ok(SelectionOutcome::Found(path)),
+            Ok(None) => {}
+            Err(error) => return Ok(SelectionOutcome::Failed(SelectionFailure::Resolution(error))),
         }
     }
     let creation = schema_roots[0].join(trimmed);
     // The author likely meant a relative reference, not a schema-root lookup.
     let sibling = base_dir.join(trimmed);
+    if let Some(admit) = admit {
+        admit(&sibling)?;
+    }
     if sibling.is_file() {
-        return SelectionOutcome::SiblingOnly {
+        return Ok(SelectionOutcome::SiblingOnly {
             sibling,
             suggestion: format!("./{trimmed}"),
             creation,
-        };
+        });
     }
-    SelectionOutcome::Missing { bare_name: true, creation: Some(creation) }
+    Ok(SelectionOutcome::Missing { bare_name: true, creation: Some(creation) })
 }
 
 /// The first candidate `file_ref` plans from `base_dir`, without probing:

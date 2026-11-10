@@ -101,6 +101,9 @@ flowchart LR
 | `lint_suggestions` | judges literal candidates; none when a template constraint (`min`, `pattern`, …) shapes the type |
 | `is_subtype` | an `enum` or `literal` with a slot is a subtype of nothing but itself |
 
+A template type adds a pending *type*, not just pending list members; see
+[While a template type is pending](#while-a-template-type-is-pending).
+
 ```rust
 use simplified_schema::{SchemaError, SimplifiedSchema, SimplifiedSchemaError};
 
@@ -401,12 +404,54 @@ Resolved with the value `"enum(draft, published)"`, `status` is exactly the
 schema `status: enum(draft, published)` would be: the same JSON Schema and
 the same validation.
 
-**What the value must be.** A string holding a type definition (`"null"` is
-the null type, and `"[string, number]"` the union of its items), or an array
-of definitions, which is a union. `null`, a mapping, a number, or a boolean
-is refused, and so is text the type parser rejects (`""`, `[]`, an array
-holding a number); nothing is converted to text first. Each is a
-`SchemaError::SlotResult` whose `kind` is `NotATypeDefinition`, at the slot,
+### Where a template type may be written
+
+A template type stands for one property's type, so the set of top-level
+property names is always known before anything runs:
+
+| Position | Example | Allowed? |
+| --- | --- | --- |
+| a property's type, including a nested object property and a named type body | `status: "{{ t }}"`, `types: { State: "{{ t }}" }` | yes |
+| a property-level union arm, including the YAML list form | `"string \| {{ t }}"`, `["string", "{{ t }}"]` | yes; a returned union joins the surrounding one |
+| an option of a grouped union, wherever a type may be written (a union arm, an object property, a tuple element, a named type body) | `"({{ t }} \| string)[]"`, `"number \| ({{ t }} \| boolean)[]"` | yes; a returned union joins the group, and the group's `[]` makes an array of the whole group |
+| a tuple element | `tuple([number, {{ t }}])` | yes; the tuple's own rules apply after resolution |
+| a tuple spread | `tuple([number, ...{{ t }}[]])` | no |
+| a `function(...)` parameter, return type, or `narrows(...)` target | `function(parameters(x: {{ t }}); returns(boolean))` | no |
+| a `property(...)` declaration | `schema(property(kind, {{ t }}))` | no |
+| the whole `$schema` root, or an arm of a root union | `$schema: "{{ t }}"` | no |
+| a property name, a pattern key, an import path after `@`, or part of a type name | `"{{ k }}": string`, `Person@{{ p }}`, `str{{ x }}` | no |
+
+A refused position is a grammar error at the slot that names the position
+and lists the allowed ones, in this form:
+
+```text
+a `{{ … }}` slot was found in a `function(...)` parameter; template types are not
+allowed there. A template type is allowed as a property's type (including nested
+properties and named type bodies), as a property-level union arm, or as a tuple
+element, with an optional suffix such as `[]` or `(required)`.
+```
+
+For the root, a key, a pattern key, an import path, or a type name, the
+message adds the nearest rewrite: "Write the name literally; to choose a type
+from data, give the property a template type: `name: "{{ … }}"`." For the
+meta-level positions (spread, `function`, `property`), move the slot into a
+named type that an ordinary property uses instead.
+
+A root `$schema` string is refused only when it *is* a slot, alone or
+followed by a type suffix. A file reference that merely contains slot text,
+such as `{{ dir }}/schema.yaml`, is still a file reference.
+
+### What the value must be
+
+| The host returns | Result |
+| --- | --- |
+| a string holding a type definition: `"enum(draft, published)"`, `"Person@./types.yaml"`, `"null"` (the null type), `"[string, number]"` (a union in YAML list form) | that definition |
+| an array of definitions: `["string", "number"]` | a union of them |
+| `null`, a mapping, a number, or a boolean | refused: `NotATypeDefinition` ("expected a type definition (a string or an array), found …") |
+| text the type parser rejects (`""`), an empty array, or an array holding a non-string | refused: `NotATypeDefinition`, wrapping the parser's own error |
+
+Nothing is converted to text first: the number `5` is refused, not read as a
+type named `5`. Every refusal is a `SchemaError::SlotResult` at the slot,
 with `property` naming the property.
 
 **How it is merged.** The returned definition is parsed once, expanded as if
@@ -440,15 +485,24 @@ slot, and a host judges each one through `SlotHost::template_reads`:
 sequenceDiagram
     participant Library
     participant Reads as TemplateReads
-    Library->>Reads: admit(slot, Probe of each candidate location)
-    Note over Library,Reads: before anything is probed
-    Library->>Reads: observe(slot, each probe: exists or not)
+    loop each location the ordered search reaches
+        Library->>Reads: admit(slot, Probe of the location)
+        Note over Library,Reads: immediately before it is probed
+        Library->>Reads: observe(slot, the probe: exists or not)
+    end
     Library->>Reads: admit(slot, Content of the selected file)
     Note over Library,Reads: before a buffer, memo, or the disk is used
     Library->>Reads: observe(slot, bytes read, or the failure)
 ```
 
-This covers imports, transitive imports, and example files. A refusal stops
+This covers imports, transitive imports, and example files. The file is
+selected exactly as for a static reference, and only the locations that
+search reaches are asked about. For example, with schema roots `first` and
+`second` and a returned `Person@types.yaml`, the host is asked about
+`first/types.yaml` and, when that file exists, never about
+`second/types.yaml`; only when `first` lacks it is `second/types.yaml`
+asked about, and the file beside the schema only when every root lacks it.
+A refusal stops
 the resolution with `SlotResolutionError::Refused` carrying the host's code,
 and it can never turn into a schema, even where an import error would
 otherwise be skipped. A static import's ability to read a file does not
@@ -457,6 +511,47 @@ every read: with it, a returned definition that imports nothing still
 resolves. A file met only during resolution is read once per resolution,
 however many properties use it, and is listed in the result's `imports` and
 `searched`.
+
+### Template-type failures
+
+Each is a `SchemaError::SlotResult` at the authored slot whose
+`SlotResultKind` says what went wrong; the whole resolution stops and no
+schema is produced.
+
+| `SlotResultKind` | Example |
+| --- | --- |
+| `NotATypeDefinition` | the host returned `null`, `5`, or `"enum("` |
+| `NestedSlot` | the host returned `"enum(a, {{ more }})"` |
+| `LocalReference` | the host returned `"State"` or `"State@this"` |
+| `ReachableSlot` | the host returned `"Person@./types.yaml"` and `Person` holds a slot |
+| `PatternRejected` | the host returned `"string(pattern('(?=a)'))"` |
+| `SuffixConflict` | `"{{ t }}(pattern('^a'))"` and the host returned `"boolean"`, which takes no pattern |
+| `InvalidExpansion` | `"{{ t }}(non-null)"` and the host returned `"string \| null"` |
+
+A read the host's `template_reads` refuses is not one of these: it is
+`SlotResolutionError::Refused`, so a caller can tell "needs a grant" apart
+from "the data is wrong".
+
+### While a template type is pending
+
+Before resolution the property is declared, but its type is not known. Each
+operation says so instead of guessing; none treats the property as
+`unknown`, an empty object, optional, or missing:
+
+| Operation | Answer for `status: "{{ t }}(required)"` |
+| --- | --- |
+| `property("status")` | the property exists; `pending_slots()` lists the slot |
+| `requiredness()` | `Requiredness::Pending` (the suffix alone cannot decide it: the returned type may admit null). A template type inside a grouped array union (`"number \| ({{ t }} \| boolean)[]"`) is pending too, unless the rest of the definition already requires the property, because a `required` marker the returned type carries makes the property required |
+| `is_required()` | `false`; ask `requiredness()` when the difference matters |
+| `PropertyAtom::is_pending_type()` | `true` for the slot's atom |
+| nested-key and shape queries | no nested shape: nothing is invented |
+| suggestion queries and completion | no values; `pending: true` |
+| `is_subtype`, narrowing | proves nothing about the pending arm; static union arms still answer |
+| `lint_suggestions` | skips it |
+| `to_simplified_yaml()` | writes the slot and its suffix back as authored |
+| lowering, `validate_*`, `layer_under` / `layer_over` | `SchemaError::UnresolvedSlots`, as for any template |
+| `PendingSchema::declared_properties()` | includes `status` |
+| `PendingSchema::without_properties(&["status"])` | drops `status` and its slot, so a higher layer's `status` keeps the slot from ever running |
 
 ### Quote a slot that starts a YAML value
 

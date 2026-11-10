@@ -202,6 +202,14 @@ exactly one `SlotSession` and passes it to every pass:
   an unapproved template is deferred, not failed).
 - `md schema validate`, `md clean`: `SlotSession::for_context` plus one batched
   `DarkmatterSchemas::approve_slot_reads` per document before it resolves.
+  A schema *file* argument resolves too (there is no passive template mode
+  and no `slots` count): after its shape check passes,
+  `commands/schema/validate.rs::resolve_schema_file` asks one batch
+  (`schema_file_templates` → `approve_template_reads`) and then calls the
+  library's `resolve_schema_file`, which resolves the export and every
+  slot-bearing named type; a refused or failed resolution is `error: slots`
+  (exit 1), any other resolver error `error: schema`. A template type's
+  returned imports are computed targets, asked when the slot evaluates.
 
 The terminal prompt is `cli/src/approval.rs::approve_slot_reads_with_io` (testable
 over any `BufRead`/`Write`; ended input is deny-for-run). A data output never

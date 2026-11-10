@@ -138,7 +138,18 @@ its last resolution from memory: nothing a slot names is read or evaluated
 while you type. Until the first resolution arrives, completion offers the
 template's literal parts and diagnostics report `dm.schema.slot_pending`; an
 unapproved read is a `dm.schema.slot_approval_required` warning whose quick
-fixes grant it. See [Schema Slots: In the editor](./schema-slots.md#in-the-editor).
+fixes grant it.
+
+A property whose whole type is a slot (a
+[template type](./schema-slots.md#template-types), such as
+`status: "{{ … }}(required)"`) is shown as declared with its type pending:
+hover names the property and says "type pending", completion offers its key
+but no nested keys, values, defaults, or requiredness, and static union arms
+beside it keep their own completions. Once the worker resolves the template,
+the property behaves exactly as the returned type written in place would. If
+a later resolution fails, the last resolved answers are marked stale and no
+current "valid" diagnostic is published. See
+[Schema Slots: In the editor](./schema-slots.md#in-the-editor).
 
 ## YAML Documents
 

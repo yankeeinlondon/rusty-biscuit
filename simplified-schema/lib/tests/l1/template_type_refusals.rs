@@ -206,6 +206,28 @@ fn a_returned_import_of_a_slot_bearing_type_is_a_reachable_slot() {
 }
 
 #[test]
+fn a_slot_reached_through_a_tuple_position_is_a_reachable_slot() {
+    // The import in a returned tuple element or spread, and a slot in an
+    // imported tuple element or a union inside one.
+    let cases = [
+        ("tuple([T@./types.yaml])", "kind: schema\ntypes:\n  T: \"{{ x }}\"\n"),
+        ("tuple([number, ...T[]@./types.yaml])", "kind: schema\ntypes:\n  T:\n    a: \"{{ x }}\"\n"),
+        ("T@./types.yaml", "kind: schema\ntypes:\n  T: \"tuple([{{ x }}])\"\n"),
+        ("T@./types.yaml", "kind: schema\ntypes:\n  T: \"tuple([number, (string | {{ x }})?])\"\n"),
+    ];
+    for (returned, types) in cases {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_files(dir.path(), &[("schema.yaml", "$schema:\n  status: \"{{ t }}\"\n"), ("types.yaml", types)]);
+        let host = TableHost::new(vec![("t", json!(returned)), ("x", json!("number"))]);
+
+        let file = reachable_file(resolve(dir.path(), &host), "status");
+
+        assert!(same_file(&file, &dir.path().join("types.yaml")), "{returned} / {types}: related {file:?}");
+        assert!(!host.evaluated("x"), "{returned} / {types}: the imported slot is never evaluated");
+    }
+}
+
+#[test]
 fn a_slot_reached_transitively_names_the_file_that_holds_it() {
     let dir = tempfile::tempdir().expect("tempdir");
     write_files(
@@ -321,6 +343,33 @@ fn a_lookaround_pattern_key_in_a_returned_inline_object_is_refused() {
     let reason = pattern_reason(resolve_schema("  dict: \"{{ t }}\"\n", &host), "dict");
 
     assert!(reason.contains("lookaround"), "{reason}");
+}
+
+#[test]
+fn a_lookaround_pattern_in_a_returned_tuple_position_is_refused() {
+    for returned in [
+        "tuple([string(pattern('(?=a)'))])",
+        "tuple([number, ...string(pattern('(?=a)'))[]])",
+        "tuple([{ <pattern::(?=a)>: number }])",
+        "tuple([number, ...{ <pattern::(?=a)>: number }[]])",
+    ] {
+        let reason = pattern_reason(resolve_schema("  pair: \"{{ t }}\"\n", &TableHost::t(json!(returned))), "pair");
+
+        assert!(reason.contains("lookaround"), "{returned}: {reason}");
+    }
+}
+
+#[test]
+fn a_lookaround_pattern_in_an_imported_tuple_position_is_refused() {
+    for code in ["tuple([string(pattern('(?=a)'))])", "tuple([number, ...string(pattern('(?=a)'))[]])"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let types = format!("kind: schema\ntypes:\n  Code: \"{code}\"\n");
+        write_files(dir.path(), &[("schema.yaml", "$schema:\n  code: \"{{ t }}\"\n"), ("types.yaml", &types)]);
+
+        let reason = pattern_reason(resolve(dir.path(), &TableHost::t(json!("Code@./types.yaml"))), "code");
+
+        assert!(reason.contains("lookaround"), "{code}: {reason}");
+    }
 }
 
 // ── authored patterns keep their rules ──────────────────────────────────

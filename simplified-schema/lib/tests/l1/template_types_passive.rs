@@ -273,7 +273,15 @@ fn requiredness_is_pending_even_when_the_suffix_says_required() {
         assert!(parsed.has_pending_type(), "{text}");
         assert_eq!(parsed.requiredness(), Requiredness::Pending, "{text}");
     }
-    // Control: a slot nested below the top level leaves presence known.
+    // An item alternative's returned `required` marker would hoist to the
+    // property, so it is pending unless the rest already requires it.
+    for text in ["({{ t }} | string)[]", "number | ({{ t }} | boolean)[]", "(number | ({{ t }} | boolean)[])[]"] {
+        let parsed = def(text);
+        assert!(!parsed.has_pending_type(), "{text}: no top-level template type");
+        assert_eq!(parsed.requiredness(), Requiredness::Pending, "{text}");
+    }
+    // Control: a written requirement on the array, or a slot in a tuple,
+    // leaves presence known.
     assert_eq!(def("({{ t }} | string)[](required)").requiredness(), Requiredness::Required);
     assert_eq!(def("tuple([{{ t }}])").requiredness(), Requiredness::Optional);
     assert_eq!(def("string(required)").requiredness(), Requiredness::Required);
@@ -339,6 +347,21 @@ fn query_property_and_named_type_answer_from_the_authored_template() {
     let concrete = SimplifiedSchema::try_from("$schema:\n  a: string\n").unwrap();
     concrete.resolve_slots(&PanickingHost).expect("a concrete schema resolves to itself without its host");
     assert!(!schema.is_resolved(), "querying resolved nothing");
+}
+
+#[test]
+fn export_round_trips_a_template_type_in_a_nested_grouped_union() {
+    let text = "$schema:\n  status: \"number | ({{ t }} | boolean)[](min(1))\"\n  pair: \"tuple([number | ({{ u }} | boolean)[]])\"\n";
+    let schema = SimplifiedSchema::try_from(text).unwrap();
+    let exported = schema.to_simplified_yaml().expect("a template exports");
+    let document = yaml(&exported);
+    // The writer spells a property-level union as a YAML list.
+    assert_eq!(document["$schema"]["status"][1].as_str(), Some("({{ t }} | boolean)[](min(1))"), "{exported}");
+    assert_eq!(document["$schema"]["pair"].as_str(), Some("tuple([number | ({{ u }} | boolean)[]])"), "{exported}");
+    let reparsed = SimplifiedSchema::try_from(exported.as_str()).expect("the export parses again");
+    assert_eq!(reparsed.to_simplified_yaml().unwrap(), exported, "export is a fixed point");
+    let slots: Vec<&str> = reparsed.pending_slots().iter().map(|slot| slot.expression.as_str()).collect();
+    assert_eq!(slots, ["t", "u"], "both nested slots are found");
 }
 
 #[test]

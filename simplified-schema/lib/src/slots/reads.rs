@@ -7,10 +7,11 @@
 //! reads belong to the slot that returned the definition, not to the schema:
 //! a static import's ability to read a file never authorizes them. While a
 //! returned definition expands, the import engine asks
-//! [`TemplateReads::admit`] for each planned probe before anything is probed
-//! and for each file before its text is used (from the disk, an open buffer,
-//! or a parse memo), and calls [`TemplateReads::observe`] after each read or
-//! probe, also when it failed.
+//! [`TemplateReads::admit`] for each location immediately before the ordered
+//! file selection probes it (so a location the first-match search never
+//! reaches is never asked about) and for each file before its text is used
+//! (from the disk, an open buffer, or a parse memo), and calls
+//! [`TemplateReads::observe`] after each read or probe, also when it failed.
 //!
 //! The first refusal is sticky: it is recorded for the running
 //! [`with_template_reads`] scope and the resolution reports it as

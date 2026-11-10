@@ -117,7 +117,17 @@ resolver inside `resolve::buffers::with(&snapshot, || ...)`. Inside it, every
 schema source the resolver reads (a `$schema` target, a `Name@file` import,
 an `example(file)`, and a file an error's spans are re-read from) comes from
 the snapshot when it holds that path, and a probed location with no file but
-an open buffer is `Found`:
+an open buffer is `Found`.
+
+An open buffer is a match at its own place in the search order, exactly as
+a saved file there would be. For `lib/types.yaml` written in `/repo/doc/`,
+an open buffer at `/repo/doc/lib/types.yaml` (the first candidate) is
+selected even when `/repo/lib/types.yaml` (the repository fallback) exists
+on disk, and `attempted` ends at the buffer: the fallback is never probed,
+and a host that approves each probe is never asked about it. A bare name
+stops at the first schema root holding a file or a buffer the same way. A
+file on disk at a location wins there, and its buffer supplies its text. A
+recursive (`%`) reference searches only the disk.
 
 ```rust
 let mut open = SourceBuffers::default();

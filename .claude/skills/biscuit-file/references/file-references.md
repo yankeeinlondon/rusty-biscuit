@@ -193,6 +193,15 @@ failures are `Err`.
   absent nearer candidates a cache must re-check;
 - `outcome()`, `error()`, and `matched_path()`.
 
+`resolve_detailed_admitted(ctx, admit)` asks `admit` about each location just
+before it is touched (a direct candidate before containment and probe; every
+`%` root before the walk); the first `Err` stops the search.
+`resolve_detailed_with_presence(ctx, admit, present)` also asks `present`
+about an admitted, contained direct candidate probed missing (never a
+directory); `true` makes it the match (`ProbeDisposition::Matched`), so an
+editor's unsaved file wins at its own place in the order and no later
+candidate is admitted or probed. `%` never asks `present`.
+
 `DetailedOutcome` is `Matched(PathBuf)` or `Failed(ResolutionFailure)`. The
 failure vocabulary is `InvalidReference`, `MissingContext`, `NoMatch`, `Io`,
 and `UnsupportedRemote`. `NoMatch` has no underlying error; other failed

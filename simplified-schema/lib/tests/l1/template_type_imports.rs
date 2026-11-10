@@ -555,3 +555,209 @@ fn refusing_only_the_example_refuses_the_resolution() {
     assert_eq!(refused_codes(&error), vec![Some(DENIED)]);
     assert!(gate.admitted(SchemaReadKind::Content, &dir.path().join("lib/types.yaml")), "{:?}", gate.events());
 }
+
+// --- 11. Examples inside tuple positions ----------------------------------
+
+const TUPLE_ELEMENT: &str = "tuple([string(example(./ex.yaml))])";
+const TUPLE_SPREAD: &str = "tuple([number, ...string(example(./ex.yaml))[]])";
+
+/// An `ex.yaml` the example loader rejects, so a test that reads it fails.
+const INVALID_EXAMPLE: &str = "kind: example\n";
+
+/// The two places a slot is written: inline (no defining file) and in
+/// `schema.yaml`, which this writes into `dir`.
+fn tuple_schemas(dir: &Path) -> [&'static str; 2] {
+    write(dir, "schema.yaml", "$schema:\n  who: \"{{ t }}\"\n");
+    ["who: \"{{ t }}\"\n", "./schema.yaml"]
+}
+
+#[test]
+fn an_example_in_a_returned_tuple_position_is_gated_and_observed() {
+    for returned in [TUPLE_ELEMENT, TUPLE_SPREAD] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write(dir.path(), "ex.yaml", VALID_EXAMPLE);
+        for schema in tuple_schemas(dir.path()) {
+            let gate = Gate::denying(&[]);
+            let host = Host::new(gate.clone(), &[("t", returned)]);
+
+            let (result, _) = resolve_template(dir.path(), schema, &host);
+
+            let resolved = result.unwrap_or_else(|error| panic!("{returned} in {schema}: {error:?}"));
+            let example = normalize(&dir.path().join("ex.yaml"));
+            let events = gate.events();
+            let probe = events.iter().position(|e| *e == GateEvent::Admit(SchemaReadKind::Probe, example.clone()));
+            let content = events.iter().position(|e| *e == GateEvent::Admit(SchemaReadKind::Content, example.clone()));
+            assert!(matches!((probe, content), (Some(p), Some(c)) if p < c), "{returned} in {schema}: {events:?}");
+            assert!(
+                gate.observed().contains(&(SchemaReadKind::Content, example.clone(), true, true)),
+                "{returned} in {schema}: the example's content read is observed: {events:?}"
+            );
+            assert!(resolved.examples.contains(&example), "{returned} in {schema}: {:?}", resolved.examples);
+        }
+    }
+}
+
+#[test]
+fn refusing_an_example_in_a_returned_tuple_position_refuses_the_resolution() {
+    for returned in [TUPLE_ELEMENT, TUPLE_SPREAD] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        write(dir.path(), "ex.yaml", VALID_EXAMPLE);
+        for schema in tuple_schemas(dir.path()) {
+            let gate = Gate::denying(&["ex.yaml"]);
+            let host = Host::new(gate.clone(), &[("t", returned)]);
+
+            let (result, observed) = resolve_template(dir.path(), schema, &host);
+
+            let error = result.expect_err("the example's read is refused");
+            assert_eq!(refused_codes(&error), vec![Some(DENIED)], "{returned} in {schema}");
+            let example = normalize(&dir.path().join("ex.yaml"));
+            assert!(
+                !gate.admitted(SchemaReadKind::Content, &example),
+                "{returned} in {schema}: refused at its probe: {:?}",
+                gate.events()
+            );
+            #[cfg(feature = "work-counters")]
+            assert!(!observed.opened.contains(&example), "{returned} in {schema}: opened {:?}", observed.opened);
+            #[cfg(not(feature = "work-counters"))]
+            let _ = observed;
+        }
+    }
+}
+
+/// `lib/types.yaml` holding `Pair` (an element example), `Rest` (a spread
+/// example), and `Tree` (a recursive type, stored once, whose tuple holds
+/// one), a valid `lib/ex.yaml` beside it, and an invalid outer `ex.yaml` that
+/// only a wrong base directory would read.
+fn imported_tuple_fixture(dir: &Path) {
+    write(
+        dir,
+        "lib/types.yaml",
+        &format!(
+            "kind: schema\ntypes:\n  Pair: \"{TUPLE_ELEMENT}\"\n  Rest: \"{TUPLE_SPREAD}\"\n  \
+             Tree:\n    leaf: \"{TUPLE_SPREAD}\"\n    kids: Tree[]@this\n"
+        ),
+    );
+    write(dir, "lib/ex.yaml", VALID_EXAMPLE);
+    write(dir, "ex.yaml", INVALID_EXAMPLE);
+}
+
+#[test]
+fn an_example_in_an_imported_tuple_position_reads_from_the_defining_file() {
+    for name in ["Pair", "Rest", "Tree"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        imported_tuple_fixture(dir.path());
+        let reference = format!("{name}@./lib/types.yaml");
+        let gate = Gate::denying(&[]);
+        let host = Host::new(gate.clone(), &[("t", reference.as_str())]);
+
+        let (result, _) = resolve_template(dir.path(), "who: \"{{ t }}\"\n", &host);
+
+        let resolved = result.unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        let example = normalize(&dir.path().join("lib/ex.yaml"));
+        assert_eq!(resolved.examples, vec![example.clone()], "{name}");
+        assert!(gate.admitted(SchemaReadKind::Content, &example), "{name}: {:?}", gate.events());
+        assert!(!gate.admitted(SchemaReadKind::Content, &normalize(&dir.path().join("ex.yaml"))), "{name}");
+        // The same import written statically reads the same example.
+        let expected = resolve_static(dir.path(), &format!("who: {reference}\n")).expect("static resolves");
+        assert_eq!(resolved.json_schema, expected.json_schema, "{name}");
+        assert_eq!(expected.examples, vec![example], "{name}: the static import keeps its base too");
+    }
+}
+
+#[test]
+fn refusing_an_example_in_an_imported_tuple_position_refuses_the_resolution() {
+    for name in ["Pair", "Rest", "Tree"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        imported_tuple_fixture(dir.path());
+        let reference = format!("{name}@./lib/types.yaml");
+        let gate = Gate::denying(&["ex.yaml"]);
+        let host = Host::new(gate.clone(), &[("t", reference.as_str())]);
+
+        let (result, _) = resolve_template(dir.path(), "who: \"{{ t }}\"\n", &host);
+
+        let error = result.expect_err("the example's read is refused");
+        assert_eq!(refused_codes(&error), vec![Some(DENIED)], "{name}");
+        assert!(gate.admitted(SchemaReadKind::Probe, &dir.path().join("lib/ex.yaml")), "{name}: {:?}", gate.events());
+    }
+}
+
+#[test]
+fn an_example_in_a_transitively_imported_tuple_position_is_gated_from_its_own_file() {
+    for name in ["Pair", "Rest"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        imported_tuple_fixture(dir.path());
+        write(dir.path(), "outer.yaml", &format!("kind: schema\ntypes:\n  Outer:\n    inner: {name}@./lib/types.yaml\n"));
+        let example = normalize(&dir.path().join("lib/ex.yaml"));
+
+        let gate = Gate::denying(&[]);
+        let host = Host::new(gate.clone(), &[("t", "Outer@./outer.yaml")]);
+        let (result, _) = resolve_template(dir.path(), "who: \"{{ t }}\"\n", &host);
+        let resolved = result.unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        assert_eq!(resolved.examples, vec![example.clone()], "{name}");
+        assert!(gate.observed().contains(&(SchemaReadKind::Content, example, true, true)), "{name}: {:?}", gate.events());
+
+        let gate = Gate::denying(&["ex.yaml"]);
+        let host = Host::new(gate.clone(), &[("t", "Outer@./outer.yaml")]);
+        let (result, _) = resolve_template(dir.path(), "who: \"{{ t }}\"\n", &host);
+        assert_eq!(refused_codes(&result.expect_err("refused")), vec![Some(DENIED)], "{name}");
+    }
+}
+
+/// Every other position a returned or imported definition holds an example
+/// in is gated the same way: refusing only `ex.yaml` refuses the resolution.
+#[test]
+fn an_example_in_every_returned_or_imported_position_is_gated() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write(dir.path(), "ex.yaml", VALID_EXAMPLE);
+    write(dir.path(), "lib/ex.yaml", VALID_EXAMPLE);
+    write(
+        dir.path(),
+        "lib/types.yaml",
+        "kind: schema\ntypes:\n  Scalar: \"string(example(./ex.yaml))\"\n  List: \"string[](example(./ex.yaml))\"\n  \
+         Obj:\n    a: \"string(example(./ex.yaml))\"\n  Arm: \"number | string(example(./ex.yaml))\"\n  \
+         Outer:\n    inner: Keys@./deep.yaml\n",
+    );
+    write(dir.path(), "lib/deep.yaml", "kind: schema\ntypes:\n  Keys:\n    \"<pattern::a>\": \"string(example(./ex.yaml))\"\n");
+    let returned = [
+        "string(example(./ex.yaml))",
+        "string[](example(./ex.yaml))",
+        "{ a: string(example(./ex.yaml)) }",
+        "number | string(example(./ex.yaml))",
+        "{ <pattern::a>: string(example(./ex.yaml)) }",
+        "Scalar@./lib/types.yaml",
+        "List@./lib/types.yaml",
+        "Obj@./lib/types.yaml",
+        "Arm@./lib/types.yaml",
+        "Outer@./lib/types.yaml",
+    ];
+    for value in returned {
+        let gate = Gate::denying(&["ex.yaml"]);
+        let host = Host::new(gate.clone(), &[("t", value)]);
+
+        let (result, _) = resolve_template(dir.path(), "who: \"{{ t }}\"\n", &host);
+
+        assert_eq!(refused_codes(&result.expect_err("refused")), vec![Some(DENIED)], "{value}");
+    }
+}
+
+/// A function signature and a `property(...)` declaration never lower an
+/// example: the returned definition is refused without reading it.
+#[test]
+fn an_example_a_returned_definition_cannot_lower_is_never_read() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write(dir.path(), "ex.yaml", VALID_EXAMPLE);
+    for value in [
+        "function(parameters(a: string(example(./ex.yaml))); returns(string))",
+        "function(parameters(a: string); returns(string(example(./ex.yaml))))",
+        "schema(property(kind, string(example(./ex.yaml))))",
+    ] {
+        let gate = Gate::denying(&[]);
+        let host = Host::new(gate.clone(), &[("t", value)]);
+
+        let (result, _) = resolve_template(dir.path(), "who: \"{{ t }}\"\n", &host);
+
+        let error = result.expect_err("the returned definition is refused");
+        assert!(!matches!(error, SlotResolutionError::Refused(_)), "{value}: {error:?}");
+        assert!(!gate.admitted(SchemaReadKind::Content, &dir.path().join("ex.yaml")), "{value}: {:?}", gate.events());
+    }
+}

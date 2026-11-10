@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use simplified_schema::slots::{
     RefuseTemplateReads, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, SlotResolutionError, TemplateReads,
 };
-use simplified_schema::{SchemaError, SimplifiedSchema, Slot, SlotRelated, SlotResultKind};
+use simplified_schema::{Requiredness, SchemaError, SimplifiedSchema, Slot, SlotRelated, SlotResultKind};
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -438,4 +438,192 @@ fn named_type_template_used_twice_is_evaluated_once() {
     assert!(resolved.validate_strict(&json!({ "first": "on", "second": "off" })).is_ok());
     assert!(resolved.validate_strict(&json!({ "first": "dim" })).is_err(), "first has the type");
     assert!(resolved.validate_strict(&json!({ "second": "dim" })).is_err(), "second has the type");
+}
+
+// ── nested grouped unions ────────────────────────────────────────────────
+//
+// A grouped union holding a template type is substituted at every depth a
+// type may be written, not only as a property's whole type. Each case is the
+// template answered with `string` against the same text with `string`
+// written in place of the slot.
+
+/// The status template `body` (with `{{ t }}` for the slot) answered with
+/// `string`, against the same document with `string` written there.
+#[track_caller]
+fn assert_string_equivalent(body: &str, valid: &Value, invalid: &Value) {
+    let template = document(body);
+    let concrete = document(&body.replace("{{ t }}", "string"));
+    assert_equivalent(&template, &[("t", json!("string"))], &concrete, valid, invalid);
+    let resolved = resolve(&template, &Answers::new(&[("t", json!("string"))])).expect("resolves");
+    assert!(resolved.is_resolved(), "lowering receives a fully substituted type: {body}");
+}
+
+#[test]
+fn bare_slot_equals_static() {
+    assert_string_equivalent("status: \"{{ t }}\"", &json!({ "status": "x" }), &json!({ "status": 1 }));
+}
+
+#[test]
+fn bare_slot_with_array_suffix_equals_static() {
+    assert_string_equivalent("status: \"{{ t }}[]\"", &json!({ "status": ["x"] }), &json!({ "status": [1] }));
+}
+
+#[test]
+fn whole_property_grouped_union_equals_static() {
+    assert_string_equivalent(
+        "status: \"({{ t }} | boolean)[]\"",
+        &json!({ "status": ["x", true] }),
+        &json!({ "status": [1] }),
+    );
+}
+
+#[test]
+fn direct_union_arm_equals_static() {
+    assert_string_equivalent("status: \"number | {{ t }}\"", &json!({ "status": "x" }), &json!({ "status": true }));
+}
+
+#[test]
+fn grouped_union_as_a_union_arm_equals_static() {
+    assert_string_equivalent(
+        "status: \"number | ({{ t }} | boolean)[]\"",
+        &json!({ "status": ["x", false] }),
+        &json!({ "status": [1] }),
+    );
+}
+
+#[test]
+fn grouped_union_inside_a_nested_group_equals_static() {
+    assert_string_equivalent(
+        "status: \"(number | ({{ t }} | boolean)[])[]\"",
+        &json!({ "status": [1, ["x", true]] }),
+        &json!({ "status": [[1]] }),
+    );
+}
+
+#[test]
+fn ordinary_object_property_equals_static() {
+    assert_string_equivalent("status: \"{ a: {{ t }} }\"", &json!({ "status": { "a": "x" } }), &json!({ "status": { "a": 1 } }));
+}
+
+#[test]
+fn grouped_union_arm_in_an_object_property_equals_static() {
+    assert_string_equivalent(
+        "status: \"{ a: number | ({{ t }} | boolean)[] }\"",
+        &json!({ "status": { "a": ["x"] } }),
+        &json!({ "status": { "a": [1] } }),
+    );
+}
+
+#[test]
+fn grouped_union_arm_in_a_pattern_key_property_equals_static() {
+    assert_string_equivalent(
+        "status:\n  \"<string>\": \"number | ({{ t }} | boolean)[]\"",
+        &json!({ "status": { "k": ["x"] } }),
+        &json!({ "status": { "k": [1] } }),
+    );
+}
+
+#[test]
+fn direct_tuple_element_equals_static() {
+    assert_string_equivalent("status: \"tuple([number, {{ t }}])\"", &json!({ "status": [1, "x"] }), &json!({ "status": [1, 2] }));
+}
+
+#[test]
+fn grouped_union_arm_in_a_tuple_element_equals_static() {
+    assert_string_equivalent(
+        "status: \"tuple([number | ({{ t }} | boolean)[]])\"",
+        &json!({ "status": [["x"]] }),
+        &json!({ "status": [[1]] }),
+    );
+}
+
+#[test]
+fn grouped_union_arm_in_a_named_type_used_twice_equals_static() {
+    let body = "kind: schema\n$schema:\n  first: State@this\n  second: State@this\ntypes:\n  State: \"number | ({{ t }} | boolean)[]\"\n";
+    let host = Answers::new(&[("t", json!("string"))]);
+    let resolved = resolve(body, &host).expect("resolves");
+    assert!(resolved.is_resolved());
+    assert_eq!(host.calls.get(), 1, "one slot, one evaluation");
+    let expected = parse(&body.replace("{{ t }}", "string"));
+    assert_eq!(json_schema(&resolved), json_schema(&expected));
+    for schema in [&resolved, &expected] {
+        assert!(schema.validate_strict(&json!({ "first": ["x"], "second": 1 })).is_ok());
+        assert!(schema.validate_strict(&json!({ "first": [1] })).is_err(), "first has the type");
+        assert!(schema.validate_strict(&json!({ "second": [1] })).is_err(), "second has the type");
+    }
+}
+
+#[test]
+fn nested_grouped_union_keeps_its_array_constraints() {
+    assert_string_equivalent(
+        "status: \"number | ({{ t }} | boolean)[](min(2))\"",
+        &json!({ "status": ["x", true] }),
+        &json!({ "status": ["x"] }),
+    );
+}
+
+#[test]
+fn nested_grouped_union_takes_a_returned_null_arm_as_an_item() {
+    assert_equivalent(
+        &document("status: \"number | ({{ t }} | boolean)[]\""),
+        &[("t", json!("string | null"))],
+        &document("status: \"number | (string | null | boolean)[]\""),
+        &json!({ "status": ["x", null] }),
+        &json!({ "status": [1] }),
+    );
+}
+
+#[test]
+fn nested_grouped_union_hoists_a_postfixed_returned_union_marker() {
+    // The suffix `(required)` on a slot answered with a union is a postfixed
+    // union arm: its marker hoists to the group, as `U(required)` does.
+    let template = "kind: schema\n$schema:\n  status: \"number | ({{ t }}(required) | boolean)[]\"\n";
+    let concrete = "kind: schema\n$schema:\n  status: \"number | (U(required) | boolean)[]\"\ntypes:\n  U: string | null\n";
+    assert_equivalent(template, &[("t", json!("string | null"))], concrete, &json!({ "status": ["x", null] }), &json!({}));
+    let resolved = resolve(template, &Answers::new(&[("t", json!("string | null"))])).expect("resolves");
+    assert_eq!(required(&resolved), vec!["status".to_owned()]);
+}
+
+#[test]
+fn nested_template_constraint_resolves() {
+    assert_equivalent(
+        &document("status: \"number | (enum({{ e }}) | boolean)[]\""),
+        &[("e", json!(["a", "b"]))],
+        &document("status: \"number | (enum(a, b) | boolean)[]\""),
+        &json!({ "status": ["a", true] }),
+        &json!({ "status": ["c"] }),
+    );
+}
+
+#[test]
+fn non_null_after_nested_substitution_is_a_located_invalid_expansion() {
+    // The static `null | (string(non-null) | boolean)[]` is a grammar error;
+    // the template is not, until the returned `non-null` joins the group.
+    assert!(SimplifiedSchema::try_from(document("status: \"null | (string(non-null) | boolean)[]\"").as_str()).is_err());
+    let host = Answers::new(&[("t", json!("string(non-null)"))]);
+    let (slot, kind, property, _) = slot_result(resolve(&document("status: \"null | ({{ t }} | boolean)[]\""), &host));
+    assert_eq!(slot.expression, "t");
+    assert_eq!(property.as_deref(), Some("status"));
+    assert!(matches!(kind, SlotResultKind::InvalidExpansion(_)), "{kind:?}");
+}
+
+#[test]
+fn a_slot_in_an_item_union_leaves_presence_pending_until_it_resolves() {
+    // The returned type's `required` marker hoists from an item alternative
+    // to the property, exactly as the static text's does.
+    for body in ["status: \"({{ t }} | boolean)[]\"", "status: \"number | ({{ t }} | boolean)[]\""] {
+        let template = parse(&document(body));
+        let status = template.property("status").expect("status is declared");
+        assert_eq!(status.requiredness(), Requiredness::Pending, "{body}");
+        assert!(!status.is_required(), "{body}: the compatibility boolean is false while pending");
+        assert_equivalent(
+            &document(body),
+            &[("t", json!("string(required)"))],
+            &document(&body.replace("{{ t }}", "string(required)")),
+            &json!({ "status": ["x"] }),
+            &json!({}),
+        );
+        let resolved = resolve(&document(body), &Answers::new(&[("t", json!("string(required)"))])).expect("resolves");
+        assert_eq!(resolved.property("status").expect("declared").requiredness(), Requiredness::Required, "{body}");
+    }
 }

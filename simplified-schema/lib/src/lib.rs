@@ -16,7 +16,7 @@
 //!   ([`claimed_values`]);
 //! - [`coercion`] and [`coerce`]: the conversion engine and frontmatter
 //!   conversion against a JSON Schema;
-//! - [`validate`], [`format`], [`file_match`]: compiled validators, the
+//! - [`validate`], [`format`](mod@format), [`file_match`]: compiled validators, the
 //!   `darkmatter-*` formats, and `x-darkmatter-*` keywords;
 //! - [`prepared`] and [`outcome`]: a schema compiled once ([`Prepared`]) and
 //!   its strict and soft validation, which return

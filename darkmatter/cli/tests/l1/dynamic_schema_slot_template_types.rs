@@ -3,7 +3,7 @@
 //! file on its own, and a document naming it, with and without
 //! `<prop>=<value>` assignments.
 //!
-//! Each test builds a Git repository at the fixture `cwd` holding
+//! Each test but the constant-slot one builds a Git repository at the fixture `cwd` holding
 //! `schemas/schema.yaml`, whose `status` and `label` types each come from a
 //! data file beside it, and `docs/doc.md`, which names the schema. Committed
 //! files get the automatic grant; a cell then changes one thing (a dirty or
@@ -212,4 +212,22 @@ fn an_assignment_with_an_ungranted_template_type_read_is_unavailable() {
     dirty_status(&fixture);
     let report = report(&validate(&fixture, &[DOCUMENT_FILE, "status=published"]), 1);
     assert_unavailable(&fixture, &report["files"][0], APPROVAL_REQUIRED, SCHEMA_FILE, 3);
+}
+
+/// A grouped union holding a template type, written as an arm of another
+/// union, resolves like the static text with `string` in place of the slot.
+/// The slot is a constant, so no read and no grant is involved.
+#[test]
+fn a_schema_file_with_a_template_type_in_a_nested_grouped_union_is_valid() {
+    let fixture = CliProcessFixture::named("template-types-nested-grouped-union");
+    let template = "kind: schema\n$schema:\n  status: \"number | ({{ 'string' }} | boolean)[]\"\n";
+    fixture.write_file("cwd/case.yaml", template);
+    fixture.write_file("cwd/static.yaml", &template.replace("{{ 'string' }}", "string"));
+    for file in ["case.yaml", "static.yaml"] {
+        let report = report(&validate(&fixture, &[file]), 0);
+        let record = &report["files"][0];
+        assert_eq!(record["valid"], true, "{file}: {report:#}");
+        assert!(record.get("error").is_none(), "{file}: {report:#}");
+        assert!(diagnostic_codes(record).is_empty(), "{file}: {report:#}");
+    }
 }

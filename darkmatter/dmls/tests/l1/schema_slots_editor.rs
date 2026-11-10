@@ -1326,6 +1326,42 @@ mod template_types {
         }
     }
 
+    /// A template type in a grouped union nested as a union arm is pending
+    /// in hover and diagnostics, then resolved and judged like a top-level
+    /// one (before nested grouped unions were substituted, resolution
+    /// failed with one slot unresolved).
+    #[test]
+    fn a_template_type_in_a_nested_grouped_union_is_pending_then_resolved() {
+        let workspace = LspWorkspace::new();
+        let root = granted_workspace(&workspace, "enum(draft, published)");
+        let doc = root.join("doc.md");
+        let text = "---\n$schema:\n  status: \"number | ({{ load_data('./status.yaml', '{ type: string }').type }} | boolean)[]\"\nstatus: [bogus]\n---\n";
+        let mut fixture = LspFixture::start_with_slot_gate(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        open(&fixture, &doc, text, 1);
+        fixture.wait_for_event(dmls::StartupEvent::SlotPreparing);
+
+        // Hover describes a property-level union by its first arm; the
+        // pending slot shows as the schema's pending note, never a presence.
+        let hover = hover_text(&mut fixture, &doc, 3, 1);
+        assert!(hover.contains(PENDING_NOTE) && !hover.contains("Required"), "{hover}");
+        let pending = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(!with_code(&pending, "dm.schema.slot_pending").is_empty(), "{pending:#?}");
+
+        fixture.release_slot_job();
+        assert!(fixture.wait_for_slot_prepared());
+        fixture.flush_server();
+        let resolved = fixture.wait_for_diagnostics(&uri(&doc));
+        assert!(with_code(&resolved, "dm.schema.slot_pending").is_empty(), "{resolved:#?}");
+        assert!(with_code(&resolved, "dm.schema.slot_failed").is_empty(), "{resolved:#?}");
+        let judged = resolved
+            .iter()
+            .any(|diagnostic| diagnostic["data"]["instance_path"].as_str().is_some_and(|path| path.starts_with("/status")));
+        assert!(judged, "bogus is judged by the resolved type: {resolved:#?}");
+        let hover = hover_text(&mut fixture, &doc, 3, 1);
+        assert!(!hover.contains(PENDING_NOTE), "{hover}");
+    }
+
     #[test]
     fn a_newer_edit_cancels_the_template_type_job_in_flight() {
         let workspace = LspWorkspace::new();
@@ -1431,6 +1467,32 @@ mod template_types {
         assert!(codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")), "{diagnostics:#?}");
         assert!(verdict_at(&diagnostics, "/owner/role").is_none(), "the unsaved import is read: {diagnostics:#?}");
         assert_eq!(std::fs::read_to_string(&types).unwrap(), disk, "the disk file is untouched");
+    }
+
+    /// An unsaved buffer at an implicit relative import's first candidate
+    /// (beside the document) is its file: the import reads it with a grant
+    /// for the document's folder alone, never reaching the repository-root
+    /// file after it.
+    #[test]
+    fn a_new_unsaved_file_at_a_returned_import_first_candidate_is_its_file() {
+        let workspace = LspWorkspace::new();
+        let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+        git(&root, &["init", "-q"]);
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        std::fs::create_dir_all(root.join("doc")).unwrap();
+        std::fs::write(root.join("lib/types.yaml"), types_file("admin")).unwrap();
+        allow_dir_persisted(&root.join("doc"));
+        let doc = root.join("doc/doc.md");
+        let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+        fixture.initialize(params(&root));
+        open(&fixture, &root.join("doc/lib/types.yaml"), &types_file("admin, guest"), 1);
+
+        let diagnostics =
+            open_and_resolve(&mut fixture, &doc, &IMPORT_DOC.replace("Person@./types.yaml", "Person@lib/types.yaml"));
+
+        assert!(codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")), "{diagnostics:#?}");
+        assert!(verdict_at(&diagnostics, "/owner/role").is_none(), "the unsaved file admits guest: {diagnostics:#?}");
+        assert!(!root.join("doc/lib/types.yaml").exists(), "the buffer is never saved");
     }
 
     #[test]

@@ -3399,9 +3399,11 @@ fn named_type_file_path(
     selection.into_result()
 }
 
-/// [`named_type_file_path`] for a template type's returned definition: every
-/// location the selection may probe is admitted by `gate` first, and each
-/// probe is reported to it, found or not.
+/// [`named_type_file_path`] for a template type's returned definition: `gate`
+/// admits each location immediately before the ordered selection probes it,
+/// so a location the first-match search never reaches is never asked about,
+/// and each probe is reported to it afterward, found or not, also when a
+/// later refusal stopped the search.
 fn gated_schema_file_path(
     gate: &crate::slots::reads::ReadGate,
     reference: &str,
@@ -3411,30 +3413,48 @@ fn gated_schema_file_path(
     searched: &mut BTreeSet<PathBuf>,
 ) -> Result<PathBuf, SchemaError> {
     let admit = |path: &Path| gate.admit(path, crate::slots::SchemaReadKind::Probe);
-    let selection = select::select_schema_file_checked(reference, base_dir, schema_roots, request_context, &admit)?;
+    let selection = match select::select_schema_file_checked(reference, base_dir, schema_roots, request_context, &admit) {
+        Ok(selection) => selection,
+        Err(refused) => {
+            for probed in &refused.attempted {
+                gate.observe(probed, crate::slots::SchemaReadKind::Probe, None, false);
+            }
+            searched.extend(refused.attempted);
+            return Err(*refused.error);
+        }
+    };
     let found = match &selection.outcome {
         SelectionOutcome::Found(path) => Some(path.as_path()),
-        SelectionOutcome::SiblingOnly { sibling, .. } => Some(sibling.as_path()),
-        SelectionOutcome::Missing { .. } | SelectionOutcome::Failed(_) => None,
+        SelectionOutcome::SiblingOnly { .. } | SelectionOutcome::Missing { .. } | SelectionOutcome::Failed(_) => None,
     };
     for probed in &selection.attempted {
         gate.observe(probed, crate::slots::SchemaReadKind::Probe, None, Some(probed.as_path()) == found);
     }
-    if let SelectionOutcome::SiblingOnly { sibling, .. } = &selection.outcome {
-        gate.observe(sibling, crate::slots::SchemaReadKind::Probe, None, true);
+    // The sibling beside the referencing document is checked only after
+    // every schema root missed a bare name.
+    match &selection.outcome {
+        SelectionOutcome::SiblingOnly { sibling, .. } => {
+            gate.observe(sibling, crate::slots::SchemaReadKind::Probe, None, true);
+        }
+        SelectionOutcome::Missing { bare_name: true, .. } => {
+            gate.observe(&base_dir.join(reference.trim()), crate::slots::SchemaReadKind::Probe, None, false);
+        }
+        _ => {}
     }
     searched.extend(selection.attempted.iter().cloned());
     selection.into_result()
 }
 
 /// Rewrites every `example(...)` reference in `atom`, including those of
-/// nested inline-object properties and union arms, to the path it resolves to from
-/// `base_dir` (see [`ImportEngine::rehome_examples`]). A path that is not
+/// nested inline-object properties, union arms, tuple elements, and the tuple
+/// spread, to the path it resolves to from `base_dir` (see
+/// [`ImportEngine::rehome_examples`]). A path that is not
 /// valid UTF-8 cannot be spelled as a reference and is left as authored.
 ///
-/// With a `gate` (a template type's returned definition), every location the
-/// selection may probe and the selected file are admitted first, and the
-/// file is read and reported here; the read at lowering is the same path.
+/// With a `gate` (a template type's returned definition), each location is
+/// admitted immediately before the selection probes it and the selected file
+/// before it is read and reported here; the read at lowering is the same
+/// path.
 pub(crate) fn rehome_atom_examples(
     atom: &mut PropertyAtom,
     base_dir: &Path,
@@ -3469,28 +3489,35 @@ pub(crate) fn rehome_atom_examples(
     let mut rehome = |atom: &mut PropertyAtom| {
         rehome_atom_examples(atom, base_dir, this_file, schema_roots, request_context, searched, gate)
     };
-    if let TypeExpr::Union(arms) = &mut atom.ty {
-        // An arm inlined from another file was already rehomed there; its
-        // absolute paths resolve to themselves.
-        for arm in arms {
-            rehome(arm)?;
+    fn def_atoms(def: &mut PropertyDef) -> &mut [PropertyAtom] {
+        match def {
+            PropertyDef::Single(inner) => std::slice::from_mut(inner),
+            PropertyDef::Union(arms) => arms,
         }
     }
-    if let TypeExpr::InlineObject(shape) = &mut atom.ty {
-        let defs = shape
+    match &mut atom.ty {
+        // An arm inlined from another file was already rehomed there; its
+        // absolute paths resolve to themselves.
+        TypeExpr::Union(arms) => arms.iter_mut().try_for_each(&mut rehome)?,
+        TypeExpr::InlineObject(shape) => shape
             .properties
             .values_mut()
-            .chain(shape.pattern_keys.iter_mut().map(|pattern| &mut pattern.def));
-        for def in defs {
-            match def {
-                PropertyDef::Single(inner) => rehome(inner)?,
-                PropertyDef::Union(arms) => {
-                    for inner in arms {
-                        rehome(inner)?;
-                    }
-                }
-            }
-        }
+            .chain(shape.pattern_keys.iter_mut().map(|pattern| &mut pattern.def))
+            .flat_map(def_atoms)
+            .try_for_each(&mut rehome)?,
+        TypeExpr::Tuple(tuple) => tuple
+            .elements
+            .iter_mut()
+            .flat_map(|element| def_atoms(&mut element.def))
+            .chain(tuple.spread.as_deref_mut())
+            .try_for_each(&mut rehome)?,
+        // A signature never lowers, so its parameters' examples are never
+        // loaded; a function's own `example(file)` is in `constraints` above.
+        TypeExpr::Primitive(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Ref(_)
+        | TypeExpr::Function(_)
+        | TypeExpr::Slot(_) => {}
     }
     Ok(())
 }

@@ -206,10 +206,11 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   (unversioned) warning before any open; wait for the versioned one.
 - The graph takes `&dyn DocumentContexts` (`WorkspaceIndex::new(contexts)`):
   `arena::locate` takes the first planned candidate when it is a graph
-  document (listed or open; no probe), else asks
-  `context::resolve_reference`, else, only on a clean `NoMatch`, a later
-  graph-document candidate (an unsaved buffer); an `Io` probe failure stays a
-  broken path. An existing file outside the list is `EdgeTarget::File`, never
+  document (listed or open; no probe), else resolves through
+  `FileReference::resolve_detailed_with_presence` with graph documents as the
+  presence predicate, so a candidate holding no file that is a graph document
+  (an unsaved buffer) matches at its own place in the order, before any later
+  candidate's file; an `Io` probe failure stays a broken path. An existing file outside the list is `EdgeTarget::File`, never
   a broken link; the list decides graph documents, never existence. A
   Markdown `File` target an open document needs (`prepare_targets`, hover,
   definition, anchor completion) is parsed as a dependency

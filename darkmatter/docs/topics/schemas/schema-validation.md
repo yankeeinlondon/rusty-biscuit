@@ -31,13 +31,21 @@ diagnostics instead of a verdict, and `md schema validate` exits `1` with the
 file's check unavailable (`error: slots`). A schema missing its loaded values
 never makes a document look valid.
 
-To check a template itself without running any slot, validate the schema
-file:
+Validating the schema file itself resolves it too, through the same grant
+gate: every slot in the file runs (template constraints and template types,
+including slots in named types the file's `$schema` does not use), and the
+resolved schema is then checked. There is no mode that passes a template
+without running it, because a template's slots decide whether it is valid:
 
 ```sh
 md schema validate schemas/provider.yaml
-# checks the template's syntax and shape, reports its slot count, resolves nothing
+# resolves every slot in provider.yaml, then checks the resolved schema
 ```
+
+A template type whose data returns something that is not a type definition,
+a refused or unapproved read, or a slot that fails makes the check
+unavailable: exit `1`, `error: slots`. See
+[`md schema validate`](../../cli/schema.md).
 
 Which commands resolve, and with which grants, is in
 [When a slot is evaluated](./schema-slots.md#when-a-slot-is-evaluated); the

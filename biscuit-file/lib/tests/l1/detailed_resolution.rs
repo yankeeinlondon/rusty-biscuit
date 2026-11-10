@@ -520,3 +520,177 @@ fn probed_paths_omits_recursive_search_roots() {
     assert!(!detailed.candidates().is_empty());
     assert_eq!(detailed.probed_paths().count(), 0, "search roots are not file probes");
 }
+
+/// `resolve_detailed_admitted` asks about each candidate immediately before
+/// probing it and stops at the first match, so a later candidate is never
+/// asked about; the outcome equals `resolve_detailed`'s.
+#[test]
+fn admitted_resolution_asks_only_about_candidates_the_search_reaches() {
+    let tmp = TempDir::new().unwrap();
+    let repo = canonical(tmp.path());
+    let base = repo.join("pkg");
+    fs::create_dir_all(&base).unwrap();
+    let base = canonical(&base);
+    fs::write(base.join("notes.md"), b"local").unwrap();
+    fs::write(repo.join("notes.md"), b"repo").unwrap();
+    let ctx = ctx_with_repo(&base, &repo);
+    let reference = FileReference::new("notes.md").unwrap();
+    let mut asked = Vec::new();
+
+    let detailed = reference
+        .resolve_detailed_admitted(&ctx, |path| {
+            asked.push(path.to_path_buf());
+            Ok::<(), ()>(())
+        })
+        .expect("every location is admitted");
+
+    assert_eq!(asked, vec![base.join("notes.md")]);
+    assert_eq!(detailed.matched_path(), reference.resolve_detailed(&ctx).matched_path());
+    assert_eq!(detailed.probed_paths().collect::<Vec<_>>(), asked);
+}
+
+/// A refusal stops the search before the refused candidate is probed and is
+/// returned unchanged; a later candidate is neither asked about nor probed.
+#[test]
+fn admitted_resolution_stops_at_a_refused_candidate() {
+    let tmp = TempDir::new().unwrap();
+    let repo = canonical(tmp.path());
+    let base = repo.join("pkg");
+    fs::create_dir_all(&base).unwrap();
+    let base = canonical(&base);
+    fs::write(repo.join("notes.md"), b"repo").unwrap();
+    let ctx = ctx_with_repo(&base, &repo);
+    let reference = FileReference::new("notes.md").unwrap();
+    let mut asked = Vec::new();
+
+    let refusal = reference
+        .resolve_detailed_admitted(&ctx, |path| {
+            asked.push(path.to_path_buf());
+            if path.starts_with(&base) { Ok(()) } else { Err("refused") }
+        })
+        .expect_err("the repository candidate is refused");
+
+    assert_eq!(refusal, "refused");
+    assert_eq!(asked, vec![base.join("notes.md"), repo.join("notes.md")]);
+}
+
+/// `present` declares the first candidate, which holds nothing on disk, a
+/// match: the search stops there, recording it as the matched candidate,
+/// and the later candidate holding a file is neither admitted nor probed.
+#[test]
+fn a_present_location_at_the_first_candidate_ends_the_search_there() {
+    let tmp = TempDir::new().unwrap();
+    let repo = canonical(tmp.path());
+    let base = repo.join("pkg");
+    fs::create_dir_all(&base).unwrap();
+    let base = canonical(&base);
+    fs::write(repo.join("notes.md"), b"repo").unwrap();
+    let ctx = ctx_with_repo(&base, &repo);
+    let reference = FileReference::new("notes.md").unwrap();
+    let (mut admitted, mut offered) = (Vec::new(), Vec::new());
+
+    let detailed = reference
+        .resolve_detailed_with_presence(
+            &ctx,
+            |path| {
+                admitted.push(path.to_path_buf());
+                Ok::<(), ()>(())
+            },
+            |path| {
+                offered.push(path.to_path_buf());
+                path == base.join("notes.md")
+            },
+        )
+        .expect("every location is admitted");
+
+    let local = base.join("notes.md");
+    assert_eq!(detailed.matched_path(), Some(local.as_path()));
+    assert_eq!(admitted, vec![local.clone()]);
+    assert_eq!(offered, vec![local.clone()]);
+    assert_eq!(detailed.probed_paths().collect::<Vec<_>>(), vec![local]);
+    let dispositions: Vec<_> = detailed.candidates().iter().map(|c| c.disposition()).collect();
+    assert_eq!(dispositions, vec![ProbeDisposition::Matched]);
+}
+
+/// A file on disk wins at its own candidate without `present` being asked,
+/// and a candidate `present` declines advances the search as a miss.
+#[test]
+fn a_file_on_disk_wins_at_its_candidate_and_a_declined_location_is_a_miss() {
+    let tmp = TempDir::new().unwrap();
+    let repo = canonical(tmp.path());
+    let base = repo.join("pkg");
+    fs::create_dir_all(&base).unwrap();
+    let base = canonical(&base);
+    fs::write(base.join("notes.md"), b"local").unwrap();
+    fs::write(repo.join("other.md"), b"repo").unwrap();
+    let ctx = ctx_with_repo(&base, &repo);
+    let mut offered = Vec::new();
+
+    let on_disk = FileReference::new("notes.md")
+        .unwrap()
+        .resolve_detailed_with_presence(&ctx, |_| Ok::<(), ()>(()), |path| {
+            offered.push(path.to_path_buf());
+            true
+        })
+        .unwrap();
+    assert_eq!(on_disk.matched_path(), Some(base.join("notes.md").as_path()));
+    assert!(offered.is_empty(), "{offered:?}");
+
+    let declined = FileReference::new("other.md")
+        .unwrap()
+        .resolve_detailed_with_presence(&ctx, |_| Ok::<(), ()>(()), |path| {
+            offered.push(path.to_path_buf());
+            false
+        })
+        .unwrap();
+    assert_eq!(declined.matched_path(), Some(repo.join("other.md").as_path()));
+    assert_eq!(offered, vec![base.join("other.md")]);
+}
+
+/// A candidate that fails its containment check is never offered to
+/// `present`: the typed boundary failure stands.
+#[test]
+fn a_candidate_failing_containment_is_never_offered_to_present() {
+    let tmp = TempDir::new().unwrap();
+    let repo = canonical(tmp.path());
+    let base = repo.join("pkg");
+    fs::create_dir_all(&base).unwrap();
+    let base = canonical(&base);
+    fs::create_dir_all(base.join("docs")).unwrap();
+    let ctx = FileResolutionContext::new(base.join("docs")).with_base_dir(&base);
+    let reference = FileReference::new("../../outside.md").unwrap();
+    let static_error = reference.resolve_detailed(&ctx).error().map(ToString::to_string);
+    let mut offered = Vec::new();
+
+    let detailed = reference
+        .resolve_detailed_with_presence(&ctx, |_| Ok::<(), ()>(()), |path| {
+            offered.push(path.to_path_buf());
+            true
+        })
+        .unwrap();
+
+    assert!(offered.is_empty(), "{offered:?}");
+    assert!(matches!(detailed.error(), Some(FileReferenceError::RelativeTreeEscape { .. })), "{:?}", detailed.outcome());
+    assert_eq!(detailed.error().map(ToString::to_string), static_error);
+}
+
+/// Without a `present` predicate (`resolve_detailed_admitted`), a location
+/// holding nothing on disk is a miss, exactly as `resolve_detailed` reports.
+#[test]
+fn admitted_resolution_without_presence_matches_the_plain_resolution() {
+    let tmp = TempDir::new().unwrap();
+    let repo = canonical(tmp.path());
+    let base = repo.join("pkg");
+    fs::create_dir_all(&base).unwrap();
+    let base = canonical(&base);
+    let ctx = ctx_with_repo(&base, &repo);
+    let reference = FileReference::new("notes.md").unwrap();
+
+    let admitted = reference.resolve_detailed_admitted(&ctx, |_| Ok::<(), ()>(())).unwrap();
+    let plain = reference.resolve_detailed(&ctx);
+
+    assert!(matches!(admitted.outcome(), DetailedOutcome::Failed(ResolutionFailure::NoMatch)));
+    assert!(matches!(plain.outcome(), DetailedOutcome::Failed(ResolutionFailure::NoMatch)));
+    assert_eq!(admitted.probed_paths().collect::<Vec<_>>(), plain.probed_paths().collect::<Vec<_>>());
+    assert_eq!(admitted.probed_paths().collect::<Vec<_>>(), vec![base.join("notes.md"), repo.join("notes.md")]);
+}

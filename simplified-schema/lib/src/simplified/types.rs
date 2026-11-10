@@ -241,15 +241,30 @@ impl PropertyDef {
     }
 
     /// The property's presence for consumers that may receive an
-    /// unresolved template: [`Requiredness::Pending`] while a top-level atom
+    /// unresolved template: [`Requiredness::Pending`] while an alternative
     /// is a template type, otherwise [`Self::is_required`]'s answer.
+    ///
+    /// An alternative is looked for through union types, grouped ones
+    /// included, as [`flattened_alternatives`](super::query::flattened_alternatives)
+    /// lists them. One that is an item of an array (`number | ({{ t }} |
+    /// boolean)[]`) cannot make the value admit null, but the type it
+    /// returns may carry a `required` marker, which an item alternative
+    /// hoists to the property; so it leaves presence pending only while the
+    /// rest of the definition does not already require it.
     pub fn requiredness(&self) -> Requiredness {
-        if self.has_pending_type() {
+        let pending: Vec<bool> = super::query::flattened_alternatives(self)
+            .iter()
+            .filter(|alternative| alternative.atom.is_pending_type())
+            .map(|alternative| alternative.is_array)
+            .collect();
+        if self.has_pending_type() || pending.iter().any(|is_item| !is_item) {
             Requiredness::Pending
         } else if self.is_required() {
             Requiredness::Required
-        } else {
+        } else if pending.is_empty() {
             Requiredness::Optional
+        } else {
+            Requiredness::Pending
         }
     }
 

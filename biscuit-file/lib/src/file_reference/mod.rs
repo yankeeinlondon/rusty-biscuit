@@ -240,7 +240,9 @@ pub enum ProbeDisposition {
     Missing,
     /// The path exists but is not a regular file (e.g. a directory).
     NonFile,
-    /// The path is a regular file (or a symlink to one) -- the winner.
+    /// The path is a regular file (or a symlink to one), or a missing location
+    /// the caller declared present
+    /// ([`FileReference::resolve_detailed_with_presence`]) -- the winner.
     Matched,
     /// Probing failed with an I/O error other than not-found; the search stops.
     Io(std::io::ErrorKind),
@@ -824,6 +826,82 @@ impl FileReference {
     ///
     /// [`resolve_in_context`]: Self::resolve_in_context
     pub fn resolve_detailed(&self, ctx: &FileResolutionContext) -> DetailedResolution {
+        self.resolve_detailed_inner(ctx, &mut |_| true, &mut |_| false)
+    }
+
+    /// [`resolve_detailed`](Self::resolve_detailed), asking `admit` about each
+    /// location immediately before it is touched, so a caller that must
+    /// approve every filesystem access is asked only about the locations the
+    /// ordered search actually reaches.
+    ///
+    /// A direct candidate is admitted before its containment check and its
+    /// probe; the search stops at the first match, so a later candidate is
+    /// never asked about. A recursive (`%`) reference lists every search root
+    /// before choosing, so each root is admitted before the walk starts. Each
+    /// path is spelled as [`DetailedResolution::probed_paths`] reports it.
+    ///
+    /// ## Errors
+    ///
+    /// The first error `admit` returns; nothing further is probed and the
+    /// partial resolution is discarded.
+    pub fn resolve_detailed_admitted<E>(
+        &self,
+        ctx: &FileResolutionContext,
+        admit: impl FnMut(&Path) -> Result<(), E>,
+    ) -> Result<DetailedResolution, E> {
+        self.resolve_detailed_with_presence(ctx, admit, |_| false)
+    }
+
+    /// [`resolve_detailed_admitted`](Self::resolve_detailed_admitted), also
+    /// asking `present` about each direct candidate that holds nothing on
+    /// disk, so a caller holding files that are not saved yet (an editor's
+    /// open buffers) has them found where they would be once saved.
+    ///
+    /// `present` is asked only after the candidate was admitted, passed its
+    /// containment check, and was probed missing, never about a candidate
+    /// that holds a directory, so a file on disk still wins at its own
+    /// candidate and a location outside the reference's boundary is never
+    /// offered. `true` ends the search there: the candidate is recorded as
+    /// [`ProbeDisposition::Matched`] and is the
+    /// [`matched_path`](DetailedResolution::matched_path), and no later
+    /// candidate is admitted or probed. A recursive (`%`) reference walks
+    /// only the disk and never asks `present`. Each path is spelled as
+    /// [`DetailedResolution::probed_paths`] reports it.
+    ///
+    /// ## Errors
+    ///
+    /// The first error `admit` returns; nothing further is probed and the
+    /// partial resolution is discarded.
+    pub fn resolve_detailed_with_presence<E>(
+        &self,
+        ctx: &FileResolutionContext,
+        mut admit: impl FnMut(&Path) -> Result<(), E>,
+        mut present: impl FnMut(&Path) -> bool,
+    ) -> Result<DetailedResolution, E> {
+        let mut refusal = None;
+        let detailed = self.resolve_detailed_inner(
+            ctx,
+            &mut |path| match admit(path) {
+                Ok(()) => true,
+                Err(error) => {
+                    refusal = Some(error);
+                    false
+                }
+            },
+            &mut present,
+        );
+        match refusal {
+            Some(error) => Err(error),
+            None => Ok(detailed),
+        }
+    }
+
+    fn resolve_detailed_inner(
+        &self,
+        ctx: &FileResolutionContext,
+        admit: &mut dyn FnMut(&Path) -> bool,
+        present: &mut dyn FnMut(&Path) -> bool,
+    ) -> DetailedResolution {
         let class = self.class();
         let cwd = ctx.cwd().to_path_buf();
         let source_path = ctx.source_path().map(Path::to_path_buf);
@@ -850,6 +928,8 @@ impl FileReference {
             ctx.magic_paths(),
             ctx.vault_roots(),
             &internal,
+            admit,
+            present,
         );
 
         let effective_kind = core.effective_kind.unwrap_or(class.kind);

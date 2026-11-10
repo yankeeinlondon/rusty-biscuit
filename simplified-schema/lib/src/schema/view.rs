@@ -77,7 +77,7 @@ impl<'a> TypeDefinition<'a> {
     /// declaration answers `false` here, and [`Self::requiredness`] says it
     /// is pending.
     pub fn is_required(&self) -> bool {
-        !self.def.has_pending_type() && self.def.is_required()
+        self.def.requiredness() == crate::Requiredness::Required
     }
 
     /// The property's presence, [`Requiredness::Pending`](crate::Requiredness::Pending)

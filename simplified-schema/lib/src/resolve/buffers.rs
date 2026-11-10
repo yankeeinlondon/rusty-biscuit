@@ -204,15 +204,11 @@ pub fn text(path: &Path) -> Option<Arc<str>> {
     ACTIVE.with_borrow(|active| active.get(path).cloned())
 }
 
-/// The first of `probed` with an open buffer in the snapshot in force.
+/// Whether an open buffer is at `path` in the snapshot in force: a file
+/// selection treats it as present at a location that holds no file.
 #[cfg_attr(not(feature = "file"), allow(dead_code))]
-pub(super) fn first_open(probed: &[PathBuf]) -> Option<PathBuf> {
-    ACTIVE.with_borrow(|active| {
-        if active.is_empty() {
-            return None;
-        }
-        probed.iter().find(|path| active.get(path).is_some()).cloned()
-    })
+pub(super) fn is_open(path: &Path) -> bool {
+    ACTIVE.with_borrow(|active| active.get(path).is_some())
 }
 
 /// `path`'s bytes, read as the resolver reads a schema source: the open
@@ -300,12 +296,12 @@ mod tests {
 
         assert_eq!(read(&file).unwrap(), b"disk");
         let (inside, found) = with(&buffers, || {
-            (read(&file).unwrap(), first_open(&[dir.path().join("absent.yaml"), dir.path().join("new.yaml")]))
+            (read(&file).unwrap(), [dir.path().join("absent.yaml"), dir.path().join("new.yaml")].map(|path| is_open(&path)))
         });
         assert_eq!(inside, b"buffer");
-        assert_eq!(found, Some(dir.path().join("new.yaml")));
+        assert_eq!(found, [false, true]);
         assert_eq!(read(&file).unwrap(), b"disk");
-        assert_eq!(first_open(&[dir.path().join("new.yaml")]), None);
+        assert!(!is_open(&dir.path().join("new.yaml")));
     }
 
     /// A refused path is not read from the disk or a buffer, an allowed one

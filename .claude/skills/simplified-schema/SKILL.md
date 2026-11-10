@@ -1,7 +1,7 @@
 ---
 name: simplified-schema
 description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, or `SchemaError`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `non-null`, closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
-last_updated: 2026-11-06T00:00:00Z
+last_updated: 2026-11-09T00:00:00Z
 ---
 
 # simplified-schema
@@ -62,62 +62,17 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   gate). Any other `{{`/`}}` end detector (`rfind("{{")`, a private depth
   scan) is a second rule: route it through these. Tests:
   `tests/l1/{expression_scanner,expression_regions,scanner_corpus}.rs`.
-- **Templates are passive and fail closed.** A `{{ … }}` element of
-  `enum`/`suggest`, or the whole argument of `literal`/`default`/`min`/`max`/
-  `pattern`, parses to `Constraint::Dynamic` / `Constraint::TemplateConstraint`
-  (a **template constraint**; only when a slot is present; static lists stay `Members`/`Suggest`). The
-  grammar reads a slot with `scan::scan_expression_at`; `source.rs`'s
-  argument scanner skips it whole and `project_atom_suggestions` projects its
-  spans. Every lowering entry returns `SchemaError::UnresolvedSlots` first
-  (`slots::reject_unresolved`), so a reader that does not know slots never
-  sees one; queries/completion set `pending`. A new `Constraint` reader that
-  could see a template must decide its slot case (see
-  [slots.md](../../../simplified-schema/docs/topics/language/slots.md)).
-  Tests: `src/simplified/grammar/slot_tests.rs`,
-  `tests/l1/{slot_spans,slot_templates}.rs`, `schema_object.rs::templates`.
-- **Resolution replays, never patches.** A host (`slots::SlotHost`: passive
-  `admit`, effectful `resolve`, `template_reads`, `is_canceled`) supplies values; the
-  library reruns the same resolution inside `slots::with_values`, and every
-  lowering site calls `slots::apply_active` right after import expansion
-  (`substitute`: result shapes, dedupe, stricter-bound/equal-default merge,
-  pattern cap). Public entry points (`resolving_entry` in `resolve.rs`)
-  attach `UnresolvedSlots::pending` (`PendingSchema`, replaying the recorded
-  `read_sources()` texts); `SimplifiedSchema::resolve_slots` reruns the
-  layer's own `Rebuild`. Expansion stamps `Slot::origin` with the file a
-  slot was written in (`DefNamespace::file`); a new lowering site must call
-  `apply_active` too (`apply_active_to_arm` for a root-union arm, never
-  pruned by `omitting`; the union then marks the arm's template
-  `is_union_arm` with the names every arm declares, `resolve.rs::pending_union_arm`,
-  read by `declared_properties()`). Tests: `tests/l1/dynamic_slots.rs`.
-- **A template type is the pending type.** A slot supplying a property's
-  whole definition parses to the atom `TypeExpr::Slot` (suffix read like a
-  reference's), allowed only as a property type, union arm, or tuple element;
-  every other position is refused by `grammar::SlotPosition` (one message
-  shape, rewrite sentence only for names/roots/paths). Readers answer it
-  explicitly, never through a `_ =>` arm: no shape facts, `pending` in queries
-  and completion, `PropertyDef::requiredness()` = `Pending` (the boolean
-  presence helpers assume a resolved definition). Resolution
-  (`slots/template_type.rs::substitute_types`, run by `apply_active` before
-  constraint substitution, so `apply_active` takes an `ExpansionSite` and
-  returns late `imports`/`searched`) parses the value once
-  (`definition_from_value`: string or array only; `NestedSlot`,
-  `LocalReference`), then expands it twice through `expand_imports` as the
-  named type `resolve::TEMPLATE_TYPE_NAME` of the slot's defining file
-  (`resolve::expand_template_definition`): bare, for `ReachableSlot`,
-  slot-pattern and lowering checks, then with the written suffix (merge
-  failures are `SuffixConflict`/`InvalidExpansion`). Arms are spliced like
-  `expand_union_arms` does. Every read the expansion causes passes
-  `SlotHost::template_reads` (`slots/reads.rs`: `ReadGate`, captured by
-  `ImportEngine::new` only inside `reads::expanding`; probes are admitted
-  through `select::select_schema_file_checked` before any is made; a refusal
-  is sticky and becomes `SlotResolutionError::Refused`). Tests:
-  `tests/l1/template_types_passive.rs`, `template_type_{results,imports,refusals}.rs`.
-  The library never evaluates a slot and never reads its targets; approval,
-  caching, and evaluation are the host's (Darkmatter's `schemas/slots/`).
+- **Templates are passive, resolution replays, and a template type is the
+  pending type.** `{{ … }}` template constraints and template types parse
+  without evaluating anything, every lowering entry fails with
+  `SchemaError::UnresolvedSlots`, and only a host (`slots::SlotHost`) resolves
+  them, with every read a returned definition causes judged by
+  `SlotHost::template_reads`. Read [templates.md](templates.md) before
+  touching `slots/`, `TypeExpr::Slot`, or any `Constraint` reader.
 - **Layering is atomic.** Each `layer_under` / `layer_over` commits completely
   or not at all, with whole-property replacement.
 - **One implementation.** Darkmatter calls the library; it never redefines a
-  library-owned item (see the guards below).
+  library-owned item (see [build-and-guards.md](build-and-guards.md)).
 - **The library sits below its hosts.** It never depends on Darkmatter, DMLS,
   Claudine, Content Policy, or any CLI, in any manifest table or source.
 
@@ -149,13 +104,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Resolve over every unsaved buffer (targets, imports, examples, unsaved-only files) | `resolve::buffers::with(&SourceBuffers, \|\| …)` (thread-scoped; reads and selection only) |
 | Several resolutions in one host operation reading each file once | `resolve::buffers::with_reads_retained(\|\| …)`; read a file you will resolve with `resolve::buffers::read_to_string` (test builds count opens in `observed::Observed::opened`) |
 | One named type as its own schema | `schema.select("Person")` |
-| Resolve a template's `{{ … }}` slots | `schema.resolve_slots(&host)`, or `UnresolvedSlots::pending` → `PendingSchema::resolve(&host, &SlotRunRequest { context })` |
-| Resolve only the top-level properties a higher layer leaves | `pending.without_properties(&names)` (drops them and the definitions only they reach; `omitted_properties()` belongs in a cache key), then `resolve` or, with no slot left, `resolve_without_slots()` |
-| The top-level names a template declares in every alternative (a root-union arm's: every arm's), unevaluated | `pending.declared_properties()` |
-| Read a slot's data file honoring editor buffers | `resolve::buffers::read(path)` |
-| Resolve an already-parsed inline `$schema` value with its slots spanned in the file it came from | `resolve::resolve_authored_yaml_schema(value, owner, Some(&AuthoredSchemaValue { file, text, mapping }), …)` (`resolve_authored_schema_with_roots` for JSON); the value is located and verified first, else no position is claimed |
-| The file and text a slot's spans index, without reading anything | `pending.slot_text(&slot)`, `SlotResolutionFailure::of_pending(error, &pending).slot_text(&slot)` |
-| Judge each schema source before it is read (a host's slot approvals) | `resolve::buffers::guarded(guard, \|\| …)`; a refusal fails the read as `PermissionDenied`; `unguarded` suspends the guards |
+| Resolve a template, drop replaced properties, slot positions and texts | see [templates.md](templates.md#slot-and-template-apis) |
 | Which file a `$schema`/`Name@file`/`example(file)` reference names, its probes, and a missing name's creation path | `resolve::select_schema_file(reference, base_dir, roots, &ctx)` → `SchemaFileSelection` (`into_result()` gives the resolver's error) |
 | Validate | `validate_strict` / `validate_soft` → `Result<ValidationSuccess, ValidationFailure>` |
 | Layer | `layer_under(&[&s])`, `layer_over(&[&s])`, `as_base`, `override_with` |
@@ -174,109 +123,17 @@ cannot run, such as a file check without a file context), and
 A definition rejected inside a schema document (standalone payload, `types`
 table, Markdown frontmatter `$schema`, or an imported named-type file) is
 `SchemaError::SchemaDocument { path, message, source, span }`: `source` is the
-grammar's typed error unchanged, `span` a byte range in the exact supplied
-text (whole Markdown file, CRLF counted). Never stringify a `SchemaError` into
-`message` alone; see [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md#a-rejected-definition-in-a-schema-document).
+Referenced `$schema` file classification (`classify_yaml_schema_text`,
+`classify_json_schema_text`), envelope admission (`envelope.rs`), and the
+ownership line with Darkmatter's `KindRegistry` are in
+[schema-documents.md](schema-documents.md).
 
-A referenced `$schema` file is classified by `classify_yaml_schema_text` /
-`classify_json_schema_text` (`resolve.rs`): YAML must be an envelope with a
-top-level `$schema` (`types`-only is `NotASchemaDocument { TypesOnly }`, a map
-without `$schema` is `NoSchemaProperty`, a `kind: yaml-schema` is
-`SelectedByKind` even when malformed, and so is one named by `Name@file`;
-hosts reading a referenced file use `resolve::parse_referenced_schema_document`).
-JSON must be an object whose
-`$schema` is exactly `DRAFT_2020_12_DIALECT` (else `JsonMissingDialect` or
-`UnsupportedJsonDialect`) and pass the offline meta-schema (else
-`InvalidJsonSchema`). There is no raw-YAML JSON Schema fallback; see
-[What a schema reference may target](../../../simplified-schema/docs/topics/language/schema-documents.md#what-a-schema-reference-may-target).
+## Paths, features, and guards
 
-Envelopes (`kind: schema`, `kind: yaml-schema`, informal) are **admitted**
-before their payload is read: `envelope.rs` soft-validates each against the
-compiled `simplified-schema/schemas/schema.yaml` / `yaml-schema.yaml`
-(`envelope::ENVELOPE_DEFINITIONS`, `admit_envelope_text`). Those files are the
-only authority for envelope structure (closed keys, `$schema` or `types`,
-`types` a mapping, non-null metadata); never add a structural check to
-`standalone.rs` (`shipped_corpus.rs` guards it). Rust keeps only category
-grammar, duplicate/undeclared categories, and duplicate overloads. Metadata
-is read from the converted copy (`description: 123` → `"123"`); `$schema` /
-`types` carriers are never converted. Report order: envelope problem, then a
-parser-located definition failure inside a carrier, then the carrier shape
-(`standalone.rs::rejected_envelope`; `locate_standalone_definition_failure`
-returns `None` when the envelope itself is malformed). The definitions
-bootstrap unadmitted (`parse_standalone_unadmitted`) through a private
-validator cache, never `SHARED_VALIDATOR_CACHE`. A host prepares a
-`yaml-schema`'s export with `resolve::prepare_embedded_yaml_schema` and reads
-its kinds with `claimed_values`. A host that has already judged a whole file
-against a definition it selected (Darkmatter's kind checks, where the
-definition may be an edited checkout copy) reads it with
-`parse_selected_standalone_schema_document(source, path, accepted)` (no
-admission; metadata from `accepted`) and prepares a `yaml-schema` with
-`resolve::prepare_standalone_yaml_schema`, so the compiled envelope never
-judges its shape twice. Tests: `envelope_admission.rs`,
-`yaml_schema_envelope.rs`.
-
-Ownership boundary: this crate owns the `schema` and `yaml-schema`
-definitions and the envelope admission above, and nothing about which YAML
-document gets which schema. Darkmatter owns `schema-trigger.yaml`, the
-`KindRegistry` (discovery in schema roots, duplicate and broken claims),
-selection (`kind` before root `$schema`), and the kind checks a definition
-cannot state; see the `darkmatter` skill's
-[schema.md](../darkmatter/schema.md#whole-yaml-documents-schemasyaml_documents).
-An envelope that fails admission is a located `SchemaDocument` error; the
-library never falls back to treating it as an untagged payload.
-
-## Property paths and setter values
-
-`PropertyPath` is the only parser of the dotted grammar. It keeps decoded text
-segments, because `0` is an index or a key depending on the value it meets, so
-`PathStep` and `JsonPointer` come only from `resolve`'s `Resolved`, never from text.
-`set_at` and `RemovalPlan` decide before changing anything and work on a frontmatter
-`IndexMap`, not on source text.
-
-`SetterValue::parse` sees only text; `bind` takes the `Shape` the host looked up.
-`Shape::Any` is a declared shape, so text stays text under it; only `None` guesses. A
-quoted string binds through the declared shape like text, and stays a string under `None`.
-Syntax rejection is text, but a parsed container that fails admission is an error,
-never text: `biscuit_file::json5_scan` finds duplicates and number spellings that
-`serde_json::Value` has already lost, `numeric::admit_json5_text_numbers` judges
-them, and `json5_is_well_formed` keeps an integer beyond `u64` from reaching the YAML
-step as a key. A YAML list under `$schema` is a union of object arms, not an array,
-which is a trap when writing fixtures; an array of objects is a named type with
-`item[]`.
-
-## Features
-
-| Feature | Default | Adds |
-|---|---|---|
-| `file` | yes | File factories, `SchemaSource`, `repository_scope_catalog`; pulls `biscuit-file/file-reference` and `sniff` |
-| `terminal` | no | `biscuit-terminal` `BlockError` rendering of `SchemaError` (Darkmatter enables it) |
-| `work-counters` | no | Test-only `work_counters` module for complexity regressions |
-
-Without `file`, the crate depends on `biscuit-file` with
-`file-reference-syntax` only (no `gix`/`walkdir`/`sniff`); file-backed checks
-fail with `FileReferenceError::ResolutionUnavailable` or
-`ValidationFailure::UnavailableCheck`, never pass.
-
-```toml
-[dependencies]
-simplified-schema = { path = "../../simplified-schema/lib" }                            # default
-simplified-schema = { path = "../../simplified-schema/lib", default-features = false } # text only
-```
-
-## Boundary Guards
-
-| Guard | Fails when | Satisfy it by |
-|---|---|---|
-| `simplified-schema/lib/tests/l1/context_construction_guard.rs` | Production code outside `schema/capture.rs` calls `std::env::current_dir`, `biscuit_file::home_dir`, `capture_env`, or `FileResolutionContext::from_snapshot` (besides the one empty `content_context` in `schema/layer.rs`), or adds a second optional context besides `SchemaSource`'s | Take a `FileResolutionContext` parameter; only extend `ALLOWLIST` (exact file, identifier, count, reason) for a genuinely new capture |
-| `simplified-schema/lib/tests/l1/dependency_direction_guard.rs` | Any manifest table (dev included, followed through path deps) reaches `darkmatter`, `dmls`, `content-policy`, `claudine*`, `rendezvous-*`, `zed-dmls`, a `*-cli`, or a crate under those dirs; or source names one of their crates | Move the host-specific code to the host; invert the dependency |
-| `simplified-schema/lib/tests/l1/path_lookup_guard.rs` | Raw `canonicalize` or home lookup | `biscuit_file::canonicalize_simplified`, `biscuit_file::home_dir` |
-| `darkmatter/lib/tests/l1/schema_language_ownership_guard.rs` | Darkmatter lib, CLI, or DMLS production source *defines* (`fn`/`struct`/`enum`/`trait`/`type`/`union`) an owned name (`to_json_schema`, `is_subtype`, `parse_yaml_schema`, `SchemaRoot`, `Lexer`, `format_number`, `ConversionError`, ...); or the listed library file no longer defines a name | Call the library instead of re-implementing; when renaming or moving an owned item in the library, update the guard's owner table and Darkmatter's `[package.metadata.ci.tests] source-inputs` |
-| `darkmatter/lib/tests/l1/glob_implementation_guard.rs` | `simplified-schema/lib/src` reaches a glob library directly or its manifest names one | Match through `biscuit_file::GlobReference` only |
-
-The guards reuse Darkmatter's shared engines by `#[path]`
-(`darkmatter/cli/tests/common/{context_guard,path_lookup_guard,source_scan}.rs`,
-`darkmatter/lib/tests/common/dependency_graph.rs`); they are declared in this
-crate's `source-inputs`, so editing them schedules this crate's tests.
+`PropertyPath`/`SetterValue` rules, the `file`/`terminal`/`work-counters`
+features, and the boundary guard table (context construction, dependency
+direction, path lookup, language ownership, glob implementation) are in
+[build-and-guards.md](build-and-guards.md); read it before fixing a failing guard.
 
 ## Testing
 

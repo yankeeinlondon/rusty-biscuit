@@ -311,6 +311,23 @@ $schema:
   os: enum({{ load_data("../data/os.yaml", "string[]") }}; required)
 ```
 
+A payload property may also take its whole type from data, a
+[template type](./schema-slots.md#template-types):
+
+```yaml
+$schema:
+  owner: "{{ load_data('../data/owner-type.yaml', 'type-definition') }}"
+```
+
+The property name `owner` is written in the payload, so layering never needs
+the slot's value: matching stays passive, the trigger is pending rather than
+invalid, and the slot runs only after matching and whole-property
+replacement have decided that the payload's `owner` survives. A document
+whose own `$schema` declares `owner: string` replaces it, and the slot never
+runs. Whatever the slot returns stays the type of `owner`: an object type's
+nested keys never become sibling top-level properties. A template type may
+not be the payload's whole `$schema` or an arm of a root union.
+
 A slot in a `match` condition is refused: the trigger is invalid
 (`dm.schema.invalid_trigger`, its message naming the slot), because only the
 payload may hold slots.

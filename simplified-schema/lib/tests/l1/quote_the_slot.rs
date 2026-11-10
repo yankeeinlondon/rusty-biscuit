@@ -14,7 +14,7 @@ fn hint_text(text: &str, error_line: Option<usize>) -> Option<&str> {
 }
 
 #[test]
-fn a_mapping_value_slot_is_found_without_its_trailing_comment() {
+fn a_slot_as_a_mapping_entry_is_found_without_its_trailing_comment() {
     let text = "$schema:\n  status: {{ load_data('./t.yaml') }}  # the statuses\n";
     assert_eq!(hint_text(text, None), Some("{{ load_data('./t.yaml') }}"));
 }

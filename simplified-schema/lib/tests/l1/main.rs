@@ -38,6 +38,7 @@ mod slot_templates;
 mod shipped_corpus;
 mod soft_validation_repair;
 mod template_type_imports;
+mod template_type_lazy_admission;
 mod template_type_refusals;
 mod template_type_results;
 mod template_types_passive;

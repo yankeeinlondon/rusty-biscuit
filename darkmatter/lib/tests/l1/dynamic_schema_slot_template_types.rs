@@ -345,6 +345,34 @@ fn a_missing_import_fails_and_observes_its_probe() {
     assert!(data.read_set().contains(&fixture.entry("missing.yaml")), "{:?}", data.read_set());
 }
 
+/// An example inside a returned tuple, in an element or in the spread, is the
+/// returned definition's read: ungranted, it needs approval before anything
+/// is read; granted, it resolves and is recorded.
+#[test]
+fn an_example_in_a_returned_tuple_needs_its_own_grant() {
+    const EXAMPLE: &str = "kind: example\ninvocation: \"x\"\nreturns: \"val\"\ndescription: d\n";
+    let cases = [
+        ("\"{{ 'tuple([string(example(./ex.yaml))])' }}\"", "[a]"),
+        ("\"{{ 'tuple([number, ...string(example(./ex.yaml))[]])' }}\"", "[1, a]"),
+    ];
+    for (owner_type, value) in cases {
+        let fixture = Fixture::with(&[("ex.yaml", EXAMPLE), ("doc.md", &owner_document(owner_type, value))]);
+
+        let data = DataRuntime::new();
+        let error = owner_schema(&fixture.schemas(SlotSession::new(data.clone())), &fixture.markdown())
+            .expect_err("an ungranted example is refused");
+        assert_eq!(codes(&error, &fixture.path("doc.md")), vec![APPROVAL_REQUIRED.to_string()], "{owner_type}: {error}");
+        assert!(data.read_set().is_empty(), "{owner_type}: nothing read: {:?}", data.read_set());
+
+        let data = DataRuntime::new();
+        let session = SlotSession::new(data.clone()).with_run_grants([grant(GrantDecision::Allow, &fixture.path("ex.yaml"))]);
+        let owner = owner_schema(&fixture.schemas(session), &fixture.markdown())
+            .unwrap_or_else(|error| panic!("{owner_type}: {error}"));
+        assert!(owner.to_string().contains("x-darkmatter-example"), "{owner_type}: {owner}");
+        assert!(data.read_set().contains(&fixture.entry("ex.yaml")), "{owner_type}: {:?}", data.read_set());
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Cache and dependencies: each "command" is a new session on a new runtime
 // ---------------------------------------------------------------------------
@@ -426,6 +454,106 @@ fn a_warm_session_without_the_grant_needs_approval() {
         .expect_err("not served from the cache");
     assert_eq!(codes(&error, &fixture.path("doc.md")), vec![APPROVAL_REQUIRED.to_string()], "{error}");
     assert!(data.read_set().is_empty(), "{:?}", data.read_set());
+}
+
+// ---------------------------------------------------------------------------
+// Bare names in the schema roots: only the locations the search reaches
+// ---------------------------------------------------------------------------
+
+/// A fixture whose document's schema roots are the tree root's `schemas/`
+/// and the home's `schemas/`, in that order, with `doc.md` giving `owner`
+/// the template type `{{ 'Person@types.yaml' }}` and `types.yaml` written
+/// into the roots named by `holding` (`"schemas"`, `"home/schemas"`).
+fn schema_roots_fixture(holding: &[&str]) -> (Fixture, FileResolutionContext) {
+    let fixture = Fixture::with(&[("doc.md", &owner_document("\"{{ 'Person@types.yaml' }}\"", "{ name: Ann }"))]);
+    for root in ["schemas", "home/schemas"] {
+        std::fs::create_dir_all(fixture.path(root)).expect("schema root");
+    }
+    for root in holding {
+        write(&fixture.path(&format!("{root}/types.yaml")), "kind: schema\ntypes:\n    Person:\n        name: string(required)\n");
+    }
+    let context = fixture.context().with_home_dir(fixture.path("home"));
+    (fixture, context)
+}
+
+/// Schemas whose bare-name lookup walks the document's schema roots, which
+/// trigger discovery supplies.
+fn root_schemas(context: &FileResolutionContext, session: SlotSession) -> DarkmatterSchemas {
+    DarkmatterSchemas::new(context.clone())
+        .with_trigger_discovery()
+        .expect("trigger discovery")
+        .with_slot_session(Arc::new(session))
+}
+
+/// The first root holding a bare name is the only location asked about: an
+/// ungranted later root, or the sibling beside the document, never refuses
+/// the import, and neither joins the read set.
+#[test]
+fn a_bare_name_import_needs_a_grant_only_for_the_first_root_holding_it() {
+    let (fixture, context) = schema_roots_fixture(&["schemas", "home/schemas"]);
+    let data = DataRuntime::new();
+    let session = SlotSession::new(data.clone()).with_run_grants([grant(GrantDecision::Allow, &fixture.path("schemas/types.yaml"))]);
+
+    let owner = owner_schema(&root_schemas(&context, session), &fixture.markdown()).expect("the first root's file resolves");
+
+    assert!(owner.to_string().contains(r#""required":["name"]"#), "{owner}");
+    let read = data.read_set();
+    assert!(read.contains(&fixture.entry("schemas/types.yaml")), "{read:?}");
+    for unreached in ["home/schemas/types.yaml", "types.yaml"] {
+        assert!(!read.contains(&fixture.entry(unreached)), "{unreached} was never probed: {read:?}");
+    }
+}
+
+/// When the first root lacks the name, the next root is genuinely needed and
+/// still needs its own grant before it is probed.
+#[test]
+fn a_bare_name_missing_from_the_first_root_needs_a_grant_for_the_next() {
+    let (fixture, context) = schema_roots_fixture(&["home/schemas"]);
+    let home_types = fixture.path("home/schemas/types.yaml");
+    let data = DataRuntime::new();
+    let only_first = SlotSession::new(data.clone()).with_run_grants([grant(GrantDecision::Allow, &fixture.path("schemas/types.yaml"))]);
+
+    let error = owner_schema(&root_schemas(&context, only_first), &fixture.markdown()).expect_err("the home root is not granted");
+
+    assert_eq!(codes(&error, &fixture.path("doc.md")), vec![APPROVAL_REQUIRED.to_string()], "{error}");
+    assert!(!data.read_set().contains(&fixture.entry("home/schemas/types.yaml")), "{:?}", data.read_set());
+
+    let data = DataRuntime::new();
+    let both = SlotSession::new(data.clone())
+        .with_run_grants([grant(GrantDecision::Allow, &fixture.path("schemas/types.yaml")), grant(GrantDecision::Allow, &home_types)]);
+    let owner = owner_schema(&root_schemas(&context, both), &fixture.markdown()).expect("both roots granted");
+    assert!(owner.to_string().contains(r#""required":["name"]"#), "{owner}");
+    let read = data.read_set();
+    assert!(read.contains(&fixture.entry("schemas/types.yaml")) && read.contains(&fixture.entry("home/schemas/types.yaml")), "{read:?}");
+}
+
+/// An unsaved buffer at an implicit relative reference's first candidate is
+/// its match: the import needs a grant only for that buffer, and neither the
+/// ungranted repository-root file after it nor its `age` definition is
+/// reached.
+#[test]
+fn an_unsaved_buffer_at_the_first_candidate_needs_a_grant_only_for_itself() {
+    let fixture = Fixture::with(&[]);
+    for folder in ["doc", "lib"] {
+        std::fs::create_dir_all(fixture.path(folder)).expect("fixture folder");
+    }
+    write(&fixture.path("doc/doc.md"), &owner_document("\"{{ 'Person@lib/types.yaml' }}\"", "{ name: Ann }"));
+    write(&fixture.path("lib/types.yaml"), "kind: schema\ntypes:\n    Person:\n        age: number(required)\n");
+    let local = fixture.path("doc/lib/types.yaml");
+    let mut open = simplified_schema::resolve::buffers::SourceBuffers::default();
+    open.insert(&local, Arc::from("kind: schema\ntypes:\n    Person:\n        name: string(required)\n"));
+    let context = fixture.context().with_repository_root(&fixture.root);
+    let data = DataRuntime::new();
+    let session = SlotSession::new(data.clone()).with_run_grants([grant(GrantDecision::Allow, &local)]);
+    let schemas = DarkmatterSchemas::new(context).with_slot_session(Arc::new(session));
+
+    let owner = simplified_schema::resolve::buffers::with(&open, || owner_schema(&schemas, &fixture.markdown_at("doc/doc.md")))
+        .expect("the granted buffer resolves");
+
+    assert!(owner.to_string().contains(r#""required":["name"]"#), "{owner}");
+    let read = data.read_set();
+    assert!(read.contains(&fixture.entry("doc/lib/types.yaml")), "{read:?}");
+    assert!(!read.contains(&fixture.entry("lib/types.yaml")), "the repository candidate was never probed: {read:?}");
 }
 
 // ---------------------------------------------------------------------------

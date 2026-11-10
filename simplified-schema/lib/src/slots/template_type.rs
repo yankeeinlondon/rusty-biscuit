@@ -137,17 +137,11 @@ impl TypeSubstitution<'_> {
     }
 
     /// Replaces the template types of `def` and of everything nested in it.
-    /// Returns the first slot replaced at `def`'s own top level, after
-    /// checking the union invariants `def` must keep with it.
+    /// Returns the first slot replaced in `def`'s own union structure (its
+    /// top level or a grouped union at any depth of its arms), after
+    /// checking the union invariants `def` must keep with it. Objects and
+    /// tuples nested in `def` check their own definitions.
     fn def(&mut self, def: &mut PropertyDef, path: &SchemaSourcePath) -> Result<Option<Slot>, SchemaError> {
-        match def {
-            PropertyDef::Single(atom) => self.nested(atom, path)?,
-            PropertyDef::Union(arms) => {
-                for (index, arm) in arms.iter_mut().enumerate() {
-                    self.nested(arm, &path.union_arm(index))?;
-                }
-            }
-        }
         let replaced = match def {
             PropertyDef::Single(atom) => match &atom.ty {
                 TypeExpr::Slot(slot) if self.values.get(slot).is_some() => {
@@ -155,11 +149,16 @@ impl TypeSubstitution<'_> {
                     *def = self.expand(&atom, false, path)?;
                     Some(slot)
                 }
-                TypeExpr::Union(_) => self.atom_union(atom, path)?,
-                _ => None,
+                _ => self.atom(atom, path)?,
             },
             PropertyDef::Union(arms) => {
-                let Spliced { arms: spliced, markers, first: replaced } = self.splice(std::mem::take(arms), path)?;
+                let mut inner = None;
+                for (index, arm) in arms.iter_mut().enumerate() {
+                    if let Some(slot) = self.atom(arm, &path.union_arm(index))? {
+                        inner.get_or_insert(slot);
+                    }
+                }
+                let Spliced { arms: spliced, markers, first } = self.splice(std::mem::take(arms), path)?;
                 *def = if markers.is_empty() {
                     PropertyDef::Union(spliced)
                 } else {
@@ -173,7 +172,7 @@ impl TypeSubstitution<'_> {
                         description: None,
                     })
                 };
-                replaced
+                first.or(inner)
             }
         };
         if let Some(slot) = &replaced {
@@ -183,15 +182,22 @@ impl TypeSubstitution<'_> {
         Ok(replaced)
     }
 
-    /// Replaces the template types nested inside `atom`'s own type.
-    fn nested(&mut self, atom: &mut PropertyAtom, path: &SchemaSourcePath) -> Result<(), SchemaError> {
+    /// Replaces the template types inside `atom`, which is not itself a
+    /// template type. A grouped union (`({{ … }} | string)[]`) is
+    /// substituted, not only traversed, at every depth: its own arms first,
+    /// then its template-type arms spliced. Returns the first slot replaced
+    /// in such a group, for the enclosing definition's invariant check.
+    fn atom(&mut self, atom: &mut PropertyAtom, path: &SchemaSourcePath) -> Result<Option<Slot>, SchemaError> {
         match &mut atom.ty {
-            TypeExpr::InlineObject(shape) => self.shape(shape, path),
+            TypeExpr::InlineObject(shape) => self.shape(shape, path).map(|()| None),
             TypeExpr::Union(arms) => {
+                let mut inner = None;
                 for (index, arm) in arms.iter_mut().enumerate() {
-                    self.nested(arm, &path.union_arm(index))?;
+                    if let Some(slot) = self.atom(arm, &path.union_arm(index))? {
+                        inner.get_or_insert(slot);
+                    }
                 }
-                Ok(())
+                Ok(self.atom_union(atom, path)?.or(inner))
             }
             TypeExpr::Tuple(tuple) => {
                 for (index, element) in tuple.elements.iter_mut().enumerate() {
@@ -202,15 +208,16 @@ impl TypeSubstitution<'_> {
                         })?;
                     }
                 }
-                Ok(())
+                Ok(None)
             }
             // The grammar refuses a template type in a signature, a spread,
-            // and a `property(...)` declaration.
+            // and a `property(...)` declaration; a template-type arm of a
+            // union is spliced by the union's own pass.
             TypeExpr::Function(_)
             | TypeExpr::Primitive(_)
             | TypeExpr::Imported { .. }
             | TypeExpr::Ref(_)
-            | TypeExpr::Slot(_) => Ok(()),
+            | TypeExpr::Slot(_) => Ok(None),
         }
     }
 

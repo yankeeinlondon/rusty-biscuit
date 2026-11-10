@@ -903,6 +903,8 @@ does not exist is `Io`.
 |-------------|-------------|---------------|--------------|
 | `resolve_in_context(&ctx)` | Explicit, authoritative context | `Result<Option<PathBuf>, FileReferenceError>` | The normal request-scoped call |
 | `resolve_detailed(&ctx)` | Explicit, authoritative context | `DetailedResolution` | Diagnostics needing candidates, dispositions, provenance |
+| `resolve_detailed_admitted(&ctx, admit)` | Explicit, authoritative context | `Result<DetailedResolution, E>` | A caller that must approve each location before it is touched |
+| `resolve_detailed_with_presence(&ctx, admit, present)` | Explicit, authoritative context | `Result<DetailedResolution, E>` | A caller that also holds files not yet saved (an editor's open buffers) |
 | `candidate_plan(&ctx)` | Explicit, authoritative context | `Result<Vec<ResolutionCandidate>, _>` | Inspect the full ordered plan without probing |
 | `complete_partial_in_context(token, &ctx)` | Explicit, authoritative context | `Result<Option<PartialCompletion>, _>` | Completion that must agree with execution |
 | `resolve()` | Live ambient state | `Result<Option<PathBuf>, FileReferenceError>` | Simple top-level calls; compatibility |
@@ -934,6 +936,8 @@ process CWD or `cwd` respectively.
 | `resolve()` / `resolve_from(cwd)` | Resolve through the ambient compatibility APIs |
 | `resolve_in_context(ctx)` | Resolve through the explicit API; no-match maps to `Ok(None)` |
 | `resolve_detailed(ctx)` | Keep the detailed success/failure record |
+| `resolve_detailed_admitted(ctx, admit)` | `resolve_detailed`, asking `admit` about each location just before it is touched |
+| `resolve_detailed_with_presence(ctx, admit, present)` | `resolve_detailed_admitted`, also letting `present` declare a direct candidate with nothing on disk a match |
 | `candidate_plan(ctx)` | Build the complete ordered plan, no filesystem probes |
 | `candidate_plan_with_order(ctx, order)` | Build the unprobed plan using an explicit `CandidatePlanOrder` |
 | `validate_repository_candidate(candidate, repository_root)` | Apply the shared `&`/`^` containment check |
@@ -984,6 +988,59 @@ ordered, *unprobed* list; a detailed result contains only the candidates
 attempted, so entries after the first match or a terminal I/O failure are
 absent. `into_convenience()` performs the legacy projection: match →
 `Ok(Some(path))`, `NoMatch` → `Ok(None)`, anything else → `Err(error)`.
+
+### Approving each probe: `resolve_detailed_admitted()`
+
+A caller that must approve every filesystem access (for example, a host
+judging the reads a computed reference causes) passes an `admit` callback.
+The search is exactly `resolve_detailed()`'s, but `admit` is asked about each
+location immediately before it is touched, spelled as `probed_paths()`
+reports it:
+
+- a direct candidate is asked about before its containment check and its
+  probe, and the search still stops at the first match, so a later candidate
+  is never asked about;
+- a recursive (`%`) reference lists every search root before it chooses, so
+  each root is asked about before the walk starts.
+
+The first `Err` stops the search and is returned unchanged; nothing further
+is probed. For `notes.md` from `repo/pkg/`, with `repo/pkg/notes.md`
+present, `admit` is asked only about `repo/pkg/notes.md`, never about
+`repo/notes.md`:
+
+```rust,ignore
+let detailed = FileReference::new("notes.md")?
+    .resolve_detailed_admitted(&ctx, |path| policy.check(path))?;
+```
+
+### Files that are not saved yet: `resolve_detailed_with_presence()`
+
+An editor can hold a file that exists only as an open buffer. To have the
+search find it where it would be once saved, pass a `present` callback as
+well. `present` is asked about a direct candidate only after that candidate
+was admitted, passed its containment check, and was probed and found
+missing. A candidate holding a directory is never offered. When `present`
+returns `true`, the search stops there:
+
+- the candidate is the match (`matched_path()`), recorded as
+  `ProbeDisposition::Matched`, and `probed_paths()` ends with it;
+- no later candidate is admitted or probed;
+- a file on disk at the same candidate still wins without `present` being
+  asked, and a candidate outside the reference's boundary keeps its typed
+  failure.
+
+A recursive (`%`) reference walks only the disk and never asks `present`.
+For `notes.md` from `repo/pkg/`, with an open buffer at `repo/pkg/notes.md`
+and a saved `repo/notes.md`, the buffer's location is the match and
+`repo/notes.md` is never touched:
+
+```rust,ignore
+let detailed = FileReference::new("notes.md")?
+    .resolve_detailed_with_presence(&ctx, |path| policy.check(path), |path| buffers.contains(path))?;
+```
+
+`resolve_detailed_admitted(ctx, admit)` is this call with a `present` that
+always answers `false`.
 
 `ResolutionFailure` is the stable diagnostic classification. Consume it as
 data — never re-derive it from the reference kind:
