@@ -2407,7 +2407,10 @@ fn release_history_walk_back_succeeds_in_the_release_calculation_environment() {
     assert_eq!(env["GIT_CONFIG_KEY_1"], "core.attributesFile", "{env:?}");
     let attributes_file = Path::new(&env["GIT_CONFIG_VALUE_1"]);
     assert!(attributes_file.starts_with(&attributes_dir), "{env:?}");
-    assert_eq!(fs::read_to_string(attributes_file).expect("attributes file"), rule);
+    // Python's text mode writes CRLF on Windows; Git's attribute parser treats
+    // the `\r` as trailing blank, so only the lines are part of the contract.
+    let written = fs::read_to_string(attributes_file).expect("attributes file");
+    assert_eq!(written.lines().collect::<Vec<_>>(), rule.lines().collect::<Vec<_>>());
 
     let repo = temp.path().join("repo");
     fs::create_dir(&repo).expect("repo dir");

@@ -44,7 +44,7 @@ import release_path as rp  # noqa: E402
 
 SCRATCH = Path(tempfile.mkdtemp(prefix="release-path-driver-"))
 atexit.register(shutil.rmtree, SCRATCH, True)
-(SCRATCH / "empty-gitconfig").write_text("")
+(SCRATCH / "empty-gitconfig").write_text("", encoding="utf-8")
 os.environ.update(
     GIT_CONFIG_GLOBAL=str(SCRATCH / "empty-gitconfig"),
     GIT_CONFIG_NOSYSTEM="1",
@@ -232,7 +232,7 @@ def the_strict_json_loader_refuses_ambiguous_documents():
     for text in ['{"a": 1, "a": 2}', '{"a": NaN}', '{"a": Infinity}', '{"a": 1} trailing', '{"a": 1', ""]:
         expect_error("event.json", rp.load_json, text, source="event.json")
     path = SCRATCH / "list-event.json"
-    path.write_text("[]")
+    path.write_text("[]", encoding="utf-8")
     expect_error(str(path), rp.load_event, path)
 
 
@@ -270,14 +270,15 @@ def per_package_configuration_keeps_settings_and_disables_tags_only_on_recovery(
 # --- a real merge graph -----------------------------------------------------
 
 def git(repo: Path, *args: str) -> str:
-    completed = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=False)
+    completed = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, encoding="utf-8",
+                               check=False)
     assert completed.returncode == 0, f"git {args}: {completed.stderr}"
     return completed.stdout.strip()
 
 
 def write(repo: Path, path: str, text: str) -> None:
     (repo / path).parent.mkdir(parents=True, exist_ok=True)
-    (repo / path).write_text(text)
+    (repo / path).write_text(text, encoding="utf-8")
 
 
 def manifest(name: str, version: str) -> str:
@@ -396,9 +397,9 @@ class FakeReleasePlz(rp.Runner):
     def run(self, argv, *, cwd, env=None):
         if argv[0] != "release-plz":
             return super().run(argv, cwd=cwd, env=env)
-        config = tomllib.loads(Path(argv[argv.index("--config") + 1]).read_text())
+        config = tomllib.loads(Path(argv[argv.index("--config") + 1]).read_text(encoding="utf-8"))
         package = config["package"][0]["name"]
-        version = tomllib.loads((cwd / f"{'sniff' if package.startswith('sniff') else 'worktree'}/cli/Cargo.toml").read_text())["package"]["version"]
+        version = tomllib.loads((cwd / f"{'sniff' if package.startswith('sniff') else 'worktree'}/cli/Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
         tag = f"{package}-v{version}"
         self.calls.append({
             "argv": list(argv), "package": package, "config": config,
@@ -577,15 +578,15 @@ def only_an_exact_integration_tag_selects_one_build():
 
 def run_cli(script: str, args: list[str], event, event_name: str, cwd: Path) -> tuple[int, str, dict]:
     event_path = SCRATCH / f"event-{len(os.listdir(SCRATCH))}.json"
-    event_path.write_text(event if isinstance(event, str) else json.dumps(event))
+    event_path.write_text(event if isinstance(event, str) else json.dumps(event), encoding="utf-8")
     output = event_path.with_suffix(".out")
-    output.write_text("")
+    output.write_text("", encoding="utf-8")
     env = {**os.environ, "GITHUB_EVENT_PATH": str(event_path), "GITHUB_EVENT_NAME": event_name,
-           "GITHUB_REPOSITORY": CANONICAL, "GITHUB_OUTPUT": str(output)}
+           "GITHUB_REPOSITORY": CANONICAL, "GITHUB_OUTPUT": str(output), "PYTHONUTF8": "1"}
     env.pop("GITHUB_STEP_SUMMARY", None)
     completed = subprocess.run([sys.executable, str(ROOT / "scripts" / "ci" / script), *args], cwd=cwd, env=env,
-                               capture_output=True, text=True, check=False)
-    outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+                               capture_output=True, text=True, encoding="utf-8", check=False)
+    outputs = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
     return completed.returncode, completed.stdout + completed.stderr, outputs
 
 
@@ -1114,15 +1115,15 @@ def run_main(main, argv: list[str], event, event_name: str, env: dict | None = N
     """A command entry point run in-process with a written event; returns its
     exit status, its output, and the step outputs it wrote."""
     event_path = SCRATCH / f"event-{len(os.listdir(SCRATCH))}.json"
-    event_path.write_text(event if isinstance(event, str) else json.dumps(event))
+    event_path.write_text(event if isinstance(event, str) else json.dumps(event), encoding="utf-8")
     output = event_path.with_suffix(".out")
-    output.write_text("")
+    output.write_text("", encoding="utf-8")
     full_env = {**os.environ, "GITHUB_EVENT_PATH": str(event_path), "GITHUB_EVENT_NAME": event_name,
                 "GITHUB_REPOSITORY": CANONICAL, "GITHUB_OUTPUT": str(output), **(env or {})}
     captured = io.StringIO()
     with redirect_stdout(captured), redirect_stderr(captured):
         code = main(argv, env=full_env, **kwargs)
-    outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    outputs = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
     return code, captured.getvalue(), outputs
 
 
@@ -1229,7 +1230,7 @@ def calculation_report_lists_the_approved_bumps_and_every_change():
     argv = ["calculation-report", "--repo", str(repo), "--output", str(output)]
     code, text, _ = run_main(rp.main, argv, {}, "workflow_dispatch")
     assert code == 0, text
-    report = json.loads(output.read_text())
+    report = json.loads(output.read_text(encoding="utf-8"))
     assert report["version_changes"] == {
         "git-wt-cli": {"from": "0.1.1", "to": "0.1.2", "manifest": "worktree/cli/Cargo.toml"},
         "sniff-detection-cli": {"from": "9.9.9", "to": "9.9.10", "manifest": "sniff/cli/Cargo.toml"},
@@ -1242,14 +1243,14 @@ def calculation_report_lists_the_approved_bumps_and_every_change():
     # A bump outside the approved set fails the dry run and is named.
     write(repo, "other/Cargo.toml", manifest("other", '"0.2.0"'))
     code, text, _ = run_main(rp.main, argv, {}, "workflow_dispatch")
-    report = json.loads(output.read_text())
+    report = json.loads(output.read_text(encoding="utf-8"))
     assert code == 1 and report["unexpected_packages"] == ["other"] and "['other']" in text, (code, text)
 
     # Nothing changed: reported, not an error, and not proof of the proposal.
     git(repo, "checkout", "--quiet", "--", ".")
     (repo / "worktree/cli/CHANGELOG.md").unlink()
     code, text, _ = run_main(rp.main, argv, {}, "workflow_dispatch")
-    report = json.loads(output.read_text())
+    report = json.loads(output.read_text(encoding="utf-8"))
     assert code == 0 and report["proves_initial_release"] is False and report["tracked_changes"] == [], report
     assert "does not prove the initial two-package proposal" in text, text
 
@@ -1343,7 +1344,7 @@ def release_pr_refuses_incomplete_credentials_and_leaves_the_checkout_clean():
         assert call["env"]["GIT_CONFIG_KEY_1"] == "credential.helper" and call["env"]["GIT_CONFIG_COUNT"] == "3"
         assert len(seen_attributes) == 1 and not seen_attributes[0].exists(), "removed after the run"
         assert [r["headers"]["Authorization"] for r in api.requests] == ["Bearer app-token"]
-        assert output.read_text() == proposal
+        assert output.read_text(encoding="utf-8") == proposal
         assert git(repo, "status", "--porcelain") == "" and git(repo, "rev-parse", "HEAD") == head
         assert git(repo, "rev-parse", "release-plz-proposal^") == head
 
