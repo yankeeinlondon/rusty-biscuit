@@ -61,6 +61,12 @@ fn canonical(fixture: &CliProcessFixture, relative: &str) -> String {
     biscuit_file::canonicalize_simplified(&in_repo(fixture, relative)).expect("exists").display().to_string()
 }
 
+/// `relative` as the envelope's `read_set` spells it: canonical, in portable
+/// forward-slash form (unlike the slot gate's native spelling).
+fn read_entry(fixture: &CliProcessFixture, relative: &str) -> String {
+    biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(&in_repo(fixture, relative)).expect("exists"))
+}
+
 fn run(fixture: &CliProcessFixture, args: &[&str]) -> Output {
     fixture.command().args(args).output().expect("md runs")
 }
@@ -125,7 +131,7 @@ fn compose_resolves_the_shipped_schema_and_reports_its_data_file_read() {
     let report = data_output(&output, 0, include_str!("../../schemas/output/compose.yaml"));
     assert_eq!(report["outcome"], "success", "{report:#}");
     assert_eq!(report["diagnostics"], json!([]), "{report:#}");
-    assert_eq!(report["read_set"], json!([canonical(&fixture, DATA_FILE)]), "{report:#}");
+    assert_eq!(report["read_set"], json!([read_entry(&fixture, DATA_FILE)]), "{report:#}");
 }
 
 #[test]
@@ -215,7 +221,7 @@ fn compose_with_a_persisted_grant_reads_the_dirty_data_file() {
     common::fixture::write(&store, &format!("# granted by hand\nallow file {}\n", canonical(&fixture, DATA_FILE)));
     let output = run(&fixture, &["compose", DOCUMENT_FILE, "--output", "json"]);
     let report = data_output(&output, 0, include_str!("../../schemas/output/compose.yaml"));
-    assert_eq!(report["read_set"], json!([canonical(&fixture, DATA_FILE)]), "{report:#}");
+    assert_eq!(report["read_set"], json!([read_entry(&fixture, DATA_FILE)]), "{report:#}");
 }
 
 /// Matrix 2's wiring cell: an invalid grant-store line grants nothing and

@@ -554,6 +554,7 @@ fn registration(fixture: &CliProcessFixture, shell: &str) -> String {
 }
 
 /// Whether `program` starts at all, for an L1 test's `expect_level!` gate.
+#[cfg(any(unix, feature = "optional-shell-tests"))]
 fn shell_starts(program: &str) -> bool {
     Command::new(program).arg("--version").output().is_ok_and(|output| output.status.success())
 }

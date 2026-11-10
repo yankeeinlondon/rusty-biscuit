@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
+#[cfg(unix)]
 use darkmatter::markdown::compose::shell_expansion::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionOptions,
 };
@@ -145,8 +146,10 @@ fn one_session_keeps_its_pinned_snapshot_for_every_pass() {
     assert_eq!(codes(&failure), vec![APPROVAL_REQUIRED.to_string()]);
 }
 
+#[cfg(unix)]
 struct AllowAll;
 
+#[cfg(unix)]
 impl ShellApprovalHandler for AllowAll {
     fn approve(
         &self,
