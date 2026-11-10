@@ -1078,6 +1078,7 @@ _test_local_all specs *args="": _storage_preflight
         exit 1
     fi
 
+    SECONDS=0
     echo
     echo -e "Testing {{ bold }}${package_names[*]}{{ reset }} in one local invocation"
     echo
@@ -1093,6 +1094,7 @@ _test_local_all specs *args="": _storage_preflight
             ${forwarded[@]+"${forwarded[@]}"} || exit_code=$?
         echo
         just _record_slow_tests L1
+        just _report_elapsed L1 "${SECONDS}"
         exit "${exit_code}"
     else
         cargo test "${selected[@]}" ${forwarded[@]+"${forwarded[@]}"} -- \
@@ -1119,6 +1121,19 @@ _slow_tests *args:
             ;;
     esac
     exec just _slow_tests_tool report --area '{{ invocation_directory() }}' "$@"
+
+# Print how long a test recipe's invocation took, compilation included.
+# Nextest's own `Summary [ …s]` counts only the time spent running tests.
+_report_elapsed tier seconds:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    total='{{ seconds }}'
+    if (( total >= 60 )); then
+        took="$((total / 60))m $((total % 60))s"
+    else
+        took="${total}s"
+    fi
+    echo -e "⏱️  {{ tier }} run took {{ bold }}${took}{{ reset }} (build and tests)"
 
 # Record the slow tests in one Nextest JUnit report in the slow-test log
 # (`scripts/slow-tests.rs`; `docs/testing-strategy.md`, "Slow-test log").
@@ -1499,6 +1514,7 @@ _test pkg *args="": _storage_preflight
 
     duration=$SECONDS
     just _stage_junit L1 "{{ pkg }}" "${exit_code}" "${duration}"
+    just _report_elapsed L1 "${duration}"
     commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
     case $exit_code in
