@@ -148,12 +148,10 @@ fn a_factory_built_template_reports_spans_in_its_own_text() {
 #[cfg(feature = "file")]
 #[test]
 fn a_slot_in_an_imported_type_points_into_the_defining_file() {
-    use std::path::Path;
-
     use biscuit_file::FileResolutionContext;
     use simplified_schema::SchemaSource;
 
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots");
+    let fixtures = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots");
     let entry = fixtures.join("imported-types.yaml");
     let defining = std::fs::read_to_string(fixtures.join("nested/platform-types.yaml")).unwrap();
     let schema = SimplifiedSchema::try_from_yaml(SchemaSource::from(&entry).bound(FileResolutionContext::new(&fixtures)))

@@ -64,7 +64,7 @@ fn document_with(repo: &SlotRepo, frontmatter: &str) -> PathBuf {
 
 #[test]
 fn a_document_valid_under_the_resolved_list_composes_and_reads_the_data_file() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::Clean);
     let home = empty_home();
     let (_, report) = compose(&repo.path(DOCUMENT_FILE), home.path(), ComposeOptions::new())
@@ -78,7 +78,7 @@ fn a_document_valid_under_the_resolved_list_composes_and_reads_the_data_file() {
 
 #[test]
 fn a_value_outside_the_resolved_list_is_a_validation_problem() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::Clean);
     let document = document_with(&repo, "schema_revision: 5\nhas_native_support: true\nos_support:\n  - BeOS\n");
     let failure = compose(&document, empty_home().path(), ComposeOptions::new()).expect_err("BeOS is not listed");
@@ -89,7 +89,7 @@ fn a_value_outside_the_resolved_list_is_a_validation_problem() {
 
 #[test]
 fn a_dirty_data_file_needs_approval_and_a_library_caller_is_never_asked() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::DirtyData);
     let failure = compose(&repo.path(DOCUMENT_FILE), empty_home().path(), ComposeOptions::new())
         .expect_err("a dirty file is not read without a grant");
@@ -128,7 +128,7 @@ fn a_slot_supplied_default_lowers_like_the_same_literal_default() {
 
 #[test]
 fn one_session_keeps_its_pinned_snapshot_for_every_pass() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::Clean);
     let home = empty_home();
     let data = DataRuntime::new();
@@ -166,7 +166,7 @@ impl ShellApprovalHandler for AllowAll {
 #[cfg(unix)]
 #[test]
 fn a_rewrite_by_the_runs_own_shell_step_re_resolves_with_the_grant_decided_earlier() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::Clean);
     let home = empty_home();
     let data = DataRuntime::new();
@@ -231,7 +231,7 @@ fn an_unselected_template_trigger_payload_reads_nothing() {
 
 #[test]
 fn the_effective_schema_holds_only_resolved_constraints() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::Clean);
     let document = repo.path(DOCUMENT_FILE);
     let context = biscuit_file::FileResolutionContext::new(document.parent().unwrap())

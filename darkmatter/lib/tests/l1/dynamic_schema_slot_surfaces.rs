@@ -135,7 +135,7 @@ mod compose_slot_approvals {
 
     #[test]
     fn a_dirty_data_file_is_asked_once_and_its_grant_lets_the_composition_read_it() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::DirtyData);
         let home = empty_home();
         let document = repo.path(DOCUMENT_FILE);
@@ -167,7 +167,7 @@ mod compose_slot_approvals {
 
     #[test]
     fn without_a_handler_nothing_is_granted_and_the_composition_needs_approval() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::DirtyData);
         let home = empty_home();
         let document = repo.path(DOCUMENT_FILE);
@@ -186,7 +186,7 @@ mod compose_slot_approvals {
 
     #[test]
     fn a_clean_committed_data_file_is_granted_automatically_without_asking() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::Clean);
         let home = empty_home();
         let document = repo.path(DOCUMENT_FILE);
@@ -208,7 +208,7 @@ mod approve_slot_reads {
 
     #[test]
     fn a_full_session_asks_once_and_the_answer_resolves_the_template() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::DirtyData);
         let home = empty_home();
         let context = context(&repo, home.path());
@@ -228,7 +228,7 @@ mod approve_slot_reads {
 
     #[test]
     fn a_reference_check_session_never_asks() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::DirtyData);
         let home = empty_home();
         let context = context(&repo, home.path());
@@ -246,7 +246,7 @@ mod reference_check {
 
     #[test]
     fn an_ungranted_read_leaves_the_template_unresolved() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::DirtyData);
         let home = empty_home();
         let context = context(&repo, home.path());
@@ -260,7 +260,7 @@ mod reference_check {
 
     #[test]
     fn an_automatically_granted_read_resolves_and_the_resolved_list_validates() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::Clean);
         let home = empty_home();
         let context = context(&repo, home.path());
@@ -279,7 +279,7 @@ mod reference_check {
 
     #[test]
     fn a_reference_validation_with_a_reference_check_session_defers_the_unapproved_template() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::DirtyData);
         let home = empty_home();
         let document = repo.path(DOCUMENT_FILE);
@@ -307,7 +307,7 @@ mod grants_needed {
 
     #[test]
     fn an_approval_record_lists_the_grants_a_prompt_would_offer() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::DirtyData);
         let home = empty_home();
         let document = repo.path(DOCUMENT_FILE);
@@ -352,7 +352,7 @@ mod grants_needed {
 
     #[test]
     fn a_slot_failure_that_is_not_an_approval_names_no_grants() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::Clean);
         write(&repo.path(DATA_FILE), "- macOS\n- [Linux\n");
         git(repo.root(), &["commit", "-q", "-am", "malformed data"]);
@@ -374,7 +374,7 @@ mod schema_error_projection {
 
     #[test]
     fn a_bare_slot_resolution_error_projects_to_positioned_slot_records() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::DirtyData);
         let home = empty_home();
         let context = context(&repo, home.path());
@@ -398,7 +398,7 @@ mod schema_error_projection {
 
     #[test]
     fn an_unresolved_template_is_one_pending_record_at_the_document() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::Clean);
         let home = empty_home();
         let document = repo.path(DOCUMENT_FILE);
@@ -421,7 +421,7 @@ mod clean_schema_config {
 
     #[test]
     fn a_dirty_read_without_a_handler_fails_the_resolution() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::DirtyData);
         let home = empty_home();
         let context = context(&repo, home.path());
@@ -438,7 +438,7 @@ mod clean_schema_config {
 
     #[test]
     fn an_allowing_handler_is_asked_once_for_every_resolution() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
         let repo = SlotRepo::build(&source, RepoState::DirtyData);
         let home = empty_home();
         let context = context(&repo, home.path());
@@ -674,7 +674,7 @@ mod template_types {
 
         #[test]
         fn a_granted_template_type_resolves_and_the_returned_type_validates() {
-            let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+            let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
             let repo = SlotRepo::build(&source, RepoState::Clean);
             let folder = folder_of(&repo.path(DOCUMENT_FILE));
             write(&folder.join("status-type.yaml"), "- enum(draft, published)\n");

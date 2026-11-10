@@ -98,7 +98,7 @@ impl SlotHost for StubHost {
 
 #[cfg(feature = "file")]
 fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots")
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots")
 }
 
 fn context(dir: &Path) -> FileResolutionContext {

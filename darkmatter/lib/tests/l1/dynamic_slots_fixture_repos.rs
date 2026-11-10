@@ -24,7 +24,7 @@ fn porcelain(root: &Path) -> String {
 
 #[test]
 fn clean_state_tracks_and_commits_every_file() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::Clean);
     assert_eq!(porcelain(repo.root()), "");
     let schema = std::fs::read_to_string(repo.path(SCHEMA_FILE)).expect("schema copied");
@@ -41,7 +41,7 @@ fn clean_state_tracks_and_commits_every_file() {
 
 #[test]
 fn dirty_state_modifies_only_the_data_file() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::DirtyData);
     assert_eq!(porcelain(repo.root()), format!(" M {DATA_FILE}\n"));
     let data = std::fs::read_to_string(repo.path(DATA_FILE)).unwrap();
@@ -50,21 +50,21 @@ fn dirty_state_modifies_only_the_data_file() {
 
 #[test]
 fn untracked_state_leaves_only_the_data_file_unadded() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::UntrackedData);
     assert_eq!(porcelain(repo.root()), format!("?? {DATA_FILE}\n"));
 }
 
 #[test]
 fn ignored_state_matches_the_data_file_with_a_committed_gitignore() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::IgnoredData);
     assert_eq!(porcelain(repo.root()), format!("!! {DATA_FILE}\n"));
 }
 
 #[test]
 fn no_repository_state_copies_the_files_without_git() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dynamic_slots/claudine");
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
     let repo = SlotRepo::build(&source, RepoState::NoRepository);
     assert!(!repo.root().join(".git").exists());
     assert!(repo.path(DATA_FILE).is_file());
