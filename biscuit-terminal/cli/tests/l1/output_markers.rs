@@ -124,3 +124,31 @@ fn the_command_line_never_spells_out_a_marker() {
         assert!(!command.contains(marker), "{marker} is spelled out in the echo: {command}");
     }
 }
+
+/// A terminal re-emits only changed attributes, so a row inside a dim run
+/// arrives bare; its `raw` must start in the state the earlier rows left.
+#[test]
+fn a_row_starts_in_the_attribute_and_link_state_earlier_rows_left() {
+    let raw = [
+        "BTOUT-4242x7-BEGIN",
+        "\x1b]8;;https://e.io\x1b\\a\x1b]8;;\x1b\\",
+        "\x1b[0;2m```",
+        "x",
+        "\x1b[38;2;0;0;0mfence",
+        "\x1b[0m\x1b]8;;https://e.io\x1b\\b",
+        "c\x1b]8;;\x1b\\",
+        "BTOUT-4242x7-END",
+    ]
+    .join("\n");
+    let raw = raw.as_str();
+    let plain = "BTOUT-4242x7-BEGIN\na\n```\nx\nfence\nb\nc\nBTOUT-4242x7-END";
+    let rows = rows_between_markers(raw, plain, ID).expect("both markers");
+    let raw_of = |text: &str| rows.iter().find(|row| row.plain == text).map(|row| row.raw.as_str());
+    assert_eq!(raw_of("x"), Some("\x1b[2mx"), "dim carried, no link");
+    assert_eq!(
+        raw_of("b"),
+        Some("\x1b[2;38;2;0;0;0m\x1b[0m\x1b]8;;https://e.io\x1b\\b"),
+        "a truecolor 0 component is not a reset"
+    );
+    assert_eq!(raw_of("c"), Some("\x1b]8;;https://e.io\x1b\\c\x1b]8;;\x1b\\"), "the open link carries");
+}
