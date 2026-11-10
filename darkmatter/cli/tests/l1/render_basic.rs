@@ -4,31 +4,51 @@ use common::{CliProcessFixture, md_file};
 use predicates::prelude::*;
 use std::io::Write;
 
-#[test]
-fn default_render_is_an_alias_with_the_same_options() {
-    let fixture = CliProcessFixture::named("render-alias-options");
+/// `md FILE` and `md render FILE` print the same bytes for `format`, with the
+/// same render options applied.
+fn assert_default_render_is_an_alias(format: &str) {
+    let fixture = CliProcessFixture::named(&format!("render-alias-options-{format}"));
     let path = fixture.write_file("cwd/doc.md", "# Alias\n\n- parent\n    - child\n");
-    for format in ["terminal", "plain", "markdown", "markdown-plus", "html", "json"] {
-        let mut outputs = Vec::new();
-        for prefix in [&[][..], &["render"][..]] {
-            let output = fixture
-                .command()
-                .args(prefix)
-                .arg(&path)
-                .args(["--output", format, "--indent", "2", "--feature", "no-mermaid-rendering"])
-                .assert()
-                .success()
-                .get_output()
-                .clone();
-            assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
-            assert!(!output.stdout.is_empty());
-            outputs.push(output.stdout);
-        }
-        assert_eq!(outputs[0], outputs[1], "format: {format}");
-        if format == "markdown" {
-            assert!(String::from_utf8_lossy(&outputs[0]).contains("- parent\n  - child"));
-        }
+    let mut outputs = Vec::new();
+    for prefix in [&[][..], &["render"][..]] {
+        let output = fixture
+            .command()
+            .args(prefix)
+            .arg(&path)
+            .args(["--output", format, "--indent", "2", "--feature", "no-mermaid-rendering"])
+            .assert()
+            .success()
+            .get_output()
+            .clone();
+        assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(!output.stdout.is_empty());
+        outputs.push(output.stdout);
     }
+    assert_eq!(outputs[0], outputs[1], "format: {format}");
+    if format == "markdown" {
+        assert!(String::from_utf8_lossy(&outputs[0]).contains("- parent\n  - child"));
+    }
+}
+
+/// One test per format, so the spawns spread across cores.
+macro_rules! default_render_alias {
+    ($($name:ident => $format:literal;)+) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_default_render_is_an_alias($format);
+            }
+        )+
+    };
+}
+
+default_render_alias! {
+    default_render_is_an_alias_for_terminal => "terminal";
+    default_render_is_an_alias_for_plain => "plain";
+    default_render_is_an_alias_for_markdown => "markdown";
+    default_render_is_an_alias_for_markdown_plus => "markdown-plus";
+    default_render_is_an_alias_for_html => "html";
+    default_render_is_an_alias_for_json => "json";
 }
 
 #[test]
