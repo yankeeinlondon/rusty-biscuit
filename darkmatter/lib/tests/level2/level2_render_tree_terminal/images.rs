@@ -85,7 +85,7 @@ fn level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal() {
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
     run_with_sentinel(harness, "clear");
-    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+    let frame = run_with_sentinel(harness, &format!("cat {}", shell_path(&path)));
 
     // Anti-regression only: the real terminal must not surface the `[cat]`
     // alt-text fallback. This does NOT prove the image was painted — the

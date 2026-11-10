@@ -148,7 +148,7 @@ fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
     let component_root = biscuit_file::canonicalize_simplified(&dir.path().join("docs").join("topics"))
         .expect("canonicalize component root");
     for rel in &expected_rel {
-        let want = format!("file://{}", component_root.join(rel).display());
+        let want = String::from(url::Url::from_file_path(component_root.join(rel)).expect("absolute file URL"));
         assert!(
             frame.raw.contains(&want),
             "expected per-file OSC8 destination {want:?} in capture; raw:\n{}",

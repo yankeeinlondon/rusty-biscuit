@@ -3,7 +3,9 @@
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, bin_exe, capture_settled, strip_ansi};
+use biscuit_test_harness::{
+    CapturedFrame, TerminalHarness, bin_exe, capture_settled, shell_path, shell_quote, strip_ansi,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -84,6 +86,11 @@ pub fn md_shim() -> &'static str {
     })
 }
 
+/// [`md_shim`] spelled as the command word of a pane command.
+pub fn md_shim_word() -> String {
+    shell_path(Path::new(md_shim()))
+}
+
 /// Verifies that the shim at `link` resolves to [`md_bin`]. Called once per
 /// process from [`md_shim`]; failures abort the test binary so the
 /// suite cannot silently pass against a host-installed `md`.
@@ -161,7 +168,9 @@ pub fn is_same_binary(candidate: &std::path::Path, built: &std::path::Path) -> b
 /// Maximum wall time we'll spend waiting for a single command's completion
 /// sentinel to appear in the pane. Generous — most `md` invocations finish
 /// in well under a second; this is a safety net for first-run cold builds.
-const SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Kept under nextest's 30 s termination so a stuck wait panics with its
+/// last capture instead of being killed silently.
+const SENTINEL_TIMEOUT: Duration = Duration::from_secs(20);
 
 fn wait_for_tmux_sentinel(
     harness: &mut TmuxHarness,
@@ -229,10 +238,6 @@ fn output_region(frame: CapturedFrame, start: &str, end: &str) -> CapturedFrame 
     CapturedFrame::from_raw(lines[start_index + 1..end_index].join("\n"))
 }
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 /// Runs the Cargo-built `md` in a headless tmux pane.
 pub fn run_md_in_tmux(
     file_body: &str,
@@ -251,10 +256,10 @@ pub fn run_md_in_tmux(
     run_tmux_command(harness, "clear", &[]);
     // A shared pane may retain a fixture directory deleted by an earlier test.
     // Establishing this live directory also gives FileReference a valid CWD.
-    let fixture_dir = shell_quote(&dir.path().to_string_lossy());
+    let fixture_dir = shell_path(dir.path());
     let md_command = format!(
         "cd {fixture_dir} && {} layout.md {extra_args}",
-        shell_quote(md_shim())
+        md_shim_word()
     );
     let command = shell_prefix
         .map(|prefix| format!("{prefix}; {md_command}"))
@@ -384,7 +389,7 @@ where
     // into this capture. `clear` is portable across bash and zsh.
     run_with_sentinel(harness, "clear");
 
-    let cmd = format!("{bin} {} {}", file_path.display(), extra_args);
+    let cmd = format!("{} {} {extra_args}", shell_path(Path::new(bin)), shell_path(&file_path));
     let frame = run_with_sentinel_env(harness, &cmd, env);
     // Keep tempdir alive past capture by returning its path.
     Some((frame, file_path))
@@ -445,8 +450,8 @@ pub fn run_md_after_shell_prefix(
     // also verify the code under review (review-2 finding #1).
     let cmd = format!(
         "{prefix} {} {} {extra_args}",
-        md_shim(),
-        file_path.display()
+        md_shim_word(),
+        shell_path(&file_path)
     );
     let frame = run_with_sentinel(harness, &cmd);
     Some((frame, file_path))

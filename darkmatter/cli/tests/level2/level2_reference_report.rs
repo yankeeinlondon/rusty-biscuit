@@ -7,10 +7,10 @@
 
 use crate::common;
 
-use biscuit_test_harness::TerminalHarness;
+use biscuit_test_harness::{TerminalHarness, shell_path};
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use common::level2::{SHARED_HARNESS, md_shim, run_with_sentinel};
+use common::level2::{SHARED_HARNESS, md_shim_word, run_with_sentinel};
 use std::fs;
 use std::time::{Duration, Instant};
 use tempfile::{TempDir, tempdir};
@@ -187,14 +187,14 @@ impl ReportPane {
         harness.resize(cols, 60).expect("resize tmux pane");
         assert_eq!(harness.pane_cols().expect("read pane width"), cols);
         let mut pane = Self { harness, fixture, runs: 0 };
-        let directory = pane.fixture.path().display().to_string();
-        pane.run(&format!("cd '{directory}'"));
+        let directory = shell_path(pane.fixture.path());
+        pane.run(&format!("cd {directory}"));
         pane
     }
 
     /// Runs `arguments` through the built `md` and returns the rows it drew.
     fn md(&mut self, arguments: &str) -> Vec<ScreenRow> {
-        self.run(&format!("{} {arguments}", md_shim()))
+        self.run(&format!("{} {arguments}", md_shim_word()))
     }
 
     /// The rows strictly between printed markers. The typed command never
@@ -438,8 +438,8 @@ fn level2_location_reaches_the_terminal_as_a_hyperlink() {
     let mut guard = SHARED_HARNESS.get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("WezTerm harness present");
 
-    run_with_sentinel(harness, &format!("cd '{}'; clear", fixture.path().display()));
-    let frame = run_with_sentinel(harness, &format!("{} validate refs docs/root.md", md_shim()));
+    run_with_sentinel(harness, &format!("cd {}; clear", shell_path(fixture.path())));
+    let frame = run_with_sentinel(harness, &format!("{} validate refs docs/root.md", md_shim_word()));
 
     let root_row = frame
         .raw

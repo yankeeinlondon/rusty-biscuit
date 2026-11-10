@@ -5,7 +5,7 @@ pub(super) use biscuit_terminal::render_tree::{
 pub(super) use biscuit_terminal::terminal::Terminal;
 pub(super) use biscuit_test_harness::shared::SharedHarness;
 pub(super) use biscuit_test_harness::wezterm::WezTermHarness;
-pub(super) use biscuit_test_harness::{CapturedFrame, TerminalHarness};
+pub(super) use biscuit_test_harness::{CapturedFrame, TerminalHarness, shell_path};
 pub(super) use darkmatter::layout::{ComponentPolicy, DarkmatterPage, PageComponent};
 pub(super) use darkmatter::markdown::Markdown;
 pub(super) use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
@@ -239,7 +239,7 @@ pub(super) fn drive_pane(
     // Reset visible region between tests.
     run_with_sentinel(harness, "clear");
 
-    let cmd = format!("cat {}", path.display());
+    let cmd = format!("cat {}", shell_path(&path));
     let frame = run_with_sentinel(harness, &cmd);
     Some((frame, dir))
 }
@@ -432,7 +432,7 @@ pub(super) fn drive_render_probe(variant: &str) -> Option<CapturedFrame> {
     // the spawned process.
     let cmd = format!(
         "{RENDER_PROBE_ENV}={variant} {} --exact level2_render_tree_terminal::public_entry_points::level2_render_probe_entrypoint --nocapture --test-threads=1",
-        exe.display()
+        shell_path(&exe)
     );
     Some(run_with_sentinel(harness, &cmd))
 }
@@ -712,7 +712,7 @@ pub(super) fn run_page_in_pane(
     fs::write(&path, rendered).unwrap();
 
     run_with_sentinel(harness, "clear");
-    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+    let frame = run_with_sentinel(harness, &format!("cat {}", shell_path(&path)));
     Some((frame, cols))
 }
 
@@ -1000,7 +1000,7 @@ pub(super) fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempf
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
     run_with_sentinel(harness, "clear");
-    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+    let frame = run_with_sentinel(harness, &format!("cat {}", shell_path(&path)));
     Some((frame, dir))
 }
 

@@ -85,6 +85,14 @@ features their tier requires.
   ConPTY pseudoconsole that PowerShell's real Tab test types into. The workspace
   already builds it for `worktree-cli`, `claudine-cli`, and `biscuit-terminal`.
 
+## Real-terminal Hyperlink Expectations
+
+- `url` (development, `darkmatter-cli`) — the Level-2 error tests spell the
+  `file://` hyperlink they expect with `Url::from_file_path`, the same
+  conversion the renderer uses, so a Windows drive path is expected as
+  `file:///C:/…` rather than a hand-built `file://C:\…`. The library already
+  depends on it.
+
 ## Source-guard Test Dependencies
 
 - `toml` (test-only, `darkmatter` and `darkmatter-cli`) — the shared

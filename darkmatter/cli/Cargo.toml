@@ -76,6 +76,8 @@ tracing-test = "0.2"
 # The shared path lookup guard reads target roots from `Cargo.toml`.
 toml = "1.0"
 syntect = "5.2"
+# Expected `file://` hyperlinks in the Level-2 error tests.
+url = "2.5"
 # Unconditional for every test target, not just the `terminal-tests` ones: the
 # ungated targets resolve fixtures through `manifest_dir!()`, which the optional
 # `[dependencies]` entry above cannot supply without the feature.

@@ -1515,6 +1515,7 @@ dependencies = [
  "serial_test",
  "tempfile",
  "unicode-width 0.2.2",
+ "windows-sys 0.61.2",
  "x11rb",
 ]
 
@@ -3293,6 +3294,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+ "url",
  "xpty",
 ]
 

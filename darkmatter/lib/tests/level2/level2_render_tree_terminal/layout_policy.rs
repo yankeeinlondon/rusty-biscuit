@@ -220,7 +220,7 @@ fn level2_percent_page_frame_offset_and_width_in_real_terminal() {
     fs::write(&path, rendered).unwrap();
 
     run_with_sentinel(harness, "clear");
-    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+    let frame = run_with_sentinel(harness, &format!("cat {}", shell_path(&path)));
 
     // The rendered paragraph is the sentinel row plus its wrapped continuations;
     // every content row carries the resolved left margin as leading spaces.
