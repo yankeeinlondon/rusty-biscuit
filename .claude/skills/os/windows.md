@@ -313,6 +313,19 @@ exported PATH is identical to the inherited one.
 - **Cygwin collapses `\\` in a command line from a native parent.** `just` is
   native, so a recipe line or backtick holding `\\` reaches bash with `\`.
   Write Windows-path manipulation without backslashes (`${exe%?bash.exe}`).
+- **Nested `just` → Cygwin bash → `just` → bash corrupts the console mode.**
+  Cygwin switches the console between its own mode and a native mode around
+  every native child, and an inner bash restores a mode captured while the
+  outer one held it. Probed by sampling `GetConsoleMode` from a hidden
+  console: a nested failing recipe leaves input mode `0x0` (no line input or
+  echo), and at the end of a full `just test` the output mode dropped to
+  `0x0` as the bash layers exited. That is exactly when native `just` prints
+  `error: recipe … failed`, so the line shows raw `←[1;31m` escapes and `◙`
+  for its newline while bash's own `echo -e` colors (Cygwin interprets them)
+  look fine. Shared test recipes call internal recipes with `just --quiet`
+  so only the top-level `just` prints that line; plain conhost runs of
+  `_record_slow_tests` alone keep output at `0x7`, so reproduce with the full
+  chain, not a single step.
 - **`/etc/bash.bashrc`'s `CYG_SYS_BASHRC` crash** appears for any `bash -eu -c`
   started over SSH without that variable, so ad hoc probes on the rig need it
   too.

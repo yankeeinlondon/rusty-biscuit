@@ -78,7 +78,7 @@ test *args="":
         # and keeps per-package invocations for distinct JUnit reports.
         BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} --features effects-instrumentation,work-counters; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     else
-        just _test_local_all "{{ LIBRARY }} --features effects-instrumentation,work-counters; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
+        just --quiet _test_local_all "{{ LIBRARY }} --features effects-instrumentation,work-counters; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     fi
     if (( exit_code == 130 )); then
         exit 130

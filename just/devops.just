@@ -991,7 +991,9 @@ _test_all specs *args="":
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
         just _run_all _test '{{ specs }}' {{ args }}
     else
-        just _test_local_all '{{ specs }}' {{ args }}
+        # `--quiet`: the caller reports the failure; just's own "recipe
+        # failed" line for this internal recipe would only repeat it.
+        just --quiet _test_local_all '{{ specs }}' {{ args }}
     fi
 
 # Run one L1 nextest invocation across an entire package area. This is the
@@ -1089,6 +1091,7 @@ _test_local_all specs *args="": _storage_preflight
         exit_code=0
         "${nextest_bin[@]}" run "${selected[@]}" -E "${filter}" --no-tests=pass \
             ${forwarded[@]+"${forwarded[@]}"} || exit_code=$?
+        echo
         just _record_slow_tests L1
         exit "${exit_code}"
     else
