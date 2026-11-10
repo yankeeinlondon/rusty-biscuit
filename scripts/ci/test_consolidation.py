@@ -851,7 +851,7 @@ class PackageTableTests(unittest.TestCase):
             "claudine": ((), ("work-counters",)),
             "sniff": ((), ("remote",), ("network",)),
             "sniff-detection-cli": ((), ("test-fixtures",)),
-            "biscuit-file": ((), ("fetch",)),
+            "biscuit-file": ((), ("fetch",), ("fetch", "delimited")),
             "schematic-gen": ((), ("terminal-tests",)),
             "biscuit-terminal-cli": ((), ("terminal-tests",)),
             "claudine-gen": ((), ("terminal-tests",)),
