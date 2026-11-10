@@ -1769,8 +1769,12 @@ mod tests {
     fn login_shell_command_line_survives_the_applescript_escape() {
         let line = super::super::login_shell_command_line("bash", true);
         let escaped = applescript_escape(&format!("BISCUIT_TEST_BIN_DIR='/b' {line}"));
+        // The script is built for the host; only Windows adds `--noediting`.
+        let flags = if cfg!(windows) { "--norc --noediting" } else { "--norc" };
         assert!(
-            escaped.contains(r#"-c 'unset ENV BASH_ENV; export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; unset BISCUIT_TEST_BIN_DIR; exec \"$0\" --norc -i' bash"#),
+            escaped.contains(&format!(
+                r#"-c 'unset ENV BASH_ENV; export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; unset BISCUIT_TEST_BIN_DIR; exec \"$0\" {flags} -i' bash"#
+            )),
             "{escaped}"
         );
         assert!(!escaped.contains('\n'), "a newline would break the literal");

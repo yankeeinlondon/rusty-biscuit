@@ -340,13 +340,24 @@ exported PATH is identical to the inherited one.
   argument (`cat 'C:\…'`) but is "command not found" as the command word;
   `C:/…` works in both places under Cygwin and Git Bash. Spell pane commands
   with `biscuit_test_harness::shell_path`.
-- **Typing into a Cygwin bash pane is superlinear in the line's length**:
-  readline redraws the wrapped line for every character. In a WezTerm pane
-  the echo took 0.5 s for 76 characters, 1.75 s for 167, and 5.8 s for 317,
-  while `md` itself ran in 0.4 s. A test typing a few long `md` lines crossed
-  nextest's 30 s limit. The harness's `send_command_with_env` and
-  `send_command_settled` therefore type a long line on Windows as
-  `. '<temp script>'`; raw `send_text` is still typed character by character.
+- **Typing into a Cygwin bash pane with readline on is superlinear in the
+  line's length**: under ConPTY, readline redraws the line for every
+  character. In a WezTerm pane 65 characters took 0.49 s, 167 took 1.75 s,
+  and 317 took 5.8 s, while `md` itself ran in 0.4 s; a test typing a few
+  long `md` lines crossed nextest's 30 s limit. With `bash --noediting` the
+  same lines took 0.05 s and 0.16 s (600 characters, 0.25 s), so the harness
+  starts its interactive bash with `--noediting` on Windows. Bracketed paste
+  is no cure: a pasted line plus Enter was slower than typing (0.66 s).
+- **Every process a Cygwin pane starts costs 0.05–0.15 s, more under
+  parallel load** (`rm`, `clear`, `/usr/bin/printf`). Prefer builtins on a
+  hot path; the harness's `CLEAR_SCREEN` is `printf` of the bytes `clear`
+  writes.
+- **`wezterm cli` without `--no-auto-start` starts a mux server when it
+  cannot reach one.** That server inherits the client's stdout and stderr
+  pipes, so a harness reading them to EOF hangs until its timeout, and it
+  binds the default `sock` path, displacing the developer's own mux. The
+  harness passes `--no-auto-start` on every client; a manual probe should
+  too.
 - **`/etc/bash.bashrc`'s `CYG_SYS_BASHRC` crash** appears for any `bash -eu -c`
   started over SSH without that variable, so ad hoc probes on the rig need it
   too.

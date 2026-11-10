@@ -317,7 +317,6 @@ impl WezTermHarness {
         let start = format!("-{lines}");
         let mut cmd = wezterm_command();
         cmd.args([
-            "cli",
             "get-text",
             "--pane-id",
             &id,
@@ -332,7 +331,7 @@ impl WezTermHarness {
                 String::from_utf8_lossy(&out.stderr)
             )));
         }
-        let raw = String::from_utf8_lossy(&out.stdout).into_owned();
+        let raw = canonical_hyperlink_params(&String::from_utf8_lossy(&out.stdout));
         Ok(CapturedFrame::from_raw(raw))
     }
 
@@ -349,7 +348,7 @@ impl WezTermHarness {
     fn kill_pane(&mut self) {
         if let Some(id) = self.pane_id.take() {
             let mut cmd = wezterm_command();
-            cmd.args(["cli", "kill-pane", "--pane-id", &id])
+            cmd.args(["kill-pane", "--pane-id", &id])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
             let _ = run_client(&mut cmd, CLEANUP_TIMEOUT);
@@ -373,7 +372,7 @@ impl WezTermHarness {
         let id = self.pane_id();
         let title = self.unique_window_title();
         let mut cmd = wezterm_command();
-        cmd.args(["cli", "set-tab-title", "--pane-id", id, &title])
+        cmd.args(["set-tab-title", "--pane-id", id, &title])
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let _ = run_client(&mut cmd, CLEANUP_TIMEOUT);
@@ -394,7 +393,7 @@ impl WezTermHarness {
     pub fn pane_size(&self) -> io::Result<PaneSize> {
         let id = self.pane_id();
         let mut cmd = wezterm_command();
-        cmd.args(["cli", "list", "--format", "json"]);
+        cmd.args(["list", "--format", "json"]);
         let out = run_client(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
@@ -509,7 +508,7 @@ impl WezTermHarness {
 
         // 1. Stamp a unique title we can target precisely.
         let mut cmd = wezterm_command();
-        cmd.args(["cli", "set-tab-title", "--pane-id", id, &title]);
+        cmd.args(["set-tab-title", "--pane-id", id, &title]);
         let out = run_client(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
@@ -520,7 +519,7 @@ impl WezTermHarness {
 
         // 2. Activate intra-WezTerm pane focus.
         let mut cmd = wezterm_command();
-        cmd.args(["cli", "activate-pane", "--pane-id", id]);
+        cmd.args(["activate-pane", "--pane-id", id]);
         let out = run_client(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
@@ -709,7 +708,7 @@ impl Drop for WezTermHarness {
 /// is swallowed.
 pub fn kill_pane_by_id(pane_id: &str) {
     let mut cmd = wezterm_command();
-    cmd.args(["cli", "kill-pane", "--pane-id", pane_id])
+    cmd.args(["kill-pane", "--pane-id", pane_id])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let _ = run_client(&mut cmd, CLEANUP_TIMEOUT);
@@ -734,7 +733,7 @@ impl TerminalHarness for WezTermHarness {
         }
         let shell = super::detect_shell();
         let mut cmd = wezterm_command();
-        cmd.args(["cli", "spawn", "--new-window"]);
+        cmd.args(["spawn", "--new-window"]);
         push_workspace_args(&mut cmd, self.spawn_visibility == SpawnVisibility::Background);
         cmd.arg("--");
         let bin_dir = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"));
@@ -775,7 +774,7 @@ impl TerminalHarness for WezTermHarness {
             CLEANUP_ONCE.call_once(sweep_if_due);
         }
         let mut cmd = wezterm_command();
-        cmd.args(["cli", "spawn", "--new-window"]);
+        cmd.args(["spawn", "--new-window"]);
         push_workspace_args(&mut cmd, self.spawn_visibility == SpawnVisibility::Background);
         cmd.arg("--");
         cmd.arg(program);
@@ -802,7 +801,7 @@ impl TerminalHarness for WezTermHarness {
     fn send_text(&mut self, bytes: &[u8]) -> io::Result<()> {
         let id = self.pane_id().to_string();
         let mut cmd = wezterm_command();
-        cmd.args(["cli", "send-text", "--pane-id", &id, "--no-paste"]);
+        cmd.args(["send-text", "--pane-id", &id, "--no-paste"]);
         let out = run_client_with_stdin(&mut cmd, bytes, SEND_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
@@ -816,7 +815,7 @@ impl TerminalHarness for WezTermHarness {
     fn capture(&mut self) -> io::Result<CapturedFrame> {
         let id = self.pane_id().to_string();
         let mut cmd = wezterm_command();
-        cmd.args(["cli", "get-text", "--pane-id", &id, "--escapes"]);
+        cmd.args(["get-text", "--pane-id", &id, "--escapes"]);
         let out = run_client(&mut cmd, CAPTURE_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
@@ -824,9 +823,37 @@ impl TerminalHarness for WezTermHarness {
                 String::from_utf8_lossy(&out.stderr)
             )));
         }
-        let raw = String::from_utf8_lossy(&out.stdout).into_owned();
+        let raw = canonical_hyperlink_params(&String::from_utf8_lossy(&out.stdout));
         Ok(CapturedFrame::from_raw(raw))
     }
+}
+
+/// Rewrites each OSC 8 hyperlink's parameters (`ESC ] 8 ; params ; uri`) in
+/// sorted order.
+///
+/// WezTerm keeps a link's parameters in a hash map and `get-text --escapes`
+/// emits them in a different order on each call, so two captures of an
+/// unchanged pane differed and [`super::capture_settled`] never saw a stable
+/// pair: a frame with `line=3:column=1` links waited out its full 20 s budget
+/// (2026-11-09). The order carries no meaning, so a sorted one loses nothing.
+fn canonical_hyperlink_params(raw: &str) -> String {
+    const OPENER: &str = "\x1b]8;";
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(at) = rest.find(OPENER) {
+        let (head, tail) = rest.split_at(at + OPENER.len());
+        out.push_str(head);
+        let Some(end) = tail.find(';') else {
+            rest = tail;
+            break;
+        };
+        let mut params: Vec<&str> = tail[..end].split(':').collect();
+        params.sort_unstable();
+        out.push_str(&params.join(":"));
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Route a background spawn into the off-screen workspace.
@@ -836,7 +863,8 @@ fn push_workspace_args(cmd: &mut Command, background: bool) {
     }
 }
 
-/// Every `wezterm` process the harness starts, with `--skip-config`.
+/// Every `wezterm cli` client the harness starts, with `--skip-config` and
+/// `--no-auto-start`; callers append the subcommand.
 ///
 /// The client evaluates `wezterm.lua` before some subcommands (`spawn` does;
 /// `list` does not), and that evaluation is not the harness's business: it
@@ -857,9 +885,16 @@ fn push_workspace_args(cmd: &mut Command, background: bool) {
 /// overridden by that inherited variable and, in the at-exit pane kill, panicked
 /// creating its random file name after thread-locals were torn down, leaking the
 /// pane.
+///
+/// `--no-auto-start` keeps a client from launching a mux server when nothing
+/// answers its socket. A launched server outlives the client while holding
+/// the client's inherited stdout and stderr, so [`run_with_timeout`] waited for
+/// an end of file that never came: on Windows, a probe of an unset or fake
+/// socket hung its test until nextest killed it (2026-11-09). The harness
+/// only talks to a mux somebody else is running.
 fn wezterm_command() -> Command {
     let mut cmd = Command::new("wezterm");
-    cmd.arg("--skip-config");
+    cmd.args(["--skip-config", "cli", "--no-auto-start"]);
     cmd
 }
 
@@ -1109,7 +1144,7 @@ fn sweep_stale_wezterm_panes() {
         return;
     };
     let mut cmd = wezterm_command();
-    cmd.args(["cli", "list", "--format", "json"]);
+    cmd.args(["list", "--format", "json"]);
     let Ok(out) = run_with_timeout(&mut cmd, QUERY_TIMEOUT) else {
         return;
     };
@@ -1162,7 +1197,7 @@ fn string_field<'a>(entry: &'a serde_json::Value, field: &str) -> Option<&'a str
 
 fn kill_wezterm_pane(pane_id: u64) {
     let mut cmd = wezterm_command();
-    cmd.args(["cli", "kill-pane", "--pane-id", &pane_id.to_string()])
+    cmd.args(["kill-pane", "--pane-id", &pane_id.to_string()])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     // The caller, `sweep_stale_wezterm_panes`, holds the client turn.
@@ -1257,7 +1292,7 @@ fn which(bin: &str) -> bool {
 /// callers can unit-test the probe surface in isolation.
 fn wezterm_gui_probe() -> Probe {
     let mut cmd = wezterm_command();
-    cmd.args(["cli", "list", "--format", "json"]);
+    cmd.args(["list", "--format", "json"]);
     match run_client(&mut cmd, AVAILABLE_PROBE_TIMEOUT) {
         Ok(out) if out.status.success() => Probe::Answered,
         Err(err) if err.kind() == io::ErrorKind::TimedOut => Probe::Late,
@@ -1286,15 +1321,28 @@ fn wezterm_required() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hyperlink_parameters_are_captured_in_one_order() {
+        let link = |params: &str| format!("a \x1b]8;{params};file:///x\x1b\\x\x1b]8;;\x1b\\ b");
+        let canonical = canonical_hyperlink_params(&link("line=3:column=1:heading=root"));
+        assert_eq!(canonical, link("column=1:heading=root:line=3"));
+        assert_eq!(
+            canonical_hyperlink_params(&link("heading=root:column=1:line=3")),
+            canonical
+        );
+        assert_eq!(canonical_hyperlink_params("plain"), "plain");
+    }
     use std::time::Instant;
 
-    /// `--skip-config` is a global option: it must precede the subcommand.
+    /// `--skip-config` is a global option and must precede `cli`;
+    /// `--no-auto-start` is a `cli` option and must precede the subcommand.
     #[test]
-    fn every_client_skips_the_developer_config() {
+    fn every_client_skips_the_developer_config_and_never_starts_a_mux() {
         let mut command = wezterm_command();
-        command.args(["cli", "list"]);
+        command.args(["list"]);
         let args: Vec<_> = command.get_args().collect();
-        assert_eq!(args, ["--skip-config", "cli", "list"]);
+        assert_eq!(args, ["--skip-config", "cli", "--no-auto-start", "list"]);
     }
 
     /// A client beyond [`CLIENT_TURNS`] waits, gives up at its timeout, and
@@ -1574,7 +1622,7 @@ mod tests {
         // was set but the GUI just happened to answer), this would
         // surface as a hang or non-zero exit.
         let mut cmd = wezterm_command();
-        cmd.args(["cli", "list", "--format", "json"]);
+        cmd.args(["list", "--format", "json"]);
         let out = run_client(&mut cmd, AVAILABLE_PROBE_TIMEOUT)
             .expect("reachable per available(); wezterm cli list must succeed within probe budget");
         assert!(

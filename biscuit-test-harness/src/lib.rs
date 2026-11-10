@@ -433,14 +433,17 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
 /// `unset ENV BASH_ENV` in [`login_shell_script`], because POSIX `sh`, `dash`,
 /// and `ksh` source whatever `$ENV` names rather than a fixed rc path.
 pub(crate) fn interactive_rc_suppression_flags(shell: &str) -> &'static [&'static str] {
-    let name = Path::new(shell)
-        .file_name()
-        .map_or_else(|| shell.to_string(), |n| n.to_string_lossy().into_owned());
-    match name.as_str() {
+    match shell_file_name(shell).as_str() {
         "bash" => &["--norc"],
         "zsh" => &["-f"],
         _ => &[],
     }
+}
+
+fn shell_file_name(shell: &str) -> String {
+    Path::new(shell)
+        .file_name()
+        .map_or_else(|| shell.to_string(), |n| n.to_string_lossy().into_owned())
 }
 
 /// Builds the `-c` script for the outer login shell.
@@ -458,6 +461,13 @@ pub(crate) fn login_shell_script(shell: &str, augment_path: bool) -> String {
     for flag in interactive_rc_suppression_flags(shell) {
         script.push(' ');
         script.push_str(flag);
+    }
+    // Under ConPTY, readline's redraw of each typed character made typing
+    // superlinear in line length: 65 characters took 0.49 s and 317 took
+    // 5.8 s, against 0.05 s and 0.16 s with line editing off (2026-11-09).
+    // The harness types whole lines, so it never uses the editing.
+    if cfg!(windows) && shell_file_name(shell) == "bash" {
+        script.push_str(" --noediting");
     }
     script.push_str(" -i");
     script
@@ -517,6 +527,14 @@ pub(crate) fn login_shell_command_line(shell: &str, augment_path: bool) -> Strin
     let script = shell_quote(&login_shell_script(shell, augment_path));
     format!("exec {shell} -l -c {script} {shell}")
 }
+
+/// A pane-shell command that clears the screen and scrollback, the bytes
+/// `clear` writes for an xterm-compatible terminal.
+///
+/// `printf` is a builtin in bash and zsh, so this starts no process: in a
+/// Cygwin pane under parallel load each fork costs a tenth of a second or
+/// more, and `clear` also fails outright for a `TERM` its terminfo lacks.
+pub const CLEAR_SCREEN: &str = r"printf '\033[H\033[2J\033[3J'";
 
 /// Wraps `s` in single quotes for a POSIX pane shell, escaping embedded ones
 /// with the `'\''` trick.
@@ -677,6 +695,71 @@ pub fn capture_settled(harness: &mut impl TerminalHarness) -> io::Result<Capture
     }
 }
 
+/// Runs `cmd` (with `env` prefixed to it), prints `sentinel` on a row of its
+/// own afterwards, and returns a settled capture showing that row.
+///
+/// Completion is observed through a temp file the line touches last, not by
+/// capturing: each capture is a terminal client call, and parallel test
+/// processes share a terminal's client budget (two at a time for WezTerm), so
+/// polling the pane while a command ran slowed every other test. The line is
+/// sent without the [`TerminalHarness::settle`] sleep for the same reason.
+///
+/// ## Errors
+///
+/// `TimedOut`, with the last capture in the message, when the sentinel row is
+/// not on screen within `timeout`; otherwise any send or capture error.
+pub fn run_to_sentinel(
+    harness: &mut impl TerminalHarness,
+    cmd: &str,
+    env: &[(&str, &str)],
+    sentinel: &str,
+    timeout: Duration,
+) -> io::Result<CapturedFrame> {
+    static DONE_FILES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let done = std::env::temp_dir().join(format!(
+        "biscuit-pane-done-{}-{}",
+        std::process::id(),
+        DONE_FILES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    // The echo spells the sentinel inside quotes, so only printf's output is
+    // a row that equals it.
+    let line = format!(
+        "{cmd}; printf '\\n%s\\n' {}; : > {}",
+        shell_quote(sentinel),
+        shell_path(&done)
+    );
+    harness.send_text(command_line_with_env(&line, env).as_bytes())?;
+    let shows_sentinel =
+        |frame: &CapturedFrame| frame.plain.lines().any(|row| row.trim() == sentinel);
+
+    let deadline = Instant::now() + timeout;
+    while !done.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if std::fs::remove_file(&done).is_ok() {
+        let frame = capture_settled(harness)?;
+        if shows_sentinel(&frame) {
+            return Ok(frame);
+        }
+    }
+    loop {
+        let frame = harness.capture()?;
+        if shows_sentinel(&frame) {
+            return Ok(frame);
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "no {sentinel} row after {timeout:?}; last capture:\n{}",
+                    frame.plain
+                ),
+            ));
+        }
+        std::thread::sleep(CAPTURE_POLL);
+    }
+}
+
 /// How long [`send_command_settled`] waits for the pane to show a sent line
 /// before settling anyway.
 ///
@@ -719,9 +802,6 @@ pub fn send_command_settled(
 
 /// The line [`TerminalHarness::send_command_with_env`] types: `KEY='value'`
 /// prefixes, `cmd`, and the Enter.
-///
-/// On Windows a line longer than its [`sourced_command_line`] is typed as that
-/// shorter line instead.
 fn command_line_with_env(cmd: &str, env: &[(&str, &str)]) -> String {
     use std::fmt::Write as _;
     let mut line = String::new();
@@ -732,38 +812,8 @@ fn command_line_with_env(cmd: &str, env: &[(&str, &str)]) -> String {
         let _ = write!(line, "{k}='{escaped}' ");
     }
     line.push_str(cmd);
-    if cfg!(windows)
-        && let Some(sourced) = sourced_command_line(&line)
-    {
-        return sourced;
-    }
     line.push('\n');
     line
-}
-
-/// Writes `line` to a script that removes itself and returns the line that
-/// sources it, `. '<script>'` and the Enter, when that line is the shorter.
-/// `None` when it is not, or the script cannot be written.
-///
-/// Typing is the slow part of a pane command on Windows. Cygwin's readline
-/// redraws the wrapped line for every character it receives, so the echo
-/// grows superlinearly with length: 76 characters took 0.5 s, 167 took 1.75 s,
-/// and 317 took 5.8 s in a WezTerm pane (2026-11-09), which put tests that
-/// type a few long `md` command lines past nextest's 30 s limit. Sourcing
-/// runs the same line in the same shell (an assignment prefix, `cd`, and the
-/// terminal as stdin behave exactly as typed); bash reads a sourced file
-/// whole before running it, so the script's first line can delete it.
-fn sourced_command_line(line: &str) -> Option<String> {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("biscuit-pane-cmd-{}-{n}.sh", std::process::id()));
-    let word = shell_path(&path);
-    let sourced = format!(". {word}\n");
-    if sourced.len() > line.len() + 1 {
-        return None;
-    }
-    std::fs::write(&path, format!("rm -f -- {word}\n{line}\n")).ok()?;
-    Some(sourced)
 }
 
 /// Best-effort cleanup for stale resources owned by the real-terminal
@@ -1114,28 +1164,6 @@ mod tests {
         assert_eq!(h.sent_string(), "bt image --debug 13x13.png\n");
     }
 
-    /// A long line is typed whole on Unix and as one short `. '<script>'` on
-    /// Windows, where the script holds its own removal and then the line.
-    #[test]
-    fn a_long_command_line_is_sourced_only_on_windows() {
-        let cmd = format!("printf '%s\\n' {}", "x".repeat(300));
-        let mut h = CapturingHarness::new();
-        h.send_command_with_env(&cmd, &[("A", "1")]).expect("send_command_with_env failed");
-        let sent = h.sent_string();
-        if cfg!(windows) {
-            let word = sent
-                .strip_prefix(". ")
-                .and_then(|rest| rest.strip_suffix('\n'))
-                .unwrap_or_else(|| panic!("expected a sourced line, got {sent:?}"));
-            let path = PathBuf::from(word.trim_matches('\''));
-            let script = std::fs::read_to_string(&path).expect("read the script");
-            let _ = std::fs::remove_file(&path);
-            assert_eq!(script, format!("rm -f -- {word}\nA='1' {cmd}\n"));
-        } else {
-            assert_eq!(sent, format!("A='1' {cmd}\n"));
-        }
-    }
-
     #[test]
     fn send_command_with_env_escapes_single_quotes() {
         let mut h = CapturingHarness::new();
@@ -1266,8 +1294,13 @@ mod tests {
     #[test]
     fn login_shell_script_suppresses_interactive_rc_for_bash() {
         let script = login_shell_script("bash", true);
+        let tail = if cfg!(windows) {
+            "exec \"$0\" --norc --noediting -i"
+        } else {
+            "exec \"$0\" --norc -i"
+        };
         assert!(
-            script.ends_with("exec \"$0\" --norc -i"),
+            script.ends_with(tail),
             "bash's inner interactive shell must skip ~/.bashrc; got {script}"
         );
     }
