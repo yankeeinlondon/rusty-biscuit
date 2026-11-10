@@ -122,8 +122,8 @@ check:
 # Install the daemon and test-client binaries.
 install *args="":
     @just build --release
-    @just _install "./daemon" "Rendezvous Daemon" {{ args }}
-    @just _install "./client" "Rendezvous Test Client" {{ args }}
+    @just _install "./daemon" "Rendezvous Daemon" "" {{ args }}
+    @just _install "./client" "Rendezvous Test Client" "" {{ args }}
 
 # Run the Phase-6 POC demo script (multi-node pair + sync flow).
 poc-demo:

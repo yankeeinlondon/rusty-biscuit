@@ -130,7 +130,7 @@ lint-fix:
 # Install the CLI
 install *args="":
     @just build --release
-    @just _install "./cli" "Biscuit Speaks" {{args}}
+    @just _install "./cli" "Biscuit Speaks" "" {{args}}
 
 # Validate the source code without doing a full build
 check:
