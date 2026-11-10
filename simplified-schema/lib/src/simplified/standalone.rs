@@ -224,7 +224,10 @@ impl StandaloneSchemaDocument {
 /// at the definition's first problem), a malformed `categories` entry or an
 /// undeclared category, two overloads with one binding contract in `types`,
 /// an unparseable SimplifiedSchema payload, and an invalid or remote
-/// reference return `Err(SchemaError::SchemaDocument)`.
+/// reference return `Err(SchemaError::SchemaDocument)`. When an unquoted
+/// `{{ … }}` value is proven to be why the text does not decode or has a
+/// non-string key, the message is the "quote the slot" hint and the span is
+/// that value.
 /// Invalid `suggest(...)` candidates
 /// within a valid envelope are returned as
 /// [`StandaloneSchemaDocument::suggestion_lints`] — they are lint data, not
@@ -300,8 +303,12 @@ fn parse_standalone(
     path: &Path,
     admission: Admission<'_>,
 ) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
-    let Some(recognized) =
-        recognize_standalone(source).map_err(|message| schema_document_error(path, message))?
+    let Some(recognized) = recognize_standalone(source).map_err(|undecoded| SchemaError::SchemaDocument {
+        path: path.to_path_buf(),
+        message: undecoded.message,
+        source: None,
+        span: undecoded.span,
+    })?
     else {
         return Ok(None);
     };
@@ -420,18 +427,25 @@ impl RecognizedStandalone {
 /// claims it.
 ///
 /// `Ok(None)` is an ordinary document (not a mapping, or no envelope claims
-/// it). `Err` carries the message for text that is not YAML. Recognition
+/// it). `Err` is text that is not YAML; when an unquoted `{{ … }}` value is
+/// what broke it ([`crate::slots::decode_error_slot`]), its message is the
+/// "quote the slot" hint, located at that value. Recognition
 /// reads only `kind` and the key set; whether the envelope is well formed is
 /// admission's question ([`crate::envelope`]), and the payload is not parsed
 /// here.
-pub(crate) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStandalone>, String> {
+pub(crate) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStandalone>, UndecodedSource> {
     // Numbers are admitted here too, so a schema file's numbers follow the
     // same rules whichever loader reads the file first.
     let document: YamlValue = crate::numeric::load_admitted_yaml(source).map_err(|error| {
         if crate::numeric::is_yaml_admission_error(&error) {
-            error.to_string()
-        } else {
-            format!("not valid YAML: {error}")
+            return UndecodedSource { message: error.to_string(), span: None };
+        }
+        let slot = error
+            .location()
+            .and_then(|location| crate::slots::decode_error_slot(source, location.line()));
+        match slot {
+            Some(slot) => UndecodedSource { message: crate::slots::quote_the_slot_message(source, &slot), span: Some(slot) },
+            None => UndecodedSource { message: format!("not valid YAML: {error}"), span: None },
         }
     })?;
     let Some(map) = document.as_mapping() else {
@@ -450,6 +464,19 @@ pub(crate) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStan
         _ => return Ok(None),
     };
     Ok(Some(RecognizedStandalone { document, envelope }))
+}
+
+/// Why [`recognize_standalone`] could not decode a document.
+pub(crate) struct UndecodedSource {
+    pub(crate) message: String,
+    /// The authored value the message points at, when it names one.
+    pub(crate) span: Option<crate::span::SourceSpan>,
+}
+
+impl From<UndecodedSource> for String {
+    fn from(undecoded: UndecodedSource) -> Self {
+        undecoded.message
+    }
 }
 
 /// Whether `source` is a YAML mapping claiming `kind: yaml-schema`, read
@@ -608,7 +635,7 @@ pub(crate) fn visit_atom(atom: &PropertyAtom, visit: &mut impl FnMut(&PropertyAt
                 .for_each(|parameter| visit_def(&parameter.def, visit));
             visit_def(&function.returns, visit);
         }
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {}
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {}
     }
 }
 

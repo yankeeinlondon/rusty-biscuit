@@ -1,6 +1,6 @@
 //! Value-candidate matching for schema `name=value` setters.
 //!
-//! Resolves the value slot after `=`: enum members for `enum` properties and
+//! Resolves the setter value after `=`: enum members for `enum` properties and
 //! filesystem paths constrained by `match(...)` globs for `file` properties.
 
 use std::collections::HashSet;
@@ -13,7 +13,9 @@ use biscuit_file::{
     canonicalize_simplified, to_portable_string,
 };
 
-use darkmatter::markdown::schemas::{completion as dm_completion, CompletionKind, EffectiveSchema};
+use darkmatter::markdown::schemas::{
+    completion as dm_completion, CompletionKind, CompletionSuggestion, EffectiveSchema,
+};
 
 use crate::completion::default_glob;
 use crate::completion::scopes::{self, ScopeContext};
@@ -42,7 +44,19 @@ pub(crate) fn property_value(
     value_partial: &str,
     ctx: &ScopeContext,
 ) -> Vec<String> {
-    let Some(suggestion) = dm_completion::for_property(effective, property) else {
+    suggestion_values(dm_completion::for_property(effective, property), property, value_partial, ctx)
+}
+
+/// [`property_value`]'s candidates for an already computed `suggestion`
+/// (none for `None`), so declarations that are not an effective schema (a
+/// pending template's static properties) complete the same way.
+pub(crate) fn suggestion_values(
+    suggestion: Option<CompletionSuggestion>,
+    property: &str,
+    value_partial: &str,
+    ctx: &ScopeContext,
+) -> Vec<String> {
+    let Some(suggestion) = suggestion else {
         return Vec::new();
     };
     match &suggestion.kind {

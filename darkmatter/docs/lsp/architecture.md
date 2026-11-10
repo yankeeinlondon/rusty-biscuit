@@ -246,7 +246,7 @@ flowchart TD
 
 | Consumer | How it resolves | Touches disk? |
 |---|---|---|
-| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is a **graph document** (a Markdown file in the workspace file list, an open buffer, or a parsed dependency); otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer when nothing matched (never past an I/O failure) | Only when the first candidate is not a graph document |
+| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is a **graph document** (a Markdown file in the workspace file list, an open buffer, or a parsed dependency); otherwise the file resolver in candidate order, where a candidate with no file that is an open, unsaved buffer matches at its own place, before any later candidate's file (never past an I/O failure) | Only when the first candidate is not a graph document |
 | Single-target features (directive links, definition and hover, transclusion diagnostics, frontmatter navigation, the create-missing-file action) | `resolve_reference`: the first planned candidate that exists, else the first candidate as the place a new file would go | Yes, as composition does |
 | Anchor completion | The first planned candidate that is a graph document; otherwise `resolve_reference`, when it finds a Markdown file | Reads that one document if it has not been parsed |
 
@@ -335,3 +335,103 @@ one, the buffer uses that repository's context unchanged, so `cwd` is the
 repository root, and it is analyzed as if it were a file at that root. With
 none, or two or more, it gets `ContextFailure::UntitledWorkspace` and the
 same `dm.context.build_failure` diagnostic.
+
+## Schema slot worker
+
+A schema can take values from data with a `{{ … }}`
+[slot](../topics/schemas/schema-slots.md). Resolving one may read files or
+fetch URLs, so DMLS never does it while answering a request: a keystroke
+must not wait on a slow `load_data`. This section covers how resolution is
+kept off the request path and how a stale resolution is noticed. What the
+user sees is described in
+[Schema Slots: In the editor](../topics/schemas/schema-slots.md#in-the-editor).
+The code is in [`slot_jobs.rs`](../../dmls/src/slot_jobs.rs).
+
+```mermaid
+flowchart LR
+    subgraph requests [Request path]
+        R[completion, hover, diagnostics] --> P{"a resolution installed<br/>for this template?"}
+        P -- yes --> S[serve its pinned schema,<br/>reading nothing a slot names]
+        P -- "no, or stale" --> D["record a demand, then serve<br/>the literal parts or the stale result"]
+    end
+    subgraph worker [Slot worker thread]
+        J[job seq n] --> W[resolve with a fresh SlotSession]
+    end
+    D -- "dispatch thread queues it;<br/>job n-1 is canceled" --> J
+    W -- "result back to the dispatch thread" --> I{newest job,<br/>not canceled?}
+    I -- yes --> N[install, refresh diagnostics]
+    I -- no --> X[drop it]
+```
+
+**Two paths.** On the request path the overlay reads the installed
+resolution through `DarkmatterSchemas::with_slot_pins_only`, which uses only
+schemas the worker's session already pinned and evaluates nothing. A miss,
+or an installed resolution marked stale, records a *demand*; it never
+blocks. After each message the dispatch thread hands every demand to the
+slot worker, a thread of its own (`dmls-slots`) fed by its own queue. The
+trigger-registry worker is deliberately not reused: requests wait on that
+lane, so a slow slot there would stall them.
+
+**A job carries its inputs.** Each job is captured on the dispatch thread:
+the document text, configuration, workspace roots, trigger registry,
+file-resolution context, the in-memory grants given in this server
+process, and every open buffer, whatever its extension. Resolution reads
+an unsaved buffer in place of its file, so editing `os.yaml`, `os.toml`, or
+`hosts.csv` without saving already changes the values a document under the
+template is offered.
+
+**A fresh session, no prompt.** The worker resolves each job with a new
+`SlotSession` built for the document's context, with no approval handler:
+the automatic, persisted, and in-memory grants decide every read, and
+anything else becomes `dm.schema.slot_approval_required`. Each slot gets
+`DMLS_SLOT_LIMITS`, a quarter of a command's work allowance (25,000 item
+visits, 4 MiB of expansion), so a runaway slot fails with the ordinary
+`dm.iteration.*` code in tens of milliseconds instead of occupying the
+worker. A slot that calls `package()`, `package_area()`, `ipv4()`, `ipv6()`,
+or `has_agentic_cli()` has the observation it reads captured on the worker,
+from the document's context, when that slot first runs; a template with no
+such call captures nothing, and no request ever waits for a capture.
+
+**Newest job wins.** Every job has a sequence number. A demand for a
+document whose job is still in flight for different inputs sets that job's
+cancel flag (passed in with `SlotSession::with_cancel`); closing a document
+does the same. The worker skips a job canceled before it starts. A job
+canceled while running finishes the slot it is evaluating, starts no more,
+and fails with `dm.schema.slot_canceled`, which is never cached. On the
+dispatch thread a result is installed only when it is not canceled and its
+sequence number is still the document's newest, so an older result can
+never replace a newer one.
+
+### What marks a resolution stale
+
+Each installed resolution records every local path it depended on: files
+it read, files it probed and found missing, folders it listed, and, when
+any of those lies in the document's Git repository, that repository's
+`.git/index` and `HEAD` (the automatic grant depends on what they record;
+for a linked worktree, the Git directory its `.git` file names).
+
+| Event | Resolutions marked stale |
+|---|---|
+| a watched-file event names a recorded path | each one that recorded it |
+| an open buffer's text changes, or the file is saved | each one that recorded that file |
+| a save, when the client cannot watch (the `stat` rescan below) | each one whose recorded path changed size, modification time, kind, or existence |
+| `dmls.grantSlotRead`, `dmls.refreshSchemaSlots`, or `workspace/didChangeConfiguration` | every one |
+
+A stale resolution keeps being served, marked stale, until its refresh is
+installed.
+
+**Watching the recorded paths.** When the client watches files and
+supports watchers rooted at a folder (`relativePatternSupport`), DMLS
+registers one watcher per recorded path, whatever its extension, under the
+registration id `dmls-schema-slot-watchers`
+([`watch.rs`](../../dmls/src/workspace/watch.rs)). A path whose folder does
+not exist yet is watched from its nearest existing ancestor, so its
+creation is seen. The registration is replaced whenever the set of recorded
+paths changes.
+
+**The `stat` fallback.** A client in server-rescan mode, one without
+`relativePatternSupport`, and one that rejects the registration get no slot
+watches. Instead, every save re-`stat`s each recorded path and compares
+size, modification time, whether it is a folder, and whether it exists.
+Contents are not compared, so a rewrite that keeps a file's size and
+timestamp is noticed only when something else refreshes the resolution.

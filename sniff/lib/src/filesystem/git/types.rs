@@ -647,6 +647,13 @@ impl GitRepo {
         f(&self.gix.borrow())
     }
 
+    /// Like [`Self::with_cached_gix`] without sizing the object cache, for
+    /// per-path queries whose few object loads would not repay the index read
+    /// that sizing costs.
+    pub(crate) fn with_gix<T>(&self, f: impl FnOnce(&gix::Repository) -> T) -> T {
+        f(&self.gix.borrow())
+    }
+
     /// Returns cached ref decorations, computing them once on first access.
     ///
     /// Errors are suppressed: an unreadable ref store yields an empty map.

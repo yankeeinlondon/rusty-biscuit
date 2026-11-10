@@ -752,6 +752,26 @@ mod tests {
         }
     }
 
+    /// With no width the band fits the longest line and its padding, far from
+    /// any filled width, and every row still lines up.
+    #[test]
+    fn test_render_hugs_the_longest_line_with_no_width() {
+        let longest = "a_key_that_is_longer_than_the_other_one: 1";
+        let block = YamlBlock::new(format!("foo: 1\n{longest}")).unwrap();
+        let profile = Terminal::new_optimistic(80).output_profile();
+        for width in [renderable::Width::Unlimited, renderable::Width::Source] {
+            let options = renderable::OutputOptions::new(width, profile.clone());
+            let out = TerminalRenderable::render(&block, &Terminal::from_output_options(&options));
+            let plain = crate::testing::strip_ansi_codes(&out);
+            let rows: Vec<&str> = plain.lines().filter(|l| !l.is_empty()).collect();
+            let widest = rows.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+            assert!((longest.len()..longest.len() + 16).contains(&widest), "{width:?}: {plain:?}");
+            for row in rows {
+                assert_eq!(row.chars().count(), widest, "{width:?}: {row:?}");
+            }
+        }
+    }
+
     /// A right margin must shrink both the code-block background and the
     /// right-aligned language pill, moving them leftward off the right edge.
     #[test]

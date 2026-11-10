@@ -128,6 +128,19 @@ fn reset_counters() {
 
 // ── Policy resolution (D3, AC-F5) ────────────────────────────────────────
 
+/// A text drawing that a narrow terminal refuses is drawn whole on a terminal
+/// with no width: nothing caps it, whatever `Terminal::width` would answer.
+#[test]
+fn a_text_drawing_has_no_cap_with_no_width() {
+    let wide = "flowchart LR\n    Alpha --> Bravo --> Charlie --> Delta --> Echo --> Foxtrot --> Golf --> Hotel --> India --> Juliet --> Kilo --> Lima --> Mike";
+    let diagram = MermaidDiagram::new(wide);
+    assert_eq!(presented(&diagram, &plain_no_images(20), ALLOWED).0, "source", "the control refuses it");
+
+    let mut unbounded = plain_no_images(20);
+    unbounded.set_output_width(renderable::Width::Unlimited);
+    assert_eq!(presented(&diagram, &unbounded, ALLOWED).0, "text");
+}
+
 #[test]
 fn an_explicit_text_fallback_never_reads_the_environment() {
     for explicit in [TextFallback::Allowed, TextFallback::NoPartial, TextFallback::Never] {

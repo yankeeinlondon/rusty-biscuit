@@ -166,6 +166,56 @@ mod context_boundary {
         assert_eq!(accepted, (true, true, false));
     }
 
+    /// Parsing, querying, exporting, and attempting to lower or validate a
+    /// template evaluates no slot and reads nothing but schema files: the
+    /// slots name data files that do not exist, which any read would fail on.
+    #[test]
+    fn a_template_reads_and_evaluates_nothing_but_its_schema_files() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "types.yaml", "kind: schema\ntypes:\n  Kind: enum(a, {{ load_data('./missing-kinds.yaml') }})\n");
+        let main = write(
+            dir.path(),
+            "main.yaml",
+            "$schema:\n  os: enum(none, {{ load_data('./missing-os.yaml', 'string[]') }}; required)\n  \
+             kind: Kind@./types.yaml\n  tries: number(max({{ env.MAX }}))\n",
+        );
+        let reads = source::reads();
+        #[cfg(feature = "work-counters")]
+        let parsed = crate::work_counters::snapshot();
+        let schema = SimplifiedSchema::try_from_yaml(SchemaSource::from(&main).bound(FileResolutionContext::new(dir.path())))
+            .expect("a template is admitted");
+        assert_eq!(source::reads() - reads, 1, "the input file is read once; slots name no schema file");
+        assert_eq!(schema.pending_slots().len(), 3);
+        #[cfg(feature = "work-counters")]
+        {
+            use crate::work_counters::{Work, snapshot};
+            // Parsing a slot parses its expression (to locate a syntax
+            // error); nothing after that touches one again.
+            assert!(snapshot().since(&parsed).get(Work::ExpressionParse) >= 3);
+            let before = snapshot();
+            let _ = (
+                schema.query("os"),
+                schema.property("kind").map(|kind| kind.pending_slots()),
+                schema.properties(),
+                schema.to_simplified_yaml().expect("exports"),
+                schema.to_json_schema().expect_err("unresolved"),
+                schema.validate_strict(&json!({ "os": "none" })).expect_err("unresolved"),
+                schema.validate_soft(&json!({ "os": "none" })).expect_err("unresolved"),
+            );
+            let work = snapshot().since(&before);
+            assert_eq!(work.get(Work::ExpressionParse), 0, "no slot is parsed again, let alone evaluated");
+            assert_eq!(work.get(Work::ValidatorCompile), 0, "no validator is compiled for a template");
+        }
+        assert_eq!(source::reads() - reads, 1);
+        let provenance = schema.provenance();
+        for listed in [provenance.referenced_files(), provenance.searched(), provenance.imports()] {
+            assert!(
+                listed.iter().all(|path| !path.to_string_lossy().contains("missing-")),
+                "a slot's data file is never a dependency of the template: {listed:?}"
+            );
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn a_windows_path_with_a_drive_resolves() {

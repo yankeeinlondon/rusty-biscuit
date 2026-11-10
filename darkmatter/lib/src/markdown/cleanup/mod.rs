@@ -2,7 +2,8 @@
 //!
 //! [`clean_document`] is the raw-source transaction `md clean` and DMLS
 //! formatting share: frontmatter repair, one resolution of the
-//! `style.markdown` rules ([`rules`]), guarded body formatting, and
+//! `style.markdown` rules ([`rules`]), the migration of legacy link titles,
+//! guarded body formatting, and
 //! reassembly from the original frontmatter bytes. [`clean_body`] is the
 //! guarded body engine underneath it: the rules run as bounded edits of the
 //! authored bytes, directive lines and expressions are fixed points, and one
@@ -22,6 +23,7 @@ pub mod diagnostic;
 mod document;
 mod edits;
 pub mod frontmatter;
+pub(crate) mod link_titles;
 mod markers;
 mod opaque;
 mod protect;

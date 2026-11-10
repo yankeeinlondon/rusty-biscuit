@@ -132,6 +132,24 @@ const ROWS: &[Row] = &[
         command: "echo ran-main",
         executes: true,
     },
+    Row {
+        name: "as_markdown content inherits the parent default",
+        files: &[("target.md", "---\nbase: main\n---\n{{ as_markdown('::file ./part.md') }}\n"), PART],
+        options: unchanged,
+        command: "echo ran-main",
+        executes: true,
+    },
+    Row {
+        name: "caller override over --state in as_markdown content",
+        files: &[("target.md", "{{ as_markdown('::file ./part.md') }}\n"), PART],
+        options: |options| {
+            options
+                .with_external_state(json!({ "base": "state" }))
+                .with_set_overrides(json!({ "base": "caller" }))
+        },
+        command: "echo ran-caller",
+        executes: true,
+    },
 ];
 
 fn write_files(dir: &Path, files: &[(&str, &str)]) -> std::path::PathBuf {
@@ -216,6 +234,8 @@ row_tests! {
     shell_block_in_a_conditional_partial_is_approved_as_executed: 7;
     untaken_branch_is_approved_as_executed: 8;
     frontmatter_command_in_the_partial_is_approved_as_executed: 9;
+    as_markdown_content_inheriting_a_parent_default_is_approved_as_executed: 10;
+    caller_override_in_as_markdown_content_is_approved_as_executed: 11;
 }
 
 /// A parent `$(...)` value is expanded before its child composes, so a child

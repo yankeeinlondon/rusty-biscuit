@@ -136,6 +136,23 @@ fn a_mermaid_diagram_on_the_windows_ssh_route_is_followed_by_a_space_and_a_carri
     );
 }
 
+/// With no width to fill, a diagram is drawn at its natural size: wider than
+/// the 40 columns the control fits it into, and with no slack to align within.
+#[test]
+fn a_mermaid_image_with_no_width_takes_its_natural_size() {
+    let diagram = MermaidDiagram::new(WIDE_FLOW).with_width(ImageWidth::Fill);
+    let bounded = diagram
+        .try_render(&terminal(TerminalApp::Kitty, ImageSupport::Kitty, 40))
+        .expect("render");
+    assert_eq!(kitty_columns(&bounded.output), 40);
+
+    let mut unbounded = terminal(TerminalApp::Kitty, ImageSupport::Kitty, 40);
+    unbounded.set_output_width(renderable::Width::Unlimited);
+    let natural = diagram.try_render(&unbounded).expect("render");
+    let columns = kitty_columns(&natural.output);
+    assert!((41..1_000).contains(&columns), "{columns}");
+}
+
 #[test]
 fn a_graph_png_reaches_kitty_byte_identical_at_its_display_size() {
     let term = terminal(TerminalApp::Kitty, ImageSupport::Kitty, 80);
@@ -209,7 +226,7 @@ fn the_hook_sizes_a_nested_fence_to_its_available_columns() {
 fn the_hook_sizes_to_the_available_columns_not_the_terminal_width() {
     let term = terminal(TerminalApp::Kitty, ImageSupport::Kitty, 40);
     let mut opts = promoting(&term);
-    opts.context = opts.context.with_width(24);
+    opts.context = opts.context.with_width(renderable::output::Width::Columns(24));
     let fence = RenderNode::code(Some("mermaid".to_string()), None, WIDE_FLOW);
 
     let output = render_terminal_node(&fence, &opts).expect("render").output;

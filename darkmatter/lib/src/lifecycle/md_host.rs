@@ -466,6 +466,12 @@ impl LifecycleHost for MdStackHost<'_> {
         matches!(self.signal, LifecycleSignal::Initialize | LifecycleSignal::Start)
     }
 
+    /// Every pass of this command shares the memo this empties, so the
+    /// stack's next expression reads the file the effect may have written.
+    fn side_effect_attempted(&self) {
+        self.request.options().invalidate_data_memo();
+    }
+
     fn is_known_effect(&self, _name: &str) -> bool {
         false
     }
@@ -508,6 +514,17 @@ pub trait CommandOutput: Sync {
     fn stdout(&self, text: &str);
     /// The command's standard error.
     fn stderr(&self, text: &str);
+    /// One finished command's captured output. A host that keeps a command's
+    /// output together overrides this; by default each non-empty stream goes
+    /// to its method, stdout first.
+    fn command(&self, _command: &str, stdout: &str, stderr: &str) {
+        if !stdout.is_empty() {
+            self.stdout(stdout);
+        }
+        if !stderr.is_empty() {
+            self.stderr(stderr);
+        }
+    }
 }
 
 /// Runs an approved lifecycle command for `md`.
@@ -531,6 +548,28 @@ pub struct MdShellRunner<'a> {
     pub source_path: &'a Path,
     /// Where command output goes.
     pub output: &'a dyn CommandOutput,
+    /// Whether the user interrupted the run.
+    pub interrupted: &'a (dyn Fn() -> bool + Sync),
+}
+
+/// How long a command's death by a signal waits for the run's interrupt flag.
+const INTERRUPT_SETTLE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Waits up to `limit` for `interrupted`, returning its last answer.
+///
+/// A terminal's Ctrl-C reaches `md` and its command together, and a signal
+/// handler sets the flag on its own thread, so the command's death can be
+/// noticed first. Reporting that as a failed command would turn an interrupted
+/// run's status 130 into 1.
+fn wait_for_interrupt(interrupted: &dyn Fn() -> bool, limit: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + limit;
+    while !interrupted() {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    true
 }
 
 impl MdShellRunner<'_> {
@@ -565,14 +604,12 @@ impl MdShellRunner<'_> {
             options.source(),
             self.request.resolution_context(),
             None,
-        )
-        .map_err(|source| ShellRunError::Value { source })?;
-        if !outcome.stdout.is_empty() {
-            self.output.stdout(&outcome.stdout);
-        }
-        if !outcome.stderr.is_empty() {
-            self.output.stderr(&outcome.stderr);
-        }
+        );
+        // The command may have written any file, failed or not; every pass of
+        // this command shares the memo it empties.
+        options.invalidate_data_memo();
+        let outcome = outcome.map_err(|source| ShellRunError::Value { source })?;
+        self.output.command(raw, &outcome.stdout, &outcome.stderr);
         match outcome.status {
             ShellStatus::Exited(code) => Ok(code),
             ShellStatus::TimedOut => Err(ShellRunError::Value {
@@ -583,10 +620,13 @@ impl MdShellRunner<'_> {
                     origin: self.origin(),
                 },
             }),
-            ShellStatus::Signaled => Err(ShellRunError::Spawn {
-                command: raw.to_string(),
-                source: std::io::Error::other("ended by a signal"),
-            }),
+            ShellStatus::Signaled => {
+                wait_for_interrupt(self.interrupted, INTERRUPT_SETTLE);
+                Err(ShellRunError::Spawn {
+                    command: raw.to_string(),
+                    source: std::io::Error::other("ended by a signal"),
+                })
+            }
         }
     }
 }
@@ -656,7 +696,11 @@ impl ShellRunner for MdShellRunner<'_> {
         request: &super::executor::ShellValueRequest<'_>,
     ) -> Result<Vec<(String, Value)>, ShellRunError> {
         self.ensure_permitted()?;
-        super::executor::execute_set_shell_values(request, None)
+        super::executor::execute_set_shell_values_sharing(
+            request,
+            None,
+            self.request.options().data_runtime_handle(),
+        )
     }
 }
 
@@ -689,6 +733,10 @@ pub struct MdStackContext<'a> {
 }
 
 /// Runs `event`'s stack of `config` in `context`.
+///
+/// Each step that ran a command or a side effect empties the request's
+/// `load_data` memo as it finishes, whatever its outcome, before the next
+/// expression; a stack whose steps were all guarded off keeps it.
 pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &MdEvent) -> LifecycleEventOutcome {
     let host = MdStackHost {
         signal: event.signal,
@@ -706,6 +754,7 @@ pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &
         request: context.request,
         source_path: context.source_path,
         output: context.output,
+        interrupted: context.interrupted,
     };
     let options = context.request.options();
     let inputs = StackInputs {

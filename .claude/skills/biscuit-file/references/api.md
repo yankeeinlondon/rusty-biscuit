@@ -113,6 +113,26 @@ let pretty: String = to_json5_pretty(&serde_json_value);
 let compact: String = to_json5_compact(&serde_json_value);
 ```
 
+### Token-level JSON5 checks
+Source: `biscuit-file/lib/src/json5/scan.rs`. `Json5` deserializes into
+`serde_json::Value`, which loses repeated keys and number spellings; these read the
+tokens instead, for a caller that must judge them.
+
+```rust
+use biscuit_file::{json5_is_well_formed, json5_scan};
+
+let scan = json5_scan("{a: 1, a: 2}")?;    // Json5Scan { duplicate_key, numbers }
+assert_eq!(scan.duplicate_key.unwrap().key, "a");
+
+// `Json5::from_str` fails on a grammar error and on an integer beyond `u64`;
+// this tells the two apart.
+assert!(json5_is_well_formed("{a: 99999999999999999999}"));
+assert!(!json5_is_well_formed("{a: 1"));
+```
+
+`simplified_schema::numeric::admit_json5_text_numbers` applies the numeric model to a
+scan's `numbers`.
+
 ## Frontmatter Envelope
 
 Feature `yaml`. Locates a Markdown document's leading `---` block and reports

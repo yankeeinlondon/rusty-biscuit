@@ -4,8 +4,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::style::schema::hr::{HrAlignment, HrKind, HrWeight};
 use darkmatter::style::schema::{CommonStyle, WidthOrMode};
 use darkmatter::style::{
-    BespokeStyleOverrides, ComponentStyleOverrides, DisclosureStyleOverrides, HrStyleOverrides,
-    ListStyleOverrides, PageStyleOverrides, apply_bespoke_style, apply_color_style,
+    apply_bespoke_style, apply_color_style,
     apply_component_style, apply_disclosure_style, apply_hr_style, apply_list_style,
     apply_page_style, from_frontmatter, StyleParseError,
 };
@@ -48,18 +47,18 @@ fn page() -> DarkmatterPage {
 
 fn frontmatter_page(md: &Markdown) -> DarkmatterPage {
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style frontmatter");
-    let page = apply_page_style(page(), &style, PageStyleOverrides::default())
+    let page = apply_page_style(page(), &style)
         .expect("apply page style");
-    let page = apply_component_style(page, &style, ComponentStyleOverrides::default())
+    let page = apply_component_style(page, &style)
         .expect("apply component style");
-    let page = apply_list_style(page, &style, ListStyleOverrides::default())
+    let page = apply_list_style(page, &style)
         .expect("apply list style");
-    let page = apply_hr_style(page, &style, HrStyleOverrides::default())
+    let page = apply_hr_style(page, &style)
         .expect("apply hr style");
-    let page = apply_disclosure_style(page, &style, DisclosureStyleOverrides::default())
+    let page = apply_disclosure_style(page, &style)
         .expect("apply disclosure style");
     let page = apply_color_style(page, &style).expect("apply color style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+    apply_bespoke_style(page, &style, darkmatter::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .expect("apply bespoke style")
 }
 

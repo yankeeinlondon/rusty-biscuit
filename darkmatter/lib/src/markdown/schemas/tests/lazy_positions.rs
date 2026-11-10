@@ -192,7 +192,7 @@ mod counts {
         let ((report, summary), builds) =
             position_builds(|| api.validate_summarized(&md).expect("validate"));
         assert!(report.valid, "{:#?}", report.problems);
-        assert!(summary.has_schema);
+        assert!(summary.has_schema());
         assert_eq!(builds, 0);
     }
 
@@ -202,7 +202,7 @@ mod counts {
         let ((report, summary), builds) =
             position_builds(|| bare_api().validate_summarized(&md).expect("validate"));
         assert!(report.valid);
-        assert!(!summary.has_schema);
+        assert!(!summary.has_schema());
         assert_eq!(builds, 0);
     }
 

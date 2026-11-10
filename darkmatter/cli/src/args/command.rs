@@ -1,10 +1,13 @@
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
+use crate::args::output::{ALL_TARGETS, COMPOSE_TARGETS, target_parser};
+use crate::args::path_completion;
+use biscuit_terminal::output::OutputTarget;
 use crate::args::{
-    CodeBlockOutput, ComposeOutputFormat, HashKind, RemoteFreshness, SchemaTarget, ValidateTarget,
-    complete_compose_args, complete_fixed_width_values, complete_indent_values,
-    complete_markdown_files, complete_theme_names, parse_fixed_width, parse_indent_size, parse_positive_limit,
+    HashKind, RemoteFreshness, SchemaTarget, ValidateTarget,
+    complete_indent_values,
+    complete_markdown_files, complete_theme_names, parse_indent_size, parse_positive_limit,
     parse_theme_name,
 };
 use darkmatter::markdown::highlighting::ThemePair;
@@ -43,27 +46,10 @@ pub enum Command {
         #[arg(long, conflicts_with = "compact")]
         loose: bool,
 
-        /// Re-wrap prose to the specified display width in columns
-        #[arg(
-            long,
-            value_name = "#",
-            value_parser = parse_fixed_width,
-            conflicts_with = "ignore_incidental_newlines",
-            add = ArgValueCompleter::new(complete_fixed_width_values)
-        )]
-        fixed_width: Option<usize>,
-
-        /// Keep source single newlines, overriding a document's `unwrap` and `fixed-width`
-        ///
-        /// The original spec proposed `--ignore-incidental-carraige-returns`;
-        /// this ships as `--ignore-incidental-newlines` because Markdown uses
-        /// line feeds semantically and the original spelling had a typo.
-        #[arg(long, conflicts_with = "fixed_width")]
-        ignore_incidental_newlines: bool,
-
-        /// Emit frontmatter diagnostics as JSON instead of the cleaned document
-        #[arg(long)]
-        json: bool,
+        /// What to print: the cleaned document, or its frontmatter diagnostics
+        /// in a data format
+        #[arg(long, value_name = "TARGET", default_value = "markdown", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
 
         /// Explicit schema replacing the document's own `$schema` layer
         #[arg(long, value_name = "PATH")]
@@ -90,7 +76,7 @@ pub enum Command {
         #[arg(
             value_name = "ARGS",
             num_args = 0..,
-            add = ArgValueCompleter::new(complete_compose_args)
+            add = ArgValueCompleter::new(path_completion::complete_compose_word)
         )]
         args: Vec<String>,
 
@@ -102,11 +88,12 @@ pub enum Command {
         #[arg(long, value_name = "JSON")]
         set: Option<String>,
 
-        /// Output format (default: markdown; `report-json` prints the composition report)
-        #[arg(long, value_enum, default_value_t = ComposeOutputFormat::Markdown)]
-        output: ComposeOutputFormat,
+        /// What to print: the composed Markdown, or the envelope (the document and
+        /// every problem) in a data format; `md render` turns Markdown into anything else
+        #[arg(long, value_name = "TARGET", default_value = "markdown", value_parser = target_parser(COMPOSE_TARGETS))]
+        output: OutputTarget,
 
-        /// Render composed content to stdout AND open in default app
+        /// Print the output AND open it in the default app
         #[arg(long)]
         show: bool,
 
@@ -223,15 +210,22 @@ pub enum Command {
         cache_root: Option<PathBuf>,
     },
 
+    /// List the themes `style.page.theme` and `style.page.code.theme` accept.
+    ListThemes {
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
+    },
+
     /// Show markdown table of contents.
     Toc {
         /// Input file path (use "-" for stdin)
         #[arg(value_name = "INPUT")]
         input: Option<PathBuf>,
 
-        /// Output TOC as JSON
-        #[arg(long)]
-        json: bool,
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
     },
 
     /// Compare two markdown documents.
@@ -244,74 +238,67 @@ pub enum Command {
         #[arg(value_name = "UPDATED")]
         updated: PathBuf,
 
-        /// Output delta as JSON
-        #[arg(long)]
-        json: bool,
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
     },
 
-    /// Get frontmatter properties from a markdown document.
+    /// Get frontmatter values from a markdown document, by property path.
     Get {
         /// Input file path (use "-" for stdin)
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
         input: PathBuf,
 
-        /// Frontmatter property names to retrieve
-        #[arg(value_name = "PROP", required = true, num_args = 1..)]
+        /// Property paths to retrieve: `author.name`, `items.0`, and `a\.b` for a key with a dot in its name
+        #[arg(value_name = "PROP", required = true, num_args = 1.., add = ArgValueCompleter::new(path_completion::complete_get_path))]
         props: Vec<String>,
 
-        /// Output as JSON5
+        /// What to print. `plain` writes raw values: strings unquoted, null as
+        /// empty, lists as one item per line, objects as "key: value" lines
+        #[arg(long, value_name = "TARGET", default_value = "json", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
+
+        /// Print arrays and objects on a single line; valid only with `--output json` or `--output json5`
         #[arg(long)]
-        json5: bool,
-
-        /// Output as YAML
-        #[arg(long)]
-        yaml: bool,
-
-        /// Output as TOML
-        #[arg(long)]
-        toml: bool,
-
-        /// Output raw values: strings unquoted, null as empty, lists as one item per line, objects as "key: value" lines
-        #[arg(long, conflicts_with_all = ["json5", "yaml", "toml", "compact"])]
-        raw: bool,
-
-        /// Output JSON on a single line for arrays and objects
-        #[arg(long, conflicts_with_all = ["json5", "yaml", "toml", "raw"])]
         compact: bool,
     },
 
-    /// Set a frontmatter property on a markdown document.
+    /// Set the value at a frontmatter property path in a markdown document.
     Set {
         /// Input file path (use "-" for stdin; outputs to stdout)
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
         input: PathBuf,
 
-        /// Frontmatter property name to set
-        #[arg(value_name = "PROP")]
+        /// Property path to set: `author.name`, `items.0`, and `a\.b` for a key with a dot in its name
+        #[arg(value_name = "PROP", add = ArgValueCompleter::new(path_completion::complete_set_path))]
         prop: String,
 
-        /// Value to set (parsed as JSON if valid, otherwise treated as a string)
-        #[arg(value_name = "VALUE")]
+        /// Value to set: JSON5 or a YAML flow mapping, otherwise text, read through the type the schema declares
+        #[arg(value_name = "VALUE", add = ArgValueCompleter::new(path_completion::complete_set_value))]
         value: String,
 
-        /// Write the change back to the source file (no output)
+        /// Write the change back to the source file (no formatted output)
         #[arg(long)]
         save: bool,
+
+        /// What to print: the edited document, or its result in a data format
+        #[arg(long, value_name = "TARGET", default_value = "markdown", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
     },
 
-    /// Remove one or more frontmatter properties from a markdown document.
+    /// Remove the values at one or more frontmatter property paths from a markdown document.
     Rm {
         /// Input file path (supports @ file references)
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
         input: PathBuf,
 
-        /// Property names to remove
-        #[arg(value_name = "PROP", required = true, num_args = 1..)]
+        /// Property paths to remove: `author.name`, `items.0`, and `a\.b` for a key with a dot in its name
+        #[arg(value_name = "PROP", required = true, num_args = 1.., add = ArgValueCompleter::new(path_completion::complete_rm_path))]
         props: Vec<String>,
 
-        /// Output result as JSON with removed, remaining, and filename fields
-        #[arg(long)]
-        json: bool,
+        /// What to print; a data format reports the removed, remaining, and filename fields
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
     },
 
     /// Open a markdown file in your preferred editor.
@@ -325,6 +312,10 @@ pub enum Command {
         /// File path or reference to edit
         #[arg(value_name = "FILE", add = ArgValueCompleter::new(complete_markdown_files))]
         file: String,
+
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
     },
 
     /// Validate references in a markdown document.
@@ -356,13 +347,17 @@ pub enum Command {
         #[arg(long, conflicts_with = "diff")]
         save: bool,
 
-        /// Report how the document differs from its stored hash (exits 2 on difference)
+        /// Report how the document differs from its stored hash (exits 1 on difference)
         #[arg(long, conflicts_with = "save")]
         diff: bool,
 
         /// Strict mode: no whitespace normalization or key reordering
         #[arg(long)]
         strict: bool,
+
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
     },
 
     /// Schema authoring and validation commands.
@@ -386,9 +381,9 @@ pub enum Command {
         #[arg(long)]
         validate: bool,
 
-        /// Output as JSON instead of a terminal tree
-        #[arg(long)]
-        json: bool,
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
     },
 
     /// Render a single code block from a file or literal content.
@@ -439,8 +434,8 @@ pub enum Command {
         #[arg(long, value_name = "RANGE")]
         highlight: Option<String>,
 
-        /// Output format.
-        #[arg(long, value_enum, default_value_t = CodeBlockOutput::Terminal, value_name = "FORMAT")]
-        output: CodeBlockOutput,
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
     },
 }

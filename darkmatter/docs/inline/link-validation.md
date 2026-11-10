@@ -43,11 +43,19 @@ Each reference is validated relative to its **own origin source**, not the root 
 |-------|-------------|
 | `references_scanned` | Total references checked |
 | `references_valid` | Count that passed |
-| `issues` | `Vec<ReferenceIssue>` with code, message, severity, origin |
+| `issues` | `Vec<ReferenceIssue>` with code, message, severity, origin, and transclusion trail |
 | `warnings` | Non-blocking informational messages |
 | `trigger_warnings` | `Vec<ComposeWarning>`: each [schema trigger skipped as invalid](../topics/schemas/schema-triggers.md#invalid-discovered-triggers) that preparing the root or a transcluded document (each in its own context) found, once per trigger, in discovery order; not serialized |
 
 Helper methods: `is_valid()` (no error-severity issues), `error_count()`.
+
+An issue's `line` and `column` in `md validate refs --output json` are authored
+positions, `null` for a document with none; `section` is the composed anchor slug
+and `included_via` the trail of directives that pulled the document in. See
+[How a problem is located](../errors/composition-problems.md#how-a-problem-is-located).
+A reference graph's own records (`ReferenceOrigin::line` and `span`) count in the
+prepared body, for code that walks the graph; authored positions are in
+`ReferenceOrigin::authored`.
 
 ## Issue Codes
 
@@ -66,11 +74,11 @@ Helper methods: `is_valid()` (no error-severity issues), `error_count()`.
 
 ## CLI
 
-The `darkmatter validate-refs` subcommand exposes reference validation with text, JSON, and graph (Mermaid/DOT) output formats. It returns a non-zero exit code when error-severity issues are found.
+`md validate refs` exposes reference validation with a grouped report, data outputs (`--output json`, `json5`, `yaml`, `toml`), and graph (`--graph mermaid` or `dot`) output. It exits 1 when error-severity issues are found. The report shows every severity; `md compose` and `md graph --validate` show errors only. See [the reference report](../errors/file-reference-failures.md#the-reference-report).
 
 ## Source Files
 
 - `darkmatter/lib/src/markdown/reference/validate.rs`
 - `darkmatter/lib/src/markdown/reference/graph.rs`
 - `darkmatter/lib/src/markdown/reference/mod.rs`
-- `darkmatter/cli/src/commands/validate_refs.rs`
+- `darkmatter/cli/src/commands/validate.rs`

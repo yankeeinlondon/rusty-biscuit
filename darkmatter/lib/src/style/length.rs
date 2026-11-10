@@ -131,9 +131,35 @@ where
     }
 }
 
+/// `true` for a length that resolves to zero at every width (`0ch`, `0%`).
+pub fn is_zero_length(length: &Length) -> bool {
+    match length {
+        Length::Zero => true,
+        Length::Ch(n) => *n == 0,
+        Length::Percent(p) => *p == 0.0,
+        Length::Css(_) => false,
+    }
+}
+
+/// Serde deserializer for a positive `Option<Length>`, the page content cap.
+///
+/// Accepts what [`deserialize_optional_length`] accepts except zero in any
+/// spelling (`0`, `"0"`, `"0ch"`, `"0%"`), which would leave no room for
+/// content.
+pub fn deserialize_optional_positive_length<'de, D>(de: D) -> Result<Option<Length>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let length = deserialize_optional_length(de)?;
+    if length.as_ref().is_some_and(is_zero_length) {
+        return Err(de::Error::custom("max-width must be greater than zero"));
+    }
+    Ok(length)
+}
+
 /// Serde deserializer for `Option<u16>` row counts.
 ///
-/// Explicitly rejects strings so `top-margin: "2ch"` produces a clear error
+/// Explicitly rejects strings so `margin-top: "2ch"` produces a clear error
 /// rather than serde's default "invalid type" message.
 pub fn deserialize_optional_row_count<'de, D>(de: D) -> Result<Option<u16>, D::Error>
 where

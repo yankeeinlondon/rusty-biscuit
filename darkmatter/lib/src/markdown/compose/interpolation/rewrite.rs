@@ -50,24 +50,20 @@ fn literal_token_failure(
     span: std::ops::Range<usize>,
     cause: TokenError,
 ) -> LocatedInterpolationError {
-    LocatedInterpolationError {
-        error: Box::new(interpolation_error(
-            &input[span.clone()],
-            ExpressionError::MalformedLiteralToken(cause),
-        )),
-        span: Some(span),
-    }
+    LocatedInterpolationError::new(
+        interpolation_error(&input[span.clone()], ExpressionError::MalformedLiteralToken(cause)),
+        Some(span),
+    )
 }
 
 /// An expression whose source holds a token spelling, say inside a string
 /// literal, would return that spelling as text; N5 makes it malformed instead.
 fn expression_holds_token(loc: &ExpressionLocation) -> Option<LocatedInterpolationError> {
-    loc.expression.contains(TOKEN_PREFIX).then(|| LocatedInterpolationError {
-        error: Box::new(interpolation_error(
-            &loc.expression,
-            ExpressionError::MalformedLiteralToken(TokenError::Embedded),
-        )),
-        span: Some(loc.start..loc.end),
+    loc.expression.contains(TOKEN_PREFIX).then(|| {
+        LocatedInterpolationError::new(
+            interpolation_error(&loc.expression, ExpressionError::MalformedLiteralToken(TokenError::Embedded)),
+            Some(loc.start..loc.end),
+        )
     })
 }
 
@@ -143,6 +139,28 @@ pub(crate) struct LocatedInterpolationError {
     /// Byte range of the failing `{{ … }}` in the caller's `input`. `None`
     /// only for a failure that is not about one located expression.
     pub span: Option<std::ops::Range<usize>>,
+    /// The warnings the rewrite had reported before it failed, in authored
+    /// order; the caller adds them to the failing document's report so a
+    /// failure keeps them. Empty for a policy stop, which carries its own.
+    pub warnings: Vec<ComposeWarning>,
+}
+
+impl LocatedInterpolationError {
+    /// `error`, located at `span`, with no earlier warnings.
+    pub(crate) fn new(error: MarkdownError, span: Option<std::ops::Range<usize>>) -> Self {
+        Self { error: Box::new(error), span, warnings: Vec::new() }
+    }
+
+    /// This failure, after `earlier` (in authored order) were reported by the
+    /// same rewrite. A policy stop already carries what it judged, so it
+    /// keeps none.
+    pub(crate) fn after(mut self, mut earlier: Vec<ComposeWarning>) -> Self {
+        if self.error.blocked_diagnostics().is_none() {
+            earlier.append(&mut self.warnings);
+            self.warnings = earlier;
+        }
+        self
+    }
 }
 
 /// Scans `input` for `{{ }}` expressions and `{{{ }}}` literals once,
@@ -225,7 +243,7 @@ pub(crate) fn show_new_warnings(
     };
     let new = &warnings[*shown..];
     *shown = warnings.len();
-    check(new).map_err(|error| LocatedInterpolationError { error: Box::new(error), span: None })
+    check(new).map_err(|error| LocatedInterpolationError::new(error, None))
 }
 
 /// Charges `bytes` inserted at `offset` to the expansions that own it.
@@ -238,11 +256,13 @@ pub(crate) fn charge(
     let Some(site) = site else {
         return Ok(());
     };
-    site.charge(offset, bytes).map_err(|error| LocatedInterpolationError {
-        error: Box::new(crate::markdown::types::MarkdownError::from(Box::new(
-            crate::markdown::compose::collection_blocks::CollectionError::budget(error),
-        ))),
-        span,
+    site.charge(offset, bytes).map_err(|error| {
+        LocatedInterpolationError::new(
+            crate::markdown::types::MarkdownError::from(Box::new(
+                crate::markdown::compose::collection_blocks::CollectionError::budget(error),
+            )),
+            span,
+        )
     })
 }
 
@@ -256,8 +276,30 @@ pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
     scan_mode: ScanMode,
     policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
+    before_eval: BeforeEval<'_>,
+    site: Option<&dyn SiteHook>,
+) -> Result<InterpolationRewrite, LocatedInterpolationError> {
+    interpolate_text_selected(input, data, evaluator, scan_mode, policy, warning_stage, before_eval, site, None)
+}
+
+/// Which spans a rewrite evaluates: given a span of its input and the
+/// expression's source (`None` for a `{{{ … }}}` literal), whether to rewrite
+/// it now. A span it declines stays as written.
+pub(crate) type SpanSelection<'s> = Option<&'s dyn Fn(std::ops::Range<usize>, Option<&str>) -> bool>;
+
+/// [`interpolate_text_guarded`], rewriting only the spans `select` accepts
+/// (every span when `None`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn interpolate_text_selected<L: EvaluationLookup>(
+    input: &str,
+    data: Option<&DataRanges>,
+    evaluator: &Evaluator<L>,
+    scan_mode: ScanMode,
+    policy: ExpressionFailurePolicy,
+    warning_stage: &'static str,
     mut before_eval: BeforeEval<'_>,
     site: Option<&dyn SiteHook>,
+    select: SpanSelection<'_>,
 ) -> Result<InterpolationRewrite, LocatedInterpolationError> {
     let strict = policy == ExpressionFailurePolicy::Strict;
     // Fast path (F14): a `{{ … }}` expression and a `{{{ … }}}` literal both
@@ -311,93 +353,109 @@ pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
     let mut shown = 0;
     let mut edits = Vec::new();
 
-    for (start, end, item) in found {
-        if let Some(site) = site {
-            site.enter(start);
-        }
-        let loc = match item {
-            Found::Literal(lit) => {
-                let replacement = format!("{}{}{}", "{{", lit.content, "}}");
-                charge(site, start, replacement.len(), None)?;
-                edits.push(TextEdit::data(start..end, replacement.len()));
-                output.replace_range(start..end, &replacement);
-                continue;
-            }
-            Found::Expression(loc) => loc,
-        };
-        if let Some(failure) = expression_holds_token(&loc) {
-            return Err(failure);
-        }
-        let origin = ExpressionOrigin::Authored(loc.start..loc.end);
-        match parse(&loc.expression) {
-            Ok(expr) => {
-                let mut ctx_warnings = evaluator.collect_context_warnings(&expr, warning_stage);
-                ctx_warnings.reverse();
-                warnings.append(&mut ctx_warnings);
-                show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
-                let mark = evaluator.missing_root_mark();
-                let evaluated = evaluator.eval(&expr);
-                evaluator.locate_missing_roots(mark, Some(loc.start..loc.end));
-                match evaluated {
-                    EvalResult::Value(replacement) => {
-                        // Inherit line indentation for multiline replacements
-                        let replacement = if replacement.contains('\n') {
-                            let line_start =
-                                output[..loc.start].rfind('\n').map(|i| i + 1).unwrap_or(0);
-                            let indent: String = output[line_start..loc.start]
-                                .chars()
-                                .take_while(|c| c.is_whitespace())
-                                .collect();
-                            if indent.is_empty() {
-                                replacement
-                            } else {
-                                replacement.replace('\n', &format!("\n{indent}"))
-                            }
-                        } else {
-                            replacement
-                        };
-                        charge(site, loc.start, replacement.len(), Some(loc.start..loc.end))?;
-                        edits.push(TextEdit::data(loc.start..loc.end, replacement.len()));
-                        output.replace_range(loc.start..loc.end, &replacement);
-                        count += 1;
-                    }
-                    EvalResult::Error { error, .. } if strict || error.is_authoring_fatal() => {
-                        return Err(LocatedInterpolationError {
-                            error: Box::new(interpolation_error(&loc.expression, error)),
-                            span: Some(loc.start..loc.end),
-                        });
-                    }
-                    EvalResult::Error { error, original } => {
-                        warnings.push(ComposeWarning::expression_failure(
-                            warning_stage,
-                            format!("failed to evaluate '{}': {}", original, error),
-                            ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
-                            origin,
-                        ));
-                    }
+    // Every failure below keeps the warnings reported before it.
+    let rewritten = (|| {
+        for (start, end, item) in found {
+            if let Some(select) = select {
+                let source = match &item {
+                    Found::Expression(loc) => Some(loc.expression.as_str()),
+                    Found::Literal(_) => None,
+                };
+                if !select(start..end, source) {
+                    continue;
                 }
             }
-            Err(e) if strict => {
-                return Err(LocatedInterpolationError {
-                    error: Box::new(interpolation_error(
-                        &loc.expression,
-                        ExpressionError::from(e),
-                    )),
-                    span: Some(loc.start..loc.end),
-                });
+            if let Some(site) = site {
+                site.enter(start);
             }
-            Err(e) => {
-                warnings.push(ComposeWarning::expression_failure(
-                    warning_stage,
-                    format!("failed to parse '{}': {}", loc.expression, e),
-                    ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE,
-                    origin,
-                ));
+            let loc = match item {
+                Found::Literal(lit) => {
+                    let replacement = format!("{}{}{}", "{{", lit.content, "}}");
+                    charge(site, start, replacement.len(), None)?;
+                    edits.push(TextEdit::data(start..end, replacement.len()));
+                    output.replace_range(start..end, &replacement);
+                    continue;
+                }
+                Found::Expression(loc) => loc,
+            };
+            if let Some(failure) = expression_holds_token(&loc) {
+                return Err(failure);
+            }
+            let origin = ExpressionOrigin::Authored(loc.start..loc.end);
+            match parse(&loc.expression) {
+                Ok(expr) => {
+                    let mut ctx_warnings = evaluator.collect_context_warnings(&expr, warning_stage);
+                    ctx_warnings.reverse();
+                    warnings.append(&mut ctx_warnings);
+                    show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
+                    let mark = evaluator.missing_root_mark();
+                    let evaluated = evaluator.eval(&expr);
+                    evaluator.locate_missing_roots(mark, Some(loc.start..loc.end));
+                    // Reversed with the rest below, so they end in authored order.
+                    let mut members = evaluator.member_warnings(&loc.expression, &(loc.start..loc.end));
+                    members.reverse();
+                    warnings.append(&mut members);
+                    match evaluated {
+                        EvalResult::Value(replacement) => {
+                            // Inherit line indentation for multiline replacements
+                            let replacement = if replacement.contains('\n') {
+                                let line_start =
+                                    output[..loc.start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+                                let indent: String = output[line_start..loc.start]
+                                    .chars()
+                                    .take_while(|c| c.is_whitespace())
+                                    .collect();
+                                if indent.is_empty() {
+                                    replacement
+                                } else {
+                                    replacement.replace('\n', &format!("\n{indent}"))
+                                }
+                            } else {
+                                replacement
+                            };
+                            charge(site, loc.start, replacement.len(), Some(loc.start..loc.end))?;
+                            edits.push(TextEdit::data(loc.start..loc.end, replacement.len()));
+                            output.replace_range(loc.start..loc.end, &replacement);
+                            count += 1;
+                        }
+                        EvalResult::Error { error, .. } if strict || error.is_authoring_fatal() => {
+                            return Err(LocatedInterpolationError::new(
+                                interpolation_error(&loc.expression, error),
+                                Some(loc.start..loc.end),
+                            ));
+                        }
+                        EvalResult::Error { error, original } => {
+                            warnings.push(ComposeWarning::expression_failure(
+                                warning_stage,
+                                format!("failed to evaluate '{}': {}", original, error),
+                                ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
+                                origin,
+                            ));
+                        }
+                    }
+                }
+                Err(e) if strict => {
+                    return Err(LocatedInterpolationError::new(
+                        interpolation_error(&loc.expression, ExpressionError::from(e)),
+                        Some(loc.start..loc.end),
+                    ));
+                }
+                Err(e) => {
+                    warnings.push(ComposeWarning::expression_failure(
+                        warning_stage,
+                        format!("failed to parse '{}': {}", loc.expression, e),
+                        ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE,
+                        origin,
+                    ));
+                }
             }
         }
+        show_new_warnings(&mut before_eval, &warnings, &mut shown)
+    })();
+    if let Err(failure) = rewritten {
+        warnings.reverse();
+        return Err(failure.after(warnings));
     }
-
-    show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
 
     // Spans were visited end to start; report and record them in document
     // order so the first authored occurrence of an issue is the one kept.
@@ -467,10 +525,7 @@ pub(crate) fn interpolate_value_guarded<L: EvaluationLookup>(
         return Ok((Value::String(result.output), result.replacements, result.warnings));
     }
     if let Some(loc) = whole_value_span(input) {
-        let located = |error| LocatedInterpolationError {
-            error: Box::new(error),
-            span: Some(loc.start..loc.end),
-        };
+        let located = |error| LocatedInterpolationError::new(error, Some(loc.start..loc.end));
         if let Some(failure) = expression_holds_token(&loc) {
             return Err(failure);
         }
@@ -481,11 +536,16 @@ pub(crate) fn interpolate_value_guarded<L: EvaluationLookup>(
         // the context-typo check on its single parsed expression — otherwise
         // `phase: "{{ ctx.toady }}"` (resolving to null) would warn in body text
         // but stay silent in frontmatter.
-        let warnings = evaluator.collect_context_warnings(&expr, warning_stage);
-        show_new_warnings(&mut before_eval, &warnings, &mut 0)?;
-        let value = evaluator
-            .eval_json(&expr)
-            .map_err(|cause| located(interpolation_error(&loc.expression, cause)))?;
+        let mut warnings = evaluator.collect_context_warnings(&expr, warning_stage);
+        let mut shown = 0;
+        show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
+        let value = evaluator.eval_json(&expr);
+        warnings.extend(evaluator.member_warnings(&loc.expression, &(loc.start..loc.end)));
+        let value = match value {
+            Ok(value) => value,
+            Err(cause) => return Err(located(interpolation_error(&loc.expression, cause)).after(warnings)),
+        };
+        show_new_warnings(&mut before_eval, &warnings, &mut shown).map_err(|failure| failure.after(warnings.clone()))?;
         return Ok((value, 1, warnings));
     }
     let result = interpolate_text_guarded(input, None, evaluator, ScanMode::Plain, policy, warning_stage, before_eval, None)?;
@@ -1248,6 +1308,59 @@ mod tests {
                 report.warnings[0].code.as_deref(),
                 Some(ComposeWarning::UNKNOWN_CONTEXT_VARIABLE_CODE)
             );
+        }
+    }
+
+    mod member_sites {
+        use super::*;
+        use crate::markdown::compose::member_sites::{MemberCandidate, MemberCandidates, MemberFrame, MemberSiteKey};
+        use std::sync::Arc;
+
+        /// Candidates for `{{ a.b }}` (ordinal 0) at offset `start` of the
+        /// leaf `/t`.
+        fn candidates(start: usize) -> Arc<MemberCandidates> {
+            let mut candidates = MemberCandidates::default();
+            candidates.insert(
+                MemberSiteKey::leaf("/t".to_string(), start),
+                0,
+                MemberCandidate {
+                    expression: "a.b".into(),
+                    order: 2,
+                    warning: ComposeWarning::new("interpolation", "member b"),
+                },
+            );
+            Arc::new(candidates)
+        }
+
+        fn messages(warnings: &[ComposeWarning]) -> Vec<&str> {
+            warnings.iter().map(|warning| warning.message.as_str()).collect()
+        }
+
+        #[test]
+        fn mixed_text_reports_a_reached_candidate_at_its_offset() {
+            let state = make_state(json!({"a": {"c": 1}}));
+            let evaluator = Evaluator::new(&state).with_member_sites(candidates(2), MemberFrame::Leaf(Default::default()));
+            evaluator.set_member_leaf("/t".to_string());
+            let policy = ExpressionFailurePolicy::Strict;
+            let result = interpolate_text("x {{ a.b }}", &evaluator, ScanMode::Plain, policy, "test").unwrap();
+            assert_eq!(messages(&result.warnings), ["member b"]);
+            // Another offset of the same leaf is another site.
+            let result = interpolate_text("{{ a.b }}", &evaluator, ScanMode::Plain, policy, "test").unwrap();
+            assert!(result.warnings.is_empty());
+            // An unchosen branch is never reached.
+            let result = interpolate_text("x {{ a.c ? 1 : a.b }}", &evaluator, ScanMode::Plain, policy, "test").unwrap();
+            assert!(result.warnings.is_empty());
+        }
+
+        #[test]
+        fn a_whole_value_reports_a_reached_candidate() {
+            let state = make_state(json!({"a": {"c": 1}}));
+            let evaluator = Evaluator::new(&state).with_member_sites(candidates(0), MemberFrame::Leaf(Default::default()));
+            evaluator.set_member_leaf("/t".to_string());
+            let (value, _, warnings) =
+                interpolate_value_guarded("{{ a.b }}", &evaluator, ExpressionFailurePolicy::Strict, "test", None).unwrap();
+            assert_eq!(value, serde_json::Value::Null);
+            assert_eq!(messages(&warnings), ["member b"]);
         }
     }
 }

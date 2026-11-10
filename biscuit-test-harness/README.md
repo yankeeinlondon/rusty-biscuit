@@ -117,7 +117,10 @@ Every backend implements one **shell-model-first** contract:
 **Every** backend spawns two shells: an outer `-l` login shell that runs
 the host's *profile* files (where `PATH` is assembled), which then
 `exec`s an interactive shell with its **rc files suppressed**
-(`bash --norc -i`, `zsh -f -i`, `unset ENV` for POSIX `sh`).
+(`bash --norc -i`, `zsh -f -i`, `unset ENV` for POSIX `sh`). On Windows
+bash also gets `--noediting`: under ConPTY, readline redraws the line for
+every typed character, which made a 317-character line take 5.8 s to type
+instead of 0.16 s.
 
 The interactive rc file is where Atuin, starship, fzf, and zoxide
 install themselves, and a prompt-replacement or first-run picker there
@@ -655,12 +658,15 @@ Re-exported from the crate root:
 | `SpawnVisibility` | `Background` (default) / `Foreground`. |
 | `strip_ansi(&str)` | Remove CSI/OSC/SGR/charset-designation escapes (ECMA-48 §5.4 aware). |
 | `skip_with_reason(&str)` | Print `skipping: requires <X>` to stderr; returns `true`. |
+| `shell_quote(&str)` / `shell_path(&Path)` | One single-quoted pane-shell word. `shell_path` also spells a Windows path with `/`, which Cygwin bash needs to run it as a command. |
 | `cleanup_stale_terminal_harness_resources()` | Best-effort cleanup for tagged stale WezTerm, tmux, and Terminal.app resources. |
 | `detect_shell()` | Pick a POSIX shell (`bash` → `sh` → `$SHELL`). |
 | `cargo_bin_dir(name)` | Locate the directory of a built cargo binary, for `PATH` augmentation. |
 | `apply_color_forcing_env(&mut Command)` | Set `FORCE_COLOR`/`CLICOLOR_FORCE`/`TERM`/`COLORTERM`, clear `NO_COLOR`. |
 | `wait_for_prompt(&mut harness)` | Poll `capture()` until a shell prompt (`$`/`#`/`%`) appears (5 s cap). |
 | `capture_settled(&mut harness)` | Poll `capture()` until two consecutive frames match and end at a prompt (20 s cap). Call it only once the command is known to have reached the pane. |
+| `run_to_sentinel(&mut harness, cmd, env, sentinel, timeout)` | Run `cmd`, print `sentinel` on its own row, and return a settled capture showing it. Completion is read from a temp file the line touches, not by polling captures, so parallel tests do not queue behind each other's terminal clients. |
+| `CLEAR_SCREEN` | A command that clears screen and scrollback with the `printf` builtin; prefix it to a command (`{CLEAR_SCREEN}; md …`) instead of running `clear` as a round trip of its own. |
 | `send_command_settled(&mut harness, cmd, env)` | Type a command as `send_command_with_env` does, wait until the frame changes, then `capture_settled`. |
 | `run_with_timeout` / `run_with_stdin_timeout` | Run a `Command` with a wall-clock timeout and pipe-deadlock-safe draining. |
 | `SPAWN_TIMEOUT`, `SEND_TIMEOUT`, `CAPTURE_TIMEOUT`, `QUERY_TIMEOUT`, `CLEANUP_TIMEOUT` | Default timeout constants. |

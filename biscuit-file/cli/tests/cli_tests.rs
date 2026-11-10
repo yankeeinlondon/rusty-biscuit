@@ -647,6 +647,29 @@ fn unknown_extension_errors() {
     let _ = std::fs::remove_file(&path);
 }
 
+#[test]
+fn detected_data_formats_without_a_converter_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    for (file, content, name) in [
+        ("rows.jsonl", "{\"a\":1}\n", "JSONL"),
+        ("rows.ndjson", "{\"a\":1}\n", "JSONL"),
+        ("table.csv", "a,b\n1,2\n", "CSV"),
+        ("table.tsv", "a\tb\n1\t2\n", "TSV"),
+    ] {
+        let path = dir.path().join(file);
+        std::fs::write(&path, content).unwrap();
+
+        bf().arg(&path)
+            .assert()
+            .failure()
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains(format!(
+                "{name} input is not supported for conversion; supported inputs: \
+                 TOML, YAML, JSON, JSON5, Markdown, PDF"
+            )));
+    }
+}
+
 // ── Debug flag ──────────────────────────────────────────────────────
 
 #[test]

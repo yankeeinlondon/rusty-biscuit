@@ -14,11 +14,12 @@
 //! a two-edge-kind model.
 
 use std::borrow::Cow;
+use std::convert::Infallible;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use biscuit_file::{FileResolutionContext, ResolutionFailure};
+use biscuit_file::{FileReference, FileResolutionContext, ResolutionFailure};
 
 use super::edge::{Edge, EdgeId, EdgeKind};
 use super::index::ReverseIndex;
@@ -29,7 +30,7 @@ use super::node::{
     WikiResolution,
 };
 use super::substrate::{DocumentIndex, WikiLinkFact};
-use crate::context::{ContextFailure, ReferenceTarget, plan_reference, resolve_reference};
+use crate::context::{ContextFailure, plan_reference};
 use crate::wiki::universe::counted_portability_key;
 use crate::wiki::{self, Match, ParseOutcome, WikiDoc, WikiUniverse};
 
@@ -1130,11 +1131,12 @@ enum Located {
 /// Locates `raw` the way composition resolves it, so an existing file is
 /// never reported missing because the workspace folder does not index it.
 ///
-/// The shared resolver ([`resolve_reference`]) decides existence. Two index
-/// lookups keep it cheap and buffer-aware: a first planned candidate that is
-/// indexed needs no probe, and a reference that matched no file (not one whose
-/// probe failed) resolves to its first candidate that is an open, not yet
-/// saved, buffer.
+/// The shared resolver decides existence, in the planned candidate order.
+/// Index lookups keep it cheap and buffer-aware: a first planned candidate
+/// that is indexed needs no probe, and a candidate holding no file that is a
+/// graph document (an open, not yet saved, buffer) is the match there, so a
+/// later candidate's file never outranks it. A candidate that could not be
+/// probed stops the search, as it stops composition.
 fn locate(
     context: &FileResolutionContext,
     raw: &str,
@@ -1147,18 +1149,19 @@ fn locate(
     if let Some(&document) = candidates.first().and_then(|candidate| by_path.get(candidate)) {
         return Located::Document(document);
     }
-    match resolve_reference(context, raw) {
-        ReferenceTarget::Found(path) => match by_path.get(&path) {
-            Some(&document) => Located::Document(document),
-            None => Located::File(path),
-        },
-        // A candidate that could not be probed stops the search, as it stops
-        // composition; a later buffer never answers for it.
-        ReferenceTarget::Missing { failure: ResolutionFailure::NoMatch, .. } => candidates
-            .iter()
-            .find_map(|candidate| by_path.get(candidate).copied())
-            .map_or(Located::Missing(ResolutionFailure::NoMatch), Located::Document),
-        ReferenceTarget::Missing { failure, .. } => Located::Missing(failure),
+    let reference = match FileReference::new(raw) {
+        Ok(reference) => reference,
+        Err(error) => return Located::Missing(error.resolution_failure()),
+    };
+    let Ok(detailed) = reference.resolve_detailed_with_presence(
+        context,
+        |_| Ok::<(), Infallible>(()),
+        |candidate| by_path.contains_key(candidate),
+    );
+    match detailed.into_convenience() {
+        Ok(Some(path)) => by_path.get(&path).map_or(Located::File(path), |&document| Located::Document(document)),
+        Ok(None) => Located::Missing(ResolutionFailure::NoMatch),
+        Err(error) => Located::Missing(error.resolution_failure()),
     }
 }
 
@@ -1718,6 +1721,42 @@ mod tests {
         let targets: Vec<EdgeTarget> =
             g.outgoing(link, EdgeKind::References).map(|edge| edge.target.clone()).collect();
         assert_eq!(targets, vec![EdgeTarget::File(root.join("docs/t.md"))]);
+    }
+
+    #[test]
+    fn test_an_unsaved_buffer_at_a_middle_candidate_outranks_a_later_existing_file() {
+        // `@t.md` plans the repository root, a configured `conf/` root, then
+        // the home directory. The middle candidate is an open, unsaved buffer
+        // and the last is a file on disk; composition would take the buffer
+        // once saved, so the graph takes it now and never reaches home's file.
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("home")).unwrap();
+        std::fs::write(root.join("home/t.md"), "# Far\n").unwrap();
+        let doc = root.join("doc.md");
+        let buffer = root.join("conf/t.md");
+        let indices = BTreeMap::from([
+            (doc.clone(), index_document(&doc, "[t](@t.md)\n")),
+            (buffer.clone(), index_document(&buffer, "# Buffer\n")),
+        ]);
+        let contexts = crate::context::FixedContext(
+            FileResolutionContext::from_snapshot(&root, Some(root.join("home")), HashMap::new())
+                .with_repository_root(&root)
+                .add_magic_path(root.join("conf"), biscuit_file::PathPosition::End),
+        );
+        let context = contexts.0.for_source(&doc);
+        assert_eq!(
+            plan_reference(&context, "@t.md").unwrap(),
+            vec![root.join("t.md"), buffer.clone(), root.join("home/t.md")],
+            "the fixture plans three candidates"
+        );
+        let g = WorkspaceGraph::build(&indices, 1, &contexts);
+        let id = g.document_id(&doc).unwrap();
+        let (link, node) = g.links(id).next().unwrap();
+        let targets: Vec<EdgeTarget> =
+            g.outgoing(link, EdgeKind::References).map(|edge| edge.target.clone()).collect();
+        assert!(matches!(targets.as_slice(), [EdgeTarget::Node(_)]), "the buffer's document node, not home's file: {targets:?}");
+        assert_eq!(g.diagnose_unresolved(id, &node.as_link().unwrap().target, Ok(&context)), None);
     }
 
     #[test]

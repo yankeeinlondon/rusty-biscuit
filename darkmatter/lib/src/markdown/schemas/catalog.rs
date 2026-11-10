@@ -126,6 +126,22 @@ pub enum CatalogErrorReason {
     /// A [`GlobalRequirement::same_as`] mismatch.
     #[error("must declare the same shape as `{0}`")]
     Mismatch(Cow<'static, str>),
+    /// The definition holds `{{ … }}` schema slots (directly or through an
+    /// import). A catalog declares globals, which apply before any slot
+    /// could be resolved, so it never holds one.
+    #[error("{}", super::slots::codes::slots_not_allowed_message("a global catalog", .0))]
+    SlotsNotAllowed(Box<simplified_schema::UnresolvedSlots>),
+}
+
+impl CatalogError {
+    /// The slot code of a catalog holding slots,
+    /// [`SLOT_NOT_ALLOWED_IN_BASELINE_CODE`](super::slots::codes::SLOT_NOT_ALLOWED_IN_BASELINE_CODE);
+    /// `None` for every other failure.
+    #[must_use]
+    pub fn slot_code(&self) -> Option<&'static str> {
+        matches!(self.reason, CatalogErrorReason::SlotsNotAllowed(_))
+            .then_some(super::slots::codes::SLOT_NOT_ALLOWED_IN_BASELINE_CODE)
+    }
 }
 
 /// A typed, field-located catalog load failure.
@@ -264,8 +280,35 @@ impl GlobalCatalog {
             field: String::new(),
             reason: CatalogErrorReason::Resolve(Box::new(SchemaError::Io { path: path.to_path_buf(), source })),
         })?;
+        Self::from_text(path, &text, requirements, context)
+    }
+
+    /// [`Self::from_file`] over `text`, the bytes the caller already read
+    /// from `path`; `path` names the catalog and locates its imports, and is
+    /// not read again.
+    pub(crate) fn from_text(
+        path: &Path,
+        text: &str,
+        requirements: &[GlobalRequirement],
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Self, CatalogError> {
         let dir = path.parent().unwrap_or_else(|| Path::new("."));
-        Self::load(&catalog, &text, &Source::Disk { dir, context }, requirements)
+        Self::load_disk(&path.display().to_string(), text, dir, context, requirements)
+    }
+
+    /// [`Self::load`] for a catalog on the disk. Each global resolves on its
+    /// own, so a failure names its field; the retaining scope makes a file
+    /// that several globals import (`ctx` and `current` typed alike) one read.
+    fn load_disk(
+        catalog: &str,
+        text: &str,
+        dir: &Path,
+        context: &biscuit_file::FileResolutionContext,
+        requirements: &[GlobalRequirement],
+    ) -> Result<Self, CatalogError> {
+        simplified_schema::resolve::buffers::with_reads_retained(|| {
+            Self::load(catalog, text, &Source::Disk { dir, context }, requirements)
+        })
     }
 
     /// Loads a host catalog file found by discovery, whose requirements the
@@ -317,7 +360,7 @@ impl GlobalCatalog {
         }
         let requirements: Vec<GlobalRequirement> = declared.into_iter().map(GlobalRequirement::owned_shape).collect();
         let dir = path.parent().unwrap_or_else(|| Path::new("."));
-        Self::load(&catalog, text, &Source::Disk { dir, context }, &requirements)
+        Self::load_disk(&catalog, text, dir, context, &requirements)
     }
 
     fn load_embedded(
@@ -470,9 +513,10 @@ impl From<Arc<GlobalCatalog>> for CatalogHandle {
 
 /// The host catalogs in a document's schema roots: every top-level
 /// `.yaml`/`.yml` file claiming the catalog envelope, other than one
-/// declaring Darkmatter's own globals, loaded with
-/// [`GlobalCatalog::from_host_file`]. A file name in an earlier root shadows
-/// the same name in later ones. Passive: files are read, nothing runs.
+/// declaring Darkmatter's own globals, loaded as
+/// [`GlobalCatalog::from_host_file`] loads it, from the bytes read to
+/// recognize it. A file name in an earlier root shadows the same name in
+/// later ones. Passive: files are read once each, nothing runs.
 ///
 /// A catalog that fails to load is returned as its error so a caller can
 /// report it; the others still load.
@@ -499,7 +543,7 @@ pub fn host_catalogs(context: &biscuit_file::FileResolutionContext) -> Vec<Resul
             if !is_global_catalog(&text) || declares_fm(&text) {
                 continue;
             }
-            catalogs.push(GlobalCatalog::from_host_file(&path, context));
+            catalogs.push(GlobalCatalog::from_host_text(&path, &text, context));
         }
     }
     catalogs
@@ -1074,7 +1118,10 @@ fn resolve_declaration(
         }
         Source::Disk { dir, context } => resolve::resolve_catalog_declaration(&single, dir, context),
     }
-    .map_err(|error| CatalogErrorReason::Resolve(Box::new(error)))?;
+    .map_err(|error| match error {
+        SchemaError::UnresolvedSlots(unresolved) => CatalogErrorReason::SlotsNotAllowed(unresolved),
+        error => CatalogErrorReason::Resolve(Box::new(error)),
+    })?;
     match resolved.simplified {
         Some(SchemaRoot::Single(mut shape)) => shape
             .properties

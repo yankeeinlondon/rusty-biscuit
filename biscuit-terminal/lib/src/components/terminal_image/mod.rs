@@ -450,6 +450,43 @@ impl TerminalImage {
         )
     }
 
+    /// The image area for this image on `term`, at its natural size when `term`
+    /// has no width.
+    fn dimensions_on(&self, term: &crate::terminal::Terminal, pixel_width: u32) -> ResolvedDimensions {
+        let cell = term.cell_size();
+        match term.columns() {
+            Some(columns) => self.resolve_dimensions_for_image(columns, cell, pixel_width),
+            None => Self::resolve_unbounded_dimensions_for(&self.width, &self.layout, pixel_width as f32, cell),
+        }
+    }
+
+    /// [`resolve_scaled_dimensions_for`](Self::resolve_scaled_dimensions_for) when
+    /// there is no width to resolve against: a fill or percentage is the
+    /// content's natural size, and there is no slack to align within.
+    ///
+    /// `natural_width` is in the content's own units, as it is there.
+    pub fn resolve_unbounded_dimensions_for(
+        width: &ImageWidth,
+        layout: &Layout,
+        natural_width: f32,
+        cell: Option<CellSize>,
+    ) -> ResolvedDimensions {
+        let cell = cell.unwrap_or(CellSize::FALLBACK);
+        let image_width = match width {
+            ImageWidth::Characters(chars) => (*chars).max(1),
+            ImageWidth::Scale(scale) => ImageWidth::scaled_columns(*scale, natural_width, cell),
+            ImageWidth::Fill | ImageWidth::Percent(_) => ImageWidth::scaled_columns(1.0, natural_width, cell),
+        };
+        let left_margin = resolve_cells(&layout.margin.left, 0);
+        ResolvedDimensions {
+            available_width: image_width,
+            image_width,
+            x_offset: left_margin,
+            left_margin,
+            right_margin: resolve_cells(&layout.margin.right, 0),
+        }
+    }
+
     /// Compute resolved image-area dimensions for an arbitrary `(width, layout)`
     /// pair without needing an existing image on disk.
     ///

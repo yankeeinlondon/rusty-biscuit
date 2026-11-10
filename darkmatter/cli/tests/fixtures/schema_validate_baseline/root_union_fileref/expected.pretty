@@ -1,1 +1,1 @@
-- ✔ the document [doc.md]({DOC_URL}) has a schema definition and is valid.
+- ✔ the document doc.md <{DOC_URL}> has a schema definition and is valid based on its $schema union and the Darkmatter default schema.

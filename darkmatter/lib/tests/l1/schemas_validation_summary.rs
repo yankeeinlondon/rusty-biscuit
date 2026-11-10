@@ -59,6 +59,16 @@ fn mode_triggers(root: &Path) -> DarkmatterSchemas {
         .expect("trigger discovery")
 }
 
+/// The file names of the triggers that layered a payload.
+fn trigger_names(summary: &PreparationSummary) -> Vec<&str> {
+    summary
+        .layers
+        .triggers
+        .iter()
+        .map(|trigger| trigger.file_name().expect("a trigger file name"))
+        .collect()
+}
+
 /// The counters a preparation count is measured from; nothing without the
 /// `work-counters` feature, where [`assert_preparations`] checks nothing.
 #[cfg(feature = "work-counters")]
@@ -114,11 +124,12 @@ fn no_schema_with_the_baseline_disabled_is_vacuously_valid_without_a_schema() {
 
     assert!(report.valid);
     assert!(report.problems.is_empty());
-    assert!(!summary.has_schema);
+    assert!(!summary.has_schema());
+    assert!(summary.layers.is_empty());
 }
 
 #[test]
-fn baseline_only_has_a_schema() {
+fn baseline_only_names_only_the_baseline_layer() {
     let (_dir, root) = repository();
     let doc = document(&root, "doc.md", "---\ntitle: plain\n---\nbody\n");
     let api = schemas(&root)
@@ -128,7 +139,52 @@ fn baseline_only_has_a_schema() {
     let (report, summary) = summarize(&api, &doc, "baseline only");
 
     assert!(report.valid, "{:?}", report.problems);
-    assert!(summary.has_schema);
+    assert!(summary.has_schema());
+    assert!(summary.layers.baseline);
+    assert!(!summary.layers.document);
+    assert!(summary.layers.triggers.is_empty());
+}
+
+#[test]
+fn a_document_schema_over_the_baseline_names_both_layers() {
+    let (_dir, root) = repository();
+    let doc = document(&root, "doc.md", "---
+$schema:
+  title: string
+title: plain
+---
+body
+");
+    let api = schemas(&root)
+        .with_darkmatter_baseline_json_schema()
+        .expect("embedded baseline");
+
+    let (report, summary) = summarize(&api, &doc, "baseline and document schema");
+
+    assert!(report.valid, "{:?}", report.problems);
+    assert!(summary.layers.document);
+    assert!(summary.layers.baseline);
+    assert!(summary.layers.triggers.is_empty());
+}
+
+#[test]
+fn a_matched_trigger_over_the_baseline_names_the_trigger_and_baseline() {
+    let (_dir, root) = repository();
+    let api = mode_triggers(&root)
+        .with_darkmatter_baseline_json_schema()
+        .expect("embedded baseline");
+    let doc = document(&root, "doc.md", "---
+mode: alpha
+alpha_field: x
+---
+");
+
+    let (report, summary) = summarize(&api, &doc, "baseline and trigger schema");
+
+    assert!(report.valid, "{:?}", report.problems);
+    assert!(!summary.layers.document);
+    assert!(summary.layers.baseline);
+    assert_eq!(trigger_names(&summary), ["alpha.trigger.yaml"]);
 }
 
 #[test]
@@ -149,7 +205,7 @@ fn explicit_schema_problems_come_from_the_same_preparation() {
         report.problems[0].line.is_some(),
         "problems keep source positions"
     );
-    assert!(summary.has_schema);
+    assert!(summary.has_schema());
 }
 
 #[test]
@@ -161,7 +217,10 @@ fn a_matched_trigger_has_a_schema() {
     let (report, summary) = summarize(&api, &doc, "trigger schema");
 
     assert!(report.valid, "{:?}", report.problems);
-    assert!(summary.has_schema);
+    assert!(summary.has_schema());
+    assert!(!summary.layers.document);
+    assert!(!summary.layers.baseline);
+    assert_eq!(trigger_names(&summary), ["alpha.trigger.yaml"]);
 }
 
 #[test]
@@ -200,7 +259,7 @@ fn a_pending_shell_value_reports_as_validate_does() {
     let (report, summary) = summarize(&schemas(&root), &doc, "pending shell value");
 
     assert!(report.valid, "{:?}", report.problems);
-    assert!(summary.has_schema);
+    assert!(summary.has_schema());
 }
 
 #[test]
@@ -256,7 +315,7 @@ fn assignments_prepare_twice_and_the_final_report_follows_the_assigned_trigger()
     );
 
     let (report, summary) = validated.expect("final validation");
-    assert!(summary.has_schema);
+    assert!(summary.has_schema());
     assert_eq!(
         timings.matched_triggers(),
         ["beta.trigger.yaml".to_string()]
@@ -296,7 +355,7 @@ fn an_assignment_that_selects_the_first_schema_turns_no_schema_into_a_schema() {
     );
 
     assert!(
-        summary.has_schema,
+        summary.has_schema(),
         "presence reflects the post-assignment preparation"
     );
     assert!(!report.valid);

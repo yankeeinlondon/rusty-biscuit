@@ -57,7 +57,8 @@ const INDENT_CHILD_LAST: &str = "        ";
 pub fn render_model(model: &FileTreeModel, term: &Terminal, show_root: bool) -> String {
     let is_nerd_font = term.is_nerd_font == Some(true);
     let is_tty = term.is_tty;
-    let width = term.width() as usize;
+    // With no width, no line has anything to be truncated to.
+    let width = term.columns().map_or(usize::MAX, |columns| columns as usize);
 
     let mut lines = Vec::new();
     if show_root {

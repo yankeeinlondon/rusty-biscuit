@@ -328,6 +328,29 @@ impl Markdown {
         self.loaded.as_deref()
     }
 
+    /// The warnings of this document's link titles: a malformed structured
+    /// title, or a leftover `key=value` title. A host that renders without
+    /// composing delivers these; composition reports them itself.
+    ///
+    /// Read before anything rewrites the body: a body the document's loaded
+    /// text no longer describes has no authored position to report.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    ///
+    /// let md: Markdown = "[Docs](./a.md \"class='x'\")\n".into();
+    /// let warnings = md.link_title_warnings();
+    /// assert_eq!(warnings[0].code.as_deref(), Some("dm.link.legacy_structured_title"));
+    /// assert!(warnings[0].message.contains("md clean"));
+    /// ```
+    #[must_use]
+    pub fn link_title_warnings(&self) -> Vec<compose::ComposeWarning> {
+        let origin = compose::body_origin::BodyOrigin::capture(self);
+        compose::link_title_warnings::link_title_warnings(self, origin.as_ref())
+    }
+
     /// The exact text this document was parsed from, or `None` for a document
     /// constructed in memory. Later edits to the frontmatter or body do not
     /// change it, so a writer can splice its edits into the original bytes
@@ -386,6 +409,8 @@ impl Markdown {
     /// markers) and link metadata from markdown titles is parsed via [`Link`].
     pub fn links(&self) -> Vec<Link> {
         let parser = Parser::new_ext(&self.content, markdown_parse_options());
+        let inert = reference::html::inert_ranges(&self.content);
+        let is_active = |offset: usize| !inert.iter().any(|range| range.contains(&offset));
 
         let mut links = Vec::new();
         let mut in_link = false;
@@ -393,11 +418,11 @@ impl Markdown {
         let mut current_title = String::new();
         let mut current_display = String::new();
 
-        for event in parser {
+        for (event, range) in parser.into_offset_iter() {
             match event {
                 Event::Start(Tag::Link {
                     dest_url, title, ..
-                }) => {
+                }) if is_active(range.start) => {
                     in_link = true;
                     current_href = dest_url.to_string();
                     current_title = title.to_string();
@@ -442,6 +467,8 @@ impl Markdown {
     /// applied consistently with standalone `ImageRef::try_from`.
     pub fn image_references(&self) -> Vec<ImageRef> {
         let parser = Parser::new_ext(&self.content, markdown_parse_options());
+        let inert = reference::html::inert_ranges(&self.content);
+        let is_active = |offset: usize| !inert.iter().any(|range| range.contains(&offset));
 
         let mut images = Vec::new();
         let mut in_image = false;
@@ -449,11 +476,11 @@ impl Markdown {
         let mut current_title = String::new();
         let mut current_alt = String::new();
 
-        for event in parser {
+        for (event, range) in parser.into_offset_iter() {
             match event {
                 Event::Start(Tag::Image {
                     dest_url, title, ..
-                }) => {
+                }) if is_active(range.start) => {
                     in_image = true;
                     current_src = dest_url.to_string();
                     current_title = title.to_string();
@@ -1203,7 +1230,7 @@ title: Test
     /// emitted as a `data-prompt` transport attribute.
     #[test]
     fn as_html_preserves_structured_link_metadata() {
-        let md: Markdown = r#"[Read docs](https://example.com "class='btn' target='_blank' prompt='Read docs' data-id='42'")"#.into();
+        let md: Markdown = r#"[Read docs](https://example.com '{ class: "btn", target: "_blank", prompt: "Read docs", "data-id": "42" }')"#.into();
         let html = md
             .as_html(output::HtmlOptions::default())
             .expect("structured link must render");
@@ -1236,7 +1263,7 @@ title: Test
     #[test]
     fn as_html_preserves_structured_link_inline_style() {
         let md: Markdown =
-            r#"[Click here](https://example.com "class='btn' style='color:red'")"#.into();
+            r#"[Click here](https://example.com '{ class: "btn", style: "color:red" }')"#.into();
         let html = md
             .as_html(output::HtmlOptions::default())
             .expect("structured link must render");
@@ -1424,7 +1451,7 @@ title: Test
     #[test]
     fn test_markdown_links_extract_structured_metadata() {
         let md: Markdown =
-            r#"[Click](https://example.com "class='btn' prompt='Read docs'")"#.into();
+            r#"[Click](https://example.com '{ class: "btn", prompt: "Read docs" }')"#.into();
         let links = md.links();
 
         assert_eq!(links.len(), 1);
@@ -1726,10 +1753,12 @@ title: Test
             base_path: None,
             italic_mode: crate::markdown::output::terminal::ItalicMode::Always,
             dim_mode: DimMode::Always,
-            max_width: Some(80),
+            width: Some(renderable::output::Width::Columns(80)),
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             mermaid_fallback_policy: Default::default(),
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
+            verbosity: 0,
+            output_profile: None,
             hr_defaults: None,
             code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };
@@ -1797,10 +1826,12 @@ title: Test
             base_path: None,
             italic_mode: crate::markdown::output::terminal::ItalicMode::Always,
             dim_mode: DimMode::Always,
-            max_width: Some(80),
+            width: Some(renderable::output::Width::Columns(80)),
             mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
             mermaid_fallback_policy: Default::default(),
             hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
+            verbosity: 0,
+            output_profile: None,
             hr_defaults: None,
             code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         };

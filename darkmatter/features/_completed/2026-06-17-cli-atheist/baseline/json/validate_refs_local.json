@@ -10,7 +10,11 @@
       "kind": "image",
       "reference": "./img.png",
       "line": 4,
-      "source": "<TMP>/local.md"
+      "column": 1,
+      "section": "local-test",
+      "inserted": false,
+      "source": "<TMP>/local.md",
+      "included_via": []
     }
   ],
   "warnings": []

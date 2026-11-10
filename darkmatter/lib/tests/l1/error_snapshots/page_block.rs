@@ -118,6 +118,7 @@ fn condition_delegates_inner_block() {
         line: 4,
         message: "unexpected token".into(),
         span: 3..4,
+        authored: None,
     }));
     let out = render(&err);
     assert_contains_all(

@@ -493,8 +493,11 @@ semantics, and composition request. An iteration does not restart the full
 document pipeline or rerun frontmatter preparation. Finish structural callback
 evaluation and body preparation before ordinary body interpolation, then run
 the existing body shell stages, link resolution, transclusion, cleanup, and
-normalization. A later callback failure can prevent earlier bodies' shell
-commands from running. Child transclusions retain existing concurrency and
+normalization. A file read in a body copy that follows a command waits for
+that command, so the next item reads what the previous item's command wrote
+(see [Reads after a command](../darkmatter-compose-pipeline.md#reads-after-a-command)).
+A later callback failure can prevent earlier bodies' shell commands from
+running. Child transclusions retain existing concurrency and
 output placement. Explicit effects invoked by an expression, including
 `as_markdown()`, still run when that expression evaluates.
 
@@ -653,8 +656,8 @@ sorting. Static authoring errors are reported once; runtime failures identify
 the iteration that exposed them, whichever stage failed: a callback, a `when=`
 gate, a `{{ }}` expression, a shell argument or its output, a `::file` target,
 condition, or child, or an allowance. The library's typed error and
-`md compose --output report-json` carry the same fields; see
-[the report](../cli/report-json.md#failures-inside-map-and-filter-bodies).
+`md compose --output json` carry the same fields; see
+[Data contracts](../cli/data-contracts.md#failures-inside-map-and-filter-bodies).
 
 ## Markdown Boundaries
 

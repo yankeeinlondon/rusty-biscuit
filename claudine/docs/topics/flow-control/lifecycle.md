@@ -271,8 +271,9 @@ after success, failure, `blocked`, `break`, and cancellation (after
 - `skip` (in `initialize`) ends the run with no `finalize`.
 - `proxy` hands off before the source's `finalize`, which never runs; the
   target runs its own lifecycle.
-- An accepted `retry` or `resume` re-enters at once without the current
-  attempt's `finalize`; `finalize` runs once when the lifecycle ends.
+- An accepted `retry` re-enters at once without the current attempt's
+  `finalize`; `finalize` runs once when the lifecycle ends.
+- An accepted `resume` does the same.
 
 Two more rules keep `finalize` from repeating:
 

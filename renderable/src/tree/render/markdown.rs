@@ -22,8 +22,12 @@
 //! assert_eq!(rendered.output, "## Title");
 //! ```
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::browser::fragment::RawRange;
 use crate::browser::utils::escape_attribute;
+use crate::output::Width;
+use crate::output::link_metadata::{LinkMetadata, StructuredTitle};
 use crate::tree::SourceSpan;
 use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::{Document, FrontmatterFormat};
@@ -56,8 +60,10 @@ pub struct MarkdownStyleOptions {}
 /// Options controlling a Markdown render.
 ///
 /// The [`Default`] uses [`MarkdownDialect::Markdown`],
-/// [`RenderStrictness::Warn`], and no style options.
-#[derive(Debug, Clone, Default)]
+/// [`RenderStrictness::Warn`], no style options, and [`Width::Source`].
+///
+/// [`Width::Source`]: crate::output::Width::Source
+#[derive(Debug, Clone)]
 pub struct MarkdownRenderOptions {
     /// The Markdown dialect to target.
     pub dialect: MarkdownDialect,
@@ -65,6 +71,21 @@ pub struct MarkdownRenderOptions {
     pub strictness: RenderStrictness,
     /// Reserved style hints; currently unused by the renderer.
     pub style: Option<MarkdownStyleOptions>,
+    /// The output width paragraphs are reflowed to. `Source` writes soft
+    /// breaks as authored; `Unlimited` joins them; `Columns(n)` joins and
+    /// wraps at `n`. Code blocks and tables are never reflowed.
+    pub width: crate::output::Width,
+}
+
+impl Default for MarkdownRenderOptions {
+    fn default() -> Self {
+        Self {
+            dialect: MarkdownDialect::default(),
+            strictness: RenderStrictness::default(),
+            style: None,
+            width: crate::output::Width::Source,
+        }
+    }
 }
 
 /// Renders a render tree node to a Markdown string.
@@ -111,6 +132,9 @@ pub fn render_markdown_node(
         html_depth: 0,
         mid_line: 0,
         heading_depth: 0,
+        wrap_mark: None,
+        prefix_width: 0,
+        lead_width: 0,
     };
 
     // Warning-severity validation findings escalate to an error under Strict
@@ -200,6 +224,17 @@ struct Writer<'a> {
     /// Non-zero while rendering a heading's text, which must stay on one
     /// line.
     heading_depth: u32,
+    /// While a paragraph is rendered for [`Width::Columns`], the character
+    /// that stands for each literal space a line may wrap at (see
+    /// [`Self::render_paragraph`]). It never occurs in the paragraph's own
+    /// content.
+    wrap_mark: Option<char>,
+    /// The display width the enclosing containers prefix every line of the
+    /// current block with (`> `, list-item and footnote indentation).
+    prefix_width: usize,
+    /// Extra width on the first line of the next paragraph only: a task
+    /// checkbox or a footnote label wider than its continuation indent.
+    lead_width: usize,
 }
 
 impl Writer<'_> {
@@ -252,7 +287,7 @@ impl Writer<'_> {
                             self.table_cell_depth > 0,
                         ))
                     }
-                    _ => self.render_inline(children),
+                    _ => self.render_paragraph(children),
                 }
             }
             NodeKind::BlockQuote { children } => {
@@ -264,7 +299,7 @@ impl Writer<'_> {
                         }
                     }
                 } else {
-                    let inner = self.render_blocks(children)?;
+                    let inner = self.render_prefixed_blocks(children, 2, 0)?;
                     Ok(prefix_lines(&inner, "> "))
                 }
             }
@@ -274,7 +309,11 @@ impl Writer<'_> {
                 children,
             } => self.render_list(node, *ordered, *start, children),
             NodeKind::ListItem { checked, children } => {
-                let body = self.render_blocks(children)?;
+                let lead = if checked.is_some() { 4 } else { 0 };
+                self.lead_width = lead;
+                let body = self.render_list_item_blocks(children);
+                self.lead_width = 0;
+                let body = body?;
                 Ok(match checked {
                     Some(true) => format!("[x] {body}"),
                     Some(false) => format!("[ ] {body}"),
@@ -315,7 +354,11 @@ impl Writer<'_> {
                 children,
             } => {
                 let label = self.footnote_label(node, identifier)?;
-                let body = self.render_blocks(children)?;
+                // The first line carries `[^label]: `, the rest the
+                // continuation indent.
+                let lead = (label.width() + 5).saturating_sub(FOOTNOTE_CONTINUATION.len());
+                let body =
+                    self.render_prefixed_blocks(children, FOOTNOTE_CONTINUATION.len(), lead)?;
                 // A GFM reader keeps a line in the definition only when it is
                 // blank or indented by four spaces, whatever the label width.
                 Ok(format!(
@@ -351,7 +394,11 @@ impl Writer<'_> {
                 self.mid_line += 1;
                 let text = self.render_inline(children);
                 self.mid_line -= 1;
-                Ok(format!("[{}]({})", text?, self.link_target(url, title)))
+                Ok(format!(
+                    "[{}]({})",
+                    text?,
+                    self.link_target(url, title.as_deref(), node.attrs.link_metadata())
+                ))
             }
             NodeKind::Image { url, title, alt } => {
                 // A reader parses alt text as inline Markdown, so it is
@@ -365,7 +412,10 @@ impl Writer<'_> {
                 } else {
                     protect_lines(&alt, false)
                 };
-                Ok(format!("![{alt}]({})", self.link_target(url, title)))
+                Ok(format!(
+                    "![{alt}]({})",
+                    self.link_target(url, title.as_deref(), None)
+                ))
             }
             NodeKind::FootnoteReference { identifier } => {
                 let label = self.footnote_label(node, identifier)?;
@@ -557,6 +607,9 @@ impl Writer<'_> {
     fn join_pieces(&mut self, pieces: &[InlinePiece]) -> Result<Joined, RenderError> {
         let block = self.mid_line == 0;
         let mut output = LineWriter::new(block, self.writes_line_starts());
+        if self.wrap_mark.is_some() && self.table_cell_depth == 0 && self.heading_depth == 0 {
+            output.marks = Some(Vec::new());
+        }
         // A block written on a table cell's line is set off from whatever
         // the cell writes before and after it by `<br>`.
         let mut after_block = false;
@@ -646,9 +699,10 @@ impl Writer<'_> {
         if block {
             output.finish();
         }
+        let fences = seq.edges();
         Ok(Joined {
-            text: output.text,
-            fences: seq.edges(),
+            text: output.into_text(self.wrap_mark),
+            fences,
         })
     }
 
@@ -661,6 +715,7 @@ impl Writer<'_> {
     /// | Markdown line, content on both sides | line ending | `\` + line ending |
     /// | Markdown line, nothing after it in the block | space | `<br>` |
     /// | Markdown line, the line so far is blank | space | `\` + line ending |
+    /// | any context, width other than [`Width::Source`] | space | as above |
     ///
     /// A reader strips a line ending at a block's end, and reads a backslash
     /// there literally; a line ending on a blank line ends the paragraph;
@@ -670,8 +725,9 @@ impl Writer<'_> {
     /// edge.
     fn write_break(&self, output: &mut LineWriter, kind: Break, ends_block: bool) {
         let one_line = self.table_cell_depth > 0 || self.heading_depth > 0;
+        let joins_soft = self.opts.width != Width::Source;
         match kind {
-            Break::Soft if one_line || output.line_is_blank() || ends_block => {
+            Break::Soft if joins_soft || one_line || output.line_is_blank() || ends_block => {
                 output.push_literal(" ");
             }
             Break::Soft => output.end_line("\n"),
@@ -829,18 +885,83 @@ impl Writer<'_> {
             });
             rest = &rest[run..];
         }
-        let mut result = String::new();
-        for (i, part) in parts.iter().enumerate() {
-            if i > 0 {
-                if part.is_empty() || parts[i - 1].is_empty() {
-                    result.push('\n');
-                } else {
-                    result.push_str("\n\n");
-                }
-            }
-            result.push_str(part);
+        Ok(join_blocks(&parts))
+    }
+
+    /// [`Self::render_blocks`] for a list item, whose phrasing children are one
+    /// implicit paragraph: a tight list item holds its text with no paragraph
+    /// node. In any other container, sibling phrasing nodes are separate blocks.
+    fn render_list_item_blocks(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
+        let mut parts = Vec::with_capacity(children.len());
+        let mut rest = children;
+        while !rest.is_empty() {
+            let run = phrasing_run(rest);
+            parts.push(if run > 0 {
+                self.render_paragraph(&rest[..run])?
+            } else {
+                self.render(&rest[0])?
+            });
+            rest = &rest[run.max(1)..];
         }
-        Ok(result)
+        Ok(join_blocks(&parts))
+    }
+
+    /// [`Self::render_blocks`] for a container that prefixes each line of
+    /// `children` with `prefix` columns, and the first line with `lead` more.
+    fn render_prefixed_blocks(
+        &mut self,
+        children: &[RenderNode],
+        prefix: usize,
+        lead: usize,
+    ) -> Result<String, RenderError> {
+        self.prefix_width += prefix;
+        self.lead_width = lead;
+        let result = self.render_blocks(children);
+        self.prefix_width -= prefix;
+        self.lead_width = 0;
+        result
+    }
+
+    /// Renders a paragraph's inline content, wrapped for
+    /// [`Width::Columns`].
+    ///
+    /// A line may wrap only at a literal space of the paragraph's own text
+    /// (or a soft break written as one), never inside a code span, a link
+    /// destination or title, an image, or raw HTML, and never where the new
+    /// line would start a block or end in a hard break (see
+    /// [`wrap_marked`]). The width counts the prefixes of the enclosing
+    /// containers. A paragraph in a table cell or heading is one line and is
+    /// never wrapped.
+    fn render_paragraph(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
+        let lead = std::mem::take(&mut self.lead_width);
+        let Width::Columns(columns) = self.opts.width else {
+            return self.render_inline(children);
+        };
+        if self.table_cell_depth > 0
+            || self.heading_depth > 0
+            || self.html_depth > 0
+            || self.mid_line > 0
+        {
+            return self.render_inline(children);
+        }
+        // The first pass finds a wrap mark the paragraph's content cannot
+        // contain, so a mark in the second pass is always a wrap point. Its
+        // diagnostics are the second pass's too, so they are dropped.
+        let diagnostics = self.diagnostics.len();
+        let plain = self.render_inline(children)?;
+        self.diagnostics.truncate(diagnostics);
+        let Some(mark) = ('\u{E000}'..='\u{F8FF}').find(|c| !plain.contains(*c)) else {
+            return Ok(plain);
+        };
+        self.wrap_mark = Some(mark);
+        let marked = self.render_inline(children);
+        self.wrap_mark = None;
+        let budget = usize::try_from(columns)
+            .unwrap_or(usize::MAX)
+            .saturating_sub(self.prefix_width)
+            .max(1);
+        let first = budget.saturating_sub(lead).max(1);
+        Ok(wrap_marked(&marked?, mark, first, budget))
     }
 
     /// Renders a sequence of children in order with no inserted separator.
@@ -1172,13 +1293,16 @@ impl Writer<'_> {
         let mut lines = Vec::with_capacity(children.len());
         let first_index = start.unwrap_or(1);
         for (offset, child) in children.iter().enumerate() {
-            let body = self.render(child)?;
             let marker = if ordered {
                 let index = first_index + offset as u64;
                 format!("{index}. ")
             } else {
                 "- ".to_string()
             };
+            self.prefix_width += marker.len();
+            let body = self.render(child);
+            self.prefix_width -= marker.len();
+            let body = body?;
             // Continuation lines are indented to align under the marker.
             let indent = " ".repeat(marker.len());
             lines.push(format!("{marker}{}", indent_continuation(&body, &indent)));
@@ -1389,7 +1513,7 @@ impl Writer<'_> {
         }
     }
 
-    /// Formats a link/image target, appending a quoted title when present.
+    /// Formats a link/image target, appending a title when present.
     ///
     /// The destination is escaped per CommonMark by
     /// [`escape_markdown_destination`] so parentheses, backslashes,
@@ -1397,20 +1521,37 @@ impl Writer<'_> {
     /// title by [`escape_link_title`], which also keeps it on one line in
     /// every context. Inside a table cell the pipes of both are then escaped
     /// by [`escape_cell_pipes`], since a literal `|` would split the GFM row.
-    fn link_target(&self, url: &str, title: &Option<String>) -> String {
-        if self.table_cell_depth > 0 {
-            let dest = escape_cell_link_destination(url);
-            return match title {
-                Some(title) => format!(
-                    "{dest} \"{}\"",
-                    escape_cell_pipes(&escape_link_title(title))
-                ),
-                None => dest,
-            };
-        }
-        let dest = escape_markdown_destination(url);
+    ///
+    /// A link carrying [`LinkMetadata`] writes a structured title instead:
+    /// [`StructuredTitle::to_json5`] of its `title` and `qp`, in `'…'`
+    /// delimiters, which a reader unescapes back to exactly that JSON5 text.
+    /// Otherwise the title is a plain `"…"` string.
+    fn link_target(
+        &self,
+        url: &str,
+        title: Option<&str>,
+        metadata: Option<&LinkMetadata>,
+    ) -> String {
+        let in_cell = self.table_cell_depth > 0;
+        let dest = if in_cell {
+            escape_cell_link_destination(url)
+        } else {
+            escape_markdown_destination(url)
+        };
+        let title = match metadata {
+            Some(metadata) => {
+                let structured = StructuredTitle {
+                    title: title.map(str::to_owned),
+                    query: metadata.query.clone(),
+                    ..StructuredTitle::default()
+                };
+                Some(structured.to_markdown_title())
+            }
+            None => title.map(|title| format!("\"{}\"", escape_link_title(title, '"'))),
+        };
         match title {
-            Some(title) => format!("{dest} \"{}\"", escape_link_title(title)),
+            Some(title) if in_cell => format!("{dest} {}", escape_cell_pipes(&title)),
+            Some(title) => format!("{dest} {title}"),
             None => dest,
         }
     }
@@ -1867,6 +2008,22 @@ impl Sides {
     }
 }
 
+/// Joins rendered blocks with a blank line; an empty block adds only its line.
+fn join_blocks(parts: &[String]) -> String {
+    let mut result = String::new();
+    for (i, part) in parts.iter().enumerate() {
+        if i > 0 {
+            if part.is_empty() || parts[i - 1].is_empty() {
+                result.push('\n');
+            } else {
+                result.push_str("\n\n");
+            }
+        }
+        result.push_str(part);
+    }
+    result
+}
+
 /// The number of leading `nodes` written as one block: a phrasing node
 /// together with every break that follows it and the phrasing node after
 /// each such break, or a lone node otherwise.
@@ -1884,6 +2041,21 @@ fn break_run(nodes: &[RenderNode]) -> usize {
         run += 1;
     }
     run
+}
+
+/// The number of leading `nodes` that are phrasing, which in a list item make
+/// one implicit paragraph.
+///
+/// Extended nodes alone count as none: a run of components with no text
+/// between them are separate blocks, which is what a component at block level
+/// is.
+fn phrasing_run(nodes: &[RenderNode]) -> usize {
+    let run = nodes.iter().take_while(|node| is_inline_kind(&node.kind)).count();
+    if nodes[..run].iter().all(|node| matches!(node.kind, NodeKind::Extended { .. })) {
+        0
+    } else {
+        run
+    }
 }
 
 /// The first block among `nodes` or inside their inline descendants, in
@@ -2410,6 +2582,10 @@ struct LineWriter {
     /// Whether the text ends with literal content, whose trailing
     /// whitespace may be encoded at a line's end.
     literal_tail: bool,
+    /// When recording, the byte offset of every literal space still written
+    /// as a space: the places a paragraph may wrap. See
+    /// [`LineWriter::into_text`].
+    marks: Option<Vec<usize>>,
 }
 
 impl LineWriter {
@@ -2421,7 +2597,25 @@ impl LineWriter {
             block: at_line_start,
             guards_lines,
             literal_tail: false,
+            marks: None,
         }
+    }
+
+    /// The written text, with each recorded literal space replaced by
+    /// `mark` when there is one.
+    fn into_text(self, mark: Option<char>) -> String {
+        let (Some(marks), Some(mark)) = (self.marks, mark) else {
+            return self.text;
+        };
+        let mut out = String::with_capacity(self.text.len() + marks.len() * 2);
+        let mut from = 0;
+        for at in marks {
+            out.push_str(&self.text[from..at]);
+            out.push(mark);
+            from = at + 1;
+        }
+        out.push_str(&self.text[from..]);
+        out
     }
 
     /// Whether the line being written holds nothing but spaces or tabs, so
@@ -2479,11 +2673,26 @@ impl LineWriter {
         }
     }
 
-    /// Writes literal content holding no line ending.
+    /// Writes literal content holding no line ending, recording its spaces
+    /// when marks are recorded. Every protection edit lands inside the
+    /// segment, so the offsets are final.
     fn push_segment(&mut self, segment: &str) {
         if segment.is_empty() {
             return;
         }
+        let from = self.text.len();
+        self.push_protected_segment(segment);
+        if let Some(marks) = self.marks.as_mut() {
+            marks.extend(
+                self.text[from..]
+                    .match_indices(' ')
+                    .map(|(at, _)| from + at),
+            );
+        }
+    }
+
+    /// [`Self::push_segment`] without recording.
+    fn push_protected_segment(&mut self, segment: &str) {
         self.literal_tail = true;
         let Some(start) = self.line else {
             self.text.push_str(segment);
@@ -2543,8 +2752,117 @@ impl LineWriter {
     fn finish(&mut self) {
         if self.guards_lines && self.literal_tail {
             encode_line_end(&mut self.text);
+            // An encoded space is no longer a wrap point.
+            if let Some(marks) = self.marks.as_mut() {
+                let bytes = self.text.as_bytes();
+                marks.retain(|&at| bytes.get(at) == Some(&b' '));
+            }
         }
     }
+}
+
+/// Wraps a paragraph whose wrap points are written as `mark`, greedily, so
+/// each line fits `first` columns (the first line) or `rest` columns where
+/// it can. A mark not used as a line break is written as a space.
+///
+/// A mark is a line break only where a reader reads the result the same
+/// way: not beside other whitespace, not after a backslash (which would
+/// make a hard break), not before the `]` that closes a link label, and not
+/// where the new line would start with a character that can begin a block
+/// or block-level construct (see [`may_start_block`]). When the break that
+/// would make a line fit is not allowed, the last allowed one on that line
+/// is used instead; with none, the line overflows. A word wider than the
+/// line overflows too.
+fn wrap_marked(text: &str, mark: char, first: usize, rest: usize) -> String {
+    let words: Vec<&str> = text.split(mark).collect();
+    let allowed: Vec<bool> = (1..words.len())
+        .map(|index| wrap_allowed(words[index - 1], words[index]))
+        .collect();
+    let mut breaks = vec![false; allowed.len()];
+    let mut budget = first;
+    let mut width = last_line_width(words[0]).unwrap_or_else(|| words[0].width());
+    if words[0].contains(['\n', '\r']) {
+        budget = rest;
+    }
+    let mut last_allowed: Option<usize> = None;
+    for (index, word) in words.iter().enumerate().skip(1) {
+        let gap = index - 1;
+        if width > 0 && width + 1 + first_line_width(word) > budget {
+            if allowed[gap] {
+                breaks[gap] = true;
+            } else if let Some(earlier) = last_allowed.take() {
+                breaks[earlier] = true;
+                budget = rest;
+                let moved = &words[earlier + 1..index];
+                width = moved.iter().map(|word| word.width()).sum::<usize>() + moved.len() - 1;
+            }
+        }
+        if breaks[gap] {
+            budget = rest;
+            width = 0;
+            last_allowed = None;
+        } else {
+            if allowed[gap] {
+                last_allowed = Some(gap);
+            }
+            width += 1;
+        }
+        match last_line_width(word) {
+            Some(after) => {
+                width = after;
+                budget = rest;
+                last_allowed = None;
+            }
+            None => width += word.width(),
+        }
+    }
+    let mut out = String::with_capacity(text.len());
+    out.push_str(words[0]);
+    for (index, word) in words.iter().enumerate().skip(1) {
+        out.push(if breaks[index - 1] { '\n' } else { ' ' });
+        out.push_str(word);
+    }
+    out
+}
+
+/// The display width of `text` up to its first line ending.
+fn first_line_width(text: &str) -> usize {
+    text.split(['\n', '\r']).next().unwrap_or_default().width()
+}
+
+/// The display width of `text` after its last line ending, when it has one.
+fn last_line_width(text: &str) -> Option<usize> {
+    text.rfind(['\n', '\r']).map(|at| text[at + 1..].width())
+}
+
+/// Whether a paragraph may wrap between the words `before` and `after`.
+fn wrap_allowed(before: &str, after: &str) -> bool {
+    let Some(last) = before.chars().next_back() else {
+        return false;
+    };
+    let backslashes = before.chars().rev().take_while(|&c| c == '\\').count();
+    if last.is_whitespace() || backslashes % 2 == 1 {
+        return false;
+    }
+    match after.chars().next() {
+        None | Some(']') => false,
+        Some(c) if c.is_whitespace() => false,
+        Some(_) => !may_start_block(after.split(['\n', '\r']).next().unwrap_or_default()),
+    }
+}
+
+/// Whether a line whose first word is `word` could be read as anything but
+/// the continuation of a paragraph: a block start [`line_start_edit`] would
+/// escape, a code fence, an HTML block, a table delimiter row, a footnote
+/// definition, or a Darkmatter `::` directive. Every such start that needs
+/// more than one word begins with one of the rejected characters, so the
+/// first word decides.
+fn may_start_block(word: &str) -> bool {
+    matches!(
+        word.chars().next(),
+        Some('#' | '>' | '-' | '+' | '*' | '=' | '|' | '<' | '_' | ':')
+    ) || ["```", "~~~", "[^"].iter().any(|start| word.starts_with(start))
+        || line_start_edit(word).is_some()
 }
 
 /// Backslash-escapes each literal `\` a CommonMark reader would otherwise
@@ -2571,9 +2889,10 @@ fn escape_literal_backslashes(text: &str) -> String {
     out
 }
 
-/// Escapes a link title for its double-quoted form: a `"` would end the title
-/// early, a trailing `\\` would escape the closing quote, and a reader decodes
-/// entity references there (`&copy;` must not become `©`).
+/// Escapes a link title for its form delimited by `quote` (`"` or `'`): the
+/// delimiter would end the title early, a trailing `\\` would escape the
+/// closing delimiter, and a reader decodes entity references there (`&copy;`
+/// must not become `©`).
 ///
 /// Each CR and LF is written `&#13;` / `&#10;` (a CRLF both), which a reader
 /// decodes back into the title value. A literal line ending would end a table
@@ -2582,9 +2901,10 @@ fn escape_literal_backslashes(text: &str) -> String {
 /// are the only ones a reader decodes, and after the backslash escape, which
 /// doubles a `\\` before a line ending so it cannot escape the reference's
 /// `&`.
-fn escape_link_title(title: &str) -> String {
+pub(crate) fn escape_link_title(title: &str, quote: char) -> String {
     encode_line_endings(
-        &escape_references(&escape_literal_backslashes(title)).replace('"', "\\\""),
+        &escape_references(&escape_literal_backslashes(title))
+            .replace(quote, &format!("\\{quote}")),
     )
 }
 
@@ -2838,6 +3158,40 @@ mod tests {
         render_markdown_node(node, &MarkdownRenderOptions::default()).expect("render")
     }
 
+    /// A tight list item holds its phrasing directly, with no paragraph.
+    fn tight_list() -> RenderNode {
+        RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(
+                None,
+                vec![
+                    RenderNode::inline_code("name"),
+                    RenderNode::text(" — one two three four five six"),
+                ],
+            )],
+        )
+    }
+
+    #[test]
+    fn a_tight_list_item_writes_its_phrasing_as_one_block() {
+        assert_eq!(render(&tight_list()).output, "- `name` — one two three four five six");
+    }
+
+    #[test]
+    fn a_tight_list_item_wraps_at_a_width_and_indents_under_its_marker() {
+        let opts = MarkdownRenderOptions {
+            width: Width::Columns(20),
+            ..MarkdownRenderOptions::default()
+        };
+        let output = render_with(&tight_list(), &opts).output;
+        assert!(output.lines().count() > 1, "{output}");
+        for (index, line) in output.lines().enumerate() {
+            assert!(line.chars().count() <= 20, "{line:?}");
+            assert_eq!(line.starts_with("  "), index > 0, "{output}");
+        }
+    }
+
     fn render_with(node: &RenderNode, opts: &MarkdownRenderOptions) -> Rendered<String> {
         render_markdown_node(node, opts).expect("render")
     }
@@ -2847,6 +3201,7 @@ mod tests {
             dialect,
             strictness,
             style: None,
+            width: crate::output::Width::Source,
         }
     }
 
@@ -4470,6 +4825,7 @@ mod literal_backslash_tests {
             dialect,
             strictness: RenderStrictness::Warn,
             style: None,
+            width: crate::output::Width::Source,
         };
         render_markdown_node(node, &opts).expect("render").output
     }
@@ -4822,6 +5178,7 @@ mod code_block_fence_tests {
                 dialect,
                 strictness: RenderStrictness::Warn,
                 style: None,
+                width: crate::output::Width::Source,
             };
             for (lang, value) in [
                 (None, "a\n```\nb\n```\nc"),
@@ -4859,6 +5216,7 @@ mod code_block_fence_tests {
                 dialect,
                 strictness: RenderStrictness::Warn,
                 style: None,
+                width: crate::output::Width::Source,
             };
             let node = RenderNode::code(None, None, "a\r```\rb");
             let markdown = render_markdown_node(&node, &opts).expect("render").output;
@@ -4922,6 +5280,7 @@ mod delimiter_edge_tests {
             dialect,
             strictness: RenderStrictness::Warn,
             style: None,
+            width: crate::output::Width::Source,
         };
         render_markdown_node(node, &opts).expect("render").output
     }
@@ -5506,6 +5865,7 @@ mod delimiter_edge_tests {
             dialect,
             strictness,
             style: None,
+            width: crate::output::Width::Source,
         }
     }
 }

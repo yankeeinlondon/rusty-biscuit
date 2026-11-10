@@ -23,7 +23,10 @@
 //! reachable under any state, the execution-time gate degrades to a pure
 //! membership check that never prompts. A site proves membership by its
 //! resolved bytes or by its authored shape, never by adding bytes it
-//! resolved at execution.
+//! resolved at execution. The one exception is a site whose arguments read a
+//! file after an earlier command ran, so its bytes may be ones the walk never
+//! saw: an exact whitelist rule may also admit it
+//! (`shell_expansion::site::prepare_refreshed_site`), still without prompting.
 //!
 //! See [`darkmatter/features/2026-06-16-compose-pipe-2/tech-design.md`] for the
 //! full design.

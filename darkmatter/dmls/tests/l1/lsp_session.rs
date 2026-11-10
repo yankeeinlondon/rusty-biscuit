@@ -2644,6 +2644,36 @@ fn interpolation_ctx_hover_matches_frontmatter_block() {
     fixture.shutdown();
 }
 
+/// A heading that carries an interpolation, so the heading's hover span
+/// contains the expression's.
+const HEADING_INTERPOLATION_DOC: &str =
+    "---\nctx:\n  packages: []\n---\n\n# Packages: {{ ctx.packages }}\n";
+
+#[test]
+fn interpolation_hover_inside_a_heading_wins_over_the_heading_hover() {
+    let workspace = LspWorkspace::new();
+    std::fs::write(workspace.path().join("doc.md"), HEADING_INTERPOLATION_DOC).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(workspace.path().join("doc.md")).unwrap();
+    open(&fixture, uri.as_str(), HEADING_INTERPOLATION_DOC);
+
+    let on_expression = hover_value(&mut fixture, uri.as_str(), 5, 18);
+    let markup = on_expression["contents"]["value"].as_str().unwrap_or_default();
+    assert!(markup.contains("string[]"), "expression hover expected: {markup}");
+    assert!(!markup.contains("Anchor:"), "heading hover must not win: {markup}");
+    assert_eq!(on_expression["range"]["start"], json!({ "line": 5, "character": 12 }));
+
+    let on_heading_text = hover_markup(&mut fixture, uri.as_str(), 5, 4);
+    assert!(
+        on_heading_text.contains("Anchor:"),
+        "heading text keeps the heading hover: {on_heading_text}"
+    );
+
+    fixture.shutdown();
+}
+
 /// A document whose body interpolates `ctx.packages` reached through index
 /// access (`ctx.packages[0]`), so the D2 hover contract is verified end-to-end
 /// for a ctx variable that is the root of an `Index` node — not just a direct

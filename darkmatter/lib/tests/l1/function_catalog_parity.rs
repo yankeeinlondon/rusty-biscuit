@@ -18,8 +18,8 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 /// The 75 aliases the registry held before the migration (the Phase 1
-/// registry inventory), each with its canonical function and arguments that
-/// bind to it.
+/// registry inventory) plus `loaddata`, registered with `load_data`, each
+/// with its canonical function and arguments that bind to it.
 const ALIASES: &[(&str, &str, &str)] = &[
     ("isnull", "is_null", "(null)"),
     ("isempty", "is_empty", r#"("")"#),
@@ -96,6 +96,7 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("markdownbodyempty", "markdown_body_empty", r#"("page.md")"#),
     ("markdowntitle", "markdown_title", r#"("page.md")"#),
     ("validateschema", "validate_schema", r#"("page.md")"#),
+    ("loaddata", "load_data", r#"(null, "string[]")"#),
 ];
 
 /// A resolution context anchored in a private temporary directory: an empty
@@ -143,7 +144,7 @@ fn registered_aliases() -> BTreeMap<&'static str, &'static str> {
 fn the_registered_aliases_are_the_inventoried_ones() {
     let inventoried: BTreeMap<&str, &str> =
         ALIASES.iter().map(|(alias, canonical, _)| (*alias, *canonical)).collect();
-    assert_eq!(inventoried.len(), 75, "the inventory lists 75 aliases");
+    assert_eq!(inventoried.len(), 76, "the inventory lists 76 aliases");
     assert_eq!(registered_aliases(), inventoried);
 }
 

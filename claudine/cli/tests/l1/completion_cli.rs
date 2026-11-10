@@ -231,7 +231,7 @@ fn implicit_relative_prompts_stays_repo_only() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn wrapper_asp_flag_value_slot_emits_no_candidates() {
+fn wrapper_asp_flag_option_value_emits_no_candidates() {
     let workspace = TestWorkspace::named("comp-wrapper-asp");
     let root = workspace.path();
     seed_repo_with_package(root);
@@ -242,13 +242,13 @@ fn wrapper_asp_flag_value_slot_emits_no_candidates() {
     let got = run_complete_trailing(root, &["claude", "--asp", ""]);
     assert!(
         got.is_empty(),
-        "wrapper --asp flag value slot must defer to clap/shell default \
+        "wrapper --asp flag option value must defer to clap/shell default \
          file completion: {got:?}",
     );
 }
 
 #[test]
-fn wrapper_replace_system_prompt_flag_value_slot_emits_no_candidates() {
+fn wrapper_replace_system_prompt_flag_option_value_emits_no_candidates() {
     let workspace = TestWorkspace::named("comp-wrapper-rsp");
     let root = workspace.path();
     seed_repo_with_package(root);
@@ -259,13 +259,13 @@ fn wrapper_replace_system_prompt_flag_value_slot_emits_no_candidates() {
     let got = run_complete_trailing(root, &["codex", "--replace-system-prompt", "@"]);
     assert!(
         got.is_empty(),
-        "wrapper --replace-system-prompt value slot must defer to the \
+        "wrapper --replace-system-prompt option value must defer to the \
          shell's default file completion: {got:?}",
     );
 }
 
 #[test]
-fn compose_asp_flag_value_slot_emits_no_candidates() {
+fn compose_asp_flag_option_value_emits_no_candidates() {
     let workspace = TestWorkspace::named("comp-compose-asp");
     let root = workspace.path();
     seed_repo_with_package(root);
@@ -276,7 +276,7 @@ fn compose_asp_flag_value_slot_emits_no_candidates() {
     let got = run_complete_trailing(root, &["compose", "file.md", "--asp", ""]);
     assert!(
         got.is_empty(),
-        "compose --asp value slot must defer to the shell's default file \
+        "compose --asp option value must defer to the shell's default file \
          completion: {got:?}",
     );
 }

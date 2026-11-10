@@ -2,437 +2,76 @@
 
 Binary: `md`
 
-A themed markdown renderer for terminal and browser workflows with markdown, markdown-plus, HTML, and AST JSON output modes.
-
-## Binary Overview
-
-The user-facing CLI surface is defined in `src/args/`: `cli.rs` holds global
-flags, `command.rs` holds subcommands, `target.rs` holds command targets,
-`render.rs` holds the shared `RenderOptions` for default and explicit rendering,
-`enums.rs` holds output/format enums, `wrappers.rs` holds CLI conversion types,
-`parsers.rs` holds value parsers, and `completion.rs` holds shell completion
-helpers.
-
-Runtime dispatch lives in `src/commands/mod.rs`, with command-specific
-implementations in `commands/render.rs`, `commands/clean.rs`,
-`commands/validate.rs`, `commands/graph.rs`, `commands/compose.rs`,
-`commands/frontmatter.rs`, `commands/hash.rs`, and `commands/code_block.rs`.
-Shared input loading is in `src/io/`, output artifact handling is in
-`src/artifact.rs`, terminal rendering setup is in `src/render.rs`, and CLI flag
-precedence is lowered to `darkmatter::style::CliStyleClaims` in
-`src/style_claims.rs`.
-
-## Integration tests
-
-L1 tests that launch the shipped `md` binary must construct a
-`CliProcessFixture` from `tests/common/fixture.rs` and build the command through
-its `command()` or `command_builder()` surface. The fixture owns the child's
-disposable CWD, home, config, cache, temporary directory, Git plumbing,
-rendering inputs, and PATH through process completion.
-
-Use `host_path()`, `fake_only_path()`, `ambient_context()`, or
-`inherit_no_env()` only when the behavior under test requires that named
-policy, with a call-site comment stating the reason.
-
-The fixture also pins deterministic rendering and darkmatter application
-inputs. A test whose subject is one of them declares it on the builder rather
-than setting it on the built command: `rendering_input(key, value)`,
-`rendering_input_removed(key)`, `application_input(key, value)`,
-`application_input_removed(key)`, or `plain_terminal(columns, lines)` for the
-whole fixed-size, `TERM=dumb`, no-color frame. The home, config, cache, temp,
-and Git plumbing variables are a different class — they exist to keep host
-state out of the child, so they have no declared override; use
-`ambient_context()` when the launch context itself is the subject.
-`tests/common/protected_env.rs` holds the classification.
-
-Do not modify CWD, PATH, or environment clearing after `build()`, and do not
-`.env`/`.env_remove` a protected key there; the L1 spawn/isolation guard
-rejects raw spawns, all of those overrides, and stale exemptions.
+`md` is a command-line tool for Markdown: render a document for reading, compose
+documents together, tidy and validate them, and read or change their frontmatter.
+Every command can print for a person or as data for a script, through the same
+`--output` and `--width` options, with the same [exit statuses](../docs/cli/output-and-width.md#exit-status).
+With no subcommand, `md` renders: `md FILE …` is `md render FILE …`.
 
 ## Installation
 
-```bash
+```sh
 # From source
 cargo install --path .
 
-# Or with just
+# Or with just, from the repository root
 just -f darkmatter/justfile install
 ```
 
-## Usage
+To enable tab completion, see [Shell Completions](../docs/cli/index.md#shell-completions).
 
-### Basic Rendering
+## Examples
 
-```bash
-# Render markdown using auto mode
+```sh
+# Read a document in the terminal; `md FILE` is `md render FILE`
 md README.md
 
-# The same render command, named explicitly
-md render README.md
+# Style it for this run only, without editing the file
+md README.md style.max-width=72 style.page.theme=github
+md README.md --style ./print.yaml
 
-# Pipe from stdin
-cat README.md | md
-echo "# Hello\n\nWorld" | md
+# The theme names `style.page.theme` accepts
+md list-themes
 
-# Explicit stdin
-md -
-```
+# Compose a document, then render the result as HTML
+md compose doc.md | md render --output html > doc.html
 
-### Output Modes
-
-Use a single `--output <OUTPUT>` switch for render format selection:
-
-- `auto` (default): render ANSI terminal output on TTY, markdown text on non-TTY
-- `markdown` (alias: `text`)
-- `markdown-plus`: markdown with disclosure blocks emitted as inline HTML `<details>`/`<summary>`
-- `html` (alias: `browser`)
-- `json` (alias: `ast`)
-
-```bash
-md README.md --output markdown
-md README.md --output text
-md README.md --output markdown-plus
-md README.md --output html > output.html
-md README.md --output browser > output.html
-md README.md --output json
-md README.md --output ast
-```
-
-### Show Rendered Output
-
-`--show` writes the selected output into a temp file and opens it with the system default app.
-
-```bash
-md README.md --output html --show
-md README.md --output markdown --show
-md README.md --output json --show
-```
-
-In `--output auto` mode on a TTY, `md` renders ANSI output to the terminal and also opens markdown in a temp file.
-
-### TOC and Delta Subcommands
-
-```bash
-# Table of contents
-md toc README.md
-md toc README.md --json
-
-# Document comparison
-md delta original.md updated.md
-md delta original.md updated.md --json
-md -v delta original.md updated.md
-```
-
-### Dependency Graph
-
-```bash
-# Visualize a file's dependency graph
-md graph README.md
-
-# Recursively follow transclusions
-md graph README.md --follow
-
-# Validate references inline
-md graph README.md --validate
-
-# Both together
-md graph README.md --follow --validate
-```
-
-Exit codes: `0` success/valid, `1` runtime error, `2` validation found errors.
-
-### Compose Pipeline
-
-```bash
-# Compose a document through the markdown pipeline
-md compose README.md
-
-# Provide default values (fills null/missing keys, preserves existing)
-md compose README.md --state '{"name":"Alice","env":"prod"}'
-
-# JSON5 is also accepted (unquoted keys, trailing commas)
-md compose README.md --state '{name: "Alice", env: "prod"}'
-
-# Override values with shorthand setters
-md compose README.md iteration=1 draft=false name=Alice
-
-# Shorthand setters can appear before the input path too
-md compose iteration=1 README.md
-
-# Include frontmatter in output
-md compose README.md --fm
-
-# Search another directory for @ references (repeatable, before the subcommand)
-md --magic-root shared compose '@prompts/feature.md'
-
-# Every command's file argument takes the same reference forms; a literal
-# file named `@` is spelled `./@` (a bare `@` is invalid-reference)
-md schema validate '&docs/plan.md'
-md get ./@ title
-
-# Compose from stdin
-echo "# Hello {{ name }}" | md compose - --state '{"name":"Alice"}'
-
-# Render compose output as HTML or JSON
-md compose README.md --output html
-md compose README.md --output json
-
-# Adjust shell command timeouts during compose
-md compose README.md --timeout 3
-
-# Convert timed out shell commands into empty strings and warnings
-md compose README.md --timeout 3 --allow shell-timeout
-
-# Report compose-tree shell commands without executing them
-md compose README.md --shell
-
-# Allow non-object ctx frontmatter (downgrades error to warning)
-md compose README.md --allow ctx-override
-
-# Fail instead of writing a document when any warning is reported
-md compose README.md --deny all
-
-# Emit structured performance report to stderr
-md compose README.md --perf
-```
-
-Commands that relax or tighten checks share three policy verbs: `--allow`
-permits a named recovery or grants a host (`--allow host=example.com`),
-`--deny` makes the selected diagnostics blocking (`md render --deny style`
-fails on unknown `style:` keys), and `--disable` stops a feature such as
-`baseline-schema` or `schema-triggers`. See [Policy Flags](../docs/cli/policy.md)
-for the identifiers each command accepts and how the verbs combine.
-
-During `compose`, Darkmatter supports both body `::shell ...` directives and top-level frontmatter `$(...)` expressions. Both use the same whitelist/blacklist and approval flow. Frontmatter shell expansion stores trimmed `stdout` only; body shell expansion stores combined `stdout` + `stderr`. Use `--shell` to inspect the shell commands discovered across the compose tree before approving or executing them.
-
-A root document that authors `initialize`, `composed`, `failed`, `cancelled`, or `finalize` runs those lifecycle stacks around composition. See [Lifecycle Events](../docs/topics/lifecycle/index.md) and the [`compose` reference](../docs/cli/compose.md#lifecycle-events).
-
-### Schema Validation
-
-```bash
-# Markdown frontmatter, against its `$schema`, triggers, and the baseline
-md schema validate docs/post.md
-
-# Whole YAML files, against their claimed `kind` or root `$schema`
-md schema validate schemas/roster.yaml data/platforms.yaml
-```
-
-See [`md schema validate`](../docs/topics/schemas/definition.md#cli-md-schema-validate)
-for flags, output, and exit codes.
-
-### Frontmatter Set
-
-```bash
-# Set a property (outputs modified document to stdout, file unchanged)
-md set doc.md title "New Title"
-
-# Save in place (no output)
-md set doc.md title "New Title" --save
-
-# Chain via pipes
-md set doc.md title "New Title" | md set - version 2
-
-# Compose and set in a pipeline
-md compose "@prompts/feature.md" --fm | md set - feature "auth" | md set - base_dir "./features/auth"
-```
-
-### Frontmatter Remove
-
-```bash
-# Remove a property (saves in place, silent on success)
-md rm doc.md draft
-
-# Remove multiple properties
-md rm doc.md draft wip temp
-
-# Verbose output
-md -v rm doc.md draft
-
-# JSON output
-md rm doc.md draft --json
-```
-
-### Frontmatter Get
-
-```bash
-# Single property
-md get doc.md title
-
-# Multiple properties
-md get doc.md title author tags
-
-# Output formats
-md get doc.md title --yaml
-md get doc.md title --json5
-```
-
-`set`, `rm`, and `get` keep the document's key order at every depth; see
-[Frontmatter](../docs/topics/frontmatter.md#key-order).
-
-### Document Cleanup
-
-```bash
-# Format under the document's style.markdown rules (output to stdout)
-md clean README.md
-
-# Join wrapped prose, then re-wrap it to 80 display columns
-md clean README.md --fixed-width 80
-
-# Keep source line breaks even if the document asks for unwrap or a width
-md clean README.md --ignore-incidental-newlines
-
-# Force 2-space nested list indentation for this run
-md clean README.md --indent 2
-
-# Remove (or add) blank lines between sibling list items
-md clean README.md --compact
-md clean README.md --loose
-
-# Clean from stdin
-cat README.md | md clean
-
-# Emit the v1 diagnostic envelope instead of Markdown
-md clean README.md --json
-
-# Control the effective frontmatter schema
-md clean README.md --schema docs.schema.yaml
-md clean README.md --baseline-schema project-baseline.yaml
-md clean README.md --disable baseline-schema
-md clean README.md --disable schema-triggers
-
-# Save cleaned file in place and report delta-style changes
+# Format a document in place
 md clean README.md --save
 
-# Include visual diff output in save mode
-md clean README.md --save -v
+# Check its links, images, and transclusions
+md validate refs README.md
 
-# Shorthand: top-level clean-and-save
-md README.md --save
+# Read and change frontmatter
+md get doc.md title --output plain
+md set doc.md title "New Title" --save
+
+# The outcome, every problem, and the document, for a script or CI job
+md compose doc.md --output json
 ```
 
-`md clean` formats the body under the document's
-[`style.markdown`](../docs/topics/markdown-formatting.md) rules; each flag
-above overrides one rule for one run. By default it pads tables, labels
-unlabeled code fences `text`, renumbers misnumbered ordered lists, re-indents
-nested lists to four spaces, and puts a blank line before and after lists. It
-keeps the line breaks you wrote, directive lines, line endings, and
-everything it has no rule for. If the result would change the document's
-structure or meaning, it prints the original unchanged and reports
-`clean.fidelity-fallback` on stderr (exit `0`; `--save` writes nothing).
-`--fixed-width` and `--ignore-incidental-newlines` conflict because
-fixed-width reflow first needs the source wrapping removed.
+## Documentation
 
-Deterministic YAML frontmatter repairs are also enabled by default. Analysis is
-limited to the frontmatter block; YAML fences in the body are never inspected.
-Without `--save`, the repaired document is printed and the input file remains
-unchanged. With `--save`, accepted repairs are written in place. Report-only
-findings are rendered as suggestions on stderr and still exit `0`; there is no
-`md clean --strict` in v1. Frontmatter whose top-level keys are all indented
-is moved to column 0, which `md hash --save` requires; see [Indented Root
-Mappings](../docs/cli/clean.md#indented-root-mappings-yamlroot-indentation).
+- [CLI index](../docs/cli/index.md): every command, and the file reference grammar
+- [Output and Width](../docs/cli/output-and-width.md): `--output`, `--width`, streams, and exit statuses
+- [Data Contracts](../docs/cli/data-contracts.md): what each command prints as data
+- [Policy Flags](../docs/cli/policy.md): `--allow`, `--deny`, and `--disable`
+- [Styling from the command line](../docs/cli/render.md#styling-from-the-command-line): style setters, `--style` files, and the [migration table](../docs/cli/render.md#presentation-flags) for the removed layout and theme flags
+- [Developing the CLI](../docs/cli/developing.md): the source layout and how tests launch `md`
 
-Schema precedence is baseline → matching repository triggers → document
-`$schema`. `--baseline-schema` replaces the default Darkmatter baseline,
-`--disable baseline-schema` removes it, `--disable schema-triggers` disables trigger
-discovery, and `--schema` replaces the document `$schema` layer. Stdin has no
-document path, so trigger discovery is always inert for stdin, while explicit
-schema and baseline flags remain active.
+| Command | What it does |
+|---|---|
+| [`render`](../docs/cli/render.md) | render a document for a terminal, as plain text, Markdown, HTML, or data |
+| [`compose`](../docs/cli/compose.md) | evaluate expressions, include other documents, and write Markdown |
+| [`clean`](../docs/cli/clean.md) | tidy a document's formatting without changing its meaning |
+| [`validate refs`](../docs/cli/validate.md) | report broken references |
+| [`graph`](../docs/cli/graph.md) | show a document's dependency graph |
+| [`toc`](../docs/cli/toc.md), [`delta`](../docs/cli/delta.md) | show a table of contents, or compare two documents |
+| [`get`](../docs/cli/get.md), [`set`](../docs/cli/set.md), [`rm`](../docs/cli/rm.md) | read and change frontmatter properties |
+| [`edit`](../docs/cli/edit.md) | open a file in your editor and wait |
+| [`hash`](../docs/cli/hash.md) | hash a document, store the hash, and report drift |
+| [`schema`](../docs/cli/schema.md) | validate against a schema, detect one, and look up the language |
+| [`code-block`](../docs/cli/code-block.md) | render one code block |
+| [`list-themes`](../docs/cli/list-themes.md) | list the prose and code themes a style can name |
 
-`--json` writes the version-1 envelope as the sole stdout payload: `version`,
-structured `source` and `frontmatter`, document-position `diagnostics`, the
-repairs actually `applied`, and whole-document `changed`. It suppresses the
-cleaned Markdown, delta report, and human stderr suggestions. Success is exit
-`0`; unrepaired invalid YAML remains exit `1` but still emits the envelope with
-a `yaml.parse` diagnostic on stdout, leaves stderr empty, and does not modify a
-save target. Diagnostic offsets are zero-based, end-exclusive document byte
-offsets; lines and byte columns are one-based. See the
-[clean command guide](../docs/cli/clean.md#version-1-json-envelope) for the
-exact JSON example and full flag behavior.
-
-Frontmatter manipulation is available through `md set` (modify individual properties) and `md compose --fm` (output frontmatter with composed content). The `--state` flag on `compose` fills in null/missing frontmatter keys with default values.
-
-### Theming and Rendering Options
-
-```bash
-# List available themes
-md --list-themes
-
-# Apply theme (affects both prose and code)
-md README.md --theme dracula
-
-# Separate prose and code themes
-md README.md --theme nord --code-theme monokai
-
-# Control the code block's light/dark variant (default: inverse)
-md README.md --code-block dark      # always a dark code panel
-md README.md --code-block light     # always a light code panel
-md README.md --code-block same      # match the terminal's mode
-
-# Line numbers in code blocks
-md README.md --line-numbers
-
-# Render mermaid diagrams as images, or as text where the terminal shows none
-md README.md --mermaid
-```
-
-A theme name (`--theme`, `--code-theme`) is mode-agnostic — the concrete
-light/dark variant is chosen from the terminal color mode. By default code blocks
-use the *inverted* mode (`--code-block inverse`): a light code panel on a dark
-page, and vice versa, so the code contrasts against the page; prose follows the
-real mode. This inversion default applies to **both terminal and HTML** output
-(`--output html`), so the two targets agree. `--code-block <inverse|dark|light|same>`
-overrides the variant for **terminal** rendering — `dark`/`light` pin the
-variant, `same` matches the terminal (HTML currently always uses the inverse
-default). The variant is derived from the terminal (the same source as the page),
-so it is consistent regardless of environment color detection.
-Every `ThemePair` is a (light theme, dark theme) couple, so the inversion applies
-to all of them. See
-[Code Highlighting](../docs/rendering/code-highlighting.md).
-
-### Verbosity
-
-```bash
-md README.md -v      # INFO level
-md README.md -vv     # DEBUG level
-md README.md -vvv    # TRACE level
-md README.md -vvvv   # TRACE with file/line info
-```
-
-### Shell Completions
-
-Enable tab completions for markdown files (`.md`, `.dm`) and directory traversal:
-
-```bash
-# Bash (add to ~/.bashrc)
-source <(COMPLETE=bash md)
-
-# Zsh (add to ~/.zshrc)
-source <(COMPLETE=zsh md)
-
-# Fish (add to ~/.config/fish/config.fish)
-COMPLETE=fish md | source
-
-# PowerShell (add to $PROFILE)
-$env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE
-```
-
-Run `md --completions <SHELL>` to print the setup command for your shell.
-
-## Notes
-
-- `TERMINAL_IMAGES` controls terminal image behavior:
-  - truthy (`true`, `1`, `yes`, `on`) forces protocol image output attempts
-  - falsy (`false`, `0`, `no`, `off`) disables image protocol output
-  - unset/invalid uses capability auto-detection
-- Removed legacy flags: `--html`, `--show-html`, `--ast`, top-level `--json`, `--no-images`, top-level `--toc`, and top-level `--delta`.
-
-## Library
-
-For programmatic access, see [darkmatter-lib](../lib/).
-
-```rust
-use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
-
-let md: Markdown = "# Hello\n\nWorld".into();
-write_terminal(&mut std::io::stdout(), &md, TerminalOptions::default())?;
-```
+For programmatic access, see [the Darkmatter library](../lib/README.md).

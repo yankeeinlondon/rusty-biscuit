@@ -9,7 +9,9 @@
 //! and are baked into the render tree during the fold.
 
 use super::PageRenderError;
-use super::page::{length_to_cells};
+use renderable::output::Width;
+
+use super::page::{length_to_cells, max_width_to_cells};
 use super::types::PageBackground;
 use crate::markdown::highlighting::ColorMode;
 
@@ -23,17 +25,17 @@ use crate::markdown::highlighting::ColorMode;
 #[derive(Debug, Clone)]
 pub(crate) struct LayoutContext {
     #[allow(dead_code)]
-    /// Original terminal width in columns.
-    pub terminal_width: u16,
+    /// The width the page was given.
+    pub terminal_width: Width,
     /// Page margin (renderable [`Edges`](renderable::layout::Edges)).
     pub page_margin: renderable::layout::Edges,
     /// Page padding (renderable [`Edges`](renderable::layout::Edges)).
     pub page_padding: renderable::layout::Edges,
     #[allow(dead_code)]
     /// Width available for content after margin and padding are removed.
-    pub content_width: u16,
+    pub content_width: Width,
     /// Final render width (capped by `max_width` if set).
-    pub effective_width: u16,
+    pub effective_width: Width,
     /// Whether any page-frame layout settings are non-default (triggers row
     /// decoration).
     pub has_layout: bool,
@@ -116,10 +118,11 @@ impl LayoutContext {
     /// ## Errors
     ///
     /// Returns [`PageRenderError::MarginsExceedTerminalWidth`] when margin +
-    /// padding meets or exceeds the terminal width.
+    /// padding meets or exceeds a [`Width::Columns`] terminal width; an
+    /// unbounded width has room for any frame.
     #[allow(clippy::too_many_arguments)]
     pub fn from_page(
-        terminal_width: u16,
+        terminal_width: Width,
         page_margin: renderable::layout::Edges,
         page_padding: renderable::layout::Edges,
         page_background: PageBackground,
@@ -134,18 +137,20 @@ impl LayoutContext {
         let padding_x = length_to_cells(&page_padding.left, terminal_width)
             .saturating_add(length_to_cells(&page_padding.right, terminal_width));
         let required = margin_x.saturating_add(padding_x);
-        if required >= terminal_width {
+        if let Some(columns) = terminal_width.as_columns()
+            && required >= columns
+        {
             return Err(PageRenderError::MarginsExceedTerminalWidth {
-                terminal_width,
+                terminal_width: columns,
                 required,
             });
         }
 
         let content_width = terminal_width.saturating_sub(required);
         // A percentage `max-width` resolves against the content width.
-        let effective_width = match page_max_width.as_ref().map(|tv| length_to_cells(tv, content_width)) {
+        let effective_width = match page_max_width.as_ref().and_then(|tv| max_width_to_cells(tv, content_width)) {
             Some(0) => return Err(PageRenderError::MaxWidthZero),
-            Some(mw) => content_width.min(mw),
+            Some(mw) => content_width.capped_at(mw),
             None => content_width,
         };
 
@@ -226,7 +231,9 @@ impl LayoutContext {
 mod tests {
     use super::*;
 
-    fn ctx(content_width: u16, effective_width: u16) -> LayoutContext {
+    fn ctx(content_width: u32, effective_width: u32) -> LayoutContext {
+        let content_width = Width::Columns(content_width);
+        let effective_width = Width::Columns(effective_width);
         LayoutContext {
             terminal_width: effective_width,
             page_margin: renderable::layout::Edges::default(),
@@ -253,7 +260,7 @@ mod tests {
         // body) even though the color itself now rides the tree root.
         use biscuit_terminal::discovery::detection::ColorMode as DetectMode;
         let c = LayoutContext::from_page(
-            80,
+            Width::Columns(80),
             renderable::layout::Edges::default(),
             renderable::layout::Edges::default(),
             PageBackground::Transparent,

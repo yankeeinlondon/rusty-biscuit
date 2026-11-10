@@ -66,6 +66,10 @@ pub struct ValidationProblem {
     /// [`path`](Self::path) points at the *parent* object in this case, so this
     /// is the only way to recover the offending key.
     pub offending_property: Option<String>,
+    /// Every undeclared key of the failure, in the validator's order. An object
+    /// with several reports them as one problem, and
+    /// [`offending_property`](Self::offending_property) is only the first.
+    pub offending_properties: Vec<String>,
     /// Structured cause of a `format: darkmatter-file` /
     /// `darkmatter-file-reference` failure (R-5 Priority 4). `Some` only when
     /// [`code`](Self::code) is [`ValidationProblemCode::InvalidFileReference`];
@@ -153,7 +157,7 @@ pub const SCHEMA_KIND_CHECK_CODE: &str = "dm.schema.kind_check";
 pub const SCHEMA_PREPARE_CODE: &str = "dm.schema.prepare";
 
 impl ValidationProblemCode {
-    /// The shared diagnostic code DMLS and `md compose --output report-json`
+    /// The shared diagnostic code DMLS and `md compose --output json`
     /// report this problem under.
     pub fn diagnostic_code(self) -> &'static str {
         match self {

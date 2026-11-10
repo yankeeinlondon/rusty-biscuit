@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-1b4581c62b7cf899
-last_updated: 2026-10-22
+hash: ef46db3751d8e999-6078bbc7cf08892c
+last_updated: 2026-11-06
 ---
 # Darkmatter
 
@@ -10,6 +10,7 @@ last_updated: 2026-10-22
     - Export readable Markdown with portable file links; see [compose output](./docs/cli/compose.md)
     - List documents with [`::file-links`](./docs/inline/file-links.md), using directory context labels and terminal-aware icons
 - Transform expression collections with [inline callbacks](./docs/topics/darkmatter-expressions.md#inline-collection-callbacks), such as `map(people, p => p.name)` and `filter(people, p -> p.active)`
+- [Load data files](./docs/topics/loading-data.md) (YAML, JSON, JSON Lines, CSV, TSV, TOML, JSON5) into an expression, checked against a type: `load_data("hosts.csv", "{ name: string, port: number }[]")`
 - Render to [multiple output formats](./docs/topics/output-formats.md)
 - Run [lifecycle events](./docs/topics/lifecycle/index.md) (`initialize`, `composed`, `failed`, `cancelled`, `finalize`) from a document's frontmatter around `md compose`
 - Compose supports body `::shell` expansion, `::shell-block` / `::end-block` multi-command blocks, and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls
@@ -38,7 +39,7 @@ last_updated: 2026-10-22
 - Validate whole `.yaml`/`.yml` documents too: a document is judged by the `kind: yaml-schema` definition that claims its `kind`, or else by its root `$schema`, with `md schema validate` and in the editor; see [YAML documents](./docs/topics/schemas/definition.md#yaml-documents)
 
 - One set of [policy verbs](./docs/cli/policy.md) on every command: `--allow <id|all>` to recover from a known problem, `--deny <id|all>` to make diagnostics blocking (for example `md compose doc.md --deny all` in CI), and `--disable <id>` to turn a feature off
-- `md compose --output report-json` prints one JSON object with the outcome, every diagnostic (with the same codes and positions the editor shows), and the composed document; see [`report-json` output](./docs/cli/report-json.md)
+- One [`--output` and `--width`](./docs/cli/output-and-width.md) on every command: print for a person (`terminal`, `plain`, `markdown`, `markdown-plus`, `html`) or as [data](./docs/cli/data-contracts.md) (`json`, `json5`, `yaml`, `toml`). For example, `md compose --output json` prints one value with the outcome, every diagnostic (with the same codes and positions the editor shows), and the composed document
 
 - Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
 - Provides shell auto-completions in the terminal (bash, elvish, fish, powershell, zsh) and the [DMLS language server](./dmls/README.md) in an editor.
@@ -50,7 +51,7 @@ For details, choose one or more of the packages in this package area.
 | Type                           | Package &nbsp;&nbsp;&nbsp; | Description                                                                                                                                                                                               |
 | ------------------------------ | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [**Library**](./lib/README.md) | `darkmatter`               | Core library; follow the link for a much deeper functional and technical overview of what Darkmatter provides                                                                                             |
-| [**CLI**](./cli/README.md)     | `darkmatter-cli`           | The Darkmatter CLI (binary: `md`); follow the link for a full description on how to use the CLI, what sub-commands exist, what CLI switches exist, example usage and how to get shell completions working |
+| [**CLI**](./cli/README.md)     | `darkmatter-cli`           | The Darkmatter CLI (binary: `md`); follow the link for what it does, how to install it, a few examples, and the links into each command's reference |
 | [**LSP**](./dmls/README.md)    | `dmls`                     | The Darkmatter Language Server (binary: `dmls`); LSP 3.17 over stdio for Markdown + the Darkmatter DSL — schema-aware frontmatter, wiki links, navigation, diagnostics, rename, formatting, semantic tokens |
 | **Zed maintenance CLI**        | `zed-dmls-cli`             | Stages the DMLS Zed extension outside worktrees and diagnoses the native binary, dev-extension registration, manifest, and recent Zed log evidence (binary: `zed-dmls`)                       |
 
@@ -68,6 +69,7 @@ just lint
 just doctest
 just test-l2       # real terminal/editor resources
 just test-browser  # headless browser protocol
+just test-optional-shells  # fish and Elvish script loads; needs both shells, never run by CI
 ```
 
 Deterministic L1 tests that execute `md` use the per-test
@@ -86,13 +88,13 @@ host OS input and take focus.
 
 - to get details on the **Composition Pipeline** in Darkmatter read: [Darkmatter Composition Pipeline](./docs/darkmatter-compose-pipeline.md)
 - to get details on the **Rendering Pipeline** in Darkmatter read: [Darkmatter Render Pipeline](./docs/darkmatter-rendering-pipeline.md)
-- for the **experimental, internal** Markdown-to-render-tree fold (does not affect `as_html` / `for_terminal`) read: [Render-Tree Fold](./docs/render-tree-fold.md)
 - for more information on how to use CLI read: [Darkmatter CLI](./docs/cli/index.md)
 - to repeat or select content from arrays and objects read: [Map Directive](./docs/inline/map.md), [Filter Directive](./docs/inline/filter.md), and [Iterables](./docs/iterables.md)
 - for shell expansion details read: [Body Shell Expansion](./docs/inline/shell-expansion.md), [Shell Blocks](./docs/inline/shell-blocks.md), and [Frontmatter Shell Expansion](./docs/inline/fm-shell-expansion.md)
 - Other topics you may be interested in:
     - [What is Composition?](./docs/topics/what-is-composition.md)
     - [Transclusion](./docs/topics/transclusion.md)
+    - [Loading Data](./docs/topics/loading-data.md) — `load_data(file, as, options)`: formats, read options (format, delimiter, headerless CSV), CSV rows, optional files, and failures that point into the data file
     - [Frontmatter](./docs/topics/frontmatter.md) and [Frontmatter and Recursion](./docs/topics/frontmatter-recursion.md) — parsing, key order, merges, and what a transcluded child inherits
     - [Lifecycle Events](./docs/topics/lifecycle/index.md) and [Lifecycle Error Handling](./docs/topics/lifecycle/error-handling.md) — the frontmatter stacks `md compose` runs before and after composition, and how failures, cleanup, and Ctrl-C route
     - [Rendering Output Formats](./docs/topics/output-formats.md)

@@ -14,8 +14,9 @@ use std::fmt::Write;
 use super::{
     alphanumeric::AlphanumericOptions,
     types::{
-        CallExample, Constraint, ExampleOutcome, FunctionParameters, FunctionType, PropertyAtom,
-        PropertyDef, SimplifiedType, TupleType, TypeExpr,
+        CallExample, Constraint, DynamicElement, DynamicKind, ExampleOutcome, FunctionParameters,
+        FunctionType, PropertyAtom, PropertyDef, SimplifiedType, Slot, SuggestionCandidate, TupleType,
+        TypeExpr, TemplateConstraintKind,
     },
 };
 use crate::numeric::{NumberTextError, admit_number_spelling, format_number};
@@ -232,6 +233,18 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
             write_function(&mut out, function, &atom.constraints);
             write_array_suffix(&mut out, atom);
         }
+        // A template type is written as authored, `{{ expression }}` plus the
+        // suffix a reference takes; exporting never evaluates it.
+        TypeExpr::Slot(slot) => {
+            write_slot(&mut out, slot);
+            let constraints = render_constraints(&atom.constraints, None);
+            if !constraints.is_empty() {
+                out.push('(');
+                out.push_str(&constraints);
+                out.push(')');
+            }
+            write_array_suffix(&mut out, atom);
+        }
     }
 
     if let Some(desc) = &atom.description {
@@ -431,6 +444,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
         Constraint::Closed => out.push_str("closed"),
         Constraint::Mapping => out.push_str("mapping"),
         Constraint::DeclaredRequired => out.push_str("declared-required"),
+        Constraint::Container => out.push_str("container"),
         Constraint::Forms(forms) => {
             out.push_str("forms(");
             let keywords: Vec<&str> = forms.iter().map(|form| form.as_keyword()).collect();
@@ -493,15 +507,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
                 if i > 0 {
                     out.push(',');
                 }
-                let value = if ty == Some(SimplifiedType::Number) {
-                    candidate
-                        .canonical_decimal
-                        .as_deref()
-                        .unwrap_or(&candidate.decoded)
-                } else {
-                    &candidate.decoded
-                };
-                write_arg(out, value);
+                write_suggestion(out, candidate, ty);
             }
             out.push(')');
         }
@@ -515,6 +521,34 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
             }
         }
         Constraint::LiteralValue(value) => write_literal_value(out, value),
+        Constraint::Dynamic(list) => {
+            let suggest = list.kind == DynamicKind::Suggest;
+            if suggest {
+                out.push_str("suggest(");
+            }
+            for (i, element) in list.elements.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                match element {
+                    DynamicElement::Member(member) => write_arg(out, member),
+                    DynamicElement::Suggestion(candidate) => write_suggestion(out, candidate, ty),
+                    DynamicElement::Slot(slot) => write_slot(out, slot),
+                }
+            }
+            if suggest {
+                out.push(')');
+            }
+        }
+        Constraint::TemplateConstraint { kind, slot, .. } => {
+            if *kind == TemplateConstraintKind::Literal {
+                write_slot(out, slot);
+            } else {
+                let _ = write!(out, "{}(", kind.as_keyword());
+                write_slot(out, slot);
+                out.push(')');
+            }
+        }
         Constraint::Options(_) => unreachable!("options are rendered first, in canonical form"),
         Constraint::Match(globs) => {
             out.push_str("match(");
@@ -590,6 +624,24 @@ fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: Option<
 fn bare_default_round_trips_as_string(value: &str) -> bool {
     !matches!(value, "true" | "false" | "null")
         && matches!(admit_number_spelling(value), Err(NumberTextError::NotANumber))
+}
+
+/// Writes one suggestion candidate: a number target keeps its canonical
+/// decimal spelling, every other target its decoded text.
+fn write_suggestion(out: &mut String, candidate: &SuggestionCandidate, ty: Option<SimplifiedType>) {
+    let value = if ty == Some(SimplifiedType::Number) {
+        candidate.canonical_decimal.as_deref().unwrap_or(&candidate.decoded)
+    } else {
+        &candidate.decoded
+    };
+    write_arg(out, value);
+}
+
+/// Writes a slot as authored, `{{ expression }}`, so the template re-parses
+/// to the same slot. The expression is never quoted or escaped: the grammar
+/// reads a slot with the expression scanner, not the argument lexer.
+fn write_slot(out: &mut String, slot: &Slot) {
+    let _ = write!(out, "{{{{ {} }}}}", slot.expression);
 }
 
 /// Write an argument, quoting it if it contains characters that would

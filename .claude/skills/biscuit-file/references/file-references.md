@@ -23,7 +23,10 @@ contract, see [the topic doc](../../../../biscuit-file/docs/topics/file-referenc
 `FileReference::class()` returns `FileReferenceClass { kind, recursive }`.
 `FileReference::payload()` returns the authored text after `%`, the sigil,
 and its optional `/` (`%@/@x.md` → `@x.md`); diagnostics use it instead of
-trimming prefixes.
+trimming prefixes. `interpolated_payload(ctx)` is that payload with `{{VAR}}`
+expanded from the context's environment snapshot, without touching the
+filesystem; judge a filename or extension by it, since a variable can supply
+either (`%{{DATA_FILE}}`).
 Recursive `%` is a modifier, not another kind. It is `GlobReference`'s
 `take_first` on `**/<escaped payload>` under the same ordered roots (an
 absolute payload searches below its own directory), so it returns the most
@@ -189,6 +192,15 @@ failures are `Err`.
   (no canonicalization; recursive search roots omitted), for recording
   absent nearer candidates a cache must re-check;
 - `outcome()`, `error()`, and `matched_path()`.
+
+`resolve_detailed_admitted(ctx, admit)` asks `admit` about each location just
+before it is touched (a direct candidate before containment and probe; every
+`%` root before the walk); the first `Err` stops the search.
+`resolve_detailed_with_presence(ctx, admit, present)` also asks `present`
+about an admitted, contained direct candidate probed missing (never a
+directory); `true` makes it the match (`ProbeDisposition::Matched`), so an
+editor's unsaved file wins at its own place in the order and no later
+candidate is admitted or probed. `%` never asks `present`.
 
 `DetailedOutcome` is `Matched(PathBuf)` or `Failed(ResolutionFailure)`. The
 failure vocabulary is `InvalidReference`, `MissingContext`, `NoMatch`, `Io`,

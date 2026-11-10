@@ -142,7 +142,9 @@ fn selection_diagnostic(ctx: &DocumentContext, error: &SchemaError, cause: &Kind
         .and_then(|ast| ast.entry_by_pointer("/kind"))
         .and_then(|entry| ctx.source_map.byte_range_to_lsp(entry.value_span.clone()))
         .unwrap_or_default();
-    let mut out = diagnostic(range, DiagnosticSeverity::ERROR, source::SCHEMA, code::SCHEMA_PREPARE, error.to_string());
+    let code_value =
+        darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(error).unwrap_or(code::SCHEMA_PREPARE);
+    let mut out = diagnostic(range, DiagnosticSeverity::ERROR, source::SCHEMA, code_value, error.to_string());
     let (files, message) = match cause {
         KindSelectionCause::Duplicate { files } => (files.clone(), "a definition claiming this kind"),
         KindSelectionCause::Reserved { file, .. } => (vec![file.clone()], "the failed definition claiming this kind"),

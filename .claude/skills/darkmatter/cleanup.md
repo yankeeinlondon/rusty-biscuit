@@ -1,6 +1,6 @@
 # Cleanup rules and frontmatter repair
 
-Cleanup (`md clean`, `md FILE --save`, DMLS `textDocument/formatting`,
+Cleanup (`md clean`, DMLS `textDocument/formatting`,
 compose's cleanup step, `md` rendering) never changes a document's meaning.
 The user-facing record is the area's `docs/` tree.
 
@@ -22,12 +22,25 @@ The user-facing record is the area's `docs/` tree.
   File's `yaml.tab-indentation` repair applies), its rules are read from that mapping, and the
   body is cleaned; the strict `yaml.parse` finding stays report-only. Empty frontmatter blocks and BOMs without
   frontmatter are kept; a BOM before frontmatter is an applied repair.
+- `clean_document` (never `clean_body`, so compose's cleanup and `md`
+  rendering do not migrate) rewrites legacy `key=value` link titles to JSON5
+  first: `cleanup::link_titles::migrate`, by source span, with its own guard
+  because `clean_body`'s comparison would call a changed title a changed
+  meaning. It covers inline links and reference definitions; an image title,
+  a definition an image also uses, and a title holding `{{ … }}` stay as
+  authored. A legacy title with no supported key (`"Run x=1 first"`) becomes
+  `{ title: "…" }` so its text is not lost. The same module's `scan` is what
+  the `dm.link.*` warnings read, so the two agree on what is a link title.
 - String wrappers: `cleanup_content` (defaults) and
   `cleanup_content_with(&MarkdownRuleOverrides)` (overrides at CLI level),
   plus `Markdown::cleanup`/`cleanup_with`. They return the input on refusal.
   Compose maps its options (`IncidentalNewlineMode`, `with_list_spacing`
   taking `ListItemPadding`, `with_indentation`, `with_fixed_width`) to explicit
   overrides; a document's own `style.markdown` is not consulted there.
+  A `style.markdown` value from an `md render` setter or `--style` file is
+  validated with the style layers but never reaches cleanup: render's
+  guarded cleanup and `--indent` behave exactly as without it, and the CLI
+  layer is never injected into frontmatter or cleanup options.
   `strip_incidental_newlines` and `reflow_to_width` stay as standalone,
   unguarded helpers (they normalize CRLF); nothing in cleanup calls them.
 - Parse budget: cleanup parses go through `cleanup_parser`; directive and
@@ -87,7 +100,7 @@ The user-facing record is the area's `docs/` tree.
   variant differs for equal values); `compare::tag_key`/`event_key` spell
   fields out.
 - User-facing docs: `darkmatter/docs/topics/markdown-formatting.md` (every
-  rule, list spacing, precedence), `docs/cli/clean.md`, `docs/inline/cleaning.md`
+  rule, legacy link titles, list spacing, precedence), `docs/cli/clean.md`, `docs/inline/cleaning.md`
   (compose's step), and `dmls/docs/editors/README.md` (DMLS formatting and
   `formatting.markdown`). Regenerate their examples from `md clean -` rather
   than writing them by hand.

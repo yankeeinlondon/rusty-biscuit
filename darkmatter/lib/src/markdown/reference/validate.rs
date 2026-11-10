@@ -21,10 +21,12 @@ use super::provenance::{
 use super::snapshot::heading_slug_key;
 use super::types::{
     ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord,
-    ReferenceTarget,
+    ReferenceReportDocument, ReferenceTarget, ReferenceTrailStep,
 };
 use crate::markdown::Markdown;
 use crate::markdown::compose::{ComposeSource, ReferenceGraphOptionsIdentity};
+
+pub use super::report::{ReferenceReportVisibility, ValidationReportData, ValidationReportView};
 
 /// Per-run memoization of prepared heading slugs, keyed by canonical target
 /// path (Finding 18).
@@ -79,6 +81,12 @@ pub struct ReferenceValidationReport {
     pub issues: Vec<ReferenceIssue>,
     /// Non-blocking warnings.
     pub warnings: Vec<String>,
+    /// Every inclusion of every document the graph traversal visited, issues
+    /// or not, depth-first in insertion order, root first. Not serialized.
+    pub documents: Vec<ReferenceReportDocument>,
+    /// Every reference the traversal reached, in composed order. Not
+    /// serialized unless a report view asks for the listing.
+    pub references: Vec<ReferenceRecord>,
     /// The schema triggers the validated documents' preparation skipped as
     /// invalid (`dm.schema.invalid_trigger`), once per trigger, in discovery
     /// order. Each transcluded child prepares in its own context, so a
@@ -119,132 +127,17 @@ impl ReferenceValidationReport {
             .filter(|i| i.severity == ReferenceSeverity::Error)
             .count()
     }
-}
 
-/// A terminal-rendered view of a [`ReferenceValidationReport`].
-///
-/// Groups error-severity issues by reference kind and renders them as a
-/// styled list with a summary line. Empty reports render to an empty string.
-#[derive(Debug, Clone)]
-pub struct ValidationReportView {
-    report: ReferenceValidationReport,
-    layout: biscuit_terminal::utils::layout::Layout,
-}
-
-impl ValidationReportView {
-    /// Creates a view for the given validation report.
-    pub fn new(report: ReferenceValidationReport) -> Self {
-        Self {
-            report,
-            layout: biscuit_terminal::utils::layout::Layout::default(),
-        }
-    }
-}
-
-impl biscuit_terminal::components::renderable::TerminalRenderable for ValidationReportView {
-    fn layout(&self) -> &biscuit_terminal::utils::layout::Layout {
-        &self.layout
-    }
-
-    fn layout_mut(&mut self) -> &mut biscuit_terminal::utils::layout::Layout {
-        &mut self.layout
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn render(&self, term: &biscuit_terminal::terminal::Terminal) -> String {
-        use std::collections::BTreeMap;
-
-        use biscuit_terminal::components::list::UnorderedList;
-        use biscuit_terminal::components::prose::{LineBreaks, Prose};
-
-        let errors: Vec<_> = self
-            .report
-            .issues
-            .iter()
-            .filter(|i| i.severity == ReferenceSeverity::Error)
-            .collect();
-
-        if errors.is_empty() {
-            return String::new();
-        }
-
-        let mut out = String::new();
-        let mut groups: BTreeMap<u8, (ReferenceKind, Vec<&ReferenceIssue>)> = BTreeMap::new();
-        for issue in &errors {
-            groups
-                .entry(issue.kind.validation_order())
-                .or_insert_with(|| (issue.kind, Vec::new()))
-                .1
-                .push(*issue);
-        }
-
-        out.push('\n');
-
-        for (kind, issues) in groups.values() {
-            let label = kind.validation_category_label();
-            out.push_str(&Prose::new(format!("<red-500><b>{label}</b></red-500>")).render(term));
-            out.push('\n');
-
-            let mut list = UnorderedList::empty();
-            for issue in issues {
-                let source_name = match &issue.origin.source {
-                    ComposeSource::File(p) => p
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "unknown".to_string()),
-                    ComposeSource::Url(u) => u.to_string(),
-                    ComposeSource::Unknown => "unknown".to_string(),
-                };
-
-                let source_href = match &issue.origin.source {
-                    ComposeSource::File(p) => format!("file://{}", p.display()),
-                    _ => String::new(),
-                };
-
-                let item_text = if source_href.is_empty() {
-                    format!(
-                        "the <blue-500>{source_name}</blue-500> reference to <red-500>{ref_display}</red-500> is not valid",
-                        ref_display = issue.reference_display,
-                    )
-                } else {
-                    format!(
-                        "the <a href=\"{source_href}\"><blue-500>{source_name}</blue-500></a> reference to <red-500>{ref_display}</red-500> is not valid",
-                        ref_display = issue.reference_display,
-                    )
-                };
-
-                list.add(Prose::new(match issue.resolution_failure() {
-                    Some(failure) => {
-                        let mut text = format!(
-                            "{item_text}\n\n<dim>failure:</dim> {}",
-                            crate::markdown::errors::resolution_failure_name(failure)
-                        );
-                        if let Some(hint) = failure.glob_hint(&issue.reference_display) {
-                            text.push_str(&format!("\n<dim>hint:</dim> {hint}"));
-                        }
-                        text
-                    }
-                    None => item_text,
-                }).with_line_breaks(LineBreaks::Hard));
+    /// The number of distinct documents the traversal visited, whatever the
+    /// number of times each was included.
+    pub fn document_count(&self) -> usize {
+        let mut seen: Vec<&ComposeSource> = Vec::new();
+        for document in &self.documents {
+            if !seen.contains(&&document.source) {
+                seen.push(&document.source);
             }
-
-            out.push_str(&list.render(term));
-            out.push('\n');
         }
-
-        let summary = format!(
-            "{} references scanned, {} valid, <red-500><b>{} issues</b></red-500>",
-            self.report.references_scanned,
-            self.report.references_valid,
-            errors.len()
-        );
-        out.push_str(&Prose::new(summary).render(term));
-        out.push('\n');
-
-        out
+        seen.len()
     }
 }
 
@@ -265,6 +158,12 @@ pub struct ReferenceIssue {
     pub reference_id: String,
     /// Where the reference was found.
     pub origin: ReferenceOrigin,
+    /// The inclusion path from the validated root to this reference's
+    /// document, outermost first.
+    pub included_via: Vec<ReferenceTrailStep>,
+    /// What the reason phrase does not already say: a URL parser's error, or a
+    /// remote status or timeout.
+    pub detail: Option<String>,
 }
 
 impl ReferenceIssue {
@@ -289,14 +188,19 @@ impl Serialize for ReferenceIssue {
         S: serde::Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("ReferenceIssue", 7)?;
+        let authored = self.origin.authored.as_ref();
+        let mut state = serializer.serialize_struct("ReferenceIssue", 11)?;
         state.serialize_field("code", &self.code)?;
         state.serialize_field("message", &self.message)?;
         state.serialize_field("severity", &self.severity)?;
         state.serialize_field("kind", &self.kind)?;
         state.serialize_field("reference", &self.reference_display)?;
-        state.serialize_field("line", &self.origin.line)?;
+        state.serialize_field("line", &authored.map(|location| location.line))?;
+        state.serialize_field("column", &authored.map(|location| location.column))?;
+        state.serialize_field("section", &self.origin.section)?;
+        state.serialize_field("inserted", &authored.map(|location| location.inserted))?;
         state.serialize_field("source", &self.origin.source)?;
+        state.serialize_field("included_via", &self.included_via)?;
         state.end()
     }
 }
@@ -336,6 +240,24 @@ pub enum ReferenceIssueCode {
     MalformedMetaTag,
 }
 
+impl ReferenceIssueCode {
+    /// The issue in words, one plain phrase per code.
+    pub fn reason_phrase(self) -> &'static str {
+        match self {
+            Self::MissingLocalTarget => "file not found",
+            Self::MissingFragmentTarget => "no matching heading",
+            Self::InvalidUrl => "malformed URL",
+            Self::RemoteUnreachable => "unreachable",
+            Self::UnsupportedScheme => "unsupported scheme",
+            Self::MissingSourceContext => "no document context",
+            Self::RemoteDisallowed => "remote check disabled",
+            Self::MalformedHtmlTag => "malformed HTML tag",
+            Self::MalformedCssImport => "malformed CSS import",
+            Self::MalformedMetaTag => "malformed meta tag",
+        }
+    }
+}
+
 /// Severity levels for validation issues.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -364,10 +286,12 @@ pub(crate) fn validate(
     let graph = super::graph::build_reference_graph(md, &options.graph).map_err(|error| {
         match error {
             crate::markdown::MarkdownError::Reference(source) => *source,
-            other => ReferenceError::Validation(other.to_string()),
+            other => ReferenceError::Compose(Box::new(other)),
         }
     })?;
-    validate_fresh_graph(md, options, &graph)
+    validate_fresh_graph(md, options, &graph).inspect_err(|_| {
+        options.graph.compose.options().preflight_failure_warnings.record(graph.earlier_warnings().to_vec());
+    })
 }
 
 /// Run validation against a caller-supplied, already-built reference graph
@@ -428,10 +352,12 @@ fn validate_graph_contents(
     graph: &ReferenceGraph,
 ) -> Result<ReferenceValidationReport, ReferenceError> {
     let root_source = graph.root().source.clone();
-    let ref_set = super::graph::flatten_graph(graph);
+    let occurrences = super::graph::flatten_occurrences(graph);
 
     let mut report = ReferenceValidationReport {
-        references_scanned: ref_set.len(),
+        references_scanned: occurrences.records.len(),
+        documents: occurrences.documents.clone(),
+        references: occurrences.records.iter().map(|(record, _)| record.clone()).collect(),
         trigger_warnings: graph.trigger_warnings().to_vec(),
         ..Default::default()
     };
@@ -459,7 +385,8 @@ fn validate_graph_contents(
         None
     };
 
-    for record in &ref_set.records {
+    for (record, occurrence) in &occurrences.records {
+        let trail = occurrences.documents[*occurrence].included_via.as_slice();
         // Use the reference's own origin source for validation (rec #5),
         // not the root document source. This ensures child references
         // are validated relative to their own file location.
@@ -482,6 +409,7 @@ fn validate_graph_contents(
                     &path_part,
                     ref_source,
                     record,
+                    trail,
                     &mut report,
                     &options.graph,
                     &root_source,
@@ -497,6 +425,7 @@ fn validate_graph_contents(
                         frag,
                         ref_source,
                         record,
+                        trail,
                         &mut report,
                         &options.graph,
                         &mut heading_cache,
@@ -518,6 +447,8 @@ fn validate_graph_contents(
                         reference_display: raw.clone(),
                         reference_id: record.id.clone(),
                         origin: record.origin.clone(),
+                        included_via: trail.to_vec(),
+                        detail: Some(e.to_string()),
                     });
                 } else if options.validate_remote {
                     // Remote validation will be done in a batch below
@@ -545,6 +476,8 @@ fn validate_graph_contents(
                                 reference_display: raw.clone(),
                                 reference_id: record.id.clone(),
                                 origin: record.origin.clone(),
+                                included_via: trail.to_vec(),
+                detail: None,
                             });
                         } else {
                             report.references_valid += 1;
@@ -571,6 +504,8 @@ fn validate_graph_contents(
                     reference_display: raw.clone(),
                     reference_id: record.id.clone(),
                     origin: record.origin.clone(),
+                    included_via: trail.to_vec(),
+                detail: None,
                 });
                 report.references_valid += 1;
             }
@@ -582,18 +517,19 @@ fn validate_graph_contents(
 
     // Remote URL validation (batch, async)
     if options.validate_remote {
-        let remote_refs: Vec<_> = ref_set
+        let (remote_refs, remote_trails): (Vec<_>, Vec<_>) = occurrences
             .records
             .iter()
-            .filter(|r| matches!(&r.target, ReferenceTarget::RemoteUrl { .. }))
-            .collect();
+            .filter(|(record, _)| matches!(&record.target, ReferenceTarget::RemoteUrl { .. }))
+            .map(|(record, occurrence)| (record, &occurrences.documents[*occurrence].included_via))
+            .unzip();
 
         if !remote_refs.is_empty() {
             let results = validate_remote_urls(&remote_refs, options.remote_timeout);
-            for (record, result) in remote_refs.iter().zip(results) {
+            for ((record, trail), result) in remote_refs.iter().zip(remote_trails).zip(results) {
                 match result {
                     RemoteResult::Ok => {}
-                    RemoteResult::Error(msg) => {
+                    RemoteResult::Error { message, detail } => {
                         let raw = match &record.target {
                             ReferenceTarget::RemoteUrl { raw } => raw.clone(),
                             _ => String::new(),
@@ -602,12 +538,14 @@ fn validate_graph_contents(
                         report.references_valid = report.references_valid.saturating_sub(1);
                         report.issues.push(ReferenceIssue {
                             code: ReferenceIssueCode::RemoteUnreachable,
-                            message: msg,
+                            message,
                             severity: ReferenceSeverity::Error,
                             kind: record.kind,
                             reference_display: raw,
                             reference_id: record.id.clone(),
                             origin: record.origin.clone(),
+                            included_via: trail.clone(),
+                            detail: Some(detail),
                         });
                     }
                 }
@@ -727,6 +665,7 @@ fn validate_local_path(
     raw: &str,
     source: &ComposeSource,
     record: &ReferenceRecord,
+    trail: &[ReferenceTrailStep],
     report: &mut ReferenceValidationReport,
     graph_options: &ReferenceGraphOptions,
     root_source: &ComposeSource,
@@ -768,6 +707,8 @@ fn validate_local_path(
                 reference_display: raw.to_string(),
                 reference_id: record.id.clone(),
                 origin: record.origin.clone(),
+                included_via: trail.to_vec(),
+                detail: None,
             });
             Ok(None)
         }
@@ -780,6 +721,8 @@ fn validate_local_path(
                 reference_display: raw.to_string(),
                 reference_id: record.id.clone(),
                 origin: record.origin.clone(),
+                included_via: trail.to_vec(),
+                detail: None,
             });
             Ok(None)
         }
@@ -907,6 +850,7 @@ fn validate_cross_doc_fragment(
     fragment: &str,
     source: &ComposeSource,
     record: &ReferenceRecord,
+    trail: &[ReferenceTrailStep],
     report: &mut ReferenceValidationReport,
     graph_options: &super::types::ReferenceGraphOptions,
     cache: &mut HeadingSlugCache,
@@ -946,6 +890,8 @@ fn validate_cross_doc_fragment(
                 reference_display: format!("{path}#{fragment}"),
                 reference_id: record.id.clone(),
                 origin: record.origin.clone(),
+                included_via: trail.to_vec(),
+                detail: None,
             });
         }
     }
@@ -990,7 +936,11 @@ fn slugify(text: &str) -> String {
 
 enum RemoteResult {
     Ok,
-    Error(String),
+    Error {
+        message: String,
+        /// The status or timeout, as the report's detail line words it.
+        detail: String,
+    },
 }
 
 /// Validates remote URLs via HTTP HEAD (falling back to GET on 405).
@@ -1041,7 +991,7 @@ async fn validate_remote_urls_async(
 
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
-            validate_single_url(&client, &url).await
+            validate_single_url(&client, &url, timeout).await
         }));
     }
 
@@ -1049,14 +999,17 @@ async fn validate_remote_urls_async(
     for handle in handles {
         match handle.await {
             Ok(result) => results.push(result),
-            Err(e) => results.push(RemoteResult::Error(format!("Task error: {e}"))),
+            Err(e) => results.push(RemoteResult::Error {
+                message: format!("Task error: {e}"),
+                detail: format!("check failed: {e}"),
+            }),
         }
     }
 
     results
 }
 
-async fn validate_single_url(client: &reqwest::Client, url: &str) -> RemoteResult {
+async fn validate_single_url(client: &reqwest::Client, url: &str, timeout: Duration) -> RemoteResult {
     // Try HEAD first
     match client.head(url).send().await {
         Ok(resp) => {
@@ -1066,36 +1019,53 @@ async fn validate_single_url(client: &reqwest::Client, url: &str) -> RemoteResul
             }
             if status.as_u16() == 405 {
                 // Method Not Allowed, fall back to GET
-                return validate_with_get(client, url).await;
+                return validate_with_get(client, url, timeout).await;
             }
-            RemoteResult::Error(format!("HTTP {status}: {url}"))
+            http_error(status, url)
         }
         Err(e) => {
             if e.is_timeout() {
-                RemoteResult::Error(format!("Timeout: {url}"))
+                timeout_error(url, timeout)
             } else {
                 // Fall back to GET on any HEAD error
-                validate_with_get(client, url).await
+                validate_with_get(client, url, timeout).await
             }
         }
     }
 }
 
-async fn validate_with_get(client: &reqwest::Client, url: &str) -> RemoteResult {
+fn http_error(status: reqwest::StatusCode, url: &str) -> RemoteResult {
+    RemoteResult::Error {
+        message: format!("HTTP {status}: {url}"),
+        detail: format!("server returned {}", status.as_u16()),
+    }
+}
+
+fn timeout_error(url: &str, timeout: Duration) -> RemoteResult {
+    RemoteResult::Error {
+        message: format!("Timeout: {url}"),
+        detail: format!("timed out after {}s", timeout.as_secs()),
+    }
+}
+
+async fn validate_with_get(client: &reqwest::Client, url: &str, timeout: Duration) -> RemoteResult {
     match client.get(url).send().await {
         Ok(resp) => {
             let status = resp.status();
             if status.is_success() || status.is_redirection() {
                 RemoteResult::Ok
             } else {
-                RemoteResult::Error(format!("HTTP {status}: {url}"))
+                http_error(status, url)
             }
         }
         Err(e) => {
             if e.is_timeout() {
-                RemoteResult::Error(format!("Timeout: {url}"))
+                timeout_error(url, timeout)
             } else {
-                RemoteResult::Error(format!("Request failed: {e}"))
+                RemoteResult::Error {
+                    message: format!("Request failed: {e}"),
+                    detail: format!("request failed: {e}"),
+                }
             }
         }
     }
@@ -1422,13 +1392,27 @@ mod tests {
                 line: 3,
                 span: 0..10,
                 syntax: ReferenceSyntax::MarkdownLink,
+                authored: Some(crate::markdown::reference::AuthoredReferenceLocation {
+                    line: 7,
+                    column: 5,
+                    span: 40..50,
+                    inserted: false,
+                }),
+                section: Some("setup".to_string()),
             },
+            included_via: vec![ReferenceTrailStep {
+                file: ComposeSource::File("/tmp/root.md".into()),
+                line: Some(2),
+            }],
+            detail: None,
         };
         let report = ReferenceValidationReport {
             references_scanned: 1,
             references_valid: 0,
             issues: vec![issue],
             warnings: Vec::new(),
+            documents: Vec::new(),
+            references: Vec::new(),
             trigger_warnings: Vec::new(),
         };
 
@@ -1446,7 +1430,14 @@ mod tests {
         assert_eq!(issue_obj.get("severity").unwrap(), "error");
         assert_eq!(issue_obj.get("kind").unwrap(), "hyperlink");
         assert_eq!(issue_obj.get("reference").unwrap(), "./missing.md");
-        assert_eq!(issue_obj.get("line").unwrap(), 3);
+        assert_eq!(issue_obj.get("line").unwrap(), 7, "the authored line, not the prepared 3");
+        assert_eq!(issue_obj.get("column").unwrap(), 5);
+        assert_eq!(issue_obj.get("section").unwrap(), "setup");
+        assert_eq!(issue_obj.get("inserted").unwrap(), false);
+        assert_eq!(
+            issue_obj.get("included_via").unwrap(),
+            &serde_json::json!([{ "file": "/tmp/root.md", "line": 2 }])
+        );
         assert_eq!(
             issue_obj.get("source").unwrap(),
             "/tmp/source.md"
@@ -1454,7 +1445,19 @@ mod tests {
     }
 
     #[test]
-    fn validation_report_view_renders_error_groups() {
+    fn an_in_memory_issue_serializes_null_positions() {
+        let md = Markdown::new("[link](./file.md)");
+        let report = validate(&md, &validation_options()).unwrap();
+        let value = serde_json::to_value(&report).unwrap();
+        let issue = &value["issues"][0];
+        for field in ["line", "column", "section", "inserted", "source"] {
+            assert!(issue[field].is_null(), "{field}: {issue}");
+        }
+        assert_eq!(issue["included_via"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn validation_report_view_renders_groups_not_kind_headings() {
         let issue = ReferenceIssue {
             code: ReferenceIssueCode::MissingLocalTarget,
             message: "Missing local target: ./missing.md".to_string(),
@@ -1467,13 +1470,19 @@ mod tests {
                 line: 3,
                 span: 0..10,
                 syntax: ReferenceSyntax::MarkdownLink,
+                authored: None,
+                section: None,
             },
+            included_via: Vec::new(),
+            detail: None,
         };
         let report = ReferenceValidationReport {
             references_scanned: 1,
             references_valid: 0,
             issues: vec![issue],
             warnings: Vec::new(),
+            documents: Vec::new(),
+            references: Vec::new(),
             trigger_warnings: Vec::new(),
         };
 
@@ -1481,18 +1490,21 @@ mod tests {
         let rendered = ValidationReportView::new(report)
             .render(&biscuit_terminal::terminal::Terminal::new_forced());
 
-        assert!(rendered.contains("Invalid Hyperlink(s)"));
+        assert!(!rendered.contains("Invalid Hyperlink(s)"));
+        assert!(!rendered.contains("is not valid"));
+        assert!(rendered.contains("file not found"));
         assert!(rendered.contains("missing.md"));
-        assert!(rendered.contains("references scanned, 0 valid"));
     }
 
     #[test]
-    fn validation_report_view_empty_report_renders_nothing() {
+    fn validation_report_view_empty_report_renders_its_summary() {
         let report = ReferenceValidationReport {
             references_scanned: 1,
             references_valid: 1,
             issues: Vec::new(),
             warnings: Vec::new(),
+            documents: Vec::new(),
+            references: Vec::new(),
             trigger_warnings: Vec::new(),
         };
 
@@ -1500,7 +1512,8 @@ mod tests {
         let rendered = ValidationReportView::new(report)
             .render(&biscuit_terminal::terminal::Terminal::new_forced());
 
-        assert!(rendered.is_empty());
+        assert!(rendered.contains("Checked 1 reference across"), "{rendered:?}");
+        assert!(rendered.contains("all ok"), "{rendered:?}");
     }
 
     /// Finding 18: validating against a pre-built graph must be byte-identical

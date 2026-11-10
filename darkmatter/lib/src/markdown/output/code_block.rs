@@ -53,7 +53,7 @@ pub(crate) fn render_terminal_code_block(
     options: &TerminalOptions,
     meta: &CodeBlockMeta,
     color_mode: ColorMode,
-    target_width: Option<u16>,
+    target_width: Option<u32>,
     override_bg: Option<Color>,
 ) -> Result<String, MarkdownError> {
     let syntax_set = highlighter.syntax_set_for(language);
@@ -372,7 +372,7 @@ pub(crate) fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Co
 /// - Resetting all attributes (\x1b[0m)
 /// - Adding a newline
 #[inline]
-pub(crate) fn emit_padding_row(bg_color: Color, target_width: Option<u16>) -> String {
+pub(crate) fn emit_padding_row(bg_color: Color, target_width: Option<u32>) -> String {
     match target_width {
         Some(w) => format!(
             "\x1b[0m\x1b[48;2;{};{};{}m{}\x1b[0m\n",
@@ -408,10 +408,12 @@ mod tests {
             base_path: None,
             italic_mode: ItalicMode::Always,
             dim_mode: DimMode::Always,
-            max_width: Some(80),
+            width: Some(renderable::output::Width::Columns(80)),
             mermaid_mode: MermaidMode::Off,
             mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Always,
+            verbosity: 0,
+            output_profile: None,
             hr_defaults: None,
             code_block_mode: crate::markdown::highlighting::CodeBlockMode::default(),
         }

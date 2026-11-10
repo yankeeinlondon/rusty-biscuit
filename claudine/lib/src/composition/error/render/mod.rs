@@ -240,7 +240,7 @@ fn compose_failed_code(md: &MarkdownError) -> &'static str {
     // the failure it wraps.
     match md.without_iteration() {
         MarkdownError::Interpolation { cause, .. } => match cause.as_ref() {
-            ExpressionError::FileReference(_) => "composition.invalid_file_reference",
+            _ if interpolation_file_reference(cause).is_some() => "composition.invalid_file_reference",
             ExpressionError::UnknownFunction { .. } => "composition.unknown_function",
             _ => "composition.expression_invalid",
         },
@@ -256,6 +256,17 @@ fn compose_failed_code(md: &MarkdownError) -> &'static str {
         MarkdownError::SchemaValidationFailed { .. }
         | MarkdownError::CallerFileClassificationChanged { .. } => "composition.schema_validation",
         _ => "composition.failed",
+    }
+}
+
+/// The file-reference diagnostic an interpolation failure reports at its own
+/// level: a read-side function's failure, or a `load_data` source or contract
+/// import that could not be read. A callback wrapper keeps its generic code,
+/// so it is not looked through.
+fn interpolation_file_reference(cause: &ExpressionError) -> Option<&FileReferenceDiagnostic> {
+    match cause {
+        ExpressionError::Callback { .. } => None,
+        other => other.file_reference_diagnostic(),
     }
 }
 
@@ -520,7 +531,7 @@ impl Diagnostic for CompositionError {
                 expression,
                 ..
             }) => match cause.as_ref() {
-                ExpressionError::FileReference(diagnostic) => {
+                _ if let Some(diagnostic) = interpolation_file_reference(cause) => {
                     return file_reference_detail(diagnostic);
                 }
                 // `composition.unknown_function` declares `name`, `suggestions`.
@@ -539,7 +550,7 @@ impl Diagnostic for CompositionError {
                 cause,
                 ..
             }) => {
-                if let ExpressionError::FileReference(diagnostic) = cause.as_ref() {
+                if let Some(diagnostic) = interpolation_file_reference(cause) {
                     return file_reference_detail(diagnostic);
                 }
             }

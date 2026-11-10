@@ -1,0 +1,23 @@
+kind: schema
+description: a template type at every position that accepts one, each with its own expression; the passive tests evaluate none of them
+$schema:
+    status: "{{ load_data('./status-type.yaml', 'type-definition') }}"
+    tags: "{{ tag_type }}[]"
+    owner: "{{ owner_type }}(required)"
+    owners: "{{ owners_type }}[](required)"
+    reviewers: "{{ reviewer_type }}(required)[](min(1))"
+    phase: "{{ phase_type }} -> where the record is in its lifecycle"
+    either: "string | {{ either_type }}"
+    fallback:
+        - string
+        - "{{ fallback_type }}"
+    grouped: "({{ grouped_type }} | string)[]"
+    pair: "tuple([number, {{ pair_type }}])"
+    maybe: "tuple([{{ maybe_type }}?])"
+    inline: "{ mode: {{ inline_type }}, label: string }"
+    settings:
+        mode: "{{ nested_type }}"
+    state: State
+    state_here: State@this
+types:
+    State: "{{ state_type }}"

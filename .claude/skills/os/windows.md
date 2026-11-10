@@ -331,6 +331,51 @@ exported PATH is identical to the inherited one.
 - **Cygwin collapses `\\` in a command line from a native parent.** `just` is
   native, so a recipe line or backtick holding `\\` reaches bash with `\`.
   Write Windows-path manipulation without backslashes (`${exe%?bash.exe}`).
+- **Nested `just` → Cygwin bash → `just` → bash corrupts the console mode.**
+  Cygwin switches the console between its own mode and a native mode around
+  every native child, and an inner bash restores a mode captured while the
+  outer one held it. Probed by sampling `GetConsoleMode` from a hidden
+  console: a nested failing recipe leaves input mode `0x0` (no line input or
+  echo), and at the end of a full `just test` the output mode dropped to
+  `0x0` as the bash layers exited. That is exactly when native `just` prints
+  `error: recipe … failed`, so the line shows raw `←[1;31m` escapes and `◙`
+  for its newline while bash's own `echo -e` colors (Cygwin interprets them)
+  look fine. Shared test recipes call internal recipes with `just --quiet`
+  so only the top-level `just` prints that line; plain conhost runs of
+  `_record_slow_tests` alone keep output at `0x7`, so reproduce with the full
+  chain, not a single step.
+- **`kill -0 <pid>` from Rust asks about a Cygwin pid, not a Windows one.**
+  On a host with Cygwin or Git Bash on `PATH`, `Command::new("kill")` runs
+  their `kill`, which reads its argument as a Cygwin pid, so every live
+  native process looked dead. The terminal harness's stale-pane sweep used it
+  and, at `-j 6`, killed the WezTerm panes of the Level-2 tests running
+  beside it ("no such pane", captures failing, commands vanishing). Ask the
+  kernel (`OpenProcess` + `GetExitCodeProcess`, `biscuit-test-harness`'s
+  `process_is_alive`); `ERROR_ACCESS_DENIED` from `OpenProcess` still means
+  the process exists.
+- **A Windows path typed into a Cygwin bash pane** loses its backslashes
+  unquoted (`C:\Users\x` runs as `C:Usersx`). Quoted, `C:\…` opens as a file
+  argument (`cat 'C:\…'`) but is "command not found" as the command word;
+  `C:/…` works in both places under Cygwin and Git Bash. Spell pane commands
+  with `biscuit_test_harness::shell_path`.
+- **Typing into a Cygwin bash pane with readline on is superlinear in the
+  line's length**: under ConPTY, readline redraws the line for every
+  character. In a WezTerm pane 65 characters took 0.49 s, 167 took 1.75 s,
+  and 317 took 5.8 s, while `md` itself ran in 0.4 s; a test typing a few
+  long `md` lines crossed nextest's 30 s limit. With `bash --noediting` the
+  same lines took 0.05 s and 0.16 s (600 characters, 0.25 s), so the harness
+  starts its interactive bash with `--noediting` on Windows. Bracketed paste
+  is no cure: a pasted line plus Enter was slower than typing (0.66 s).
+- **Every process a Cygwin pane starts costs 0.05–0.15 s, more under
+  parallel load** (`rm`, `clear`, `/usr/bin/printf`). Prefer builtins on a
+  hot path; the harness's `CLEAR_SCREEN` is `printf` of the bytes `clear`
+  writes.
+- **`wezterm cli` without `--no-auto-start` starts a mux server when it
+  cannot reach one.** That server inherits the client's stdout and stderr
+  pipes, so a harness reading them to EOF hangs until its timeout, and it
+  binds the default `sock` path, displacing the developer's own mux. The
+  harness passes `--no-auto-start` on every client; a manual probe should
+  too.
 - **`/etc/bash.bashrc`'s `CYG_SYS_BASHRC` crash** appears for any `bash -eu -c`
   started over SSH without that variable, so ad hoc probes on the rig need it
   too.
@@ -713,3 +758,18 @@ touches. Three shapes recur:
   for a helper that already carries Windows branches, use
   `#[cfg_attr(windows, allow(dead_code, reason = "…"))]` instead of deleting
   them.
+
+A related compile error happens only on Windows. On Windows a dependency
+(`encode_unicode`) adds `impl FromIterator<Utf16Char> for Vec<u16>`, so
+`.map(|s| s.parse().unwrap()).collect::<Vec<u16>>()`, or the same thing
+returned as `Vec<u16>`, no longer infers the parse target (E0283/E0284). It
+compiles on macOS and Linux. Always write `.parse::<u16>()` when collecting
+into `Vec<u16>`.
+
+## Spawning a program from a test
+
+- Windows PowerShell (`powershell`) rejects `--version`, so a generic "does it start" probe
+  reports it missing. Probe with `-NoProfile -NonInteractive -Command "exit 0"`.
+- A test that needs a command with a side effect cannot use `touch`: Darkmatter runs a command
+  without a shell, and the rig has no such program. Copy the `darkmatter-argv-recorder` fixture
+  into the fixture `bin` directory, which also records what ran.

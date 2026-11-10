@@ -42,7 +42,7 @@ impl FinalMessage {
     ///
     /// Without this, each render constructs a fresh default (incurring theme
     /// detection). Hot paths that render repeatedly — e.g. streaming — should
-    /// build the options once and pass them here. An unset `max_width` is
+    /// build the options once and pass them here. An unset `width` is
     /// still filled from the render-time terminal; only an explicit pin wins.
     pub fn with_options(mut self, options: TerminalOptions) -> Self {
         self.options = Some(options);
@@ -56,8 +56,8 @@ impl TerminalRenderable for FinalMessage {
             Some(options) => options.clone(),
             None => TerminalOptions::default(),
         };
-        if opts.max_width.is_none() {
-            opts.max_width = Some(term.width().clamp(1, u32::from(u16::MAX)) as u16);
+        if opts.width.is_none() {
+            opts.width = Some(renderable::output::Width::Columns(term.width().max(1)));
         }
 
         let md = Markdown::new(self.text.trim());
@@ -184,7 +184,7 @@ mod tests {
         assert_eq!(visible, "narrowbutpresent");
     }
 
-    /// Cached options built without an explicit `max_width` (the streaming
+    /// Cached options built without an explicit `width` (the streaming
     /// hot path's shape) must honor the supplied terminal exactly like the
     /// default-options path, so the streaming and final renders agree.
     #[test]
@@ -206,13 +206,13 @@ mod tests {
         );
     }
 
-    /// A caller that pinned `max_width` explicitly keeps that pin; the
+    /// A caller that pinned `width` explicitly keeps that pin; the
     /// supplied terminal only fills the unset case.
     #[test]
-    fn an_explicit_max_width_wins_over_the_supplied_terminal() {
+    fn an_explicit_width_wins_over_the_supplied_terminal() {
         let term = Terminal::new_optimistic(40);
         let mut options = TerminalOptions::default();
-        options.max_width = Some(30);
+        options.width = Some(renderable::output::Width::Columns(30));
         let rendered = FinalMessage::new(
             "The quick brown fox jumps over the lazy dog while the eager cat \
              watches carefully from the windowsill above.",
@@ -225,7 +225,7 @@ mod tests {
             .collect();
         assert!(
             widths.iter().all(|width| *width <= 30),
-            "an explicit max_width must stay authoritative, got {widths:?}"
+            "an explicit width must stay authoritative, got {widths:?}"
         );
     }
 }

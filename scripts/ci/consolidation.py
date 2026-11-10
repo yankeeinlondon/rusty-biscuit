@@ -101,7 +101,7 @@ PACKAGE_FEATURE_SETS: dict[str, tuple[tuple[str, ...], ...]] = {
     # `remote` implies `network`, but `test-real` builds `network` alone.
     "sniff": ((), ("remote",), ("network",)),
     "sniff-detection-cli": ((), ("test-fixtures",)),
-    "biscuit-file": ((), ("fetch",)),
+    "biscuit-file": ((), ("fetch",), ("fetch", "delimited")),
     "schematic-gen": ((), ("terminal-tests",)),
     "biscuit-terminal-cli": ((), ("terminal-tests",)),
     "claudine-gen": ((), ("terminal-tests",)),

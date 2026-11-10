@@ -188,7 +188,7 @@ fn each_missing_reference_allowance_recovers_its_own_kind_only() {
         (&image, "missing-image-refs", "![logo](missing-logo.png)"),
         (&part, "missing-transclusions", "After"),
     ] {
-        fixture.command().arg("compose").arg(document).assert().code(2).stdout(predicate::str::is_empty());
+        fixture.command().arg("compose").arg(document).assert().code(1).stdout(predicate::str::is_empty());
         fixture
             .command()
             .args(["compose", "--allow", allowance])
@@ -198,7 +198,7 @@ fn each_missing_reference_allowance_recovers_its_own_kind_only() {
             .stdout(predicate::str::contains(kept));
     }
     // An allowance covers its kind only.
-    fixture.command().args(["compose", "--allow", "missing-image-refs"]).arg(&link).assert().code(2);
+    fixture.command().args(["compose", "--allow", "missing-image-refs"]).arg(&link).assert().code(1);
     // The transclusion directive is removed, not left in the output.
     fixture
         .command()
@@ -225,7 +225,7 @@ fn a_specific_denial_beats_allow_all_in_either_order() {
         &["compose", "--deny", "missing-hyperlinks", "--allow", "all"],
         &["compose", "--allow", "all", "--deny", "dm.reference.missing_hyperlink"],
     ] {
-        fixture.command().args(args).arg(&document).assert().code(2).stdout(predicate::str::is_empty());
+        fixture.command().args(args).arg(&document).assert().code(1).stdout(predicate::str::is_empty());
     }
 }
 
@@ -352,7 +352,7 @@ fn a_disabled_baseline_stays_disabled_under_deny_all() {
     // Skipped checks are not described as passing validation.
     let output = fixture
         .command()
-        .args(["schema", "validate", "--disable", "baseline-schema", "--format", "json"])
+        .args(["schema", "validate", "--disable", "baseline-schema", "--output", "json"])
         .arg(&document)
         .output()
         .unwrap();
@@ -368,8 +368,8 @@ fn deny_all_fails_a_category_3_document_with_no_document_in_any_mode() {
     let fixture = CliProcessFixture::named("policy_category_3");
     let document = fixture.write_file("cwd/doc.md", CATEGORY_3);
     fixture.command().arg("compose").arg(&document).assert().success().stdout("Body 5\n");
-    for output in ["markdown", "json", "html"] {
-        let result = fixture
+    let denied = |output: &str| {
+        fixture
             .command_builder()
             // Skips launching a viewer, so a regression cannot open one.
             .application_input("MD_DRY_RUN", "1")
@@ -377,19 +377,32 @@ fn deny_all_fails_a_category_3_document_with_no_document_in_any_mode() {
             .args(["compose", "--deny", "all", "--show", "--output", output])
             .arg(&document)
             .output()
-            .unwrap();
-        let stderr = stderr_of(&result);
-        assert_eq!(result.status.code(), Some(1), "{output}: {stderr}");
-        assert!(result.stdout.is_empty(), "{output}: {}", String::from_utf8_lossy(&result.stdout));
-        assert!(stderr.contains("blocking diagnostics"), "{output}: {stderr}");
-        assert!(stderr.contains("category 3"), "the warning keeps its message: {stderr}");
-        assert!(!stderr.contains("Failed to open"), "no viewer launch: {stderr}");
-    }
+            .unwrap()
+    };
+
+    let result = denied("markdown");
+    let stderr = stderr_of(&result);
+    assert_eq!(result.status.code(), Some(1), "{stderr}");
+    assert!(result.stdout.is_empty(), "{}", String::from_utf8_lossy(&result.stdout));
+    assert!(stderr.contains("blocking diagnostics"), "{stderr}");
+    assert!(stderr.contains("category 3"), "the warning keeps its message: {stderr}");
+    assert!(!stderr.contains("Failed to open"), "no viewer launch: {stderr}");
     // No temp viewer file was published either.
     let published = std::fs::read_dir(fixture.tmp_dir())
         .map(|entries| entries.filter_map(Result::ok).any(|entry| entry.file_name().to_string_lossy().starts_with("md-output-")))
         .unwrap_or(false);
     assert!(!published, "a failed composition publishes no viewer file");
+
+    // A data output reports the same stop as its one value.
+    let result = denied("json");
+    let stderr = stderr_of(&result);
+    assert_eq!(result.status.code(), Some(1), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+    let envelope: serde_json::Value = serde_json::from_slice(&result.stdout).expect("one JSON envelope");
+    assert_eq!(envelope["outcome"], "failure", "{envelope:#}");
+    assert_eq!(envelope["document"], serde_json::Value::Null, "{envelope:#}");
+    assert_eq!(envelope["diagnostics"][0]["code"], "dm.expression.uncertain_call", "{envelope:#}");
+    assert!(envelope["diagnostics"][0]["message"].as_str().unwrap().contains("category 3"), "{envelope:#}");
 }
 
 #[test]
@@ -436,7 +449,7 @@ fn a_denied_missing_link_inside_inserted_text_blocks() {
     // The link is produced by an expression, so it is a warning, not an error.
     let document = fixture.write_file("cwd/doc.md", "---\nlink: \"[gone](./gone.md)\"\n---\nSee {{ link }}\n");
     fixture.command().arg("compose").arg(&document).assert().success();
-    fixture.command().args(["compose", "--deny", "missing-hyperlinks"]).arg(&document).assert().code(2).stdout(predicate::str::is_empty());
+    fixture.command().args(["compose", "--deny", "missing-hyperlinks"]).arg(&document).assert().code(1).stdout(predicate::str::is_empty());
     fixture
         .command()
         .args(["compose", "--deny", "all", "--allow", "missing-hyperlinks"])

@@ -53,7 +53,7 @@ fn fixture(stem: &str) -> Markdown {
 fn terminal_options() -> TerminalOptions {
     let mut opts = TerminalOptions::default();
     opts.color_depth = Some(ColorDepth::TrueColor);
-    opts.max_width = Some(120);
+    opts.width = Some(renderable::output::Width::Columns(120));
     opts
 }
 

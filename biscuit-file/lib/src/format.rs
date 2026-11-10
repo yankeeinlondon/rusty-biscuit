@@ -21,6 +21,12 @@ pub enum DataFormat {
     Json,
     /// JSON5 data file (JSON with comments and trailing commas).
     Json5,
+    /// JSON Lines data file: one JSON value per line (also called NDJSON).
+    Jsonl,
+    /// Comma-separated values with CSV-style quoting.
+    Csv,
+    /// Tab-separated values with CSV-style quoting.
+    Tsv,
     /// Markdown document.
     Markdown,
     /// PDF document.
@@ -48,6 +54,9 @@ impl DataFormat {
             Self::Yaml => "yaml",
             Self::Json => "json",
             Self::Json5 => "json5",
+            Self::Jsonl => "jsonl",
+            Self::Csv => "csv",
+            Self::Tsv => "tsv",
             Self::Markdown => "md",
             Self::Pdf => "pdf",
             Self::Text => "txt",
@@ -72,6 +81,9 @@ impl DataFormat {
             Self::Yaml => "application/yaml",
             Self::Json => "application/json",
             Self::Json5 => "application/json5",
+            Self::Jsonl => "application/x-ndjson",
+            Self::Csv => "text/csv",
+            Self::Tsv => "text/tab-separated-values",
             Self::Markdown => "text/markdown",
             Self::Pdf => "application/pdf",
             Self::Text => "text/plain",
@@ -94,12 +106,22 @@ impl DataFormat {
     /// ```
     #[must_use]
     pub fn requires_utf8(&self) -> bool {
-        matches!(self, Self::Toml | Self::Json5 | Self::Markdown | Self::Text)
+        matches!(
+            self,
+            Self::Toml
+                | Self::Json5
+                | Self::Jsonl
+                | Self::Csv
+                | Self::Tsv
+                | Self::Markdown
+                | Self::Text
+        )
     }
 
     /// Returns `true` if this format represents structured data.
     ///
-    /// Structured formats can be parsed into a tree or object model.
+    /// Structured formats can be parsed into a tree or object model. The
+    /// delimited formats count: their rows parse into records of cells.
     ///
     /// ## Examples
     ///
@@ -112,7 +134,16 @@ impl DataFormat {
     /// ```
     #[must_use]
     pub fn is_structured(&self) -> bool {
-        matches!(self, Self::Toml | Self::Yaml | Self::Json | Self::Json5)
+        matches!(
+            self,
+            Self::Toml
+                | Self::Yaml
+                | Self::Json
+                | Self::Json5
+                | Self::Jsonl
+                | Self::Csv
+                | Self::Tsv
+        )
     }
 }
 
@@ -123,6 +154,9 @@ impl fmt::Display for DataFormat {
             Self::Yaml => "YAML",
             Self::Json => "JSON",
             Self::Json5 => "JSON5",
+            Self::Jsonl => "JSONL",
+            Self::Csv => "CSV",
+            Self::Tsv => "TSV",
             Self::Markdown => "Markdown",
             Self::Pdf => "PDF",
             Self::Text => "Text",
@@ -143,6 +177,9 @@ mod tests {
             DataFormat::Yaml,
             DataFormat::Json,
             DataFormat::Json5,
+            DataFormat::Jsonl,
+            DataFormat::Csv,
+            DataFormat::Tsv,
             DataFormat::Markdown,
             DataFormat::Pdf,
             DataFormat::Text,
@@ -164,6 +201,9 @@ mod tests {
             DataFormat::Yaml,
             DataFormat::Json,
             DataFormat::Json5,
+            DataFormat::Jsonl,
+            DataFormat::Csv,
+            DataFormat::Tsv,
             DataFormat::Markdown,
             DataFormat::Pdf,
             DataFormat::Text,
@@ -184,6 +224,9 @@ mod tests {
         assert!(DataFormat::Json5.requires_utf8());
         assert!(DataFormat::Markdown.requires_utf8());
         assert!(DataFormat::Text.requires_utf8());
+        assert!(DataFormat::Jsonl.requires_utf8());
+        assert!(DataFormat::Csv.requires_utf8());
+        assert!(DataFormat::Tsv.requires_utf8());
 
         // Non-UTF-8 formats
         assert!(!DataFormat::Yaml.requires_utf8());
@@ -198,6 +241,9 @@ mod tests {
         assert!(DataFormat::Yaml.is_structured());
         assert!(DataFormat::Json.is_structured());
         assert!(DataFormat::Json5.is_structured());
+        assert!(DataFormat::Jsonl.is_structured());
+        assert!(DataFormat::Csv.is_structured());
+        assert!(DataFormat::Tsv.is_structured());
 
         // Non-structured formats
         assert!(!DataFormat::Markdown.is_structured());
@@ -211,6 +257,9 @@ mod tests {
         assert_eq!(DataFormat::Yaml.to_string(), "YAML");
         assert_eq!(DataFormat::Json.to_string(), "JSON");
         assert_eq!(DataFormat::Json5.to_string(), "JSON5");
+        assert_eq!(DataFormat::Jsonl.to_string(), "JSONL");
+        assert_eq!(DataFormat::Csv.to_string(), "CSV");
+        assert_eq!(DataFormat::Tsv.to_string(), "TSV");
         assert_eq!(DataFormat::Markdown.to_string(), "Markdown");
         assert_eq!(DataFormat::Pdf.to_string(), "PDF");
         assert_eq!(DataFormat::Text.to_string(), "Text");

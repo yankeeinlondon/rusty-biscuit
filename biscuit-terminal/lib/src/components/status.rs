@@ -579,9 +579,9 @@ impl TerminalRenderable for Status {
     }
 
     fn render(&self, term: &Terminal) -> String {
-        let width = term.width();
+        let width = term.columns();
         let content = self.to_terminal(term);
-        if width == 0 {
+        if width == Some(0) {
             return String::new();
         }
         // `Status` is an inline badge (spec C7): only `Layout::word_wrap` is
@@ -591,9 +591,9 @@ impl TerminalRenderable for Status {
         // Each row of a multi-row description wraps on its own, so a row
         // after the first keeps its written indentation; only a row's own
         // continuation lines take the hanging indent.
-        match &self.layout.word_wrap {
-            WordWrap::None => content,
-            strategy => content
+        match (&self.layout.word_wrap, width) {
+            (WordWrap::None, _) | (_, None) => content,
+            (strategy, Some(width)) => content
                 .split('\n')
                 .flat_map(|row| wrap_lines(vec![row.to_string()], strategy, width))
                 .collect::<Vec<_>>()

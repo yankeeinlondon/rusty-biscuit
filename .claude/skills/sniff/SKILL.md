@@ -112,6 +112,10 @@ It reuses the one status walk, then reads each changed path once, counted as
 `git.working_state.paths_hashed`. `scripts/slow-tests.rs` keys test runs on it.
 Tests: `filesystem/git/working_state_tests.rs`.
 
+`GitRepo::tracked_state(paths)` / `worktree_blob_id(path, bytes)` answer
+"is this one file clean and committed?" without a status walk; see
+"Per-path tracked state" in [remote-and-repository.md](remote-and-repository.md).
+
 `filesystem::repo::{PackageNameSource, PackageOwnershipLookup}` support callers
 that need declared identity and repeated file ownership. Check `name_source ==
 Manifest`; a nonempty `name` alone may be a relative-path fallback. Legacy

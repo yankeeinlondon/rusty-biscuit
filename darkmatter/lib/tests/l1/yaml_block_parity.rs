@@ -137,7 +137,7 @@ impl CodeRenderer for StubCodeRenderer {
         Some(format!(
             "STUB[lang={};width={};header={};body={}]",
             lang.unwrap_or("?"),
-            context.width(),
+            context.width().as_columns().unwrap_or(0),
             hints.header_row,
             value,
         ))

@@ -57,7 +57,8 @@ fn test_graph_validate_valid() {
         .assert()
         .success()
         .stdout(predicate::str::contains("valid"))
-        .stdout(predicate::str::contains("0 issues"));
+        .stdout(predicate::str::contains("all ok"))
+        .stdout(predicate::str::contains("scanned").not());
 }
 
 #[test]
@@ -76,8 +77,8 @@ fn test_graph_validate_invalid() {
 
     assert_eq!(
         output.status.code(),
-        Some(2),
-        "expected exit code 2 for validation errors"
+        Some(1),
+        "expected exit code 1 for validation errors"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -85,7 +86,7 @@ fn test_graph_validate_invalid() {
         "expected [missing] suffix in output"
     );
     assert!(
-        stdout.contains("1 issues"),
+        stdout.contains("0 ok, 1 broken"),
         "expected issue count in summary"
     );
 }
@@ -130,8 +131,8 @@ fn test_graph_follow_validate_child_broken_link() {
 
     assert_eq!(
         output.status.code(),
-        Some(2),
-        "expected exit code 2 when followed child has a broken link"
+        Some(1),
+        "expected exit code 1 when followed child has a broken link"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -220,7 +221,7 @@ fn test_graph_json_output() {
 
     fixture
         .command()
-        .args(["graph", "--json"])
+        .args(["graph", "--output", "json"])
         .arg(&file)
         .assert()
         .success()
@@ -234,7 +235,7 @@ fn test_graph_json_output() {
 // The Phase 1 leak extraction (CLI Atheist / Leak 3) replaced the
 // hand-rolled CLI JSON serializers with `#[derive(serde::Serialize)]`
 // on the library reference types. These tests pin the public JSON shape
-// of `md graph --json` against the captured baseline fixtures under
+// of `md graph --output json` against the captured baseline fixtures under
 // `darkmatter/features/2026-06-17-cli-atheist/baseline/json/`.
 
 use common::baseline;
@@ -247,6 +248,7 @@ fn assert_graph_json_matches_baseline(
     args: &[&str],
     temp_dir: &std::path::Path,
     baseline_name: &str,
+    expected_exit: i32,
 ) {
     let output = fixture
         .command()
@@ -254,16 +256,25 @@ fn assert_graph_json_matches_baseline(
         .output()
         .expect("md command failed to spawn");
 
-    assert!(
-        output.status.success(),
-        "md graph --json failed with status {:?}\nstderr: {}",
+    assert_eq!(
         output.status.code(),
+        Some(expected_exit),
+        "md graph --output json exit status\nstderr: {}",
         String::from_utf8_lossy(&output.stderr),
     );
+    assert!(output.stderr.is_empty(), "a data output writes nothing to stderr: {output:?}");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let actual: serde_json::Value =
+    let mut actual: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("md graph output must be valid JSON");
+    // The baseline pins the report's own shape; a failed run adds these two.
+    if expected_exit == 1 {
+        assert_eq!(actual["outcome"], "failure", "{stdout}");
+        assert!(!actual["diagnostics"].as_array().expect("diagnostics").is_empty(), "{stdout}");
+        let report = actual.as_object_mut().expect("a report object");
+        report.remove("outcome");
+        report.remove("diagnostics");
+    }
 
     let redact = baseline::paths_to_redact(temp_dir);
     let redact_refs: Vec<&str> = redact.iter().map(|s| s.as_str()).collect();
@@ -272,7 +283,7 @@ fn assert_graph_json_matches_baseline(
 
     assert_eq!(
         actual_norm, expected_norm,
-        "md graph --json output did not match baseline {baseline_name}\n\
+        "md graph --output json did not match baseline {baseline_name}\n\
          raw output:\n{stdout}",
     );
 }
@@ -291,9 +302,10 @@ fn graph_json_local_baseline() {
     let local = root.join("local.md");
     assert_graph_json_matches_baseline(
         &fixture,
-        &["graph", "--json", local.to_str().unwrap()],
+        &["graph", "--output", "json", local.to_str().unwrap()],
         root,
         "graph_local.json",
+        0,
     );
 }
 
@@ -311,9 +323,10 @@ fn graph_json_follow_baseline() {
     let prologue = root.join("prologue.md");
     assert_graph_json_matches_baseline(
         &fixture,
-        &["graph", "--json", "--follow", prologue.to_str().unwrap()],
+        &["graph", "--output", "json", "--follow", prologue.to_str().unwrap()],
         root,
         "graph_follow.json",
+        0,
     );
 }
 
@@ -330,8 +343,9 @@ fn graph_json_validate_baseline() {
     let errors = root.join("errors.md");
     assert_graph_json_matches_baseline(
         &fixture,
-        &["graph", "--json", "--validate", errors.to_str().unwrap()],
+        &["graph", "--output", "json", "--validate", errors.to_str().unwrap()],
         root,
         "graph_validate.json",
+        1,
     );
 }

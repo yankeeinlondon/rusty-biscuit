@@ -46,24 +46,28 @@ fn test_compose_basic() {
 }
 
 #[test]
-fn test_compose_markdown_plus_renders_disclosure_as_details() {
+fn test_compose_rejects_output_markdown_plus_and_keeps_the_disclosure_directive() {
     let fixture =
-        CliProcessFixture::named("test_compose_markdown_plus_renders_disclosure_as_details");
-    // `md compose --output markdown-plus` must route the composed document
-    // through the MarkdownPlus fold, emitting `<details>`/`<summary>` HTML
-    // rather than preserving the `::disclosure` DSL verbatim.
-    fixture.command()
+        CliProcessFixture::named("test_compose_rejects_output_markdown_plus_and_keeps_the_disclosure_directive");
+    // `md compose` always writes Markdown: the MarkdownPlus fold belongs to
+    // `md render`, and the composed document keeps the `::disclosure` DSL.
+    let input = "::disclosure\nLicense *Agreement*\n::details\nKeep your **hands** off.\n::end-disclosure\n";
+    fixture
+        .command()
         .args(["compose", "--output", "markdown-plus", "-"])
-        .write_stdin(
-            "::disclosure\nLicense *Agreement*\n::details\nKeep your **hands** off.\n::end-disclosure\n",
-        )
+        .write_stdin(input)
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains("invalid value 'markdown-plus'"));
+    fixture
+        .command()
+        .args(["compose", "-"])
+        .write_stdin(input)
         .assert()
         .success()
-        .stdout(predicate::str::contains("<details>"))
-        .stdout(predicate::str::contains("<summary>"))
-        .stdout(predicate::str::contains("</summary>"))
-        .stdout(predicate::str::contains("</details>"))
-        .stdout(predicate::str::contains("::disclosure").not());
+        .stdout(predicate::str::contains("::disclosure"))
+        .stdout(predicate::str::contains("<details>").not());
 }
 
 #[test]
@@ -79,15 +83,16 @@ fn test_compose_with_state() {
 }
 
 #[test]
-fn test_compose_output_html() {
-    let fixture = CliProcessFixture::named("test_compose_output_html");
+fn test_compose_rejects_output_html() {
+    let fixture = CliProcessFixture::named("test_compose_rejects_output_html");
     fixture
         .command()
         .args(["compose", "-", "--output", "html"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("<h1 id=\"hello\">Hello</h1>"));
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains("invalid value 'html'"));
 }
 
 #[test]

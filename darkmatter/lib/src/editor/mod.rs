@@ -46,6 +46,14 @@ pub enum EditorError {
     /// No supported editor could be resolved from environment or fallback probes.
     #[error("no editor found; set $EDITOR or $VISUAL, or install one of: nvim, vim, code, nano")]
     NoEditorFound,
+    /// `$EDITOR` or `$VISUAL` is set, and no set one names a program that exists.
+    #[error("{variable} names '{value}', which was not found; fix it or unset it")]
+    ConfiguredEditorMissing {
+        /// The first variable that is set.
+        variable: &'static str,
+        /// What it holds.
+        value: String,
+    },
     /// The launched editor returned a non-zero exit status.
     #[error(
         "editor '{editor}' exited with status {code} while editing {path}",
@@ -100,6 +108,14 @@ impl biscuit_terminal::errors::BlockError for EditorError {
                     )).with_line_breaks(LineBreaks::Hard))
                     .hint("Set <cyan>$EDITOR</cyan> to your preferred editor, or install one of the probed binaries.")
             }
+
+            EditorError::ConfiguredEditorMissing { variable, value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("EditorError", "configured editor not found"))
+                .body(Prose::new(format!(
+                    "<cyan>${variable}</cyan> names <cyan>{}</cyan>, which was not found.",
+                    Prose::escape_text(value)
+                )))
+                .hint("Fix the variable or unset it to use the first installed editor."),
 
             EditorError::NonZeroExit { code, editor, path } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("EditorError", "editor exited with error"))
@@ -164,19 +180,26 @@ fn build_editor_command_details(editor_cmd: &str) -> (String, Vec<String>, Strin
 }
 
 /// Resolve the editor command using `$EDITOR`, `$VISUAL`, then fallback probes.
+///
+/// A blank variable counts as unset. The probes run only when neither variable
+/// is set: a user who named an editor does not get a different one because of
+/// a typo.
 pub fn resolve_editor_command() -> Result<String, EditorError> {
-    if let Ok(editor) = std::env::var("EDITOR") {
-        let cmd = editor.split_whitespace().next().unwrap_or(&editor);
+    let mut missing = None;
+    for (variable, value) in [("EDITOR", std::env::var("EDITOR")), ("VISUAL", std::env::var("VISUAL"))] {
+        let Ok(value) = value else {
+            continue;
+        };
+        let Some(cmd) = value.split_whitespace().next() else {
+            continue;
+        };
         if find_program(cmd).is_some() {
-            return Ok(editor);
+            return Ok(value);
         }
+        missing.get_or_insert(EditorError::ConfiguredEditorMissing { variable, value });
     }
-
-    if let Ok(visual) = std::env::var("VISUAL") {
-        let cmd = visual.split_whitespace().next().unwrap_or(&visual);
-        if find_program(cmd).is_some() {
-            return Ok(visual);
-        }
+    if let Some(missing) = missing {
+        return Err(missing);
     }
 
     let editors = sniff::programs::InstalledEditors::new();
@@ -441,6 +464,35 @@ mod tests {
 
         let resolved = resolve_editor_command().unwrap();
         assert_eq!(resolved, visual.display().to_string());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn a_configured_editor_that_is_missing_refuses_rather_than_probing() {
+        let mut env_guard = ScopedEnv::new();
+        env_guard.set("EDITOR", "/definitely/missing/editor");
+        env_guard.set("VISUAL", "/definitely/missing/visual");
+
+        let error = resolve_editor_command().unwrap_err();
+        assert!(
+            matches!(&error, EditorError::ConfiguredEditorMissing { variable: "EDITOR", value } if value == "/definitely/missing/editor"),
+            "{error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn a_blank_editor_variable_counts_as_unset() {
+        let dir = tempdir().unwrap();
+        let visual = write_editor_script(dir.path(), "visual-choice", "#!/bin/sh\nexit 0\n");
+
+        let mut env_guard = ScopedEnv::new();
+        env_guard.set("EDITOR", "   ");
+        env_guard.set("VISUAL", visual.as_os_str());
+
+        assert_eq!(resolve_editor_command().unwrap(), visual.display().to_string());
     }
 
     #[cfg(unix)]

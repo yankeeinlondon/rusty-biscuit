@@ -829,7 +829,7 @@ class L1ThreadForwardingTests(unittest.TestCase):
                         "    assert 'TEST_POLICY_FORBIDDEN' not in os.environ, 'explicit override must skip calculation'\n"
                         "    raise SystemExit(subprocess.run([os.environ['TEST_REAL_JUST'], '--justfile', os.environ['TEST_POLICY_RECIPE'], '_test_threads'], check=False).returncode)\n"
                         "if sys.argv[1] == '_tier_filter':\n    print('all()')\n"
-                        "else:\n    assert sys.argv[1] in ('_stage_junit_reset', '_stage_junit', '_speak'), sys.argv\n"
+                        "else:\n    assert sys.argv[1] in ('_stage_junit_reset', '_stage_junit', '_speak', '_report_elapsed'), sys.argv\n"
                     ),
                 }
                 for name, body in stubs.items():

@@ -157,6 +157,7 @@ parse-only.
 | `property(NAME, type-definition(...))` | `schema` | declare `NAME` in every inline mapping it exports, and that property's declaration must satisfy the inner `type-definition(...)` options. |
 | `forms(K, ...)` | `type-definition` | build every top-level alternative as a non-array atom with one of the listed type keywords. |
 | `declared-required` | `type-definition` | be marked `required`, with no alternative that admits null. |
+| `container` | `type-definition` | denote a container: every non-null alternative is a list, tuple, object (`object` or an inline object), or dictionary, and at least one exists. |
 
 - **`property` reaches inline mappings only.** It judges a mapping carrier,
   or each inline mapping arm of a root-union list; a failure names the arm
@@ -164,7 +165,8 @@ parse-only.
   a reference arm are skipped. The option may repeat, and every repetition is
   enforced:
   `schema(property(kind, type-definition(declared-required)); property(name, type-definition(forms(string))))`.
-  Its inner `type-definition(...)` takes only `forms` and `declared-required`.
+  Its inner `type-definition(...)` takes only `forms`, `declared-required`,
+  and `container`.
 - **`forms` lists type keywords as a set.** Order and repeats carry no
   meaning, and any type keyword may be listed (`forms(string)`,
   `forms(literal, null)`). A `literal` or `enum` alternative must also denote
@@ -176,18 +178,37 @@ parse-only.
   because it is optional; `null | literal(a; required)` fails because a
   null-admitting union is never required (see
   [Null-Admitting Properties](types.md#null-admitting-properties)).
+- **`container` drops `null` alternatives but needs a container.**
+
+  | Definition | Verdict |
+  | --- | --- |
+  | `string[]`, `tuple([string, number])`, `{ name: string }`, `{ <string>: number }`, `object`, `unknown[]` | accepted |
+  | `string[] \| null`, `{a: string}[] \| {b: number}[]`, `string[] \| {a: string}` | accepted |
+  | `Rows@./rows.yaml`, `Rows@./rows.yaml \| null` | accepted provisionally: the reference is not followed |
+  | `string`, `enum(a, b)`, `unknown`, `any`, `null` | rejected |
+  | `[string, number]` (a YAML list), or the string `"[string, number]"` | rejected: a list is a union of its items (`string \| number`), not a tuple |
+  | `['string[]', null]`, or the string `"['string[]', null]"` | accepted |
+  | `string[] \| string` | rejected: the `string` alternative is not a container |
+
+  A rejection names the definition: *the definition must denote a container
+  (an array, tuple, object, or dictionary, optionally `| null`); `string`
+  does not*.
 - **On a `type-definition` value itself**, the subject of a message is the
   definition: `type-definition(forms(literal, enum); declared-required)`
   rejects `string(required)` with *the definition must be declared as
   `literal(...)` or `enum(...)`*.
 - **Each option belongs to one meta-type.** `string(mapping)`,
   `schema(forms(literal))`, `schema[](mapping)`, and a named-type reference
-  carrying an option are schema errors. `mapping` and `declared-required`
-  take no arguments; `forms` needs at least one keyword.
+  carrying an option are schema errors. `mapping`, `declared-required`, and
+  `container` take no arguments; `forms` needs at least one keyword.
 
 What a provisional pass skipped (a reference arm, a named-type alternative)
 is checked once the declaration is resolved: a library caller does that with
-[`claimed_values`](../language-core.md#claimed-values). The lowered JSON
+[`claimed_values`](../language-core.md#claimed-values) for `forms` and
+`property`, and with `simplified::narrowing::denotes_container` over the
+resolved definition for `container`. `container_admission` is the text-only
+judgment, which tells a provisional reference (`Provisional`) apart from a
+proven container (`Container`) and a rejection (`NotContainer`). The lowered JSON
 Schema carries the options in the `x-darkmatter-schema` and
 `x-darkmatter-type-definition` payloads; see
 [Custom Vocabulary](../custom-vocabulary.md#declaration-option-payloads).

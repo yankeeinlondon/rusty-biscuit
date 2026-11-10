@@ -367,6 +367,61 @@ fn line_column(source: &str, slice: &str) -> (usize, usize) {
     (line, before[line_start..].chars().count() + 1)
 }
 
+/// Admits every number in a JSON5 document from its written spelling.
+///
+/// The JSON5 counterpart of [`admit_json_text_numbers`], and likewise for text
+/// that has already parsed: text that does not tokenize reports no admission
+/// error. A number shadowed by a later duplicate key is checked too. Beyond
+/// the decimal grammar, JSON5 adds `NaN` and `Infinity`, which are never
+/// finite, and hexadecimal integers, admitted by their exact value.
+///
+/// ## Examples
+///
+/// ```
+/// use simplified_schema::numeric::admit_json5_text_numbers;
+///
+/// assert!(admit_json5_text_numbers("{a: 1.10, b: 0x10}").is_ok());
+/// assert!(admit_json5_text_numbers("{a: 9007199254740993}").is_err());
+/// assert!(admit_json5_text_numbers("[NaN]").is_err());
+/// ```
+///
+/// ## Errors
+///
+/// The first number, in document order, that admission rejects.
+pub fn admit_json5_text_numbers(text: &str) -> Result<(), JsonNumberError> {
+    let Ok(scan) = biscuit_file::json5_scan(text) else {
+        return Ok(());
+    };
+    for number in scan.numbers {
+        if let Err(reason) = admit_json5_spelling(&number.spelling) {
+            let (line, column) = line_column(text, &text[number.offset..]);
+            return Err(JsonNumberError {
+                pointer: number.pointer,
+                spelling: number.spelling,
+                reason,
+                line,
+                column,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn admit_json5_spelling(spelling: &str) -> Result<(), NumericAdmissionError> {
+    let unsigned = spelling.strip_prefix(['+', '-']).unwrap_or(spelling);
+    if matches!(unsigned, "NaN" | "Infinity") {
+        return Err(NumericAdmissionError::NotFinite);
+    }
+    if let Some(digits) = unsigned.strip_prefix("0x").or_else(|| unsigned.strip_prefix("0X")) {
+        let integer = i128::from_str_radix(digits, 16).map_err(|_| NumericAdmissionError::Inexact)?;
+        return admit_integer(integer).map(|_| ());
+    }
+    match admit_number_spelling(spelling) {
+        Err(NumberTextError::Admission(reason)) => Err(reason),
+        _ => Ok(()),
+    }
+}
+
 /// An object's members in written order, duplicates included, each value
 /// still borrowed as its raw text.
 struct JsonEntries<'a>(Vec<(String, &'a RawValue)>);

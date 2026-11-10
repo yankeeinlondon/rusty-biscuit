@@ -990,7 +990,7 @@ fn nested_code_preserves_a_surrounding_hyperlink() {
             assert!(out.starts_with("\x1b]8;;https://e.io\x1b\\"), "{out:?}");
             assert!(out.ends_with("\x1b]8;;\x1b\\"), "{out:?}");
         } else {
-            assert!(strip(&out).ends_with("](https://e.io)"), "{out:?}");
+            assert_eq!(strip(&out), "go x now", "{out:?}");
         }
         assert!(out.contains("\x1b[2mx\x1b[0m"), "{out:?}");
     }

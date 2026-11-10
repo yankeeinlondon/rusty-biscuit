@@ -259,13 +259,15 @@ for another host with all of its actions, use that host.
 
 ### Output order
 
-The composed document is written after `composed` and before `finalize`.
-`stdout` actions and the output of lifecycle commands share stdout with the
-document, in run order; every other communication verb (`stderr`, `info`,
-`warn`, `success`, `message`) writes to stderr. With
-`--output report-json`, stdout contains only the structured report; lifecycle
-`stdout` actions and command output go to stderr instead. See the
-[`md compose` reference](../../cli/compose.md#lifecycle-events).
+The composed document is written after `composed` and before `finalize`, and
+it is the only thing on stdout, so `md compose doc.md > out.md` captures the
+document alone. In Markdown mode, all lifecycle output goes to stderr in run
+order: every communication verb (`stdout`, `stderr`, `info`, `warn`, `success`,
+`message`) and the output of lifecycle commands. With a data output
+(`--output json`, `json5`, `yaml`, or `toml`), stderr stays empty and the same
+output goes into the payload's `lifecycle_output`, one entry per step. See the
+[`md compose` reference](../../cli/compose.md#lifecycle-events) and
+[Data contracts](../../cli/data-contracts.md).
 
 ```yaml
 composed:
@@ -276,21 +278,28 @@ finalize:
 
 ```text
 $ md compose doc.md 2>/dev/null
-before
 <the composed document>
+
+$ md compose doc.md >/dev/null
+before
 after
+
+$ md compose doc.md --output json
+{
+  "file": "doc.md",
+  "outcome": "success",
+  "document": "<the composed document>",
+  ...
+  "lifecycle_output": [
+    { "stage": "composed", "step": "stdout", "text": "before" },
+    { "stage": "finalize", "step": "stdout", "text": "after" }
+  ]
+}
 ```
 
-On a terminal, communication text is rendered as inline Markdown prose, so
-`**bold**` shows as bold. When stdout is a pipe or a file, a `stdout` action
-writes its text exactly as authored, so it joins the Markdown document
-unchanged:
-
-```text
-$ md compose doc.md > out.md    # composed: [{ stdout: "**draft** <!-- x -->" }]
-$ head -1 out.md
-**draft** <!-- x -->
-```
+Communication text is rendered as inline Markdown prose, so `**bold**` shows as
+bold on a terminal and as `bold` when stderr is a pipe or a file. In
+`lifecycle_output`, `text` holds it as authored.
 
 ### `stop`, `set`, and `skip`
 

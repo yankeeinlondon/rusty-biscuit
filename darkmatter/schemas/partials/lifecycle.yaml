@@ -682,6 +682,12 @@ types:
         - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(link-long))"
         - "{target: file(deferred) | null,desc: string(deferred) | null}(min-keys(2);operands(link-long))"
         - "{target: file(deferred) | null,desc: string(deferred) | null,no_error: boolean(required)}(min-keys(3);operands(link-long))"
+    load_data-short: "tuple([file(deferred) | null, type-definition(container;deferred), ({format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5;deferred),delimiter: string(deferred),header: boolean(deferred)}(deferred) | null)?]; operands(load_data-short))"
+    load_data-long:
+        - "{file: file(deferred) | null,as: type-definition(container;deferred;required)}(min-keys(2);operands(load_data-long))"
+        - "{file: file(deferred) | null,as: type-definition(container;deferred;required),no_error: boolean(required)}(min-keys(3);operands(load_data-long))"
+        - "{file: file(deferred) | null,as: type-definition(container;deferred;required),options: {format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5;deferred),delimiter: string(deferred),header: boolean(deferred)}(deferred) | null}(min-keys(3);operands(load_data-long))"
+        - "{file: file(deferred) | null,as: type-definition(container;deferred;required),options: {format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5;deferred),delimiter: string(deferred),header: boolean(deferred)}(deferred) | null,no_error: boolean(required)}(min-keys(4);operands(load_data-long))"
     lower-short:
         - "string(deferred;operands(lower-short))"
         - "tuple([string(deferred) | null]; operands(lower-short))"
@@ -834,6 +840,10 @@ types:
     trim-long:
         - "{text: string(deferred) | null}(min-keys(1);operands(trim-long))"
         - "{text: string(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(trim-long))"
+    try-short: "tuple([unknown | null, unknown | null]; operands(try-short))"
+    try-long:
+        - "{expr: unknown | null,fallback: unknown | null}(min-keys(2);operands(try-long))"
+        - "{expr: unknown | null,fallback: unknown | null,no_error: boolean(required)}(min-keys(3);operands(try-long))"
     try_frontmatter-short:
         - "file(deferred;operands(try_frontmatter-short))"
         - "tuple([file(deferred) | null]; operands(try_frontmatter-short))"
@@ -1232,6 +1242,9 @@ types:
         link:
             - link-short
             - link-long
+        load_data:
+            - load_data-short
+            - load_data-long
         lower:
             - lower-short
             - lower-long
@@ -1320,6 +1333,9 @@ types:
         trim:
             - trim-short
             - trim-long
+        try:
+            - try-short
+            - try-long
         try_frontmatter:
             - try_frontmatter-short
             - try_frontmatter-long
@@ -1459,6 +1475,7 @@ types:
         last: last-short
         length: length-short
         link: link-short
+        load_data: load_data-short
         lower: lower-short
         markdown_body_empty: markdown_body_empty-short
         markdown_title: markdown_title-short
@@ -1489,6 +1506,7 @@ types:
         terminal: terminal-short
         title_case: title_case-short
         trim: trim-short
+        try: try-short
         try_frontmatter: try_frontmatter-short
         upper: upper-short
         validate_schema: validate_schema-short
@@ -1613,6 +1631,7 @@ types:
         last: last-short
         length: length-short
         link: link-short
+        load_data: load_data-short
         lower: lower-short
         markdown_body_empty: markdown_body_empty-short
         markdown_title: markdown_title-short
@@ -1643,6 +1662,7 @@ types:
         terminal: terminal-short
         title_case: title_case-short
         trim: trim-short
+        try: try-short
         try_frontmatter: try_frontmatter-short
         upper: upper-short
         validate_schema: validate_schema-short

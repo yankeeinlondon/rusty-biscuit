@@ -208,6 +208,40 @@ flowchart LR
     B -->|"shell, directive, and transclusion stages:<br/>carried as text, never scanned"| O["composed output"]
 ```
 
+#### Reads after a command
+
+A body expression that reads a file (it calls `load_data` or another
+[read-side function](./topics/darkmatter-expressions.md#read-side-functions))
+and comes after a `::shell` line or shell block in the body is not evaluated
+by body interpolation. It waits until every command before it has run, so it
+sees what they wrote. This covers plain text, the arguments of a later
+`::shell` line or shell-block command, and `::file`/`::code`/`::url` targets,
+including every repeated copy of a `::map` or `::filter` body: the second
+item's read follows the first item's command.
+
+```markdown
+value: {{ load_data('d.toml', '{ a: { b: number } }').a.b }}
+::shell git config --file d.toml a.b 2
+value: {{ load_data('d.toml', '{ a: { b: number } }').a.b }}
+```
+
+The first line shows the old value, 1; the last shows 2. An expression that
+reads no file is still evaluated by body interpolation, before any command.
+
+```mermaid
+flowchart LR
+    I["Interpolation:<br/>everything except file reads after a command"] --> C1["next command runs"]
+    C1 --> R["file reads that now have no command left before them"]
+    R --> C1
+    R --> L["Links and transclusion"]
+```
+
+Every `::shell` line runs before any shell block, so a read written after a
+shell block waits for that block, and then sees every `::shell` line too. The
+stage boundaries are otherwise unchanged: page blocks, `::map`/`::filter`
+gates, sources, and callbacks are decided before any body command runs, so a
+read there keeps the value from before the commands.
+
 #### Structural preparation of `::map` and `::filter`
 
 [Map](./inline/map.md) and [filter](./inline/filter.md) regions are prepared in

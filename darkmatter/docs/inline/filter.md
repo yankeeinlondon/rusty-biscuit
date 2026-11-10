@@ -262,8 +262,12 @@ An outer false condition skips an inner filter; an inner condition can read an
 outer iteration's local bindings. Iterations do not rerun frontmatter or
 restart the whole document pipeline. Finish structural callbacks and body
 preparation before ordinary body interpolation, then run the existing body
-shell, link-resolution, transclusion, cleanup, and normalization stages. A later
-predicate failure can prevent earlier bodies' shell commands from running.
+shell, link-resolution, transclusion, cleanup, and normalization stages. A file
+read in a body copy that follows a command waits for that command, so the next
+item reads what the previous item's command wrote (see
+[Reads after a command](../darkmatter-compose-pipeline.md#reads-after-a-command)).
+A later predicate failure can prevent earlier bodies' shell commands from
+running.
 Children retain existing concurrency and output placement. Explicit expression
 effects, including `as_markdown()`, run when their expression evaluates.
 
@@ -384,8 +388,8 @@ iteration. A runtime failure names the item whose copy exposed it, whichever
 stage failed: a callback, a `when=` gate, a `{{ }}` expression, a shell
 argument or its output, a `::file` target, condition, or child, or an
 allowance. Sorting never replaces source positions with output positions. The
-library's typed error and `md compose --output report-json` carry the same
-fields; see [the report](../cli/report-json.md#failures-inside-map-and-filter-bodies).
+library's typed error and `md compose --output json` carry the same
+fields; see [Data contracts](../cli/data-contracts.md#failures-inside-map-and-filter-bodies).
 
 ## Markdown Boundaries
 

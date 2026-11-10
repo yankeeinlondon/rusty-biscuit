@@ -130,6 +130,28 @@ fn an_envelope_with_unknown_keys_is_a_finding_and_validation_stays_vacuous() {
     assert_eq!(report.trigger_findings, schemas.discovery_findings());
 }
 
+/// A slot in a trigger's `match` is refused when discovered, as an invalid
+/// trigger naming the slot; its valid neighbor still applies.
+#[test]
+fn a_slot_in_a_match_condition_is_an_invalid_trigger() {
+    let bad = "schemas/slotted.yaml";
+    let good = "schemas/good.yaml";
+    let repo = Repo::new(&[
+        (good, GOOD_TRIGGER),
+        (bad, "kind: schema-trigger\nmatch:\n  os: enum({{ env.OS }})\n$schema:\n  level: number\n"),
+    ]);
+
+    let schemas = repo.schemas();
+
+    assert_eq!(file_sources(schemas.trigger_registry().expect("registry")), [repo.path(good)]);
+    let finding = the_finding(schemas.discovery_findings());
+    assert_eq!(finding.source(), &TriggerSource::File(repo.path(bad)));
+    assert_eq!(finding.code(), "dm.schema.invalid_trigger");
+    assert!(finding.message().contains("slot"), "{}", finding.message());
+    let accepted = repo.document("ok.md", "title: t\nlevel: 3\n");
+    assert!(effective_properties(&schemas, &accepted).contains(&"level".to_string()));
+}
+
 fn assert_valid_trigger_applies_beside_invalid(good: &str, bad: &str) {
     let repo = Repo::new(&[(good, GOOD_TRIGGER), (bad, MISSING_PAYLOAD_TRIGGER)]);
 

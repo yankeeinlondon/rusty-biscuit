@@ -20,7 +20,7 @@ use super::layer::{Typed, declares, json_declares};
 use crate::completion::{AlternativeSite, PathStep, def_at_path};
 use crate::simplified::query::resolved_alternatives;
 use crate::simplified::{
-    Alternative, CallExample, Constraint, DefinitionTable, FunctionParameter, FunctionType, NarrowsClause, PropertyAtom,
+    Alternative, CallExample, Constraint, DefinitionTable, Slot, FunctionParameter, FunctionType, NarrowsClause, PropertyAtom,
     PropertyDef, SchemaArm, SchemaRoot, SchemaShape, TupleType, TypeExpr, serialize::serialize_property_def,
 };
 
@@ -73,8 +73,17 @@ impl<'a> TypeDefinition<'a> {
     }
 
     /// Whether the property is effectively required ([`PropertyDef::is_required`]).
+    /// A template type's presence is not known until it resolves; such a
+    /// declaration answers `false` here, and [`Self::requiredness`] says it
+    /// is pending.
     pub fn is_required(&self) -> bool {
-        self.def.is_required()
+        self.def.requiredness() == crate::Requiredness::Required
+    }
+
+    /// The property's presence, [`Requiredness::Pending`](crate::Requiredness::Pending)
+    /// while a template type has not resolved ([`PropertyDef::requiredness`]).
+    pub fn requiredness(&self) -> crate::Requiredness {
+        self.def.requiredness()
     }
 
     /// The leaf alternatives at this site, with references opened one level
@@ -94,6 +103,15 @@ impl<'a> TypeDefinition<'a> {
             return None;
         };
         FunctionView::of(atom)
+    }
+
+    /// The unresolved `{{ … }}` slots this type holds, directly or through a
+    /// stored definition it references, each once. Non-empty means the type
+    /// is part of a template: its `enum(...)`/`suggest(...)` lists show only
+    /// their literal elements and are not complete, and its template constraints
+    /// are not known.
+    pub fn pending_slots(&self) -> Vec<Slot> {
+        crate::slots::reachable_slots(&self.def, self.definitions)
     }
 
     /// The stored definitions references in this type point into.

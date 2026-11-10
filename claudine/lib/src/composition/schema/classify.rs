@@ -387,7 +387,9 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
         | TypeExpr::Tuple(_)
         | TypeExpr::Function(_)
         // A recursive named type is a nested structure.
-        | TypeExpr::Ref(_) => None,
+        | TypeExpr::Ref(_)
+        // A pending template type has no widget until it resolves.
+        | TypeExpr::Slot(_) => None,
     }
 }
 
@@ -437,6 +439,8 @@ pub(super) fn type_label_for_atom(atom: &PropertyAtom) -> String {
         TypeExpr::Tuple(_) => format!("tuple{suffix}"),
         TypeExpr::Function(_) => format!("function{suffix}"),
         TypeExpr::Ref(key) => format!("{name}{suffix}", name = key.name),
+        // A template type is labeled as authored until it resolves.
+        TypeExpr::Slot(slot) => format!("{{{{ {} }}}}{suffix}", slot.expression),
     }
 }
 
@@ -617,8 +621,9 @@ pub fn build_schema_status_report_for_mode(
         );
     report.problems.retain(|problem| {
         matches!(problem.kind, ValidationProblemKind::Missing)
-            || !top_level_pointer_segment(&problem.path)
-                .is_some_and(|name| caller_resolved.contains(&name))
+            || !(caller_resolved.contains(&problem.path)
+                || top_level_pointer_segment(&problem.path)
+                    .is_some_and(|name| caller_resolved.contains(&name)))
     });
     Ok(status_report_from_validation(
         &effective,

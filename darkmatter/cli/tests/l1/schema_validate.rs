@@ -52,7 +52,7 @@ fn schema_validate_failing_returns_exit_1() {
 }
 
 #[test]
-fn schema_validate_json_format_emits_ndjson() {
+fn schema_validate_json_format_emits_one_report() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
     let doc = write_file(
@@ -61,14 +61,18 @@ fn schema_validate_json_format_emits_ndjson() {
         "---\n$schema:\n  title: 'string(required)'\ntitle: Hello\n---\nBody\n",
     );
 
-    process
+    let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .arg(&doc)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"valid\":true"))
-        .stdout(predicate::str::contains("\"problems\":[]"));
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let record = common::schema_validate_record(&output.stdout);
+    assert_eq!(record["valid"], true, "{record}");
+    assert_eq!(record["problems"], serde_json::json!([]), "{record}");
 }
 
 #[test]
@@ -81,14 +85,33 @@ fn schema_validate_json_format_reports_problems() {
         "---\n$schema:\n  title: 'string(required)'\nother: stuff\n---\nBody\n",
     );
 
-    process
+    let output = failing_json_run(&process, &[], &doc);
+
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["outcome"], "failure", "{report}");
+    let record = common::schema_validate_record(&output.stdout);
+    assert_eq!(record["valid"], false, "{record}");
+    assert!(!record["problems"].as_array().unwrap().is_empty(), "{record}");
+}
+
+/// A `--output json` run that must exit 1, for reading its problems.
+fn failing_json_run(process: &CliProcessFixture, extra: &[&str], doc: &Path) -> std::process::Output {
+    let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
-        .arg(&doc)
-        .assert()
-        .code(1)
-        .stdout(predicate::str::contains("\"valid\":false"))
-        .stdout(predicate::str::contains("\"problems\""));
+        .args(["schema", "validate", "--output", "json"])
+        .args(extra)
+        .arg(doc)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    output
+}
+
+/// The named field of every problem in a one-file `--output json` report.
+fn problem_field_values(output: &std::process::Output, field: &str) -> Vec<serde_json::Value> {
+    let record = common::schema_validate_record(&output.stdout);
+    record["problems"].as_array().unwrap().iter().map(|problem| problem[field].clone()).collect()
 }
 
 #[test]
@@ -156,7 +179,7 @@ fn schema_validate_pretty_rejects_bare_sidecar_without_schema_property() {
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::contains("has a schema definition error"))
         .stdout(predicate::str::contains("not a schema definition"))
         .stdout(predicate::str::contains("schema.yaml"))
@@ -177,14 +200,14 @@ fn schema_validate_json_reports_bare_sidecar_as_not_a_schema_document() {
 
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .arg(&doc)
         .assert()
-        .code(2)
+        .code(1)
         .get_output()
         .stdout
         .clone();
-    let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let value = common::schema_validate_record(&output);
 
     assert_eq!(value["error"], "schema", "{value}");
     assert_eq!(value["valid"], false, "{value}");
@@ -216,7 +239,7 @@ fn schema_validate_quiet_still_reports_bare_sidecar_rejection() {
         .args(["schema", "validate", "--quiet"])
         .arg(&doc)
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::contains("not a schema definition"))
         .stdout(predicate::str::contains("schema.yaml"));
 }
@@ -265,7 +288,7 @@ fn schema_validate_baseline_from_env_var() {
 }
 
 #[test]
-fn schema_validate_bad_baseline_exits_2() {
+fn schema_validate_bad_baseline_exits_1() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
     let bad = write_file(tmp, "baseline.yaml", "not: a-schema\n");
@@ -277,11 +300,11 @@ fn schema_validate_bad_baseline_exits_2() {
         .arg(&bad)
         .arg(&doc)
         .assert()
-        .code(2);
+        .code(1);
 }
 
 #[test]
-fn schema_validate_unparseable_frontmatter_exits_3() {
+fn schema_validate_unparseable_frontmatter_exits_1() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
     // Intentionally malformed YAML inside frontmatter delimiters.
@@ -296,7 +319,7 @@ fn schema_validate_unparseable_frontmatter_exits_3() {
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
-        .code(3);
+        .code(1);
 }
 
 #[test]
@@ -329,17 +352,14 @@ fn schema_validate_json_reports_arm_index_for_root_union() {
         "---\n$schema:\n  - title: 'string(required)'\n  - name: 'string(required)'\nother: value\n---\nBody\n",
     );
 
-    process
-        .command()
-        .args(["schema", "validate", "--format", "json"])
-        .arg(&doc)
-        .assert()
-        .code(1)
-        .stdout(predicate::str::contains("\"arm_index\":0"));
+    let output = failing_json_run(&process, &[], &doc);
+
+    let values = problem_field_values(&output, "arm_index");
+    assert!(values.contains(&serde_json::json!(0)), "{values:?}");
 }
 
 #[test]
-fn schema_validate_unresolved_document_schema_exits_2() {
+fn schema_validate_unresolved_document_schema_exits_1() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
     let doc = write_file(
@@ -353,16 +373,13 @@ fn schema_validate_unresolved_document_schema_exits_2() {
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
-        .code(2);
+        .code(1);
 }
 
 #[test]
-fn schema_validate_unresolved_document_schema_outranks_validation_failure() {
+fn schema_validate_unresolved_document_schema_and_validation_failure_report_side_by_side() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
-    // One file has a missing `$schema` reference (schema-load error → 2);
-    // the other has a normal validation failure (→ 1). Schema-load errors
-    // outrank validation failures so the overall exit code must be 2.
     let bad_schema = write_file(
         tmp,
         "bad_schema.md",
@@ -374,13 +391,19 @@ fn schema_validate_unresolved_document_schema_outranks_validation_failure() {
         "---\n$schema:\n  title: 'string(required)'\nother: stuff\n---\nBody\n",
     );
 
-    process
+    let output = process
         .command()
-        .args(["schema", "validate"])
+        .args(["schema", "validate", "--output", "json"])
         .arg(&bad_schema)
         .arg(&bad_value)
-        .assert()
-        .code(2);
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let records = common::schema_validate_records(&output.stdout);
+    assert_eq!(records[0]["error"], "schema", "{records:#?}");
+    assert!(records[1].get("error").is_none(), "{records:#?}");
+    assert_eq!(records[1]["valid"], false, "{records:#?}");
 }
 
 #[test]
@@ -440,13 +463,10 @@ fn schema_validate_pretty_reports_source_line_for_problem() {
         "---\n$schema:\n  rating: number\n# important: do not reorder\n\nrating: nope\n---\nBody\n",
     );
 
-    process
-        .command()
-        .args(["schema", "validate", "--format", "json"])
-        .arg(&doc)
-        .assert()
-        .code(1)
-        .stdout(predicate::str::contains("\"line\":6"));
+    let output = failing_json_run(&process, &[], &doc);
+
+    let values = problem_field_values(&output, "line");
+    assert!(values.contains(&serde_json::json!(6)), "{values:?}");
 }
 
 #[test]
@@ -668,7 +688,7 @@ fn schema_validate_invalid_assignment_yaml_returns_usage_error() {
         // error rather than silently treated as a file path.
         .arg("user={broken")
         .assert()
-        .code(64);
+        .code(2);
 }
 
 #[test]
@@ -775,15 +795,10 @@ fn schema_validate_json_carries_description_field() {
         "---\n$schema:\n  title: 'string(required) -> The headline shown in listing pages'\nother: stuff\n---\nBody\n",
     );
 
-    process
-        .command()
-        .args(["schema", "validate", "--format", "json"])
-        .arg(&doc)
-        .assert()
-        .code(1)
-        .stdout(predicate::str::contains(
-            "\"description\":\"The headline shown in listing pages\"",
-        ));
+    let output = failing_json_run(&process, &[], &doc);
+
+    let values = problem_field_values(&output, "description");
+    assert!(values.contains(&serde_json::json!("The headline shown in listing pages")), "{values:?}");
 }
 
 #[test]
@@ -798,13 +813,10 @@ fn schema_validate_json_description_is_null_when_absent() {
         "---\n$schema:\n  rating: number\nrating: nope\n---\nBody\n",
     );
 
-    process
-        .command()
-        .args(["schema", "validate", "--format", "json"])
-        .arg(&doc)
-        .assert()
-        .code(1)
-        .stdout(predicate::str::contains("\"description\":null"));
+    let output = failing_json_run(&process, &[], &doc);
+
+    let values = problem_field_values(&output, "description");
+    assert!(values.contains(&serde_json::json!(null)), "{values:?}");
 }
 
 #[test]
@@ -853,7 +865,7 @@ fn schema_validate_contested_file_match_selects_and_rejects_union_arms() {
     let validate = |doc: &Path, spec: &str| {
         let output = process
             .command()
-            .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
+            .args(["schema", "validate", "--disable", "schema-triggers", "--output", "json"])
             .arg(doc)
             .arg(format!("spec={spec}"))
             .output()
@@ -869,7 +881,7 @@ fn schema_validate_contested_file_match_selects_and_rejects_union_arms() {
     ] {
         let (code, stdout) = validate(doc, spec);
         assert_eq!(code, Some(0), "{} with {spec}: {stdout}", doc.display());
-        assert!(stdout.contains("\"valid\":true"), "{stdout}");
+        assert_eq!(common::schema_validate_record(stdout.as_bytes())["valid"], true, "{stdout}");
     }
 
     let (code, stdout) = validate(&settled, "features/x/spec.md");
@@ -919,7 +931,7 @@ fn schema_validate_enforces_each_root_union_arm_match() {
         for (spec, accepted) in [(matching, true), (outside, false)] {
             let output = process
                 .command()
-                .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
+                .args(["schema", "validate", "--disable", "schema-triggers", "--output", "json"])
                 .arg(&doc)
                 .arg(format!("spec={spec}"))
                 .output()
@@ -971,13 +983,12 @@ fn assert_spelling_applied(schema: &str, instances: &[(&str, Expected)]) {
         );
         let output = process
             .command()
-            .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
+            .args(["schema", "validate", "--disable", "schema-triggers", "--output", "json"])
             .arg(&doc)
             .output()
             .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let report: serde_json::Value = serde_json::from_str(&stdout)
-            .unwrap_or_else(|error| panic!("{instance:?}: {error}: {stdout}"));
+        let report = common::schema_validate_record(&output.stdout);
         assert_eq!(report["schema"], "./schema.yaml", "{instance:?}: {stdout}");
         match expected {
             None => {
@@ -1029,15 +1040,10 @@ fn schema_validate_reports_folded_description_of_continued_scalar() {
         "---\n$schema: ./schema.yaml\ntitle: ab\n---\nBody\n",
     );
 
-    process
-        .command()
-        .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
-        .arg(&doc)
-        .assert()
-        .code(1)
-        .stdout(predicate::str::contains(
-            "\"description\":\"the display title of the post\"",
-        ));
+    let output = failing_json_run(&process, &["--disable", "schema-triggers"], &doc);
+
+    let values = problem_field_values(&output, "description");
+    assert!(values.contains(&serde_json::json!("the display title of the post")), "{values:?}");
 }
 
 #[test]
@@ -1070,7 +1076,7 @@ fn schema_validate_rejects_indentless_types_sequence() {
         .args(["schema", "validate", "--disable", "schema-triggers"])
         .arg(&doc)
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::contains("has a schema definition error"))
         .stdout(predicate::str::contains("`/types`"));
 }
@@ -1124,7 +1130,7 @@ const NAMED_TYPE_SCHEMA: &str = "$schema:\n  title: string(required)\n  a: title
 /// [`NAMED_TYPE_SCHEMA`], leaving every generated property absent.
 const NAMED_TYPE_REQUIRED_VALUES: [&str; 4] = ["title=t", "a=t", "b=t", "c=t"];
 
-/// Runs `md schema validate --format json` on `doc` with `extra` positional
+/// Runs `md schema validate --output json` on `doc` with `extra` positional
 /// inputs, returning the exit code and the parsed report.
 fn validate_json(
     process: &CliProcessFixture,
@@ -1137,17 +1143,13 @@ fn validate_json(
             "schema",
             "validate",
             "--disable", "schema-triggers",
-            "--format",
-            "json",
+            "--output", "json",
         ])
         .arg(doc)
         .args(extra)
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let report =
-        serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: stdout {stdout:?}"));
-    (output.status.code(), report)
+    (output.status.code(), common::schema_validate_record(&output.stdout))
 }
 
 /// The `(path, message)` of every reported problem, sorted by path.
@@ -1324,7 +1326,7 @@ fn schema_validate_multi_hop_bound_contradiction_names_both_origins() {
 
     let (code, report) = validate_json(&process, &doc, &[]);
 
-    assert_eq!(code, Some(2), "{report}");
+    assert_eq!(code, Some(1), "{report}");
     assert_eq!(report["error"], "schema", "{report}");
     let message = report["message"].as_str().unwrap();
     for fragment in [
@@ -1350,7 +1352,7 @@ fn schema_validate_unknown_bare_name_in_an_inline_schema_is_a_schema_error() {
 
     let (code, report) = validate_json(&process, &doc, &[]);
 
-    assert_eq!(code, Some(2), "{report}");
+    assert_eq!(code, Some(1), "{report}");
     assert_eq!(report["error"], "schema", "{report}");
     assert_eq!(
         report["message"], "heading: unknown named type `nosuchtype` in the inline `$schema`",
@@ -1371,7 +1373,7 @@ fn schema_validate_unknown_bare_name_in_a_referenced_schema_names_that_file() {
 
     let (code, report) = validate_json(&process, &doc, &[]);
 
-    assert_eq!(code, Some(2), "{report}");
+    assert_eq!(code, Some(1), "{report}");
     let message = report["message"].as_str().unwrap();
     let fragment = format!(
         "heading: unknown named type `nosuchtype` in `{}`",
@@ -1515,14 +1517,11 @@ fn shipped_claudine_document(process: &CliProcessFixture, values: &str) -> PathB
 fn validate_triggered_json(process: &CliProcessFixture, doc: &Path) -> (Option<i32>, serde_json::Value) {
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .arg(doc)
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let report =
-        serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: stdout {stdout:?}"));
-    (output.status.code(), report)
+    (output.status.code(), common::schema_validate_record(&output.stdout))
 }
 
 #[test]
@@ -1640,7 +1639,7 @@ fn schema_validate_grammar_error_in_one_shipped_definition_names_its_location() 
 
     let (code, rendered) = validate_rendered(&process, &doc);
 
-    assert_eq!(code, Some(2), "{rendered}");
+    assert_eq!(code, Some(1), "{rendered}");
     for fragment in [
         "has a schema definition error",
         "lifecycle.yaml as a standalone SimplifiedSchema",
@@ -1662,7 +1661,7 @@ fn schema_validate_bound_conflict_across_an_import_of_a_shipped_file_shows_both_
 
     let (code, rendered) = validate_rendered(&process, &doc);
 
-    assert_eq!(code, Some(2), "{rendered}");
+    assert_eq!(code, Some(1), "{rendered}");
     for fragment in [
         "has a schema definition error",
         "tag reuses slug with contradictory bounds",

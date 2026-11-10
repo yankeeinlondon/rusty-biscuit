@@ -20,7 +20,7 @@ use clap_complete::engine::CompletionCandidate;
 use darkmatter::markdown::compose::collection_blocks::diagnostics::{UNTYPED_FILTER_SOURCE_CODE, UNTYPED_MAP_SOURCE_CODE};
 use darkmatter::markdown::compose::policy::{
     BlockingPolicy, COMPOSE_DIAGNOSTIC_CODES, CTX_OVERRIDE_CODE, INVALID_FRONTMATTER_ASSIGNMENT_CODE,
-    MISSING_HYPERLINK_CODE, MISSING_IMAGE_CODE, MISSING_TRANSCLUSION_CODE,
+    MISSING_HYPERLINK_CODE, MISSING_IMAGE_CODE, MISSING_TRANSCLUSION_CODE, RENDER_DIAGNOSTIC_CODES,
     REASSIGNED_FRONTMATTER_PROPERTY_CODE, SHELL_TIMEOUT_CODE,
 };
 
@@ -59,7 +59,8 @@ impl PolicyCommand {
     fn deny_codes(self) -> &'static [(&'static str, &'static str)] {
         match self {
             Self::Compose => COMPOSE_DIAGNOSTIC_CODES,
-            Self::Render | Self::Clean | Self::SchemaValidate => &[],
+            Self::Render => RENDER_DIAGNOSTIC_CODES,
+            Self::Clean | Self::SchemaValidate => &[],
         }
     }
 }
@@ -623,6 +624,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn link_title_codes_are_deniable_on_compose_and_render_only() {
+        use darkmatter::markdown::compose::policy::{LINK_LEGACY_TITLE_CODE, LINK_MALFORMED_TITLE_CODE};
+        for code in [LINK_LEGACY_TITLE_CODE, LINK_MALFORMED_TITLE_CODE] {
+            for command in [Compose, Render] {
+                assert!(parse_selector(command, PolicyVerb::Deny, code).is_ok(), "{code}");
+                assert!(long_help(command, PolicyVerb::Deny).contains(code), "{code}");
+            }
+            assert!(parse_selector(Clean, PolicyVerb::Disable, code).is_err(), "{code}");
+        }
+    }
+
+    #[test]
+    fn the_undeclared_member_code_is_deniable_on_compose_only() {
+        use darkmatter::markdown::compose::expression::UNDECLARED_MEMBER_CODE;
+        assert_eq!(parse(Compose, PolicyVerb::Deny, UNDECLARED_MEMBER_CODE), PolicySelector::Code(UNDECLARED_MEMBER_CODE));
+        assert!(long_help(Compose, PolicyVerb::Deny).contains(UNDECLARED_MEMBER_CODE));
+        assert!(parse_selector(Render, PolicyVerb::Deny, UNDECLARED_MEMBER_CODE).is_err());
     }
 
     #[test]

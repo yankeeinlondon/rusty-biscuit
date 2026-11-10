@@ -82,6 +82,43 @@ First character: `A-Z a-z 0-9`
 A local type named like a built-in, referenced as `shell@this`, hovers and
 goes to its local definition; the bare `shell` is the built-in.
 
+### Type definitions inside a function argument
+
+Hovering a string argument whose catalog parameter is a `type-definition`,
+such as the `as` of `load_data`, shows the same definition hover, titled by
+the parameter and ranged on the string literal. It works in the body and in
+frontmatter expressions, through string escapes and YAML quoting.
+`{{ load_data("os.yaml", "string[]") }}` shows:
+
+```markdown
+**`as`**
+
+Type: **type-definition**
+
+Declares: **string[]**
+
+**`string`**: ...
+```
+
+A named reference such as `"Hosts@./types.yaml"` hovers as written; the
+schema file is not opened. A string that is not a valid definition falls
+back to the expression hover.
+
+### Function signatures with an options object
+
+Hovering a function name shows its typed signature and catalog description.
+For `load_data`, the signature shows the optional third parameter in
+brackets with its declared keys, and the description gives each key's
+default:
+
+```markdown
+load_data(file: file | null, as: type-definition(container), [options: {format: enum(yaml,yml,json,jsonl,ndjson,csv,tsv,toml,json5),delimiter: string,header: boolean} | null]) -> unknown | null | error
+```
+
+The description says that `format` overrides the file extension, that
+`delimiter` defaults to a comma (TSV accepts only a tab), and that `header`
+defaults to `true`.
+
 ### Union-typed properties and list items
 
 A property typed by a reference to a union-typed named type with a postfix
@@ -143,6 +180,29 @@ inlined union would, listing its alternatives as described under
 [Union-typed properties and list items](#union-typed-properties-and-list-items),
 so the item line ("matches alternative N of M") numbers the same list
 whether the union was stored or copied.
+
+### Properties whose type is pending
+
+A property whose whole type comes from a schema slot (a *template type*,
+`status: "{{ … }}(required)"`) has no known type until the slot worker
+resolves it. Its hover says so and claims nothing the returned type will
+decide: no *Required* line (even with a `(required)` suffix, since the
+returned type may admit null), no values, and no default. A `-> description`
+written after the slot is still shown, and a property-level union lists its
+static arms beside the pending one:
+
+```markdown
+**`status`**
+
+Type: one of:
+- **type pending**
+- **boolean**
+
+_Schema slots pending: only the schema's literal parts are known._
+```
+
+Once the slot resolves, the hover is the resolved type's, as for any
+property. See [Schema Slots: In the editor](../../docs/topics/schemas/schema-slots.md#in-the-editor).
 
 ## Value versus key hover
 
@@ -567,12 +627,14 @@ Hover is a provider-chain capability: each provider may contribute, and the regi
 
 | Provider (in order)  | Hovers on                                            | Content                                                                                                   |
 |----------------------|------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| substrate (Markdown) | a link                                               | graph-sourced target preview, plus a Markdown target's frontmatter summary (an unopened target is read once, then cached) |
+| substrate (Markdown) | a heading or a link (not a `{{ }}` inside either)    | heading level and anchor; graph-sourced target preview, plus a Markdown target's frontmatter summary (an unopened target is read once, then cached) |
 | wiki                 | `[[target]]` / `[[target#heading]]`                  | resolved target + heading preview (no summary)                                                            |
 | frontmatter          | a frontmatter key or its value                       | key: schema type/required/enum/default/description, or a `ctx.*` generated-key annotation; value: the `$schema` or `file` value hover |
 | DSL                  | a directive, `{{ }}` interpolation, `{{{ }}}` literal, or a `$()` value | directive semantics + resolved target; interpolation's static value, schema-property fallback, or `ctx.*` note, plus a guard-narrowed local type; literal composed-output + inert note; on a `$()` suffix (`::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), what the suffix does; elsewhere on a `$()` value, the shell policy verdict |
 
 Because the chain stops at the first non-empty hover, a schema-defined frontmatter key whose value contains `{{ }}` is explained by the **frontmatter** provider (the schema description), while an *undefined* key's `{{ … }}` value falls through to the **DSL** provider's interpolation hover.
+
+The substrate declines any offset inside a body `{{ … }}`, so an interpolation in a heading or link (`# Research on {{ seq.name }}`) shows the expression hover, while the rest of the heading still shows its anchor.
 
 ## Frontmatter typing and its reuse
 

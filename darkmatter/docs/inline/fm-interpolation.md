@@ -164,7 +164,8 @@ name. See
 
 The [read-side functions](../topics/darkmatter-expressions.md#read-side-functions)
 (`file_exists`, `frontmatter`, `markdown_title`, `markdown_body_empty`,
-`validate_schema`, `absolute`, `relative`) resolve in frontmatter interpolation
+`validate_schema`, [`load_data`](../topics/loading-data.md), `absolute`,
+`relative`) resolve in frontmatter interpolation
 just as they do in body interpolation — both passes carry a resolution context
 anchored on the source document's directory and its repository root (implicit
 paths resolve from the document directory first, then the repository root). The motivating pattern relies on this:
@@ -321,6 +322,11 @@ That means:
   A candidate from pass 1 is only reported if the name is still unknown after
   schema validation and pass 2, so a key that shell expansion or the schema
   supplies never warns
+- a misspelled member of a typed value (`{{ server.nmae }}` when the schema
+  types `server` as `{ name: string }`) raises the advisory
+  `dm.expression.undeclared_member` once per authored site, judged against
+  the prepared schema, never a provisional one (see
+  [Misspelled members](../topics/darkmatter-expressions.md#misspelled-members))
 - fallbacks work: `{{ color || "unknown" }}`
 - ternaries work: `{{ enabled ? "yes" : "no" }}`
 - helper functions work: `{{ length(items) }}`
@@ -347,6 +353,15 @@ state, not text:
 
 Mixed text (`"a {{ x }}"`) and strings holding more than one expression
 interpolate to a string instead.
+
+A `}}` inside a quoted string or a nested `{ … }` does not end the span (see
+[Where an Expression Ends](./interpolation.md#where-an-expression-ends)), so
+a whole value can hold a nested type or object literal and still keep its
+type:
+
+```yaml
+hosts: "{{ load_data('hosts.yaml', '{ name: string, tags: { <string>: string }}[]') }}"
+```
 
 ## Chained References
 

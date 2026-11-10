@@ -79,7 +79,7 @@ test *args="":
         # and keeps per-package invocations for distinct JUnit reports.
         BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} --features effects-instrumentation,work-counters; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     else
-        just _test_local_all "{{ LIBRARY }} --features effects-instrumentation,work-counters; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
+        just --quiet _test_local_all "{{ LIBRARY }} --features effects-instrumentation,work-counters; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     fi
     if (( exit_code == 130 )); then
         exit 130
@@ -115,6 +115,11 @@ test-l3 *args="":
 # `BISCUIT_BROWSER_REQUIRED=1` is set.
 test-browser *args="":
     @just _test_browser {{ LIBRARY }} --features browser-tests {{ args }}
+
+# Opt-in L1 loaders for `md`'s fish and Elvish completion scripts, which no CI
+# runner can run. Needs both shells: a missing one fails, never skips.
+test-optional-shells *args="":
+    @just _test {{ CLI }} --features test-fixtures,optional-shell-tests path_completion::optional_shells:: {{ args }}
 
 # not applicable: darkmatter has no real-resource (device / network) tier
 test-real:
@@ -518,14 +523,15 @@ docs_library:
     @just _claude_file ./prompts/update-library-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
     @just _play confirmation
 
-# Regenerate the expression function table in docs/topics/darkmatter-expressions.md
+# Regenerate the expression function table in docs/topics/darkmatter-expressions.md and the function pages in docs/functions/
 regen-expr-doc:
     @echo
-    @echo -e "Regenerating {{ BOLD }}Darkmatter Expressions{{ RESET }} function table"
+    @echo -e "Regenerating {{ BOLD }}Darkmatter Expressions{{ RESET }} function table and function pages"
     @echo
     @cargo run -p darkmatter --example expression_doc_generator -- --write
     @echo
     @echo -e "{{ BOLD }}{{ GREEN }}Function table regenerated{{ RESET }} in docs/topics/darkmatter-expressions.md"
+    @echo -e "{{ BOLD }}{{ GREEN }}Function pages regenerated{{ RESET }} in docs/functions/"
 
 # Regenerate the generated lifecycle verb types in schemas/partials/lifecycle.yaml
 regen-lifecycle-schema:

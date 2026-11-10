@@ -45,6 +45,23 @@ validation before execution or result reuse. Re-preparing a document with
 changed state requires another audit; an exact decision cannot cover new bytes.
 A dead-branch command is **approved but never executed**.
 
+One case has bytes the walk could not see: a command whose argument reads a
+file (`load_data`, `frontmatter`, `file_exists`, …) after an earlier command
+ran. Pre-flight read the file before anything ran, so it approved the bytes
+the old content gave. When the command's bytes change, they run only if an
+`exact` rule in the whitelist names them, the rule the walk itself would have
+applied, or if the command's `template` shape was approved. Otherwise the
+command fails as not pre-approved, and nothing about it runs:
+
+```markdown
+::shell git config --file d.toml a.b 2
+
+::shell git config --file result.toml r.v {{ load_data('d.toml', '{ a: { b: number } }').a.b }}
+```
+
+Pre-flight sees `… r.v 1`; the second command runs as `… r.v 2`. Approve it
+with `exact git config --file result.toml r.v 2` or with its template shape.
+
 ### Missing values
 
 A shell command never runs with a missing value. A placeholder is missing
@@ -126,6 +143,34 @@ part: "$(echo pending)"
 ---
 {{ map(['::shell echo child'], part => as_markdown(part)) }}
 ```
+
+### Recoverable reads in `try`
+
+A discovery pass, such as this approval walk or the reference check
+`md compose` runs first, evaluates expressions before composition does. This
+section covers what it does with
+[`try(expr, fallback)`](../functions/try.md), which returns `fallback` when
+`expr` fails to read its data (see
+[Recovering from read failures](../topics/darkmatter-expressions.md#recovering-from-read-failures)).
+
+- **A real recoverable failure takes the fallback.** When the pass reads a
+  missing file, it uses the fallback and keeps going. With no `build.yaml`,
+  it approves `ls src`, and composition later runs the same command:
+
+  ```md
+  ::shell ls {{ try(load_data("build.yaml", "{ dir: string }"), {dir: "src"}).dir }}
+  ```
+
+- **A read the pass cannot perform is deferred.** The reference check has no
+  network permission, so it does not fetch a remote `load_data`. It does not
+  treat that as a failure and does not take the fallback: the expression is
+  left for composition, which reads the real value. A fallback chosen during
+  discovery never becomes the final value.
+- **Both arguments are inspected.** Like both sides of a ternary, a command or
+  a file the fallback would need is collected even when `expr` succeeds.
+- **`try` loosens nothing.** It does not approve a command, does not absorb
+  `NotPreApproved` or `MissingValue`, and does not relax fetch policy: a
+  denied host stays an error inside `try`.
 
 ## ICMP Effects
 
@@ -500,8 +545,14 @@ When Darkmatter is used through an external orchestrator (such as Claudine), the
 ```md
 ::code &src/main.rs                     resolved; recorded in the report's graph
 ::toc-linking "&missing.md | false"     suppressed; no error
-::toc-linking &missing.md               fails pre-flight with `failure: no-match`
+::toc-linking &missing.md               fails pre-flight with the class `no-match`
 ```
+
+The library returns that failure as a typed error, whose block ends in a
+`failure: no-match` row. `md compose` finds the same target in its earlier
+reference check and lists it in the
+[reference report](../errors/file-reference-failures.md#the-reference-report), whose
+data outputs carry the class in `failure`.
 
 Each resolved `::code` and `::toc-linking` target appears in `ComposePreflightReport::preflight_graph` as a `PreflightTargetEdge` on its document's node (`targets`), separate from the `::file` edges that composition reuses.
 

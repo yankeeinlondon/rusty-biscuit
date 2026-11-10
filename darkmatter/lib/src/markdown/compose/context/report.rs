@@ -14,6 +14,10 @@ use std::path::PathBuf;
 /// generated during processing.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ComposeReport {
+    /// The document this report's own warnings are about, stamped on each as
+    /// it is added; `None` for input with no named origin.
+    pub(crate) document: Option<PathBuf>,
+
     /// Number of frontmatter interpolation expressions resolved.
     pub frontmatter_interpolations_applied: usize,
 
@@ -86,6 +90,12 @@ pub struct ComposeReport {
     /// Remote-fetch statistics from this compose run.
     pub remote_fetch_stats: Option<super::super::remote_fetch::RemoteFetchStats>,
 
+    /// The files and URLs the command's expressions read, deduplicated and in
+    /// lexical order: canonical local paths as portable text, and normalized
+    /// URLs. It covers every pass that shared the command's data runtime (a
+    /// reference check included), and a read that failed after resolving.
+    pub read_set: Vec<String>,
+
     /// Top-level frontmatter keys intentionally deferred from compose-time
     /// resolution (via `ComposeOptions::with_exclude_keys`). Their values
     /// survive raw in `effective_frontmatter` for caller-owned event-time
@@ -98,6 +108,12 @@ pub struct ComposeReport {
     /// such as preflight discovery). A caller that scans that body for
     /// instructions must skip them. Never merged from a child report.
     pub(crate) body_data: Option<crate::markdown::compose::body_origin::DataRanges>,
+
+    /// Where each byte of the composed body came from, under the same
+    /// condition as [`Self::body_data`]: reference analysis projects its
+    /// prepared-body records through it. `None` when the document has no map.
+    /// Never merged from a child report.
+    pub(crate) body_origin: Option<crate::markdown::compose::body_origin::BodyOrigin>,
 
     /// The repeated copies of the composed body ([`Self::body_data`]'s
     /// counterpart for `::map` / `::filter`), and the body before any stage
@@ -118,6 +134,13 @@ pub struct ComposeReport {
     /// pass reports other warnings the compose pass would not. Never merged
     /// from a child report.
     pub(crate) passive_warnings: usize,
+
+    /// The undeclared-member candidates this document's passive call check
+    /// found, joined with the selectors its evaluator reaches
+    /// ([`member_sites`](crate::markdown::compose::member_sites)). Per
+    /// document: never merged from a child report, whose member warnings
+    /// merge as warnings.
+    pub(crate) member_candidates: std::sync::Arc<crate::markdown::compose::member_sites::MemberCandidates>,
 }
 
 /// First-read undeclared-property candidates in read order, one per root.
@@ -441,7 +464,8 @@ impl ComposeReport {
     /// [`WarningIdentity`] and their `(source, code, subject)` keys match; the
     /// first one added is kept, so its location is the one displayed. Warnings
     /// without an identity are always added.
-    pub fn add_warning(&mut self, warning: ComposeWarning) {
+    pub fn add_warning(&mut self, mut warning: ComposeWarning) {
+        warning.attribute_to(self.document.as_deref());
         if let Some(key) = warning.issue_key()
             && !self.warning_index.admit(&self.warnings, key)
         {
@@ -540,6 +564,8 @@ impl ComposeReport {
             _ => {}
         }
 
+        merge_read_sets(&mut self.read_set, other.read_set);
+
         // Deferred keys accumulate across recursive child pipelines.
         self.deferred_frontmatter_keys
             .extend(other.deferred_frontmatter_keys);
@@ -587,7 +613,9 @@ pub struct ComposeWarning {
     /// Human-readable description of the issue.
     pub message: String,
 
-    /// Line number where the issue occurred (1-indexed), if applicable.
+    /// Line number where the issue occurred (1-indexed), if applicable. Most
+    /// producers count it in the current body, so it is for a terminal row;
+    /// [`Self::location`] is what a diagnostic may publish.
     pub line_number: Option<usize>,
 
     /// Stable producer identity when the warning originates from a typed
@@ -617,6 +645,23 @@ pub struct ComposeWarning {
     /// types the editor shows. [`Self::message`] is that finding phrased
     /// for a terminal row.
     pub diagnostic: Option<Box<crate::markdown::compose::expression::Diagnostic>>,
+
+    /// The file the warning is about: the document that reported it unless
+    /// the producer named another. A child's warning keeps its child through
+    /// a merge into the parent.
+    pub(crate) document: Option<PathBuf>,
+
+    /// The warning's proven authored position in [`Self::document`].
+    pub(crate) location: Option<WarningLocation>,
+}
+
+/// Where a warning sits in its document as written. Never a current-body
+/// coordinate: a stage may have moved those.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WarningLocation {
+    pub(crate) line: usize,
+    pub(crate) column: Option<usize>,
+    pub(crate) span: Option<std::ops::Range<usize>>,
 }
 
 /// A failed composition with the warnings it had reported before the
@@ -625,6 +670,19 @@ pub struct ComposeWarning {
 pub struct ComposeFailure {
     pub error: crate::markdown::types::MarkdownError,
     pub warnings: Vec<ComposeWarning>,
+    /// What the command's expressions had read when it stopped; see
+    /// [`ComposeReport::read_set`].
+    pub read_set: Vec<String>,
+}
+
+/// Unions `other` into the sorted, deduplicated `read_set`.
+pub(crate) fn merge_read_sets(read_set: &mut Vec<String>, other: Vec<String>) {
+    if other.is_empty() {
+        return;
+    }
+    read_set.extend(other);
+    read_set.sort();
+    read_set.dedup();
 }
 
 /// The issue a coded warning reports, so each issue is reported once.
@@ -672,6 +730,15 @@ pub(crate) enum WarningSubject {
         scope: Option<String>,
         origin: ExpressionOrigin,
     },
+    /// One link's title, once per source document however many times a pass
+    /// reaches it (a repeated `::map` copy, a second scan of the same body).
+    LinkTitle {
+        /// Source document; `None` until the document's pipeline attributes it.
+        document: Option<PathBuf>,
+        /// Where the link starts in that document's authored text, or the
+        /// construct that wrote it.
+        start: usize,
+    },
 }
 
 /// Where an expression was observed in a scanned text.
@@ -688,7 +755,7 @@ impl WarningSubject {
     fn attribute_to(&mut self, source_document: &std::path::Path) {
         match self {
             Self::Path(_) | Self::Embedded { .. } => {}
-            Self::Root { document, .. } | Self::Expression { document, .. } => {
+            Self::Root { document, .. } | Self::Expression { document, .. } | Self::LinkTitle { document, .. } => {
                 if document.is_none() {
                     *document = Some(source_document.to_path_buf());
                 }
@@ -714,6 +781,9 @@ impl ComposeWarning {
     /// `find_files()` and `::file-links`.
     pub const GLOB_SKIPPED_SYMLINK_CODE: &'static str = "dm.glob.skipped_symlink";
 
+    /// Producer of the link-title warnings.
+    pub const LINK_TITLE_SOURCE: &'static str = "darkmatter.link";
+
     /// Creates a new warning.
     pub fn new(stage: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -727,6 +797,8 @@ impl ComposeWarning {
             resolution_failure: None,
             identity: None,
             diagnostic: None,
+            document: None,
+            location: None,
         }
     }
 
@@ -754,10 +826,12 @@ impl ComposeWarning {
             identity: Some(WarningIdentity {
                 subject: WarningSubject::Path(path.clone()),
             }),
+            document: Some(path.clone()),
             path: Some(path),
             consumer: Some(consumer.into()),
             resolution_failure: None,
             diagnostic: None,
+            location: None,
         }
     }
 
@@ -768,9 +842,9 @@ impl ComposeWarning {
     /// A disk trigger's identity and `path` are its normalized path; an
     /// embedded trigger has no `path`. Either way the warning collapses
     /// across every document and pass that discovers the same trigger. The
-    /// shared record is placed in the trigger file at the finding's
+    /// shared record names the trigger file, at the finding's
     /// [`position`](crate::markdown::schemas::InvalidTriggerFinding::position)
-    /// and is source-free without one or for an embedded trigger.
+    /// when it has one; an embedded trigger names no file and is source-free.
     pub(crate) fn from_invalid_trigger(
         finding: &crate::markdown::schemas::InvalidTriggerFinding,
         consumer: impl Into<PathBuf>,
@@ -794,13 +868,20 @@ impl ComposeWarning {
             code: finding.code().to_string(),
             severity: crate::markdown::compose::expression::Severity::Warning,
             message: message.clone(),
-            source: path.as_ref().zip(finding.position()).map(|(file, (line, column))| {
-                crate::markdown::compose::expression::DiagnosticSource { file: Some(file.clone()), line, column }
+            source: path.as_ref().map(|file| {
+                use crate::markdown::compose::expression::DiagnosticSource;
+                match finding.position() {
+                    Some((line, column)) => DiagnosticSource::at(Some(file.clone()), line, column),
+                    None => DiagnosticSource::file_only(Some(file.clone())),
+                }
             }),
             expected_type: None,
             actual_type: None,
             span: None,
             iteration_path: Default::default(),
+            reference_details: None,
+            data_location: None,
+            grants_needed: None,
         };
         Self {
             stage: "schema_validation".to_string(),
@@ -813,6 +894,70 @@ impl ComposeWarning {
             consumer: Some(consumer.into()),
             resolution_failure: None,
             diagnostic: Some(Box::new(diagnostic)),
+            document: None,
+            location: None,
+        }
+    }
+
+    /// A link whose title raised `notice`, at `location` when its document has
+    /// authored positions. `start` is the link's identity (see
+    /// [`WarningSubject::LinkTitle`]).
+    pub(crate) fn from_link_title(
+        notice: &renderable::output::link_metadata::LinkTitleNotice,
+        link: &str,
+        start: usize,
+        location: Option<(PathBuf, crate::markdown::reference::types::AuthoredReferenceLocation)>,
+    ) -> Self {
+        use renderable::output::link_metadata::LinkTitleNotice;
+        let message = match notice {
+            LinkTitleNotice::Malformed { reason } => {
+                format!("the link {link} has a malformed structured title, read as plain text: {reason}")
+            }
+            LinkTitleNotice::Legacy => format!(
+                "the link {link} has a legacy `key=value` title, read as plain text with no attributes applied; run `md clean` to migrate it to JSON5"
+            ),
+        };
+        let (path, line_number, source, span) = match location {
+            Some((file, location)) => (
+                Some(file.clone()),
+                Some(location.line),
+                Some(crate::markdown::compose::expression::DiagnosticSource {
+                    file: Some(file),
+                    line: Some(location.line),
+                    column: Some(location.column),
+                    section: None,
+                    inserted: location.inserted,
+                }),
+                Some(location.span),
+            ),
+            None => (None, None, None, None),
+        };
+        let diagnostic = crate::markdown::compose::expression::Diagnostic {
+            code: crate::markdown::compose::policy::link_title_code(notice).to_string(),
+            severity: crate::markdown::compose::expression::Severity::Warning,
+            message: message.clone(),
+            source,
+            expected_type: None,
+            actual_type: None,
+            span,
+            iteration_path: Default::default(),
+            reference_details: None,
+            data_location: None,
+            grants_needed: None,
+        };
+        Self {
+            stage: "link_titles".to_string(),
+            message,
+            line_number,
+            source: Some(Self::LINK_TITLE_SOURCE.to_string()),
+            code: Some(crate::markdown::compose::policy::link_title_code(notice).to_string()),
+            path,
+            consumer: None,
+            resolution_failure: None,
+            identity: Some(WarningIdentity { subject: WarningSubject::LinkTitle { document: None, start } }),
+            diagnostic: Some(Box::new(diagnostic)),
+            document: None,
+            location: None,
         }
     }
 
@@ -832,7 +977,7 @@ impl ComposeWarning {
                 bundle: bundle.clone(),
                 name: name.clone(),
             }),
-            WarningSubject::Root { .. } | WarningSubject::Expression { .. } => None,
+            WarningSubject::Root { .. } | WarningSubject::Expression { .. } | WarningSubject::LinkTitle { .. } => None,
         }
     }
 
@@ -876,6 +1021,8 @@ impl ComposeWarning {
                     name: name.to_string(),
                 },
             }),
+            location: line.map(|line| WarningLocation { line, column: None, span: None }),
+            document: document.clone(),
             path: document,
             line_number: line,
             ..Self::new(stage, message)
@@ -941,6 +1088,21 @@ impl ComposeWarning {
     pub fn at_line(mut self, line: usize) -> Self {
         self.line_number = Some(line);
         self
+    }
+
+    /// This warning, proven to sit at `span` of the loaded `document`.
+    #[must_use]
+    pub(crate) fn at_authored(mut self, document: Option<PathBuf>, span: &crate::markdown::types::AuthoredSpan) -> Self {
+        self.document = document.or(self.document);
+        self.location = Some(WarningLocation { line: span.line(), column: Some(span.column()), span: Some(span.range()) });
+        self
+    }
+
+    /// Names `document` as this warning's file unless it already names one.
+    pub(crate) fn attribute_to(&mut self, document: Option<&std::path::Path>) {
+        if self.document.is_none() {
+            self.document = document.map(std::path::Path::to_path_buf);
+        }
     }
 
     /// The `(source, code, subject)` key, for a warning whose family
@@ -1097,6 +1259,8 @@ mod tests {
                     subject: WarningSubject::Path(PathBuf::from("schema.yaml")),
                 }),
                 diagnostic: None,
+                document: None,
+                location: None,
             }
         };
         let mut report = ComposeReport::new();

@@ -59,6 +59,13 @@ Authoring rules and examples live in
   region whose inner text is `a {{ b }}` — which then fails to parse and fails
   composition. Nesting is not a feature; the depth counter exists so a stray
   inner `}}` does not truncate the region at the wrong place.
+- A `}}` inside a **quoted string** or inside a **nested `{ … }`** does not end
+  the expression. So `{{ load_data(f, "{a: {b: string}}") }}` is one
+  expression whose second argument is the text `{a: {b: string}}`. The
+  scanner prefers this quote- and brace-aware span only when it parses and the
+  depth-counted span above does not, so every expression that parsed before
+  still ends where it did.
+- `{{{ … }}}` is still a literal and keeps its own closing rule (see Literals above).
 - Inner text is **trimmed** before it reaches the lexer, so `{{name}}` and
   `{{  name  }}` are identical.
 - **Empty or whitespace-only** content (`{{}}`, `{{  }}`) yields no expression at

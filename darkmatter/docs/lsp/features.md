@@ -49,15 +49,15 @@ Inline code spans (single backticks) are interpolated by default. Fenced/indente
 
 #### Directive options vocabulary
 
-A directive line such as `::file ./doc.md when="draft" set.title="Override" exclude="Appendix" replace=parent quotation disclosure="Click"` may carry these keys:
+A directive line such as `::file ./doc.md when="draft" set.title="Override" exclude="## Appendix" replace=true quotation=true disclosure="Click"` may carry these keys:
 
 - `when="<expr>"` — boolean DSL evaluated against effective state
 - `set=<json5-object>` — object-form frontmatter override (middle layer of the three-layer merge)
 - `set.<NAME>=<json5-value>` — property-form frontmatter override (top layer; preserves directive order for last-write tracing)
-- `replace=parent` | `replace=child` | `replace={…}` — replacement-map inheritance
-- `quotation` (boolean) | `quotation="caption"` — wrap output in a blockquote
-- `disclosure="summary"` — wrap output in a `<details>` block
-- `exclude="Heading A"` (repeatable) — drop named sections from transcluded markdown
+- `replace=true` | `replace=false` | `replace={…}` — replacement-map inheritance: `true` makes the parent's `replace` map win over the child's, `false` (the default) keeps the default inheritance, and a JSON object is a one-off map for this transclusion only
+- `quotation=true` | `quotation="caption"` — wrap output in a blockquote; every option needs `=value`, so a bare `quotation` is a parse error
+- `disclosure=true` | `disclosure="summary"` — wrap output in a `<details>` block
+- `exclude="## Heading A"` (repeatable) — drop that heading's section from the transcluded markdown; the pattern names the heading level as the child writes it, so `exclude="Heading A"` matches nothing. `"## Heading*"` matches by prefix and `"!prelude"` drops the content before the first heading
 - Shell-block parameters: `when_error="…"`, `when_exit_code=<int>`, `stderr_contains="…"`, `timeout=<seconds>`
 
 #### Horizontal-rule attribute blocks
@@ -196,6 +196,7 @@ Expression diagnostics follow one severity policy:
 | `dm.expression.malformed`, schema-typed frontmatter value with exact projection | Error | The schema declares the value is an expression, so a parse failure never evaluates. |
 | `dm.expression.malformed`, document-body span | Warning | A body `{{ … }}` is only *inferred* to be an expression; it may be foreign template syntax. Authors can opt out with `\{{`. |
 | `dm.expression.undeclared_property` | Warning | Advisory: the undeclared document property is valid and `null` unless supplied at runtime. Inside a lifecycle stack of the document's host (md's, or a host's from its lifecycle artifact) the event's binding view declares `err` and `timing`; a global a host catalog declares (Claudine's `seq`, `loop`, `group`) is never reported. |
+| `dm.expression.undeclared_member` | Warning | Advisory: a member the value's known object type does not declare (`server.nmae` for `{ name: string }`) reads `null`. Checked in every branch and callback body, under both `expressions.strict` settings, and against the unresolved schema while its slots are pending; `md compose` reports only the reads it evaluates. Not checked in lifecycle stacks. |
 | `dm.expression.unknown_function` | Error | The function catalog is closed, so compose fails on the call. |
 | `dm.expression.unavailable_global` | Error | Inside a lifecycle stack of the document's host, the event declares the global unavailable (`err` in md's `composed` or Claudine's `start`), so the read fails when the stack runs. |
 | `dm.expression.nested_span_in_literal` | Error | On a single-pass surface the braces are never interpolated, and Claudine refuses the document. |
@@ -280,6 +281,40 @@ Code fences with a recognized language tag (`rust`, `ts`, `python`, `bash`, `yam
 | Normalization (heading levels)          | `executeCommand: darkmatter.normalizeHeadings`, source action surfaced in code actions.                  |
 | Compose preview                         | `executeCommand: darkmatter.composePreview` returning the fully-composed text + `ComposeReport` summary. |
 | Migrate deprecated syntax               | `source.fixAll.darkmatter.migrate` source action that rewrites superseded directive forms in place.       |
+
+### 4.11 Schema Slots (implemented)
+
+A schema can take values from data with a `{{ … }}` [slot](../topics/schemas/schema-slots.md), for example `os: enum({{ load_data("../os.yaml", "string[]") }})`. The editor shows those values in completion, hover, and diagnostics without ever making you wait for them or asking you anything: **no request resolves a slot or reads what it names.** Every request is answered from the last resolution kept in memory, and a background slot worker does the resolving after an open, an edit, or a change to something a resolution read (see [Schema slot worker](./architecture.md#schema-slot-worker)).
+
+| State | Diagnostics | Completion and hover |
+|---|---|---|
+| not resolved yet (just opened) | `dm.schema.slot_pending` (information) at the slot; the frontmatter is not judged | the template's literal parts, marked pending: `enum(Haiku, {{ … }})` offers `Haiku` |
+| resolved | ordinary schema diagnostics against the loaded values | the loaded values |
+| refreshing after an input changed | the last verdict, plus one `dm.schema.slot_pending` (information) | the last values, marked stale |
+| a read needs approval | `dm.schema.slot_approval_required` (warning) at the slot, with quick fixes | the template's literal parts, marked pending |
+| a slot failed | the slot's own code (`dm.schema.slot_*`, `dm.data.*`, `dm.iteration.*`) as an error | the template's literal parts, marked pending |
+
+"Marked" means each completion item's `detail` ends with the note
+(*Schema slots stale: refreshing; shown from their last resolution.* or
+*Schema slots pending: only the schema's literal parts are known.*), and
+hover ends with the same note in italics. The hover of a body `{{ … }}`
+expression, which describes the schema's values, is marked too, and an
+*Add required key* quick fix whose inserted value comes from the schema
+names the note in its title. Labels, inserted text, and the order of
+completion items are the same as they would be unmarked.
+
+A template that did not resolve is never validated against, so a schema missing its loaded values never makes a document look valid.
+
+**Granting a read.** Each grant an approval-required diagnostic offers is a quick fix (an LSP code action the editor lists on the diagnostic), titled like *Always allow schema slots to read file /repo/data/os.yaml*. A quick fix runs a workspace command rather than editing the document. The server advertises two commands in its `initialize` result (`executeCommandProvider`, the list of commands an editor may ask the server to run):
+
+| Command | Argument | What it does |
+|---|---|---|
+| `dmls.grantSlotRead` | one object: `{ "decision": "allow"\|"deny", "kind": "file"\|"dir"\|"url"\|"url-any-query"\|"site", "target": "…", "scope": "once"\|"persisted" }` | `persisted` appends the line to the user's [grant store](../topics/schemas/schema-slots.md#grants), the same file `md` reads; `once` keeps the grant in the server's memory until it exits |
+| `dmls.refreshSchemaSlots` | none | resolves every open document's slots again, granting nothing |
+
+Either command, and any configuration change (`workspace/didChangeConfiguration`), marks every resolution stale and re-publishes diagnostics, because a slot may read the environment, which no file event reports. The resolution itself runs on the worker, so the command answers without waiting for it.
+
+The full behavior, including what refreshes a resolution and the editor's smaller work allowance per slot, is in [Schema Slots: In the editor](../topics/schemas/schema-slots.md#in-the-editor).
 
 ## 5. Cross-Cutting Requirements
 

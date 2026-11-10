@@ -46,7 +46,8 @@ fn final_git_status_frame_is_visible(frame: &CapturedFrame) -> bool {
         .all(|needle| frame.plain.contains(needle));
     let underline =
         frame.raw.contains("4:2m") || frame.raw.contains("[4m") || frame.raw.contains(";4m");
-    let link = frame.raw.contains("]8;;") || frame.plain.contains("](file");
+    // Without OSC 8 (tmux) a link prints its label alone.
+    let link = frame.raw.contains("]8;;") || frame.plain.contains("located at ");
     let lines: Vec<&str> = frame.plain.lines().collect();
     let layout = lines
         .iter()
@@ -96,8 +97,8 @@ fn level2_git_status_headers_and_links_render_styled_in_tmux() {
     );
 
     // Worktree locations render as hyperlinks: OSC8 (`\e]8;;`) on capable
-    // terminals, or the `[label](file://…)` markdown fallback in tmux.
-    let has_link = frame.raw.contains("]8;;") || frame.plain.contains("](file");
+    // terminals, or their label alone in tmux.
+    let has_link = frame.raw.contains("]8;;") || frame.plain.contains("located at ");
     assert!(
         has_link,
         "expected an OSC8 hyperlink or its fallback (worktree paths) in capture.\nplain:\n{}\nraw:\n{}",

@@ -66,7 +66,7 @@ impl DiagramRenderer for RecordingDiagrams {
         self.seen.borrow_mut().push(SeenRequest {
             source: request.source.to_string(),
             node_id: request.attrs.id.clone(),
-            available_width: request.available_width,
+            available_width: request.available_width.as_columns().unwrap_or(0),
             image_support: request.terminal.image_support(),
             graphics_mode: request.graphics_mode,
             mermaid_mode: request.mermaid_mode,
@@ -94,7 +94,7 @@ impl CodeRenderer for CountingCode {
         context: TerminalCodeContext,
     ) -> Option<String> {
         *self.calls.borrow_mut() += 1;
-        self.seen.borrow_mut().push((lang.map(str::to_string), value.to_string(), context.width()));
+        self.seen.borrow_mut().push((lang.map(str::to_string), value.to_string(), context.width().as_columns().unwrap_or(0)));
         Some("CODE HOOK".to_string())
     }
 

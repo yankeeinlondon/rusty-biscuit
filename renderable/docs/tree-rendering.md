@@ -843,6 +843,87 @@ Inside a link label or a span or delimiter body, a literal line feed in a
 same reasons. In a block, a literal blank line is kept: it separates
 paragraphs, and `Compose` relies on that between the paragraphs of a
 `Prose`.
+
+### Output width
+
+`MarkdownRenderOptions::width` and `BrowserRenderOptions::width` take a
+`renderable::output::Width`, the width a command was asked to print at (see
+[Command Output](./command-output.md#output-width)). It
+decides how paragraph text is laid out; it never changes what the text says.
+
+| Width | Markdown | Browser |
+|---|---|---|
+| `Source` (the default) | soft breaks written as authored (see the table above) | no width rule |
+| `Unlimited` | every soft break written as a space; hard breaks kept | no width rule |
+| `Columns(n)` | soft breaks joined, then each paragraph wrapped at `n` display columns | prose capped at `n` `ch` |
+
+For `Columns(n)` the Markdown writer wraps only paragraphs, and only at a
+space of the paragraph's own text. Code blocks, tables, headings, and HTML
+blocks keep their lines. The `> ` of a block quote, a list item's indent, a
+task checkbox, and a footnote label count toward `n`. A line never breaks:
+
+- inside a code span, a link or image destination and title, an autolink, or
+  raw HTML;
+- before the `]` that closes a link label, so `](dest "title")` stays with
+  the last word of the label;
+- after a backslash, which would turn the line ending into a hard break;
+- where the next line would start with a character that can open a block
+  (`#`, `>`, `-`, `+`, `*`, `=`, `_`, `|`, `:`, `<`, `` ``` ``, `~~~`, `[^`,
+  or `1.` / `1)`). A code span may start a line.
+
+When the break that would make a line fit is not allowed, the last allowed
+break earlier on the line is used; when there is none, or a single word is
+wider than `n`, the line is left longer than `n`. The wrapped output reads
+back as the same paragraph as the `Unlimited` output.
+
+```text
+Width::Columns(14), paragraph "one two three - four":
+
+one two
+three - four
+```
+
+`one two three -` would fit, but the next line would then start with
+`- four`, a list item, so the break moves back to before `three`.
+
+In the browser, `Columns(n)` adds one rule to the page stylesheet,
+`:where(p, li, blockquote, dl, h1, h2, h3, h4, h5, h6){max-width: {n}ch;}`.
+`:where` gives it no specificity, so any page or component style overrides
+it. Code blocks and tables are not in the selector.
+
+### Link query metadata
+
+A `Link` node may carry `LinkMetadata` (`NodeAttrs::set_link_metadata`): query
+parameters (`qp`) such as a line and column in the target file. Each fold
+writes them its own way; a link without metadata is written as before.
+
+**Markdown** writes a structured title: the JSON5 object
+`StructuredTitle::to_json5` gives for the link's title and `qp`, in single
+quotes. A `'` in it is written `\'`, and a backslash that a reader would
+otherwise take as an escape is doubled, so a CommonMark reader hands back
+exactly the JSON5 text and `parse_link_title` reads it back to the same
+query.
+
+```md
+[types.md:14:83](/abs/types.md#slug '{ qp: { line: 14, column: 83 } }')
+[Types](/abs/types.md '{ title: "it\'s here", qp: { line: 3 } }')
+```
+
+**Browser** writes the parameters into the `href` query string and moves
+the `#fragment` there as `heading=`, so the `href` has no fragment. The
+destination's own query pairs come first, in their order, minus any key the
+metadata also sets; then `heading`, `line`, `column`, and the other `qp`
+keys sorted by name. A `heading` in `qp` wins over the fragment. Values are
+form-encoded; the path is not rewritten.
+
+```text
+/x/types.md#simplified-schema-types  + qp { line: 14, column: 83 }
+→ /x/types.md?heading=simplified-schema-types&line=14&column=83
+
+/x/a.md?b=1&line=9#frag  + qp { zeta: "z", line: 14 }
+→ /x/a.md?b=1&heading=frag&line=14&zeta=z
+```
+
 ### HTML-backed MarkdownPlus content
 
 MarkdownPlus writes three constructs as HTML because Markdown has no
@@ -1203,6 +1284,8 @@ filesystem walk, no color-identity loss. This is the mechanism behind darkmatter
   support matrix.
 - [`layout-and-style.md`](./layout-and-style.md) — the `Layout` and `Style`
   primitives that ride on the tree.
+- [`command-output.md`](./command-output.md) — `CommandOutput`, the contract that
+  turns a command result into any output target through these folds.
 - `.claude/skills/renderable/tree.md` — the `renderable::tree` API.
 - `.claude/skills/biscuit-terminal/render-tree.md` — terminal folding and layout
   application.

@@ -270,6 +270,10 @@ Unlike an exported standalone schema, a `schema-trigger` document applies its sc
 Schema triggers let you choose a schema based on the document and its surroundings. Conditions can check:
 
 - Frontmatter properties on the actively edited document
+- The document's path (`$path`)
+
+These conditions are **planned** and not yet part of the trigger grammar; a trigger that uses one is skipped as invalid:
+
 - File existence or absence
 - File contains text
 - Binary found or absent from the hosts execution path
@@ -278,25 +282,33 @@ Schema triggers let you choose a schema based on the document and its surroundin
 - Host timezone
 - Host OS
 - Repository membership or absence
+- An `expression` over document values
 
-Conditions belong under `match`. Top-level conditions combine with **AND**; conditions inside a `group` combine with **OR**. An `expression` uses normal Darkmatter expression syntax to check document values:
+Conditions belong under `match`. Top-level conditions combine with **AND**; conditions inside a `group` combine with **OR**. A trigger file holds only `kind`, `match`, and `$schema`:
 
 ```yaml
 kind: schema-trigger
-description: defines 'foo', 'bar', and 'baz' when one of them is present in the document
 match:
-    - expression: foo || bar || baz
-$schema: 
+    - group:
+          - foo: string(required)
+          - bar: string(required)
+          - baz: string(required)
+$schema:
     foo: string -> my favorite fake thing
     bar: string -> not bad, but no foo
     baz: string -> I wish we could leave him at home
 ```
+
+This trigger applies when the document has at least one of `foo`, `bar`, or `baz`.
 
 Just like a normal schema definition a schema trigger will be _active_ when it's located in one of the directories mentioned in the last section. However, in this case _active_ means that the matching is active. When there is a match then the schema will be merged into the base schema.
 
 A trigger's schema can use named types, including [recursive ones](#recursive-types), like any other schema. Its stored definitions (recursive types, and [shared](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#shared-named-types) structured ones) are merged beside the document's own; a type named `item` in both stays two separate types.
 
 #### Passive Activation Expressions
+
+> **Planned.** The `expression`, file, and host conditions this section and
+> the next describe are not yet part of the trigger grammar.
 
 Choosing a schema should only answer a question: does this schema apply to this document? It should never run a command or start a runtime action. We call this _passive activation_.
 
@@ -533,6 +545,66 @@ There is a _variant_ of an enumeration which we will call a "suggestion" which p
 ```
 
 #### Wide versus Nested Dictionaries
+
+### Make an Enum from a Data File
+
+When the choices for a property already live in a data file (the operating
+systems a project supports, the regions a service runs in), copying them into
+the schema means two lists to keep in sync. A `{{ … }}` **slot** lets the
+schema take them from the file instead:
+
+```yaml
+# schemas/provider.yaml, beside schemas/os.yaml
+kind: schema
+$schema:
+    os: enum({{ load_data("./os.yaml", "string[]") }}; required)
+```
+
+A relative path in a slot resolves from the folder of the schema file the
+slot is written in, not from the document being validated. A slot may sit
+beside literal elements, so `enum(none, {{ … }})` adds `none` to the loaded
+values.
+
+A schema with a slot is a **template**. Reading it evaluates nothing: parsing,
+querying, exporting, trigger matching, completion, and hover all see the slot
+as text. The slot runs only when a command resolves the schema, and every
+read it makes must be approved first. A clean, committed file in the schema's
+own repository is approved automatically; anything else needs a grant or an
+answer at a prompt. See
+[When a slot is evaluated](./schema-slots.md#when-a-slot-is-evaluated) and
+[What a slot may read](./schema-slots.md#what-a-slot-may-read).
+
+A slot may be written in these positions, and each takes one shape of value:
+
+| Position | Example | The slot must produce |
+| --- | --- | --- |
+| an `enum(...)` member | `enum(none, {{ list }})` | an array of strings, spliced in as members |
+| a `suggest(...)` candidate | `string(suggest(a, {{ list }}))` | an array of strings, numbers, booleans, or `null`s, spliced in as candidates |
+| `literal(...)` | `literal({{ revision }})` | one string, number, or boolean |
+| `default(...)` | `number(default({{ n }}))` | one value other than `null` that the property's type accepts |
+| `min(...)`, `max(...)` | `number(min({{ low }}))` | a number (a non-negative integer for a length or item count) |
+| `pattern(...)` | `string(pattern({{ re }}))` | a string, within the pattern cap |
+
+A list slot must return an array even for a single value: a bare scalar is a
+wrong shape. A template constraint is the whole argument, so `default({{ d }} + 1)` is
+a grammar error. A pattern from a slot is capped so that data can never slow
+down validation: it may not use lookaround or a backreference, and it may be
+at most 4096 bytes (see
+[The pattern cap](../../../../simplified-schema/docs/topics/language/slots.md#the-pattern-cap)).
+
+A **template type** is a slot that supplies a property's whole type
+definition (`status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`);
+see [Template Types](../../../../simplified-schema/docs/topics/language/slots.md#template-types).
+
+Every file a returned definition imports or names is read only with a grant,
+exactly like the slot's own reads; see
+[The reads a returned definition causes](./schema-slots.md#the-reads-a-returned-definition-causes).
+
+The full grammar and every result rule are in
+[Slots: Values Supplied by an Expression](../../../../simplified-schema/docs/topics/language/slots.md).
+Darkmatter's side (which expressions a slot may contain, where slots may
+appear, approvals and grants, caching, the editor, and failure codes) is in
+[Schema Slots in Darkmatter](./schema-slots.md).
 
 ### Union Types
 

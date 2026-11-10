@@ -20,6 +20,8 @@ pub(super) struct Definition {
     pub title: Option<String>,
     /// Source offset of the definition.
     pub at: usize,
+    /// Source offset past the definition's last byte.
+    pub end: usize,
 }
 
 /// The parse of a [`ParseView`], in source coordinates.
@@ -40,6 +42,7 @@ pub(super) fn parse(view: &ParseView) -> Parsed<'_> {
             destination: definition.dest.to_string(),
             title: definition.title.as_ref().map(ToString::to_string),
             at: view.start_to_source(definition.span.start),
+            end: view.end_to_source(definition.span.end),
         })
         .collect();
     definitions.sort_by(|left, right| left.label.cmp(&right.label));

@@ -80,7 +80,7 @@ strict = false
 Claudine's schemas need no extension entry. They are trigger schemas, which
 `dmls` discovers in the document's schema roots: a document under `claudine/`
 reaches `claudine/schemas/` automatically, and a document elsewhere needs the
-complete seven-file trigger bundle in the repository root's `schemas/`, an absolute
+complete eight-file trigger bundle in the repository root's `schemas/`, an absolute
 `SCHEMAS_DIR`, or `~/schemas`. Copy `globals.yaml` and its companion
 `globals.lifecycle.json` too for Claudine-specific globals and lifecycle
 analysis. `dmls` reads these files from disk only and uses the trigger bundle

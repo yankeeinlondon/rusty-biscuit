@@ -6,7 +6,8 @@
 //!
 //! ## Limitations
 //!
-//! - Unix only (requires raw mode terminal access)
+//! - Needs the controlling terminal: `/dev/tty` on Unix, the console
+//!   (`CONIN$`/`CONOUT$`) on native Windows
 //! - Skipped in CI environments and multiplexers
 //! - Requires a real TTY (not a pipe)
 
@@ -42,9 +43,8 @@ pub fn cursor_position_with_timeout(timeout: Duration) -> Option<CursorPosition>
 
 /// Internal DSR query implementation.
 ///
-/// The exchange goes through the shared `/dev/tty` round trip, so a terminal
+/// The exchange goes through the shared terminal round trip, so a terminal
 /// found silent earlier in the process is not asked again.
-#[cfg(unix)]
 fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
     use crate::discovery::detection::is_tty;
     use crate::discovery::os_detection::is_ci;
@@ -79,17 +79,10 @@ fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
     })
 }
 
-#[cfg(not(unix))]
-fn query_cursor_position(_timeout: Duration) -> Result<CursorPosition, String> {
-    tracing::trace!("DSR cursor position query: not supported on this platform");
-    Err("cursor position query not supported on this platform".into())
-}
-
 /// Parse a CPR (Cursor Position Report) response.
 ///
 /// Expected format: `ESC[{row};{col}R`
 /// Searches backwards from the `R` terminator to handle echoed query noise.
-#[cfg(any(unix, test))]
 fn parse_cpr_response(data: &[u8]) -> Option<CursorPosition> {
     let text = std::str::from_utf8(data).ok()?;
 

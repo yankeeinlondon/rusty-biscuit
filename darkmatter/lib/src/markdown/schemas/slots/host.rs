@@ -1,0 +1,282 @@
+//! Darkmatter's [`SlotHost`]: admits each slot passively and evaluates it
+//! with the [`SlotEvaluator`].
+//!
+//! A failure keeps its typed cause. The [`SlotFailure`] carries the
+//! expression's own [`ExpressionError`] (so a `load_data` failure keeps its
+//! `DataError`, its `dm.data.*` code, and its data location), and its code is
+//! [`failure_code`]'s.
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use serde_json::Value;
+use simplified_schema::expression::parse_spanned;
+use simplified_schema::simplified::Slot;
+use simplified_schema::slots::{
+    SchemaRead, SchemaReadKind, SchemaReadOutcome, SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, TemplateReads,
+};
+use simplified_schema::span::SourceSpan;
+
+use super::admission::slot_class_report;
+use super::codes::{
+    SLOT_APPROVAL_REQUIRED_CODE, SLOT_CANCELED_CODE, SLOT_CYCLE_CODE, SLOT_DENIED_CODE, SLOT_FAILED_CODE,
+    SLOT_GRANT_STORE_INVALID_CODE, SLOT_SYNTAX_CODE, slot_result_code,
+};
+use crate::markdown::compose::expression::data::DataError;
+use super::cache::ContextCheck;
+use super::dependencies;
+use super::evaluator::{ContextDigest, SlotEvaluation, SlotEvaluator, context_digest_now, context_inputs, slot_context};
+use crate::markdown::compose::expression::ExpressionError;
+use crate::markdown::compose::expression::data::DataSourceIdentity;
+use crate::markdown::compose::expression::functions::ReadKind;
+use crate::markdown::compose::expression::read_gate::{GateRefusal, ReadLocation, ReadTarget};
+
+/// Resolves a template's slots on Darkmatter's expression engine.
+#[derive(Debug)]
+pub struct DarkmatterSlotHost {
+    evaluator: SlotEvaluator,
+    evaluations: Mutex<Vec<(Slot, SlotEvaluation)>>,
+    cancel: Option<Arc<AtomicBool>>,
+    /// Where a slot with no defining file was written (the request
+    /// context's `base_dir()`), for its returned definition's reads.
+    request_base: Option<PathBuf>,
+}
+
+impl DarkmatterSlotHost {
+    /// A host evaluating with `evaluator`.
+    pub(crate) fn new(evaluator: SlotEvaluator) -> Self {
+        Self { evaluator, evaluations: Mutex::new(Vec::new()), cancel: None, request_base: None }
+    }
+
+    /// Judges the reads of a returned definition whose slot has no defining
+    /// file (an inline `$schema`) as written at `base`, the base folder of
+    /// the request context the resolution runs in, as [`SlotHost::resolve`]
+    /// does for the slot's own reads.
+    pub(crate) fn with_request_base(mut self, base: &Path) -> Self {
+        self.request_base = Some(base.to_path_buf());
+        self
+    }
+
+    /// Reports the resolution canceled once `cancel` is set.
+    pub(crate) fn with_cancel(mut self, cancel: Option<Arc<AtomicBool>>) -> Self {
+        self.cancel = cancel;
+        self
+    }
+
+    /// Every successful evaluation so far, in order, with what it depended
+    /// on.
+    #[cfg(test)]
+    pub(crate) fn evaluations(&self) -> Vec<(Slot, SlotEvaluation)> {
+        self.evaluations.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+}
+
+/// `span`, an offset in `slot`'s expression text, in the slot's own source
+/// coordinates.
+fn in_slot(slot: &Slot, span: &SourceSpan) -> SourceSpan {
+    let start = slot.expression_span.start;
+    (start + span.start)..(start + span.end)
+}
+
+impl SlotHost for DarkmatterSlotHost {
+    fn is_canceled(&self) -> bool {
+        self.cancel.as_ref().is_some_and(|cancel| cancel.load(Ordering::Acquire))
+    }
+
+    fn admit(&self, slot: &Slot) -> Result<(), SlotAdmissionError> {
+        let parsed = parse_spanned(&slot.expression).map_err(|error| {
+            let at = slot.expression_span.start + error.position.min(slot.expression.len());
+            SlotAdmissionError {
+                code: Some(SLOT_SYNTAX_CODE),
+                message: format!("the slot is not an expression: {}", error.message),
+                span: Some(at..at),
+            }
+        })?;
+        let report = slot_class_report(&parsed);
+        match report.rejections.into_iter().next() {
+            Some(rejection) => Err(SlotAdmissionError {
+                code: Some(rejection.code),
+                message: rejection.message,
+                span: Some(in_slot(slot, &rejection.span)),
+            }),
+            None => Ok(()),
+        }
+    }
+
+    fn template_reads(&self) -> std::rc::Rc<dyn TemplateReads> {
+        std::rc::Rc::new(DarkmatterTemplateReads {
+            gates: self.evaluator.gates(),
+            data: self.evaluator.data().clone(),
+            request_base: self.request_base.clone(),
+        })
+    }
+
+    fn resolve(&self, request: &SlotRequest<'_>) -> Result<Value, SlotFailure> {
+        let slot = request.slot;
+        let parsed = parse_spanned(&slot.expression)
+            .map_err(|error| SlotFailure::new(ExpressionError::Parse(error.message), Some(SLOT_SYNTAX_CODE)))?;
+        let context = slot_context(request.context, request.defining_file);
+        // Recorded for every slot that runs (a later union round, a nested
+        // contract's), whether it succeeds or fails, so a cached outcome is
+        // re-checked against each context input it could have read.
+        for input in context_inputs(&parsed) {
+            dependencies::note_context(ContextCheck {
+                defining: request.defining_file.map(std::path::Path::to_path_buf),
+                digest: ContextDigest { digest: context_digest_now(&input, &context), input },
+            });
+        }
+        let defining = request.defining_file.unwrap_or_else(|| request.context.base_dir());
+        crate::note_work!(SlotResolution);
+        match self.evaluator.evaluate(&parsed, context, defining) {
+            Ok(evaluation) => {
+                let value = evaluation.value.clone();
+                self.evaluations
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push((slot.clone(), evaluation));
+                Ok(value)
+            }
+            Err(error) => {
+                let code = failure_code(&error);
+                Err(SlotFailure::new(error, Some(code)))
+            }
+        }
+    }
+}
+
+/// Judges and records the reads a template type's returned definition
+/// causes (its imports, their transitive imports, examples, and the
+/// candidates probed to select them) exactly as the slot's own reads are:
+///
+/// - `admit` asks the gate of the slot's defining file (or, for an inline
+///   slot, the request's base folder) before anything is probed or read, so
+///   a deny grant refuses with `dm.schema.slot_denied`, an allow, persisted,
+///   or automatic grant allows, the approval handler is asked where the
+///   session has one, and anything else needs approval
+///   (`dm.schema.slot_approval_required`). An import named by returned data
+///   is a computed target: pre-flight never sees it. The session's gates
+///   record each allowed read with its defining file, so a cached result is
+///   served only where the same reads are granted;
+/// - `observe` records every read and probe, found or missing, succeeded or
+///   failed, in the command's data runtime: it joins the read set and the
+///   resolution's observations, which become the cache's input checks and
+///   the editor's watches.
+struct DarkmatterTemplateReads {
+    gates: Arc<dyn super::evaluator::SlotGates>,
+    data: crate::markdown::compose::DataRuntime,
+    request_base: Option<PathBuf>,
+}
+
+/// The function a returned definition's reads are attributed to in a
+/// prompt, a grant request, and a refusal.
+const TEMPLATE_READ_FUNCTION: &str = "schema import";
+
+impl TemplateReads for DarkmatterTemplateReads {
+    fn admit(&self, slot: &Slot, read: &SchemaRead<'_>) -> Result<(), SlotAdmissionError> {
+        let refused = |code, message: String| SlotAdmissionError { code: Some(code), message, span: None };
+        let Some(defining) = slot.origin.as_deref().or(self.request_base.as_deref()) else {
+            return Err(refused(
+                SLOT_APPROVAL_REQUIRED_CODE,
+                format!("reading `{}` for a template type needs approval", read.path.display()),
+            ));
+        };
+        let target = ReadTarget {
+            function: TEMPLATE_READ_FUNCTION.to_string(),
+            kind: match read.kind {
+                SchemaReadKind::Content => ReadKind::Content,
+                SchemaReadKind::Probe => ReadKind::Probe,
+            },
+            location: ReadLocation::Local(read.path.to_path_buf()),
+            observed_hash: None,
+        };
+        self.gates.gate_for(defining).check(&target).map_err(|refusal| {
+            let code = match refusal {
+                GateRefusal::Denied => SLOT_DENIED_CODE,
+                GateRefusal::ApprovalRequired { .. } => SLOT_APPROVAL_REQUIRED_CODE,
+            };
+            let verb = if read.kind == SchemaReadKind::Content { "read" } else { "probe" };
+            refused(code, format!("the template type's definition may not {verb} `{}`: {refusal}", target.location))
+        })
+    }
+
+    fn observe(&self, _: &Slot, outcome: &SchemaReadOutcome<'_>) {
+        match outcome.kind {
+            SchemaReadKind::Content => {
+                let hash = outcome.bytes.map(biscuit_hash::blake3_hash_bytes);
+                self.data.observe_read(&DataSourceIdentity::local(outcome.path), hash);
+            }
+            SchemaReadKind::Probe => self.data.observe_existence(outcome.path, outcome.exists),
+        }
+    }
+}
+
+/// The code a failed slot reports: a refused read's slot code, a
+/// `load_data` failure's `dm.data.*` code (or, for a contract naming a
+/// template whose own slots failed, the code of that failure), an exhausted
+/// budget's `dm.iteration.*` code, and [`SLOT_FAILED_CODE`] for any other
+/// failure (a missing file, a failed call), whose typed cause is still kept.
+pub(crate) fn failure_code(error: &ExpressionError) -> &'static str {
+    if let Some(data) = error.data_failure() {
+        return match contract_template_failure(data) {
+            Some(failure) => nested_resolution_code(&failure.error),
+            None => data.code().unwrap_or(SLOT_FAILED_CODE),
+        };
+    }
+    match error.without_callbacks() {
+        ExpressionError::SlotReadRefused { refusal: GateRefusal::Denied, .. } => SLOT_DENIED_CODE,
+        ExpressionError::SlotReadRefused { .. } => SLOT_APPROVAL_REQUIRED_CODE,
+        ExpressionError::IterationLimit(limit) => limit.kind.code(),
+        _ => SLOT_FAILED_CODE,
+    }
+}
+
+/// The failed resolution of a `load_data` contract naming a template, when
+/// that is why `error` happened: the slots of the template the contract
+/// named, resolved inside the slot that read the data.
+pub(crate) fn contract_template_failure(error: &DataError) -> Option<&simplified_schema::SlotResolutionFailure> {
+    match error {
+        DataError::ContractSchema { source, .. } => match source.as_ref() {
+            simplified_schema::SchemaError::SlotResolution(failure) => Some(failure),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The code of a slot whose contract template's resolution failed with
+/// `error`: the code the template's failing slot reports, as if it had
+/// failed in this slot.
+///
+/// When several of the template's slots failed, a cycle outranks a missing
+/// or invalid grant, which outranks an exhausted work limit, which outranks
+/// the first failure: this code decides whether the outer failure may be
+/// cached, deferred for a grant, or handed to a command with other limits
+/// (`cache::caches_failure`, `session::needs_grant`, `session::exhausted_work`).
+fn nested_resolution_code(error: &simplified_schema::slots::SlotResolutionError) -> &'static str {
+    use simplified_schema::slots::SlotResolutionError;
+    let codes: Vec<&'static str> = match error {
+        SlotResolutionError::Refused(refused) => {
+            refused.iter().map(|(_, refusal)| refusal.code.unwrap_or(SLOT_FAILED_CODE)).collect()
+        }
+        SlotResolutionError::Failed(failed) => {
+            failed.iter().map(|(_, failure)| failure.code.unwrap_or(SLOT_FAILED_CODE)).collect()
+        }
+        SlotResolutionError::Schema(schema) => match schema.as_ref() {
+            simplified_schema::SchemaError::SlotResult { kind, .. } => vec![slot_result_code(kind)],
+            simplified_schema::SchemaError::SlotResolution(failure) => vec![nested_resolution_code(&failure.error)],
+            _ => Vec::new(),
+        },
+        SlotResolutionError::Canceled => vec![SLOT_CANCELED_CODE],
+        _ => Vec::new(),
+    };
+    let grant_dependent = [SLOT_APPROVAL_REQUIRED_CODE, SLOT_DENIED_CODE, SLOT_GRANT_STORE_INVALID_CODE];
+    codes
+        .iter()
+        .find(|code| **code == SLOT_CYCLE_CODE)
+        .or_else(|| codes.iter().find(|code| grant_dependent.contains(code)))
+        .or_else(|| codes.iter().find(|code| code.starts_with("dm.iteration.")))
+        .or_else(|| codes.first())
+        .copied()
+        .unwrap_or(SLOT_FAILED_CODE)
+}

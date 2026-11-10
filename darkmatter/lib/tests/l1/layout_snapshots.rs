@@ -53,7 +53,7 @@ impl Drop for ColorSnapshotEnv {
 
 /// End-to-end example from the spec:
 /// Terminal is dark mode, 120 cols wide.
-/// --margin 2 --padding 1 --page-bg subtle --max-width 100 --line-numbers true --align-code-blocks center
+/// `md doc.md style.margin=2 style.padding=1 style.page.background=subtle style.max-width=100 style.code-block.line-numbers=true style.code-block.alignment=center`
 #[test]
 #[serial_test::serial(layout_snapshot_env)]
 fn end_to_end_example_snapshot() {
@@ -96,7 +96,7 @@ fn zero_config_prose_snapshot() {
     // the zero-config render above resolves the *ambient* terminal, whose color
     // depth and tty state vary between a real terminal and a piped test process.
     let mut pinned_opts = TerminalOptions::default();
-    pinned_opts.max_width = Some(120);
+    pinned_opts.width = Some(renderable::output::Width::Columns(120));
     pinned_opts.color_depth = Some(ColorDepth::TrueColor);
     let pinned = md.as_terminal(pinned_opts).unwrap();
     insta::assert_snapshot!(pinned);

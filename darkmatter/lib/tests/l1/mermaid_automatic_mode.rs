@@ -103,14 +103,14 @@ fn automatic_mermaid_mode_page_geometry_keeps_the_no_image_route() {
 fn automatic_mermaid_mode_direct_render_width_keeps_the_no_image_route() {
     let _env = no_image_process();
 
-    for max_width in [None, Some(60)] {
+    for width in [None, Some(renderable::output::Width::Columns(60))] {
         let mut options = TerminalOptions::default();
         options.mermaid_mode = MermaidMode::Automatic;
-        options.max_width = max_width;
+        options.width = width;
         let output = plain(&fenced(FLOWCHART).as_terminal(options).expect("terminal render"));
-        assert!(!output.contains(KITTY_IMAGE), "{max_width:?}: no image protocol:\n{output:?}");
-        assert!(!output.contains("Alpha --> Beta"), "{max_width:?}: drawn as text:\n{output}");
-        assert!(output.contains("Alpha") && output.contains("Beta"), "{max_width:?}:\n{output}");
+        assert!(!output.contains(KITTY_IMAGE), "{width:?}: no image protocol:\n{output:?}");
+        assert!(!output.contains("Alpha --> Beta"), "{width:?}: drawn as text:\n{output}");
+        assert!(output.contains("Alpha") && output.contains("Beta"), "{width:?}:\n{output}");
     }
 }
 

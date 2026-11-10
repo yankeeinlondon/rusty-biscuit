@@ -607,7 +607,9 @@ fn collect_document(
     // frontmatter-shell expansion cannot be approved condition-blind: its
     // approved shape (with `$(...)`) differs from its executed shape. Reject it
     // here rather than letting it surface as a late `NotPreApproved`.
-    let prepared_provenance = prepare_frontmatter_for_compose(&mut markdown.clone(), options);
+    let mut with_setters = markdown.clone();
+    let mut prepared_provenance = prepare_frontmatter_for_compose(&mut with_setters, options);
+    crate::markdown::compose::setters::apply_setter_plan_for_preflight(&mut with_setters, options, &mut prepared_provenance)?;
     let mut pending = pending_shell_literals(&prepared, &prepared_provenance, &prepared_ctx);
     pending.extend(still_inherited_pending(&prepared, &inherited.pending));
     let for_children = InheritedDiscovery {
@@ -1178,16 +1180,20 @@ fn collect_document(
     // ── Nested `as_markdown` content (condition-blind) ─────────────
     // What discovery evaluated, plus every string-literal argument in the
     // authored source, so a branch discovery did not take still contributes.
-    // Runtime composes the content against the root source; so does this walk.
+    // Runtime composes the content against the root source, inheriting this
+    // document's state as a `::file` child does; so does this walk.
     let mut nested_contents = discovery.nested_compose.take_discovered();
     nested_contents.extend(authored_as_markdown_literals(markdown));
     for content in nested_contents {
         let key = format!("as_markdown:{}", biscuit_hash::xx_hash(&content));
-        let mut nested_options = options.clone();
+        let mut nested_options = transclusion::inherited_child_options(
+            options,
+            &child_state_data,
+            &transclusion::BlockOptions::default(),
+        );
         nested_options.source = root.0.clone();
         nested_options.source_derivation = root.1;
         nested_options.source_opening = root.2.clone();
-        nested_options.clear_root_overrides();
         let child = Markdown::from(content);
         let mut node = collect_recursive(
             &child,
@@ -1202,7 +1208,7 @@ fn collect_document(
             remote_fetch,
             root,
             Some(key),
-            &InheritedDiscovery::default(),
+            &for_children,
         )?;
         node.source = None;
         children.push(std::sync::Arc::new(node));
@@ -1256,6 +1262,7 @@ fn scan_one_frontmatter(
 ) -> MarkdownResult<()> {
     let mut fm_clone = markdown.clone();
     let mut provenance = prepare_frontmatter_for_compose(&mut fm_clone, options);
+    crate::markdown::compose::setters::apply_setter_plan_for_preflight(&mut fm_clone, options, &mut provenance)?;
     let mut preflight_exclude_keys = options.exclude_keys.clone();
     preflight_exclude_keys.insert("$schema".to_string());
     let mut best_effort_missing_context = None;
@@ -1719,6 +1726,7 @@ fn unobserved_keys(
             .flatten()
             .filter_map(Value::as_object)
             .any(|overrides| overrides.contains_key(key))
+            || options.setters.names_whole_key(key)
     };
     let mut unobserved: Vec<String> = inherited
         .iter()

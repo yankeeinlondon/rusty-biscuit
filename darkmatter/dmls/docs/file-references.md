@@ -264,8 +264,10 @@ buffer), it resolves there without touching the disk. Otherwise the graph
 asks the file resolver, so an existing file outside the list is still a
 target. For example, with only `repo/docs/` open, `[t](&target.md)` links to
 `repo/target.md`, go-to-definition opens it, and no `dm.links.broken_path` is
-reported. When no file exists, a later candidate that is an open, unsaved
-buffer still counts.
+reported. A later candidate that is an open, unsaved buffer counts at its own
+place in the order, as the file would once saved: with `@t.md` planning the
+repository root, a configured `conf/` root, then the home directory, an
+unsaved `conf/t.md` is the target even when `~/t.md` exists on disk.
 
 A `#fragment` is checked against the target's headings, which are parsed the
 first time an open document's link or heading completion needs them. That

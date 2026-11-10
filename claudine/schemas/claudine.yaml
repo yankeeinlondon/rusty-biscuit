@@ -105,7 +105,7 @@ $schema:
         - "{ mode: enum(merge, override), rules: { pattern: string, patterns: string[], kind: enum(literal, regex), ignore_case: boolean, scope: string }[] } -> output patterns that end the run, with how they combine with the configured rules"
     guard_settings: "{ repetition: { enabled: boolean, max_repeats: number(integer; min(0)), max_cycle_length: number(integer; min(0)) }, volume: { enabled: boolean, max_lines: number(integer; min(0)), max_bytes: number(integer; min(0)) } } -> thresholds for the runaway-output guards"
     operation: "string -> a sequence task's operation; set by flag or task, not read from a document"
-    yolo: "boolean -> skip permission prompts; set by flag, not read from a document"
+    yolo: "boolean -> request the provider's native permission bypass; --yolo or CLAUDINE_YOLO take precedence, and only they approve shell pre-flight"
     verbosity: "string(suggest(silent, quiet, verbose)) -> prompt-reporting verbosity of a system prompt: silent, quiet, or verbose in any letter case"
     mode: "enum(append, replace) -> whether a system prompt appends to or replaces the provider's own"
     name: name@./linking.yaml

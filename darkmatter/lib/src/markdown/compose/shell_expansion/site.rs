@@ -325,6 +325,52 @@ pub(crate) fn prepare_site(
     approve_template_only(site, &shape, template_key, &programs, options, policy_paths, runtime)
 }
 
+/// [`prepare_site`] for a site whose arguments were read after an earlier
+/// command of this composition ran.
+///
+/// Pre-flight read the site before any command ran, so with pre-approvals
+/// its current bytes may be ones the approval set never saw. Those bytes run
+/// when an exact rule of the request's policy names every segment, the rule
+/// the walk would have applied had it seen them; the site is then prepared
+/// as it would be without pre-approvals, blacklists included. Otherwise it
+/// needs what any site does: its bytes or its shape in the set.
+pub(crate) fn prepare_refreshed_site(
+    resolved: Result<ShellDirective, ShellExpansionError>,
+    site: Option<&TemplateSite<'_>>,
+    options: &crate::markdown::compose::ComposeRequest,
+    policy_paths: &ShellPolicyPaths,
+    runtime: &mut ShellExpansionRuntime,
+) -> Result<PreparedShellDirective, ShellExpansionError> {
+    let any_mode = site.is_none_or(|site| site.candidate.requirement == ModeRequirement::AnyMode);
+    if let (Some(approved), Ok(directive), true) = (&options.pre_approved_commands, &resolved, any_mode) {
+        let (effective, _) = super::resolve_or_passthrough(
+            directive,
+            &options.alias_resolutions,
+            probe::login_shell(options.context().env()),
+        );
+        let normalized = super::collect_normalized_commands(&effective);
+        let snapshot = runtime.snapshot();
+        if !normalized.iter().all(|command| approved.contains_exact(command))
+            && normalized.iter().all(|command| snapshot.whitelist.matches_exact(command))
+        {
+            let by_policy = options.clone().map_options(|mut options| {
+                options.pre_approved_commands = None;
+                options
+            });
+            return prepare_site(resolved, site, &by_policy, policy_paths, runtime);
+        }
+    }
+    prepare_site(resolved, site, options, policy_paths, runtime).map_err(|error| match error {
+        ShellExpansionError::NotPreApproved { ctx, command, origin, source_desc } => ShellExpansionError::NotPreApproved {
+            ctx,
+            command,
+            origin,
+            source_desc: format!("{source_desc} (its arguments were read after an earlier command ran)"),
+        },
+        other => other,
+    })
+}
+
 /// Asks the approval handler about a site that can run only as a template,
 /// recording a session decision under the shape's key.
 fn approve_template_only(

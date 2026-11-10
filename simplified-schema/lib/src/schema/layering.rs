@@ -31,7 +31,8 @@ impl SimplifiedSchema {
     /// lower layer is not a simple object schema (a root union, for one) or
     /// its references would not keep their meaning, and
     /// [`SimplifiedSchemaError::Unprepared`] when a participant cannot be
-    /// lowered. The call is atomic: on `Err` the receiver's definition,
+    /// lowered ([`SimplifiedSchemaError::Unresolved`] when it is an
+    /// unresolved template). The call is atomic: on `Err` the receiver's definition,
     /// revision, and prepared validation state are exactly as before.
     pub fn layer_under(&mut self, incoming: &[&SimplifiedSchema]) -> Result<&mut Self, SimplifiedSchemaError> {
         self.layer(incoming, Winner::Receiver)
@@ -74,7 +75,7 @@ impl SimplifiedSchema {
         let Some((lowest, higher)) = incoming.split_first() else {
             return Ok(self);
         };
-        let lowered = |schema: &SimplifiedSchema| schema.lowered().map_err(SimplifiedSchemaError::Unprepared);
+        let lowered = |schema: &SimplifiedSchema| schema.lowered().map_err(SimplifiedSchemaError::from_lowering);
 
         // The incoming list merged low to high. The lowest schema is the
         // borrowed first base; a merge consumes its higher side, so each
@@ -107,11 +108,7 @@ impl SimplifiedSchema {
                 (incoming_layers.into_iter().chain(own).collect(), receiver)
             }
         };
-        let definition = Arc::new(Definition {
-            layers,
-            receiver,
-            merged: Some(Arc::new(merged)),
-        });
+        let definition = Arc::new(Definition::new(layers, receiver, Some(Arc::new(merged))));
 
         // Commit.
         self.definition = definition;

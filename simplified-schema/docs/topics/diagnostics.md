@@ -25,7 +25,8 @@ variants describe the *input*: `MissingFile`, `Read`, `Reference` (a
 malformed or unresolvable reference), `Context` and `Discovery` (capturing a
 raw path's request context failed; see
 [Host Capabilities](./host-capabilities.md)), `MissingSchema`, `Frontmatter`,
-`Unprepared`, `Selection`, and `ExportUnsupported`. A malformed *definition*
+`Unprepared`, `Unresolved` (a [template](./language/slots.md) whose slots
+are not resolved), `Selection`, and `ExportUnsupported`. A malformed *definition*
 is `SimplifiedSchemaError::Schema`, which holds the language's own
 `SchemaError` by value, so the source chain is never flattened into text:
 
@@ -263,6 +264,22 @@ is reported at (the node at its instance path, or the offending key of an
 unknown-key problem), for a caller that underlines text rather than printing
 a line and column. It is `None` when the map holds no authored tree.
 
+A YAML alias (`*name`) has no text for the value it expands to, so a problem
+at an alias, or anywhere below one, is reported at the `*name` token. Every
+other node in the document keeps its own position. In
+
+```yaml
+base: &b {port: x}
+one: *b
+```
+
+against a schema requiring a numeric `port`, `/base/port` is line 1,
+column 17 (the `x`) and `/one/port` is line 2, column 6, with `byte_range`
+covering only `*b`. When the authored YAML cannot be matched to the parsed
+value mapping for mapping (for example a key with an anchor, `&k a: 1`, or an
+unquoted `{{ }}`), the map falls back to top-level keys: a problem is reported at
+the line of the top-level key it falls under, column 1.
+
 ## Source-Aware Parsing and Located Failures
 
 An editor or linter that underlines a schema error needs to know *where* the
@@ -371,6 +388,8 @@ wraps it; see [above](#simplifiedschemaerror-wraps-schemaerror)):
 | `SchemaDocument`        | A recognized standalone schema document (informal, `kind: schema`, or `kind: yaml-schema` envelope) fails its envelope definition ([details](#an-envelope-its-definition-rejects)) or has a payload the parser rejects, or a schema document's text is not a schema (not valid YAML or strict JSON, or an untagged `$schema` mapping with an unsupported top-level key, whose message adds the `.json` migration when `$schema` is a `json-schema.org` URI); carries the document `path`, and, for a rejected definition, the typed cause as `source` and its byte `span` in the supplied text ([details](#a-rejected-definition-in-a-schema-document)); an envelope rejection carries a `span` and no `source`. |
 | `FrontmatterShape`      | `$schema` is present but is not a mapping, sequence, or string.                                           |
 | `Baseline`              | Baseline could not be loaded or is not a simple object schema.                                            |
+| `UnresolvedSlots`       | The schema is a [template](./language/slots.md): it holds `{{ … }}` slots and cannot be lowered, validated, or layered yet. Lists every slot (expression, spans, defining file); `pending` is the handle that resolves it when the call that met it can (`None` from lowering alone). |
+| `SlotResult`            | A resolved slot's value cannot fill its position. Carries the `slot` (its `span`, in `slot.origin`'s file when set) and a `SlotResultKind`: `Empty`, `WrongShape { expected, found }`, `Inadmissible(reason)`, or `PatternRejected(reason)` (a slot pattern the linear engine must not take). See [What a Slot's Value Must Be](./language/slots.md#what-a-slots-value-must-be). |
 | `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union, contradictory bounds or schemes on one atom, a `$constraints` key the block's object cannot use, an unresolved `@`-import reaching conversion, or a `<pattern::RE>` that cannot be wrapped for literal-key precedence). |
 | `ImportCycle`           | A chain of named-type references (bare or `Name@file`) that never repeats a type is deeper than 32 levels. A type that refers back to itself is not this error. |
 | `NonDescendingCycle`    | Named types form a cycle that never passes through a child value (an alias cycle, a self-union, or a cycle through a `function(...)` signature). Carries every reference of each rejected cycle as a `CycleReference` with its site, target, and, in a schema file, its span. See [Recursive Named Types](language/objects-and-named-types.md#recursive-named-types). |

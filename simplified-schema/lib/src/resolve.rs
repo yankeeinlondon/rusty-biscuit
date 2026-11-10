@@ -57,9 +57,10 @@ use super::{
         SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaDeclaration, SchemaReferenceSite, SchemaSourceId, SchemaSourceMap,
         SchemaSourcePath, SchemaUnionRejection, parse_standalone_schema_document, parse_yaml_schema,
         to_json_schema, to_json_schema_with_definitions,
+        grammar::{is_suggestion_list, suggestion_list_span},
         types::{
-            Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType,
-            TypeExpr,
+            Constraint, DynamicKind, TemplateConstraintKind, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType,
+            Slot, TypeExpr,
         },
     },
 };
@@ -230,9 +231,185 @@ impl InlineOwner<'_> {
 /// [`resolve_yaml_schema_with_roots`] for an inline value authored by
 /// `owner`. A string reference resolves exactly as it does for a document;
 /// only the namespaces of inline named types differ.
+///
+/// A template (a schema holding `{{ … }}` slots, here or in anything it
+/// imports or references) fails with [`SchemaError::UnresolvedSlots`] whose
+/// `pending` resolves it ([`crate::slots::PendingSchema::resolve`]); every
+/// function delegating here does the same.
 pub fn resolve_yaml_schema_owned_by(
     value: &YamlValue,
     owner: InlineOwner<'_>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    resolve_authored_yaml_schema(value, owner, None, base_dir, schema_roots, request_context, shipped)
+}
+
+/// Where an inline `$schema` value was written: the whole text of the file
+/// holding it, as read, and the byte range of the YAML mapping whose
+/// `$schema` key holds the value (a Markdown document's frontmatter block, a
+/// schema-trigger or YAML document's whole text).
+///
+/// Given to [`resolve_authored_yaml_schema`], it lets every `{{ … }}` slot
+/// written in the value carry its byte range in that file, whatever YAML
+/// carrier (plain, single- or double-quoted, literal or folded block) holds
+/// the type string, and a pending template keep this text
+/// ([`crate::slots::PendingSchema::authored_source`]) so a failure of one
+/// of those slots can be positioned without reading the file again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredSchemaValue {
+    /// The file the value is written in; `None` for in-memory text. For a
+    /// trigger payload's template this is the canonical path its slots'
+    /// [`Slot::origin`](crate::simplified::Slot::origin) names.
+    pub file: Option<PathBuf>,
+    /// The file's whole text.
+    pub text: Arc<str>,
+    /// The YAML mapping holding the `$schema` key, as a byte range of `text`.
+    pub mapping: std::ops::Range<usize>,
+}
+
+impl AuthoredSchemaValue {
+    /// `value` located in this text and checked against it, when every
+    /// inline schema it holds projects: the proof that the slot spans of a
+    /// parse of `value` can be moved into the file. `None` for a value with
+    /// no `{{` (nothing to position) or one the text does not prove.
+    fn locate(&self, value: &YamlValue) -> Option<crate::simplified::LocatedSchemaValue> {
+        if !mentions_slot(value) {
+            return None;
+        }
+        let mapping = self.text.get(self.mapping.clone())?;
+        let located = crate::simplified::LocatedSchemaValue::locate(mapping, "$schema", self.mapping.start, value)?;
+        let projects = |item: &YamlValue, located: Option<crate::simplified::LocatedSchemaValue>| match parse_yaml_schema(item) {
+            // A definition that does not parse fails resolution on its own.
+            Err(_) => true,
+            Ok(mut schema) => located.is_some_and(|located| located.project(&mut schema).is_ok()),
+        };
+        let proven = match value {
+            YamlValue::Mapping(_) => projects(value, Some(located.clone())),
+            YamlValue::Sequence(items) => items
+                .iter()
+                .enumerate()
+                .all(|(index, item)| !item.is_mapping() || projects(item, located.arm(index))),
+            _ => false,
+        };
+        proven.then_some(located)
+    }
+}
+
+/// Whether any string in `value` contains `{{`.
+fn mentions_slot(value: &YamlValue) -> bool {
+    match value {
+        YamlValue::String(text) => text.contains("{{"),
+        YamlValue::Mapping(map) => map.values().any(mentions_slot),
+        YamlValue::Sequence(items) => items.iter().any(mentions_slot),
+        YamlValue::Tagged(tagged) => mentions_slot(&tagged.value),
+        _ => false,
+    }
+}
+
+/// [`resolve_yaml_schema_owned_by`] for a value written in `authored`: each
+/// slot of the inline value (and of its inline root-union arms) carries
+/// its byte range in that file, and a template met here keeps `authored`
+/// for positioning a failure. Without `authored`, or when the text does
+/// not prove where the value is, a slot's spans stay relative to its type
+/// string and the template keeps no text, so no position is claimed.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_authored_yaml_schema(
+    value: &YamlValue,
+    owner: InlineOwner<'_>,
+    authored: Option<&AuthoredSchemaValue>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    let located = authored.and_then(|authored| authored.locate(value));
+    let kept = located.as_ref().and(authored).map(|authored| crate::slots::pending::AuthoredText {
+        value: Arc::new(match owner {
+            InlineOwner::Document => authored.clone(),
+            InlineOwner::Trigger(path) => AuthoredSchemaValue { file: Some(canonical_path(path)), ..authored.clone() },
+        }),
+        document: matches!(owner, InlineOwner::Document),
+    });
+    resolving_entry(
+        || resolve_owned_value(value, owner, located.as_ref(), base_dir, schema_roots, request_context, shipped),
+        kept,
+        || {
+            let value = value.clone();
+            let located = located.clone();
+            let trigger = match owner {
+                InlineOwner::Document => None,
+                InlineOwner::Trigger(path) => Some(path.to_path_buf()),
+            };
+            let base_dir = base_dir.to_path_buf();
+            let schema_roots = schema_roots.to_vec();
+            let context = request_context.clone();
+            Arc::new(move || {
+                let owner = trigger.as_deref().map_or(InlineOwner::Document, InlineOwner::Trigger);
+                resolve_owned_value(&value, owner, located.as_ref(), &base_dir, &schema_roots, &context, shipped)
+            })
+        },
+    )
+}
+
+/// [`resolve_schema_with_roots`] for a document `$schema` value written in
+/// `authored` ([`resolve_authored_yaml_schema`]).
+pub fn resolve_authored_schema_with_roots(
+    value: &Value,
+    authored: Option<&AuthoredSchemaValue>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    let yaml = json_to_yaml(value);
+    resolve_authored_yaml_schema(&yaml, InlineOwner::Document, authored, base_dir, schema_roots, request_context, shipped)
+}
+
+thread_local! {
+    /// How many [`resolving_entry`] calls are running on this thread.
+    static ENTRY_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Runs the public resolution `resolve`. When it meets a template, the
+/// error gains the [`crate::slots::PendingSchema`] that resolves it: the
+/// texts `resolve` read and the `replay` (built only then) of the same call.
+/// A call nested in another entry point, or running inside a slot-value
+/// scope (a replay), is left to the outer one.
+fn resolving_entry(
+    resolve: impl FnOnce() -> Result<ResolvedSchema, SchemaError>,
+    authored: Option<crate::slots::pending::AuthoredText>,
+    replay: impl FnOnce() -> crate::slots::Replay,
+) -> Result<ResolvedSchema, SchemaError> {
+    if ENTRY_DEPTH.get() > 0 || crate::slots::active_values().is_some() {
+        return resolve();
+    }
+    struct Leave;
+    impl Drop for Leave {
+        fn drop(&mut self) {
+            ENTRY_DEPTH.set(ENTRY_DEPTH.get() - 1);
+        }
+    }
+    ENTRY_DEPTH.set(ENTRY_DEPTH.get() + 1);
+    let _leave = Leave;
+    let open = buffers::current();
+    let (result, sources) = buffers::recording(resolve);
+    match result {
+        Err(SchemaError::UnresolvedSlots(mut unresolved)) => {
+            unresolved.pending = Some(crate::slots::PendingSchema::new(&unresolved, open, sources, authored, replay()));
+            Err(SchemaError::UnresolvedSlots(unresolved))
+        }
+        other => other,
+    }
+}
+
+/// [`resolve_yaml_schema_owned_by`] without the template handle.
+fn resolve_owned_value(
+    value: &YamlValue,
+    owner: InlineOwner<'_>,
+    located: Option<&crate::simplified::LocatedSchemaValue>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
@@ -253,13 +430,14 @@ pub fn resolve_yaml_schema_owned_by(
         YamlValue::Mapping(_) => resolve_inline_mapping(
             value,
             owner,
+            located,
             base_dir,
             schema_roots,
             request_context,
             shipped,
         ),
         YamlValue::Sequence(items) => {
-            resolve_root_union(items, owner, base_dir, schema_roots, request_context, &mut stack, shipped)
+            resolve_root_union(items, owner, located, base_dir, schema_roots, request_context, &mut stack, shipped)
         }
         other => Err(SchemaError::FrontmatterShape {
             message: format!(
@@ -279,19 +457,25 @@ pub fn resolve_catalog_declaration(
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    resolve_inline_mapping(value, InlineOwner::Document, base_dir, &[], request_context, shipped)
+    resolve_inline_mapping(value, InlineOwner::Document, None, base_dir, &[], request_context, shipped)
 }
 
 /// Resolves the inline `$schema` mapping `value` authored by `owner`.
 fn resolve_inline_mapping(
     value: &YamlValue,
     owner: InlineOwner<'_>,
+    located: Option<&crate::simplified::LocatedSchemaValue>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    let schema = parse_yaml_schema(value)?;
+    let mut schema = parse_yaml_schema(value)?;
+    if let Some(located) = located {
+        // Proven by `AuthoredSchemaValue::locate` before resolution began.
+        let projected = located.project(&mut schema);
+        debug_assert!(projected.is_ok(), "{projected:?}");
+    }
     // Inline the definitions of any `Name@file` named-type imports
     // (Feature B) before conversion — `to_json_schema` rejects a
     // surviving import. `@this` resolves against this mapping, whose
@@ -302,7 +486,7 @@ fn resolve_inline_mapping(
         schema_roots: schema_roots.to_vec(),
         context: Box::new(request_context.clone()),
     };
-    let (schema, imports) = expand_imports(
+    let (mut schema, imports) = expand_imports(
         schema,
         None,
         base_dir,
@@ -314,11 +498,13 @@ fn resolve_inline_mapping(
         &mut definitions,
         shipped,
     )?;
+    let site = crate::slots::ExpansionSite { base_dir, schema_roots, request_context, shipped };
+    let late = crate::slots::apply_active(&mut schema, &mut definitions, &site)?;
     let mut json = to_json_schema_with_definitions(&schema, &definitions)?;
     // Inline `$schema` mappings have no on-disk path, so `this` example
     // references have no target here (the acceptance driver references
     // examples from a schema *file*, resolved in `parse_yaml_referenced_file`).
-    let examples = resolve_document_examples(
+    let mut examples = resolve_document_examples(
         &mut json,
         base_dir,
         None,
@@ -326,6 +512,8 @@ fn resolve_inline_mapping(
         request_context,
         &mut searched,
     )?;
+    let mut imports = imports;
+    late.merge_into(&mut imports, &mut examples, &mut searched);
     Ok(ResolvedSchema {
         simplified: Some(schema),
         definitions: Arc::new(definitions),
@@ -545,9 +733,11 @@ pub fn check_standalone_named_types(
     Ok(imports.into_iter().collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_root_union(
     items: &[YamlValue],
     owner: InlineOwner<'_>,
+    located: Option<&crate::simplified::LocatedSchemaValue>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
@@ -575,9 +765,13 @@ pub(crate) fn resolve_root_union(
     for (index, item) in items.iter().enumerate() {
         match item {
             YamlValue::Mapping(_) => {
-                let arm_schema = parse_yaml_schema(item)?;
+                let mut arm_schema = parse_yaml_schema(item)?;
+                if let Some(arm) = located.and_then(|located| located.arm(index)) {
+                    let projected = arm.project(&mut arm_schema);
+                    debug_assert!(projected.is_ok(), "{projected:?}");
+                }
                 // Named-type imports are inlined per arm before conversion.
-                let (arm_schema, arm_imports) =
+                let (mut arm_schema, arm_imports) =
                     expand_document_imports(
                         arm_schema,
                         None,
@@ -591,6 +785,18 @@ pub(crate) fn resolve_root_union(
                         shipped,
                     )?;
                 imports.extend(arm_imports);
+                let site = crate::slots::ExpansionSite { base_dir, schema_roots, request_context, shipped };
+                match crate::slots::apply_active_to_arm(&mut arm_schema, &mut definitions, &site) {
+                    Ok(late) => {
+                        imports.extend(late.imports);
+                        examples.extend(late.examples);
+                        searched.extend(late.searched);
+                    }
+                    Err(error) => {
+                        let later = document_union_arm_names(&items[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
+                        return Err(pending_union_arm(error, &any_of, later));
+                    }
+                }
                 let mut arm_json = to_json_schema_with_definitions(&arm_schema, &definitions)?;
                 examples.extend(resolve_document_examples(
                     &mut arm_json,
@@ -619,14 +825,21 @@ pub(crate) fn resolve_root_union(
                 any_of.push(strip_schema_uri(arm_json));
             }
             YamlValue::String(reference) => {
-                let resolved = resolve_reference_in_context(
+                let resolved = match resolve_reference_in_context(
                     reference,
                     base_dir,
                     schema_roots,
                     request_context,
                     stack,
                     shipped,
-                )?;
+                ) {
+                    Ok(resolved) => resolved,
+                    Err(error @ SchemaError::UnresolvedSlots(_)) => {
+                        let later = document_union_arm_names(&items[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
+                        return Err(pending_union_arm(error, &any_of, later));
+                    }
+                    Err(error) => return Err(error),
+                };
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
@@ -928,6 +1141,11 @@ pub mod observed {
         pub read: BTreeSet<PathBuf>,
         /// Every location probed, present or absent.
         pub searched: BTreeSet<PathBuf>,
+        /// One entry per schema source opened from the disk, in order and
+        /// normalized like [`Self::read`]; a read served by an open buffer
+        /// is not an open. Test instrumentation for read-once contracts.
+        #[cfg(feature = "work-counters")]
+        pub opened: Vec<PathBuf>,
     }
 
     /// Runs `resolve`, returning its result with everything it observed.
@@ -964,6 +1182,21 @@ pub mod observed {
             let normalized = super::canonical_path(path);
             for frame in frames.iter_mut() {
                 frame.read.insert(normalized.clone());
+            }
+        });
+    }
+
+    /// Records a schema source opened from the disk.
+    #[cfg_attr(not(feature = "work-counters"), allow(unused_variables))]
+    pub(super) fn opened(path: &Path) {
+        #[cfg(feature = "work-counters")]
+        FRAMES.with_borrow_mut(|frames| {
+            if frames.is_empty() {
+                return;
+            }
+            let normalized = super::canonical_path(path);
+            for frame in frames.iter_mut() {
+                frame.opened.push(normalized.clone());
             }
         });
     }
@@ -1208,7 +1441,7 @@ fn resolve_standalone_schema(
         SchemaRoot::Single(_) => {
             let mut searched = BTreeSet::new();
             let mut definitions = DefinitionTable::default();
-            let (schema, imports) = expand_document_imports(
+            let (mut schema, imports) = expand_document_imports(
                 schema,
                 local_types,
                 file_dir,
@@ -1220,8 +1453,10 @@ fn resolve_standalone_schema(
                 &mut definitions,
                 shipped,
             )?;
+            let site = crate::slots::ExpansionSite { base_dir: file_dir, schema_roots, request_context, shipped };
+            let late = crate::slots::apply_active(&mut schema, &mut definitions, &site)?;
             let mut json_schema = to_json_schema_with_definitions(&schema, &definitions)?;
-            let examples = resolve_document_examples(
+            let mut examples = resolve_document_examples(
                 &mut json_schema,
                 file_dir,
                 Some(path),
@@ -1229,6 +1464,8 @@ fn resolve_standalone_schema(
                 request_context,
                 &mut searched,
             )?;
+            let mut imports = imports;
+            late.merge_into(&mut imports, &mut examples, &mut searched);
             Ok(ResolvedSchema {
                 simplified: Some(schema),
                 definitions: Arc::new(definitions),
@@ -1402,15 +1639,37 @@ pub fn prepare_yaml_schema_text(
 /// [`SchemaError::NotASchemaDocument`] when `document` is not a
 /// `yaml-schema` ([`NotSchemaReason::NoSchemaProperty`]); every resolver
 /// error of its export and imports.
+///
+/// A template fails with [`SchemaError::UnresolvedSlots`] whose `pending`
+/// resolves it, as for [`resolve_yaml_schema_owned_by`].
 pub fn prepare_standalone_yaml_schema(
     document: StandaloneSchemaDocument,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
+    resolving_entry(
+        || prepare_standalone_document(&document, schema_roots, request_context, shipped),
+        None,
+        || {
+            let document = document.clone();
+            let schema_roots = schema_roots.to_vec();
+            let context = request_context.clone();
+            Arc::new(move || prepare_standalone_document(&document, &schema_roots, &context, shipped))
+        },
+    )
+}
+
+/// [`prepare_standalone_yaml_schema`] without the template handle.
+fn prepare_standalone_document(
+    document: &StandaloneSchemaDocument,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
     let StandaloneSchemaDocument { path, envelope, declaration, local_types, .. } = document;
     let path = path.as_path();
-    if envelope != StandaloneSchemaEnvelope::YamlSchema {
+    if *envelope != StandaloneSchemaEnvelope::YamlSchema {
         return Err(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty });
     }
     let canonical = canonical_path(path);
@@ -1418,7 +1677,7 @@ pub fn prepare_standalone_yaml_schema(
     stack.enter(&canonical)?;
     let resolved = match declaration {
         SchemaDeclaration::Schema(schema) => resolve_standalone_schema(
-            schema,
+            schema.clone(),
             local_types.as_ref(),
             path,
             schema_roots,
@@ -1531,6 +1790,16 @@ fn lower_embedded_schema(
         &mut definitions,
         shipped,
     )?;
+    // An embedded schema is a build input: nothing could resolve a slot in
+    // it, as nothing could read an `example(...)` file.
+    if crate::slots::has_dynamic(&schema, &definitions) {
+        return Err(SchemaError::SchemaDocument {
+            path: PathBuf::from(path),
+            message: "an embedded schema cannot contain `{{ … }}` slots".into(),
+            source: None,
+            span: None,
+        });
+    }
     let json_schema = to_json_schema_with_definitions(&schema, &definitions)?;
     if contains_example_annotation(&json_schema) {
         return Err(SchemaError::SchemaDocument {
@@ -1566,6 +1835,103 @@ fn contains_example_annotation(value: &Value) -> bool {
     }
 }
 
+/// The template error one arm of a root union met, marked as that arm's,
+/// with the top-level properties every arm of the union declares: the
+/// arms already lowered (`lowered`), the pending arm itself, and the arms
+/// after it (`later`). Exactly what the resolved union's arms declare, so a
+/// host layering the pending union discards what the resolved one would.
+fn pending_union_arm(error: SchemaError, lowered: &[Value], later: Vec<Vec<String>>) -> SchemaError {
+    let SchemaError::UnresolvedSlots(mut unresolved) = error else {
+        return error;
+    };
+    if let Some(template) = unresolved.template.as_mut() {
+        let arms = lowered
+            .iter()
+            .map(json_property_names)
+            .chain(std::iter::once(template.single_object_names()))
+            .chain(later);
+        template.mark_union_arm(every_arm_declares(arms));
+    }
+    SchemaError::UnresolvedSlots(unresolved)
+}
+
+/// The names every one of `arms` declares, in the first arm's order.
+fn every_arm_declares(arms: impl IntoIterator<Item = Vec<String>>) -> Vec<String> {
+    let mut arms = arms.into_iter();
+    let first = arms.next().unwrap_or_default();
+    arms.fold(first, |kept, arm| kept.into_iter().filter(|name| arm.contains(name)).collect())
+}
+
+/// The top-level `properties` a lowered arm declares (none for an arm that
+/// is itself a union).
+fn json_property_names(arm: &Value) -> Vec<String> {
+    arm.get("properties").and_then(Value::as_object).map(|properties| properties.keys().cloned().collect()).unwrap_or_default()
+}
+
+/// The top-level properties a referenced root-union arm declares as it
+/// resolves; a template's are read from it unevaluated. An arm that fails to
+/// resolve declares nothing.
+fn reference_arm_names(
+    reference: &str,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    stack: &mut ReferenceStack,
+    shipped: ShippedSources,
+) -> Vec<String> {
+    match resolve_reference_in_context(reference, base_dir, schema_roots, request_context, stack, shipped) {
+        Ok(resolved) => json_property_names(&resolved.json_schema),
+        Err(SchemaError::UnresolvedSlots(unresolved)) => {
+            unresolved.template.as_ref().map(crate::slots::Template::single_object_names).unwrap_or_default()
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
+/// The top-level properties each of a document root union's `arms`
+/// declares, an inline arm's as written (import expansion never adds a
+/// top-level property).
+fn document_union_arm_names(
+    arms: &[YamlValue],
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    stack: &mut ReferenceStack,
+    shipped: ShippedSources,
+) -> Vec<Vec<String>> {
+    arms.iter()
+        .map(|arm| match arm {
+            YamlValue::Mapping(_) => match parse_yaml_schema(arm) {
+                Ok(SchemaRoot::Single(shape)) => shape.properties.keys().cloned().collect(),
+                _ => Vec::new(),
+            },
+            YamlValue::String(reference) => {
+                reference_arm_names(reference, base_dir, schema_roots, request_context, stack, shipped)
+            }
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// [`document_union_arm_names`] for a standalone schema's root-union arms.
+fn standalone_union_arm_names(
+    arms: &[SchemaArm],
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    stack: &mut ReferenceStack,
+    shipped: ShippedSources,
+) -> Vec<Vec<String>> {
+    arms.iter()
+        .map(|arm| match arm {
+            SchemaArm::Inline(shape) => shape.properties.keys().cloned().collect(),
+            SchemaArm::FileRef(reference) => {
+                reference_arm_names(reference, base_dir, schema_roots, request_context, stack, shipped)
+            }
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_standalone_root_union(
     arms: Vec<SchemaArm>,
@@ -1590,11 +1956,11 @@ pub(crate) fn resolve_standalone_root_union(
     // Arms whose definitions join the root after every typed key is known.
     let mut deferred_arms: Vec<usize> = Vec::new();
 
-    for (index, arm) in arms.into_iter().enumerate() {
+    for (index, arm) in arms.iter().enumerate() {
         match arm {
             SchemaArm::Inline(shape) => {
-                let schema = SchemaRoot::Single(shape);
-                let (schema, arm_imports) = expand_document_imports(
+                let schema = SchemaRoot::Single(shape.clone());
+                let (mut schema, arm_imports) = expand_document_imports(
                     schema,
                     local_types,
                     base_dir,
@@ -1607,6 +1973,18 @@ pub(crate) fn resolve_standalone_root_union(
                     shipped,
                 )?;
                 imports.extend(arm_imports);
+                let site = crate::slots::ExpansionSite { base_dir, schema_roots, request_context, shipped };
+                match crate::slots::apply_active_to_arm(&mut schema, &mut definitions, &site) {
+                    Ok(late) => {
+                        imports.extend(late.imports);
+                        examples.extend(late.examples);
+                        searched.extend(late.searched);
+                    }
+                    Err(error) => {
+                        let later = standalone_union_arm_names(&arms[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
+                        return Err(pending_union_arm(error, &any_of, later));
+                    }
+                }
                 let SchemaRoot::Single(shape) = schema else {
                     unreachable!("single root-union arm remains single")
                 };
@@ -1631,14 +2009,21 @@ pub(crate) fn resolve_standalone_root_union(
                 any_of.push(strip_schema_uri(arm_json));
             }
             SchemaArm::FileRef(reference) => {
-                let resolved = resolve_reference_in_context(
-                    &reference,
+                let resolved = match resolve_reference_in_context(
+                    reference,
                     base_dir,
                     schema_roots,
                     request_context,
                     stack,
                     shipped,
-                )?;
+                ) {
+                    Ok(resolved) => resolved,
+                    Err(error @ SchemaError::UnresolvedSlots(_)) => {
+                        let later = standalone_union_arm_names(&arms[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
+                        return Err(pending_union_arm(error, &any_of, later));
+                    }
+                    Err(error) => return Err(error),
+                };
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
@@ -1649,7 +2034,7 @@ pub(crate) fn resolve_standalone_root_union(
                     &resolved.definitions,
                     matches!(resolved.simplified, Some(SchemaRoot::Single(_))),
                     &mut arm_json,
-                    &reference,
+                    reference,
                     &mut definitions,
                     &mut root_defs,
                 )? {
@@ -1850,6 +2235,10 @@ struct ImportEngine<'a> {
     /// Set just before expanding a definition's top-level atom that must not
     /// become a reference to a shared definition; taken by that expansion.
     force_inline: bool,
+    /// The template type whose returned definition this engine expands, with
+    /// the host's read hooks: every probe and read is admitted before it
+    /// happens. `None` for every other expansion, which reads as it always has.
+    template_gate: Option<crate::slots::reads::ReadGate>,
 }
 
 /// Where an expansion reads the namespaces its imports name. This is all that
@@ -1892,6 +2281,7 @@ impl<'a> ImportEngine<'a> {
             forced_cache: HashMap::new(),
             arm_use: false,
             force_inline: false,
+            template_gate: crate::slots::reads::current_gate(),
         }
     }
 }
@@ -2079,7 +2469,7 @@ fn dollar_constraints_key(constraint: &Constraint) -> &'static str {
 
 /// The mapping key a pattern property is authored under, which is its
 /// segment in a [`SchemaSourcePath`].
-fn pattern_key_source_name(key: &PatternKey) -> String {
+pub(crate) fn pattern_key_source_name(key: &PatternKey) -> String {
     match key {
         PatternKey::CatchAll => "<string>".to_string(),
         PatternKey::Starting(prefix) => format!("<starting::{prefix}>"),
@@ -2125,6 +2515,119 @@ fn expand_document_imports(
     expand_imports(schema, local_types, base_dir, key, &root, source, Sharing::Automatic, searched, definitions, shipped)
 }
 
+/// The name a template type's returned definition takes in the namespace its
+/// expansion builds. It is never written, stored, or reported: the namespace
+/// holds nothing else, and a returned definition cannot name a local type.
+pub(crate) const TEMPLATE_TYPE_NAME: &str = "{{ template type }}";
+
+/// One expansion of a template type's returned definition.
+pub(crate) struct TemplateExpansion {
+    /// The definition, as the slot's position takes it: for an arm, the arms
+    /// to splice (a `Union`, or a `Single` non-array union atom holding the
+    /// property markers its postfix hoisted), else the property definition.
+    pub(crate) def: PropertyDef,
+    /// Files its imports read.
+    pub(crate) imports: Vec<PathBuf>,
+    /// Locations probed to select them.
+    pub(crate) searched: BTreeSet<PathBuf>,
+}
+
+/// Expands `returned`, the definition the template type `use_site` (a
+/// [`TypeExpr::Slot`] atom) returned, as a named type of the slot's defining
+/// file (its namespace, never the data file's) used once at the slot's
+/// position: with the written suffix merged by the named-type rules, or
+/// `bare` without it. `as_arm` uses it as a union alternative, so a returned
+/// union flattens into the surrounding one.
+///
+/// Runs inside [`crate::slots::reads::expanding`] for `slot`, so with a
+/// host's read hooks installed every probe and read of its imports is
+/// admitted first. Stored definitions it reaches are added to `definitions`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn expand_template_definition(
+    returned: &PropertyDef,
+    use_site: &PropertyAtom,
+    bare: bool,
+    as_arm: bool,
+    slot: &Slot,
+    site: &crate::slots::ExpansionSite<'_>,
+    definitions: &mut DefinitionTable,
+) -> Result<TemplateExpansion, SchemaError> {
+    let (base_dir, key) = match slot.origin.as_deref() {
+        Some(origin) => (
+            origin.parent().unwrap_or(site.base_dir).to_path_buf(),
+            DefNamespace::File(canonical_path(origin)),
+        ),
+        None => (site.base_dir.to_path_buf(), DefNamespace::InlineRoot),
+    };
+    let mut types = SchemaShape::default();
+    types.properties.insert(TEMPLATE_TYPE_NAME.to_string(), returned.clone());
+    let atom = if bare {
+        PropertyAtom {
+            ty: TypeExpr::local(TEMPLATE_TYPE_NAME),
+            is_array: false,
+            constraints: Vec::new(),
+            array_constraints: Vec::new(),
+            description: None,
+        }
+    } else {
+        PropertyAtom { ty: TypeExpr::local(TEMPLATE_TYPE_NAME), ..use_site.clone() }
+    };
+    let def = if as_arm { PropertyDef::Union(vec![atom]) } else { PropertyDef::Single(atom) };
+    let mut shape = SchemaShape::default();
+    shape.properties.insert(TEMPLATE_TYPE_NAME.to_string(), def);
+    let mut searched = BTreeSet::new();
+    let source = NamespaceSource::Files {
+        schema_roots: site.schema_roots.to_vec(),
+        context: Box::new(site.request_context.clone()),
+    };
+    let (root, imports) = crate::slots::reads::expanding(slot, || {
+        expand_imports(
+            SchemaRoot::Single(shape),
+            Some(&types),
+            &base_dir,
+            key,
+            &SchemaSourcePath::root(),
+            source,
+            Sharing::Automatic,
+            &mut searched,
+            definitions,
+            site.shipped,
+        )
+    })?;
+    let SchemaRoot::Single(mut shape) = root else {
+        unreachable!("a single root stays single")
+    };
+    let def = shape.properties.swap_remove(TEMPLATE_TYPE_NAME).expect("the expansion keeps its one property");
+    Ok(TemplateExpansion { def, imports, searched })
+}
+
+/// Pins the `example(...)` references of `returned`, a definition the
+/// template type `slot` returned, when the slot has no defining file: its
+/// expansion's namespace is then no file, so nothing else rehomes them, and
+/// the read must still pass `slot`'s gate. A slot written in a file has them
+/// rehomed by its expansion.
+pub(crate) fn rehome_returned_examples(
+    returned: &mut PropertyDef,
+    slot: &Slot,
+    site: &crate::slots::ExpansionSite<'_>,
+    searched: &mut BTreeSet<PathBuf>,
+) -> Result<(), SchemaError> {
+    if slot.origin.is_some() {
+        return Ok(());
+    }
+    crate::slots::reads::expanding(slot, || {
+        let gate = crate::slots::reads::current_gate();
+        let atoms: &mut [PropertyAtom] = match returned {
+            PropertyDef::Single(atom) => std::slice::from_mut(atom),
+            PropertyDef::Union(arms) => arms,
+        };
+        for atom in atoms {
+            rehome_atom_examples(atom, site.base_dir, None, site.schema_roots, site.request_context, searched, gate.as_ref())?;
+        }
+        Ok(())
+    })
+}
+
 /// Whether an expansion stores repeated acyclic structured definitions once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sharing {
@@ -2163,6 +2666,12 @@ fn expand_imports(
     definitions: &mut DefinitionTable,
     shipped: ShippedSources,
 ) -> Result<(SchemaRoot, Vec<PathBuf>), SchemaError> {
+    let mut schema = schema;
+    // A slot evaluates in the file it was written in: stamp the root's own
+    // slots here and each lifted definition's in `rehome_definition`.
+    if let Some(file) = key.file() {
+        crate::slots::stamp_root_origin(&mut schema, file);
+    }
     if !schema_has_imports(&schema) {
         return Ok((schema, Vec::new()));
     }
@@ -2330,7 +2839,7 @@ impl ImportEngine<'_> {
         let suggestions = out
             .iter()
             .flat_map(PropertyAtom::property_constraints)
-            .filter(|constraint| matches!(constraint, Constraint::Suggest(_)))
+            .filter(|constraint| is_suggestion_list(constraint))
             .count();
         if suggestions > 1 {
             // An inherited candidate's span belongs to another source, so no
@@ -2397,6 +2906,9 @@ impl ImportEngine<'_> {
             })?),
             TypeExpr::Function(function) => TypeExpr::Function(function),
             TypeExpr::Ref(key) => TypeExpr::Ref(key),
+            // A template type stays pending through expansion, its written
+            // suffix kept for resolution to merge with the returned type.
+            TypeExpr::Slot(slot) => TypeExpr::Slot(slot),
         };
         let mut atom = PropertyAtom {
             ty,
@@ -2559,19 +3071,28 @@ impl ImportEngine<'_> {
         };
         self.stack.pop();
 
-        let base = self.rehome_definition_examples(base, &target.key)?;
+        let base = self.rehome_definition(base, &target.key)?;
         let cache = if force_inline { &mut self.forced_cache } else { &mut self.expanded_cache };
         cache.insert(frame.clone(), base.clone());
         Ok(base)
     }
 
-    /// Pins the examples of a definition expanded from a schema file (see
-    /// [`Self::rehome_examples`]); other namespaces have none to pin.
-    fn rehome_definition_examples(
+    /// Rehomes a definition expanded from `namespace` for use elsewhere:
+    /// stamps its slots with the file it was written in (a slot evaluates in
+    /// its defining file's context), and pins its examples when that file is
+    /// a schema file (see [`Self::rehome_examples`]); other namespaces have
+    /// none to pin.
+    fn rehome_definition(
         &mut self,
-        base: ExpandedDef,
+        mut base: ExpandedDef,
         namespace: &DefNamespace,
     ) -> Result<ExpandedDef, SchemaError> {
+        if let Some(file) = namespace.file() {
+            match &mut base {
+                ExpandedDef::Single(atom, _) => crate::slots::stamp_atom_origin(atom, file),
+                ExpandedDef::Union(arms) => arms.iter_mut().for_each(|atom| crate::slots::stamp_atom_origin(atom, file)),
+            }
+        }
         match namespace {
             DefNamespace::File(file) | DefNamespace::FileRootUnionArm(file, _) => {
                 self.rehome_examples(base, &file.clone())
@@ -2602,9 +3123,10 @@ impl ImportEngine<'_> {
             unreachable!("a file namespace is only loaded from the file source")
         };
         let searched = &mut self.searched;
+        let gate = self.template_gate.as_ref();
         let base_dir = file.parent().unwrap_or_else(|| Path::new("."));
         let mut rehome = |atom: &mut PropertyAtom| {
-            rehome_atom_examples(atom, base_dir, file, schema_roots, context, searched)
+            rehome_atom_examples(atom, base_dir, Some(file), schema_roots, context, searched, gate)
         };
         Ok(match base {
             ExpandedDef::Single(mut atom, provenance) => {
@@ -2672,7 +3194,10 @@ impl ImportEngine<'_> {
                     (selected.path.clone(), selected.canonical.clone())
                 } else {
                     let mut probed = BTreeSet::new();
-                    let selected = named_type_file_path(reference, &current.base_dir, schema_roots, context, &mut probed);
+                    let selected = match &self.template_gate {
+                        Some(gate) => gated_schema_file_path(gate, reference, &current.base_dir, schema_roots, context, &mut probed),
+                        None => named_type_file_path(reference, &current.base_dir, schema_roots, context, &mut probed),
+                    };
                     self.searched.extend(probed.iter().cloned());
                     let path = selected?;
                     let canonical = canonical_path(&path);
@@ -2697,6 +3222,17 @@ impl ImportEngine<'_> {
         };
 
         self.dependencies.insert(canonical.clone());
+        // A returned definition's import is admitted before its text is used
+        // from anywhere: this engine's cache, the process memo, a buffer, or
+        // the disk. Its bytes are read, and reported, here.
+        let gated_bytes = match &self.template_gate {
+            Some(gate) if !self.namespace_cache.contains_key(&canonical) => Some(gate.read(&path)?),
+            Some(gate) => {
+                gate.admit(&path, crate::slots::SchemaReadKind::Content)?;
+                None
+            }
+            None => None,
+        };
         // Reuse an already-loaded namespace for this file: multiple import sites
         // targeting the same file (`A@types.yaml`, `B@types.yaml`, …) otherwise
         // re-read and re-parse it once each.
@@ -2707,7 +3243,10 @@ impl ImportEngine<'_> {
                 named_types: Arc::clone(&cached.named_types),
             });
         }
-        let named_types = load_named_types(&path)?;
+        let named_types = match gated_bytes {
+            Some(bytes) => load_named_types_from(&path, Ok(bytes))?,
+            None => load_named_types(&path)?,
+        };
         let base_dir = path
             .parent()
             .map(Path::to_path_buf)
@@ -2860,17 +3399,70 @@ fn named_type_file_path(
     selection.into_result()
 }
 
+/// [`named_type_file_path`] for a template type's returned definition: `gate`
+/// admits each location immediately before the ordered selection probes it,
+/// so a location the first-match search never reaches is never asked about,
+/// and each probe is reported to it afterward, found or not, also when a
+/// later refusal stopped the search.
+fn gated_schema_file_path(
+    gate: &crate::slots::reads::ReadGate,
+    reference: &str,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    searched: &mut BTreeSet<PathBuf>,
+) -> Result<PathBuf, SchemaError> {
+    let admit = |path: &Path| gate.admit(path, crate::slots::SchemaReadKind::Probe);
+    let selection = match select::select_schema_file_checked(reference, base_dir, schema_roots, request_context, &admit) {
+        Ok(selection) => selection,
+        Err(refused) => {
+            for probed in &refused.attempted {
+                gate.observe(probed, crate::slots::SchemaReadKind::Probe, None, false);
+            }
+            searched.extend(refused.attempted);
+            return Err(*refused.error);
+        }
+    };
+    let found = match &selection.outcome {
+        SelectionOutcome::Found(path) => Some(path.as_path()),
+        SelectionOutcome::SiblingOnly { .. } | SelectionOutcome::Missing { .. } | SelectionOutcome::Failed(_) => None,
+    };
+    for probed in &selection.attempted {
+        gate.observe(probed, crate::slots::SchemaReadKind::Probe, None, Some(probed.as_path()) == found);
+    }
+    // The sibling beside the referencing document is checked only after
+    // every schema root missed a bare name.
+    match &selection.outcome {
+        SelectionOutcome::SiblingOnly { sibling, .. } => {
+            gate.observe(sibling, crate::slots::SchemaReadKind::Probe, None, true);
+        }
+        SelectionOutcome::Missing { bare_name: true, .. } => {
+            gate.observe(&base_dir.join(reference.trim()), crate::slots::SchemaReadKind::Probe, None, false);
+        }
+        _ => {}
+    }
+    searched.extend(selection.attempted.iter().cloned());
+    selection.into_result()
+}
+
 /// Rewrites every `example(...)` reference in `atom`, including those of
-/// nested inline-object properties and union arms, to the path it resolves to from
-/// `base_dir` (see [`ImportEngine::rehome_examples`]). A path that is not
+/// nested inline-object properties, union arms, tuple elements, and the tuple
+/// spread, to the path it resolves to from `base_dir` (see
+/// [`ImportEngine::rehome_examples`]). A path that is not
 /// valid UTF-8 cannot be spelled as a reference and is left as authored.
-fn rehome_atom_examples(
+///
+/// With a `gate` (a template type's returned definition), each location is
+/// admitted immediately before the selection probes it and the selected file
+/// before it is read and reported here; the read at lowering is the same
+/// path.
+pub(crate) fn rehome_atom_examples(
     atom: &mut PropertyAtom,
     base_dir: &Path,
-    this_file: &Path,
+    this_file: Option<&Path>,
     schema_roots: &[PathBuf],
     request_context: &FileResolutionContext,
     searched: &mut BTreeSet<PathBuf>,
+    gate: Option<&crate::slots::reads::ReadGate>,
 ) -> Result<(), SchemaError> {
     for constraint in atom
         .constraints
@@ -2879,58 +3471,53 @@ fn rehome_atom_examples(
     {
         if let Constraint::Example(references) = constraint {
             for reference in references.iter_mut() {
-                let path = resolve_example_path(
-                    reference,
-                    base_dir,
-                    Some(this_file),
-                    schema_roots,
-                    request_context,
-                    searched,
-                )?;
+                let path = match gate {
+                    Some(gate) if reference.trim() != "this" => {
+                        let path =
+                            gated_schema_file_path(gate, reference, base_dir, schema_roots, request_context, searched)?;
+                        gate.read(&path)?;
+                        path
+                    }
+                    _ => resolve_example_path(reference, base_dir, this_file, schema_roots, request_context, searched)?,
+                };
                 if let Some(resolved) = path.to_str() {
                     *reference = resolved.to_string();
                 }
             }
         }
     }
-    if let TypeExpr::Union(arms) = &mut atom.ty {
-        // An arm inlined from another file was already rehomed there; its
-        // absolute paths resolve to themselves.
-        for arm in arms {
-            rehome_atom_examples(arm, base_dir, this_file, schema_roots, request_context, searched)?;
+    let mut rehome = |atom: &mut PropertyAtom| {
+        rehome_atom_examples(atom, base_dir, this_file, schema_roots, request_context, searched, gate)
+    };
+    fn def_atoms(def: &mut PropertyDef) -> &mut [PropertyAtom] {
+        match def {
+            PropertyDef::Single(inner) => std::slice::from_mut(inner),
+            PropertyDef::Union(arms) => arms,
         }
     }
-    if let TypeExpr::InlineObject(shape) = &mut atom.ty {
-        let defs = shape
+    match &mut atom.ty {
+        // An arm inlined from another file was already rehomed there; its
+        // absolute paths resolve to themselves.
+        TypeExpr::Union(arms) => arms.iter_mut().try_for_each(&mut rehome)?,
+        TypeExpr::InlineObject(shape) => shape
             .properties
             .values_mut()
-            .chain(shape.pattern_keys.iter_mut().map(|pattern| &mut pattern.def));
-        for def in defs {
-            match def {
-                PropertyDef::Single(inner) => {
-                    rehome_atom_examples(
-                        inner,
-                        base_dir,
-                        this_file,
-                        schema_roots,
-                        request_context,
-                        searched,
-                    )?;
-                }
-                PropertyDef::Union(arms) => {
-                    for inner in arms {
-                        rehome_atom_examples(
-                            inner,
-                            base_dir,
-                            this_file,
-                            schema_roots,
-                            request_context,
-                            searched,
-                        )?;
-                    }
-                }
-            }
-        }
+            .chain(shape.pattern_keys.iter_mut().map(|pattern| &mut pattern.def))
+            .flat_map(def_atoms)
+            .try_for_each(&mut rehome)?,
+        TypeExpr::Tuple(tuple) => tuple
+            .elements
+            .iter_mut()
+            .flat_map(|element| def_atoms(&mut element.def))
+            .chain(tuple.spread.as_deref_mut())
+            .try_for_each(&mut rehome)?,
+        // A signature never lowers, so its parameters' examples are never
+        // loaded; a function's own `example(file)` is in `constraints` above.
+        TypeExpr::Primitive(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Ref(_)
+        | TypeExpr::Function(_)
+        | TypeExpr::Slot(_) => {}
     }
     Ok(())
 }
@@ -2952,7 +3539,16 @@ pub fn canonical_path(path: &Path) -> PathBuf {
 /// UTF-8 — imports are only defined among a file's named types, so a raw
 /// JSON Schema has none to offer.
 fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
-    let loaded = read_named_types(path);
+    let bytes = buffers::read(path).map_err(|source| SchemaError::Io {
+        path: path.to_path_buf(),
+        source,
+    });
+    load_named_types_from(path, bytes)
+}
+
+/// [`load_named_types`] over `path`'s bytes, already read.
+fn load_named_types_from(path: &Path, bytes: Result<Vec<u8>, SchemaError>) -> Result<Arc<NamedTypes>, SchemaError> {
+    let loaded = bytes.and_then(|bytes| read_named_types(path, &bytes));
     if loaded.is_err() {
         // The path's latest revision failed: drop its entry so the memo only
         // ever holds a table the file parsed to when last read.
@@ -2963,19 +3559,15 @@ fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
 
 /// Reads and hashes `path`, reusing its memo entry when the hash matches and
 /// otherwise parsing and replacing the entry.
-fn read_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
-    let bytes = buffers::read(path).map_err(|source| SchemaError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+fn read_named_types(path: &Path, bytes: &[u8]) -> Result<Arc<NamedTypes>, SchemaError> {
     observed::read(path);
-    let text = std::str::from_utf8(&bytes).map_err(|error| SchemaError::SchemaDocument {
+    let text = std::str::from_utf8(bytes).map_err(|error| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
         message: format!("not UTF-8 text: {error}"),
         source: None,
         span: None,
     })?;
-    let hash = biscuit_hash::xx_hash_bytes(&bytes);
+    let hash = biscuit_hash::xx_hash_bytes(bytes);
     if let Some(entry) = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").get(path)
         && entry.hash == hash
     {
@@ -3178,29 +3770,16 @@ fn apply_import_postfix(
         });
     }
 
-    if is_array
-        && array_constraints
-            .iter()
-            .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
-    {
+    if is_array && array_constraints.iter().any(is_suggestion_list) {
         return Err(SchemaError::Grammar {
             property: name.to_string(),
             message: "`suggest` is not valid at the array level".into(),
-            span: array_constraints
-                .iter()
-                .find_map(|constraint| match constraint {
-                    Constraint::Suggest(candidates) => candidates.first().map(|candidate| candidate.span.clone()),
-                    _ => None,
-                })
-                .unwrap_or(0..0),
+            span: array_constraints.iter().find_map(suggestion_list_span).unwrap_or(0..0),
             related: Vec::new(),
         });
     }
 
-    if constraints
-        .iter()
-        .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
-    {
+    if constraints.iter().any(is_suggestion_list) {
         let TypeExpr::Primitive(
             ty @ (SimplifiedType::String | SimplifiedType::Number | SimplifiedType::Alphanumeric),
         ) = &base_atom.ty
@@ -3210,25 +3789,19 @@ fn apply_import_postfix(
                 message: format!(
                     "`suggest` on imported type `{name}@{reference}` requires an exact `string`, `number`, or `alphanumeric` target"
                 ),
-                span: constraints
-                    .iter()
-                    .find_map(|constraint| match constraint {
-                        Constraint::Suggest(candidates) => {
-                            candidates.first().map(|candidate| candidate.span.clone())
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or(0..0),
+                span: constraints.iter().find_map(suggestion_list_span).unwrap_or(0..0),
                 related: Vec::new(),
             });
         };
         for constraint in &mut constraints {
-            if let Constraint::Suggest(candidates) = constraint {
-                super::simplified::grammar::reinterpret_suggestion_candidates(
-                    candidates,
-                    *ty,
-                    &name,
-                )?;
+            match constraint {
+                Constraint::Suggest(candidates) => {
+                    super::simplified::grammar::reinterpret_suggestion_candidates(candidates, *ty, &name)?;
+                }
+                Constraint::Dynamic(list) if list.kind == DynamicKind::Suggest => {
+                    super::simplified::grammar::reinterpret_dynamic_suggestions(list, *ty);
+                }
+                _ => {}
             }
         }
     }
@@ -3237,16 +3810,10 @@ fn apply_import_postfix(
         .constraints
         .iter()
         .chain(constraints.iter())
-        .filter(|constraint| matches!(constraint, Constraint::Suggest(_)))
+        .filter(|constraint| is_suggestion_list(constraint))
         .count();
     if suggestion_count > 1 {
-        let span = constraints
-            .iter()
-            .find_map(|constraint| match constraint {
-                Constraint::Suggest(candidates) => candidates.first().map(|candidate| candidate.span.clone()),
-                _ => None,
-            })
-            .unwrap_or(0..0);
+        let span = constraints.iter().find_map(suggestion_list_span).unwrap_or(0..0);
         return Err(SchemaError::Grammar {
             property: name.to_string(),
             message: "a property definition may contain at most one `suggest` constraint".into(),
@@ -3296,7 +3863,7 @@ fn apply_import_postfix(
     } else if base_is_array {
         let (items, container): (Vec<Tagged>, Vec<Tagged>) = use_site
             .into_iter()
-            .partition(|(constraint, _)| matches!(constraint, Constraint::Suggest(_)));
+            .partition(|(constraint, _)| is_suggestion_list(constraint));
         let container = reinterpret_bounds(container, CountedBound::Items, &property)?;
         (
             merge_constraints(inherited_value, items, &merge_site)?,
@@ -3568,6 +4135,10 @@ fn is_array_container_constraint(constraint: &Constraint) -> bool {
             | Constraint::Unique
             | Constraint::Default(_)
             | Constraint::Example(_)
+            | Constraint::TemplateConstraint {
+                kind: TemplateConstraintKind::Min | TemplateConstraintKind::Max | TemplateConstraintKind::Default,
+                ..
+            }
     )
 }
 
@@ -3598,6 +4169,9 @@ enum CountedBound {
 
 /// Reinterprets use-site `min`/`max`, which a reference parses as numeric
 /// bounds before its target is known, as counts of `counted`.
+///
+/// A `{{ … }}` bound is kept as a slot: merging it with an inherited bound,
+/// as [`merge_constraints`] does for concrete ones, waits for its value.
 fn reinterpret_bounds(
     constraints: Vec<Tagged>,
     counted: CountedBound,
@@ -3619,6 +4193,13 @@ fn reinterpret_bounds(
                 (Constraint::Max(n), CountedBound::Items) => {
                     Constraint::MaxItems(bound_count(n, "max", property)?)
                 }
+                // A slot bound is retargeted, not converted: its count is
+                // judged once resolution supplies it. An items bound needs no
+                // retarget, since it sits in the container's list.
+                (
+                    Constraint::TemplateConstraint { kind: kind @ (TemplateConstraintKind::Min | TemplateConstraintKind::Max), slot, .. },
+                    CountedBound::Length,
+                ) => Constraint::TemplateConstraint { kind, target: SimplifiedType::String, slot },
                 (other, _) => other,
             };
             Ok((constraint, origin))
@@ -3931,7 +4512,8 @@ fn atom_has_imports(atom: &PropertyAtom) -> bool {
         TypeExpr::InlineObject(shape) => shape_has_imports(shape),
         TypeExpr::Union(arms) => arms.iter().any(atom_has_imports),
         TypeExpr::Tuple(tuple) => tuple.any_atom(atom_has_imports),
-        TypeExpr::Primitive(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => false,
+        // A template type's imports are unknown until it resolves.
+        TypeExpr::Primitive(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) | TypeExpr::Slot(_) => false,
     }
 }
 
@@ -6850,5 +7432,69 @@ mod named_type_file_memo {
         std::fs::remove_file(&path).unwrap();
         assert!(matches!(load_named_types(&path), Err(SchemaError::Io { .. })));
         assert!(!memo_holds(&path));
+    }
+
+    /// A template type's import that the host refuses is never parsed into
+    /// the memo, nor served from it: the gate is asked before the memo is
+    /// consulted. The same import, admitted, reaches the memo.
+    #[cfg(feature = "file")]
+    #[test]
+    fn a_refused_template_type_import_never_reaches_the_memo() {
+        use crate::slots::{SchemaRead, SchemaReadOutcome, SlotAdmissionError, TemplateReads};
+
+        struct Gate(bool);
+        impl TemplateReads for Gate {
+            fn admit(&self, _: &Slot, _: &SchemaRead<'_>) -> Result<(), SlotAdmissionError> {
+                if self.0 { Ok(()) } else { Err(SlotAdmissionError { code: Some("test.denied"), message: "denied".into(), span: None }) }
+            }
+            fn observe(&self, _: &Slot, _: &SchemaReadOutcome<'_>) {}
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("types.yaml");
+        // The memo keys on the path as selected; either spelling counts.
+        let held = || memo_holds(&path) || memo_holds(&canonical_path(&path));
+        std::fs::write(&path, "kind: schema\ntypes:\n  name: string\n").unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        let site = crate::slots::ExpansionSite {
+            base_dir: dir.path(),
+            schema_roots: &[],
+            request_context: &context,
+            shipped: ShippedSources::NONE,
+        };
+        let slot = Slot { expression: "t".into(), span: 0..7, expression_span: 3..4, origin: None };
+        let returned = crate::simplified::parse_property_definition(
+            "status",
+            &YamlValue::String("name@./types.yaml".into()),
+        )
+        .unwrap();
+        let use_site = PropertyAtom {
+            ty: TypeExpr::Slot(slot.clone()),
+            is_array: false,
+            constraints: Vec::new(),
+            array_constraints: Vec::new(),
+            description: None,
+        };
+        let expand = |allow: bool| {
+            crate::slots::with_template_reads(std::rc::Rc::new(Gate(allow)), || {
+                expand_template_definition(&returned, &use_site, true, false, &slot, &site, &mut DefinitionTable::default())
+                    .map(|expansion| expansion.def)
+            })
+        };
+
+        let (refused, refusal) = expand(false);
+        assert!(matches!(refused, Err(SchemaError::SlotReadRefused { .. })), "{refused:?}");
+        assert_eq!(refusal.map(|(_, refusal)| refusal.code), Some(Some("test.denied")));
+        assert!(!held(), "a refused import is never parsed into the memo");
+
+        let (admitted, refusal) = expand(true);
+        assert!(admitted.is_ok() && refusal.is_none(), "{admitted:?}");
+        assert!(held(), "the admitted import is parsed as any import is");
+
+        let (refused_again, _) = expand(false);
+        assert!(
+            matches!(refused_again, Err(SchemaError::SlotReadRefused { .. })),
+            "a memo entry never authorizes a refused read: {refused_again:?}"
+        );
     }
 }

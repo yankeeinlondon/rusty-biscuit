@@ -236,6 +236,12 @@ fn scan_executable_body_groups(content: &str) -> HashSet<ContextGroup> {
     scan_needed_groups(&masked)
 }
 
+/// The group whose retained observations the built-in `function` reads, when
+/// it reads one ([`FUNCTION_GROUPS`]).
+pub(crate) fn function_group(function: &str) -> Option<ContextGroup> {
+    FUNCTION_GROUPS.iter().find(|(name, _)| *name == function).map(|(_, group)| *group)
+}
+
 /// Finds the runtime-context domains referenced by `ctx.KEY` expressions and
 /// by calls to the [`FUNCTION_GROUPS`] functions.
 pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {

@@ -9,7 +9,7 @@ use clap::{Parser, ValueEnum};
 use common::{CliProcessFixture, md_file};
 use darkmatter::markdown::Markdown;
 use darkmatter_cli::args::{Command, Feature};
-use darkmatter_cli::artifact::{html_artifact, html_page};
+use darkmatter_cli::artifact::html_page;
 use darkmatter_cli::Cli;
 use std::ffi::OsString;
 
@@ -110,9 +110,32 @@ fn render_subcommand_accepts_feature() {
     };
     assert_eq!(options.features, [Feature::EmbedMermaidFont]);
 
-    // Before the subcommand it lands on the top level, which `render` merges.
+    // Before the subcommand it lands on the top level, where it is a usage
+    // error rather than being combined with `render`'s list.
     let cli = parse(&["--feature", "embed-mermaid-font", "render", "doc.md"]).unwrap();
     assert_eq!(cli.render.features, [Feature::EmbedMermaidFont]);
+    let error = darkmatter_cli::commands::validate_subcommand_usage(&cli)
+        .expect_err("a root --feature before `render`")
+        .downcast::<clap::Error>()
+        .expect("a usage error");
+    assert_eq!(error.exit_code(), 2);
+}
+
+#[test]
+fn root_feature_before_the_render_subcommand_exits_with_usage_error() {
+    let fixture = CliProcessFixture::named("root_feature_before_the_render_subcommand_exits_with_usage_error");
+    let doc = md_file(MERMAID_DOC);
+    let output = fixture
+        .command()
+        .args(["--feature", "embed-mermaid-font", "render"])
+        .arg(doc.path())
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("subcommands cannot be combined") && stderr.contains("--feature"), "{stderr}");
 }
 
 #[test]
@@ -164,14 +187,24 @@ fn completion_offers_feature_names() {
     }
 }
 
+/// The HTML page `md` builds for `md` and `cli`'s features.
+fn html_page_for(md: &Markdown, cli: &darkmatter_cli::Cli) -> darkmatter::layout::DarkmatterPage {
+    use common::style::{page_inputs, with_presentation};
+    use darkmatter_cli::render::document_style;
+    let style = document_style(md, None, biscuit_file::FileResolutionContext::new(std::env::temp_dir())).expect("style");
+    with_presentation(&style, &cli.render.features, false, |presentation| {
+        html_page(&page_inputs(), presentation).expect("html page")
+    })
+}
+
 #[test]
 fn embed_mermaid_font_feature_sets_the_html_page_option() {
     let md = Markdown::try_from_content(MERMAID_DOC).unwrap();
     let with = parse(&["--feature", "embed-mermaid-font", "doc.md"]).unwrap();
     let without = parse(&["doc.md"]).unwrap();
 
-    assert!(html_page(&md, &with, None, false, &with.render.features).unwrap().embed_mermaid_font());
-    assert!(!html_page(&md, &without, None, false, &without.render.features).unwrap().embed_mermaid_font());
+    assert!(html_page_for(&md, &with).embed_mermaid_font());
+    assert!(!html_page_for(&md, &without).embed_mermaid_font());
 }
 
 #[test]
@@ -183,10 +216,10 @@ fn no_frontmatter_key_turns_on_embedding() {
     let plain = Markdown::try_from_content(MERMAID_DOC).unwrap();
     let cli = parse(&["doc.md"]).unwrap();
 
-    assert!(!html_page(&with_keys, &cli, None, false, &cli.render.features).unwrap().embed_mermaid_font());
+    assert!(!html_page_for(&with_keys, &cli).embed_mermaid_font());
     assert_eq!(
-        html_artifact(&with_keys, &cli, None, false, &cli.render.features).unwrap().content,
-        html_artifact(&plain, &cli, None, false, &cli.render.features).unwrap().content
+        html_page_for(&with_keys, &cli).render_to_browser_document(&with_keys).unwrap(),
+        html_page_for(&plain, &cli).render_to_browser_document(&plain).unwrap()
     );
 }
 

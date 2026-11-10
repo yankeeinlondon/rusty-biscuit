@@ -4,18 +4,9 @@ Binary: `claudine` — interactive setup, hook inspection, event handling, share
 
 ## Commands
 
-### `claudine init [--quick] [--repo]`
+### First-run setup
 
-Interactive setup wizard that walks through 4 phases:
-
-1. **Agent Discovery** — detects installed agentic CLIs on the system
-2. **Provider Preferences** — rank your favorite installed CLIs for canonical ordering
-3. **Action Defaults** — global interview (logging `all/some/none`, then input-needed actions)
-4. **Write & Register** — saves `~/.claudine/config.json` and registers hooks with each provider
-
-Setup automatically configures all detected available agents (no per-agent selection prompt). Claudine auto-configures every event each provider supports via native hooks. Events with no actions are still registered as explicit no-op bindings.
-
-`--quick` skips prompts and registers all hook-supported events for installed providers, with default sounds for `session_start`, `turn_complete`, `tool_error`, `permission_request`, and `human_in_the_loop`. `--repo` creates `.claudine/config.json` in the repository root and can add `.claudine/` to `.gitignore`.
+There is no `init` subcommand. The first command that needs a config (anything except `handle`, `completions`, and `steer`) runs setup automatically when `~/.claudine/config.json` is missing or in an old format. In a terminal, setup asks about text-to-speech, a preferred agent, and messaging, explains the always-on Logging and Protect services, saves `~/.claudine/config.json`, and registers hooks with each detected provider. Without a terminal on stdin it writes headless defaults (TTS off, Logging on, Protect default) and asks nothing. Change settings afterwards with `claudine config`.
 
 ### `claudine hooks [provider] [flags]`
 
@@ -140,13 +131,14 @@ Manage Claudine's normalized MCP catalog and provider sync state.
 |------------|-------------|
 | *(none)* | List catalog entries, defaults, and provider presence |
 | `init` | Import supported native provider MCP configs into `~/.claudine/mcp/` |
-| `show <id>` | Show normalized definition and provenance for one server |
+| `config [query]` | Show normalized definition and provenance for one server |
 | `default [ids...]` | Replace user-scope default server IDs |
 | `default --repo [ids...]` | Replace repo-scope default server IDs |
-| `alias add <id> <alias>` | Add a catalog alias |
-| `alias remove <alias>` | Remove an alias |
-| `remove <id>` | Remove a catalog entry after confirmation |
-| `sync <provider> [--scope user\|repo] [--apply]` | Dry-run or apply export of effective defaults to a provider's native config |
+| `alias <id> <alias>` | Add a catalog alias |
+| `remove <id\|alias>` | Remove a catalog entry (after confirmation) or an alias |
+| `check` | Validate the current MCP state |
+| `sync` | Refresh the catalog from provider configs (pull only) |
+| `export <provider> [--scope user\|repo] [--apply]` | Dry-run or apply export of effective defaults to a provider's native config |
 
 Storage lives in `~/.claudine/mcp/catalog.json`, `~/.claudine/mcp/defaults.json`, `~/.claudine/mcp/provider-state.json`, and optional repo defaults at `<repo>/.claudine/mcp.json`. Repo defaults replace user defaults.
 
@@ -173,6 +165,9 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, and
 - `claudine qwen`
 - `claudine opencode`
 - `claudine goose`
+- `claudine kilo`
+- `claudine pi`
+- `claudine antigravity` (runs the `agy` CLI)
 
 Shared wrapper flags:
 
@@ -182,7 +177,8 @@ Shared wrapper flags:
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
 | `--edit` | Draft the initial prompt in an external editor (`$EDITOR`, then `$VISUAL`, then an installed editor), optionally seeded by a positional prompt; combine with `-i` for an interactive session. Needs a terminal for the editor whatever the session mode; an empty buffer exits 0 without launching the provider. `-i` with `--timeout`/`--step-timeout` is rejected before the editor opens |
 | `-m, --model <MODEL>` | Override the model used by the provider |
-| `-s, --system-prompt <PROMPT\|FILE>` | Set or append a system prompt (string or file path) |
+| `--append-system-prompt, --asp <FILE>` | Append a system prompt read from a file |
+| `--replace-system-prompt, --rsp <FILE>` | Replace the provider's system prompt with a file's contents |
 | `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
@@ -222,7 +218,7 @@ Wrapper behavior:
 - Non-interactive Codex, Gemini, OpenCode, and Kilo runs also strip catalog-resolvable `#tags` from the prompt and activate the matching servers.
 - Runtime MCP injection currently exists for Codex, Gemini, OpenCode, and Kilo only. Codex and Gemini write into a per-launch provider overlay under `~/.claudine/overlays`, removed when the launch ends and selected through `CODEX_HOME` or `GEMINI_CLI_HOME` without changing `HOME`; OpenCode injects `OPENCODE_CONFIG_CONTENT` and Kilo `KILO_CONFIG_CONTENT`.
 - Gemini runtime sessions append `--allowed-mcp-server-names` for the resolved server list.
-- Claude, Goose, Kimi, and Qwen wrappers fail fast with guidance to use `claudine mcp sync <provider>` instead. Roo is import/sync only and has no wrapper command.
+- Claude, Goose, Kimi, and Qwen wrappers fail fast with guidance to use `claudine mcp export <provider> --apply` instead. Roo is import/sync only and has no wrapper command.
 - Runs child process with inherited stdio/cwd and propagates child exit code.
 - Writes a synthetic JSONL summary event per session for reporting completeness.
 
@@ -244,7 +240,7 @@ claudine sequence @research.md topic="async traits" retries=3
 
 Setter values are parsed as JSON5 first and fall back to strings. A setter may also follow provider switches (`compose plan.md --codex -c x=y phase=2` forwards `-c x=y` and applies `phase=2`); it is never sent to the agent unless it is the first value of a switch that takes one, and a parameter the document's `$schema` declares is never a switch's value. Words after `--` are provider data. The last occurrence of a repeated key wins. Inline setters override `--set` on overlapping keys wherever either is written; `sequence` reserved overlay keys still win over both. See [Composition → Setters after a provider switch](../docs/topics/composition.md#setters-after-a-provider-switch).
 
-Shared composition flags include provider selectors (`--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`), `--exclude <provider>`, `-i` / `--interactive`, `--no-interactive`, `-m` / `--model`, `-s` / `--system-prompt`, `-t` / `--timeout`, `--dry-run` (with `--dry-run-shell` to also run a sequence's `shell:` tasks during the preview), `-q` / `--quiet`, and `--silent`. File arguments use `biscuit-file::FileReference`: implicit paths check the launch directory before the repository root, `@` searches magic roots, `&` pins to the repository root, `^` searches package then package-area then repository roots, and explicit-relative, home, vault, recursive, remote, and absolute forms retain their shared meanings. Session mode resolves as `--no-interactive` > `--interactive` > `interactive: true` frontmatter > default (non-interactive); `--interactive` and `--no-interactive` are mutually exclusive, and `sequence` rejects `interactive: true` frontmatter.
+Shared composition flags include provider selectors (`--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`), `--exclude <provider>`, `-i` / `--interactive`, `--no-interactive`, `-m` / `--model`, `--asp` / `--append-system-prompt` and `--rsp` / `--replace-system-prompt` (files only), `-t` / `--timeout`, `--dry-run` (with `--dry-run-shell` to also run a sequence's `shell:` tasks during the preview), `-q` / `--quiet`, and `--silent`. File arguments use `biscuit-file::FileReference`: implicit paths check the launch directory before the repository root, `@` searches magic roots, `&` pins to the repository root, `^` searches package then package-area then repository roots, and explicit-relative, home, vault, recursive, remote, and absolute forms retain their shared meanings. Session mode resolves as `--no-interactive` > `--interactive` > `interactive: true` frontmatter > default (non-interactive); `--interactive` and `--no-interactive` are mutually exclusive, and `sequence` rejects `interactive: true` frontmatter.
 
 Provider selection follows a TTY/non-TTY split. In **TTY mode** with no explicit flag, an interactive `biscuit-tui` picker is always shown. In **non-TTY mode**, resolution follows a strict chain: explicit flag → singular frontmatter `agent` → list-valued frontmatter `agent` (first installed match) → configured `favorite_agent` → structured hard error. The old "single installed" auto-selection shortcut has been removed.
 

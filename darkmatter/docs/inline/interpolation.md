@@ -15,6 +15,8 @@ Both stages also expose the [read-side functions](../topics/darkmatter-expressio
 
 Body interpolation runs after text replacement and page blocks have been applied. Within the body, all handlebar placeholders like `{{foo}}` or `{{bar}}` are replaced with their resolved values.
 
+One kind of expression waits: one that reads a file and comes after a `::shell` line or shell block. The shell stages evaluate it once the commands before it have run, so it sees what they wrote; see [Reads after a command](../darkmatter-compose-pipeline.md#reads-after-a-command).
+
 ### Nullable directive targets
 
 A whole-value `{{ ... }}` target on `::file`, `::code`, or `::url` has special
@@ -161,7 +163,10 @@ whether anything **declares** the name:
 ```
 
 The advisory is decided by the name's root: `{{ user.name }}` is reported when
-nothing declares `user`. It is suppressed where the author has handled the
+nothing declares `user`. A misspelled member of a declared, typed root
+(`{{ user.nmae }}` when `user` is `{ name: string }`) is a separate advisory,
+`dm.expression.undeclared_member`, which follows the same absence rules (see
+[Misspelled members](../topics/darkmatter-expressions.md#misspelled-members)). It is suppressed where the author has handled the
 absence:
 
 | Expression | Undeclared `x` reported? |
@@ -439,6 +444,33 @@ Handlebars writes a variable as \{{ name }} and a partial as \{\{> header }}.
 - The scanner counts the run of backslashes directly before `{{`. An **odd** run escapes the opener. An **even** run escapes itself, so `\\{{ x }}` still interpolates `x`.
 - Compose **preserves every backslash**. The Markdown renderer resolves the escape under CommonMark's backslash-before-punctuation rule, so `\{{` displays as `{{`.
 - Parity is counted on the text the scanner receives, after its owning format has decoded it. Inside a double-quoted YAML scalar, write `"\\{{ x }}"` so the decoded value holds one backslash.
+
+## Where an Expression Ends
+
+An expression opens at `{{` and ends at the `}}` that closes it. A `}}`
+inside a quoted string, or inside a nested `{ … }`, does not close it:
+
+```md
+{{ "}}" }}                                  the text }}
+{{ {a: {b: 1}} }}                           the object {a: {b: 1}}
+{{ load_data(f, "{ a: { b: string }}") }}   one call
+```
+
+Strings use the expression lexer's rules: single or double quotes, `\`
+escapes the next character (so `"a\"}}"` is one string), and a string may
+span lines.
+
+This longer reading is used only when its text parses and the reading that
+ends at the first `}}` does not. Any span that parsed under the
+first-`}}` rule therefore keeps its meaning. That matters in prose, where an
+apostrophe would otherwise open a "string" that swallows later expressions:
+`{{ don't }} it's fine {{ x }}` still finds `don't` and `x`. An expression
+that has a real syntax error and a `}}` inside a string still ends at that
+`}}`, so its error describes the shorter text.
+
+`{{{ … }}}` is unaffected: it is still an
+[interpolation literal](#interpolation-literals) that closes at the first
+`}}}`, even inside quotes.
 
 ## Braces Inside String Literals
 

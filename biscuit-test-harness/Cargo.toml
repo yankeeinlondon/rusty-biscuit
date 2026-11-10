@@ -13,6 +13,11 @@ unicode-width = "0.2"
 
 # XTEST key presses on a private Xvfb display (`src/xvfb.rs`). Pure Rust; no
 # default features, only the `xtest` extension.
+[target.'cfg(windows)'.dependencies]
+# `process_is_alive` asks the kernel whether a pid is running; a `kill -0`
+# child resolves to Cygwin's or MSYS's `kill`, which reads Cygwin pids.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "0.13.2", default-features = false, features = ["xtest"] }
 

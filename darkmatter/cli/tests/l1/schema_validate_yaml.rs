@@ -36,10 +36,9 @@ fn stdout_of(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-/// The one JSON record `md schema validate --format json` printed.
+/// The one file record `md schema validate --output json` printed.
 fn json_record(output: &std::process::Output) -> serde_json::Value {
-    let stdout = stdout_of(output);
-    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| panic!("one JSON record: {error}\n{stdout}"))
+    common::schema_validate_record(&output.stdout)
 }
 
 // ── Kind route ─────────────────────────────────────────────────────────────
@@ -55,7 +54,7 @@ fn a_claimed_shipped_kind_validates_against_its_definition() {
         .arg(&doc)
         .assert()
         .success()
-        .stdout(predicate::str::contains("has a schema definition and is valid."));
+        .stdout(predicate::str::contains("has a schema definition and is valid based on its definition"));
 }
 
 #[test]
@@ -82,7 +81,7 @@ fn a_kind_semantic_check_failure_exits_1_as_a_kind_check_record() {
         "kind: schema\ncategories: [text]\ntypes:\n    title: string(category(media))\n",
     );
 
-    let output = process.command().args(["schema", "validate", "--format", "json"]).arg(&doc).output().unwrap();
+    let output = process.command().args(["schema", "validate", "--output", "json"]).arg(&doc).output().unwrap();
     assert_eq!(output.status.code(), Some(1), "{}", stdout_of(&output));
     let record = json_record(&output);
     assert_eq!(record["valid"], false);
@@ -151,7 +150,7 @@ fn an_opened_checkout_trigger_definition_admits_an_added_property() {
 }
 
 #[test]
-fn a_repository_kind_claim_selects_its_definition_and_a_duplicate_claim_exits_2() {
+fn a_repository_kind_claim_selects_its_definition_and_a_duplicate_claim_exits_1() {
     let process = CliProcessFixture::new();
     if !process.initialize_repository() {
         eprintln!("skipping: git is unavailable");
@@ -173,8 +172,8 @@ fn a_repository_kind_claim_selects_its_definition_and_a_duplicate_claim_exits_2(
 
     // A second definition claiming the same kind: neither applies.
     let second = write(&process, "schemas/roster-copy.yaml", ROSTER_DEFINITION);
-    let output = process.command().args(["schema", "validate", "--format", "json"]).arg(&doc).output().unwrap();
-    assert_eq!(output.status.code(), Some(2), "{}", stdout_of(&output));
+    let output = process.command().args(["schema", "validate", "--output", "json"]).arg(&doc).output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{}", stdout_of(&output));
     let record = json_record(&output);
     assert_eq!(record["error"], "schema");
     let message = record["message"].as_str().unwrap();
@@ -185,7 +184,7 @@ fn a_repository_kind_claim_selects_its_definition_and_a_duplicate_claim_exits_2(
 }
 
 #[test]
-fn a_kind_reserved_by_a_failed_definition_exits_2_naming_the_definition() {
+fn a_kind_reserved_by_a_failed_definition_exits_1_naming_the_definition() {
     let process = CliProcessFixture::new();
     if !process.initialize_repository() {
         eprintln!("skipping: git is unavailable");
@@ -200,7 +199,7 @@ fn a_kind_reserved_by_a_failed_definition_exits_2_naming_the_definition() {
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::contains("has a schema definition error"))
         .stdout(predicate::str::contains("roster.yaml"));
 }
@@ -245,7 +244,7 @@ fn a_root_schema_without_data_fails_its_required_property() {
     let process = CliProcessFixture::new();
     let doc = write(&process, "team.yaml", "$schema:\n    owner: string(required)\n");
 
-    let output = process.command().args(["schema", "validate", "--format", "json"]).arg(&doc).output().unwrap();
+    let output = process.command().args(["schema", "validate", "--output", "json"]).arg(&doc).output().unwrap();
     assert_eq!(output.status.code(), Some(1), "{}", stdout_of(&output));
     let record = json_record(&output);
     let problems = record["problems"].as_array().unwrap();
@@ -266,7 +265,7 @@ fn a_document_without_kind_or_schema_is_valid_and_its_json_record_says_no_schema
         .success()
         .stdout(predicate::str::contains("doesn't have a schema definition so is valid by default."));
 
-    let output = process.command().args(["schema", "validate", "--format", "json"]).arg(&doc).output().unwrap();
+    let output = process.command().args(["schema", "validate", "--output", "json"]).arg(&doc).output().unwrap();
     assert!(output.status.success());
     let record = json_record(&output);
     assert_eq!(record["valid"], true);
@@ -286,15 +285,15 @@ fn a_null_kind_in_a_schema_root_claims_nothing() {
         return;
     }
     let doc = write(&process, "schemas/data.yaml", "kind:\nowner: ops\n");
-    let output = process.command().args(["schema", "validate", "--format", "json"]).arg(&doc).output().unwrap();
+    let output = process.command().args(["schema", "validate", "--output", "json"]).arg(&doc).output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
     let record = json_record(&output);
     assert_eq!(record["schema"], serde_json::Value::Null, "{record}");
     assert_eq!(record["problems"], serde_json::json!([]), "{record}");
 
     write(&process, "schemas/data.yaml", "kind:\n$schema: ./missing.yaml\nowner: ops\n");
-    let output = process.command().args(["schema", "validate", "--format", "json"]).arg(&doc).output().unwrap();
-    assert_eq!(output.status.code(), Some(2), "{}", stdout_of(&output));
+    let output = process.command().args(["schema", "validate", "--output", "json"]).arg(&doc).output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{}", stdout_of(&output));
     let record = json_record(&output);
     assert_eq!(record["error"], "schema", "{record}");
     let message = record["message"].as_str().unwrap();
@@ -302,7 +301,7 @@ fn a_null_kind_in_a_schema_root_claims_nothing() {
 }
 
 #[test]
-fn an_unresolvable_root_schema_reference_exits_2() {
+fn an_unresolvable_root_schema_reference_exits_1() {
     let process = CliProcessFixture::new();
     let doc = write(&process, "service.yaml", "$schema: ./missing.yaml\nname: x\n");
 
@@ -311,7 +310,7 @@ fn an_unresolvable_root_schema_reference_exits_2() {
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::contains("has a schema definition error"))
         .stdout(predicate::str::contains("missing.yaml"));
 }
@@ -342,17 +341,17 @@ fn outside_a_repository_a_bare_root_schema_resolves_as_frontmatter_does() {
     };
 
     let (markdown_code, markdown_stdout) = exit_code(&markdown);
-    assert_eq!(markdown_code, Some(2), "{markdown_stdout}");
+    assert_eq!(markdown_code, Some(1), "{markdown_stdout}");
     let (yaml_code, yaml_stdout) = exit_code(&yaml);
     assert_eq!(yaml_code, markdown_code, "{yaml_stdout}");
     let (explicit_code, explicit_stdout) = exit_code(&explicit);
     assert_eq!(explicit_code, Some(0), "{explicit_stdout}");
 }
 
-/// A referenced schema that is not valid YAML is the schema's failure (exit
-/// `2`), not the document's (exit `3`), though both are YAML load errors.
+/// A referenced schema that is not valid YAML is the schema's failure, not
+/// the document's, though both are YAML load errors.
 #[test]
-fn a_root_schema_naming_malformed_yaml_exits_2_not_3() {
+fn a_root_schema_naming_malformed_yaml_is_a_schema_definition_error() {
     let process = CliProcessFixture::new();
     write(&process, "contract.yaml", "a: [1\n");
     let doc = write(&process, "service.yaml", "$schema: ./contract.yaml\nname: x\n");
@@ -362,14 +361,14 @@ fn a_root_schema_naming_malformed_yaml_exits_2_not_3() {
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::contains("has a schema definition error"));
 }
 
 // ── Loading ────────────────────────────────────────────────────────────────
 
 #[test]
-fn malformed_yaml_exits_3_located_and_reported_as_yaml_parse() {
+fn malformed_yaml_exits_1_located_and_reported_as_yaml_parse() {
     let process = CliProcessFixture::new();
     let doc = write(&process, "broken.yaml", "a: [1\n");
 
@@ -378,12 +377,12 @@ fn malformed_yaml_exits_3_located_and_reported_as_yaml_parse() {
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
-        .code(3)
+        .code(1)
         .stdout(predicate::str::contains("is not a valid YAML document"))
         .stdout(predicate::str::contains("(at line 2, column 1)"));
 
-    let output = process.command().args(["schema", "validate", "--format", "json"]).arg(&doc).output().unwrap();
-    assert_eq!(output.status.code(), Some(3));
+    let output = process.command().args(["schema", "validate", "--output", "json"]).arg(&doc).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
     let record = json_record(&output);
     assert_eq!(record["error"], "yaml_parse");
     assert_eq!((record["line"].as_u64(), record["column"].as_u64()), (Some(2), Some(1)));
@@ -434,7 +433,7 @@ fn a_magic_reference_resolving_to_a_yaml_file_routes_as_yaml() {
 // ── Preflight usage errors ─────────────────────────────────────────────────
 
 #[test]
-fn an_assignment_with_a_yaml_input_exits_64_before_any_file_is_validated() {
+fn an_assignment_with_a_yaml_input_exits_2_before_any_file_is_validated() {
     let process = CliProcessFixture::new();
     let markdown = "---\ntitle: before\n---\nBody\n";
     let earlier = write(&process, "post.md", markdown);
@@ -447,14 +446,14 @@ fn an_assignment_with_a_yaml_input_exits_64_before_any_file_is_validated() {
         .arg("title=after")
         .arg(&yaml)
         .assert()
-        .code(64)
+        .code(2)
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("assignments"));
     assert_eq!(std::fs::read_to_string(&earlier).unwrap(), markdown);
 }
 
 #[test]
-fn a_custom_baseline_with_a_yaml_input_exits_64() {
+fn a_custom_baseline_with_a_yaml_input_exits_2() {
     let process = CliProcessFixture::new();
     let baseline = write(&process, "baseline.yaml", "$schema:\n    title: string\n");
     let doc = write(&process, "post.md", "---\ntitle: hi\n---\nBody\n");
@@ -467,7 +466,7 @@ fn a_custom_baseline_with_a_yaml_input_exits_64() {
         .arg(&doc)
         .arg(&yaml)
         .assert()
-        .code(64)
+        .code(2)
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("--schema"));
 }
@@ -499,7 +498,7 @@ fn a_yaml_only_batch_never_loads_the_baseline() {
         .arg(&doc)
         .arg(&markdown)
         .assert()
-        .code(2);
+        .code(1);
 }
 
 #[test]
@@ -518,7 +517,7 @@ fn disabling_the_baseline_is_accepted_with_a_yaml_input() {
 // ── Batch exit precedence ──────────────────────────────────────────────────
 
 #[test]
-fn a_mixed_batch_exits_with_the_most_specific_failure() {
+fn a_mixed_batch_exits_1_and_keeps_each_failure_kind_in_its_record() {
     let process = CliProcessFixture::new();
     let invalid = write(&process, "invalid.yaml", "$schema:\n    name: string(required)\nother: 1\n");
     let bad_reference = write(&process, "reference.yaml", "$schema: ./missing.yaml\n");
@@ -534,6 +533,18 @@ fn a_mixed_batch_exits_with_the_most_specific_failure() {
         command.output().unwrap().status.code()
     };
     assert_eq!(run(&[&invalid, &markdown]), Some(1));
-    assert_eq!(run(&[&invalid, &bad_reference, &markdown]), Some(2));
-    assert_eq!(run(&[&invalid, &bad_reference, &malformed, &markdown]), Some(3));
+    assert_eq!(run(&[&invalid, &bad_reference, &markdown]), Some(1));
+    assert_eq!(run(&[&invalid, &bad_reference, &malformed, &markdown]), Some(1));
+
+    let output = process
+        .command()
+        .args(["schema", "validate", "--disable", "baseline-schema", "--output", "json"])
+        .args([&invalid, &bad_reference, &malformed, &markdown])
+        .output()
+        .unwrap();
+    let errors: Vec<Option<String>> = common::schema_validate_records(&output.stdout)
+        .iter()
+        .map(|record| record["error"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(errors, [None, Some("schema".to_string()), Some("yaml_parse".to_string()), None]);
 }

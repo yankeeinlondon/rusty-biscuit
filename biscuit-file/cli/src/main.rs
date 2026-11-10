@@ -248,6 +248,15 @@ fn main() -> Result<()> {
         FileType::Json5 => process_json5(text_content.unwrap(), format, compact)?,
         FileType::Markdown => process_markdown(text_content.unwrap(), format, compact)?,
         FileType::Pdf => process_pdf(&content, format, compact)?,
+        FileType::Jsonl | FileType::Csv | FileType::Tsv => {
+            let name = input_format
+                .as_data_format()
+                .map_or_else(|| format!("{input_format:?}"), |fmt| fmt.to_string());
+            bail!(
+                "{name} input is not supported for conversion; supported inputs: \
+                 TOML, YAML, JSON, JSON5, Markdown, PDF"
+            );
+        }
         FileType::Unknown => {
             bail!(
                 "Unknown file type. Use --input-format to specify the format, \

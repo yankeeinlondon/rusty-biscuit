@@ -439,6 +439,17 @@ fn check_node(
         ));
     }
 
+    // Link transport metadata is lowered only by the Link arms of each fold.
+    if node.attrs.link_metadata().is_some() && !matches!(node.kind, NodeKind::Link { .. }) {
+        report.findings.push(error(
+            format!(
+                "link metadata is permitted only on a Link node, found on {}",
+                kind_name(&node.kind),
+            ),
+            span.clone(),
+        ));
+    }
+
     // Kind-specific browser sub-groups: a link group belongs only on a Link
     // node, an image group only on an Image node, and a non-default block
     // element only on a Paragraph. The remaining browser fields
@@ -1146,6 +1157,29 @@ mod tests {
             RenderNode::list(false, None, vec![item]),
         ]);
         assert!(ensure_valid(&root).is_ok());
+    }
+
+    // ── Typed link-metadata placement ─────────────────────────────────────
+
+    #[test]
+    fn link_metadata_is_valid_only_on_a_link() {
+        use crate::output::link_metadata::{LinkMetadata, QueryParams};
+        let metadata = LinkMetadata {
+            query: QueryParams::from_iter([("line", 3_u64)]),
+        };
+        let mut link = RenderNode::link("u", None, vec![RenderNode::text("x")]);
+        link.attrs.set_link_metadata(metadata.clone());
+        let root = RenderNode::root(vec![RenderNode::paragraph(vec![link])]);
+        assert!(ensure_valid(&root).is_ok());
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_link_metadata(metadata);
+        let report = validate(&RenderNode::root(vec![para]), ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("link metadata is permitted only on a Link")),
+        );
     }
 
     // ── Typed thematic-break placement ────────────────────────────────────

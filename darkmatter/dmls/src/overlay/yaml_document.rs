@@ -273,6 +273,7 @@ fn bundle(validation: &YamlValidation) -> SchemaBundle {
         extension_shapes: Vec::new(),
         extension_dependencies: Vec::new(),
         extension_definitions: Vec::new(),
+        templated: false,
     }
 }
 
@@ -342,6 +343,7 @@ fn analysis(
         bundle: bundle.cloned(),
         named_types: Arc::new(NamedTypeCatalog::default()),
         yaml_document: true,
+        template_shape: None,
     };
     Arc::new(FrontmatterAnalysis::new(identity, ast.cloned(), Arc::clone(shared)))
 }

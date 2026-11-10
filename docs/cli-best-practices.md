@@ -39,19 +39,18 @@ patterns observed across the five CLIs.
 
 ### Output & formatting
 
-4. **Mandatory `--json` and `--plain`, defined globally.** `sniff` is the model
-   here — both are top-level global flags. `--json` makes stdout valid JSON
-   only; `--plain` strips all ANSI for pipes and non-TTY.
-5. **One output-format mechanism per CLI.** Prefer a single `--format <enum>`
-   (or `--output <enum>`) over mixing `--json`, `--yaml`, `--html`, `--md`
-   ad hoc per command.
+4. **`--output <target>` is the one output selector.** Its values are a formatted
+   family and a data family; `--output json` makes stdout valid JSON only, and
+   `--output plain` strips all ANSI. See 2.1.
+5. **One output-format mechanism per CLI.** Never mix `--json`, `--yaml`, `--html`,
+   `--md` ad hoc per command.
 6. **Terminal-optimized default output via biscuit-terminal `Prose`.** Use
    `Prose`, `Table`, `TwoColumns`, lists, and block quotes — never raw escape
    codes, and not an alternate color crate.
-7. **STDOUT is data, STDERR is metadata.** Diagnostics, progress, warnings, and
-   verbose chatter go to stderr; the consumable result goes to stdout. Keep
-   stdout pure JSON in `--json` mode (route `--perf`/timing to stderr, as
-   `sniff` does).
+7. **STDOUT holds the deliverable.** In a formatted output, diagnostics, progress,
+   warnings, and verbose chatter go to stderr. In a data output, stdout is one
+   value and stderr stays empty, with timings and warnings as fields in the value
+   (see 2.1).
 
 ### Color
 
@@ -78,9 +77,9 @@ patterns observed across the five CLIs.
     `md` is the gold standard: `color_eyre::install()`, a bold red `Error:`
     rendered through `Prose`, and a deduplicated cause chain. Backtraces are
     opt-in via the usual env vars, never the default.
-13. **Conventional exit codes.** `0` success, `1` general error, `2` usage
-    error, `130` for SIGINT during interactive prompts. Document any
-    domain-specific codes (e.g. `md` returns `2` on a hash mismatch).
+13. **Conventional exit codes.** `0` success, `1` the command ran and failed, `2`
+    usage error and nothing else, `130` for SIGINT during interactive prompts. A
+    check that finds a problem (such as a hash mismatch) exits `1`.
 
 ### Completions, signals, help
 
@@ -108,26 +107,86 @@ convergence.
 ### 2.1 Output-format flags are inconsistent and overlapping
 
 **Observed:**
-- `sniff` — global `--json` and `--plain` (the cleanest).
+- `md` — one `--output <target>` on every command, built on the shared contract
+  below (the model).
+- `sniff` — global `--json` and `--plain`.
 - `bt` — global `--json` but it only affects metadata commands; rendering
   commands instead use per-command `--html` / `--md` / `--md-plus`.
-- `md` — mixes `--output <enum>` (render/compose), `--format <enum>`
-  (validate/schema), `--json` (toc/delta/rm), and individual `--json5`/`--yaml`/
-  `--toml` (get) — three different naming conventions for the same concept.
 - `playa`, `so-you-say` — no machine-readable output format at all; voice/effect
   lists are emitted as rendered Markdown tables only.
 
-**How to standardize:**
-1. Make `--json` and `--plain` **global** flags on every CLI (lift `bt`'s and
-   `md`'s per-command flags to the root, as `sniff` already has them).
-2. Pick **one** name for the multi-format selector — recommend `--format
-   <enum>` with a `clap::ValueEnum` (`text`, `json`, `yaml`, `toml`, ...).
-   Retire the parallel `--output` / bare `--json5`/`--yaml`/`--toml` flag
-   clusters in `md`; keep `--json`/`--plain` as the two universal shortcuts.
-3. Add a `--json` path to `playa` and `so-you-say` for their list commands
-   (`list-effects`, `list-providers`, `list-voices`) so they're scriptable.
-4. Encode mutually-exclusive formats as enum variants (prevents
-   `--json --yaml` nonsense without manual `conflicts_with` wiring).
+**How to standardize:** every CLI moves to one contract, implemented by the shared
+libraries so no CLI hand-writes a renderer per format
+([`CommandOutput`](../renderable/docs/command-output.md),
+[`write_output`](../biscuit-terminal/docs/output.md)).
+
+1. **Two sources, two families.** A library exposes `as_prose()`, a render-tree
+   document, and `as_data()`, a serializable value. Every output comes from one of
+   them, and this split is a design principle to preserve. A command accepts whole
+   families (both, or the data family only) plus any command-specific extras its
+   `--help` lists, and never part of a family.
+
+   | Family | `--output` values | Source |
+   |--------|-------------------|--------|
+   | formatted | `terminal`, `plain`, `markdown`, `markdown-plus`, `html` (alias `browser`) | `as_prose()` |
+   | data | `json`, `json5`, `yaml`, `toml` | `as_data()` |
+
+2. **`--output` is the one selector.** Retire `--json`, `--plain`, `--format`,
+   and per-format flags. The enum prevents `--json --yaml` nonsense without manual
+   `conflicts_with` wiring. `playa` and `so-you-say` gain the data family for their
+   list commands (`list-effects`, `list-providers`, `list-voices`) this way, so
+   they become scriptable.
+3. **Each command declares its default**, and `--help` shows it. There is no
+   `auto`, and an explicit `--output` always wins.
+   - A command whose deliverable is a Markdown document defaults to `markdown` and
+     always writes Markdown, whatever stdout is, so `tool doc.md > out.md` is
+     predictable.
+   - Every other command defaults to `terminal`, which falls back to the same bytes
+     as `plain` when stdout is not a terminal or the terminal lacks color.
+4. **Streams.** Stdout holds the deliverable.
+   - A data output writes exactly one value to stdout, on success and on failure,
+     and leaves stderr empty. Warnings, timings, and problems are fields in the
+     value, or are not said. A script therefore never has to separate two streams.
+   - In a formatted output, anything that is not the deliverable goes to stderr, as
+     `terminal` with the `plain` fallback, judged by stderr's own TTY and color
+     detection. When a report is what the command was run to produce, it is the
+     deliverable and goes to stdout.
+   - Stderr has its own width: its terminal's columns, or unlimited when it is not a
+     terminal. `--width` and `OUTPUT_COLUMNS` never apply to it, because the two
+     streams can go to different places.
+5. **`--width <N | N% | auto | source | unlimited>` is the CLI-wide width option.**
+   Every command has it, and it has no effect on a command that prints no prose, so
+   one rule covers every command. `auto` is `OUTPUT_COLUMNS`, else the terminal's
+   columns, else unlimited; it is never a guessed 80. A command whose deliverable is
+   a Markdown document defaults to `source`, which keeps authored line breaks.
+   `--max-width` is **not** a general pattern and is not added to a command.
+6. **Typed data outputs, enforced by tests.** Each command's data output has a schema
+   file. A conformance test per command runs the real binary and validates stdout
+   strictly; a guard test enumerates the clap definitions and fails on a command
+   with no schema or conformance test; a parity test proves `yaml`, `json5`, and
+   `toml` carry the same data as `json`. A new command cannot ship an untyped data
+   output. See `darkmatter/cli/schemas/output/`.
+7. **Exit statuses mean the same in every output mode.** A script decides what
+   happened from the status, never from stderr.
+
+   | Status | Meaning | Data output |
+   |--------|---------|-------------|
+   | `0` | the command ran and succeeded | one value on stdout |
+   | `1` | the command ran and failed | one value on stdout, reporting the failure |
+   | `2` | a usage error, and nothing else: no command ran | nothing on stdout; the parser's message on stderr |
+
+8. **A CLI with subcommands never has a separate root command.** A root alias is fine
+   for ergonomics, but it must be an exact alias of one named subcommand, so that
+   every flag and output rule has one meaning. Shared controls (width, verbosity,
+   debug, launch configuration, completion generation) are not part of the alias
+   and keep their documented placement rules: a root-only control stays root-only
+   rather than becoming a clap global, and an aliased option given both at the
+   root and after the subcommand is a usage error. Enforce this with tests
+   generated from the clap definition, not with a hand-kept list: `md`'s
+   `darkmatter/cli/tests/l1/render_alias_parity.rs` (for example
+   `every_root_argument_is_classified`, which fails on a root argument not
+   placed as aliased, shared, or root-only) and
+   `darkmatter/cli/src/args/cli.rs::the_root_declares_only_shared_controls_besides_render_options`.
 
 ### 2.2 Two CLIs are monolithic
 
@@ -149,7 +208,7 @@ means inconsistent markup, its own color-detection, and no `Prose` components.
 
 **How to standardize:** Migrate `so-you-say` to `Prose`/`Table` from
 biscuit-terminal, matching the other CLIs. This also gives it the shared
-color-mode resolution (2.4) and `--plain` behavior (2.1) for free. Drop the
+color-mode resolution (2.4) and `plain` output (2.1) for free. Drop the
 `owo-colors` dependency afterward.
 
 ### 2.4 `NO_COLOR` / `FORCE_COLOR` handling is uneven
@@ -261,7 +320,7 @@ single error-to-exit-code mapping in `main`.
 If standardizing incrementally, this is the suggested order (highest
 value-to-effort first):
 
-1. Global `--json` / `--plain` on all five CLIs (2.1).
+1. One `--output` on all five CLIs, through the shared contract (2.1).
 2. `color_eyre` + styled `Error:` everywhere; kill `bt`'s default backtrace (2.6).
 3. Shared color-mode resolver respecting `NO_COLOR`/`FORCE_COLOR` (2.4).
 4. Migrate `so-you-say` off owo-colors to `Prose` (2.3).

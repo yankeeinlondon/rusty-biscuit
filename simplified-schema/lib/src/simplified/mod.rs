@@ -55,15 +55,15 @@ pub use source::{
     parse_yaml_schema_with_source, project_suggestion_spans,
 };
 pub use source::locate_frontmatter_value;
-pub(crate) use source::parse_keyed_declaration;
+pub(crate) use source::{LocatedSchemaValue, parse_keyed_declaration, project_keyed_declaration_spans};
 pub use standalone::{
     SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_selected_standalone_schema_document,
     parse_standalone_schema_document,
 };
 pub use types::{
-    CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
-    LOCAL_REFERENCE, NarrowsClause, NarrowsKind, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SchemaRoot, SimplifiedType, SuggestionCandidate, TupleElement, TupleType, TypeExpr, operands_verb,
+    CallExample, Constraint, DynamicElement, DynamicKind, DynamicList, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
+    LOCAL_REFERENCE, NarrowsClause, NarrowsKind, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, Requiredness, SchemaArm, SchemaShape,
+    SchemaRoot, SimplifiedType, Slot, SuggestionCandidate, TupleElement, TupleType, TypeExpr, TemplateConstraintKind, operands_verb,
 };
 #[cfg(feature = "work-counters")]
 pub use yaml_scalar::alias_search_work;
@@ -136,6 +136,7 @@ pub(crate) fn parse_schema_declaration_located(
 ) -> Result<SchemaDeclaration, DefinitionFailure> {
     let root = SchemaSourcePath::root();
     if let YamlValue::String(reference) = value {
+        refuse_root_slot(reference, grammar::SlotPosition::Root, "<root>", &root)?;
         return classify_schema_reference(reference)
             .map(SchemaDeclaration::Reference)
             .map_err(DefinitionFailure::at(&root));
@@ -190,7 +191,10 @@ pub(crate) fn parse_yaml_schema_located(
                     YamlValue::Mapping(_) => {
                         SchemaArm::Inline(parse_schema_shape(&label, item, 0, &arm_path)?)
                     }
-                    YamlValue::String(s) => SchemaArm::FileRef(s.clone()),
+                    YamlValue::String(s) => {
+                        refuse_root_slot(s, grammar::SlotPosition::RootUnionArm, &label, &arm_path)?;
+                        SchemaArm::FileRef(s.clone())
+                    }
                     other => {
                         return Err(DefinitionFailure::at(&arm_path)(SchemaError::Grammar {
                             property: label,
@@ -227,6 +231,57 @@ pub(crate) fn parse_yaml_schema_located(
     }
 }
 
+/// Refuses a root `$schema` string (or root-union arm) written as a template
+/// type: one leading `{{ … }}` slot followed by nothing, or by a type suffix
+/// (`(`, `[`, `|`, `->`). A file reference that merely starts with slot text,
+/// such as `{{ dir }}/schema.yaml`, keeps its own classification.
+fn refuse_root_slot(
+    text: &str,
+    position: grammar::SlotPosition,
+    label: &str,
+    path: &SchemaSourcePath,
+) -> Result<(), DefinitionFailure> {
+    let Some(end) = grammar::leading_slot_end(text) else {
+        return Ok(());
+    };
+    let rest = text[end..].trim_start();
+    let template = rest.is_empty() || rest.starts_with(['(', '[', '|']) || rest.starts_with("->");
+    if !template {
+        return Ok(());
+    }
+    Err(DefinitionFailure::at(path)(SchemaError::Grammar {
+        property: label.to_string(),
+        message: position.refusal().expect("a root position refuses a template type"),
+        span: (text.len() - text.trim_start().len())..end,
+        related: Vec::new(),
+    }))
+}
+
+/// Refuses a property name or pattern key of the object `context` that
+/// starts with a balanced `{{ … }}` slot. A key that only contains brace text
+/// stays literal.
+fn refuse_key_slot(key: &str, context: &str, path: &SchemaSourcePath) -> Result<(), DefinitionFailure> {
+    let (position, body) = if types::PatternKey::is_pattern_key(key) {
+        let inner = &key[1..key.len() - 1];
+        let body = ["starting::", "ending::", "pattern::"]
+            .iter()
+            .find_map(|prefix| inner.strip_prefix(prefix))
+            .unwrap_or(inner);
+        (grammar::SlotPosition::PatternKey, body)
+    } else {
+        (grammar::SlotPosition::PropertyKey, key)
+    };
+    if grammar::leading_slot_end(body).is_none() {
+        return Ok(());
+    }
+    Err(DefinitionFailure::at(path)(SchemaError::Grammar {
+        property: context.to_string(),
+        message: position.refusal().expect("a key refuses a template type"),
+        span: 0..0,
+        related: Vec::new(),
+    }))
+}
+
 /// Parses one property definition through the same YAML-shape and string
 /// grammar used by [`parse_yaml_schema`].
 ///
@@ -244,6 +299,39 @@ pub fn parse_property_definition(
     parse_property_definition_located(property, value).map_err(SchemaError::from)
 }
 
+/// Parses a `type-definition` value: [`parse_property_definition`], except
+/// that a string holding a bracket list, such as `"[string, number]"`, means
+/// what the same list means unquoted, the union of its items. A list is never
+/// a tuple; that is `tuple([string, number])`.
+///
+/// Every reader of a definition supplied as a value (the `type-definition`
+/// meta-type, a host's function argument, editor hover) parses through here,
+/// so a quoted and an unquoted list cannot disagree. A schema declaration's
+/// own string is not a value and keeps the plain grammar.
+///
+/// ## Errors
+///
+/// As [`parse_property_definition`]. Text that is neither grammar nor a list
+/// of definitions keeps the grammar's error, so `"[string,"` fails as it
+/// always did.
+pub fn parse_type_definition_value(property: &str, value: &YamlValue) -> Result<PropertyDef, SchemaError> {
+    let written = parse_property_definition(property, value);
+    let YamlValue::String(text) = value else {
+        return written;
+    };
+    if written.is_ok() {
+        return written;
+    }
+    let trimmed = text.trim();
+    if !(trimmed.starts_with('[') && trimmed.ends_with(']')) {
+        return written;
+    }
+    match serde_yaml_ng::from_str::<YamlValue>(trimmed) {
+        Ok(list @ YamlValue::Sequence(_)) => parse_property_definition(property, &list).or(written),
+        _ => written,
+    }
+}
+
 /// [`parse_property_definition`], keeping the rejected node's path.
 pub(crate) fn parse_property_definition_located(
     property: &str,
@@ -251,6 +339,11 @@ pub(crate) fn parse_property_definition_located(
 ) -> Result<PropertyDef, DefinitionFailure> {
     parse_property_definition_at_depth(property, value, 0, &SchemaSourcePath::root())
 }
+
+/// The error of a schema object key that does not decode to a string. An
+/// unquoted `key: {{ … }}` decodes to exactly this shape, so source-aware
+/// callers re-read the text before trusting it ([`crate::slots::unquoted_slot_hint`]).
+pub(crate) const NON_STRING_PROPERTY_NAME: &str = "property names must be strings";
 
 /// Parses one schema object whose structural path is `path`.
 fn parse_schema_shape(
@@ -275,7 +368,7 @@ fn parse_schema_shape(
         let key_str = key.as_str().ok_or_else(|| {
             DefinitionFailure::at(path)(SchemaError::Grammar {
                 property: context.to_string(),
-                message: "property names must be strings".into(),
+                message: NON_STRING_PROPERTY_NAME.into(),
                 span: 0..0,
                 related: Vec::new(),
             })
@@ -284,6 +377,7 @@ fn parse_schema_shape(
         // stripped before shape assembly and never participates in property
         // matching. It is reserved only inside authored schema objects, so it
         // imposes no restriction on user frontmatter data.
+        refuse_key_slot(key_str, context, path)?;
         if key_str == "$constraints" {
             constraints.append(&mut parse_dollar_constraints(
                 context,
@@ -547,60 +641,8 @@ fn parse_property_definition_at_depth(
                     related: Vec::new(),
                 }));
             }
-            if let Some(duplicate) = grammar::second_suggestion_span(&arms) {
-                return Err(DefinitionFailure::at(&path.union_arm(duplicate.arm))(SchemaError::Grammar {
-                    property: name.to_string(),
-                    message: "a property definition may contain at most one `suggest` constraint"
-                        .into(),
-                    span: duplicate.span,
-                    related: vec![GrammarRelated {
-                        message: grammar::FIRST_SUGGESTION.into(),
-                        span: duplicate.first_span,
-                        arm: (duplicate.first_arm != duplicate.arm).then_some(duplicate.first_arm),
-                    }],
-                }));
-            }
-            if let Some((idx, message)) = signature::duplicate_overload_arm(&arms, None) {
-                return Err(DefinitionFailure::at(&path.union_arm(idx))(SchemaError::Grammar {
-                    property: name.to_string(),
-                    message,
-                    span: 0..0,
-                    related: Vec::new(),
-                }));
-            }
-            if let Some(problem) = narrowing::overload_arms_problem(&arms) {
-                // Each arm is its own YAML scalar: each span is in the arm it
-                // was located in, and an overload without a clause is its
-                // whole scalar.
-                let related = problem
-                    .related
-                    .and_then(|related| {
-                        let span = related.span.or_else(|| match items.get(related.overload) {
-                            Some(YamlValue::String(text)) => Some(0..text.len()),
-                            _ => None,
-                        })?;
-                        Some(GrammarRelated { message: related.message, span, arm: Some(related.overload) })
-                    })
-                    .into_iter()
-                    .collect();
-                return Err(DefinitionFailure::at(&path.union_arm(problem.located))(SchemaError::Grammar {
-                    property: name.to_string(),
-                    message: problem.message,
-                    span: problem.span,
-                    related,
-                }));
-            }
-            if let Some(message) = PropertyDef::Union(arms.clone()).non_null_problem() {
-                let marked = arms.iter().position(PropertyAtom::marks_non_null).unwrap_or(0);
-                return Err(DefinitionFailure::at(&path.union_arm(marked))(SchemaError::Grammar {
-                    property: name.to_string(),
-                    message,
-                    span: match items.get(marked) {
-                        Some(YamlValue::String(text)) => 0..text.len(),
-                        _ => 0..0,
-                    },
-                    related: Vec::new(),
-                }));
+            if let Some(problem) = grammar::union_invariant_problem(&arms, true) {
+                return Err(list_union_failure(name, path, &items[..], problem));
             }
             Ok(PropertyDef::Union(arms))
         }
@@ -614,6 +656,51 @@ fn parse_property_definition_at_depth(
             related: Vec::new(),
         })),
     }
+}
+
+/// The located failure of a list-form union whose options `arms` (from
+/// `items`, index for index) violate a union invariant. Each arm is its own
+/// YAML scalar, so a span is in the arm it was located in, and an arm with
+/// no recorded span is its whole scalar.
+fn list_union_failure(
+    name: &str,
+    path: &SchemaSourcePath,
+    items: &[YamlValue],
+    problem: grammar::UnionInvariant,
+) -> DefinitionFailure {
+    let whole = |index: usize| match items.get(index) {
+        Some(YamlValue::String(text)) => Some(0..text.len()),
+        _ => None,
+    };
+    let (arm, message, span, related) = match problem {
+        grammar::UnionInvariant::SecondSuggestion(duplicate) => (
+            duplicate.arm,
+            "a property definition may contain at most one `suggest` constraint".to_string(),
+            duplicate.span,
+            vec![GrammarRelated {
+                message: grammar::FIRST_SUGGESTION.into(),
+                span: duplicate.first_span,
+                arm: (duplicate.first_arm != duplicate.arm).then_some(duplicate.first_arm),
+            }],
+        ),
+        grammar::UnionInvariant::DuplicateOverload { arm, message } => (arm, message, 0..0, Vec::new()),
+        grammar::UnionInvariant::Narrows(problem) => {
+            let related = problem
+                .related
+                .and_then(|related| {
+                    let span = related.span.or_else(|| whole(related.overload))?;
+                    Some(GrammarRelated { message: related.message, span, arm: Some(related.overload) })
+                })
+                .into_iter()
+                .collect();
+            (problem.located, problem.message, problem.span, related)
+        }
+        grammar::UnionInvariant::NonNull { arm, message } => {
+            let marked = arm.unwrap_or(0);
+            (marked, message, whole(marked).unwrap_or(0..0), Vec::new())
+        }
+    };
+    DefinitionFailure::at(&path.union_arm(arm))(SchemaError::Grammar { property: name.to_string(), message, span, related })
 }
 
 /// Parses a mapping at a property or union-arm position, whose structural

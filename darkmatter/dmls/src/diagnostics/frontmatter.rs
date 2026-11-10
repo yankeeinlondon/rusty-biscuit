@@ -18,7 +18,7 @@ use simplified_schema::{
     FileReferenceDiagnostic, PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason, ValidationProblem,
     ValidationProblemCode, SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
     SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value, LocatedDefinitionFailure, LocatedRelated,
-    locate_standalone_definition_failure, parse_property_definition, parse_property_definition_with_source,
+    locate_standalone_definition_failure, parse_property_definition_with_source, parse_type_definition_value,
     parse_schema_declaration, parse_schema_declaration_with_source, parse_yaml_schema,
 };
 use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
@@ -87,10 +87,16 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
 
     match &overlay.schema {
         _ if overlay.yaml_document.is_some() => {}
+        SchemaOutcome::Failed(error) if crate::slot_jobs::is_slot_failure(error) => {
+            crate::diagnostics::slots::failure_diagnostics(ctx, overlay.ast.as_deref(), error, overlay.slots.as_ref(), &mut out);
+        }
         SchemaOutcome::Failed(error) => {
             schema_prepare_diagnostic(ctx, overlay.ast.as_deref(), error, &mut out);
         }
         SchemaOutcome::Ready(Some(bundle)) => {
+            if let Some(status) = &overlay.slots {
+                crate::diagnostics::slots::served_diagnostics(ctx, overlay.ast.as_deref(), status, &mut out);
+            }
             if let Some(ast) = overlay.ast.as_deref() {
                 schema_advisory_diagnostics(ctx, ast, bundle, &mut out);
                 // One effective-schema validation drives both the generic schema
@@ -316,7 +322,9 @@ fn schema_prepare_diagnostic_with_origin(
             if let SchemaError::SchemaDocument { path, .. } = other {
                 related.extend(named_types::referenced_definition_related(ctx, path, other).unwrap_or_default());
             }
-            (code::SCHEMA_PREPARE, other.to_string(), fallback_span.clone())
+            let code_value = darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(other)
+                .unwrap_or(code::SCHEMA_PREPARE);
+            (code_value, other.to_string(), fallback_span.clone())
         }
     };
     let range = span
@@ -618,7 +626,7 @@ fn semantic_authored_diagnostics(
         for kind in &value.kinds {
             let result = match kind {
                 MetaSchemaKind::TypeDefinition => {
-                    parse_property_definition(&entry.key, &yaml).map(|_| ())
+                    parse_type_definition_value(&entry.key, &yaml).map(|_| ())
                 }
                 MetaSchemaKind::Schema => parse_schema_declaration(&yaml).map(|_| ()),
             };
@@ -805,7 +813,8 @@ fn problem_range(
 /// identifier, in any operand position, that is an undeclared document property,
 /// `dm.expression.unknown_function` (`ERROR`) for each call to a function
 /// outside Darkmatter's catalog, the design-time call check's
-/// `dm.expression.incompatible_call` / `dm.expression.uncertain_call`
+/// `dm.expression.incompatible_call` / `dm.expression.uncertain_call` and,
+/// outside a lifecycle stack, `dm.expression.undeclared_member`
 /// ([`FrontmatterCalls`]),
 /// and `dm.expression.nested_span_in_literal` for a lifecycle predicate. All
 /// carry source `darkmatter.frontmatter`; ranges go through the scalar
@@ -911,8 +920,14 @@ fn expression_diagnostics(
                             calls.push(ctx, doc_span, found, out);
                         }
                     }
+                    // A lifecycle stack's value gets call findings only.
                     None => {
-                        for found in calls.check(&parsed) {
+                        let found = if lifecycle.stack_event(&path).is_some() {
+                            calls.check_stack(&parsed)
+                        } else {
+                            calls.check(&parsed, expression)
+                        };
+                        for found in found {
                             let doc_span = value.project(found.span.clone()).unwrap_or_else(|| value.expression_span());
                             calls.push(ctx, doc_span, found, out);
                         }
@@ -1041,7 +1056,7 @@ fn stack_expression_diagnostics(
                 }
             }
             None => {
-                for found in calls.check(&parsed) {
+                for found in calls.check_stack(&parsed) {
                     let doc_span = expression.range(found.span.clone());
                     calls.push(ctx, doc_span, found, out);
                 }
@@ -1135,7 +1150,7 @@ impl GuardedStackCalls {
     }
 }
 
-/// The design-time call check over the `{{ … }}` spans of frontmatter values
+/// The design-time call and member checks over the `{{ … }}` spans of frontmatter values
 /// outside lifecycle stacks (those are [`stack_expression_diagnostics`]'),
 /// which frontmatter interpolation evaluates. `$schema` declarations are not
 /// interpolated; a span that does not parse, and a stale tree, report
@@ -1161,9 +1176,58 @@ fn interpolation_call_diagnostics(
         let Ok(parsed) = crate::overlay::expressions::parse(&interpolation.text) else {
             continue;
         };
-        for found in calls.check(&parsed) {
+        for found in calls.check(&parsed, &interpolation.text) {
             let doc_span = interpolation.project(found.span.clone()).unwrap_or_else(|| interpolation.outer_span());
             calls.push(ctx, doc_span, found, out);
+        }
+    }
+    shell_member_diagnostics(ctx, ast, lifecycle, &calls, out);
+}
+
+/// The undeclared-member warnings of each top-level `$( … )` ternary's
+/// condition and both value branches, the pieces composition's precheck
+/// inventories ([`FrontmatterShellTernary::member_pieces`](darkmatter::markdown::compose::FrontmatterShellTernary::member_pieces)).
+/// Every piece is checked, although composition reaches only the selected
+/// branch. A piece's `{{ … }}` placeholders are frontmatter interpolation
+/// sites of their own, checked by [`interpolation_call_diagnostics`]; inside
+/// the piece they are string text. Composition call-checks no piece, so
+/// neither does this.
+fn shell_member_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    lifecycle: &crate::overlay::event_views::LifecycleHost,
+    calls: &FrontmatterCalls<'_>,
+    out: &mut Vec<Diagnostic>,
+) {
+    use darkmatter::markdown::compose::{FrontmatterShellBody, parse_frontmatter_shell_value_spanned};
+    for (index, entry) in ast.entries().iter().enumerate() {
+        let path = ast.path_at(index);
+        let [crate::overlay::FmPathSegment::Key(key)] = path.as_slice() else {
+            continue;
+        };
+        if *key == "$schema" || lifecycle.stack_event(&path).is_some() {
+            continue;
+        }
+        if !entry.scalar.as_deref().is_some_and(|scalar| scalar.contains("$(")) {
+            continue;
+        }
+        let Some((projection, value)) = crate::overlay::expressions::ScalarProjection::for_value(entry, ctx.text) else {
+            continue;
+        };
+        let Some(FrontmatterShellBody::Ternary(ternary)) =
+            parse_frontmatter_shell_value_spanned(&value).map(|parsed| parsed.body)
+        else {
+            continue;
+        };
+        for (_, span) in ternary.member_pieces(&value) {
+            let source = &value[span.clone()];
+            let Ok(parsed) = crate::overlay::expressions::parse(source) else {
+                continue;
+            };
+            for found in calls.check_members(&parsed, source) {
+                let doc_span = projection.range(span.start + found.span.start..span.start + found.span.end);
+                calls.push(ctx, doc_span, found, out);
+            }
         }
     }
 }
@@ -1184,11 +1248,30 @@ impl<'d> FrontmatterCalls<'d> {
         }
     }
 
+    /// Call and member findings of `expr`, parsed from `text`.
     fn check(
         &self,
         expr: &darkmatter::markdown::compose::expression::SpannedExpr,
+        text: &str,
     ) -> Vec<crate::diagnostics::call_check::CallDiagnostic> {
-        crate::diagnostics::call_check::call_diagnostics(expr, &self.site, self.strict)
+        crate::diagnostics::call_check::call_diagnostics(expr, text, &self.site, self.strict)
+    }
+
+    /// Member findings alone, for a shell ternary piece.
+    fn check_members(
+        &self,
+        expr: &darkmatter::markdown::compose::expression::SpannedExpr,
+        text: &str,
+    ) -> Vec<crate::diagnostics::call_check::CallDiagnostic> {
+        crate::diagnostics::call_check::member_diagnostics(expr, text, &self.site)
+    }
+
+    /// Call findings alone, for a lifecycle stack's expression.
+    fn check_stack(
+        &self,
+        expr: &darkmatter::markdown::compose::expression::SpannedExpr,
+    ) -> Vec<crate::diagnostics::call_check::CallDiagnostic> {
+        crate::diagnostics::call_check::stack_call_diagnostics(expr, &self.site, self.strict)
     }
 
     fn push(
@@ -1298,7 +1381,10 @@ fn style_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<
         let (code_value, message) = match &warning.kind {
             StyleWarningKind::UnknownKey => (
                 code::STYLE_UNKNOWN_KEY,
-                format!("unknown style key `{}`", warning.path),
+                match &warning.suggestion {
+                    Some(key) => format!("unknown style key `{}`; use `{key}`", warning.path),
+                    None => format!("unknown style key `{}`", warning.path),
+                },
             ),
             StyleWarningKind::Deprecated { replacement } => (
                 code::STYLE_DEPRECATED_KEY,
@@ -1688,7 +1774,7 @@ mod tests {
     use lsp_types::{InitializeParams, NumberOrString, Uri};
 
     use crate::capabilities::ClientProfile;
-    use crate::config::DmlsConfig;
+    use crate::config::{DmlsConfig, SchemaExtensionConfig};
     use crate::graph::WorkspaceGraph;
     use crate::overlay::OverlayState;
     use crate::source_map::PositionEncoding;
@@ -2616,11 +2702,21 @@ mod tests {
         strict: bool,
         f: impl FnOnce(&DocumentContext, &[Diagnostic]) -> R,
     ) -> R {
+        diagnostics_on_disk_with(root, text, |config| config.schema.strict = strict, f)
+    }
+
+    /// [`diagnostics_on_disk`] with the configuration `configure` makes.
+    fn diagnostics_on_disk_with<R>(
+        root: &Path,
+        text: &str,
+        configure: impl FnOnce(&mut DmlsConfig),
+        f: impl FnOnce(&DocumentContext, &[Diagnostic]) -> R,
+    ) -> R {
         let path = root.join("doc.md");
         std::fs::write(&path, text).expect("write document");
         let uri = crate::workspace::file_path_to_uri(&path).expect("document uri");
         let mut config = DmlsConfig::default();
-        config.schema.strict = strict;
+        configure(&mut config);
         let roots = [root.to_path_buf()];
         let resolution = crate::context::test_support::resolution_in(root, &path);
         let state = OverlayState::default();
@@ -2648,7 +2744,7 @@ mod tests {
     /// from the resolver's `/private/var`.
     fn canonical_tempdir() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let root = dir.path().canonicalize().expect("canonical temp dir");
+        let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
         (dir, root)
     }
 
@@ -2785,6 +2881,50 @@ mod tests {
                 "{diagnostics:#?}"
             );
         });
+    }
+
+    /// An editor schema extension is a baseline layer, so one holding a
+    /// `{{ … }}` slot (written in it or reached through an import) is
+    /// refused with the baseline slot code; the same extension without the
+    /// slot applies.
+    #[test]
+    fn a_schema_extension_holding_a_slot_is_refused_with_the_baseline_slot_code() {
+        use darkmatter::markdown::schemas::slots::codes::SLOT_NOT_ALLOWED_IN_BASELINE_CODE;
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("plain.yaml"), "$schema:\n    tag: enum(a, b)\n").unwrap();
+        std::fs::write(root.join("direct.yaml"), "$schema:\n    tag: enum({{ env.TAGS }})\n").unwrap();
+        std::fs::write(root.join("types.yaml"), "kind: schema\ntypes:\n    tag: enum({{ env.TAGS }})\n").unwrap();
+        std::fs::write(root.join("imported.yaml"), "$schema:\n    tag: tag@./types.yaml\n").unwrap();
+        let text = "---\ntag: c\n---\n\nbody\n";
+        for (case, file) in [("control", "plain.yaml"), ("direct", "direct.yaml"), ("imported", "imported.yaml")] {
+            let extension = root.join(file);
+            let configure = |config: &mut DmlsConfig| {
+                config.schema.extensions.insert(
+                    "ext".to_string(),
+                    SchemaExtensionConfig { path: extension.clone(), globs: vec!["**/*.md".to_string()] },
+                );
+            };
+            diagnostics_on_disk_with(&root, text, configure, |_, diagnostics| {
+                let refused: Vec<_> =
+                    diagnostics.iter().filter(|d| code_of(d) == Some(SLOT_NOT_ALLOWED_IN_BASELINE_CODE)).collect();
+                if case == "control" {
+                    assert!(refused.is_empty(), "{case}: {diagnostics:#?}");
+                    // The extension applies: `c` is not one of its members.
+                    assert!(
+                        diagnostics.iter().any(|d| d.message.contains("is not one of")),
+                        "{case}: the extension judges `tag`: {diagnostics:#?}"
+                    );
+                } else {
+                    assert_eq!(refused.len(), 1, "{case}: {diagnostics:#?}");
+                    assert_eq!(refused[0].severity, Some(DiagnosticSeverity::ERROR), "{case}");
+                    assert!(refused[0].message.contains("env.TAGS"), "{case}: {}", refused[0].message);
+                    assert!(
+                        !diagnostics.iter().any(|d| code_of(d) == Some(code::SCHEMA_PREPARE)),
+                        "{case}: one diagnostic, under the slot code: {diagnostics:#?}"
+                    );
+                }
+            });
+        }
     }
 
     #[test]

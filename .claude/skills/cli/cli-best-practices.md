@@ -2,29 +2,44 @@
 
 ### Output Formats
 
-- `--json` and `--plain` are mandatory output flags; add `--csv`, `--yaml`, `--toml` as needed
-- The **default** output is terminal-optimized (escape codes for color, bold, dim, italics)
+- Every output comes from one of two sources on the command's result (`renderable::CommandOutput`): `as_prose()` behind the **formatted** family (`terminal`, `plain`, `markdown`, `markdown-plus`, `html`, alias `browser`) and `as_data()` behind the **data** family (`json`, `json5`, `yaml`, `toml`)
+- `--output <target>` is the one output selector; do not add `--json`, `--plain`, `--format`, or per-format flags. Print with `biscuit_terminal::output::write_output`
+- A command accepts whole families (both, or data only) plus any command-specific extras its `--help` lists; never part of a family
+- Each command declares its default in `--help`, and there is no `auto`; an explicit `--output` always wins
+    - a command whose deliverable is a Markdown document defaults to `markdown` and always writes Markdown
+    - every other command defaults to `terminal`, which degrades to the same bytes as `plain` when stdout is not a terminal or the terminal has no color
+- The `terminal` output is terminal-optimized (escape codes for color, bold, dim, italics)
     - Start with the `Prose` component from `biscuit-terminal` for rich terminal output
     - Use `Table`, `TwoColumns`, `BlockQuote`, `OrderedList`, and `UnorderedList` for structure
-- `--plain` strips all escape codes — essential for piped output and non-TTY contexts
-- Respect the `NO_COLOR` environment variable (see https://no-color.org): when set, disable colors even without `--plain`
+- `plain` strips all escape codes and keeps meaning: code keeps its backticks and fences, and tables keep their borders
+- Respect the `NO_COLOR` environment variable (see https://no-color.org): when set, disable colors even without `--output plain`
 - Support `FORCE_COLOR=1` to enable colors even when output is not a TTY (useful for CI logs)
+
+### Output Width
+
+- `--width <N | N% | auto | source | unlimited>` is the CLI-wide width option; every command accepts it, and it has no effect on a command that prints no prose
+- `auto` is `OUTPUT_COLUMNS`, else the terminal's columns, else unlimited; a command whose deliverable is a Markdown document defaults to `source` instead
+- `--max-width` is not a general pattern; do not add it to a command
 
 ### STDOUT vs STDERR
 
-- **STDOUT** is for data — the primary output the user or a downstream tool consumes
-- **STDERR** is for metadata — progress indicators, status messages, warnings, diagnostics
-- When `--json` is active, STDOUT **must** be valid JSON; never mix non-JSON text into it
-- Error messages always go to STDERR, even in `--json` mode
-- Progress bars and spinners (via `indicatif`) should write to STDERR so they don't corrupt piped data
+- **STDOUT** holds the deliverable — the primary output the user or a downstream tool consumes
+- In a data output, STDOUT is exactly one value on success and on failure, and STDERR stays **empty**; warnings and problems are fields in that value
+- In a formatted output, anything that is not the deliverable goes to STDERR, as `terminal` with the `plain` fallback, judged by STDERR's own TTY and color detection and wrapped at STDERR's own width
+- When a report is what the command was run to produce, it is the deliverable and goes to STDOUT
+- Progress bars and spinners (via `indicatif`) should write to STDERR in a formatted output so they don't corrupt piped data; a data output has none
+
+### Typed Data Outputs
+
+- Each command's data output has a schema file, and tests enforce it: a conformance test per command, a guard test that fails on a command with no schema, and a parity test across `json`, `json5`, `yaml`, and `toml`
 
 ### Exit Codes
 
-- `0` — success
-- `1` — general error (command failed)
-- `2` — usage error (invalid arguments, missing required flags)
+- `0` — the command ran and succeeded
+- `1` — the command ran and failed; a data output still holds its one value on STDOUT
+- `2` — usage error and nothing else (invalid arguments, missing required flags): no command ran, the message is on STDERR, and STDOUT is empty
 - Use clap's built-in exit code handling for argument parsing errors
-- Document any domain-specific exit codes in `--help` output
+- A script decides what happened from the exit status, never from STDERR
 
 ### Verbosity
 
@@ -34,7 +49,7 @@
 - `--quiet` / `-q` for minimal metadata output (data only)
 - `--silent` sends nothing to STDOUT; only errors to STDERR
 - `--no-output` suppresses both STDOUT and STDERR entirely
-- Conflicting flag combinations (e.g., `--json --no-output`) should produce a clear error explaining the conflict
+- Conflicting flag combinations (e.g., `--output json --no-output`) should produce a clear error explaining the conflict
 
 ### Debugging and Tracing
 
@@ -112,6 +127,12 @@ A monolithic `main.rs` quickly becomes a maintenance and testing bottleneck. Use
 | `commands.rs` | Execution logic for each subcommand. Glue between CLI args and the core library. For CLIs with many subcommands, use a `commands/` directory with one file per subcommand. |
 | `output.rs` | Output formatting — JSON serialization structs, table generation, terminal styling. |
 | `main.rs` | Thin wrapper: `color_eyre` setup, tracing init, dynamic completions registration, arg parsing, route to `commands.rs`. |
+
+### Root Alias and Shared Controls
+
+- A CLI with subcommands has no separate root command; a root alias, if any, is an exact alias of one named subcommand (one shared `Args` struct, flattened at the root and held by the subcommand)
+- Shared controls (width, verbosity, debug, launch configuration, completion generation) are not part of the alias and keep their documented placement rules; a root-only control stays root-only rather than becoming a clap global
+- Enforce placement with tests generated from the clap definition, as `md` does: `darkmatter/cli/tests/l1/render_alias_parity.rs` (`every_root_argument_is_classified`) and `darkmatter/cli/src/args/cli.rs::the_root_declares_only_shared_controls_besides_render_options`
 
 ### Library Interaction
 
@@ -334,7 +355,7 @@ For each user-observable requirement, ask: *what is the lowest-fidelity test tha
 | Internal state transition | Level 1 |
 | Argument parsing / output formatting | Level 1 |
 | Terminal-rendered glyph / width / colour | Level 2 |
-| `--json` output is valid JSON | Level 1 |
+| `--output json` output is valid JSON | Level 1 |
 | "When user presses X, the badge appears" | Level 2 (kitty bytes via `wezterm cli send-text`) **or** Level 3 |
 | "When user holds modifier, behaviour Y" | Level 2 with kitty bytes — Level 3 cliclick has known macOS limitations for bare-modifier events |
 | Hotkey chord triggers binding | Level 1 manufactured bytes + Level 3 chord injection (cliclick chords work reliably) |

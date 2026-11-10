@@ -183,6 +183,10 @@ pub struct LspFixture<'workspace> {
     /// or dropped, for a fixture started with
     /// [`LspFixture::start_with_startup_probe_gate`].
     startup_probe_gate: Option<crossbeam_channel::Sender<()>>,
+    /// Holds each schema-slot job until sent to (one job per message) or
+    /// dropped, for a fixture started with
+    /// [`LspFixture::start_with_slot_gate`].
+    slot_gate: Option<crossbeam_channel::Sender<()>>,
     /// The last [`dmls::StartupEvent::RegistryJobsOutstanding`] count seen.
     registry_jobs: usize,
 }
@@ -287,6 +291,42 @@ impl<'workspace> LspFixture<'workspace> {
             Self::spawn_with_clock(workspace, Duration::ZERO, Self::fixture_snapshot(workspace), hooks, Some(clock));
         fixture.registry_gate = Some(gate_tx);
         fixture
+    }
+
+    /// Like [`LspFixture::start_with_snapshot`], but each schema-slot job
+    /// waits for [`LspFixture::release_slot_job`] (or
+    /// [`LspFixture::open_slot_gate`]) before it resolves anything, so a test
+    /// can talk to the server while a resolution is held.
+    pub fn start_with_slot_gate(workspace: &'workspace LspWorkspace, snapshot: RequestSnapshot) -> Self {
+        let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
+        let hooks = dmls::StartupHooks { slot_gate: Some(gate_rx), ..dmls::StartupHooks::default() };
+        let mut fixture = Self::spawn_with_all_hooks(workspace, Duration::ZERO, snapshot, hooks);
+        fixture.slot_gate = Some(gate_tx);
+        fixture
+    }
+
+    /// Lets one held schema-slot job through.
+    pub fn release_slot_job(&self) {
+        if let Some(gate) = &self.slot_gate {
+            gate.send(()).expect("slot gate open");
+        }
+    }
+
+    /// Lets every current and later schema-slot job through.
+    pub fn open_slot_gate(&mut self) {
+        self.slot_gate = None;
+    }
+
+    /// Waits for the next finished schema-slot job the server handled and
+    /// returns whether it was installed.
+    pub fn wait_for_slot_prepared(&mut self) -> bool {
+        loop {
+            match self.next_event() {
+                Ok(dmls::StartupEvent::SlotPrepared { installed }) => return installed,
+                Ok(_) => {}
+                Err(error) => panic!("no slot job finished within {MESSAGE_BOUND:?}: {error}"),
+            }
+        }
     }
 
     /// Lets one held trigger-registry job through.
@@ -609,6 +649,7 @@ impl<'workspace> LspFixture<'workspace> {
             registry_gate: None,
             registry_probe_gate: None,
             startup_probe_gate: None,
+            slot_gate: None,
             registry_jobs: 0,
         }
     }

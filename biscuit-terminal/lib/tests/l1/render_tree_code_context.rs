@@ -67,7 +67,7 @@ impl CodeRenderer for CapturingCodeRenderer {
         context: TerminalCodeContext,
     ) -> Option<String> {
         self.captured_width
-            .store(context.width(), Ordering::Relaxed);
+            .store(context.width().as_columns().unwrap_or(0), Ordering::Relaxed);
         *self.captured_color_depth.lock().unwrap() = Some(context.color_depth());
         *self.captured_color_mode.lock().unwrap() = Some(context.color_mode());
         Some("CAPTURED".to_string())
@@ -105,7 +105,7 @@ fn options_with(
 fn context_passes_available_width_not_root_width() {
     let term = Terminal::new_optimistic(120);
     let mut context = TerminalRenderContext::from_terminal(&term);
-    context.available_width = 80; // Differs from root width (120).
+    context.available_width = renderable::output::Width::Columns(80); // Differs from root width (120).
 
     let renderer = Rc::new(CapturingCodeRenderer::new());
     let opts = options_with(context, renderer.clone());

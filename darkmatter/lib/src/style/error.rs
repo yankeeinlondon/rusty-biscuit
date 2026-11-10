@@ -40,6 +40,25 @@ pub enum StyleParseError {
         reason: &'static str,
     },
 
+    /// A name-valued key (a theme, a code-block mode) holds a name that is
+    /// not accepted there.
+    #[error("Invalid value `{raw}` at `{path}`: {reason}")]
+    InvalidValue {
+        path: String,
+        raw: String,
+        reason: String,
+    },
+
+    /// Two different spellings of one field in one `style:` value, such as
+    /// `ml` beside `page.margin-left` or `max-width` beside `page.max-width`.
+    /// Each path is as written; `path` is the field both name.
+    #[error("`{first}` and `{second}` both set `{path}`; keep one")]
+    Conflict {
+        path: String,
+        first: String,
+        second: String,
+    },
+
     /// A `style.markdown` cleanup rule is invalid.
     #[error("Invalid formatting rule at `{path}`: {reason}")]
     InvalidRule { path: String, reason: String },
@@ -61,8 +80,9 @@ impl StyleParseError {
     /// warning carries a span when the parse ran through
     /// [`from_frontmatter`](super::parse::from_frontmatter) with the raw
     /// frontmatter text available. The value-level typed variants
-    /// (`Structure`, `InvalidLength`, `InvalidPercent`, `InvalidColor`) carry a
-    /// dotted `path` but no span in v1 and return `None`.
+    /// (`Structure`, `InvalidLength`, `InvalidPercent`, `InvalidColor`,
+    /// `InvalidValue`) carry a dotted `path` but no span in v1 and return
+    /// `None`.
     pub fn source_span(&self) -> Option<&StyleSpan> {
         match self {
             StyleParseError::Strict { warnings } => {

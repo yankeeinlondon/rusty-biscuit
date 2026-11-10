@@ -8,13 +8,14 @@ use std::collections::BTreeMap;
 use super::provenance::{
     ReferenceDependencyManifest, ReferenceDocumentIdentity, ReferenceGraphMode,
 };
-use super::snapshot::PreparedHeadingSnapshot;
+use super::snapshot::{PreparedHeading, PreparedHeadingSnapshot, heading_at, prepared_headings_of};
 use super::types::{
-    NodeId, ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
-    ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet,
-    ReferenceSyntax, classify_target, make_reference_id,
+    AuthoredReferenceLocation, NodeId, ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
+    ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord,
+    ReferenceReportDocument, ReferenceSet, ReferenceSyntax, ReferenceTrailStep, classify_target, make_reference_id,
 };
 use crate::markdown::Markdown;
+use crate::markdown::compose::body_origin::BodyOrigin;
 use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::conditions;
 use crate::markdown::compose::toc_linking;
@@ -26,6 +27,7 @@ use crate::markdown::compose::transclusion::{
 use crate::markdown::compose::{
     ComposeOperation, ComposeSource, ComposeWarning, EffectiveStateBuilder, ResolvingLookup,
 };
+use crate::markdown::hash::{FrontmatterPathSegment, locate_frontmatter_leaves, locate_frontmatter_value_range};
 use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::types::MarkdownResult;
 
@@ -40,6 +42,10 @@ struct ReferenceAnalysisRuntime {
     /// per trigger, in discovery order: a child prepares in its own context,
     /// whose schema roots may hold triggers the root's never see.
     trigger_warnings: Vec<ComposeWarning>,
+    /// The passive warnings of each finished preparation and everything the
+    /// failed one reported, in order, for a build that fails before a report
+    /// can carry them.
+    earlier_warnings: Vec<ComposeWarning>,
 }
 
 fn source_to_path(source: &ComposeSource) -> std::path::PathBuf {
@@ -89,6 +95,7 @@ fn build_graph_inner(
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
         cache: make_cache(options),
         trigger_warnings: Vec::new(),
+        earlier_warnings: Vec::new(),
     };
 
     // Seed the runtime with the root node so child documents that
@@ -110,7 +117,10 @@ fn build_graph_inner(
         extract_references,
         &mut dependencies,
         &mut prepared_headings,
-    )?;
+    )
+    .inspect_err(|_| {
+        options.compose.options().preflight_failure_warnings.record(std::mem::take(&mut runtime.earlier_warnings));
+    })?;
 
     runtime.transclusion.exit();
 
@@ -123,7 +133,8 @@ fn build_graph_inner(
         dependencies,
         prepared_headings,
     )
-    .with_trigger_warnings(runtime.trigger_warnings))
+    .with_trigger_warnings(runtime.trigger_warnings)
+    .with_earlier_warnings(runtime.earlier_warnings))
 }
 
 /// Build a transclusion-only graph (no link/image extraction at leaf nodes).
@@ -144,9 +155,31 @@ pub(crate) fn build_reference_graph(
 
 /// Flatten a reference graph into composed-order [`ReferenceSet`].
 pub(crate) fn flatten_graph(graph: &ReferenceGraph) -> ReferenceSet {
-    let mut records = Vec::new();
-    flatten_node(graph.root(), graph, &mut records);
-    ReferenceSet { records }
+    ReferenceSet {
+        records: flatten_occurrences(graph)
+            .records
+            .into_iter()
+            .map(|(record, _)| record)
+            .collect(),
+    }
+}
+
+/// A graph walked in composed order, one entry per traversal occurrence.
+#[derive(Default)]
+pub(crate) struct ReferenceOccurrences {
+    /// Each reference with the index in `documents` of the document copy it
+    /// was reached through.
+    pub(crate) records: Vec<(ReferenceRecord, usize)>,
+    /// Each inclusion of a document, depth-first in insertion order, root
+    /// first. A child transcluded twice is here twice with different trails.
+    pub(crate) documents: Vec<ReferenceReportDocument>,
+}
+
+/// Walks the graph, keeping the inclusion trail of every document copy.
+pub(crate) fn flatten_occurrences(graph: &ReferenceGraph) -> ReferenceOccurrences {
+    let mut out = ReferenceOccurrences::default();
+    flatten_node(graph.root(), graph, &mut Vec::new(), &mut out);
+    out
 }
 
 /// Recursively flatten a node's references in composed order.
@@ -158,7 +191,18 @@ pub(crate) fn flatten_graph(graph: &ReferenceGraph) -> ReferenceSet {
 /// When a transclusion record and its child insertion share the same line
 /// (which is the normal case), the child subtree is emitted immediately
 /// after the transclusion record.
-fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec<ReferenceRecord>) {
+fn flatten_node(
+    node: &ReferenceGraphNode,
+    graph: &ReferenceGraph,
+    trail: &mut Vec<ReferenceTrailStep>,
+    out: &mut ReferenceOccurrences,
+) {
+    let occurrence = out.documents.len();
+    out.documents.push(ReferenceReportDocument {
+        source: node.source.clone(),
+        included_via: trail.clone(),
+    });
+
     // Build an index of child insertions by directive line for interleaving.
     let mut insertion_map: BTreeMap<usize, Vec<&ReferenceInsertion>> = BTreeMap::new();
     for insertion in &node.child_insertions {
@@ -183,29 +227,20 @@ fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec
         if last_line < record.origin.line {
             for (&line, insertions) in insertion_map.range(last_line..record.origin.line) {
                 if emitted_insertion_lines.insert(line) {
-                    for insertion in insertions {
-                        if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref())
-                        {
-                            flatten_node(child_node, graph, out);
-                        }
-                    }
+                    flatten_insertions(node, insertions, graph, trail, out);
                 }
             }
         }
 
         // Emit this reference
-        out.push(record.clone());
+        out.records.push((record.clone(), occurrence));
 
         // If a child insertion exists at the same line as this reference,
         // emit it immediately after (this is the transclusion point).
         if emitted_insertion_lines.insert(record.origin.line)
             && let Some(insertions) = insertion_map.get(&record.origin.line)
         {
-            for insertion in insertions {
-                if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref()) {
-                    flatten_node(child_node, graph, out);
-                }
-            }
+            flatten_insertions(node, insertions, graph, trail, out);
         }
 
         last_line = record.origin.line.saturating_add(1);
@@ -214,11 +249,28 @@ fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec
     // Flush remaining child insertions after all local references
     for (&line, insertions) in insertion_map.range(last_line..) {
         if emitted_insertion_lines.insert(line) {
-            for insertion in insertions {
-                if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref()) {
-                    flatten_node(child_node, graph, out);
-                }
-            }
+            flatten_insertions(node, insertions, graph, trail, out);
+        }
+    }
+}
+
+/// Walks `node`'s children at one directive line, each under its own trail
+/// step.
+fn flatten_insertions(
+    node: &ReferenceGraphNode,
+    insertions: &[&ReferenceInsertion],
+    graph: &ReferenceGraph,
+    trail: &mut Vec<ReferenceTrailStep>,
+    out: &mut ReferenceOccurrences,
+) {
+    for insertion in insertions {
+        if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref()) {
+            trail.push(ReferenceTrailStep {
+                file: node.source.clone(),
+                line: insertion.authored_directive_line,
+            });
+            flatten_node(child_node, graph, trail, out);
+            trail.pop();
         }
     }
 }
@@ -256,6 +308,108 @@ fn section_at_line(
         .rev()
         .find(|(line, _, _)| *line <= target_line)
         .map(|(_, text, level)| (text.as_str(), *level))
+}
+
+/// Maps one document's prepared-body offsets to its loaded file.
+///
+/// Exists only for a document with a file behind it whose map describes the
+/// prepared body, so an in-memory or remote document has no authored position
+/// rather than a prepared one.
+pub(crate) struct AuthoredLocator<'a> {
+    prepared: &'a str,
+    loaded: &'a str,
+    origin: &'a BodyOrigin,
+    /// Byte offset of each line of `loaded`.
+    line_starts: Vec<usize>,
+}
+
+impl<'a> AuthoredLocator<'a> {
+    pub(crate) fn new(
+        md: &'a Markdown,
+        source: &ComposeSource,
+        prepared: &'a str,
+        origin: Option<&'a BodyOrigin>,
+    ) -> Option<Self> {
+        if !matches!(source, ComposeSource::File(_)) {
+            return None;
+        }
+        let loaded = md.loaded_source()?.text.as_ref();
+        let origin = origin.filter(|origin| origin.describes(prepared));
+        debug_assert!(
+            origin.is_some(),
+            "a document loaded from a file keeps a map of its prepared body",
+        );
+        Some(Self {
+            prepared,
+            loaded,
+            origin: origin?,
+            line_starts: std::iter::once(0)
+                .chain(loaded.match_indices('\n').map(|(index, _)| index + 1))
+                .collect(),
+        })
+    }
+
+    /// `range` of the loaded file as a location.
+    fn location(&self, range: std::ops::Range<usize>, inserted: bool) -> AuthoredReferenceLocation {
+        let line = self.line_starts.partition_point(|start| *start <= range.start);
+        let line_start = self.line_starts[line - 1];
+        // A byte-order mark is an encoding signature, not a column.
+        let counted = self.loaded[line_start..range.start].trim_start_matches('\u{FEFF}');
+        AuthoredReferenceLocation { line, column: counted.chars().count() + 1, span: range, inserted }
+    }
+
+    /// The location of the prepared-body `span`, from its first character past
+    /// any indentation: the whole span when every byte of it is authored, else
+    /// that character, or the construct that wrote the character. `None` when
+    /// neither is known.
+    pub(crate) fn body_location(&self, span: &std::ops::Range<usize>) -> Option<AuthoredReferenceLocation> {
+        let text = self.prepared.get(span.clone())?;
+        let start = span.end - text.trim_start_matches([' ', '\t']).len();
+        let first = start..start + self.prepared.get(start..)?.chars().next()?.len_utf8();
+        if let Some(first) = self.origin.project(&first) {
+            let whole = (start < span.end).then(|| self.origin.project_whole(&(start..span.end), self.loaded)).flatten();
+            return Some(self.location(whole.unwrap_or(first), false));
+        }
+        self.origin.producer_of(start).map(|construct| self.location(construct, true))
+    }
+
+    /// The construct that wrote the first stage-written byte of the
+    /// prepared-body `span`; `None` when every byte of it was copied.
+    pub(crate) fn produced_location(&self, span: &std::ops::Range<usize>) -> Option<AuthoredReferenceLocation> {
+        span.clone().find_map(|offset| self.origin.producer_of(offset)).map(|construct| self.location(construct, true))
+    }
+
+    /// The location of a `prologue:` or `epilogue:` value reading `expected`
+    /// (`index` for one item of a list); `None` when it cannot be proven.
+    fn frontmatter_location(&self, key: &str, index: Option<usize>, expected: &str) -> Option<AuthoredReferenceLocation> {
+        let mut path = vec![FrontmatterPathSegment::Key(key.to_string())];
+        path.extend(index.map(FrontmatterPathSegment::Index));
+        // A leaf is located within its own property, so a construct elsewhere
+        // the whole-frontmatter locator cannot read does not cost it its place.
+        let range = match locate_frontmatter_leaves(self.loaded, std::slice::from_ref(&path)) {
+            Ok(mut leaves) => leaves.pop()?.range,
+            Err(_) => locate_frontmatter_value_range(self.loaded, key, index, expected)?,
+        };
+        Some(self.location(range, false))
+    }
+}
+
+/// `origin`, whose span is in the prepared body, with its authored position
+/// and section. `locator` is `None` when the document has no authored
+/// positions.
+fn placed_in_body(
+    origin: ReferenceOrigin,
+    locator: Option<&AuthoredLocator<'_>>,
+    headings: &[PreparedHeading],
+) -> ReferenceOrigin {
+    let authored = locator.and_then(|locator| locator.body_location(&origin.span));
+    let section = heading_at(headings, origin.span.start).map(|heading| heading.slug.clone());
+    ReferenceOrigin { authored, section, ..origin }
+}
+
+/// The file line of the directive occupying the prepared-body `span`.
+fn authored_directive_line(locator: Option<&AuthoredLocator<'_>>, span: &std::ops::Range<usize>) -> Option<usize> {
+    locator.and_then(|locator| locator.body_location(span)).map(|location| location.line)
 }
 
 /// `opening` is the reference that resolved to `path`, when the caller has it
@@ -297,8 +451,22 @@ fn build_node(
     // Always run InlinePre preparation (rec #2): page blocks, interpolation,
     // shell expansion, and text replacement can affect references even in
     // leaf documents with no transclusions.
-    let (prepared_content, body_data, warnings) = prepare_content(md, options)?;
+    let PreparedReferenceContent {
+        content: prepared_content,
+        body_data,
+        body_origin,
+        warnings,
+        passive_warnings,
+    } = prepare_content(md, options).map_err(|failure| {
+        runtime.earlier_warnings.extend(failure.warnings);
+        failure.error
+    })?;
+    // The rest of a lenient check's warnings stand in for failures the
+    // composition would raise (as in the shell-approval walk).
+    runtime.earlier_warnings.extend(warnings.iter().take(passive_warnings).cloned());
     let body_data = body_data.as_ref();
+    let locator = AuthoredLocator::new(md, source, &prepared_content, body_origin.as_ref());
+    let locator = locator.as_ref();
     for warning in warnings {
         if let Some(trigger) = warning.invalid_trigger_source()
             && !runtime
@@ -317,9 +485,10 @@ fn build_node(
 
     // Build heading index for section context on transclusion insertions
     let (heading_index, prepared_slugs) = build_heading_index(&prepared_content);
+    let headings = prepared_headings_of(&prepared_content);
 
     if let ComposeSource::File(path) = source {
-        prepared_headings.record(path, prepared_slugs);
+        prepared_headings.record(path, prepared_slugs, headings.clone());
     }
 
     // Extract local references if requested
@@ -339,6 +508,9 @@ fn build_node(
                 );
             }
         }
+    }
+    for record in &mut local_references.records {
+        record.origin = placed_in_body(record.origin.clone(), locator, &headings);
     }
 
     // Parse transclusion directives and build child nodes
@@ -414,12 +586,18 @@ fn build_node(
                     id: make_reference_id(source, directive.line, directive.span.start),
                     kind: ReferenceKind::Transclusion,
                     target: classify_target(&directive.raw_target),
-                    origin: ReferenceOrigin {
-                        source: source.clone(),
-                        line: directive.line,
-                        span: directive.span.clone(),
-                        syntax,
-                    },
+                    origin: placed_in_body(
+                        ReferenceOrigin {
+                            source: source.clone(),
+                            line: directive.line,
+                            span: directive.span.clone(),
+                            syntax,
+                            authored: None,
+                            section: None,
+                        },
+                        locator,
+                        &headings,
+                    ),
                     attributes: serde_json::Map::new(),
                 });
             }
@@ -470,6 +648,7 @@ fn build_node(
                             child_insertions.push(ReferenceInsertion {
                                 child_node_id: child_node.node_id.clone(),
                                 directive_line: directive.line,
+                                authored_directive_line: authored_directive_line(locator, &directive.span),
                                 insertion_order,
                                 reference_id: Some(ref_id),
                                 context: ReferenceInsertionContext {
@@ -513,12 +692,18 @@ fn build_node(
                         id: ref_id.clone(),
                         kind: ReferenceKind::Transclusion,
                         target: classify_target(&display_target),
-                        origin: ReferenceOrigin {
-                            source: source.clone(),
-                            line: directive.line,
-                            span: directive.span.clone(),
-                            syntax: ReferenceSyntax::DirectiveTocLinking,
-                        },
+                        origin: placed_in_body(
+                            ReferenceOrigin {
+                                source: source.clone(),
+                                line: directive.line,
+                                span: directive.span.clone(),
+                                syntax: ReferenceSyntax::DirectiveTocLinking,
+                                authored: None,
+                                section: None,
+                            },
+                            locator,
+                            &headings,
+                        ),
                         attributes: serde_json::Map::new(),
                     });
                 }
@@ -538,6 +723,7 @@ fn build_node(
                         record
                             .attributes
                             .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
+                        record.origin = placed_in_body(record.origin, locator, &headings);
                         local_references.records.push(record);
                     }
                 }
@@ -565,6 +751,7 @@ fn build_node(
                         child_insertions.push(ReferenceInsertion {
                             child_node_id: child_node.node_id.clone(),
                             directive_line: directive.line,
+                            authored_directive_line: authored_directive_line(locator, &directive.span),
                             insertion_order,
                             reference_id: Some(ref_id.clone()),
                             context: ReferenceInsertionContext {
@@ -590,6 +777,7 @@ fn build_node(
                     child_insertions.push(ReferenceInsertion {
                         child_node_id: NodeId::from(""),
                         directive_line: directive.line,
+                        authored_directive_line: authored_directive_line(locator, &directive.span),
                         insertion_order,
                         reference_id: Some(ref_id),
                         context: ReferenceInsertionContext {
@@ -608,12 +796,18 @@ fn build_node(
                         id: ref_id.clone(),
                         kind: ReferenceKind::Transclusion,
                         target: classify_target(raw_target),
-                        origin: ReferenceOrigin {
-                            source: source.clone(),
-                            line: directive.line,
-                            span: directive.span.clone(),
-                            syntax: ReferenceSyntax::DirectiveTocLinking,
-                        },
+                        origin: placed_in_body(
+                            ReferenceOrigin {
+                                source: source.clone(),
+                                line: directive.line,
+                                span: directive.span.clone(),
+                                syntax: ReferenceSyntax::DirectiveTocLinking,
+                                authored: None,
+                                section: None,
+                            },
+                            locator,
+                            &headings,
+                        ),
                         attributes: serde_json::Map::new(),
                     });
                 }
@@ -621,6 +815,7 @@ fn build_node(
                 child_insertions.push(ReferenceInsertion {
                     child_node_id: NodeId::from(""),
                     directive_line: directive.line,
+                    authored_directive_line: authored_directive_line(locator, &directive.span),
                     insertion_order,
                     reference_id: Some(ref_id),
                     context: ReferenceInsertionContext {
@@ -654,12 +849,18 @@ fn build_node(
                     id: make_reference_id(source, directive.line, directive.span.start),
                     kind: ReferenceKind::Transclusion,
                     target: classify_target(&raw_target),
-                    origin: ReferenceOrigin {
-                        source: source.clone(),
-                        line: directive.line,
-                        span: directive.span.clone(),
-                        syntax: ReferenceSyntax::DirectiveFileLinks,
-                    },
+                    origin: placed_in_body(
+                        ReferenceOrigin {
+                            source: source.clone(),
+                            line: directive.line,
+                            span: directive.span.clone(),
+                            syntax: ReferenceSyntax::DirectiveFileLinks,
+                            authored: None,
+                            section: None,
+                        },
+                        locator,
+                        &headings,
+                    ),
                     attributes: serde_json::Map::new(),
                 });
             }
@@ -668,8 +869,13 @@ fn build_node(
 
     // Frontmatter prologue/epilogue
     if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map(), ctx.clone()) {
+        let value_location = |key: &str, idx: usize, expected: &str| {
+            let in_list = md.frontmatter().as_map().get(key).is_some_and(serde_json::Value::is_array);
+            locator.and_then(|locator| locator.frontmatter_location(key, in_list.then_some(idx), expected))
+        };
         for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
             let is_literal = is_literal_content(prologue);
+            let location = value_location("prologue", idx, prologue);
 
             if extract_references {
                 let mut attrs = serde_json::Map::new();
@@ -680,6 +886,7 @@ fn build_node(
                     for mut link in links {
                         link.attributes
                             .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
+                        link.origin.authored.clone_from(&location);
                         local_references.records.push(link);
                     }
                 }
@@ -696,6 +903,8 @@ fn build_node(
                         line: 0,
                         span: 0..0,
                         syntax: ReferenceSyntax::FrontmatterPrologue,
+                        authored: location.clone(),
+                        section: None,
                     },
                     attributes: attrs,
                 });
@@ -736,6 +945,7 @@ fn build_node(
                         child_insertions.push(ReferenceInsertion {
                             child_node_id: child_node.node_id.clone(),
                             directive_line: 0, // prologue goes at the start
+                            authored_directive_line: location.as_ref().map(|location| location.line),
                             insertion_order,
                             reference_id: Some(ref_id),
                             context: ReferenceInsertionContext {
@@ -755,6 +965,7 @@ fn build_node(
 
         for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
             let is_literal = is_literal_content(epilogue);
+            let location = value_location("epilogue", idx, epilogue);
 
             if extract_references {
                 let mut attrs = serde_json::Map::new();
@@ -765,6 +976,7 @@ fn build_node(
                     for mut link in links {
                         link.attributes
                             .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
+                        link.origin.authored.clone_from(&location);
                         local_references.records.push(link);
                     }
                 }
@@ -781,6 +993,8 @@ fn build_node(
                         line: usize::MAX,
                         span: 0..0,
                         syntax: ReferenceSyntax::FrontmatterEpilogue,
+                        authored: location.clone(),
+                        section: None,
                     },
                     attributes: attrs,
                 });
@@ -825,6 +1039,7 @@ fn build_node(
                         child_insertions.push(ReferenceInsertion {
                             child_node_id: child_node.node_id.clone(),
                             directive_line: usize::MAX, // epilogue goes at the end
+                            authored_directive_line: location.as_ref().map(|location| location.line),
                             insertion_order,
                             reference_id: Some(ref_id),
                             context: ReferenceInsertionContext {
@@ -874,6 +1089,10 @@ pub(super) fn extract_all_references(content: &str, source: &ComposeSource) -> R
     // HTML references
     records.extend(super::html::extract_html_links(content, source));
     records.extend(super::html::extract_html_images(content, source));
+    records.extend(super::html::extract_html_videos(content, source));
+    records.extend(super::html::extract_html_audio(content, source));
+    records.extend(super::html::extract_html_sources(content, source));
+    records.extend(super::html::extract_html_iframes(content, source));
     records.extend(super::html::extract_html_script_blocks(content, source));
     records.extend(super::html::extract_html_link_tags(content, source));
     records.extend(super::html::extract_html_meta_tags(content, source));
@@ -881,22 +1100,8 @@ pub(super) fn extract_all_references(content: &str, source: &ComposeSource) -> R
     // Extract style blocks once and reuse for CSS/font extraction (rec #17)
     let style_blocks = super::html::extract_html_style_blocks(content, source);
     for style_record in &style_blocks {
-        if let Some(css_content) = style_record
-            .attributes
-            .get("css_content")
-            .and_then(|v| v.as_str())
-        {
-            records.extend(super::css::extract_css_imports(
-                css_content,
-                source,
-                style_record.origin.line,
-            ));
-            records.extend(super::css::extract_font_face_sources(
-                css_content,
-                source,
-                style_record.origin.line,
-            ));
-        }
+        records.extend(super::css::style_references(content, style_record, super::css::extract_css_imports));
+        records.extend(super::css::style_references(content, style_record, super::css::extract_font_face_sources));
     }
     records.extend(style_blocks);
 
@@ -925,7 +1130,19 @@ pub(super) fn prepare_content_for_validation(
         }
         _ => options.clone(),
     };
-    prepare_content(md, &node_options).map(|(content, _, _)| content)
+    prepare_content(md, &node_options).map(|prepared| prepared.content).map_err(|failure| failure.error)
+}
+
+/// A document's body after InlinePre preparation.
+struct PreparedReferenceContent {
+    content: String,
+    /// Which bytes of `content` are data.
+    body_data: Option<crate::markdown::compose::body_origin::DataRanges>,
+    /// Where each byte of `content` came from.
+    body_origin: Option<BodyOrigin>,
+    warnings: Vec<ComposeWarning>,
+    /// How many of `warnings` the document's passive checks found.
+    passive_warnings: usize,
 }
 
 /// Prepare content by running only InlinePre operations.
@@ -934,19 +1151,10 @@ pub(super) fn prepare_content_for_validation(
 /// external state, overrides, cache settings, shell settings, and per-node
 /// source provenance, then restricts it to the InlinePre operations it
 /// enables.
-///
-/// ## Returns
-///
-/// The prepared body, which of its bytes are data, and the preparation's
-/// warnings.
 fn prepare_content(
     md: &Markdown,
     options: &ReferenceGraphOptions,
-) -> MarkdownResult<(
-    String,
-    Option<crate::markdown::compose::body_origin::DataRanges>,
-    Vec<ComposeWarning>,
-)> {
+) -> Result<PreparedReferenceContent, Box<crate::markdown::compose::ComposeFailure>> {
     // Restricted, never widened: an operation the request disabled (the
     // passive `md compose` reference check's `ShellExpansion`) stays off.
     // A `::map` / `::filter` body is repeated per item at composition and read
@@ -957,6 +1165,8 @@ fn prepare_content(
     let repeats_bodies = md.content().contains("::map") || md.content().contains("::filter");
     let inline_pre_options = options.compose.clone().derive(|compose| {
         let enabled: Vec<ComposeOperation> = [
+            // A schema and a condition judge the resolved values.
+            ComposeOperation::FrontmatterInterpolation,
             ComposeOperation::TextReplacement,
             ComposeOperation::PageBlocks,
             ComposeOperation::Interpolation,
@@ -973,8 +1183,24 @@ fn prepare_content(
         compose.only(&enabled)
     });
 
-    let (result, report) = md.compose_with_options(inline_pre_options)?;
-    Ok((result.content().to_string(), report.body_data, report.warnings))
+    let mut result = md.clone();
+    let report = match result.run_root_pipeline_collecting(inline_pre_options, None) {
+        (Ok(report), _) => report,
+        (Err(error), warnings) => {
+            return Err(Box::new(crate::markdown::compose::ComposeFailure {
+                error,
+                warnings,
+                read_set: options.compose.read_set(),
+            }));
+        }
+    };
+    Ok(PreparedReferenceContent {
+        content: result.content().to_string(),
+        body_data: report.body_data,
+        body_origin: report.body_origin,
+        warnings: report.warnings,
+        passive_warnings: report.passive_warnings,
+    })
 }
 
 /// The attribute that marks a reference found in data (text an expression
@@ -1064,6 +1290,8 @@ fn generate_toc_link_references(
                     line: directive.line,
                     span: directive.span.clone(),
                     syntax: ReferenceSyntax::MarkdownLink,
+                    authored: None,
+                    section: None,
                 },
                 attributes: serde_json::Map::new(),
             }
@@ -1459,6 +1687,7 @@ mod tests {
                     insertion_order: 0,
                     reference_id: None,
                     context: ReferenceInsertionContext::default(),
+                    authored_directive_line: None,
                 },
                 ReferenceInsertion {
                     child_node_id: "child_b".into(),
@@ -1466,6 +1695,7 @@ mod tests {
                     insertion_order: 1,
                     reference_id: None,
                     context: ReferenceInsertionContext::default(),
+                    authored_directive_line: None,
                 },
             ],
         };
@@ -1485,6 +1715,8 @@ mod tests {
                         line: 1,
                         span: 0..10,
                         syntax: ReferenceSyntax::MarkdownLink,
+                        authored: None,
+                        section: None,
                     },
                     attributes: serde_json::Map::new(),
                 }],
@@ -1507,6 +1739,8 @@ mod tests {
                         line: 1,
                         span: 0..10,
                         syntax: ReferenceSyntax::MarkdownLink,
+                        authored: None,
+                        section: None,
                     },
                     attributes: serde_json::Map::new(),
                 }],

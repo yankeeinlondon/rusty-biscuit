@@ -1,0 +1,3 @@
+name;port
+web;8080
+db;5432

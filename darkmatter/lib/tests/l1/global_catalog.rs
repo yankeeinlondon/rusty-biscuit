@@ -312,6 +312,71 @@ fn an_unloadable_catalog_registered_as_the_baseline_fails_naming_its_field() {
     assert!(matches!(&error, SchemaError::Baseline { message, .. } if message.contains("`$schema.env` is null")), "{error:?}");
 }
 
+/// The baseline never holds `{{ … }}` slots: a registered catalog whose `fm`
+/// reaches one through its imports, a schema file, and an in-memory schema
+/// each fail as a baseline with the slot code, and nothing the slot names is
+/// read. The unedited catalog is the control.
+#[test]
+fn a_baseline_holding_a_slot_fails_with_the_slot_code() {
+    use darkmatter::markdown::schemas::slots::codes::{SLOT_NOT_ALLOWED_IN_BASELINE_CODE, slot_prohibition_code};
+    let assert_refused = |case: &str, error: SchemaError| {
+        assert!(
+            matches!(&error, SchemaError::Baseline { source: Some(source), .. } if matches!(**source, SchemaError::UnresolvedSlots(_))),
+            "{case}: {error:?}"
+        );
+        assert_eq!(slot_prohibition_code(&error), Some(SLOT_NOT_ALLOWED_IN_BASELINE_CODE), "{case}");
+        assert!(error.to_string().contains("env.TAGS"), "{case}: {error}");
+    };
+
+    // Control: the unedited catalog loads as the baseline.
+    let dir = tempfile::tempdir().expect("temp dir");
+    shipped!().write_below(dir.path());
+    DarkmatterSchemas::new(context_at(dir.path()))
+        .with_baseline_from_file(dir.path().join(DARKMATTER_CATALOG_PATH))
+        .expect("the control catalog loads");
+
+    // A catalog whose `fm` partial holds a slot (reached through the
+    // catalog's import of the partial).
+    let dir = tempfile::tempdir().expect("temp dir");
+    let mut texts = shipped!();
+    let edited = texts.0[1].replace("tags: \"string[] -> ", "tags: \"enum({{ env.TAGS }})[] -> ");
+    assert_ne!(edited, texts.0[1]);
+    texts.0[1] = edited;
+    texts.write_below(dir.path());
+    let error = DarkmatterSchemas::new(context_at(dir.path()))
+        .with_baseline_from_file(dir.path().join(DARKMATTER_CATALOG_PATH))
+        .err()
+        .expect("a catalog holding a slot is not a baseline");
+    assert_refused("catalog", error);
+    let catalog = GlobalCatalog::from_file(&dir.path().join(DARKMATTER_CATALOG_PATH), DARKMATTER_GLOBALS, &context_at(dir.path()))
+        .expect_err("the catalog itself refuses the slot");
+    assert!(matches!(catalog.reason, CatalogErrorReason::SlotsNotAllowed(_)), "{catalog}");
+    assert_eq!(catalog.slot_code(), Some(SLOT_NOT_ALLOWED_IN_BASELINE_CODE));
+
+    // A plain schema file, its slot written in it and through an import.
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join("plain.yaml"), "$schema:\n    title: string\n").unwrap();
+    std::fs::write(dir.path().join("direct.yaml"), "$schema:\n    tag: enum({{ env.TAGS }})\n").unwrap();
+    std::fs::write(dir.path().join("types.yaml"), "kind: schema\ntypes:\n    tag: enum({{ env.TAGS }})\n").unwrap();
+    std::fs::write(dir.path().join("imported.yaml"), "$schema:\n    tag: tag@./types.yaml\n").unwrap();
+    DarkmatterSchemas::new(context_at(dir.path()))
+        .with_baseline_from_file(dir.path().join("plain.yaml"))
+        .expect("the control file loads");
+    for case in ["direct", "imported"] {
+        let error = DarkmatterSchemas::new(context_at(dir.path()))
+            .with_baseline_from_file(dir.path().join(format!("{case}.yaml")))
+            .err()
+            .expect(case);
+        assert_refused(case, error);
+    }
+
+    // An in-memory schema.
+    let schema = simplified_schema::parse_yaml_schema(&serde_yaml_ng::from_str("tag: enum({{ env.TAGS }})").unwrap())
+        .expect("a template parses");
+    let error = DarkmatterSchemas::new(context_at(dir.path())).with_baseline(schema).err().expect("in memory");
+    assert_refused("in memory", error);
+}
+
 /// The old separately embedded baseline under `docs/schemas/` is gone, and no
 /// Darkmatter source or test names or includes it.
 #[test]

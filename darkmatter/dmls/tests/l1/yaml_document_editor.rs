@@ -226,6 +226,29 @@ fn a_claimed_repository_kind_is_validated_by_its_definition_alone() {
     assert_eq!(start(&diagnostic), position_of(&text, "title"), "{diagnostic:#?}");
 }
 
+/// Each use of a failing anchor is published at its `*name` token and
+/// ranges only that token; the anchored original ranges its failing value.
+#[test]
+fn an_alias_use_is_ranged_at_its_token() {
+    let probe = Probe::new();
+    let platforms = "platforms:\n    - &p {name: [1]}\n    - *p\n";
+    for text in [
+        format!("kind: roster\nroster_version: 1\n{platforms}"),
+        format!("kind: roster\nroster_version: 1\nowner: é\n{platforms}"),
+        // `é` before the alias on its own line: one UTF-16 unit, two bytes.
+        "kind: roster\nroster_version: 1\nplatforms: [{name: é}, &p {name: [1]}, *p]\n".to_string(),
+    ] {
+        let diagnostics = probe.schema_diagnostics("roster.data.yaml", &text);
+        assert_eq!(codes(&diagnostics), ["dm.schema.type_mismatch", "dm.schema.type_mismatch"], "{diagnostics:#?}");
+        let mut starts: Vec<_> = diagnostics.iter().map(start).collect();
+        starts.sort();
+        assert_eq!(starts, [position_of(&text, "[1]"), position_of(&text, "*p")], "{diagnostics:#?}");
+        let alias = diagnostics.iter().find(|diagnostic| start(diagnostic) == position_of(&text, "*p")).unwrap();
+        let (line, character) = position_of(&text, "*p");
+        assert_eq!((alias.range.end.line, alias.range.end.character), (line, character + 2), "{alias:#?}");
+    }
+}
+
 #[test]
 fn a_shipped_kind_is_claimed_without_any_schema_root() {
     let probe = Probe::new();
@@ -287,6 +310,24 @@ fn a_kind_claimed_twice_is_one_error_on_the_kind_naming_both_definitions() {
     assert_eq!(files.len(), 2, "{related:#?}");
     assert!(files.iter().any(|uri| uri.ends_with("schemas/roster.yaml")), "{files:?}");
     assert!(files.iter().any(|uri| uri.ends_with("schemas/roster-copy.yaml")), "{files:?}");
+}
+
+/// A kind definition holding a `{{ … }}` slot is a broken claim: one error
+/// on the document's `kind`, under the kind slot code, relating the
+/// definition.
+#[test]
+fn a_kind_definition_holding_a_slot_is_one_error_under_the_kind_slot_code() {
+    let probe = Probe::new();
+    let slotted = ROSTER_DEFINITION.replace("name: string(required)", "name: enum({{ env.PLATFORMS }}; required)");
+    assert_ne!(slotted, ROSTER_DEFINITION);
+    write(&probe.path("schemas/roster.yaml"), &slotted);
+    let diagnostics = probe.schema_diagnostics("roster.data.yaml", ROSTER);
+    let diagnostic = only(&diagnostics);
+    assert_eq!(code_of(diagnostic), "dm.schema.slot_not_allowed_in_kind", "{diagnostic:#?}");
+    assert_eq!(start(diagnostic), position_of(ROSTER, "roster\n"), "{diagnostic:#?}");
+    assert!(diagnostic.message.contains("a kind definition cannot hold"), "{diagnostic:#?}");
+    let related = diagnostic.related_information.as_deref().unwrap_or_default();
+    assert!(related.iter().any(|info| info.location.uri.as_str().ends_with("schemas/roster.yaml")), "{related:#?}");
 }
 
 #[test]

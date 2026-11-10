@@ -27,6 +27,12 @@
 //!   Schema at validator-construction time.
 //! - [`SchemaError::Io`] — filesystem I/O failed while reading a referenced
 //!   file.
+//! - [`SchemaError::UnresolvedSlots`] — the schema is a template holding
+//!   `{{ … }}` slots and cannot be lowered until they are resolved.
+//! - [`SchemaError::SlotResult`] — a resolved slot's value cannot fill its
+//!   position.
+//! - [`SchemaError::SlotResolution`] — a host resolved a template's slots
+//!   and the resolution failed ([`SlotResolutionFailure`]).
 //! - [`SchemaError::FrontmatterShape`] — `$schema` is present in frontmatter
 //!   but is not a YAML mapping/sequence/string.
 
@@ -37,6 +43,8 @@ use std::{
 };
 
 use thiserror::Error;
+
+use crate::span::SourceSpan;
 
 /// A secondary location of a [`SchemaError::Grammar`] failure: the earlier
 /// declaration a duplicate or a disagreeing overload conflicts with.
@@ -72,7 +80,7 @@ pub struct CycleReference {
 
 use super::simplified::{
     SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaReferenceSite,
-    SchemaSourceId, SchemaUnionRejection,
+    SchemaSourceId, SchemaUnionRejection, Slot,
 };
 
 
@@ -89,11 +97,14 @@ pub enum KindSelectionCause {
     /// Two or more definitions claim the kind; `files` names each, sorted
     /// by path (a compiled-in definition by its repository-relative path).
     Duplicate { files: Vec<PathBuf> },
-    /// The definition that claims the kind failed; `defect` is its failure.
-    Reserved { file: PathBuf, defect: String },
+    /// The definition that claims the kind failed; `defect` is its failure,
+    /// and `code` the host's diagnostic code for it when the host gives the
+    /// failure one of its own (a kind definition holding schema slots).
+    Reserved { file: PathBuf, defect: String, code: Option<&'static str> },
     /// No healthy definition claims the kind, and `file` is a definition
-    /// that failed before revealing what it claims, so the kind may be its.
-    Unavailable { file: PathBuf, defect: String },
+    /// that failed before revealing what it claims, so the kind may be its;
+    /// `code` as for [`Self::Reserved`].
+    Unavailable { file: PathBuf, defect: String, code: Option<&'static str> },
     /// A schema root could not be read, so its definitions are unknown.
     RootUnreadable { root: PathBuf, defect: String },
 }
@@ -105,10 +116,10 @@ impl fmt::Display for KindSelectionCause {
                 let files: Vec<String> = files.iter().map(|file| format!("`{}`", file.display())).collect();
                 write!(f, "it is claimed by more than one definition: {}", files.join(", "))
             }
-            Self::Reserved { file, defect } => {
+            Self::Reserved { file, defect, .. } => {
                 write!(f, "its definition `{}` failed: {defect}", file.display())
             }
-            Self::Unavailable { file, defect } => write!(
+            Self::Unavailable { file, defect, .. } => write!(
                 f,
                 "schema selection is unavailable: definition `{}` failed before revealing its kind: {defect}",
                 file.display()
@@ -182,6 +193,211 @@ impl fmt::Display for NotSchemaReason {
     }
 }
 
+/// The `{{ … }}` slots that keep a schema from being lowered.
+///
+/// Each slot carries its authored span (in the type-expression string, or
+/// the whole YAML or Markdown document once source-aware parsing projected
+/// it) and its defining file when it was reached through an import.
+///
+/// `pending` is the handle that resolves the template: set by the public
+/// resolution entry points (`resolve::resolve_yaml_schema_owned_by` and the
+/// functions delegating to it, `resolve::prepare_standalone_yaml_schema`),
+/// `None` where the schema cannot be resolved from the call that met it.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct UnresolvedSlots {
+    /// Every slot of the schema, in declaration order, each once.
+    pub slots: Vec<Slot>,
+    /// How to resolve the template, when the call that met it can.
+    pub pending: Option<crate::slots::PendingSchema>,
+    /// The expanded template the slots were found in, kept for
+    /// [`crate::slots::PendingSchema::template`].
+    pub(crate) template: Option<crate::slots::Template>,
+}
+
+impl UnresolvedSlots {
+    /// The unresolved slots `slots`, with no resolution handle.
+    pub fn new(slots: Vec<Slot>) -> Self {
+        Self { slots, pending: None, template: None }
+    }
+
+    /// `slots`, found in the expanded `template`.
+    pub(crate) fn with_template(slots: Vec<Slot>, template: crate::slots::Template) -> Self {
+        Self { slots, pending: None, template: Some(template) }
+    }
+}
+
+/// A secondary location of a [`SchemaError::SlotResult`]: the imported file
+/// that holds a rejected definition, or the authored suffix a returned type
+/// conflicts with. `file` and `span` are `None` when no source text proves
+/// them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlotRelated {
+    /// What this location contributes to the failure, in words.
+    pub message: String,
+    /// The file `span` is a byte range of; `None` for the slot's own text.
+    pub file: Option<PathBuf>,
+    /// Where the participant is.
+    pub span: Option<SourceSpan>,
+}
+
+/// What is wrong with a value a `{{ … }}` slot produced
+/// ([`SchemaError::SlotResult`]).
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum SlotResultKind {
+    /// The list's slots produced no element and the list has no literal one.
+    Empty,
+    /// The value is not the JSON shape the position takes.
+    WrongShape {
+        /// The shape the position takes.
+        expected: &'static str,
+        /// The JSON kind the slot produced (`null`, `boolean`, `number`,
+        /// `string`, `array`, `mapping`), naming the element for a list.
+        found: String,
+    },
+    /// The value has the right shape but the position cannot take it: a
+    /// number outside the numeric model, a negative or fractional count, a
+    /// bound that crosses its counterpart, a default the type rejects or that
+    /// disagrees with another.
+    Inadmissible(String),
+    /// A slot-supplied pattern the linear regex engine must not take: a
+    /// lookaround, a backreference, more than
+    /// [`MAX_SLOT_PATTERN_BYTES`](crate::slots::MAX_SLOT_PATTERN_BYTES), or a
+    /// pattern that does not compile within the default size limit.
+    PatternRejected(String),
+    /// A template type's value is not a type definition: a JSON shape other
+    /// than a string or an array, or text the ordinary definition parser
+    /// rejects (the parser's error is kept unchanged). Shared, so the kind
+    /// stays cheap to clone.
+    NotATypeDefinition(std::sync::Arc<SchemaError>),
+    /// A template type's returned definition holds an active `{{ … }}` slot
+    /// of its own (a template constraint included): returned data never
+    /// causes another expression to run.
+    NestedSlot,
+    /// A definition reachable from a template type's returned definition,
+    /// through its imports, holds an active `{{ … }}` slot.
+    ReachableSlot,
+    /// A template type's returned definition names a local type (`Name` or
+    /// `Name@this`); returned data has no schema of its own to name types
+    /// from.
+    LocalReference(String),
+    /// A template type's returned definition conflicts with the suffix
+    /// written after the slot (a default or constraint the merge rejects).
+    SuffixConflict(String),
+    /// A template type's returned definition is a valid definition that
+    /// cannot stand at the slot's position once expanded (an invalid
+    /// `non-null`, a union or tuple invariant).
+    InvalidExpansion(String),
+}
+
+impl PartialEq for SlotResultKind {
+    /// Compares by meaning: a wrapped definition error compares by its
+    /// message, since [`SchemaError`] has no structural equality.
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Empty, Self::Empty) | (Self::NestedSlot, Self::NestedSlot) | (Self::ReachableSlot, Self::ReachableSlot) => true,
+            (Self::WrongShape { expected: a, found: b }, Self::WrongShape { expected: c, found: d }) => a == c && b == d,
+            (Self::Inadmissible(a), Self::Inadmissible(b))
+            | (Self::PatternRejected(a), Self::PatternRejected(b))
+            | (Self::LocalReference(a), Self::LocalReference(b))
+            | (Self::SuffixConflict(a), Self::SuffixConflict(b))
+            | (Self::InvalidExpansion(a), Self::InvalidExpansion(b)) => a == b,
+            (Self::NotATypeDefinition(a), Self::NotATypeDefinition(b)) => a.to_string() == b.to_string(),
+            _ => false,
+        }
+    }
+}
+
+impl fmt::Display for SlotResultKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("the list is empty: its slots produced no element and it has no literal one"),
+            Self::WrongShape { expected, found } => write!(f, "expected {expected}, found {found}"),
+            Self::Inadmissible(reason) | Self::PatternRejected(reason) => f.write_str(reason),
+            Self::NotATypeDefinition(error) => write!(f, "it is not a type definition: {error}"),
+            Self::NestedSlot => f.write_str(
+                "the returned type definition holds a `{{ … }}` slot; returned data cannot run another expression",
+            ),
+            Self::ReachableSlot => f.write_str(
+                "a type the returned definition imports holds a `{{ … }}` slot; returned data cannot run another expression",
+            ),
+            Self::LocalReference(name) => write!(
+                f,
+                "the returned type definition names the local type `{name}`; returned data can only import named \
+                 types from a file (`{name}@./file.yaml`)"
+            ),
+            Self::SuffixConflict(reason) => write!(f, "the returned type conflicts with the written suffix: {reason}"),
+            Self::InvalidExpansion(reason) => f.write_str(reason),
+        }
+    }
+}
+
+/// A failed resolution of a template ([`SchemaError::SlotResolution`]),
+/// with the schema texts the resolution read, and the text its inline
+/// value was written in, so each slot's span can be located in its defining
+/// file ([`Self::slot_text`]) without reading it again.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct SlotResolutionFailure {
+    /// Why no schema was produced. Shared, so a host can cache the failure
+    /// and report it again.
+    pub error: std::sync::Arc<crate::slots::SlotResolutionError>,
+    /// Every schema file the template's first pass read, with the text
+    /// read ([`crate::slots::PendingSchema::read_sources`]).
+    pub sources: std::sync::Arc<[(PathBuf, std::sync::Arc<str>)]>,
+    /// The template's authored inline value
+    /// ([`crate::slots::PendingSchema::authored_source`]).
+    authored: Option<crate::slots::pending::AuthoredText>,
+}
+
+impl SlotResolutionFailure {
+    /// The failure `error` of a template that read `sources`, with no
+    /// authored inline value.
+    pub fn new(
+        error: std::sync::Arc<crate::slots::SlotResolutionError>,
+        sources: std::sync::Arc<[(PathBuf, std::sync::Arc<str>)]>,
+    ) -> Self {
+        Self { error, sources, authored: None }
+    }
+
+    /// The failure `error` of resolving `pending`: its read texts and its
+    /// authored inline value.
+    pub fn of_pending(error: std::sync::Arc<crate::slots::SlotResolutionError>, pending: &crate::slots::PendingSchema) -> Self {
+        Self { error, sources: pending.read_sources().to_vec().into(), authored: pending.authored_text().cloned() }
+    }
+
+    /// The text `slot`'s spans are byte ranges of, with the file it is
+    /// (`None`: in-memory text): a schema file the resolution read, which
+    /// the slot's origin names, or the inline value the template was
+    /// written in ([`crate::slots::PendingSchema::slot_text`]). `None` when
+    /// no text proves where the slot is.
+    pub fn slot_text(&self, slot: &crate::simplified::Slot) -> Option<(Option<&Path>, &std::sync::Arc<str>)> {
+        crate::slots::pending::slot_text(&self.sources, self.authored.as_ref(), slot)
+    }
+}
+
+impl fmt::Display for SlotResolutionFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "the schema's slots could not be resolved: {}", self.error)
+    }
+}
+
+impl fmt::Display for UnresolvedSlots {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let count = self.slots.len();
+        write!(
+            f,
+            "the schema holds {count} unresolved `{{{{ … }}}}` slot{}; resolve it before lowering, validating, or layering it",
+            if count == 1 { "" } else { "s" }
+        )?;
+        if let Some(first) = self.slots.first() {
+            write!(f, " (first: `{{{{ {} }}}}`)", first.expression)?;
+        }
+        Ok(())
+    }
+}
+
 fn not_schema_message(path: &Path, reason: NotSchemaReason) -> String {
     with_hint_line(
         format!("`{}` is not a valid schema definition: {reason}", path.display()),
@@ -236,6 +452,48 @@ pub enum SchemaError {
     /// Phase 3 concern).
     #[error("cannot convert SimplifiedSchema for `{property}` to JSON Schema: {message}")]
     Convert { property: String, message: String },
+
+    /// The schema is a template: it holds `{{ … }}` slots, so it cannot be
+    /// lowered to JSON Schema, prepared for validation, or layered until an
+    /// explicit resolution step substitutes them. Every lowering entry point
+    /// returns this before lowering anything; it is never a placeholder
+    /// schema.
+    #[error("{0}")]
+    UnresolvedSlots(Box<UnresolvedSlots>),
+
+    /// A `{{ … }}` slot's value cannot fill its position. `slot.span` (in
+    /// `slot.origin`'s file when set) is where it is reported; resolution
+    /// stops at the first such value and publishes nothing.
+    #[error("the value of `{{{{ {} }}}}` cannot be used here: {kind}", slot.expression)]
+    SlotResult {
+        /// The slot that produced the value.
+        slot: Box<Slot>,
+        /// What is wrong with it.
+        kind: SlotResultKind,
+        /// The path of the property whose slot it is, when known.
+        property: Option<String>,
+        /// Other participants: an imported file holding a rejected
+        /// definition, or a conflicting authored suffix.
+        related: Vec<SlotRelated>,
+    },
+
+    /// A read that a template type's returned definition introduced (an
+    /// import, an example file, or a path probe) was refused by the host's
+    /// read gate before anything was opened. Distinct from a failed or
+    /// cyclic import, so a host keeps its grant policy for it.
+    #[error("a read needed by `{{{{ {} }}}}` was refused: {refusal}", slot.expression)]
+    SlotReadRefused {
+        /// The template type whose returned definition needs the read.
+        slot: Box<Slot>,
+        /// The host's refusal, with its code.
+        refusal: crate::slots::SlotAdmissionError,
+    },
+
+    /// A host resolved the template's slots and the resolution produced no
+    /// schema: a refused or failed slot, a value that cannot fill its
+    /// position, or a cancellation. The host's typed causes are kept.
+    #[error("{0}")]
+    SlotResolution(Box<SlotResolutionFailure>),
 
     /// A `$schema` file reference could not be resolved: the syntax is
     /// invalid, or biscuit-file rejected it. A reference that resolves but
@@ -790,6 +1048,70 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                          <cyan>{type} -> description</cyan>",
                     )
             }
+
+            SchemaError::UnresolvedSlots(unresolved) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "schema template is unresolved"))
+                .body(
+                    unresolved
+                        .slots
+                        .iter()
+                        .map(|slot| {
+                            Prose::new(format!(
+                                "<dim>Slot:</dim> <cyan>{}</cyan> <dim>(bytes {}..{})</dim>",
+                                Prose::escape_text(&format!("{{{{ {} }}}}", slot.expression)),
+                                slot.span.start,
+                                slot.span.end
+                            ))
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .hint("Resolve the schema's slots explicitly before validating documents against it."),
+
+            SchemaError::SlotResolution(failure) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "schema slots could not be resolved"))
+                .body(vec![Prose::new(Prose::escape_text(&failure.error.to_string()))])
+                .hint("Fix the slot's expression or the data it reads, or grant the read it needs."),
+
+            SchemaError::SlotResult { slot, kind, property, related } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "slot value cannot be used"))
+                .body(
+                    std::iter::once(Prose::new(format!(
+                        "<dim>Slot:</dim> <cyan>{}</cyan> <dim>(bytes {}..{})</dim>",
+                        Prose::escape_text(&format!("{{{{ {} }}}}", slot.expression)),
+                        slot.span.start,
+                        slot.span.end
+                    )))
+                    .chain(property.iter().map(|property| {
+                        Prose::new(format!("<dim>Property:</dim> <cyan>{}</cyan>", Prose::escape_text(property)))
+                    }))
+                    .chain(std::iter::once(Prose::new(format!(
+                        "<dim>Problem:</dim> {}",
+                        Prose::escape_text(&kind.to_string())
+                    ))))
+                    .chain(related.iter().map(|related| {
+                        let place = related.file.as_ref().map(|file| format!(" <dim>({})</dim>", Prose::escape_text(&file.display().to_string())));
+                        Prose::new(format!(
+                            "<dim>Related:</dim> {}{}",
+                            Prose::escape_text(&related.message),
+                            place.unwrap_or_default()
+                        ))
+                    }))
+                    .collect::<Vec<_>>(),
+                )
+                .hint("Change the slot's expression or the data it reads so it yields a value the position takes."),
+
+            SchemaError::SlotReadRefused { slot, refusal } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "slot read refused"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Slot:</dim> <cyan>{}</cyan> <dim>(bytes {}..{})</dim>",
+                        Prose::escape_text(&format!("{{{{ {} }}}}", slot.expression)),
+                        slot.span.start,
+                        slot.span.end
+                    )),
+                    Prose::new(format!("<dim>Refused:</dim> {}", Prose::escape_text(&refusal.message))),
+                ])
+                .hint("Grant the read the returned type definition needs, or change the data it reads."),
 
             SchemaError::Convert { property, message } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(

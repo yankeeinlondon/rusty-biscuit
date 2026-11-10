@@ -25,13 +25,31 @@ See the `renderable` skill's *Tree Module* topic for the tree model itself
   render `context`, strictness, and an optional `code_renderer`
   (`Option<Rc<dyn CodeRenderer>>`).
 - **`TerminalRenderContext`** — the terminal-capability snapshot the renderer
-  consults: `width`, `available_width`, `current_indent`, `color_depth`,
-  `color_mode`, `hyperlinks`, `supports_unicode`, `layout`,
-  `terminal`, `active_layout`. Built via `from_terminal` / `fallback`.
+  consults: `width` and `available_width` (both `renderable::Width`, the
+  output width enum: `Columns(n)`, `Unlimited`, `Source` — never a sentinel
+  number), `current_indent`, `color_depth`, `color_mode`, `hyperlinks`,
+  `supports_unicode`, `verbosity`, `plain`, `layout`, `terminal`,
+  `active_layout`. Built via `from_terminal` / `fallback`, or
+  `from_profile(&TerminalProfile, Width)` / `from_output_options`.
+  `pin_plain()` applies the plain profile after every other option; a pinned
+  render writes no escape byte and no trailing whitespace.
+  `from_terminal` reads `Terminal::output_width`, so a bridge terminal
+  (`Terminal::from_output_options`) folds at its `Unlimited`/`Source` state.
+  A bespoke component reads `Terminal::columns()` (`None` under those) rather
+  than `Terminal::width()`, and places a block with
+  `LayoutTerminalExt::apply_block_layout_on`.
   Fork helpers — `for_child(indent_delta, width_delta)`, `with_width`,
   `with_layout` — narrow width and accumulate indent for nested content.
   (`active_layout` is currently a carried-but-unread field; the renderer
   applies layout from `NodeAttrs::layout()` directly — see *Layout* below.)
+- **`render_terminal_output(&Document, &OutputOptions, strictness)`** — the
+  generic terminal fold the shared dispatch (`biscuit_terminal::output`) uses.
+  Under an unbounded width nothing wraps and nothing fills (3-glyph styled
+  rule, `---` in plain, natural-width tables). It returns `Rendered<String>`, and
+  `render_output` carries the fold's diagnostics in `RenderedOutput`; a borderless
+  table plans for its gaps, not a box. Non-clickable links print `text`
+  (`text <url>` at verbosity ≥ 1); printed URLs are unbreakable words. See
+  `biscuit-terminal/docs/output.md`.
 
 ## Strictness model
 
@@ -177,8 +195,9 @@ wired into three node shapes without mutating the tree:
 
 - **`Link`** — the link label/display text is shaped to the resolved field
   (the structured link children stay intact for OSC 8 / fallback).
-- **`Image`** — the `▉ IMAGE[alt]` placeholder is shaped with the alt text
-  *inside* the brackets; the source `alt` stays intact on the node.
+- **`Image`** — the `IMAGE[alt]` fallback (the only image placeholder) is
+  shaped with the alt text *inside* the brackets; the source `alt` stays
+  intact on the node.
 - **`ListItem`** — the marker is lifted out and the item body is block-aligned
   and padded within the resolved field; the marker stays structurally separate
   from body placement.

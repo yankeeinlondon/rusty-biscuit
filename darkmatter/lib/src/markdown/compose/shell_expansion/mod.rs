@@ -704,13 +704,18 @@ pub(crate) fn execute_prepared_outcome(
 ) -> Result<DirectiveOutcome, ShellExpansionError> {
     let shell_opts = options.shell_options();
     let run = || {
-        executor::execute_directive_outcome(
+        let outcome = executor::execute_directive_outcome(
             &prepared.effective,
             &shell_opts,
             &options.source,
             options.resolution_context(),
             options.shell_child_environment(),
-        )
+        );
+        // The command may have written any file, failed or not, so no read
+        // from before it may be reused. A cache hit ran nothing and keeps the
+        // memo.
+        options.invalidate_data_memo();
+        outcome
     };
     if prepared.effective.no_cache {
         return Ok(DirectiveOutcome {

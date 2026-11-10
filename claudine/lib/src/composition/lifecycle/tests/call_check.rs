@@ -121,7 +121,7 @@ fn a_category_3_lifecycle_call_returns_its_located_warning() {
     assert_eq!(diagnostic.code, darkmatter::markdown::compose::expression::UNCERTAIN_CALL_CODE);
     let source = diagnostic.source.as_ref().expect("located");
     // `label` in `  - when: min(label, 5) > 1`, line 6.
-    assert_eq!((source.line, source.column), (6, 15));
+    assert_eq!((source.line, source.column), (Some(6), Some(15)));
 }
 
 /// A rejected lifecycle call keeps Darkmatter's shared record through the
@@ -142,5 +142,5 @@ fn a_rejected_lifecycle_call_keeps_its_located_shared_record() {
     let source = diagnostic.source.as_ref().expect("located");
     assert_eq!(source.file.as_deref(), Some(dummy_path()));
     // `true` in `  - say: "{{ min(true, 5) }}"`, line 3.
-    assert_eq!((source.line, source.column), (3, 18));
+    assert_eq!((source.line, source.column), (Some(3), Some(18)));
 }

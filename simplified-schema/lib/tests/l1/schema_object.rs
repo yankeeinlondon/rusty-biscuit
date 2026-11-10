@@ -597,3 +597,136 @@ fn the_object_is_send_and_sync() {
     fn check<T: Send + Sync + Clone>() {}
     check::<SimplifiedSchema>();
 }
+
+// ── Templates: `{{ … }}` slots admitted passively ─────────────────────────
+
+mod templates {
+    use super::*;
+    use simplified_schema::simplified::{Constraint, DynamicElement, DynamicKind};
+
+    const OS_SLOT: &str = r#"load_data("./os.yaml", "string[]")"#;
+
+    fn template(text: &str) -> SimplifiedSchema {
+        let schema = SimplifiedSchema::try_from(text).unwrap_or_else(|error| panic!("template admitted: {error}"));
+        assert!(!schema.is_resolved(), "a template is not resolved");
+        schema
+    }
+
+    #[track_caller]
+    fn assert_unresolved(error: &SimplifiedSchemaError, expressions: &[&str]) {
+        let SimplifiedSchemaError::Unresolved(inner) = error else {
+            panic!("expected an unresolved-template error, got {error:?}");
+        };
+        let SchemaError::UnresolvedSlots(unresolved) = inner.as_ref() else {
+            panic!("expected UnresolvedSlots, got {inner:?}");
+        };
+        let found: Vec<&str> = unresolved.slots.iter().map(|slot| slot.expression.as_str()).collect();
+        assert_eq!(found, expressions);
+    }
+
+    #[test]
+    fn the_enum_fixture_is_admitted_and_lists_its_slot() {
+        let schema = template(include_str!("../fixtures/dynamic_slots/schema-with-slot.yaml"));
+        let expressions: Vec<&str> = schema.pending_slots().iter().map(|slot| slot.expression.as_str()).collect();
+        assert_eq!(expressions, vec![OS_SLOT]);
+        assert_unresolved(&schema.to_json_schema().unwrap_err(), &[OS_SLOT]);
+    }
+
+    #[test]
+    fn every_shipped_template_fixture_is_admitted_without_lowering() {
+        for (name, text, slots) in [
+            ("schema-with-slot", include_str!("../fixtures/dynamic_slots/schema-with-slot.yaml"), 1),
+            ("suggest-slot", include_str!("../fixtures/dynamic_slots/suggest-slot.yaml"), 1),
+            ("template-constraints", include_str!("../fixtures/dynamic_slots/template-constraints.yaml"), 5),
+        ] {
+            let schema = template(text);
+            assert_eq!(schema.pending_slots().len(), slots, "{name}");
+            assert!(matches!(schema.to_json_schema(), Err(SimplifiedSchemaError::Unresolved(_))), "{name}");
+        }
+    }
+
+    #[test]
+    fn validation_reports_the_template_unprepared_and_judges_nothing() {
+        let schema = template(include_str!("../fixtures/dynamic_slots/schema-with-slot.yaml"));
+        for result in [
+            schema.validate_strict(&json!({ "os_support": ["macOS"] })),
+            schema.validate_soft(&json!({ "os_support": ["anything"] })),
+        ] {
+            let Err(ValidationFailure::Unprepared { error }) = result else {
+                panic!("expected an unprepared failure, got {result:?}");
+            };
+            assert!(matches!(error.as_ref(), SchemaError::UnresolvedSlots(_)), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn layering_with_a_template_on_either_side_fails_and_changes_nothing() {
+        let template = template("$schema:\n  os: enum(none, {{ load_data('./os.yaml') }})\n");
+        let concrete = schema("$schema:\n  name: string\n");
+
+        let mut receiver = concrete.clone();
+        assert_unresolved(&receiver.layer_under(&[&template]).unwrap_err(), &["load_data('./os.yaml')"]);
+        assert_eq!(receiver.revision(), 0);
+        assert!(receiver.is_resolved());
+        assert_unresolved(&receiver.layer_over(&[&template]).unwrap_err(), &["load_data('./os.yaml')"]);
+
+        let mut receiver = template.clone();
+        assert_unresolved(&receiver.layer_under(&[&concrete]).unwrap_err(), &["load_data('./os.yaml')"]);
+        assert_eq!(receiver.revision(), 0);
+        assert_eq!(receiver.pending_slots().len(), 1);
+    }
+
+    #[test]
+    fn export_keeps_every_slot_as_authored_and_round_trips() {
+        for text in [
+            include_str!("../fixtures/dynamic_slots/schema-with-slot.yaml"),
+            include_str!("../fixtures/dynamic_slots/suggest-slot.yaml"),
+            include_str!("../fixtures/dynamic_slots/template-constraints.yaml"),
+        ] {
+            let first = template(text);
+            let exported = first.to_simplified_yaml().expect("a template exports");
+            for slot in first.pending_slots() {
+                assert!(exported.contains(&format!("{{{{ {} }}}}", slot.expression)), "{exported}");
+            }
+            let second = template(&exported);
+            let expressions = |schema: &SimplifiedSchema| -> Vec<String> {
+                schema.pending_slots().iter().map(|slot| slot.expression.clone()).collect()
+            };
+            assert_eq!(expressions(&second), expressions(&first));
+            assert_eq!(second.to_simplified_yaml().unwrap(), exported, "export → parse → export is stable");
+        }
+    }
+
+    #[test]
+    fn export_keeps_literal_quoting_beside_a_slot() {
+        let schema = template("$schema:\n  os: \"enum('a, b', {{ x }}, c; required)\"\n");
+        let exported = schema.to_simplified_yaml().unwrap();
+        let again = template(&exported);
+        let os = again.property("os").expect("declared");
+        let PropertyDef::Single(atom) = os.def() else { panic!("{:?}", os.def()) };
+        let Constraint::Dynamic(list) = &atom.constraints[0] else { panic!("{:?}", atom.constraints) };
+        assert_eq!(list.kind, DynamicKind::Members);
+        assert!(matches!(
+            list.elements.as_slice(),
+            [DynamicElement::Member(a), DynamicElement::Slot(_), DynamicElement::Member(c)] if a == "a, b" && c == "c"
+        ));
+        assert_eq!(atom.constraints[1], Constraint::Required);
+    }
+
+    #[test]
+    fn a_static_schema_is_resolved_and_lowers_its_lists_as_before() {
+        let schema = schema("$schema:\n  os: enum(a, b; required)\n  tag: string(suggest(x, y))\n");
+        assert!(schema.is_resolved());
+        assert!(schema.pending_slots().is_empty());
+        let json = schema.to_json_schema().unwrap();
+        assert_eq!(json["properties"]["os"]["enum"], json!(["a", "b"]));
+        fn suggestions(value: &Value) -> Option<&Value> {
+            match value {
+                Value::Object(map) => map.get("x-darkmatter-suggest").or_else(|| map.values().find_map(suggestions)),
+                Value::Array(items) => items.iter().find_map(suggestions),
+                _ => None,
+            }
+        }
+        assert_eq!(suggestions(&json["properties"]["tag"]), Some(&json!(["x", "y"])));
+    }
+}

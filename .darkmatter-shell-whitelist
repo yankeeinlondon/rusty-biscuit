@@ -10,3 +10,4 @@ prefix hug
 exact git add .
 prefix gitnexus
 prefix git
+prefix md

@@ -41,7 +41,7 @@ fn long_top_level_paragraph_wraps_to_content_width_through_tree() {
     let md: Markdown = format!("{}\n", para.trim()).into();
 
     let mut opts = TerminalOptions::default();
-    opts.max_width = Some(40);
+    opts.width = Some(renderable::output::Width::Columns(40));
     opts.color_depth = Some(ColorDepth::TrueColor);
 
     let tree = render_tree_terminal(&md, &opts).expect("tree render").output;
@@ -78,7 +78,7 @@ fn tree_prose_wrap_matches_public_entry_within_width_and_lossless() {
     let md: Markdown = format!("{para}\n").into();
 
     let mut opts = TerminalOptions::default();
-    opts.max_width = Some(40);
+    opts.width = Some(renderable::output::Width::Columns(40));
     opts.color_depth = Some(ColorDepth::TrueColor);
 
     let tree = render_tree_terminal(&md, &opts).expect("tree render").output;
@@ -118,7 +118,7 @@ fn tree_blockquote_uses_legacy_quarter_block_bar() {
         "> This is a fairly long quoted paragraph that should wrap onto a second visible line once the 40-col width forces it below the page width.\n".into();
 
     let mut opts = TerminalOptions::default();
-    opts.max_width = Some(40);
+    opts.width = Some(renderable::output::Width::Columns(40));
     opts.color_depth = Some(ColorDepth::TrueColor);
 
     let tree = render_tree_terminal(&md, &opts).expect("tree render").output;

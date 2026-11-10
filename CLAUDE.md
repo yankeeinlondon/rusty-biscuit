@@ -247,6 +247,7 @@ Update alongside code changes:
       review cycle closes
         - an agent never makes that move and never runs `just complete`; an
           agent's terminal state is "implementation complete, ready for review"
+- a plan's ordered units of work are called phases, numbered from Phase 1; tasks within a phase may run in parallel
 - **a spec is a snapshot in time, not a current record.** It says what was
   decided and why as of its date, is not maintained after it closes, and is
   never the place to learn how something behaves now; that is the `docs/`

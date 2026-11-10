@@ -46,7 +46,7 @@ use super::alphanumeric::AlphanumericOptions;
 use super::definitions::{DefKey, DefinitionOuter, DefinitionTable, definition_pointer};
 use super::types::{
     Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot,
-    SimplifiedType, TupleType, TypeExpr,
+    SimplifiedType, Slot, TupleType, TypeExpr,
 };
 use crate::numeric::json_number;
 use crate::expression::parse as parse_expression;
@@ -68,6 +68,9 @@ pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 /// Converts a [`SchemaRoot`] into a Draft 2020-12 JSON Schema value.
 ///
 /// ## Errors
+///
+/// Returns [`SchemaError::UnresolvedSlots`] when the schema or a definition
+/// it holds is a template with `{{ … }}` slots, before lowering anything.
 ///
 /// Returns [`SchemaError::Convert`] when:
 ///
@@ -111,6 +114,7 @@ pub fn to_json_schema_with_definitions(
     schema: &SchemaRoot,
     defs: &DefinitionTable,
 ) -> Result<Value, SchemaError> {
+    crate::slots::reject_unresolved(schema, defs)?;
     let mut copies = MatchCopies::default();
     let root = match schema {
         SchemaRoot::Single(shape) => shape_to_object_schema(shape, Lowering::suggesting(defs))?,
@@ -243,7 +247,7 @@ fn collect_atom_refs(atom: &PropertyAtom, path: &str, out: &mut IndexMap<DefKey,
         }
         // A function type fails conversion where it is met; an unresolved
         // import does too.
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => {}
     }
 }
 
@@ -527,7 +531,7 @@ impl MatchCopies {
                     self.collect_atom(spread, property, in_copy, defs);
                 }
             }
-            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => {}
         }
     }
 
@@ -565,7 +569,7 @@ fn atom_reaches_match(atom: &PropertyAtom, defs: &DefinitionTable, seen: &mut st
             tuple.elements.iter().any(|element| def_reaches(&element.def, seen))
                 || tuple.spread.as_deref().is_some_and(|spread| atom_reaches_match(spread, defs, seen))
         }
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => false,
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => false,
     }
 }
 
@@ -602,7 +606,7 @@ fn reaches_enforced_reference(
                 tuple.elements.iter().any(|element| reaches_enforced_reference(&element.def, defs, cyclic, seen))
                     || tuple.spread.as_deref().is_some_and(|spread| atom_reaches(spread, defs, cyclic, seen))
             }
-            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => false,
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Slot(_) => false,
         }
     }
     match def {
@@ -1040,6 +1044,20 @@ fn atom_fragment_without_null_wrap(
     allow_optional_empty_file: bool,
     defs: Lowering<'_>,
 ) -> Result<(Value, bool), SchemaError> {
+    // The entry points reject a template before lowering anything; this
+    // keeps every other route into an atom's lowering just as closed, rather
+    // than letting a fragment read a dynamic list as no members.
+    let template_type = match &atom.ty {
+        TypeExpr::Slot(slot) => Some(slot.clone()),
+        _ => None,
+    };
+    let slots: Vec<Slot> = template_type
+        .into_iter()
+        .chain(atom.constraints.iter().chain(&atom.array_constraints).flat_map(Constraint::slots).cloned())
+        .collect();
+    if !slots.is_empty() {
+        return Err(SchemaError::UnresolvedSlots(Box::new(crate::errors::UnresolvedSlots::new(slots))));
+    }
     // Required is hoisted out; default may appear on either constraints
     // (single/value-level) or array_constraints (array-level). Repeated
     // defaults must agree after number normalization (`3` == `3.0`).
@@ -1105,6 +1123,10 @@ fn atom_fragment_without_null_wrap(
                           cannot type a value in a document schema"
                     .into(),
             });
+        }
+        // The guard above has already refused it; kept closed, never lowered.
+        TypeExpr::Slot(slot) => {
+            return Err(SchemaError::UnresolvedSlots(Box::new(crate::errors::UnresolvedSlots::new(vec![slot.clone()]))));
         }
         // The alternatives of each item (with `is_array`) or of a union
         // nested as an arm. Items get no `null` wrapper or empty-file arm,
@@ -2282,7 +2304,11 @@ fn semantic_type_fragment(
 fn is_declaration_option(constraint: &Constraint) -> bool {
     matches!(
         constraint,
-        Constraint::Mapping | Constraint::Property { .. } | Constraint::Forms(_) | Constraint::DeclaredRequired
+        Constraint::Mapping
+            | Constraint::Property { .. }
+            | Constraint::Forms(_)
+            | Constraint::DeclaredRequired
+            | Constraint::Container
     )
 }
 
@@ -2296,8 +2322,8 @@ fn is_declaration_option(constraint: &Constraint) -> bool {
 /// ## Errors
 ///
 /// [`SchemaError::Convert`] when a `property(name, …)` option's declaration
-/// is not one `type-definition(...)` carrying only `forms` and
-/// `declared-required`.
+/// is not one `type-definition(...)` carrying only `forms`,
+/// `declared-required`, and `container`.
 pub fn declaration_options_payload(property: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
     let options: Vec<&Constraint> = constraints.iter().filter(|constraint| is_declaration_option(constraint)).collect();
     options_payload(property, &options)
@@ -2319,6 +2345,9 @@ fn options_payload(name: &str, options: &[&Constraint]) -> Result<Value, SchemaE
             Constraint::DeclaredRequired => {
                 payload.insert("declaredRequired".into(), Value::Bool(true));
             }
+            Constraint::Container => {
+                payload.insert("container".into(), Value::Bool(true));
+            }
             Constraint::Forms(forms) => {
                 let forms = forms.iter().map(|form| Value::from(form.as_keyword())).collect();
                 payload.insert("forms".into(), Value::Array(forms));
@@ -2333,13 +2362,15 @@ fn options_payload(name: &str, options: &[&Constraint]) -> Result<Value, SchemaE
                 let inner: Vec<&Constraint> = atom.property_constraints().collect();
                 if let Some(other) = inner
                     .iter()
-                    .find(|constraint| !matches!(constraint, Constraint::Forms(_) | Constraint::DeclaredRequired))
+                    .find(|constraint| {
+                        !matches!(constraint, Constraint::Forms(_) | Constraint::DeclaredRequired | Constraint::Container)
+                    })
                 {
                     return Err(SchemaError::Convert {
                         property: name.to_string(),
                         message: format!(
                             "constraint `{}` is not valid on the `type-definition` of `property({property}, …)`; \
-                             only `forms` and `declared-required` judge a declaration",
+                             only `forms`, `declared-required`, and `container` judge a declaration",
                             other.keyword()
                         ),
                     });

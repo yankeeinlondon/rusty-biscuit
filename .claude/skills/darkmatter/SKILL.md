@@ -28,6 +28,14 @@ extension.
   execute expressions, fetch remotes, or mutate documents.
 - Keep network access deny-all by default. Route every allowed remote read or
   write through `biscuit_file::FetchPolicy` and exact-host consent.
+- Keep schema `{{ … }}` slots passive by default. Only an explicit resolution
+  through a `SlotSession` (`DarkmatterSchemas::resolve_template`) evaluates
+  them, after every slot is admitted; nothing ever validates against a
+  template or a placeholder. Every slot read passes the grant gate before the
+  file is opened or the shared memo consulted, and grants come only from the
+  user-level store under the home (`<home>/.config/darkmatter/schema-read-policy`),
+  a prompt, or the clean-committed automatic grant; repository or workspace
+  content never grants. See [schema.md](schema.md), "Schema templates".
 - Render terminal output with `TerminalRenderable` components. The browser tier
   is headless and must use browser-protocol input, never host focus or OS input.
 - Preserve source spans and typed diagnostic provenance through parsing,
@@ -48,6 +56,7 @@ definitions away from their references or replace them with placeholders.
 | Remote reads and the transport cache | [remote-cache.md](remote-cache.md) |
 | `md` file arguments and CLI conventions | [cli.md](cli.md) |
 | Expression grammar, inserted text, warnings | [expressions.md](expressions.md) |
+| `load_data`, data contracts, `dm.data.*`, read set | [expressions.md](expressions.md#load_data-data-files), [requests.md](requests.md#data-runtime-and-read-set) |
 | Lifecycle grammar, executor, run accounting, request/reply `Run` | [lifecycle.md](lifecycle.md) |
 | Test fixtures, source guards, parity matrix | [testing.md](testing.md) |
 | Public modules and extracted library surfaces | [library-surfaces.md](library-surfaces.md) |
@@ -79,7 +88,8 @@ built from a `RequestSnapshot`. A source-derived file reference must resolve
 against a context derived from that one. User-facing docs:
 `darkmatter/docs/topics/compose-requests.md` (API, builder, Mermaid),
 `topics/file-referencing.md` (forms and tree rule), and
-`errors/file-reference-failures.md` (the `failure:` row).
+`errors/file-reference-failures.md` (the `failure:` row and data field), and
+`errors/composition-problems.md` (stopping rules, authored positions).
 
 The root compose pipeline is ordered: the passive call check (a proven-bad
 call in any branch rejects the document before anything runs); frontmatter
@@ -89,7 +99,10 @@ interpolation pass 2; literal replacement; conditional page blocks and
 `::map`/`::filter` regions (one structural traversal, callbacks finish before
 body stages); body interpolation; shell directives and blocks; link resolution; concurrent
 transclusion; inline cleanup and optional reflow; root-only link
-normalization. Keep this order stable. Whole-value `{{ ... }}` and `$(...)`
+normalization. Keep this order stable. One interleaving: a body read-side call
+(`remote::calls_read_side_function`) after the first command site is left in
+`BodyProvenance::pending` and evaluated by the shell stages once no unrun
+command precedes it (see compose.md "Reads after a command"). Whole-value `{{ ... }}` and `$(...)`
 values are executable state: they must resolve or fail, never leak as literal
 syntax. Demand-driven context capture must observe only referenced `ctx.*`
 groups.
@@ -237,14 +250,15 @@ mutates component content. Browser tests are headless (no window activation or
 host input) and assert DOM, computed style, accessibility state, or geometry;
 browser HTML and CSS come from the same lowered values, never string repair.
 
-Read [rendering.md](rendering.md) before changing style claims, code-block
+Read [rendering.md](rendering.md) before changing style precedence, code-block
 themes, disclosure blocks, browser safety, or the render-tree fold.
 
 ## CLI orientation
 
-The binary is `md`: `compose`, `clean`, `read`, `toc`, `delta`, `schema
-validate|detect|about|triggers`, `hash`, `get|set|rm` (frontmatter),
-`code-block`, `graph`, and reference commands.
+The binary is `md`: `render`, `compose`, `clean`, `toc`, `delta`, `schema
+validate|detect|about|triggers`, `hash`, `get|set|rm` (frontmatter), `edit`,
+`code-block`, `graph`, and `validate refs`. Users' contract:
+`docs/cli/output-and-width.md` and `docs/cli/data-contracts.md`.
 
 Checks are relaxed or tightened only through three verbs: `--allow <id|all>`
 (a recovery, or `host=HOST`), `--deny <id|all>` (make diagnostics blocking),
@@ -273,10 +287,91 @@ the last stages' warnings are checked by the CLI before writing. A new coded war
 code to `COMPOSE_DIAGNOSTIC_CODES`; a new recovery adds a registry entry
 naming the codes it governs.
 
-`md compose --output report-json` (compose only; `ComposeOutputFormat`)
-prints one `{outcome, diagnostics, document}` object for every parsed
-invocation. The CLI only collects (`commands/compose/report.rs::ReportSink`,
-`ReportedExit` for the exit status); every code and record comes from
+Every other command leaf goes through `cli/src/output/command.rs::CommandRun`:
+`CommandRun::begin` (target, `--width`, default width, `DataShape`), build a
+`CommandValue` (`markdown::output::command`: the data struct, a `Document` for
+the generic folds, optional terminal, Markdown, and HTML overrides), then
+`run.finish(result)`; a leaf working on one document calls
+`run.set_document` so a failure with no file of its own still names it. A handler returns `Completed::success` or
+`Completed::failure` (a report that is the deliverable), or `Err` (no result),
+which `finish` turns into a payload for a data output and leaves to `main` for a
+formatted one. `DataShape` adds the run status: `Typed` always, `Object` only
+when a run needs it, `Bare` as `{ outcome, diagnostics, value }` for a value whose
+fields are the user's (`md get`, `md schema detect`). `md clean`'s own
+`diagnostics` keep their meaning, so its run-level ones are `run_diagnostics`. A
+document command calls `.exact_markdown()` and `commands/render.rs::document_value`,
+keeping its text's bytes and page-rendering everything else. An override reads
+only the `OutputOptions` it is given (`Terminal::from_output_options`), never the
+host: it also serves `plain`. A component that paints regardless of its terminal
+(`DeltaReport`, a status block) needs `strip_escape_codes` when
+`terminal_profile.degrades_to_plain()`, and `output::stderr_text` on stderr.
+A new leaf adds a row to `args/output.rs::COMMAND_LEAVES`, a schema file under
+`cli/schemas/output/`, and conformance tests in `cli/tests/l1/output_commands.rs`
+that spell the schema path inside each `#[test]`;
+`every_leaf_has_a_schema_file_and_a_conformance_test` fails otherwise. A schema's
+named types are closed, unlike its root object, so a type must list every field.
+One Rust `Diagnostic` serializes into all 17 output schemas, so their
+`diagnostic` and `data-location` types are identical
+(`output_commands::every_schema_file_shares_one_diagnostic_type`); a new
+diagnostic field goes into every file. `DocumentEnvelope.read_set` is always an
+array; `ReportSink::reads_from(&DataRuntime)` reads the command's runtime when
+the envelope is written, so every exit carries it without per-path pushes.
+A schema root is an object: a scalar result is judged under `value`.
+
+Link titles are JSON5 objects or plain text (`docs/topics/hyperlinking.md`); a
+leftover `key=value` title is plain text with a warning until `md clean`
+migrates it (`cleanup::link_titles`, see [cleanup.md](cleanup.md)). Image titles
+keep their own syntax (`render/image_ref.rs`). Titles
+(`dm.link.malformed_structured_title`, `dm.link.legacy_structured_title`) are
+interpreted only by
+`renderable::output::link_metadata::parse_link_title`, which reports a neutral
+notice; `compose::policy::link_title_code` gives its code. `Link` stores the notice
+(`title_notice`) and never prints. Composition reports them from
+`compose::link_title_warnings`, keyed by the link's authored start: once before
+anything runs (so a failed run keeps them and `--deny` stops first) and once
+after the inline stages (a link a stage wrote). `md render`, which does not
+compose, reads `Markdown::link_title_warnings` before cleanup and names the
+same codes through `RENDER_DIAGNOSTIC_CODES`.
+
+The reference report is `reference/validate.rs::ValidationReportView`, built in
+`reference/report.rs`, implementing `CommandOutput`. `ReferenceValidationReport`
+keeps `documents` (one entry per inclusion, depth-first, empty documents
+included) so grouping by `(source, included_via)` and the document count never
+infer scope from issues; neither `documents` nor `references` is serialized, and
+issue JSON reports authored `line`/`column`, `section`, `inserted`, and
+`included_via`, null where unknown (`ReferenceOrigin::line`/`span` stay prepared
+coordinates, for graph walkers only; `origin.authored` is the projection).
+`as_prose()` is the Markdown/HTML document;
+`render_terminal` rebuilds the same structure with bare `file://` URIs
+and `heading` as a link parameter. Compose and `md graph --validate` show errors
+(compose prints nothing when there are none), `md validate refs` shows all
+severities. Reasons and constructs live only in
+`ReferenceIssueCode::reason_phrase` and `ReferenceSyntax::construct_phrase`.
+HTML discovery (`reference/html.rs`) reads one Markdown HTML node as any number of
+elements with `scan_elements`, and `LineMap` carries each back to the source past
+line breaks and container prefixes; never classify an HTML node line by line.
+`visit_html_elements` walks a document's HTML nodes in order, so a raw-text element
+split across nodes is one element, and every reader drops what starts in its
+`inert_ranges`; never decide inertness in one consumer. See
+`docs/cli/validate.md#html-and-css-references`.
+
+`md compose` accepts its Markdown default and the data family; `md render` both
+families, defaulting to `terminal`, which is byte-identical to `plain` off a
+color TTY. A data output of either prints one envelope (`file`, `outcome`,
+`document`, `diagnostics`, `summary`, optional `perf`, `lifecycle_output`;
+`markdown::output::command::DocumentEnvelope`; schemas in
+`cli/schemas/output/`) for every parsed invocation, and stderr stays empty: no
+`-v`, tracing, prompt, or lifecycle line reaches it. Lifecycle output there is
+collected per step; in Markdown mode all of it, `stdout:` included, goes to
+stderr, because stdout holds only the deliverable. Exit 0 succeeded, 1 ran and
+failed (including a refused reference), 2 usage only; handlers return
+`ReportedExit`, and only `main` exits. `cli/src/output/mod.rs` resolves target
+and width (`OutputEnvironment`; a test passes one to spoof a stream) and owns
+stderr (`stderr_terminal`, `stderr_report`: its own TTY and columns, unlimited
+off a terminal, whatever `--width` says). `cli/src/artifact.rs::ProcessOpener`
+is the `--show` seam: `MD_DRY_RUN` never launches, and `MD_DRY_RUN=fail` is a
+host with no default app. The CLI only collects
+(`cli/src/output/report.rs::ReportSink`); every code and record comes from
 `compose::report_diagnostics` (`warning_diagnostic`, `error_diagnostics`,
 `lifecycle_failure_diagnostics`), and a CLI-worded shell failure keeps its
 typed diagnostics through `ClassifiedFailure`. `Markdown::compose_with_warnings`
@@ -293,7 +388,20 @@ a failing document keeps the triggers its `as_markdown` children and gate
 found (`NestedCompose::finish` → `PipelineRuntime::record_failed_triggers`).
 `md compose`'s reference check is passive: its graph preparation runs no
 `::shell` (`prepare_content` never re-enables an operation the request
-disabled). Skipped-trigger
+disabled), and `ComposeOptions::for_reference_check` defers what only
+composition can judge (values waiting on a frontmatter command, an expression
+it cannot finish). A check that still fails (`check_references` returns
+`Result`) is a composition failure with status 1, reported through
+`error_diagnostics`; its graph build leaves its warnings for
+`take_preflight_failure_warnings`. A `Diagnostic`'s `source.line`/`column` are
+`Option` (null when no authored position is proven, never a placeholder), a
+record that knows only its file keeps the file, a typed error with no file takes
+the composed document (`report_diagnostics::with_document_fallback`, applied by
+`ReportSink`), a warning's file is stamped from `ComposeReport::document`, and
+only `ComposeWarning::location` (never `line_number`, a current-body count) is
+published; `source.inserted` marks a construct that wrote the text; only a reference
+record has `reference_details`, flattened into `reason`, `construct`,
+`reference`, `failure`, and `included_via`. Skipped-trigger
 warnings found by a pass that runs ahead of the delivering report (reference
 validation via `ReferenceValidationReport::trigger_warnings`, which prepares
 each transcluded child in its own context; the lifecycle call check via
@@ -303,14 +411,13 @@ each transcluded child in its own context; the lifecycle call check via
 `compose.rs::PendingTriggerWarnings`: merged once into the first report or
 failure, or delivered by any exit that never composes.
 The call precheck orders findings by authored position and keeps the prefix
-before a rejection. Never print to stdout on a report-mode path; see
-`docs/cli/report-json.md`.
+before a rejection. Never print to stdout or stderr on a data-output path.
 
 Every source-file argument opens through `cli/src/io::open_argument`:
 `FileReference` grammar first, resolved in the launch context, with the
 document context derived from the opening reference. Read [cli.md](cli.md)
 before adding a route that reads a file argument or changing CLI style
-claims.
+layers.
 
 ## Testing and verification
 
@@ -323,7 +430,8 @@ changes require both a passive shipped-artifact corpus test and an end-to-end
 test through the normal invocation path. Persisted values require a repeated
 read/write/read round trip.
 
-Expression grammar, inserted-text, failure-policy, undeclared-property, host-binding, and
+Expression grammar, inserted-text, failure-policy, undeclared-property,
+undeclared-member, host-binding, and
 warning-identity rules are in [expressions.md](expressions.md); read it
 before changing the lexer, an evaluation surface, or a warning family.
 Fixture rules (`CliProcessFixture`, `git init` for repositories), the

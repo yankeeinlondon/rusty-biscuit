@@ -27,6 +27,7 @@ mod registry_jobs;
 pub mod request_timing;
 pub mod router;
 pub mod semantic_legend;
+pub mod slot_jobs;
 pub mod source_map;
 pub mod wiki;
 pub mod work_counters;

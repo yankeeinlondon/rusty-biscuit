@@ -1,6 +1,5 @@
 use crate::common;
 
-use biscuit_terminal::terminal::Terminal;
 use common::layout::*;
 use common::{CliProcessFixture, MdCommandBuilder, md_file};
 
@@ -13,15 +12,14 @@ fn rendering_command(fixture: &CliProcessFixture) -> assert_cmd::Command {
 fn rendering_builder(fixture: &CliProcessFixture) -> MdCommandBuilder<'_> {
     fixture.command_builder().plain_terminal(80, 24)
 }
-use darkmatter::layout::DarkmatterPage;
 
 #[test]
 fn style_fixture_cli_pipe_smoke_passes() {
     let fixture = CliProcessFixture::named("style_fixture_cli_pipe_smoke_passes");
     // Smoke check that `md style-prop.md` exits successfully and emits a
     // non-empty stdout when stdout is a pipe (the CLI test runner captures
-    // stdout, so `OutputFormat::Auto` takes the markdown pass-through path
-    // here — this test does NOT exercise the terminal renderer). Terminal
+    // stdout, so the default `terminal` target prints what `plain` prints
+    // here — this test does NOT exercise a styled terminal). Terminal
     // layout coverage lives in the Level 2 WezTerm pane tests
     // (`darkmatter/cli/tests/level2_layout.rs::level2_style_fixture_*`).
     let output = rendering_command(&fixture)
@@ -176,15 +174,15 @@ fn deny_style_fails_on_unknown_key() {
 fn deny_style_fails_on_deprecated_key() {
     let fixture = CliProcessFixture::named("deny_style_fails_on_deprecated_key");
     // `--deny style` promotes `Deprecated` warnings to errors. The
-    // canonical key is `style.page.left-margin`; the alias
-    // `style.page.left_margin` should trigger a Deprecated warning, which
+    // canonical key is `style.page.max-width`; the alias
+    // `style.page.max_width` should trigger a Deprecated warning, which
     // strict mode turns into an error. Route through `--output html` to
     // exercise the frontmatter pipeline.
     let tmp = md_file(
         "---\n\
         style:\n\
         \x20   page:\n\
-        \x20       left_margin: 2ch\n\
+        \x20       max_width: 80ch\n\
         ---\n\n# Doc\n",
     );
 
@@ -280,36 +278,48 @@ fn style_non_strict_renders_with_unknown_key() {
 }
 
 #[test]
-fn style_cli_margin_overrides_frontmatter() {
-    // Spec test #2: CLI flag overrides frontmatter. The fixture has
-    // `left-margin: 2ch`; `--ml 7` claims that field via
-    // `PageStyleOverrides::margin_left = true`, so the CLI value (7) wins.
-    let page = {
-        // Mirror the cli's parse → apply_cli → apply_style_frontmatter
-        // pipeline as in the public API.
-        use darkmatter::markdown::Markdown;
-        use darkmatter::style::{PageStyleOverrides, apply_page_style, from_frontmatter};
-        let raw = std::fs::read_to_string(style_prop_fixture()).unwrap();
-        let md = Markdown::try_from_content(&raw).unwrap();
-        let (style, _) = from_frontmatter(md.frontmatter()).unwrap();
+fn removed_page_spacing_name_warns_with_its_replacement() {
+    let fixture = CliProcessFixture::named("removed_page_spacing_name_warns_with_its_replacement");
+    let tmp = md_file(
+        "---\n\
+        style:\n\
+        \x20   page:\n\
+        \x20       left-margin: 2ch\n\
+        ---\n\n# Doc\n",
+    );
+    let output = rendering_builder(&fixture)
+        .application_input("MD_DRY_RUN", "1")
+        .build()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stderr = common::unwrapped(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("unknown style key `style.page.left-margin`; use `page.margin-left`"),
+        "{stderr}"
+    );
+}
 
-        let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term).with_margin_left(7);
-        let overrides = PageStyleOverrides {
-            margin_left: true,
-            ..PageStyleOverrides::default()
-        };
-        apply_page_style(page, &style, overrides).expect("apply")
-    };
+#[test]
+fn style_setter_margin_overrides_frontmatter() {
+    // Spec test #2: a setter overrides frontmatter, field by field. The fixture
+    // has `margin-left: 2ch` and `margin-right: 4ch`; `style.ml=7` wins the
+    // left side, and the right side the setter does not name stays the
+    // document's.
+    let raw = std::fs::read_to_string(style_prop_fixture()).unwrap();
+    let page = common::style::styled_page(&raw, &["doc.md", "style.ml=7"], 80);
     assert_eq!(
         tv_cells(&page.page_margin().left),
         7,
-        "CLI override must win over frontmatter left-margin"
+        "the setter must win over frontmatter margin-left"
     );
     assert_eq!(
         tv_cells(&page.page_margin().right),
         4,
-        "frontmatter right-margin (4ch) must still apply when not claimed"
+        "frontmatter margin-right (4ch) must still apply when no setter names it"
     );
 }
 

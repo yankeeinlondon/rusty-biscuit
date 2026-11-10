@@ -17,19 +17,25 @@
 //!   emitted; nothing is saved and the run fails (exit `1`).
 //!
 //! A referenced schema that is missing, unreadable, or invalid fails the run
-//! (exit `1`) before any outcome; under `--json` the version-1 envelope is
-//! still written first, carrying the skipped-trigger `warnings` discovery
-//! retained.
+//! (exit `1`) before any outcome; a data output still reports the version-1
+//! value, carrying the skipped-trigger `warnings` discovery retained.
 //!
 //! This module owns what is specific to the `md` binary: flags as explicit
 //! rule overrides, schema flags and the request contexts they resolve in,
-//! terminal findings, and (in [`json`]) the version-1 JSON envelope.
+//! stderr findings, and the formatted outputs.
 
-mod json;
-
+use crate::args::Cli;
+use crate::commands::render::document_value;
 use crate::commands::trigger_findings::emit_warnings;
 use crate::io::{OpenedArgument, open_argument};
+use crate::output::command::{CommandRun, Completed, DataShape};
+use crate::output::report::failure_diagnostics;
+use crate::output::{ResolvedOutput, stderr_terminal};
 use crate::request::MdRequest;
+use biscuit_terminal::output::{OutputTarget, WidthRequest};
+use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+use darkmatter::markdown::output::command::{CleanJsonReport, CommandValue, clean_report, clean_schema_failure_report, code_document};
+use renderable::Width;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -45,11 +51,9 @@ use darkmatter::markdown::cleanup::{CleanOutcome, CleanRequest, CleanResult, cle
 use darkmatter::markdown::delta::DeltaReport;
 use darkmatter::markdown::extract_frontmatter_block;
 use darkmatter::markdown::schemas::{CleanSchemaConfig, InvalidTriggerFinding};
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use tracing::instrument;
-
-use json::json_report;
 
 /// Schema controls for `md clean`, mirroring the `md compose` flags of the
 /// same name.
@@ -71,6 +75,9 @@ pub struct CleanSchemaFlags {
 struct DocumentRequest<'a> {
     request: &'a MdRequest,
     opening: Option<&'a biscuit_file::FileReference>,
+    /// The run may ask about a schema slot's read: a formatted output on a
+    /// terminal. A data output never prompts.
+    prompts: bool,
 }
 
 /// Everything `md clean` needs beyond its input path.
@@ -85,15 +92,9 @@ pub struct CleanOptions {
     pub indent: Option<usize>,
     /// `--compact` (`None`) or `--loose` (`One`): the `list-item-padding` rule.
     pub list_item_padding: Option<ListItemPadding>,
-    /// `--fixed-width N`: the `fixed-width` rule, which implies `unwrap`.
-    pub fixed_width: Option<usize>,
-    /// `--ignore-incidental-newlines`: `unwrap: false` and `fixed-width:
-    /// false`, overriding a width the document selects.
-    pub ignore_incidental_newlines: bool,
     pub verbose: bool,
-    /// Emit the machine-readable diagnostic envelope on STDOUT instead of the
-    /// cleaned document or the delta report.
-    pub json: bool,
+    /// `--output`: the cleaned document, or in a data format its diagnostics.
+    pub output: Option<OutputTarget>,
     pub schema: CleanSchemaFlags,
 }
 
@@ -108,11 +109,13 @@ pub(crate) fn resolve_list_spacing(compact: bool, loose: bool) -> Option<ListIte
 
 /// The rule overrides this invocation's flags state explicitly.
 ///
+/// An explicit `--width` overrides the document's own `fixed-width:` and
+/// `unwrap:`; with no `--width` both stay the document's.
+///
 /// ## Errors
 ///
-/// An `indent` other than 2, 4, or 8, or a `fixed_width` outside `u16`;
-/// the command-line parsers already reject both.
-fn rule_overrides(options: &CleanOptions) -> Result<MarkdownRuleOverrides> {
+/// An `indent` other than 2, 4, or 8; the command-line parser already rejects it.
+fn rule_overrides(options: &CleanOptions, width: Option<Width>) -> Result<MarkdownRuleOverrides> {
     let mut overrides = MarkdownRuleOverrides::default();
     if let Some(spaces) = options.indent {
         let indentation = Indentation::from_spaces(spaces)
@@ -122,20 +125,46 @@ fn rule_overrides(options: &CleanOptions) -> Result<MarkdownRuleOverrides> {
     if let Some(padding) = options.list_item_padding {
         overrides.list_item_padding = Leaf::Value(padding);
     }
-    if let Some(width) = options.fixed_width {
-        let columns = u16::try_from(width)
-            .map_err(|_| eyre!("--fixed-width must be between 1 and 1000 (got {width})"))?;
-        overrides.fixed_width = Leaf::Value(FixedWidth::Columns(columns));
-    }
-    if options.ignore_incidental_newlines {
-        overrides.unwrap = Leaf::Value(false);
-        overrides.fixed_width = Leaf::Value(FixedWidth::Off);
+    match width {
+        None => {}
+        Some(Width::Source) => {
+            overrides.unwrap = Leaf::Value(false);
+            overrides.fixed_width = Leaf::Value(FixedWidth::Off);
+        }
+        Some(Width::Unlimited) => {
+            overrides.unwrap = Leaf::Value(true);
+            overrides.fixed_width = Leaf::Value(FixedWidth::Off);
+        }
+        // The rule holds a `u16`; a wider value wraps nothing either way.
+        Some(Width::Columns(columns)) => {
+            overrides.fixed_width = Leaf::Value(FixedWidth::Columns(u16::try_from(columns).unwrap_or(u16::MAX)));
+        }
     }
     Ok(overrides)
 }
 
 #[instrument(skip_all)]
-pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRequest) -> Result<()> {
+pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, cli: &Cli, request: &MdRequest) -> Result<()> {
+    let run = CommandRun::begin(
+        options.output.unwrap_or(OutputTarget::Markdown),
+        cli.width,
+        WidthRequest::Source,
+        cli.verbose,
+        DataShape::Object,
+    )?
+    .exact_markdown();
+    let result = clean_value(input, options, request, run.output());
+    run.finish(result)
+}
+
+type CleanValue = CommandValue<Option<CleanJsonReport>>;
+
+fn clean_value(
+    input: Option<&PathBuf>,
+    options: &CleanOptions,
+    request: &MdRequest,
+    output: &ResolvedOutput,
+) -> Result<Completed<CleanValue>> {
     let opened = open_input(input, request)?;
     let resolved = opened.as_ref().map(|opened| opened.path().to_path_buf());
     // Resolving the destination up front means the stdin-under-`--save`
@@ -151,38 +180,39 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
         (false, _) => None,
     };
     let raw = read_source(resolved.as_ref())?;
-    let overrides = rule_overrides(options)?;
+    let overrides = rule_overrides(options, output.explicit_width.then_some(output.options.width))?;
+    let is_data = output.target.is_data();
 
-    let document_request = DocumentRequest { request, opening: opened.as_ref().map(|opened| opened.reference()) };
+    let document_request = DocumentRequest {
+        request,
+        opening: opened.as_ref().map(|opened| opened.reference()),
+        prompts: !is_data && crate::approval::can_prompt_interactively(),
+    };
     let result = match clean(&raw, &overrides, resolved.as_deref(), &options.schema, &document_request) {
         Ok(result) => result,
         Err(CleanFailure { error, trigger_findings: None }) => return Err(error),
         Err(CleanFailure { error, trigger_findings: Some(findings) }) => {
-            if options.json {
-                let report = json::schema_failure_report(&findings, resolved, &raw);
-                println!("{}", serde_json::to_string_pretty(&report)?);
-                io::stdout().flush()?;
-            } else {
-                emit_warnings(&findings, &Terminal::new());
+            if is_data {
+                let report = clean_schema_failure_report(&findings, resolved, &raw);
+                return Ok(Completed::failure(data_value(report)).with_diagnostics(failure_diagnostics(&error)));
             }
+            emit_warnings(&findings, &stderr_terminal());
             return Err(error);
         }
     };
 
-    if options.json {
-        let report = json_report(&result, resolved, &raw);
-        println!("{}", serde_json::to_string_pretty(&report)?);
+    if is_data {
+        let report = clean_report(&result, resolved, &raw);
         if result.outcome == CleanOutcome::Invalid {
-            io::stdout().flush()?;
-            std::process::exit(1);
+            return Ok(Completed::failure(data_value(report)));
         }
         if let Some(path) = save_path {
             write_if_changed(&path, &result)?;
         }
-        return Ok(());
+        return Ok(Completed::success(data_value(report)));
     }
 
-    let terminal = Terminal::new();
+    let terminal = stderr_terminal();
     emit_warnings(&result.trigger_findings, &terminal);
 
     if result.outcome == CleanOutcome::Invalid {
@@ -197,35 +227,55 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
     report_findings(&result.diagnostics, &terminal);
 
     let Some(path) = save_path else {
-        print!("{}", result.text);
-        return Ok(());
+        // What was printed is what a later `--save` would write, so a document
+        // the guards declined prints unchanged.
+        let document = Markdown::from(result.text.as_str());
+        return document_value(None, &document, result.text.clone(), resolved.as_ref(), output, request).map(Completed::success);
     };
     if result.outcome == CleanOutcome::Declined {
-        return Ok(());
+        return Ok(Completed::success(acknowledgment(String::new())));
     }
 
     write_if_changed(&path, &result)?;
+    Ok(Completed::success(acknowledgment(save_report(&raw, &result, options, output)?)))
+}
+
+fn data_value(report: CleanJsonReport) -> CleanValue {
+    CommandValue::new(Some(report), darkmatter::markdown::output::command::empty_document())
+}
+
+/// A saved document's result: what changed, in every formatted output.
+fn acknowledgment(text: String) -> CleanValue {
+    let terminal = text.clone();
+    CommandValue::new(None, code_document(None, text.trim_end()))
+        .with_terminal(move |_| terminal.clone())
+        .with_markdown(text)
+}
+
+/// What `--save` reports: any frontmatter repairs, then the delta.
+fn save_report(raw: &str, result: &CleanResult, options: &CleanOptions, output: &ResolvedOutput) -> Result<String> {
+    let terminal = Terminal::from_output_options(&output.options);
+    let mut text = String::new();
     if !result.applied.is_empty() {
         // The delta below compares bodies; frontmatter repairs are reported
         // here instead.
-        println!(
-            "{}",
-            Prose::new("Frontmatter: repairs applied").render(&terminal)
-        );
+        text.push_str(&Prose::new("Frontmatter: repairs applied").render(&terminal));
+        text.push('\n');
     }
     let cleaned = Markdown::try_from_content(result.text.clone())?;
-    let original = baseline(&raw, &result.text)?;
+    let original = baseline(raw, &result.text)?;
     let delta = original.delta(&cleaned);
     if !result.applied.is_empty() && delta.is_unchanged() {
         // A body-only "No changes" would contradict the repair notice above.
-        return Ok(());
+        return Ok(text);
     }
     let mut report = DeltaReport::new(delta).with_documents(original, cleaned);
     if options.verbose {
         report = report.verbose();
     }
-    print!("{}", report.render(&terminal));
-    Ok(())
+    let rendered = report.render(&terminal);
+    text.push_str(&if output.options.terminal_profile.degrades_to_plain() { strip_escape_codes(rendered) } else { rendered });
+    Ok(text)
 }
 
 /// Writes a `Changed` result to `path`; any other outcome leaves the file
@@ -312,7 +362,18 @@ fn schema_config(
         Some(path) => request.request.document_context(request.opening, path)?,
         None => request.request.launch_context()?.clone(),
     };
-    let mut config = CleanSchemaConfig::new(context);
+    // A schema template resolves through one session: its automatic grants
+    // judged against the document's repository, the user's grant store, and
+    // a prompt only when the run may ask. An unapproved read leaves the
+    // document unchecked, which fails the run rather than reporting it clean.
+    let mut session = darkmatter::markdown::schemas::slots::SlotSession::for_context(
+        darkmatter::markdown::compose::DataRuntime::new(),
+        &context,
+    );
+    if request.prompts {
+        session = session.with_handler(std::sync::Arc::new(crate::approval::CliShellApprovalHandler));
+    }
+    let mut config = CleanSchemaConfig::new(context).with_slot_session(std::sync::Arc::new(session));
 
     if flags.no_baseline_schema || crate::commands::compose::env_disables_baseline_schema() {
         config = config.without_baseline_schema();
@@ -423,7 +484,7 @@ mod tests {
 
     #[test]
     fn no_flags_override_nothing() {
-        let overrides = rule_overrides(&CleanOptions::default()).unwrap();
+        let overrides = rule_overrides(&CleanOptions::default(), None).unwrap();
         assert!(overrides.is_empty());
     }
 
@@ -432,10 +493,9 @@ mod tests {
         let options = CleanOptions {
             indent: Some(2),
             list_item_padding: resolve_list_spacing(true, false),
-            fixed_width: Some(80),
             ..CleanOptions::default()
         };
-        let overrides = rule_overrides(&options).unwrap();
+        let overrides = rule_overrides(&options, Some(Width::Columns(80))).unwrap();
         assert_eq!(overrides.indentation, Leaf::Value(Indentation::Two));
         assert_eq!(overrides.list_item_padding, Leaf::Value(ListItemPadding::None));
         assert_eq!(overrides.fixed_width, Leaf::Value(FixedWidth::Columns(80)));
@@ -443,14 +503,23 @@ mod tests {
     }
 
     #[test]
-    fn ignore_incidental_newlines_turns_unwrap_and_width_off() {
-        let options = CleanOptions {
-            ignore_incidental_newlines: true,
-            ..CleanOptions::default()
-        };
-        let overrides = rule_overrides(&options).unwrap();
+    fn an_explicit_source_width_turns_unwrap_and_width_off() {
+        let overrides = rule_overrides(&CleanOptions::default(), Some(Width::Source)).unwrap();
         assert_eq!(overrides.unwrap, Leaf::Value(false));
         assert_eq!(overrides.fixed_width, Leaf::Value(FixedWidth::Off));
+    }
+
+    #[test]
+    fn an_explicit_unlimited_width_unwraps_and_fills_nothing() {
+        let overrides = rule_overrides(&CleanOptions::default(), Some(Width::Unlimited)).unwrap();
+        assert_eq!(overrides.unwrap, Leaf::Value(true));
+        assert_eq!(overrides.fixed_width, Leaf::Value(FixedWidth::Off));
+    }
+
+    #[test]
+    fn a_width_past_the_rule_range_is_still_a_width() {
+        let overrides = rule_overrides(&CleanOptions::default(), Some(Width::Columns(100_000))).unwrap();
+        assert_eq!(overrides.fixed_width, Leaf::Value(FixedWidth::Columns(u16::MAX)));
     }
 
     #[test]
@@ -459,7 +528,7 @@ mod tests {
             indent: Some(3),
             ..CleanOptions::default()
         };
-        assert!(rule_overrides(&options).is_err());
+        assert!(rule_overrides(&options, None).is_err());
     }
 
     #[test]

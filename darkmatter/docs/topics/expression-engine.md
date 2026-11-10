@@ -53,8 +53,22 @@ does not.
 ### Callback execution and passive analysis
 
 Ordinary calls bind evaluated value arguments before computing a result.
-`and` and `or` short-circuit; `map` and `filter` instead bind the iterable once
-and evaluate the callback serially for each item. A callback is an argument,
+Three functions are **lazy** instead: the evaluator, not an eager handler,
+decides which arguments to evaluate. `and` and `or` short-circuit, stopping at
+the first operand that decides the answer. `try(expr, fallback)` evaluates
+`expr`, and evaluates `fallback` only when `expr` failed with a recoverable
+read failure (see
+[Recovering from read failures](./darkmatter-expressions.md#recovering-from-read-failures)).
+Only the selected argument is evaluated and bound against the signature, so
+`try(load_data(f, "string[]"), [])` never builds the `[]` when the file loads.
+A call path that holds only argument values, not their expressions, cannot
+run a lazy function: it rejects the call as a contract violation
+(`ExpressionError::ContractViolation`) saying the function is called only by
+the evaluator. That error is fatal on every surface and `try` never recovers
+it. A host function cannot be registered as lazy, and the name `try` is
+reserved. `map` and `filter` instead bind the iterable once and evaluate the
+callback serially for each item; a value-only call of either, such as
+`map(items, 1)` with no inline callback, is rejected the same way. A callback is an argument,
 never a stored or returned value. Neither callback function is a lifecycle verb;
 use it inside an expression operand or condition.
 

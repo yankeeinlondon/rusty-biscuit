@@ -31,6 +31,11 @@ required-features = ["test-fixtures"]
 [features]
 terminal-tests = ["dep:biscuit-test-harness"]
 test-fixtures = ["dep:test-toolkit"]
+# Opt-in L1 tests that load `md`'s fish and Elvish scripts in the real shells.
+# No CI runner provides either shell, so neither CI `features` nor
+# `local-features` lists this; `just test-optional-shells` selects it on a
+# host that has both, and a selected test fails when its shell cannot start.
+optional-shell-tests = []
 
 [dependencies]
 darkmatter = { path = "../lib" }
@@ -72,14 +77,22 @@ tracing-test = "0.2"
 # The shared path lookup guard reads target roots from `Cargo.toml`.
 toml = "1.0"
 syntect = "5.2"
+# Expected `file://` hyperlinks in the Level-2 error tests.
+url = "2.5"
 # Unconditional for every test target, not just the `terminal-tests` ones: the
 # ungated targets resolve fixtures through `manifest_dir!()`, which the optional
 # `[dependencies]` entry above cannot supply without the feature.
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # The process-global broken-pass hook, so an in-process `run_clean` can prove
-# a refused body is never saved; a dev-dependency feature, so no non-test
-# build of `md` compiles it.
-darkmatter = { path = "../lib", features = ["cleanup-test-hooks"] }
+# a refused body is never saved; and the work counters, so a test can count what
+# one Tab press prepares. Dev-dependency features, so no non-test build of `md`
+# compiles them.
+darkmatter = { path = "../lib", features = ["cleanup-test-hooks", "work-counters"] }
+
+# A windowless console (ConPTY) for PowerShell's real Tab test; already built for
+# worktree-cli, claudine-cli, and biscuit-terminal.
+[target.'cfg(windows)'.dev-dependencies]
+xpty = "0.3.6"
 
 # One test binary per execution contract (tier × exact `required-features`),
 # declared explicitly: `autotests = false` above, so a `tests/` file reaches a

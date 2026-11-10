@@ -1677,9 +1677,11 @@ fn every_shipped_yaml_schema_definition_is_in_the_shipped_table() {
 /// checkout copies of the shipped definitions sit in a schema root: each copy
 /// is recognized as the source of its built-in (source-path identity), so the
 /// corpus manufactures no duplicate claim, and validation follows the copy.
+/// A schema template (one holding `{{ … }}` slots, such as Claudine's
+/// sandboxing schema) passes passively: admission evaluates no slot.
 #[test]
 fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
-    use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
+    use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context, build_resolution_context_with_catalog};
     use darkmatter::markdown::schemas::yaml_documents::{Claim, DefinitionSource};
     use darkmatter::markdown::schemas::{DarkmatterSchemas, KindRegistry, RegistryScope, YamlOutcome};
 
@@ -1704,6 +1706,12 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
                 && matches!(exception.class, Class::Draft { .. } | Class::EnvelopeRejected | Class::Placeholder)
         })
     };
+    // Every folder is in this one checkout, so one repository discovery serves
+    // them all; on Windows each discovery costs a quarter second.
+    let catalog = build_resolution_context(&RequestSnapshot::new(&root).with_home(None))
+        .expect("checkout context")
+        .repository_scope_catalog()
+        .cloned();
     let mut checked = 0usize;
     let mut failures = Vec::new();
     for (dir, path) in &areas {
@@ -1711,7 +1719,7 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
         // One context and registry per folder: the folder's package area
         // decides its schema roots, and every artifact in it shares them.
         let snapshot = RequestSnapshot::new(path).with_home(None);
-        let context = build_resolution_context(&snapshot).expect("checkout context");
+        let context = build_resolution_context_with_catalog(&snapshot, catalog.clone()).expect("checkout context");
         let registry = std::sync::Arc::new(KindRegistry::from_filesystem(&context, RegistryScope::WithRoots));
         for (kind, claim) in registry.claims() {
             if let Claim::Duplicate(files) = claim {
@@ -1736,8 +1744,9 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
             if !matches!(kind.as_str(), "schema" | "schema-trigger" | "yaml-schema") || known_invalid(dir, &file_label) {
                 continue;
             }
+            let outcome = schemas.validate_yaml_document(&source, &file);
             checked += 1;
-            match schemas.validate_yaml_document(&source, &file) {
+            match outcome {
                 Ok(YamlOutcome::Validated(validation)) if validation.report.valid => {}
                 Ok(YamlOutcome::Validated(validation)) => {
                     failures.push(format!("{dir}/{file_label}: {:?}", validation.report.problems))
@@ -1748,4 +1757,29 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
     }
     assert!(checked >= 20, "the corpus checked {checked} kinded artifacts");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Claudine's shipped sandboxing schema is a template: its `os` enum is one
+/// `load_data` slot naming `claudine/docs/os.yaml` relative to the schema.
+/// It is admitted passively, as written, without resolving the slot (the
+/// file's text is supplied, and nothing the slot names is read), and lowering
+/// it reports the slot unresolved rather than producing a schema.
+#[test]
+fn the_shipped_sandboxing_schema_is_admitted_as_a_template_without_resolving() {
+    let text = include_str!("../../../../claudine/docs/research/sandboxing/providers/sandboxing.yaml");
+    let root = repo_root();
+    let path = root.join("claudine/docs/research/sandboxing/providers/sandboxing.yaml");
+    let source = simplified_schema::SchemaSource::from(path.as_path())
+        .bound(FileResolutionContext::new(path.parent().expect("the schema's folder")))
+        .with_text(text);
+    let schema = simplified_schema::SimplifiedSchema::try_from_yaml(source).expect("the template is admitted");
+    assert!(!schema.is_resolved(), "the schema holds a slot");
+    let slots: Vec<&str> = schema.pending_slots().iter().map(|slot| slot.expression.as_str()).collect();
+    assert_eq!(slots, [r#"load_data("../../../os.yaml", "string[]")"#]);
+    assert_eq!(
+        biscuit_file::canonicalize_simplified(&path.parent().unwrap().join("../../../os.yaml")).ok(),
+        biscuit_file::canonicalize_simplified(&root.join("claudine/docs/os.yaml")).ok(),
+        "the slot names the shipped OS list"
+    );
+    assert!(schema.to_json_schema().is_err(), "a template does not lower before it resolves");
 }

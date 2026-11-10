@@ -287,25 +287,31 @@ impl BlockQuote {
     ///
     /// The border width is determined by the `border` field and the
     /// child content width is reduced accordingly.
-    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
+    /// The quote at `term_width`; `None` is a terminal with no width, where
+    /// nothing inside it wraps or fills.
+    fn render_content(&self, term: Option<&Terminal>, term_width: Option<u32>) -> String {
         let border_width = visible_width(&self.border);
-        let child_width = term_width.saturating_sub(border_width);
+        let child_width = term_width.map(|width| width.saturating_sub(border_width));
 
         // Render child content with constrained width
         let content: String = match &self.content {
             RenderableTerminalContent::String(s) => {
                 // Wrap plain strings to child_width using the layout's word wrap strategy
                 let lines = split_lines(s);
-                let wrapped = wrap_lines(lines, &self.layout.word_wrap, child_width);
+                let wrapped = match child_width {
+                    Some(width) => wrap_lines(lines, &self.layout.word_wrap, width),
+                    None => lines,
+                };
                 wrapped.join("\n")
             }
             RenderableTerminalContent::Component(component) => {
                 // Use render() with the constrained child width so nested
                 // components respect the block quote's border
-                term.map_or_else(
-                    || component.render_optimistic(Some(child_width)),
-                    |t| component.render_in_width(t, child_width),
-                )
+                match (term, child_width) {
+                    (Some(t), Some(width)) => component.render_in_width(t, width),
+                    (Some(t), None) => component.render(t),
+                    (None, width) => component.render_optimistic(width),
+                }
             }
         };
 
@@ -420,7 +426,7 @@ impl TerminalRenderable for BlockQuote {
         // Compatibility fallback for `with_border()` custom prefixes.
         let width = term_width.unwrap_or(80);
         let available = self.layout.available_width(width);
-        let content = self.render_content(None, available);
+        let content = self.render_content(None, Some(available));
         // BlockQuote has a `┃ ` border on every line — the border must form a
         // straight vertical bar, so the block must be aligned as a unit.
         self.layout.apply_block_layout(&content, width)
@@ -430,10 +436,9 @@ impl TerminalRenderable for BlockQuote {
         if self.has_default_border() {
             return self.render_via_tree(term);
         }
-        let width = term.width();
-        let available = self.layout.available_width(width);
+        let available = term.columns().map(|width| self.layout.available_width(width));
         let content = self.render_content(Some(term), available);
-        self.layout.apply_block_layout(&content, width)
+        self.layout.apply_block_layout_on(&content, term)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

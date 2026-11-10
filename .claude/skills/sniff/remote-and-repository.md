@@ -10,6 +10,7 @@ conflicts, and provider queries.
 - [Worktrees](#worktrees)
 - [Recent commits](#recent-commits)
 - [Conflicts and branches](#conflicts-and-branches)
+- [Per-path tracked state](#per-path-tracked-state)
 - [Remote snapshots](#remote-snapshots)
 - [Focused providers](#focused-providers)
 
@@ -96,6 +97,25 @@ worktree state as merge input.
 
 Branch discovery uses locally known refs by default. Refresh requires explicit
 opt-in.
+
+## Per-path tracked state
+
+`GitRepo::tracked_state(&[PathBuf])` classifies canonical absolute paths as
+`TrackedState::{Clean, Dirty, Untracked, Ignored, Conflicted, Filtered,
+Outside}` (non-exhaustive; one result per input, same order). It never runs a
+status walk: one index and `HEAD` tree read per call, then per path an index
+lookup, a tree lookup, the gix attribute/exclude stack, and one file read
+(after Git's size pre-check). `Clean` is decided by hashing the bytes after
+gix's worktree-to-git conversion (`core.autocrlf`, `text`/`eol`), never by
+stat alone; `GitRepo::worktree_blob_id(path, bytes)` exposes that hash.
+External filter drivers never run: a `filter` attribute makes the path
+`Filtered` and `worktree_blob_id` an error. Symlinks are `Dirty`, never
+followed. Nonexistent and directory paths outside the index are `Untracked`;
+`.git/`, nested repositories, and submodules are `Outside`. Root comparison is
+component-wise against the `canonicalize_simplified` root. Bare repositories
+fail with `BareRepository`. Darkmatter's schema-slot automatic grant
+(`darkmatter/lib/src/markdown/schemas/slots/grants/auto.rs`) uses both. Code: `filesystem/git/tracked_state.rs`; tests:
+`tracked_state_tests.rs`.
 
 ## Remote snapshots
 

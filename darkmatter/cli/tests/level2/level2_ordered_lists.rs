@@ -9,7 +9,7 @@ fn level2_list_max_fill_caps_wrap_width() {
     // Long bullet so wrap is observable.
     let body = "- This is a notably long list item that has to wrap to a second visible row once Max(40) constrains the list render width to forty columns.\n- Follow-up.\n";
 
-    let Some((frame, _)) = run_md(body, "--fill-lists max=40 --max-width 80") else {
+    let Some((frame, _)) = run_md(body, "style.ul.max-width=40 style.ol.max-width=40 style.li.max-width=40 style.max-width=80") else {
         return;
     };
 
@@ -52,20 +52,20 @@ fn level2_list_max_fill_caps_wrap_width() {
 #[serial(level2_terminal)]
 fn level2_list_center_alignment_indents_more_than_left() {
     // Use short items so we can compare the marker line's leading indent.
-    // Per sub-spec #4, when `style.li.alignment` (or the broadcast `--align-lists`
-    // that writes Li alignment) shifts the body, the body becomes its own block
+    // Per sub-spec #4, when `style.li.alignment` (here set with `ul` and `ol`,
+    // as the list group is named bucket by bucket) shifts the body, the body becomes its own block
     // on a fresh line. We anchor on the body sentinel `xy` so the test works
     // regardless of whether the marker and body share a line.
     let body = "- xy\n- ab\n";
     let Some((left, _)) = run_md(
         body,
-        "--align-lists left --fill-lists max=30 --max-width 60",
+        "style.ul.alignment=left style.ol.alignment=left style.li.alignment=left style.ul.max-width=30 style.ol.max-width=30 style.li.max-width=30 style.max-width=60",
     ) else {
         return;
     };
     let Some((center, _)) = run_md(
         body,
-        "--align-lists center --fill-lists max=30 --max-width 60",
+        "style.ul.alignment=center style.ol.alignment=center style.li.alignment=center style.ul.max-width=30 style.ol.max-width=30 style.li.max-width=30 style.max-width=60",
     ) else {
         return;
     };
@@ -99,7 +99,7 @@ style:
 - sentinel_ul_lm item
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=60") else {
         return;
     };
 
@@ -134,7 +134,7 @@ style:
 - sentinel_ul_mw This is a notably long bullet item that has to wrap to a second visible row once the frontmatter cap constrains the list render width to forty columns.
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 80") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=80") else {
         return;
     };
 
@@ -182,7 +182,7 @@ style:
 - sentinel_ul_stack This is a notably long bullet item that has to wrap to a second visible row once the frontmatter max-width cap constrains the list render width to forty columns total.
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 80") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=80") else {
         return;
     };
 
@@ -246,10 +246,10 @@ style:
 1. sentinel_ol_align item
 "#;
 
-    let Some((right_frame, _)) = run_md(right, "--max-width 80") else {
+    let Some((right_frame, _)) = run_md(right, "style.max-width=80") else {
         return;
     };
-    let Some((left_frame, _)) = run_md(left, "--max-width 80") else {
+    let Some((left_frame, _)) = run_md(left, "style.max-width=80") else {
         return;
     };
 
@@ -298,7 +298,7 @@ style:
 - sentinel_li_body
 "#;
 
-    let Some((frame, _)) = run_md(body, "--max-width 80") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=80") else {
         return;
     };
 
@@ -328,21 +328,21 @@ style:
 
 #[test]
 #[serial(level2_terminal)]
-fn level2_cli_align_lists_broadcast_indents_in_real_terminal() {
-    // `--align-lists center` plus `--fill-lists max=30` must broadcast to Ul/Ol/Li
-    // so both bullet and numbered items render with extra leading indent vs
-    // left-aligned baseline.
+fn level2_list_group_alignment_indents_in_real_terminal() {
+    // The list group, named bucket by bucket (`ul`, `ol`, `li`): center
+    // alignment plus `max-width: 30` must reach Ul/Ol/Li so both bullet and
+    // numbered items render with extra leading indent vs left-aligned baseline.
     let body = "- sentinel_alpha\n1. sentinel_numbered\n";
 
     let Some((left, _)) = run_md(
         body,
-        "--align-lists left --fill-lists max=30 --max-width 60",
+        "style.ul.alignment=left style.ol.alignment=left style.li.alignment=left style.ul.max-width=30 style.ol.max-width=30 style.li.max-width=30 style.max-width=60",
     ) else {
         return;
     };
     let Some((center, _)) = run_md(
         body,
-        "--align-lists center --fill-lists max=30 --max-width 60",
+        "style.ul.alignment=center style.ol.alignment=center style.li.alignment=center style.ul.max-width=30 style.ol.max-width=30 style.li.max-width=30 style.max-width=60",
     ) else {
         return;
     };
@@ -362,13 +362,13 @@ fn level2_cli_align_lists_broadcast_indents_in_real_terminal() {
     let lead = |s: &str| s.chars().take_while(|c| *c == ' ').count();
     assert!(
         lead(&center_ul) > lead(&left_ul),
-        "--align-lists center must indent Ul more than left: left={}, center={}",
+        "the centered list group must indent Ul more than left: left={}, center={}",
         lead(&left_ul),
         lead(&center_ul)
     );
     assert!(
         lead(&center_ol) > lead(&left_ol),
-        "--align-lists center must indent Ol more than left: left={}, center={}",
+        "the centered list group must indent Ol more than left: left={}, center={}",
         lead(&left_ol),
         lead(&center_ol)
     );
@@ -376,20 +376,20 @@ fn level2_cli_align_lists_broadcast_indents_in_real_terminal() {
 
 #[test]
 #[serial(level2_terminal)]
-fn level2_cli_align_ul_granular_indents_only_ul_in_real_terminal() {
-    // `--align-ul center` plus `--fill-ul max=30` must indent the unordered list
+fn level2_ul_alignment_setter_indents_only_ul_in_real_terminal() {
+    // `style.ul.alignment=center` plus `style.ul.max-width=30` must indent the unordered list
     // versus the left baseline, while leaving an ordered list unaffected.
     let body = "- sentinel_ul_only\n\n1. sentinel_ol_only\n";
 
     let Some((left, _)) = run_md(
         body,
-        "--align-ul left --fill-ul max=30 --max-width 60",
+        "style.ul.alignment=left style.ul.max-width=30 style.max-width=60",
     ) else {
         return;
     };
     let Some((center, _)) = run_md(
         body,
-        "--align-ul center --fill-ul max=30 --max-width 60",
+        "style.ul.alignment=center style.ul.max-width=30 style.max-width=60",
     ) else {
         return;
     };
@@ -409,15 +409,15 @@ fn level2_cli_align_ul_granular_indents_only_ul_in_real_terminal() {
     let lead = |s: &str| s.chars().take_while(|c| *c == ' ').count();
     assert!(
         lead(&center_ul) > lead(&left_ul),
-        "--align-ul center must indent Ul more than left: left={}, center={}",
+        "style.ul.alignment=center must indent Ul more than left: left={}, center={}",
         lead(&left_ul),
         lead(&center_ul)
     );
-    // Ol must NOT shift: --align-ul only targets Ul.
+    // Ol must NOT shift: `style.ul.alignment` only targets Ul.
     assert_eq!(
         lead(&center_ol),
         lead(&left_ol),
-        "--align-ul must not affect Ol: left_ol={}, center_ol={}",
+        "style.ul.alignment must not affect Ol: left_ol={}, center_ol={}",
         lead(&left_ol),
         lead(&center_ol)
     );
@@ -430,7 +430,7 @@ fn level2_ul_color_inherits_into_li_body() {
 style:\n  ul:\n    color: red-500\n---\n\
 - listbodyalpha\n- listbodybeta\n";
 
-    let Some((frame, _)) = run_md(body, "--max-width 40") else {
+    let Some((frame, _)) = run_md(body, "style.max-width=40") else {
         return;
     };
 

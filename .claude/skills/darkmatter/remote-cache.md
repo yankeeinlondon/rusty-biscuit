@@ -31,7 +31,10 @@ Detail behind the "Remote and cache safety" section of [SKILL.md](SKILL.md).
   refresh, and TTL flags. Response `Cache-Control` outranks all of them:
   `no-store` is never written (an on-disk `no-store` entry is purged), and
   `no-cache` is revalidated before every reuse, even under `Optimistic`, with
-  no stale serve under `Fallback`. The write path accepts only
+  no stale serve under `Fallback`. `Fallback` serves stale only when the
+  revalidation's `RemoteFetchFailure::kind` is `Transport`; a policy refusal
+  (denied redirect), invalid reference, or infrastructure failure is returned
+  so its kind reaches the readers' typed adapter. The write path accepts only
   `StorableDirectives`, so a TTL override structurally cannot store a
   `no-store` response; keep it that way.
 - Transport-cache I/O failures (write or purge) are non-fatal. They flow
@@ -53,5 +56,21 @@ Detail behind the "Remote and cache safety" section of [SKILL.md](SKILL.md).
   root never authorizes a host. `denied_host_never_reads_a_fresh_cached_entry`
   and the CLI `test_compose_denied_host_never_reads_a_seeded_cache_entry` pin
   this ordering.
+- A failed fetch is typed where it happens: `compose/remote_fetch/error.rs::RemoteFetchFailure`
+  (`kind: expression::RemoteReadKind`, `message`). `Transport` covers the
+  request, HTTP status, body read, header, and response UTF-8 failures;
+  `Policy` a policy denial or blocked redirect; `InvalidReference` an
+  unsupported scheme or unparsable URL; `Infrastructure` the runtime or client
+  failing to start, or a slot missing after registration. `FetchSlot::Failed`
+  and `fetch_with_cache` keep the typed failure; `get_content` stays the
+  string adapter (the message, byte for byte) for transclusion and preflight,
+  and `get_content_typed` feeds `ResolutionContext::fetch_remote_text`, whose
+  policy-derived `RemoteTextError::Denied` is checked first so a denied host is
+  never typed `Transport`. `ExpressionError::RemoteRead.kind` carries the kind;
+  only `Transport` is recoverable (see expressions.md and
+  [Recovering from read failures](../../../darkmatter/docs/topics/darkmatter-expressions.md#recovering-from-read-failures)).
+  Never classify a fetch by its message; a new `FetchError` or
+  `RemoteReadError` variant gets its kind in the exhaustive `From` impls in
+  `remote_fetch/error.rs`.
 - `absolute` and `relative` are local path transforms, never remote fetches.
 - `EffectEngine::http_post` uses the same host policy as remote reads.

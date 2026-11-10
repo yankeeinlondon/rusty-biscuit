@@ -450,7 +450,7 @@ fn path_building_functions_reject_urls_without_fetching() {
         }
         // With no remote runtime, existence of a URL cannot be answered.
         let error = eval(&context, "file_exists", url).unwrap_err();
-        assert!(error.to_string().contains("local-only"), "{error}");
+        assert!(error.to_string().contains("remote reads are not enabled"), "{error}");
     }
 }
 

@@ -73,10 +73,12 @@
 use crate::catalog::{describe_for_error, suggest};
 use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
-use crate::markdown::compose::expression::absence::{AbsenceScope, MissingRoot};
+use crate::markdown::compose::expression::absence::{AbsenceScope, MissingRoot, Observation};
 use crate::markdown::compose::expression::{
-    EvaluationLookup, Expr, ExpressionError, evaluate_observed, observe_missing, scalar_string,
+    EvaluationLookup, Expr, ExpressionError, evaluate_observed, is_member_selector, observe_missing, scalar_string,
 };
+use crate::markdown::compose::member_sites::{MemberCandidates, MemberFrame};
+use std::sync::Arc;
 use std::cell::RefCell;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -210,6 +212,18 @@ pub struct Evaluator<'a, L: EvaluationLookup> {
     /// Unhandled reads of absent document properties, when the surface observes them.
     /// Stage-local and uncontended: one evaluator serves one stage.
     missing_roots: Option<RefCell<Vec<MissingRoot>>>,
+    /// The document's undeclared-member candidates and how this surface names
+    /// its sites, when it reports member reads.
+    member_sites: Option<MemberSiteView<'a>>,
+}
+
+/// What an evaluator that reports member reads keeps.
+struct MemberSiteView<'a> {
+    candidates: Arc<MemberCandidates>,
+    frame: MemberFrame<'a>,
+    /// Ordinals of the member selectors reached since the last
+    /// [`Evaluator::member_warnings`].
+    reached: RefCell<Vec<usize>>,
 }
 
 impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
@@ -219,6 +233,44 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
             state,
             presentation_values: None,
             missing_roots: None,
+            member_sites: None,
+        }
+    }
+
+    /// Records the member selectors each evaluation reaches, so
+    /// [`Self::member_warnings`] can join them with `candidates`; `frame`
+    /// names the site of each scanned `{{ … }}`. With no candidates nothing
+    /// is recorded, and values and errors are unchanged either way.
+    pub(crate) fn with_member_sites(mut self, candidates: Arc<MemberCandidates>, frame: MemberFrame<'a>) -> Self {
+        if !candidates.is_empty() {
+            self.member_sites = Some(MemberSiteView {
+                candidates,
+                frame,
+                reached: RefCell::new(Vec::new()),
+            });
+        }
+        self
+    }
+
+    /// Names the frontmatter leaf the next expressions are scanned from, for
+    /// a [`MemberFrame::Leaf`] evaluator.
+    pub(crate) fn set_member_leaf(&self, label: String) {
+        if let Some(MemberSiteView { frame: MemberFrame::Leaf(leaf), .. }) = &self.member_sites {
+            *leaf.borrow_mut() = Some(label);
+        }
+    }
+
+    /// The undeclared-member warnings of the selectors the last evaluation
+    /// reached, for the `{{ … }}` at `span` of the scanned text whose trimmed
+    /// source is `expression`, in authored order. Always clears the record.
+    pub(crate) fn member_warnings(&self, expression: &str, span: &std::ops::Range<usize>) -> Vec<ComposeWarning> {
+        let Some(sites) = &self.member_sites else {
+            return Vec::new();
+        };
+        let reached = sites.reached.take();
+        match sites.frame.key(span) {
+            Some(key) => sites.candidates.warnings(&key, expression, &reached),
+            None => Vec::new(),
         }
     }
 
@@ -258,6 +310,15 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     }
 
     fn evaluate(&self, expr: &Expr) -> Result<Value, ExpressionError> {
+        if let Some(sites) = &self.member_sites {
+            let mut observation = Observation::default();
+            let result = evaluate_observed(expr, self.state, &mut observation);
+            sites.reached.borrow_mut().extend(observation.take_reached());
+            if let Some(roots) = &self.missing_roots {
+                roots.borrow_mut().append(&mut observation.roots);
+            }
+            return result;
+        }
         match &self.missing_roots {
             Some(roots) => {
                 let mut observed = Vec::new();
@@ -298,11 +359,26 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
         self.state.begin_expression_scope();
 
         if let Some(value) = self.presentation_value(expr) {
+            // A presented value is a constant access chain, read whole.
+            if let Some(sites) = &self.member_sites {
+                let selectors = crate::markdown::compose::expression::member_check::expr_nodes(expr)
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, node)| is_member_selector(node))
+                    .map(|(ordinal, _)| ordinal);
+                sites.reached.borrow_mut().extend(selectors);
+            }
             return EvalResult::Value(scalar_string(&value));
         }
 
         // Preserve debug/trace logging for variable resolution
         if let Expr::Variable(name) = expr {
+            // The fast path is the evaluator's own read of node 0.
+            if let Some(sites) = &self.member_sites
+                && is_member_selector(expr)
+            {
+                sites.reached.borrow_mut().push(0);
+            }
             // One resolution, then the lookup's own formatting hook (some
             // production lookups apply configured name coercion there); a
             // second lookup could hide an error or observe another value.

@@ -149,5 +149,7 @@ as the same number.
 
 `md compose --state` and `--set`, and a transclusion's `set.NAME=` and `set=`,
 read JSON5. A non-finite JSON5 number (`Infinity`, `NaN`, `1e400`) is an
-error ("a number is not finite"), never `null`. A `name=value` shorthand
-setter keeps such a value as text, as it does any value that does not parse.
+error ("a number is not finite"), never `null`. A
+[`path=value` setter](../cli/compose.md#setters) or `md set` value applies the
+same check inside an object or array, so `{a:NaN}` fails. A bare `NaN` is not
+structure, so it stays text, as does any value that does not parse.

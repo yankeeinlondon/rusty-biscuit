@@ -161,14 +161,14 @@ instead and does not repeat it on stderr.
 
 | Command | Ordinary output | Report mode |
 | --- | --- | --- |
-| `md compose` | stderr, after the document (after the report for `--shell`); on a failure, before the error | [`--output report-json`](../../cli/report-json.md#codes): a `dm.schema.invalid_trigger` diagnostic whose `source` is the trigger file at the [failure's position](#where-a-failure-is-positioned), else `null` |
-| `md schema validate` | stderr, before the file's result (also with `--quiet`) | `--format json`: a row in the `warnings` of the first file that discovers the trigger |
+| `md compose` | stderr, after the document (after the report for `--shell`); on a failure, before the error | [`--output json`](../../cli/data-contracts.md#codes): a `dm.schema.invalid_trigger` diagnostic whose `source` is the trigger file at the [failure's position](#where-a-failure-is-positioned), else `null` |
+| `md schema validate` | stderr, before the file's result (also with `--quiet`) | `--output json`: a row in the `warnings` of the first file that discovers the trigger |
 | `md schema triggers` | stderr; the trace on stdout names each skipped trigger and its code in a "Skipped invalid triggers" section, between the shadowed envelopes and the triggers, without repeating the warning | — |
-| `md clean` | stderr; on a schema failure, before the error | [`--json`](../../cli/clean.md#version-1-json-envelope): the top-level `warnings` array, also in the envelope a schema failure prints |
+| `md clean` | stderr; on a schema failure, before the error | [`--output json`](../../cli/clean.md#version-1-json-envelope): the top-level `warnings` array, also in the envelope a schema failure prints |
 | DMLS | a warning diagnostic on the trigger file, at the start of the line of the [failure's position](#where-a-failure-is-positioned) when it has one; see [Failures](../../lsp/indexing.md#failures) | — |
 
-A JSON row has the same four fields everywhere it appears outside
-`report-json`:
+A JSON row has the same four fields everywhere it appears outside the
+`diagnostics` of `md compose`:
 
 ```json
 {
@@ -290,6 +290,47 @@ load the trigger again instead of reusing a cached result, including when
 every trigger was invalid the first time.
 DMLS refreshes on the same changes through its file events; see
 [When the registry changes](../../lsp/indexing.md#when-the-registry-changes).
+
+## A payload that holds slots
+
+A payload may take values from data with `{{ … }}`
+[slots](./schema-slots.md). Such a payload is **pending**, never invalid:
+discovery and matching read nothing a slot names, and `md schema triggers`
+lists it as pending. When a document it matches is composed or validated,
+the payload's slots resolve in that command's slot session, and the resolved
+schema must then pass the same payload rules (a mergeable object schema that
+compiles). A slot failure is reported at the slot, in the trigger's files.
+A document the trigger does not match never evaluates its slots.
+
+```yaml
+# schemas/sandbox.trigger.yaml
+kind: schema-trigger
+match:
+  topic: literal(sandbox; required)
+$schema:
+  os: enum({{ load_data("../data/os.yaml", "string[]") }}; required)
+```
+
+A payload property may also take its whole type from data, a
+[template type](./schema-slots.md#template-types):
+
+```yaml
+$schema:
+  owner: "{{ load_data('../data/owner-type.yaml', 'type-definition') }}"
+```
+
+The property name `owner` is written in the payload, so layering never needs
+the slot's value: matching stays passive, the trigger is pending rather than
+invalid, and the slot runs only after matching and whole-property
+replacement have decided that the payload's `owner` survives. A document
+whose own `$schema` declares `owner: string` replaces it, and the slot never
+runs. Whatever the slot returns stays the type of `owner`: an object type's
+nested keys never become sibling top-level properties. A template type may
+not be the payload's whole `$schema` or an arm of a root union.
+
+A slot in a `match` condition is refused: the trigger is invalid
+(`dm.schema.invalid_trigger`, its message naming the slot), because only the
+payload may hold slots.
 
 ## Applying a recursive type
 

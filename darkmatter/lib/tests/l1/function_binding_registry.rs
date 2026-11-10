@@ -165,7 +165,7 @@ impl EvaluationLookup for Lookup {
 const FIXTURE: &str = "---\ntitle: Fixture Title\n---\n# Fixture Title\n\nBody.\n";
 const NUMBERED: &str = "---\ntitle: Numbered\n---\n# Numbered\n\nBody.\n";
 
-/// A private fixture tree: `fixture.md`, a file named `2026` (so a number
+/// A private fixture tree: `fixture.md`, `fixture.yaml`, a file named `2026` (so a number
 /// converted to text names a real file), an index family, `sub/note.md`, an
 /// empty home, and an empty Git repository with no remote, so nothing
 /// discovers a repository above it.
@@ -183,6 +183,7 @@ fn fixture() -> (TempDir, Lookup) {
     write("review-1.md", "# Review\n");
     write("review-2.md", "# Review\n");
     write("sub/note.md", "# Note\n");
+    write("fixture.yaml", "- macOS\n- Linux\n- Windows\n");
     std::fs::create_dir_all(root.join("home")).expect("home");
     let lookup = lookup_at(&root);
     (dir, lookup)
@@ -194,10 +195,10 @@ fn lookup_at(root: &Path) -> Lookup {
     Lookup { context: ResolutionContext::new(file_context) }
 }
 
-/// `and` and `or` are evaluated lazily by the evaluator, which binds each
-/// operand as it goes; they have no handler to enter.
+/// `and`, `or`, and `try` are evaluated lazily by the evaluator, which binds
+/// each operand it evaluates; they have no handler to enter.
 fn expected_entries(function: &str) -> usize {
-    if matches!(function, "and" | "or") { 0 } else { 1 }
+    if matches!(function, "and" | "or" | "try") { 0 } else { 1 }
 }
 
 fn run_case(function: &str, cell: &str, case: &Case, lookup: &Lookup) {
@@ -265,9 +266,11 @@ fn check(function: &str, row: Row) {
 
 /// One `#[test]` per registered canonical function, so the rows run in
 /// parallel, plus the list of names the guard compares with the registry.
+/// A keyword-named function (`try`) is written as a raw identifier
+/// (`r#try`); its row name drops the `r#`.
 macro_rules! registry_rows {
     ($($name:ident => $row:expr;)+) => {
-        const ROW_NAMES: &[&str] = &[$(stringify!($name)),+];
+        const ROW_NAMES: &[&str] = &[$(row_name(stringify!($name))),+];
 
         mod rows {
             use super::*;
@@ -275,11 +278,19 @@ macro_rules! registry_rows {
             $(
                 #[test]
                 fn $name() {
-                    check(stringify!($name), $row);
+                    check(row_name(stringify!($name)), $row);
                 }
             )+
         }
     };
+}
+
+/// `name` without a raw-identifier `r#` prefix.
+const fn row_name(name: &'static str) -> &'static str {
+    match name.as_bytes() {
+        [b'r', b'#', ..] => name.split_at(2).1,
+        _ => name,
+    }
 }
 
 registry_rows! {
@@ -415,7 +426,7 @@ registry_rows! {
         rejects_type(r#"older_than("2024-06-01", "2024-06-20", "fortnight")"#),
         unchanged(NO_DATE_TEXT, vec![type_error(r#"older_than("2024-06-01", "2024-06-20", true)"#)]));
 
-    // ── Logical (lazy: no handler; the evaluator binds each operand) ───────
+    // ── Logical (lazy: no handler; the evaluator binds what it evaluates) ──
     and => row(ok(r#"and(true, "x")"#, json!(true)),
         Rejected::Impossible {
             reason: "every value binds and every arity, including zero, is eligible",
@@ -431,6 +442,13 @@ registry_rows! {
         },
         unchanged("preservation-only `unknown | null` variadic: truthiness reads the original value", vec![
             ok(r#"or("false")"#, json!(true)), ok("or(0)", json!(false)),
+        ]));
+    // The fixture tree has no `absent.yaml`, so the protected read misses and
+    // the fallback is the result.
+    r#try => row(ok(r#"try(load_data("absent.yaml", "string[]"), "x")"#, json!("x")), rejects_arity("try(1)"),
+        unchanged("both parameters are preservation-only `unknown | null`: the selected operand is kept as is", vec![
+            ok(r#"try("4", 0)"#, json!("4")), ok("try(null, 7)", json!(null)),
+            ok(r#"try(load_data("absent.yaml", "string[]"), "0")"#, json!("0")),
         ]));
 
     // ── Git (an empty repository with no remote, deny-all remote policy) ───
@@ -523,6 +541,10 @@ registry_rows! {
         ok(r#"try_frontmatter("fixture.md")"#, json!({"ok": true, "value": {"title": "Fixture Title"}, "error": null})),
         rejects_type("try_frontmatter([])"),
         converts(ok("try_frontmatter(2026)", json!({"ok": true, "value": {"title": "Numbered"}, "error": null}))));
+    // `2026` converts to text naming the extensionless file `2026`; the
+    // handler resolves it and fails on its format, proving the conversion.
+    load_data => row(ok(r#"load_data("fixture.yaml", "string[]")"#, json!(["macOS", "Linux", "Windows"])),
+        rejects_type(r#"load_data([], "string[]")"#), converts(domain(r#"load_data(2026, "string[]")"#)));
     markdown_body_empty => row(ok(r#"markdown_body_empty("fixture.md")"#, json!(false)),
         rejects_type("markdown_body_empty([])"), converts(ok("markdown_body_empty(2026)", json!(false))));
     markdown_title => row(ok(r#"markdown_title("fixture.md")"#, json!("Fixture Title")),
@@ -618,6 +640,7 @@ fn no_handler_local_coercion_helpers_remain() {
         ("cicd.rs", include_str!("../../src/markdown/compose/expression/functions/cicd.rs")),
         ("collections.rs", include_str!("../../src/markdown/compose/expression/functions/collections.rs")),
         ("composition.rs", include_str!("../../src/markdown/compose/expression/functions/composition.rs")),
+        ("data.rs", include_str!("../../src/markdown/compose/expression/functions/data.rs")),
         ("dates.rs", include_str!("../../src/markdown/compose/expression/functions/dates.rs")),
         ("escape.rs", include_str!("../../src/markdown/compose/expression/functions/escape.rs")),
         ("fs.rs", include_str!("../../src/markdown/compose/expression/functions/fs.rs")),

@@ -7,7 +7,7 @@ use serde_json::Value;
 use sniff::network::ScopedIpAddr;
 use sniff::network::icmp::{PingVerdict, ProbeBudget};
 
-use super::{BoundCall, FunctionBinding, ResolutionContext, required_text};
+use super::{BoundCall, FunctionBinding, SlotClass, ResolutionContext, required_text};
 use crate::markdown::compose::context::ContextGroup;
 use crate::markdown::compose::expression::ExpressionError;
 
@@ -18,10 +18,10 @@ const DEFAULT_PING_TIMEOUT_MS: f64 = 100.0;
 const DEFAULT_PING_UNDER_ATTEMPTS: f64 = 3.0;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding::context("ipv4", &[], ipv4_fn),
-    FunctionBinding::context("ipv6", &[], ipv6_fn),
-    FunctionBinding::context("ping", &[], ping_fn),
-    FunctionBinding::context("ping_under", &[], ping_under_fn),
+    FunctionBinding::context("ipv4", &[], ipv4_fn).slot(SlotClass::Captured),
+    FunctionBinding::context("ipv6", &[], ipv6_fn).slot(SlotClass::Captured),
+    FunctionBinding::context("ping", &[], ping_fn).slot(SlotClass::Rejected),
+    FunctionBinding::context("ping_under", &[], ping_under_fn).slot(SlotClass::Rejected),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -117,7 +117,7 @@ A few behaviours worth knowing:
 - `additionalProperties` is `true` — documents may carry extra tooling-specific frontmatter without tripping the schema.
 - Unrecognized constraints are a **hard error at compile time**, so typos surface immediately rather than being silently ignored.
 - Conversion collects **every** independent per-property failure into one aggregate rather than stopping at the first, so a schema with two bad definitions reports two problems (and DMLS anchors one diagnostic per property). A structural failure that makes further traversal meaningless is still a single error.
-- `file` is **lazy by default**: it builds the reference's candidate plan and materializes the first absolute candidate without probing the filesystem. Add `eager` (`file(eager)`) to require an existing regular file and materialize the first matching candidate. For document-backed validation, an implicit reference such as `spec.md` checks the prompt document's directory before the repository root; an explicit `./spec.md` or `../spec.md` is source-relative only. Caller-supplied values use the captured launch context, while the captured launch area is retained only as diagnostics for document-authored values. `match(...)` shapes path *suggestions* in a single schema; in a root union an existing file outside an arm's declared globs rules that arm out (see [Root unions](#root-unions-and-file-match)).
+- `file` is **lazy by default**: it builds the reference's candidate plan and materializes the first absolute candidate without probing the filesystem. Add `eager` (`file(eager)`) to require an existing regular file and materialize the first matching candidate. For document-backed validation, an implicit reference such as `spec.md` checks the prompt document's directory before the repository root; an explicit `./spec.md` or `../spec.md` is source-relative only. Caller-supplied values, at any depth, use the captured launch context, while the captured launch area is retained only as diagnostics for document-authored values. `match(...)` shapes path *suggestions* in a single schema; in a root union an existing file outside an arm's declared globs rules that arm out (see [Root unions](#root-unions-and-file-match)).
 
 ## Validation Phases
 
@@ -215,7 +215,7 @@ enforces.
 
 `--disable baseline-schema` and `--schema` cannot be combined (a usage error, exit
 `2`). A custom path resolves from the directory you ran the command in, and a
-custom baseline that cannot be loaded exits `2`; it never falls back. Opting
+custom baseline that cannot be loaded exits `1`; it never falls back. Opting
 out removes only the baseline: the document's own `$schema` and matching
 trigger schemas still apply, and `--disable schema-triggers` controls triggers
 separately. See
@@ -249,13 +249,13 @@ Because a whole property is replaced when both sides declare it, replacing a bas
 ## CLI: `md schema validate`
 
 ```bash
-md schema validate <file>... [--schema <path> | --disable baseline-schema] [--disable schema-triggers] [--format pretty|json] [--quiet] [-vv]
+md schema validate <file>... [--schema <path> | --disable baseline-schema] [--disable schema-triggers] [--output <target>] [--quiet] [-vv]
 ```
 
-Pretty output (the default) renders one styled block per file:
+Terminal output (the default) renders one styled block per file:
 
 ```
-- ✔ the document post.md has a schema definition and is valid.
+- ✔ the document post.md has a schema definition and is valid based on its $schema ./schemas/post.yaml and the Darkmatter default schema.
 - ✗ the document draft.md failed schema validation:
     - title is a required property (at line 2, column 1)
     - tags/1 42 is not of type "string" (at line 6, column 5)
@@ -268,28 +268,46 @@ item of a block list on line 6, so its value starts at column 5, after the
 `- `. See [Problem Locations](../topics/schemas/definition.md#problem-locations)
 for the full rules and fallbacks.
 
-`--format json` emits newline-delimited JSON (one object per file) for piping into other tools, and `--quiet` suppresses the success lines.
+`--output json` prints one JSON document with one record per file under `files`, for piping into other tools (`json5`, `yaml`, and `toml` carry the same data), and `--quiet` suppresses the success lines.
 
 | Exit code | Meaning |
 |-----------|---------|
 | 0 | All files valid. |
-| 1 | One or more files failed validation. |
-| 2 | Schema or baseline could not be loaded. |
-| 3 | A file's frontmatter could not be parsed at all. |
-| 64 | Usage error. |
+| 1 | A file failed validation, could not be opened or parsed, or a schema or baseline could not be loaded. |
+| 2 | Usage error. |
 
-A document with no `$schema` is validated against the baseline and reported as having a schema definition; in JSON output its `schema` field is still `null`, because the field names the document's own `$schema`. Only with the baseline turned off does such a document succeed vacuously (with a warning line in pretty mode).
+A document can be judged by up to three schema layers, merged in this order: the baseline, any matching schema triggers, then the document's own `$schema`. The pretty success line names every layer that applied, in the order document, triggers, baseline:
+
+| Layer | Named as |
+| --- | --- |
+| An inline `$schema` mapping | `its inline $schema` |
+| A `$schema` file reference or bare name | `its $schema ./schemas/post.yaml` |
+| A `$schema` root union | `its $schema union` |
+| Matching schema triggers | `the trigger schema post.trigger.yaml` (or `the trigger schemas a.trigger.yaml and b.trigger.yaml`) |
+| The built-in baseline | `the Darkmatter default schema` |
+| A custom baseline (`--schema` or `BASELINE_SCHEMA`) | `the baseline schema ./my-baseline.yaml` |
+
+The line opens with `has a schema definition and is valid based on …` when the document has its own `$schema`, and with `does not have an explicit schema definition but it is valid based on …` when only triggers or the baseline applied:
+
+```
+- ✔ the document post.md has a schema definition and is valid based on its $schema ./schemas/post.yaml, the trigger schema post.trigger.yaml, and the Darkmatter default schema.
+- ✔ the document README.md does not have an explicit schema definition but it is valid based on the Darkmatter default schema.
+```
+
+With no layer at all (baseline turned off, no `$schema`, no matching trigger) the line is `doesn't have a schema definition so is valid by default.`
+
+JSON output carries the same facts in each validated record's `layers` object (see [JSON Output](../topics/schemas/definition.md#json-output)). Its `schema` field still names only the document's own `$schema`, so it is `null` whenever the document has none.
 
 ### Stage timings (`-vv`)
 
 To see where a slow validation spends its time, pass `-v` twice. After each
 document's normal output, `md` prints a stage breakdown to **stderr**; stdout
-(pretty or JSON) and the exit code are exactly what they are without it. A
+(terminal or data) and the exit code are exactly what they are without it. A
 single `-v` changes nothing, and neither `--debug` nor `RUST_LOG` is needed.
 
 ```console
 $ md schema validate docs/prompt.md -vv
-- ✔ the document docs/prompt.md has a schema definition and is valid.
+- ✔ the document docs/prompt.md does not have an explicit schema definition but it is valid based on the trigger schema prompt.trigger.yaml and the Darkmatter default schema.
 Validation timings for docs/prompt.md
 matched triggers: prompt.trigger.yaml
 compile cache: miss
@@ -332,8 +350,8 @@ parsed get no breakdown.
 
 The breakdown covers all of the document's schema work, not just the final
 check. Without assignments the schema is resolved once: that one resolution
-produces the report and also decides whether the document "has a schema
-definition". With `key=value` assignments, `md` first resolves the schema to
+produces the report and also decides which schema layers the success line
+names. With `key=value` assignments, `md` first resolves the schema to
 coerce the assigned values, then resolves it again after assigning them,
 because an assignment can change which triggers match; the second resolution
 alone decides the report and the wording. Both resolutions are counted, so a
@@ -341,7 +359,7 @@ validator first built while preparing the assignments is still a `miss`:
 
 ```console
 $ md schema validate --disable baseline-schema review_counter=2 doc.md -vv
-- ✔ the document doc.md has a schema definition and is valid.
+- ✔ the document doc.md has a schema definition and is valid based on its inline $schema.
 Validation timings for doc.md
 matched triggers: none
 compile cache: miss
@@ -389,7 +407,14 @@ Elapsed-time comparisons are development measurements, not test thresholds.
 `detect` is a productivity aid for adopting schemas on an existing corpus — it infers a starting SimplifiedSchema from real documents.
 
 ```bash
-md schema detect <file>... [--format yaml|json] [--merge]
+md schema detect <file>... [--output <target>] [--merge]
+```
+
+The default prints the schema in a fenced `yaml` block. To save it as a file, ask
+for the bare schema:
+
+```bash
+md schema detect post.md --output yaml > schema.yaml
 ```
 
 It infers only **base types** from each value (e.g. an integer → `number(integer)`, an ISO date string → `date`, a resolvable path → `file`). It never synthesises constraints, and every detected property is marked optional — a single sample cannot prove requiredness. With `--merge` across several files, a property is required only if present in *every* file, disagreeing types widen to a common ancestor (or become a union when genuinely disjoint), and enum members accumulate. Treat the output as a draft to refine, not a finished schema.
@@ -611,7 +636,8 @@ fail because no single unprobed identity exists. Path functions, comparisons,
 lifecycle state, and frontmatter expressions consume the native semantic
 identity. Markdown body text uses a separate portable presentation value;
 direct variables and static member/index selections share this presentation
-behavior without changing effective frontmatter. The raw record remains
+behavior without changing effective frontmatter, for a file at any depth below a
+top-level property too. The raw record remains
 unchanged so fresh preparation can apply another active document's schema
 without recapturing ambient state.
 
@@ -633,6 +659,9 @@ and its glob then selects the `fix` arm (below). When the arms disagree on
 the file mode (`spec: string` in one, `spec: file` in the other) or one omits
 the property, the caller value stays raw, and the eager-`file` rewrite leaves
 it raw too rather than re-anchor it as though the document had authored it.
+Refusing a caller's file value that no arm accepts names the launch directory
+it was judged from, at any depth, whether the file is missing there or found
+there but excluded by every arm.
 
 A raw JSON Schema root may declare `properties` beside its `anyOf`. They
 apply whichever arm is chosen, exactly as they do without the union:
@@ -753,14 +782,20 @@ if !report.valid {
 
 `validate_summarized(&Markdown)` returns the same report as `validate`
 together with a `PreparationSummary` from the same schema resolution. Its
-`has_schema` is `false` when no baseline, trigger, or `$schema` applied (the
-report is then vacuously valid). Use it instead of calling `effective_for`
-again just to learn whether a schema applied:
+`layers` (a `SchemaLayers`) says which layers applied: `document` (the
+document's own `$schema`), `triggers` (the matching triggers that layered a
+payload, as `TriggerSource`s in layering order), and `baseline`.
+`has_schema()` is `false` when none did, and the report is then vacuously
+valid. Use it instead of calling `effective_for` again just to learn which
+schema applied; an `EffectiveSchema` you already hold answers the same through
+`layers()`:
 
 ```rust
 let (report, summary) = api.validate_summarized(&markdown)?;
-if report.valid && !summary.has_schema {
+if report.valid && !summary.has_schema() {
     println!("no schema applies; valid by default");
+} else if !summary.layers.document {
+    println!("judged only by {} trigger(s) and the baseline", summary.layers.triggers.len());
 }
 ```
 

@@ -33,6 +33,33 @@ pub const REASSIGNED_FRONTMATTER_PROPERTY_CODE: &str = "dm.transclusion.reassign
 /// A shell command that timed out and was replaced by an empty string.
 pub const SHELL_TIMEOUT_CODE: &str = "dm.shell.timeout_recovered";
 
+/// A malformed structured link title, read as plain text.
+pub const LINK_MALFORMED_TITLE_CODE: &str = "dm.link.malformed_structured_title";
+/// A leftover `key=value` link title, read as plain text.
+pub const LINK_LEGACY_TITLE_CODE: &str = "dm.link.legacy_structured_title";
+/// An unknown key under `style:`.
+pub const STYLE_UNKNOWN_KEY_CODE: &str = "dm.style.unknown_key";
+/// A deprecated key under `style:`, or a deprecated inline rule style.
+pub const STYLE_DEPRECATED_CODE: &str = "dm.style.deprecated";
+
+/// The diagnostic code of a link title's notice.
+#[must_use]
+pub fn link_title_code(notice: &renderable::output::link_metadata::LinkTitleNotice) -> &'static str {
+    use renderable::output::link_metadata::LinkTitleNotice;
+    match notice {
+        LinkTitleNotice::Malformed { .. } => LINK_MALFORMED_TITLE_CODE,
+        LinkTitleNotice::Legacy => LINK_LEGACY_TITLE_CODE,
+    }
+}
+
+/// The diagnostic codes `md render` reports too, with what they report.
+pub const RENDER_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
+    (LINK_MALFORMED_TITLE_CODE, "a link title that starts with `{` but is not a valid structured title"),
+    (LINK_LEGACY_TITLE_CODE, "a link title in the removed `key=value` syntax"),
+    (STYLE_UNKNOWN_KEY_CODE, "an unknown key under `style:`"),
+    (STYLE_DEPRECATED_CODE, "a deprecated key under `style:`, or a deprecated inline rule style"),
+];
+
 /// The code of a missing reference target of `kind`, when a recovery
 /// governs that kind.
 pub fn missing_reference_code(kind: ReferenceKind) -> Option<&'static str> {
@@ -54,6 +81,7 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (super::expression::ALWAYS_FALSE_CALL_CODE, "a predicate call that is always false"),
     (super::expression::host::INCOMPLETE_ANALYSIS_CODE, "a host call the analysis cannot judge"),
     (ComposeWarning::UNDECLARED_PROPERTY_CODE, "a read of a property no schema declares"),
+    (super::expression::UNDECLARED_MEMBER_CODE, "a member read the known object type does not declare"),
     (ComposeWarning::UNKNOWN_CONTEXT_VARIABLE_CODE, "a read of an unknown `ctx` group"),
     (ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE, "an expression that did not parse"),
     (ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE, "an expression that did not evaluate"),
@@ -68,6 +96,8 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (INVALID_FRONTMATTER_ASSIGNMENT_CODE, "an invalid `set=` assignment on a `::file` directive"),
     (REASSIGNED_FRONTMATTER_PROPERTY_CODE, "a property a `::file` directive assigns twice"),
     (SHELL_TIMEOUT_CODE, "a shell command timeout replaced by an empty string"),
+    (LINK_MALFORMED_TITLE_CODE, "a link title that starts with `{` but is not a valid structured title"),
+    (LINK_LEGACY_TITLE_CODE, "a link title in the removed `key=value` syntax"),
     (super::collection_blocks::diagnostics::MALFORMED_CODE, "a malformed `::map` / `::filter` region, header, or option"),
     (super::collection_blocks::diagnostics::UNTYPED_MAP_SOURCE_CODE, "a `::map` source with no iterable declaration"),
     (super::collection_blocks::diagnostics::UNTYPED_FILTER_SOURCE_CODE, "a `::filter` source with no iterable declaration"),

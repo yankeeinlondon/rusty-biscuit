@@ -147,8 +147,8 @@ vendored or JS-enhanced path could close the gap. The spec's
 same supported-engine contract. Treat the manual checklist below as unverified
 guidance for those engines, not an automated support claim:
 
-1. Render a doc with a `prompt='…'` structured link to HTML
-   (`md compose … | md render --html`, or `Markdown::as_html`).
+1. Render a doc with a `'{ prompt: "…" }'` structured link to HTML
+   (`md compose … | md render - --output html`, or `Markdown::as_html`).
 2. Hover the link — the prompt appears. Tab to the link — the prompt appears
    (`:focus-within`). Click/Enter still navigates. With reduced motion enabled,
    the fade is disabled.

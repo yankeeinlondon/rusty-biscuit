@@ -197,6 +197,25 @@ empty or its gate is false. Null and container values are rejected when the
 command is built. Identical commands may reuse the request-wide result cache;
 use `--no-cache` to launch each occurrence.
 
+## Reading what a command wrote
+
+A body expression after a `::shell` line that reads a file, such as
+`{{ load_data('d.toml', …) }}`, is evaluated after that line runs, so it sees
+the command's write. The same holds for the arguments of a later `::shell`
+line, and for the next item of a `::map` body:
+
+```md
+::shell git config --file d.toml a.b 2
+
+::shell git config --file result.toml r.v {{ load_data('d.toml', '{ a: { b: number } }').a.b }}
+```
+
+The second line runs as `… r.v 2`. Pre-flight approval saw `… r.v 1`, so
+the new bytes need an `exact` whitelist rule or the line's `template` shape;
+see [Pre-flight checks](./preflight-checks.md#approval-vs-execution). See
+[Reads after a command](../darkmatter-compose-pipeline.md#reads-after-a-command)
+for the full rule.
+
 ## Approval
 
 A command runs only if it is approved: whitelisted, or approved interactively when the composition starts. A few commands can never be approved. Both checks happen before anything runs, and both cover every `::shell` line in the document and in every file it transcludes, including lines inside a `::block` whose condition is false.

@@ -26,6 +26,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::markdown::Markdown;
+use crate::markdown::schemas::slots::grants::gate::SlotGrants;
+use crate::markdown::schemas::slots::grants::{Grant, GrantBook, GrantScope, GrantStore};
 use crate::markdown::compose::shell_expansion::policy::{
     check_builtin_blacklist, check_template_blacklist, check_user_blacklist, check_whitelist,
 };
@@ -49,6 +51,9 @@ pub struct PreflightApprovalStats {
     pub already_whitelisted: usize,
     /// Commands the approval handler admitted.
     pub user_approved: usize,
+    /// Schema-slot reads known before evaluation that no grant (or the
+    /// automatic grant) already decided, and so were asked about.
+    pub slot_reads_asked: usize,
 }
 
 /// Result of the pre-flight approval lifecycle.
@@ -74,6 +79,10 @@ pub struct ComposePreflightApprovals {
     pub stats: PreflightApprovalStats,
     pub preflight_graph: super::PreflightGraphNode,
     pub warnings: Vec<crate::markdown::compose::ComposeWarning>,
+    /// The schema-slot read grants the handler gave for this run only
+    /// (persisted ones are already in the grant store), for the run that
+    /// resolves the slots.
+    pub slot_grants: Vec<Grant>,
 }
 
 impl Markdown {
@@ -195,6 +204,10 @@ impl Markdown {
             policy.check_blacklists(entry)?;
         }
 
+        // Schema-slot reads are judged and asked before any command prompt,
+        // in the same batch.
+        let (slot_grants, slot_reads_asked) = self.approve_slot_reads(request, policy.handler)?;
+
         // Then one decision per command site: template-required sites by
         // their shape, resolved-byte sites by exact rule, template rule, then
         // prefix rule, before any prompt.
@@ -225,10 +238,78 @@ impl Markdown {
                 total_discovered: report.entries.len() + template_sites,
                 already_whitelisted: policy.already_whitelisted,
                 user_approved: policy.user_approved,
+                slot_reads_asked,
             },
             preflight_graph: report.preflight_graph,
             warnings: Vec::new(),
+            slot_grants,
         })
+    }
+
+    /// The schema-slot half of [`Self::compose_preflight_approvals`], for a
+    /// run with no shell operation to approve: collects the reads the slots
+    /// of this document's schema templates name, and asks `approval_handler`
+    /// once about every one no grant decides yet. Returns the grants given
+    /// for this run only, for
+    /// [`SlotSession::with_run_grants`](crate::markdown::schemas::slots::SlotSession::with_run_grants);
+    /// persisted ones are already in the grant store.
+    ///
+    /// Passive: nothing is resolved, and nothing a slot names is read.
+    ///
+    /// ## Errors
+    ///
+    /// [`ShellExpansionError::SlotGrantStore`] when the user's grant store is
+    /// invalid; the handler's own failure.
+    pub fn compose_slot_approvals(
+        &self,
+        request: &crate::markdown::compose::ComposeRequest,
+        approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
+    ) -> Result<Vec<Grant>, ShellExpansionError> {
+        self.approve_slot_reads(request, approval_handler.as_deref()).map(|(grants, _)| grants)
+    }
+
+    /// Collects the reads the slots of this document's schema templates will
+    /// make, and asks `handler` once about every one no grant decides yet.
+    /// Returns the grants given for this run and how many reads were asked
+    /// about.
+    ///
+    /// Only reads named before evaluation are asked here; a computed target
+    /// is judged when its slot evaluates. Without a handler nothing is asked
+    /// and an undecided read stays `dm.schema.slot_approval_required` when
+    /// its slot resolves. Nothing is resolved or read for a slot.
+    ///
+    /// ## Errors
+    ///
+    /// [`ShellExpansionError::SlotGrantStore`] when the user's grant store is
+    /// invalid; the handler's own failure.
+    fn approve_slot_reads(
+        &self,
+        request: &crate::markdown::compose::ComposeRequest,
+        handler: Option<&dyn ShellApprovalHandler>,
+    ) -> Result<(Vec<Grant>, usize), ShellExpansionError> {
+        let options = request.options();
+        let mut registry = None;
+        let pending = crate::markdown::compose::schema_validation::prepare_schemas(self, request, &mut registry)
+            .map(|prepared| prepared.pending_templates_for(self))
+            .unwrap_or_default();
+        if pending.is_empty() {
+            return Ok((Vec::new(), 0));
+        }
+        let context = request.resolution_context();
+        let store_path = GrantStore::path_for_home(context.home_dir());
+        let store = GrantStore::load(store_path.as_deref())
+            .map_err(|error| ShellExpansionError::SlotGrantStore(Box::new(error)))?;
+        let hosts = options.remote_read_config.http_hosts().cloned().collect();
+        let grants = SlotGrants::new(GrantBook::new(store, hosts), options.slot_repository_root().as_deref(), None);
+
+        let requests = grants.undecided_requests(&pending, context);
+        let Some(handler) = handler.filter(|_| !requests.is_empty()) else {
+            return Ok((Vec::new(), requests.len()));
+        };
+        let decisions = handler.approve_slot_reads(&requests)?;
+        grants.apply_all(&requests, &decisions);
+        let once = grants.book().once().iter().filter(|grant| grant.scope == GrantScope::Once).cloned().collect();
+        Ok((once, requests.len()))
     }
 }
 
@@ -532,7 +613,6 @@ mod lifecycle_tests {
     //! `pre_approved_commands` for `compose_with(...)`.
 
     use std::sync::Arc;
-
     use crate::markdown::Markdown;
     use crate::markdown::compose::{ComposeOperation, ComposeOptions};
     use crate::markdown::compose::shell_expansion::types::{

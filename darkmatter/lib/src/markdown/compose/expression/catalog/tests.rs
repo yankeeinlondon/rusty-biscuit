@@ -405,6 +405,9 @@ fn every_executable_example_evaluates_to_its_declared_result() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join("fixture.md"), "---\ntitle: Fixture Title\n---\n# Fixture\n\nBody\n").unwrap();
     std::fs::write(dir.path().join("note.md"), "plain\n").unwrap();
+    for (file, content) in EXAMPLE_DATA_FILES {
+        std::fs::write(dir.path().join(file), content).unwrap();
+    }
     std::fs::write(dir.path().join("review-1.md"), "").unwrap();
     std::fs::write(dir.path().join("review-2.md"), "").unwrap();
     std::fs::create_dir(dir.path().join("sub")).unwrap();
@@ -573,6 +576,113 @@ fn narrative_doc_function_table_matches_catalog() {
     );
 }
 
+/// The committed `load_data` reference page must equal the generator's
+/// output; regenerate it with `just regen-expr-doc`.
+#[test]
+fn load_data_function_page_matches_catalog() {
+    let page_path = biscuit_test_harness::manifest_dir!().join("../../darkmatter/docs/functions/load-data.md");
+    let content = std::fs::read_to_string(&page_path).expect("docs/functions/load-data.md should be readable");
+    let generated = generate_expression_function_page("load_data").expect("load_data is cataloged");
+    assert_eq!(content, generated, "docs/functions/load-data.md does not match generated output");
+    assert!(
+        EXPRESSION_FUNCTION_PAGES
+            .iter()
+            .any(|page| page.function == "load_data" && page.path == "docs/functions/load-data.md"),
+        "the generator writes the page this test reads"
+    );
+}
+
+/// The committed `try` reference page must equal the generator's output;
+/// regenerate it with `just regen-expr-doc`.
+#[test]
+fn try_function_page_matches_catalog() {
+    let page_path = biscuit_test_harness::manifest_dir!().join("../../darkmatter/docs/functions/try.md");
+    let content = std::fs::read_to_string(&page_path).expect("docs/functions/try.md should be readable");
+    let generated = generate_expression_function_page("try").expect("try is cataloged");
+    assert_eq!(content, generated, "docs/functions/try.md does not match generated output");
+    assert!(
+        EXPRESSION_FUNCTION_PAGES.iter().any(|page| page.function == "try" && page.path == "docs/functions/try.md"),
+        "the generator writes the page this test reads"
+    );
+}
+
+/// The generated `try` page states the lazy contract the evaluator
+/// implements: the fallback runs only after a recoverable read failure, every
+/// other failure propagates, falsy values are successes, and the page links
+/// the topic sections that list the recoverable failures.
+#[test]
+fn try_page_states_lazy_semantics() {
+    let page = generate_expression_function_page("try").expect("try is cataloged");
+    assert!(page.contains("try(expr: unknown | null, fallback: unknown | null)"), "the page shows the two-operand signature");
+    assert!(page.contains("Only when expr fails with a recoverable read failure"), "the fallback is lazy");
+    assert!(page.contains("every other failure propagates"), "non-recoverable failures propagate");
+    assert!(page.contains("including a falsy one"), "falsy values are successes");
+    for example in ["try(null, 7)", "try(0, 7)"] {
+        assert!(page.contains(example), "the page shows the falsy-success example `{example}`");
+    }
+    for link in ["../topics/darkmatter-expressions.md#recovering-from-read-failures", "../topics/loading-data.md"] {
+        assert!(page.contains(&format!("]({link})")), "the page links {link}");
+    }
+}
+
+/// R12: the generated `load_data` page shows an executable example, and its
+/// input file, for every format family.
+#[test]
+fn load_data_function_page_shows_every_format_family() {
+    let page = generate_expression_function_page("load_data").expect("load_data is cataloged");
+    let executable = partition_call_examples().executable;
+    for extension in ["yaml", "json", "jsonl", "csv", "tsv", "toml", "json5"] {
+        let file = format!("fixture.{extension}");
+        let call = executable
+            .iter()
+            .map(|(call, _)| *call)
+            .find(|call| call.starts_with("load_data(") && call.contains(&format!("\"{file}\"")))
+            .unwrap_or_else(|| panic!("no executable load_data example reads a .{extension} file"));
+        assert!(page.contains(call), "the page shows `{call}`");
+        assert!(page.contains(&format!("`{file}`:")), "the page shows the input file `{file}`");
+    }
+    assert!(page.contains("Ada,yes,1_000"), "the CSV example shows the boolean and number cell vocabulary");
+    for link in ["../topics/loading-data.md", "../topics/schemas/definition.md#container-types", "../cli/data-contracts.md"] {
+        assert!(page.contains(&format!("]({link})")), "the page links {link}");
+    }
+}
+
+/// The generated `load_data` page shows the three-argument examples (a
+/// headerless CSV, a custom delimiter on a `.txt` file, an explicit format on
+/// an extensionless file), each one's input file, and the `options` parameter.
+#[test]
+fn load_data_function_page_shows_option_examples() {
+    let page = generate_expression_function_page("load_data").expect("load_data is cataloged");
+    let executable = partition_call_examples().executable;
+    for (file, option, language) in [
+        ("fixture-headerless.csv", "{header: false}", "csv"),
+        ("fixture-semicolon.txt", "{format: \"csv\", delimiter: \";\"}", "text"),
+        ("fixture-export", "{format: \"json\"}", "text"),
+    ] {
+        let call = executable
+            .iter()
+            .map(|(call, _)| *call)
+            .find(|call| call.starts_with("load_data(") && call.contains(&format!("\"{file}\"")))
+            .unwrap_or_else(|| panic!("no executable load_data example reads `{file}`"));
+        assert!(call.contains(option), "`{call}` passes `{option}`");
+        assert!(page.contains(call), "the page shows `{call}`");
+        assert!(page.contains(&format!("`{file}`:\n\n```{language}\n")), "the page shows `{file}` fenced as {language}");
+    }
+    assert!(page.contains("web,8080\ndb,5432"), "the headerless input has no header row");
+    assert!(page.contains("name;port"), "the semicolon input is shown");
+    assert!(page.contains("options"), "the page names the third parameter");
+}
+
+#[test]
+fn function_pages_render_only_cataloged_functions() {
+    assert!(generate_expression_function_page("no_such_function").is_none());
+    let page = generate_expression_function_page("loaddata").expect("an alias names the function");
+    assert!(page.starts_with("<!-- Generated by `just regen-expr-doc`"));
+    let overloaded = generate_expression_function_page("link").expect("link is cataloged");
+    assert!(overloaded.contains("## Overloads"), "an overload set lists each overload");
+    assert!(!overloaded.contains("## See also"), "only a registered page has related links");
+}
+
 /// The `pr_list`/`cicd_list` query overloads' descriptions carry the
 /// query-vocabulary link that DMLS hover and completion surface (the `count`
 /// overloads take no query); the anchor must exist.
@@ -734,6 +844,99 @@ fn shipped_callback_examples_passively_parse_through_the_catalog() {
             };
             assert!(display_only.is_none(), "{call}");
             assert!(parse(call).is_ok(), "{call}");
+        }
+    }
+}
+
+/// `load_data`'s third parameter is an optional, nullable, closed inline
+/// object whose keys and `format` members come from the catalog.
+#[test]
+fn load_data_options_parameter_is_a_closed_inline_object() {
+    use simplified_schema::simplified::{FunctionParameters, SimplifiedType};
+
+    let descriptors = function_descriptors("load_data");
+    assert_eq!(descriptors.len(), 1, "one overload");
+    let descriptor = &descriptors[0];
+    assert_eq!(&*descriptor.signature, "load_data(file, as, [options])");
+    let FunctionParameters::List(parameters) = &descriptor.function_type.parameters else {
+        panic!("load_data declares parameters");
+    };
+    assert_eq!(parameters.len(), 3);
+    let options = &parameters[2];
+    assert_eq!(options.name, "options");
+    assert!(options.optional && !options.rest);
+    let PropertyDef::Union(arms) = &options.def else {
+        panic!("options is `{{…}} | null`: {:?}", options.def);
+    };
+    assert!(arms.iter().any(|arm| arm.ty == TypeExpr::Primitive(SimplifiedType::Null)), "admits null: {arms:?}");
+    let shape = arms
+        .iter()
+        .find_map(|arm| match &arm.ty {
+            TypeExpr::InlineObject(shape) => Some(shape),
+            _ => None,
+        })
+        .expect("an inline-object arm");
+    assert_eq!(shape.properties.keys().map(String::as_str).collect::<Vec<_>>(), ["format", "delimiter", "header"]);
+    assert!(shape.pattern_keys.is_empty(), "closed: no pattern keys");
+    let PropertyDef::Single(format) = &shape.properties["format"] else {
+        panic!("format is one enum");
+    };
+    assert_eq!(format.ty, TypeExpr::Primitive(SimplifiedType::Enum));
+    let members: Vec<&str> = format
+        .constraints
+        .iter()
+        .find_map(|constraint| match constraint {
+            Constraint::Members(values) => Some(values.iter().map(String::as_str).collect()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    assert_eq!(members, ["yaml", "yml", "json", "jsonl", "ndjson", "csv", "tsv", "toml", "json5"]);
+}
+
+/// The shared binder decides the options object's shape: an unknown key, a
+/// wrongly typed field, and a format name outside the enum fail binding at
+/// argument 2, while `null`, `{}`, and null fields bind (and the unchanged
+/// handler then reads the file).
+#[test]
+fn load_data_options_bind_through_the_shared_binder() {
+    use crate::markdown::compose::expression::ExpressionError;
+    use crate::markdown::compose::expression::functions::call_function;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("rows.csv"), "name,port\nweb,8080\n").unwrap();
+    let context = ResolutionContext::at(dir.path().to_path_buf());
+    let call = |options: Value| {
+        call_function("load_data", &[json!("rows.csv"), json!("tuple([string, number])[]"), options], Some(&context))
+            .expect("load_data is registered")
+    };
+    for options in [
+        json!({"quote": ","}),
+        json!({"header": [1]}),
+        json!({"format": "CSV"}),
+        json!({"format": " csv"}),
+        json!({"format": "text"}),
+        json!({"delimiter": [","]}),
+        json!(5),
+        json!("csv"),
+        json!([]),
+    ] {
+        let error = call(options.clone()).expect_err(&options.to_string());
+        let ExpressionError::Call(binding) = &error else {
+            panic!("{options}: not a binding error: {error:?}");
+        };
+        let indices: Vec<usize> = binding.argument_errors().map(|failure| failure.index).collect();
+        assert!(!indices.is_empty() && indices.iter().all(|index| *index == 2), "{options}: {indices:?}");
+    }
+    for options in [json!(null), json!({}), json!({"header": null}), json!({"format": null, "delimiter": null})] {
+        assert_eq!(call(options.clone()).unwrap_or_else(|error| panic!("{options}: {error}")), json!([["web", 8080]]));
+    }
+    // The coercion engine's normal conversions apply to option fields, and
+    // the handler reads the converted values: `5` splits on the character
+    // `5` (so each row is one cell), and `"false"` reads the header as a row.
+    for (options, code) in [(json!({"delimiter": 5}), "dm.data.contract_mismatch"), (json!({"header": "false"}), "dm.data.contract_mismatch")] {
+        match call(options.clone()) {
+            Err(ExpressionError::Data(data)) => assert_eq!(data.code(), Some(code), "{options}: {data}"),
+            other => panic!("{options} binds and is applied: {other:?}"),
         }
     }
 }

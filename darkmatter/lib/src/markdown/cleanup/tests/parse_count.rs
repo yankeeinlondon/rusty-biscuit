@@ -14,7 +14,7 @@
 //! | `clean_body` / `cleanup_content*`, unchanged or malformed input | 1 (0 when malformed) | 1 |
 //! | `clean_body` / `cleanup_content*`, changed | 2 | 2 |
 //! | the same with `fixed-width` after a first-stage edit | at most 3 | at most 3 |
-//! | `clean_document` | the body's counts | the body's counts |
+//! | `clean_document` | the body's counts, plus 2 when a link title may need migrating | the body's counts, plus 2 likewise |
 //! | `strip_incidental_newlines` (standalone, unguarded) | 1 | 1 |
 //! | `reflow_to_width` (standalone, unguarded) | 1 | 1 |
 //!

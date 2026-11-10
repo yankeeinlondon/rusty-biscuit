@@ -563,6 +563,14 @@ types:
             category(Logical);
             example(or(false, true) => true);
         ) -> Returns true when any argument is truthy, evaluating them in order and stopping at the first truthy one.
+    try: |-
+        function(
+            parameters(expr: unknown | null, fallback: unknown | null);
+            returns(unknown | null);
+            category(Logical);
+            example(try(null, 7) => null);
+            example(try(0, 7) => 0);
+        ) -> Returns the value of expr. Only when expr fails with a recoverable read failure (a missing or unreadable source, malformed or contract-mismatched data, or an allowed remote read that fails in transport) is fallback evaluated and returned instead; every other failure propagates. Any value expr produces, including a falsy one such as null, false, 0, or an empty string, list, or object, is a success.
 
     # Type Conversion
     number: |-
@@ -789,6 +797,24 @@ types:
                 fallible;
                 example(link("fixture.md", "Fixture") => "[Fixture](/path/to/fixture.md)"; display-only: result includes an absolute destination path, which is not portable);
             ) -> Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its text; null passes through.
+    load_data: |-
+        function(
+            parameters(file: file | null, as: type-definition(container), options?: {format: enum(yaml, yml, json, jsonl, ndjson, csv, tsv, toml, json5), delimiter: string, header: boolean} | null);
+            returns(any | null);
+            category(Filesystem);
+            fallible;
+            example(load_data("fixture.yaml", "string[]") => ["macOS", "Linux", "Windows"]);
+            example(load_data("fixture.json", "{name: string, tags: string[]}") => {name: "Ada", tags: ["math", "engines"]});
+            example(load_data("fixture.jsonl", "{id: number, ok: boolean}[]") => [{id: 1, ok: true}, {id: 2, ok: false}]);
+            example(load_data("fixture.csv", "{name: string, active: boolean, stars: number}[]") => [{name: "Ada", active: true, stars: 1000}, {name: "Grace", active: false, stars: 250}]);
+            example(load_data("fixture.tsv", "tuple([string, number])[]") => [["web", 8080], ["db", 5432]]);
+            example(load_data("fixture.toml", "{package: {name: string, version: string}}") => {package: {name: "demo", version: "1.0.0"}});
+            example(load_data("fixture.json5", "{hosts: string[]}") => {hosts: ["alpha", "beta"]});
+            example(load_data("fixture-headerless.csv", "tuple([string, number])[]", {header: false}) => [["web", 8080], ["db", 5432]]);
+            example(load_data("fixture-semicolon.txt", "{name: string, port: number}[]", {format: "csv", delimiter: ";"}) => [{name: "web", port: 8080}, {name: "db", port: 5432}]);
+            example(load_data("fixture-export", "{name: string, tags: string[]}", {format: "json"}) => {name: "Ada", tags: ["math", "engines"]});
+            example(load_data(null, "string[]") => null);
+        ) -> Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file and returns its data converted to the container type `as` describes, or fails naming where the data breaks that type. CSV and TSV rows become objects keyed by the header, or lists of cells, as `as`'s element type says. The optional `options` object chooses how the file is read: `format` (`yaml`, `json`, `jsonl`, `csv`, `tsv`, `toml`, `json5`, or the aliases `yml` and `ndjson`) overrides the extension; `delimiter`, one ASCII character other than a double quote, CR, or LF, separates CSV cells (default a comma; TSV accepts only a tab); `header: false` reads every CSV or TSV record as a row by position, which needs a list-row contract (default `true`). `delimiter` or `header` on a non-tabular format is an error. Null passes through without reading anything.
     markdown_body_empty: |-
         function(
             parameters(file: file | null);
@@ -1127,4 +1153,4 @@ types:
             category(Composition);
             fallible;
             example(as_markdown("::file ./intro.md") => "# Introduction"; display-only: result depends on the transcluded file);
-        ) -> Composes the text as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown; null passes through.
+        ) -> Composes the text as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown; the content inherits the calling document's values as a `::file` child does; null passes through.

@@ -1,0 +1,6 @@
+kind: schema
+description: one enum slot mixed with a literal that the slot's data repeats; resolved against `os.yaml` the members are macOS, Linux, Windows
+$schema:
+    os_support: os[](required) -> which operating systems the feature supports
+types:
+    os: enum(macOS, {{ load_data("./os.yaml", "string[]") }}; required) -> a supported operating system

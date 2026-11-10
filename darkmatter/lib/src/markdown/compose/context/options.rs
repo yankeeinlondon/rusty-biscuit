@@ -63,13 +63,22 @@ pub fn caller_input_records_for_overrides<'a>(
     context: &biscuit_file::FileResolutionContext,
     launch_area: Option<&std::path::Path>,
 ) -> CallerInputRecords {
-    let origin = context.for_trusted_external_cwd(launch_area.unwrap_or_else(|| context.request_cwd()));
+    let origin = caller_origin(context, launch_area);
     overrides
         .into_iter()
         .filter_map(serde_json::Value::as_object)
         .flatten()
         .map(|(key, value)| (key.clone(), CallerInputRecord::new(value.clone(), origin.clone())))
         .collect()
+}
+
+/// The context a caller's value was authored in: the launch area when one is
+/// recorded, and else the request directory of `context`.
+pub(crate) fn caller_origin(
+    context: &biscuit_file::FileResolutionContext,
+    launch_area: Option<&std::path::Path>,
+) -> biscuit_file::FileResolutionContext {
+    context.for_trusted_external_cwd(launch_area.unwrap_or_else(|| context.request_cwd()))
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -236,6 +245,14 @@ pub struct ComposeOptions {
     /// transcludes it. Never propagated to grandchildren.
     pub(crate) inherited_origin: InheritedOrigin,
 
+    /// The command line's `key=value` setters, applied per document after
+    /// `set_overrides`. A key `data_overrides` names keeps that value.
+    pub(crate) setters: crate::markdown::compose::setters::SetterPlan,
+
+    /// What `setters` wrote into the current document, as caller input. Derived
+    /// per document from `setters`, so no cache key holds it.
+    pub(crate) setter_bindings: crate::markdown::compose::setters::SetterBindings,
+
     /// Raw caller overrides and their per-property authoring contexts.
     pub(crate) caller_input_records: CallerInputRecords,
 
@@ -369,6 +386,10 @@ pub struct ComposeOptions {
 
     /// Optional fixed column width for cleanup reflow. Default: `None`.
     pub(crate) fixed_width: Option<usize>,
+
+    /// The explicit `--width` of the composed output, which outranks both
+    /// [`fixed_width`](Self::fixed_width) and the unwrap rule. Default: `None`.
+    pub(crate) output_width: Option<renderable::output::Width>,
 
     /// The cleanup stage's nested-list `indentation`. Default: `Four`.
     pub(crate) indentation: crate::markdown::cleanup::rules::Indentation,
@@ -640,6 +661,19 @@ pub struct ComposeOptions {
     /// request per URL. `None` means each stage builds its own.
     pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
 
+    // ── Shared `load_data` runtime and read set ───────────────────
+    /// The command-wide data memo and read set, shared by every pass that
+    /// clones these options (reference check, pre-flight, lifecycle,
+    /// composition, nested documents). `None` means each root composition
+    /// builds its own, so separate compositions never share results.
+    pub(crate) data_runtime: Option<crate::markdown::compose::DataRuntime>,
+
+    // ── Shared schema-slot session ────────────────────────────────
+    /// The command's schema-slot session: its grants, pinned snapshots, and
+    /// resolution stack, shared by every pass that clones these options.
+    /// `None` means each root composition builds its own from the request.
+    pub(crate) slot_session: Option<Arc<crate::markdown::schemas::slots::SlotSession>>,
+
     // ── File-reference launch-area anchor (diagnostic only) ────────
     /// The captured launch-area directory a top-level caller (Claudine) was
     /// invoked from.
@@ -668,6 +702,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("set_overrides", &self.set_overrides)
             .field("data_overrides", &self.data_overrides)
             .field("inherited_origin", &self.inherited_origin)
+            .field("setters", &self.setters)
             .field("caller_input_records", &self.caller_input_records)
             .field("max_transclusion_depth", &self.max_transclusion_depth)
             .field("allow_remote_transclusion", &self.allow_remote_transclusion)
@@ -702,6 +737,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("list_spacing", &self.list_spacing)
             .field("incidental_newline_mode", &self.incidental_newline_mode)
             .field("fixed_width", &self.fixed_width)
+            .field("output_width", &self.output_width)
             .field("indentation", &self.indentation)
             .field("cache_access_mode", &self.cache_access_mode)
             .field("cache_root", &self.cache_root)
@@ -880,6 +916,20 @@ impl ComposeOptions {
             .or_else(|| self.context.observations().repository())
     }
 
+    /// The root of the request's one repository observation, which a schema
+    /// slot's automatic read grant is judged against; `None` when the request
+    /// found no repository (never a new discovery).
+    pub(crate) fn slot_repository_root(&self) -> Option<std::path::PathBuf> {
+        self.request_repository().and_then(|repository| repository.root.clone())
+    }
+
+    /// The request's one repository observation, which a schema slot's
+    /// `package()`/`package_area()` read; `None` when the request holds none
+    /// (never a new discovery).
+    pub(crate) fn slot_repository(&self) -> Option<std::sync::Arc<super::repository_scope::RepositoryObservation>> {
+        self.request_repository().cloned()
+    }
+
     /// The request's repository observation when it found a repository that
     /// contains `dir`, so the context builder can project it instead of
     /// discovering the repository a second time.
@@ -956,6 +1006,8 @@ impl ComposeOptions {
             set_overrides: None,
             data_overrides: None,
             inherited_origin: InheritedOrigin::default(),
+            setters: crate::markdown::compose::setters::SetterPlan::default(),
+            setter_bindings: crate::markdown::compose::setters::SetterBindings::default(),
             caller_input_records: CallerInputRecords::new(),
             caller_file_provenance: std::collections::HashMap::new(),
             max_transclusion_depth: 16,
@@ -982,6 +1034,7 @@ impl ComposeOptions {
             list_spacing: crate::markdown::cleanup::rules::ListItemPadding::Preserve,
             incidental_newline_mode: crate::markdown::cleanup::IncidentalNewlineMode::Strip,
             fixed_width: None,
+            output_width: None,
             indentation: crate::markdown::cleanup::rules::Indentation::Four,
             cache_access_mode: CacheAccessMode::default(),
             cache_root: None,
@@ -1017,6 +1070,8 @@ impl ComposeOptions {
             schema_phase: None,
             preflight_graph: None,
             remote_fetch: None,
+            data_runtime: None,
+            slot_session: None,
             exclude_keys: std::collections::HashSet::new(),
             host_globals: None,
             deferred_shell_roots: Default::default(),
@@ -1075,9 +1130,29 @@ impl ComposeOptions {
     /// holds for a failed composition, plus the skipped triggers of documents
     /// the walk finished before the one that failed. An approval run that
     /// fails on policy after a successful walk leaves that walk's
-    /// skipped-trigger warnings. Empty after a successful run.
+    /// skipped-trigger warnings. A reference validation that could not build
+    /// its graph leaves the warnings of the documents it prepared. Empty after
+    /// a successful run.
     pub fn take_preflight_failure_warnings(&self) -> Vec<crate::markdown::compose::ComposeWarning> {
         self.preflight_failure_warnings.take()
+    }
+
+    /// The options of a reference check that runs ahead of composition and
+    /// never instead of it.
+    ///
+    /// Body `::shell` directives stay unexpanded. Like the shell-approval
+    /// walk, the check does not hold the values a later stage produces, so a
+    /// value still waiting on a command and an expression it cannot finish are
+    /// left to the composition that owns their verdict. A failure the check
+    /// can prove on its own (a rejected call, a schema violation, an invalid
+    /// file reference) still fails it.
+    #[must_use]
+    pub fn for_reference_check(mut self) -> Self {
+        self.enabled_operations.remove(ComposeOperation::ShellExpansion);
+        self.defer_shell_pending_schema_problems = true;
+        self.defer_missing_runtime_context = true;
+        self.defer_expression_failures = true;
+        self
     }
 
     /// Restricts composition to the effective frontmatter surface: frontmatter
@@ -1201,6 +1276,19 @@ impl ComposeOptions {
         self
     }
 
+    /// Sets the command line's `key=value` setters.
+    ///
+    /// A setter is applied to each document after [`with_set_overrides`](Self::with_set_overrides)
+    /// and read through that document's schema, so it reaches a transcluded child
+    /// as a value of the child's declared type. A nested setter keeps its
+    /// siblings. Its value is authored, like a `--set` value.
+    #[must_use]
+    pub fn with_setters(mut self, setters: crate::markdown::compose::setters::SetterPlan) -> Self {
+        self.setter_bindings = setters.provisional_bindings();
+        self.setters = setters;
+        self
+    }
+
     /// Sets override values that overwrite existing frontmatter keys as
     /// **data**.
     ///
@@ -1264,14 +1352,6 @@ impl ComposeOptions {
         self
     }
 
-    /// Clears the caller overrides that target the root document, for a
-    /// compose of other content (`as_markdown`) under these options.
-    pub(crate) fn clear_root_overrides(&mut self) {
-        self.set_overrides = None;
-        self.data_overrides = None;
-        self.inherited_origin = InheritedOrigin::default();
-    }
-
     /// Installs immutable raw caller values with their per-property origins.
     #[must_use]
     pub fn with_caller_input_records(mut self, records: CallerInputRecords) -> Self {
@@ -1305,6 +1385,23 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_fixed_width(mut self, width: usize) -> Self {
         self.fixed_width = Some(width.max(1));
+        self
+    }
+
+    /// Sets the explicit output width of the composed document.
+    ///
+    /// It decides the cleanup stage's unwrap and fixed-width rules, winning
+    /// over [`with_fixed_width`](Self::with_fixed_width) and
+    /// [`with_incidental_newline_mode`](Self::with_incidental_newline_mode):
+    ///
+    /// | Width | Prose |
+    /// |---|---|
+    /// | `Columns(n)` | as [`with_fixed_width`](Self::with_fixed_width)`(n)` |
+    /// | `Unlimited` | unwrapped, no fixed width |
+    /// | `Source` | line breaks kept as authored |
+    #[must_use]
+    pub fn with_output_width(mut self, width: renderable::output::Width) -> Self {
+        self.output_width = Some(width);
         self
     }
 
@@ -1755,6 +1852,7 @@ impl ComposeOptions {
         );
         context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         context.remote_fetch = self.remote_reads_enabled().then(|| remote_fetch.clone());
+        context.data = self.data_runtime();
         context.ctx_values = self.context_values_for_resolution();
         context.observations = self.context.observations().clone();
         if !self.suppress_shell_probes {
@@ -1803,6 +1901,7 @@ impl ComposeOptions {
             self.source_file_resolution_context_in(request_context),
         );
         context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
+        context.data = self.data_runtime();
         context.ctx_values = self.context_values_for_resolution();
         context.observations = self.context.observations().clone();
         if !self.suppress_shell_probes {
@@ -2305,6 +2404,74 @@ impl ComposeOptions {
         self
     }
 
+    /// Attaches a fresh `load_data` runtime that every pass cloned from these
+    /// options shares: one memo and one read set for the whole command.
+    ///
+    /// A command that runs several passes (a reference check, pre-flight,
+    /// lifecycle events, then composition) calls this once before building
+    /// its first request, so a file is read once across them and the read set
+    /// lists every pass's reads. A root composition with none attached builds
+    /// its own.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::ComposeOptions;
+    ///
+    /// let options = ComposeOptions::new().with_shared_data_runtime();
+    /// let check = options.clone();
+    /// assert!(check.data_runtime_handle().unwrap().same_instance(options.data_runtime_handle().unwrap()));
+    /// ```
+    #[must_use]
+    pub fn with_shared_data_runtime(mut self) -> Self {
+        self.data_runtime = Some(crate::markdown::compose::DataRuntime::new());
+        self
+    }
+
+    /// Attaches `runtime` as the shared `load_data` runtime, so the caller
+    /// keeps a handle to its read set and counters.
+    #[must_use]
+    pub fn with_data_runtime(mut self, runtime: crate::markdown::compose::DataRuntime) -> Self {
+        self.data_runtime = Some(runtime);
+        self
+    }
+
+    /// Resolves schema templates (schemas holding `{{ … }}` slots) through
+    /// `session` in every pass cloned from these options, so the command's
+    /// grants are decided once and each template is pinned to one snapshot.
+    /// Without one a root composition builds its own session from the
+    /// request (its data runtime, repository, `--allow host=HOST` values,
+    /// home, and approval handler).
+    #[must_use]
+    pub fn with_slot_session(mut self, session: Arc<crate::markdown::schemas::slots::SlotSession>) -> Self {
+        self.slot_session = Some(session);
+        self
+    }
+
+    /// The attached schema-slot session, if any.
+    pub fn slot_session(&self) -> Option<&Arc<crate::markdown::schemas::slots::SlotSession>> {
+        self.slot_session.as_ref()
+    }
+
+    /// The attached `load_data` runtime, if any.
+    pub fn data_runtime_handle(&self) -> Option<&crate::markdown::compose::DataRuntime> {
+        self.data_runtime.as_ref()
+    }
+
+    /// Returns the attached `load_data` runtime, otherwise a fresh one that
+    /// shares nothing.
+    pub(crate) fn data_runtime(&self) -> crate::markdown::compose::DataRuntime {
+        self.data_runtime.clone().unwrap_or_default()
+    }
+
+    /// Empties the attached runtime's memo after a command or a lifecycle
+    /// side effect ran. With none attached there is no memo anyone else could read.
+    pub(crate) fn invalidate_data_memo(&self) {
+        if let Some(runtime) = &self.data_runtime {
+            runtime.invalidate_memo();
+        }
+    }
+
     /// Returns the shared remote-fetch runtime when one is attached, otherwise
     /// builds a fresh one with the transport cache resolved from `cache_root`.
     pub(crate) fn remote_fetch_runtime(&self) -> RemoteFetchRuntime {
@@ -2388,6 +2555,16 @@ impl ComposeSource {
     /// Creates a file source from a path reference.
     pub fn infer_from_path(path: impl AsRef<Path>) -> Self {
         Self::File(path.as_ref().to_path_buf())
+    }
+
+    /// The file or URL a diagnostic names for this source; `None` for input
+    /// with no named origin.
+    pub fn document_path(&self) -> Option<PathBuf> {
+        match self {
+            Self::File(path) => Some(path.clone()),
+            Self::Url(url) => Some(url.as_str().into()),
+            Self::Unknown => None,
+        }
     }
 
     /// Returns a human-readable form of the source.
@@ -2924,6 +3101,8 @@ impl ComposeOptions {
             set_overrides,
             data_overrides,
             inherited_origin,
+            setters,
+            setter_bindings: _,
             caller_input_records,
             caller_file_provenance,
             max_transclusion_depth,
@@ -2952,6 +3131,7 @@ impl ComposeOptions {
             list_spacing,
             incidental_newline_mode,
             fixed_width,
+            output_width,
             indentation,
             cache_access_mode,
             cache_root,
@@ -2996,6 +3176,12 @@ impl ComposeOptions {
             absolute_fallback_warning,
             preflight_graph,
             remote_fetch,
+            // A memo and read-set sink: it changes how often a file is read
+            // and what the report lists, never a composed result.
+            data_runtime: _,
+            // Grants and pinned snapshots: they decide whether a template
+            // resolves, and the resolved schema is judged by its content.
+            slot_session: _,
             file_ref_fallback_dir,
         } = self;
 
@@ -3074,6 +3260,11 @@ impl ComposeOptions {
         }
         enc.field("inherited_origin");
         inherited_origin.encode(&mut enc);
+        enc.field("setters");
+        enc.count(setters.arguments().len());
+        for argument in setters.arguments() {
+            enc.str(argument);
+        }
         enc.field("caller_input_records");
         enc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
@@ -3234,6 +3425,16 @@ impl ComposeOptions {
                 enc.u64(*width as u64);
             }
             None => enc.tag(0),
+        }
+        enc.field("output_width");
+        match output_width {
+            None => enc.tag(0),
+            Some(renderable::output::Width::Columns(columns)) => {
+                enc.tag(1);
+                enc.u64(u64::from(*columns));
+            }
+            Some(renderable::output::Width::Unlimited) => enc.tag(2),
+            Some(renderable::output::Width::Source) => enc.tag(3),
         }
         enc.field("indent_size");
         enc.u64(indentation.spaces().unwrap_or(0) as u64);
@@ -3558,6 +3759,11 @@ impl ComposeOptions {
         }
         cenc.field("inherited_origin");
         inherited_origin.encode(&mut cenc);
+        cenc.field("setters");
+        cenc.count(setters.arguments().len());
+        for argument in setters.arguments() {
+            cenc.str(argument);
+        }
         cenc.field("caller_input_records");
         cenc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
@@ -4048,6 +4254,25 @@ mod tests {
         options.compose_cache_fingerprint(&neutral_context())
     }
 
+    #[test]
+    fn every_output_width_has_its_own_options_fingerprint() {
+        use renderable::output::Width;
+
+        let mut fingerprints: Vec<u64> = [
+            ComposeOptions::new(),
+            ComposeOptions::new().with_output_width(Width::Columns(40)),
+            ComposeOptions::new().with_output_width(Width::Columns(80)),
+            ComposeOptions::new().with_output_width(Width::Unlimited),
+            ComposeOptions::new().with_output_width(Width::Source),
+        ]
+        .iter()
+        .map(|options| options.classify_options(&neutral_context()).graph_value_fingerprint)
+        .collect();
+        fingerprints.sort_unstable();
+        fingerprints.dedup();
+        assert_eq!(fingerprints.len(), 5);
+    }
+
     /// Options over a deterministic fixed context.
     ///
     /// The graph identity folds in the complete runtime context (including
@@ -4120,6 +4345,24 @@ mod tests {
         }
         assert_ne!(rid(&unopened), rid(&variants[2]));
         assert_ne!(unopened.compose_cache_fingerprint(), variants[2].compose_cache_fingerprint());
+    }
+
+    #[test]
+    fn setters_participate_in_graph_and_cache_identity() {
+        use crate::markdown::compose::setters::{SetterPlan, TokenClass, classify_token};
+        let plan = |token: &str| {
+            let TokenClass::Setter(setter) = classify_token(token) else {
+                panic!("`{token}` is a setter");
+            };
+            SetterPlan::new([setter]).unwrap()
+        };
+        let a = fixed_opts().with_setters(plan("a.b=1"));
+        let b = fixed_opts().with_setters(plan("a.b=1.0"));
+        assert_ne!(id(&a), id(&b));
+        assert_ne!(fp(&a), fp(&b));
+        assert_ne!(id(&a), id(&fixed_opts()));
+        assert_eq!(id(&a), id(&a.clone()));
+        assert_eq!(fp(&a), fp(&a.clone()));
     }
 
     #[test]

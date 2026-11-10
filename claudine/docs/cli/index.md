@@ -29,6 +29,9 @@ Wrapped Execution:
   kimi              Wrap Kimi Code with Claudine preflight/env handling
   opencode          Wrap OpenCode with Claudine preflight/env handling
   qwen              Wrap Qwen Code with Claudine preflight/env handling
+  kilo              Wrap Kilo Code with Claudine preflight/env handling
+  pi                Wrap Pi with Claudine preflight/env handling
+  antigravity       Wrap Antigravity (the `agy` CLI) with Claudine preflight/env handling
   steer             Send a message to one running agent session
 
 Composition:
@@ -51,7 +54,7 @@ Administration:
 ## CLI Switch Overview
 
 - all _switches_ start with a `--{name}` signature although in some cases you may find a _short form_ alias that takes the `-{alias}` format
-- there is a **global** `--help`/`-h` switch that can be used anywhere in the CLI to get help; the help you get will be specific to where you in the API:
+- there is a **global** `--help`/`-h` switch that can be used anywhere in the CLI to get help; for most commands the help you get is specific to where you are in the API:
     - `claudine -h` - broad help overview listing commands, etc.
-    - `claudine compose -h` - help on the **compose** command
-- each command will also
+    - `claudine hooks -h`, `claudine mcp -h`, and the other administrative and shared-resource subcommands print their own help, and each provider wrapper (`claudine codex -h`, etc.) prints wrapper-specific help
+    - `claudine compose -h`, `claudine inline-compose -h`, and `claudine sequence -h` currently print the same broad overview as `claudine -h`; per-command help for these three composition commands is **planned**

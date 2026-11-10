@@ -944,7 +944,9 @@ fn pre_validate_verdict(
             let caller_resolved = !matches!(p.kind, ValidationProblemKind::Missing)
                 && top_level_pointer_segment(&p.path)
                     .is_some_and(|name| caller_resolved_eager_files.contains(&name));
-            !caller_resolved && is_composition_independent(p, &raw_instance, data_keys, &report.deferred)
+            !caller_resolved
+                && !is_nested_caller_file_verdict(p, set_overrides.as_ref())
+                && is_composition_independent(p, &raw_instance, data_keys, &report.deferred)
         })
         .cloned()
         .collect();
@@ -1180,6 +1182,11 @@ fn drop_invalid_optionals_with_schemas(
                 if bundle::is_claudine_owned(&effective, &name) {
                     continue;
                 }
+                // Composition reads this file from the caller's origin, and
+                // refuses it there if it is missing.
+                if is_nested_caller_file_verdict(problem, set_overrides.as_ref()) {
+                    continue;
+                }
                 if is_required(shape, &name) {
                     continue;
                 }
@@ -1244,8 +1251,39 @@ fn drop_invalid_optionals_with_schemas(
     (source, set_overrides, dropped)
 }
 
-/// The top-level properties whose file-reference verdict is on a caller
-/// override that resolves from the caller's launch area.
+/// Whether `problem` is a file verdict on a string inside an object a caller
+/// supplied.
+///
+/// This validator judges such a value from the document's directory. Composition
+/// projects it from the caller's origin, whichever schema shape holds it, and only
+/// that verdict names the right base. So a launch leaves it to composition rather
+/// than refusing a file composition accepts, or dropping an optional object whose
+/// file composition would refuse. A top-level string or list of strings is
+/// judged by [`caller_resolved_file_properties`] instead, which keeps its
+/// interactive completion.
+pub(super) fn is_nested_caller_file_verdict(
+    problem: &ValidationProblem,
+    overrides: Option<&serde_json::Value>,
+) -> bool {
+    fn holds_object(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(_) => true,
+            serde_json::Value::Array(items) => items.iter().any(holds_object),
+            _ => false,
+        }
+    }
+    matches!(problem.code, ValidationProblemCode::InvalidFileReference)
+        && overrides.is_some_and(|overrides| {
+            overrides.pointer(&problem.path).is_some_and(serde_json::Value::is_string)
+                && top_level_pointer_segment(&problem.path)
+                    .and_then(|name| overrides.get(&name))
+                    .is_some_and(holds_object)
+        })
+}
+
+/// The caller overrides whose file-reference verdict is about the wrong base:
+/// the top-level property of a string or list resolving from the caller's launch
+/// area, and the JSON pointer of such a file inside a supplied object.
 ///
 /// The validator judges every value from the document's directory; a caller
 /// value resolves from where the caller launched, so such a verdict is about
@@ -1256,9 +1294,10 @@ pub(super) fn caller_resolved_file_properties(
     launch_area: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> std::collections::HashSet<String> {
-    let Some((launch_area, overrides)) =
-        launch_area.zip(overrides.and_then(serde_json::Value::as_object))
-    else {
+    let Some((launch_area, whole)) = launch_area.zip(overrides) else {
+        return std::collections::HashSet::new();
+    };
+    let Some(overrides) = whole.as_object() else {
         return std::collections::HashSet::new();
     };
     // The caller launched there, so the launch area is trusted even when the
@@ -1267,11 +1306,16 @@ pub(super) fn caller_resolved_file_properties(
     problems
         .iter()
         .filter(|problem| matches!(problem.code, ValidationProblemCode::InvalidFileReference))
-        .filter_map(|problem| top_level_pointer_segment(&problem.path))
-        .filter(|property| {
+        .filter_map(|problem| {
+            if is_nested_caller_file_verdict(problem, Some(whole)) {
+                let value = whole.pointer(&problem.path)?;
+                return file_override_resolves_from(value, &launch_context).then(|| problem.path.clone());
+            }
+            let property = top_level_pointer_segment(&problem.path)?;
             overrides
-                .get(property)
+                .get(&property)
                 .is_some_and(|value| file_override_resolves_from(value, &launch_context))
+                .then_some(property)
         })
         .collect()
 }

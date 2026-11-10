@@ -1,7 +1,7 @@
 use super::*;
 use crate::discovery::detection::TerminalApp;
 use crate::discovery::fonts::CellSize;
-use crate::utils::layout::Alignment;
+use crate::utils::layout::{Alignment, Edges, Length};
 use serial_test::serial;
 use std::io::Write;
 use std::path::Path;
@@ -1252,6 +1252,25 @@ const CELL_8X16: CellSize = CellSize {
     width: 8,
     height: 16,
 };
+
+#[test]
+fn an_image_with_no_width_to_fill_takes_its_natural_size() {
+    let layout = Layout {
+        margin: Edges::x(Length::ch(2)),
+        alignment: Alignment::Right,
+        ..Layout::default()
+    };
+    let natural = |width: &ImageWidth| {
+        TerminalImage::resolve_unbounded_dimensions_for(width, &layout, 400.0, Some(CELL_8X16))
+    };
+    // 400 units at 16-unit text on a 16 px line is 400 px, or 50 columns of 8 px.
+    assert_eq!(natural(&ImageWidth::Fill).image_width, 50);
+    assert_eq!(natural(&ImageWidth::Percent(0.5)).image_width, 50);
+    assert_eq!(natural(&ImageWidth::Scale(2.0)).image_width, 100);
+    assert_eq!(natural(&ImageWidth::Characters(7)).image_width, 7);
+    // A left margin in cells still applies; alignment has no slack.
+    assert_eq!(natural(&ImageWidth::Fill).x_offset, 2);
+}
 
 #[test]
 fn scaled_columns_follow_the_cell_height_rule() {

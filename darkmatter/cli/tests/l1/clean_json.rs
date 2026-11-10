@@ -1,4 +1,4 @@
-//! Level-1 CLI coverage for `md clean --json` (acceptance row D-5).
+//! Level-1 CLI coverage for `md clean --output json` (acceptance row D-5).
 //!
 //! The envelope is a machine contract, so these tests pin field names, value
 //! shapes, enum spellings, and the STDOUT/STDERR channel split rather than
@@ -20,14 +20,14 @@ fn doc(content: &str) -> (tempfile::TempDir, PathBuf) {
     (dir, path)
 }
 
-/// Runs `md clean --json` and parses the envelope, asserting STDOUT is valid
+/// Runs `md clean --output json` and parses the envelope, asserting STDOUT is valid
 /// JSON and nothing else.
 fn envelope(fixture: &CliProcessFixture, path: &Path, extra: &[&str]) -> Value {
     let assert = fixture
         .command()
         .arg("clean")
         .arg(path)
-        .arg("--json")
+        .args(["--output", "json"])
         .args(extra)
         .assert()
         .success();
@@ -43,7 +43,7 @@ fn envelope(fixture: &CliProcessFixture, path: &Path, extra: &[&str]) -> Value {
 fn stdin_envelope(fixture: &CliProcessFixture, source: &str) -> Value {
     let assert = fixture
         .command()
-        .args(["clean", "-", "--json"])
+        .args(["clean", "-", "--output", "json"])
         .write_stdin(source)
         .assert()
         .success();
@@ -550,7 +550,7 @@ fn test_json_suppresses_document_and_human_rendering_on_stdout() {
         .command()
         .arg("clean")
         .arg(&path)
-        .arg("--json")
+        .args(["--output", "json"])
         .assert()
         .success();
     let output = assert.get_output();
@@ -574,7 +574,7 @@ fn test_json_suppresses_document_and_human_rendering_on_stdout() {
     let _: Value = serde_json::from_str(&stdout).unwrap();
 }
 
-/// `--save --json` performs the write *and* prints the envelope.
+/// `--save --output json` performs the write *and* prints the envelope.
 #[test]
 fn test_json_with_save_writes_file_and_prints_envelope() {
     let fixture =
@@ -604,7 +604,7 @@ fn test_json_changed_reports_body_only_cleanup() {
     assert_eq!(report["changed"], Value::Bool(true));
 }
 
-/// `--save --json` prints the envelope instead of the delta report.
+/// `--save --output json` prints the envelope instead of the delta report.
 #[test]
 fn test_json_with_save_suppresses_delta_report() {
     let fixture =
@@ -615,7 +615,7 @@ fn test_json_with_save_suppresses_delta_report() {
         .command()
         .arg("clean")
         .arg(&path)
-        .args(["--save", "--json"])
+        .args(["--save", "--output", "json"])
         .assert()
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
@@ -634,7 +634,7 @@ fn test_json_stdin_reports_null_path() {
     let fixture = CliProcessFixture::named("clean-json-test-json-stdin-reports-null-path");
     let assert = fixture
         .command()
-        .args(["clean", "-", "--json"])
+        .args(["clean", "-", "--output", "json"])
         .write_stdin("---\ntitle: @daily-report\n---\n\n# Body\n")
         .assert()
         .success();
@@ -657,7 +657,7 @@ fn test_json_unrepairable_frontmatter_exits_one_with_envelope() {
         .command()
         .arg("clean")
         .arg(&path)
-        .arg("--json")
+        .args(["--output", "json"])
         .assert()
         .failure();
 

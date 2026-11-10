@@ -73,6 +73,12 @@ fn groups() -> Vec<CommandGroup> {
                     "qwen",
                     "Wrap Qwen Code with Claudine preflight/env handling",
                 ),
+                cmd("kilo", "Wrap Kilo Code with Claudine preflight/env handling"),
+                cmd("pi", "Wrap Pi with Claudine preflight/env handling"),
+                cmd(
+                    "antigravity",
+                    "Wrap Antigravity (the `agy` CLI) with Claudine preflight/env handling",
+                ),
                 cmd("steer", "Send a message to one running agent session"),
             ],
         },
@@ -98,10 +104,6 @@ fn groups() -> Vec<CommandGroup> {
                 cmd("uninstall", "Remove Claudine hooks from all agents"),
                 cmd("providers", "Show provider capability matrix"),
                 cmd("logs", "Query and sync Claudine JSONL logs"),
-                cmd(
-                    "budget",
-                    "Create and operate the shared budget ledger a sequence run enforces",
-                ),
                 cmd(
                     "dashboard",
                     "Show the mesh NOW view: live sessions across rendezvous hosts",
@@ -230,6 +232,29 @@ mod tests {
             .iter()
             .find(|g| g.name == name)
             .unwrap_or_else(|| panic!("expected group `{name}` in help output"))
+    }
+
+    /// Visible subcommands that are deliberately left off the grouped help
+    /// screen, each with its reason.
+    const UNLISTED: &[(&str, &str)] = &[("signals", "developer/CI tool for the signal-detection tables")];
+
+    /// The grouped screen is hand-written, so it drifts from the parser: it
+    /// once omitted the `kilo`, `pi`, and `antigravity` wrappers and listed a
+    /// `budget` command that never existed.
+    #[test]
+    fn grouped_help_lists_exactly_the_visible_subcommands() {
+        use clap::CommandFactory;
+        let parser: std::collections::BTreeSet<String> = crate::args::Cli::command()
+            .get_subcommands()
+            .filter(|sub| !sub.is_hide_set())
+            .map(|sub| sub.get_name().to_string())
+            .filter(|name| !UNLISTED.iter().any(|(unlisted, _)| unlisted == name))
+            .collect();
+        let listed: std::collections::BTreeSet<String> = groups()
+            .iter()
+            .flat_map(|group| group.commands.iter().map(|entry| entry.name.to_string()))
+            .collect();
+        assert_eq!(listed, parser, "grouped help (left) must match the parser's visible subcommands (right)");
     }
 
     #[test]

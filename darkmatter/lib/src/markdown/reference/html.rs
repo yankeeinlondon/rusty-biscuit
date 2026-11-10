@@ -2,7 +2,18 @@
 //!
 //! Extracts reference records from HTML tags within markdown documents:
 //! - `<a>` and `<img>` (Phase 1)
+//! - `<video>`, `<audio>`, `<source>`, `<iframe>` (their `src`)
 //! - `<style>`, `<script>`, `<link>`, `<meta>` (Phase 2)
+//!
+//! A Markdown HTML node can hold any number of tags, and a tag or a `<style>`
+//! body can span lines. [`scan_elements`] finds each element in a node, skipping
+//! comments and raw-text bodies; a tag's record is located at its `<`.
+//!
+//! A raw-text element can also span nodes: CommonMark splits one opened after
+//! prose, or one it has no block type for, at every tag, and its body can run
+//! across paragraphs. [`visit_html_elements`] therefore walks all of a
+//! document's HTML nodes in order, and [`inert_ranges`] lets the other readers
+//! drop what such a body holds.
 
 use super::types::{
     ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSyntax, ReferenceTarget,
@@ -11,6 +22,8 @@ use super::types::{
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::output;
 use markdown::mdast::Node;
+use std::borrow::Cow;
+use std::ops::Range;
 use tracing::trace;
 
 /// Extract HTML `<a>` tags as [`ReferenceRecord`]s with provenance.
@@ -77,12 +90,106 @@ pub(crate) fn extract_html_meta_tags(
 
 // ── Unified collector ───────────────────────────────────────────────
 
-/// Walks the MDAST, finds `Html` nodes, and applies a classifier function.
+/// Applies a classifier function to every active HTML element of `content`.
 fn collect_from_html_nodes(
     content: &str,
     source: &ComposeSource,
     classifier: fn(&str, &ComposeSource, usize, usize, usize) -> Option<ReferenceRecord>,
 ) -> Vec<ReferenceRecord> {
+    let mut records = Vec::new();
+    visit_html_elements(content, |text, line, span| {
+        records.extend(classifier(text, source, line, span.start, span.end));
+    });
+    records
+}
+
+/// The ranges of `content` holding the body of a raw-text element that spans
+/// Markdown nodes, each running from the end of the opener's node through the
+/// closing tag. Whatever starts inside one is text, not a reference.
+pub(crate) fn inert_ranges(content: &str) -> Vec<Range<usize>> {
+    if !content.contains('<') {
+        return Vec::new();
+    }
+    visit_html_elements(content, |_, _, _| {})
+}
+
+/// `content` with the body of every raw-text element masked, offsets and
+/// whitespace unchanged, for a reader that looks for tags in an HTML node's text.
+pub(crate) fn blank_raw_text_bodies(content: &str) -> Cow<'_, str> {
+    if !content.contains('<') {
+        return Cow::Borrowed(content);
+    }
+    let mut bodies = Vec::new();
+    visit_html_elements(content, |text, _, span| {
+        if let Some(name) = tag_name(text).map(str::to_ascii_lowercase)
+            && RAW_TEXT_ELEMENTS.contains(&name.as_str())
+            && let Some(element) = content.get(span.clone())
+            && let Some(open_end) = open_tag_end(element)
+        {
+            // The closing tag stays: without one, reparsing the blanked text
+            // could run the element to the end of the document.
+            let body_len = last_closing_tag(&element[open_end..], &name)
+                .map_or(element.len() - open_end, |closer| closer.start);
+            bodies.push(span.start + open_end..span.start + open_end + body_len);
+        }
+    });
+    if bodies.is_empty() {
+        return Cow::Borrowed(content);
+    }
+    let mut blanked = content.as_bytes().to_vec();
+    for body in bodies {
+        for byte in &mut blanked[body] {
+            // Not a space: that would indent the closing tag on a body's last
+            // line into a code block, hiding it and what follows it on reparse.
+            if !byte.is_ascii_whitespace() {
+                *byte = b'x';
+            }
+        }
+    }
+    // A body starts and ends on character boundaries and every byte in it but
+    // ASCII whitespace was replaced, so the bytes stay valid UTF-8.
+    Cow::Owned(String::from_utf8_lossy(&blanked).into_owned())
+}
+
+/// One Markdown HTML node, located in the text it was parsed from.
+struct HtmlNode<'a> {
+    value: &'a str,
+    start: usize,
+    end: usize,
+    line: usize,
+}
+
+fn collect_html_nodes<'a>(node: &'a Node, nodes: &mut Vec<HtmlNode<'a>>) {
+    if let Node::Html(html) = node
+        && let Some(position) = &html.position
+    {
+        nodes.push(HtmlNode {
+            value: &html.value,
+            start: position.start.offset,
+            end: position.end.offset,
+            line: position.start.line,
+        });
+    }
+    if let Some(children) = node.children() {
+        for child in children {
+            collect_html_nodes(child, nodes);
+        }
+    }
+}
+
+/// Calls `visit` with the text, line, and span in `content` of every active
+/// HTML element, in document order, and returns [`inert_ranges`].
+///
+/// A raw-text element's closing tag is looked for only in the HTML nodes after
+/// its own, never in the source: `</textarea>` in a code span or fence reaches
+/// a browser escaped, so it closes nothing. The search does not stop at a
+/// paragraph, because the browser reads one body across the rendered `<p>`s.
+/// With no closing tag in any later node, nothing past the opener's node is
+/// inert: a prose mention of `<title>` must not hide the references after it.
+fn visit_html_elements(
+    content: &str,
+    mut visit: impl FnMut(&str, usize, Range<usize>),
+) -> Vec<Range<usize>> {
     let root = match output::parse_mdast(content) {
         Ok(root) => root,
         Err(error) => {
@@ -90,55 +197,60 @@ fn collect_from_html_nodes(
             return Vec::new();
         }
     };
+    let mut nodes = Vec::new();
+    collect_html_nodes(&root, &mut nodes);
 
-    let line_index = super::local::LineIndex::new(content);
-    let mut records = Vec::new();
-    walk_html_nodes(&root, source, &line_index, classifier, &mut records);
-    records
+    let mut inert = Vec::new();
+    let mut index = 0;
+    let mut resume_at = 0;
+    while let Some(node) = nodes.get(index) {
+        let lines = LineMap::new(content, node.start, node.value);
+        let mut next = (index + 1, 0);
+        for element in scan_elements(node.value, resume_at) {
+            let line = node.line + node.value[..element.span.start].matches('\n').count();
+            let start = lines.to_content(element.span.start);
+            let text = &node.value[element.text];
+            let spanning = closer_in_later_node(text, &nodes[index + 1..], content).and_then(|closer| {
+                Some((content.get(start..closer.content_end)?, closer))
+            });
+            if let Some((whole, closer)) = spanning {
+                visit(whole, line, start..closer.content_end);
+                inert.push(node.end..closer.content_end);
+                next = (index + 1 + closer.nodes_ahead, closer.value_end);
+            } else {
+                visit(text, line, start..lines.to_content(element.span.end));
+            }
+        }
+        (index, resume_at) = next;
+    }
+    inert
 }
 
-fn walk_html_nodes(
-    node: &Node,
-    source: &ComposeSource,
-    line_index: &super::local::LineIndex,
-    classifier: fn(&str, &ComposeSource, usize, usize, usize) -> Option<ReferenceRecord>,
-    records: &mut Vec<ReferenceRecord>,
-) {
-    if let Node::Html(html_node) = node {
-        let position = html_node.position.as_ref();
-        let (span_start, span_end) = position
-            .map(|p| (p.start.offset, p.end.offset))
-            .unwrap_or((0, 0));
-        let base_line = position
-            .map(|p| p.start.line)
-            .unwrap_or_else(|| line_index.line_at(span_start));
+/// Where a raw-text element's closing tag ends, past its opener's node.
+struct LaterCloser {
+    /// The closing tag's node, as an index into the nodes after the opener's.
+    nodes_ahead: usize,
+    /// The end's offset in that node's value.
+    value_end: usize,
+    content_end: usize,
+}
 
-        // The MDAST parser may merge adjacent HTML lines into a single
-        // Node::Html.  Split by lines so each tag gets classified.
-        let lines: Vec<&str> = html_node.value.lines().collect();
-        if lines.len() > 1 {
-            let mut offset = span_start;
-            for (li, tag_line) in lines.iter().enumerate() {
-                let line_end = offset + tag_line.len();
-                if let Some(record) = classifier(tag_line, source, base_line + li, offset, line_end)
-                {
-                    records.push(record);
-                }
-                // +1 for the newline character
-                offset = line_end + 1;
-            }
-        } else if let Some(record) =
-            classifier(&html_node.value, source, base_line, span_start, span_end)
-        {
-            records.push(record);
-        }
+/// The closing tag in `later` for the raw-text element `text` opens, when `text`
+/// has a complete open tag and no closing tag of its own.
+fn closer_in_later_node(text: &str, later: &[HtmlNode<'_>], content: &str) -> Option<LaterCloser> {
+    let name = tag_name(text)?.to_ascii_lowercase();
+    let open_end = open_tag_end(text)?;
+    if !RAW_TEXT_ELEMENTS.contains(&name.as_str()) || closing_tag(&text[open_end..], &name).is_some() {
+        return None;
     }
-
-    if let Some(children) = node.children() {
-        for child in children {
-            walk_html_nodes(child, source, line_index, classifier, records);
-        }
-    }
+    later.iter().enumerate().find_map(|(nodes_ahead, node)| {
+        let closer = closing_tag(node.value, &name)?;
+        Some(LaterCloser {
+            nodes_ahead,
+            value_end: closer.end,
+            content_end: LineMap::new(content, node.start, node.value).to_content(closer.end),
+        })
+    })
 }
 
 // ── Tag classifiers ─────────────────────────────────────────────────
@@ -155,7 +267,7 @@ fn classify_a_tag(
     if !is_tag(html, "a") {
         return None;
     }
-    let href = extract_attribute(html, "href")?;
+    let href = extract_target(html, "href")?;
     let display = extract_inner_text(html).unwrap_or_default();
 
     let mut attributes = serde_json::Map::new();
@@ -173,6 +285,8 @@ fn classify_a_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlAnchor,
+            authored: None,
+            section: None,
         },
         attributes,
     })
@@ -188,7 +302,7 @@ fn classify_img_tag(
     if !is_tag(html, "img") {
         return None;
     }
-    let src = extract_attribute(html, "src")?;
+    let src = extract_target(html, "src")?;
 
     let mut attributes = serde_json::Map::new();
     if let Some(alt) = extract_attribute(html, "alt") {
@@ -217,6 +331,8 @@ fn classify_img_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlImage,
+            authored: None,
+            section: None,
         },
         attributes,
     })
@@ -232,7 +348,7 @@ fn classify_video_tag(
     if !is_tag(html, "video") {
         return None;
     }
-    let src = extract_attribute(html, "src")?;
+    let src = extract_target(html, "src")?;
 
     Some(ReferenceRecord {
         id: make_reference_id(source, line, span_start),
@@ -243,6 +359,8 @@ fn classify_video_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlVideoTag,
+            authored: None,
+            section: None,
         },
         attributes: serde_json::Map::new(),
     })
@@ -258,7 +376,7 @@ fn classify_audio_tag(
     if !is_tag(html, "audio") {
         return None;
     }
-    let src = extract_attribute(html, "src")?;
+    let src = extract_target(html, "src")?;
 
     Some(ReferenceRecord {
         id: make_reference_id(source, line, span_start),
@@ -269,6 +387,8 @@ fn classify_audio_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlAudioTag,
+            authored: None,
+            section: None,
         },
         attributes: serde_json::Map::new(),
     })
@@ -284,7 +404,7 @@ fn classify_source_tag(
     if !is_tag(html, "source") {
         return None;
     }
-    let src = extract_attribute(html, "src")?;
+    let src = extract_target(html, "src")?;
 
     Some(ReferenceRecord {
         id: make_reference_id(source, line, span_start),
@@ -295,6 +415,8 @@ fn classify_source_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlSourceTag,
+            authored: None,
+            section: None,
         },
         attributes: serde_json::Map::new(),
     })
@@ -310,7 +432,7 @@ fn classify_iframe_tag(
     if !is_tag(html, "iframe") {
         return None;
     }
-    let src = extract_attribute(html, "src")?;
+    let src = extract_target(html, "src")?;
 
     Some(ReferenceRecord {
         id: make_reference_id(source, line, span_start),
@@ -321,6 +443,8 @@ fn classify_iframe_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlIframeTag,
+            authored: None,
+            section: None,
         },
         attributes: serde_json::Map::new(),
     })
@@ -351,6 +475,8 @@ fn classify_style_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlStyleTag,
+            authored: None,
+            section: None,
         },
         attributes,
     })
@@ -368,7 +494,7 @@ fn classify_script_tag(
     }
 
     // Check if it has a src attribute (import) or inline content
-    if let Some(src) = extract_attribute(html, "src") {
+    if let Some(src) = extract_target(html, "src") {
         Some(ReferenceRecord {
             id: make_reference_id(source, line, span_start),
             kind: ReferenceKind::ScriptImport,
@@ -378,6 +504,8 @@ fn classify_script_tag(
                 line,
                 span: span_start..span_end,
                 syntax: ReferenceSyntax::HtmlScriptTag,
+                authored: None,
+                section: None,
             },
             attributes: serde_json::Map::new(),
         })
@@ -398,6 +526,8 @@ fn classify_script_tag(
                 line,
                 span: span_start..span_end,
                 syntax: ReferenceSyntax::HtmlScriptTag,
+                authored: None,
+                section: None,
             },
             attributes,
         })
@@ -415,7 +545,7 @@ fn classify_link_tag(
         return None;
     }
 
-    let href = extract_attribute(html, "href")?;
+    let href = extract_target(html, "href")?;
     let rel = extract_attribute(html, "rel").unwrap_or_default();
     let as_attr = extract_attribute(html, "as").unwrap_or_default();
 
@@ -454,6 +584,8 @@ fn classify_link_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlLinkTag,
+            authored: None,
+            section: None,
         },
         attributes,
     })
@@ -498,59 +630,293 @@ fn classify_meta_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlMetaTag,
+            authored: None,
+            section: None,
         },
         attributes,
     })
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────
+// ── Element scanner ─────────────────────────────────────────────────
 
-/// Checks if the HTML string is a specific tag.
-fn is_tag(html: &str, tag_name: &str) -> bool {
-    let trimmed = html.trim_start();
-    trimmed.starts_with(&format!("<{tag_name} "))
-        || trimmed.starts_with(&format!("<{tag_name}>"))
-        || trimmed.starts_with(&format!("<{tag_name}/"))
+/// Elements whose body the HTML parser reads as text, so a tag-like string in
+/// one is not a tag.
+const RAW_TEXT_ELEMENTS: [&str; 8] =
+    ["script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes"];
+
+/// One element a [`scan_elements`] pass found. Both ranges index the scanned text.
+#[derive(Debug, PartialEq, Eq)]
+struct ScannedElement {
+    /// What its classifier reads: the open tag, plus the body of a raw-text
+    /// element or an `<a>`.
+    text: Range<usize>,
+    /// What its record spans: the open tag, plus a raw-text element's body.
+    /// An `<a>` stops at its open tag because it can contain other references,
+    /// and the link stages rewrite targets inside spans assuming they do not
+    /// nest.
+    span: Range<usize>,
 }
 
-/// Extracts the value of an HTML attribute from a tag string.
-pub(super) fn extract_attribute(html: &str, attr_name: &str) -> Option<String> {
-    let patterns = [
-        format!("{attr_name}=\""),
-        format!("{attr_name}='"),
-        format!("{attr_name} = \""),
-        format!("{attr_name} = '"),
-    ];
+/// Finds every element start tag in `html` from `from` on, in order, past
+/// comments, closing tags, declarations, and the bodies of raw-text elements.
+fn scan_elements(html: &str, from: usize) -> Vec<ScannedElement> {
+    let mut elements = Vec::new();
+    let mut cursor = from;
+    while let Some(found) = html[cursor..].find('<') {
+        let start = cursor + found;
+        let rest = &html[start..];
+        let Some(name) = tag_name(rest) else {
+            cursor = start + markup_len(rest);
+            continue;
+        };
+        let open_end = start + open_tag_end(rest).unwrap_or(rest.len());
+        let lower_name = name.to_ascii_lowercase();
+        let body_end = closing_tag(&html[open_end..], &lower_name).map(|closer| open_end + closer.end);
+        if RAW_TEXT_ELEMENTS.contains(&lower_name.as_str()) {
+            let end = body_end.unwrap_or(html.len());
+            elements.push(ScannedElement { text: start..end, span: start..end });
+            cursor = end;
+        } else {
+            let text_end = if lower_name == "a" { body_end.unwrap_or(open_end) } else { open_end };
+            elements.push(ScannedElement { text: start..text_end, span: start..open_end });
+            cursor = open_end;
+        }
+    }
+    elements
+}
 
-    for pattern in &patterns {
-        if let Some(start) = html.find(pattern.as_str()) {
-            let value_start = start + pattern.len();
-            let quote_char = if pattern.ends_with('"') { '"' } else { '\'' };
-            if let Some(end) = html[value_start..].find(quote_char) {
-                return Some(
-                    html_escape::decode_html_entities(&html[value_start..value_start + end])
-                        .to_string(),
-                );
+/// The length of the non-element markup `rest` opens: a comment, CDATA section,
+/// processing instruction, declaration, or closing tag. An unterminated one
+/// runs to the end, and a bare `<` is one character of text.
+fn markup_len(rest: &str) -> usize {
+    let terminator = if rest.starts_with("<!--") {
+        "-->"
+    } else if rest.starts_with("<![CDATA[") {
+        "]]>"
+    } else if rest.starts_with("<?") {
+        "?>"
+    } else if rest.starts_with("<!") || rest.starts_with("</") {
+        ">"
+    } else {
+        return 1;
+    };
+    rest.find(terminator).map_or(rest.len(), |end| end + terminator.len())
+}
+
+/// The range of the first `</name>` closing tag in `text`, ignoring case.
+fn closing_tag(text: &str, lower_name: &str) -> Option<Range<usize>> {
+    let needle = format!("</{lower_name}");
+    let mut cursor = 0;
+    while let Some(found) = text.get(cursor..)?.find("</") {
+        let start = cursor + found;
+        let after = start + needle.len();
+        if text.get(start..after).is_some_and(|opening| opening.eq_ignore_ascii_case(&needle))
+            && text[after..].starts_with(|ch: char| ch.is_ascii_whitespace() || ch == '>' || ch == '/')
+        {
+            let end = text[after..].find('>').map_or(text.len(), |close| after + close + 1);
+            return Some(start..end);
+        }
+        cursor = start + 2;
+    }
+    None
+}
+
+/// The range of the last `</name>` closing tag in `text`, ignoring case. An
+/// element's text ends at its real closing tag, so one before it sat in a code
+/// span and closes nothing.
+fn last_closing_tag(text: &str, lower_name: &str) -> Option<Range<usize>> {
+    let mut last = None;
+    let mut cursor = 0;
+    while let Some(closer) = closing_tag(&text[cursor..], lower_name) {
+        last = Some(cursor + closer.start..cursor + closer.end);
+        cursor += closer.end;
+    }
+    last
+}
+
+/// Maps offsets in text copied from an Html node back to `content`.
+///
+/// The copy lacks what each line carries in `content` around it: a `\r` and a
+/// container prefix such as `> `. Lines therefore shift independently.
+pub(super) struct LineMap {
+    /// `(offset in the text, offset in content)` of each line's start.
+    lines: Vec<(usize, usize)>,
+    /// Whether every line was found verbatim in `content`, and so whether
+    /// [`LineMap::to_content`] is exact rather than the line's start plus a guess.
+    pub(super) exact: bool,
+}
+
+impl LineMap {
+    /// Aligns `text`, whose first byte is at `start` in `content`.
+    pub(super) fn new(content: &str, start: usize, text: &str) -> Self {
+        let mut lines = Vec::new();
+        let mut exact = true;
+        let mut text_offset = 0;
+        let mut line_start = start;
+        for (index, line) in text.split_inclusive('\n').enumerate() {
+            let line_text = line.trim_end_matches(['\r', '\n']);
+            let content_line = content.get(line_start..).unwrap_or("");
+            let content_line = &content_line[..content_line.find('\n').unwrap_or(content_line.len())];
+            let column = if index == 0 {
+                content_line.starts_with(line_text).then_some(0)
+            } else {
+                column_past_prefix(content_line, line_text)
+            };
+            exact &= column.is_some();
+            lines.push((text_offset, line_start + column.unwrap_or(0)));
+            text_offset += line.len();
+            line_start += content_line.len() + 1;
+        }
+        Self { lines, exact }
+    }
+
+    /// The `content` offset of `text_offset`.
+    pub(super) fn to_content(&self, text_offset: usize) -> usize {
+        let index = self.lines.partition_point(|(line_start, _)| *line_start <= text_offset);
+        match index.checked_sub(1).map(|line| self.lines[line]) {
+            Some((line_start, content_start)) => content_start + (text_offset - line_start),
+            None => text_offset,
+        }
+    }
+}
+
+/// Where `line_text` starts in `content_line`, past a container prefix. The
+/// rightmost candidate wins: a `>` closing a tag is also what a block-quote
+/// prefix is made of.
+fn column_past_prefix(content_line: &str, line_text: &str) -> Option<usize> {
+    let prefix_len = content_line.len() - content_line.trim_start_matches([' ', '\t', '>']).len();
+    (0..=prefix_len).rev().find(|column| content_line[*column..].starts_with(line_text))
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/// The tag name `text` opens with, when it starts with an element's start tag.
+fn tag_name(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('<')?;
+    let end = rest
+        .find(|ch: char| ch.is_ascii_whitespace() || ch == '/' || ch == '>')
+        .unwrap_or(rest.len());
+    let name = &rest[..end];
+    name.starts_with(|ch: char| ch.is_ascii_alphabetic()).then_some(name)
+}
+
+/// Checks if the HTML string is a specific tag.
+fn is_tag(html: &str, wanted: &str) -> bool {
+    tag_name(html.trim_start()).is_some_and(|name| name.eq_ignore_ascii_case(wanted))
+}
+
+/// One attribute of a start tag: its raw name and its raw value, which a bare
+/// attribute and an unterminated quote do not have.
+type RawAttribute<'a> = (&'a str, Option<&'a str>);
+
+/// Reads a start tag's attributes the way an HTML tokenizer does: a quote only
+/// opens a value right after `=`, and any ASCII whitespace separates tokens,
+/// line breaks included.
+///
+/// Returns the attributes and the offset just past the closing `>`, which is
+/// `None` when `tag` ends first.
+fn read_start_tag(tag: &str) -> (Vec<RawAttribute<'_>>, Option<usize>) {
+    let mut attributes = Vec::new();
+    let mut pos = tag_name(tag).map_or(0, |name| name.len() + 1);
+    let skip_space = |pos: usize| {
+        tag[pos..].find(|ch: char| !ch.is_ascii_whitespace()).map_or(tag.len(), |skip| pos + skip)
+    };
+    loop {
+        pos = skip_space(pos);
+        match tag[pos..].chars().next() {
+            None => return (attributes, None),
+            Some('>') => return (attributes, Some(pos + 1)),
+            Some('/') => {
+                pos += 1;
+                continue;
+            }
+            Some(_) => {}
+        }
+        // A `=` that starts an attribute is part of its name.
+        let name_start = pos + tag[pos..].chars().next().map_or(0, char::len_utf8);
+        let name_end = tag[name_start..]
+            .find(|ch: char| ch.is_ascii_whitespace() || matches!(ch, '=' | '>' | '/'))
+            .map_or(tag.len(), |end| name_start + end);
+        let name = &tag[pos..name_end];
+        pos = skip_space(name_end);
+        if !tag[pos..].starts_with('=') {
+            attributes.push((name, None));
+            continue;
+        }
+        pos = skip_space(pos + 1);
+        match tag[pos..].chars().next() {
+            Some(quote @ ('"' | '\'')) => match tag[pos + 1..].find(quote) {
+                Some(len) => {
+                    attributes.push((name, Some(&tag[pos + 1..pos + 1 + len])));
+                    pos += len + 2;
+                }
+                None => {
+                    attributes.push((name, None));
+                    return (attributes, None);
+                }
+            },
+            _ => {
+                let end = tag[pos..]
+                    .find(|ch: char| ch.is_ascii_whitespace() || ch == '>')
+                    .map_or(tag.len(), |len| pos + len);
+                attributes.push((name, Some(&tag[pos..end])));
+                pos = end;
             }
         }
     }
-
-    None
 }
 
-/// Extracts inner text between opening and closing tags.
+/// The offset just past the `>` closing the start tag `tag` begins with.
+pub(super) fn open_tag_end(tag: &str) -> Option<usize> {
+    read_start_tag(tag).1
+}
+
+/// Extracts the entity-decoded value of an HTML attribute from the start tag
+/// `html` begins with. The attribute name matches whole and ignores case.
+pub(super) fn extract_attribute(html: &str, attr_name: &str) -> Option<String> {
+    read_start_tag(html.trim_start())
+        .0
+        .into_iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(attr_name))
+        .and_then(|(_, value)| value)
+        .map(|value| html_escape::decode_html_entities(value).to_string())
+}
+
+/// The byte range of an attribute's raw value within `tag`, which must begin
+/// with the start tag. The attribute name matches whole and ignores case.
+pub(crate) fn attribute_value_range(tag: &str, attr_name: &str) -> Option<Range<usize>> {
+    let (_, value) = read_start_tag(tag)
+        .0
+        .into_iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(attr_name))?;
+    let value = value?;
+    // The tokenizer's values are subslices of `tag`.
+    let start = value.as_ptr() as usize - tag.as_ptr() as usize;
+    Some(start..start + value.len())
+}
+
+/// The target a URL attribute names. A browser strips the whitespace around a
+/// URL attribute, and an empty one loads nothing, so it is no reference; a
+/// file reference could not even parse it.
+fn extract_target(html: &str, attr_name: &str) -> Option<String> {
+    let value = extract_attribute(html, attr_name)?;
+    let target = value.trim();
+    (!target.is_empty()).then(|| target.to_string())
+}
+
+/// Extracts the entity-decoded text between the start tag `html` begins with
+/// and that element's closing tag. An unclosed raw-text element runs to the end
+/// of `html`, as it does in a browser.
 pub(super) fn extract_inner_text(html: &str) -> Option<String> {
-    let tag_end = html.find('>')?;
-    let after_tag = &html[tag_end + 1..];
-
-    if let Some(close_start) = after_tag.find("</") {
-        let text = &after_tag[..close_start];
-        if !text.is_empty() {
-            return Some(html_escape::decode_html_entities(text).to_string());
-        }
-    }
-
-    None
+    let html = html.trim_start();
+    let name = tag_name(html)?.to_ascii_lowercase();
+    let after_tag = &html[open_tag_end(html)?..];
+    let text = match last_closing_tag(after_tag, &name) {
+        Some(closer) => &after_tag[..closer.start],
+        None if RAW_TEXT_ELEMENTS.contains(&name.as_str()) => after_tag,
+        None => return None,
+    };
+    (!text.is_empty()).then(|| html_escape::decode_html_entities(text).to_string())
 }
 
 #[cfg(test)]

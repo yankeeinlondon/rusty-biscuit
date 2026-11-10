@@ -11,7 +11,7 @@ file is one a `$schema` may point at, without validating anything.
 Use these when you build a tool that needs to know *which file* a reference
 means, or *what it would mean* if the file existed, rather than the resolved
 schema itself. To build a schema, use the [`SimplifiedSchema`
-object](./schema-object.md) or the `resolve` module's resolvers, which call
+object](simplified-schema-struct.md) or the `resolve` module's resolvers, which call
 the selector for you.
 
 ## Selecting the file
@@ -117,7 +117,17 @@ resolver inside `resolve::buffers::with(&snapshot, || ...)`. Inside it, every
 schema source the resolver reads (a `$schema` target, a `Name@file` import,
 an `example(file)`, and a file an error's spans are re-read from) comes from
 the snapshot when it holds that path, and a probed location with no file but
-an open buffer is `Found`:
+an open buffer is `Found`.
+
+An open buffer is a match at its own place in the search order, exactly as
+a saved file there would be. For `lib/types.yaml` written in `/repo/doc/`,
+an open buffer at `/repo/doc/lib/types.yaml` (the first candidate) is
+selected even when `/repo/lib/types.yaml` (the repository fallback) exists
+on disk, and `attempted` ends at the buffer: the fallback is never probed,
+and a host that approves each probe is never asked about it. A bare name
+stops at the first schema root holding a file or a buffer the same way. A
+file on disk at a location wins there, and its buffer supplies its text. A
+recursive (`%`) reference searches only the disk.
 
 ```rust
 let mut open = SourceBuffers::default();
@@ -130,6 +140,44 @@ Outside `with`, resolution reads only the disk. The snapshot is plain
 `Send + Sync` data, applies to the calling thread only, and is restored when
 `with` returns, so the host captures it once per preparation and may run
 that preparation on any thread.
+
+### Reading each file once across resolutions
+
+Each resolution call reads the files it needs once, but two separate calls
+read a file they share twice. A host operation that runs several resolutions
+(one per global of a catalog, or a baseline, a trigger, and a document
+`$schema` for one completion) can wrap them in
+`resolve::buffers::with_reads_retained(|| ...)`: inside it, the first read of
+a file from the disk is kept and every later read of that path in the scope
+gets the same bytes. A scope started inside another joins it, and nothing is
+kept after the outermost one returns. To read a file it will then resolve
+(to recognize a catalog, say), the host calls `resolve::buffers::read_to_string`,
+which reads the way the resolver does:
+
+```rust
+let resolved = buffers::with_reads_retained(|| {
+    let text = buffers::read_to_string(&path)?; // opened here
+    let first = resolve_yaml_schema(&ctx_reference, base_dir, &ctx, ShippedSources::NONE)?;
+    let second = resolve_yaml_schema(&current_reference, base_dir, &ctx, ShippedSources::NONE)?;
+    Ok((text, first, second)) // a file both references import was opened once
+});
+```
+
+A host that must approve each file before it is read (Darkmatter's schema
+slots, whose reads need a grant) wraps the resolution in
+`resolve::buffers::guarded(guard, || ...)`. The guard is asked with each path
+before it is read, from an open buffer or the disk, at any import depth.
+When it answers `false` the file is not read, and the read fails as
+`std::io::ErrorKind::PermissionDenied`, which the resolver reports like any
+unreadable file. Probing which candidate exists is not a read and is never
+asked. `resolve::buffers::unguarded(|| ...)` suspends every guard for work the
+host judges another way.
+
+```rust
+let only_types: buffers::ReadGuard = Rc::new(move |path: &Path| path == allowed);
+let resolved = buffers::guarded(only_types, || resolve_yaml_schema(&reference, base_dir, &ctx, ShippedSources::NONE));
+// a `$schema` or import other than `allowed` failed as unreadable, unopened
+```
 
 ### As an error
 

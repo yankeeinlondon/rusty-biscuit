@@ -66,6 +66,30 @@ the enum / boolish / file families for the same position. The candidates come
 from the schema itself (via the library's `suggestions_for_path`), so DMLS
 holds no parallel suggestion table.
 
+### Items of an array of one scalar type
+
+When an array's items are one scalar type (`enum(fit, fill)[]`, or `os[]`
+where `os: enum(macOS, Linux, Windows)` is a named type), each item is
+completed as a scalar value of that type: an `enum`'s members, a
+`literal(...)` value, `boolish` spellings, or `file(...)` paths. This holds
+on a `- ` line and inside a flow list. A `suggest(...)` on the array wins,
+as it does for a scalar.
+
+```yaml
+$schema: ./sandboxing.yaml   # os_support: os[](required)
+os_support:
+  - macOS
+  - Li        # offers `Linux`, replacing `Li`
+```
+
+```yaml
+os_support: [macOS, ]        # the cursor after `, ` offers every member
+```
+
+An unclosed `[` (`os_support: [`) leaves the frontmatter unparseable, so
+completion offers nothing until the bracket is closed; editors that close
+brackets as you type never reach that state.
+
 ### Items of an array of a union
 
 When an array's items are a union (`policy[](min(1))@./content-policy.yaml`,
@@ -102,6 +126,17 @@ reaches is never read. On an empty `- ` line of a list of objects, recursive
 or not, the object's keys are offered (marked `(required)` where they are),
 as they are for an object that has no keys yet. See
 [Recursive types](../../docs/topics/schemas/dmls-schema-support.md#recursive-types).
+
+### Properties whose type is pending
+
+While a schema slot that supplies a property's whole type (a *template
+type*) is unresolved, key completion offers the property with the detail
+`type pending` instead of `(required)`, and its value completion offers
+nothing: no member, `true`/`false`, or file path is guessed. A static arm
+of the same union (`"{{ … }} | boolean"`) and every static sibling property
+still complete as usual. Once the slot resolves, the resolved type's keys
+and values are offered. See
+[Schema Slots: In the editor](../../docs/topics/schemas/schema-slots.md#in-the-editor).
 
 ### Only the cursor's path is typed
 
@@ -160,6 +195,63 @@ types:
 
 Options are not offered inside a reference to a named `alphanumeric` type:
 a use site may only repeat its definition's options.
+
+### Type definitions inside a function argument
+
+A string argument whose catalog parameter is a `type-definition`, such as
+the `as` of `load_data`, completes as a type definition rather than as an
+expression. It works in the body and in frontmatter, in a `{{ … }}` span of
+any string value and in an Expression-typed value:
+
+```markdown
+{{ load_data("hosts.yaml", "{ name: str|") }}    offers `string`, `string[]`, ...
+{{ load_data("hosts.yaml", "string(m|") }}       offers `min`, `max`, ...
+```
+
+```yaml
+hosts: '{{ load_data(''hosts.yaml'', ''{ name: str|'') }}'
+```
+
+- The candidates are the ones a `type-definition` value gets (built-in
+  types, their `[]` forms, aliases, constraints and options, and the
+  `{}`/`[]`/`Name@./types.yaml` scaffolds), except your named types: an
+  expression has no schema document, so `Name@this` has no target there.
+- The string may still be open (`{{ load_data("x.yaml", "str`): the server
+  closes it at the cursor to read the call, and diagnostics still wait for
+  an expression that parses.
+- The edit replaces exactly what you typed, read through the string's
+  escapes (`\"`, `\\`) and the YAML quoting around a frontmatter value, and
+  the inserted text is escaped the same way.
+- Which arguments qualify comes from the function catalog's parameter type,
+  so the file argument of `load_data` is completed as an expression.
+
+### Keys and values of an options object
+
+An object written as an argument whose catalog parameter declares its keys,
+such as the `options` of `load_data`, completes from that declaration:
+
+```markdown
+{{ load_data("rows.txt", "string[]", {|            offers `format`, `delimiter`, `header`
+{{ load_data("rows.txt", "string[]", {format: "csv", |   offers `delimiter`, `header`
+{{ load_data("rows.txt", "string[]", {format: |    offers `"yaml"`, `"yml"`, `"json"`, ... (all nine)
+{{ load_data("rows.txt", "string[]", {format: "cs| offers `"csv"`
+{{ load_data("rows.txt", "string[]", {header: |    offers `true`, `false`
+```
+
+- At a key position (after `{` or `,`), every declared key not already
+  written is offered; choosing one inserts `key: `.
+- At the start of an `enum` value, every declared member is offered,
+  quoted; inside an open quote, the member replaces what you typed inside
+  it. `format` offers all nine names, including the aliases `yml` and
+  `ndjson`.
+- At the start of a `boolean` value, `true` and `false` are offered.
+- Any other value position, such as `delimiter:`, gets ordinary expression
+  completion, so a variable or call can be written there.
+- It works in the body and in frontmatter, and the inserted text is escaped
+  for the YAML quoting around a frontmatter value.
+- The keys and members come from the function catalog, never from a list in
+  the editor. A parameter typed plain `object`, such as the filter of
+  `pr_list`, declares no keys and gets ordinary completion.
 
 ## Shell suffix completion (`$( … )::`)
 
@@ -322,3 +414,16 @@ Nested callbacks see their enclosing locals, with the nearest binding winning.
 The iterable argument is completed before the new parameter exists, and the
 binding is not offered after the callback ends. Incomplete callback bodies use
 the same cursor scope without executing the expression.
+
+After `person.`, completion offers the members of the local's object type,
+`person.name` and so on, with each member's type as `detail`. A local typed
+by a literal `load_data` contract gets its members from the contract:
+
+```markdown
+{{ map(load_data("hosts.yaml", "{ name: string, port: number }[]"), h => h.| }}
+                                                   offers `h.name`, `h.port`
+```
+
+A computed contract (`load_data("hosts.yaml", t)`) or a named reference
+(`"Hosts@./types.yaml"`) types the local as unknown, so nothing is offered
+after `h.`; the server never opens the data or schema file to find out.

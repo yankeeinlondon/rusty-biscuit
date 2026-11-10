@@ -4,7 +4,7 @@
 //! Shared through `#[path]` with `src/argv/partition/tests.rs`, whose drift
 //! guard fails when these spellings and the clap-derived owned surface
 //! (`OwnedFlags::for_composition`) differ, so the completion matrix in
-//! `l1/completion_ownership.rs` covers every value slot clap declares.
+//! `l1/completion_ownership.rs` covers every option value clap declares.
 
 /// One owned option.
 pub(crate) struct OwnedValueOption {

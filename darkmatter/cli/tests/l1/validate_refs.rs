@@ -32,8 +32,7 @@ fn validate_refs_json_output() {
         .arg("validate")
         .arg("refs")
         .arg(&md_path)
-        .arg("--format")
-        .arg("json")
+        .args(["--output", "json"])
         .output()
         .unwrap();
 
@@ -132,9 +131,9 @@ fn validate_refs_graph_dot() {
 
 // ── JSON baseline fixtures (byte-for-byte compatibility) ────────────────
 //
-// `md validate refs --json` serializes the library
+// `md validate refs --output json` serializes the library
 // `ReferenceValidationReport` directly via `Serialize` (the same shape
-// `md graph --validate --json` uses for its `validation` block). These
+// `md graph --validate --output json` uses for its `validation` block). These
 // tests pin that public shape against the baseline fixtures under
 // `darkmatter/features/2026-06-17-cli-atheist/baseline/json/`. Each
 // test reproduces the source content used to capture the baseline,
@@ -142,11 +141,11 @@ fn validate_refs_graph_dot() {
 // remaining FNV-1a reference-id hash prefix, then compares the full
 // JSON value.
 
-/// Asserts that `md validate refs --json <input>` produces output that,
+/// Asserts that `md validate refs --output json <input>` produces output that,
 /// after environment normalization, equals the named baseline fixture.
 ///
 /// Note: `md validate refs` exits with a non-zero status when validation
-/// finds errors, even in `--format json` mode (the JSON payload is still
+/// finds errors, even in `--output json` mode (the JSON payload is still
 /// printed to stdout before the process exits). The baseline fixtures
 /// capture both the success and the error shape, so we must not require
 /// `status.success()` here.
@@ -160,35 +159,48 @@ fn assert_json_matches_baseline(
         .arg("validate")
         .arg("refs")
         .arg(input)
-        .arg("--format")
-        .arg("json")
+        .args(["--output", "json"])
         .output()
         .expect("md command failed to spawn");
 
     // The CLI always prints the JSON report to stdout even when the
     // subsequent validation summary errors out and sets a non-zero exit.
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let actual: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+    let mut actual: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
         panic!(
-            "md validate refs --json did not produce valid JSON: {e}\n\
+            "md validate refs --output json did not produce valid JSON: {e}\n\
                  status: {:?}\nstderr: {}\nstdout: {stdout}",
             output.status.code(),
             String::from_utf8_lossy(&output.stderr),
         )
     });
 
+    assert!(output.stderr.is_empty(), "a data output writes nothing to stderr: {output:?}");
+
+    let expected = baseline::load_json(baseline_name);
+    // The baseline pins the report's own shape; a failed run adds these two.
+    if expected["valid"] == false {
+        assert_eq!(output.status.code(), Some(1), "{stdout}");
+        assert_eq!(actual["outcome"], "failure", "{stdout}");
+        assert!(!actual["diagnostics"].as_array().expect("diagnostics").is_empty(), "{stdout}");
+        let report = actual.as_object_mut().expect("a report object");
+        report.remove("outcome");
+        report.remove("diagnostics");
+    } else {
+        assert_eq!(output.status.code(), Some(0), "{stdout}");
+    }
+
     let parent = input.parent().expect("input has a parent dir");
     let redact = baseline::paths_to_redact(parent);
     let redact_refs: Vec<&str> = redact.iter().map(|s| s.as_str()).collect();
     let actual_norm = baseline::normalize(actual, &redact_refs);
 
-    let expected = baseline::load_json(baseline_name);
     let expected_norm = baseline::normalize(expected, &redact_refs);
 
     assert_eq!(
         actual_norm,
         expected_norm,
-        "md validate refs --json output did not match baseline {baseline_name}\n\
+        "md validate refs --output json did not match baseline {baseline_name}\n\
          status: {:?}\nraw output:\n{stdout}",
         output.status.code(),
     );
@@ -249,8 +261,7 @@ fn validate_refs_json_fragment_baseline() {
         .arg("refs")
         .arg(root.join("fragment.md"))
         .arg("--fragments")
-        .arg("--format")
-        .arg("json")
+        .args(["--output", "json"])
         .output()
         .expect("md command failed to spawn");
 

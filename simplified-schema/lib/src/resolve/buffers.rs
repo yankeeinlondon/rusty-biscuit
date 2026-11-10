@@ -11,6 +11,14 @@
 //!
 //! The snapshot is plain data (`Send + Sync`): the host captures it once per
 //! preparation and may carry it to whichever thread prepares.
+//!
+//! [`with_reads_retained`] uses the same snapshot for a second purpose: for
+//! the length of one host operation, every file read from the disk is kept as
+//! if it were open, so separate resolutions in that operation share one read.
+//!
+//! [`guarded`] lets a host judge each schema source before it is read (from
+//! a buffer or the disk): a refused path fails its read as
+//! [`std::io::ErrorKind::PermissionDenied`] and nothing is read.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -78,8 +86,100 @@ impl SourceBuffers {
     }
 }
 
+/// The schema texts one [`recording`] scope has read: path and text, in
+/// read order.
+pub type ReadSources = Vec<(PathBuf, Arc<str>)>;
+
 thread_local! {
     static ACTIVE: RefCell<SourceBuffers> = RefCell::new(SourceBuffers::default());
+    /// The texts each running [`recording`] scope has read, in read order.
+    static RECORDING: RefCell<Vec<ReadSources>> = const { RefCell::new(Vec::new()) };
+    /// How many [`with_reads_retained`] scopes are running on this thread.
+    static RETAINING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The guards of the running [`guarded`] scopes, outermost first.
+    static GUARDS: RefCell<Vec<ReadGuard>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A host's judgment of one schema source read: `true` lets it happen.
+pub type ReadGuard = std::rc::Rc<dyn Fn(&Path) -> bool>;
+
+/// Runs `resolve` with `guard` asked before every schema source it reads,
+/// from a buffer or the disk, at any import depth. A path any running guard
+/// refuses is not read: the read fails with
+/// [`std::io::ErrorKind::PermissionDenied`], which the resolver reports as
+/// it reports any unreadable file. The guard is removed when `resolve`
+/// returns, even when it panics.
+pub fn guarded<T>(guard: ReadGuard, resolve: impl FnOnce() -> T) -> T {
+    struct Pop;
+    impl Drop for Pop {
+        fn drop(&mut self) {
+            GUARDS.with_borrow_mut(Vec::pop);
+        }
+    }
+    GUARDS.with_borrow_mut(|guards| guards.push(guard));
+    let _pop = Pop;
+    resolve()
+}
+
+/// Runs `resolve` with no [`guarded`] scope's guard in force, restoring them
+/// after, even when it panics: for work a host judges by other means (a
+/// schema slot evaluated with its own approvals inside a resolution another
+/// slot's guard covers).
+pub fn unguarded<T>(resolve: impl FnOnce() -> T) -> T {
+    struct Restore(Vec<ReadGuard>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let outer = std::mem::take(&mut self.0);
+            GUARDS.with_borrow_mut(|guards| *guards = outer);
+        }
+    }
+    let _restore = Restore(GUARDS.with_borrow_mut(std::mem::take));
+    resolve()
+}
+
+/// Whether every running guard lets `path` be read. The guards are cloned
+/// out first, so a guard may itself read through this module.
+fn permitted(path: &Path) -> bool {
+    let guards = GUARDS.with_borrow(Clone::clone);
+    guards.iter().all(|guard| guard(path))
+}
+
+/// Runs `resolve` with the snapshot in force, also keeping each schema
+/// source it reads from the disk as an open buffer for the rest of `resolve`:
+/// one host operation that runs several separate resolutions (a catalog's
+/// globals, say) reads each file once. The kept texts are dropped when
+/// `resolve` returns; nothing persists past the call. Inside a running scope
+/// this joins it, so what an inner operation reads stays kept for the outer
+/// one.
+pub fn with_reads_retained<T>(resolve: impl FnOnce() -> T) -> T {
+    if RETAINING.get() > 0 {
+        return resolve();
+    }
+    struct Leave;
+    impl Drop for Leave {
+        fn drop(&mut self) {
+            RETAINING.set(RETAINING.get() - 1);
+        }
+    }
+    let current = ACTIVE.with_borrow(Clone::clone);
+    with(&current, || {
+        RETAINING.set(RETAINING.get() + 1);
+        let _leave = Leave;
+        resolve()
+    })
+}
+
+/// `path`'s text, read as the resolver reads a schema source: the open
+/// buffer in force, else the file's, kept for the rest of a
+/// [`with_reads_retained`] scope. For a host reading a schema file it then
+/// resolves (a baseline, a catalog) before handing the text on.
+///
+/// ## Errors
+///
+/// The read's I/O error; [`std::io::ErrorKind::InvalidData`] when the file
+/// is not UTF-8.
+pub fn read_to_string(path: &Path) -> std::io::Result<String> {
+    String::from_utf8(read(path)?).map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
 }
 
 /// Runs `resolve` with `buffers` in force on this thread, restoring the
@@ -104,23 +204,81 @@ pub fn text(path: &Path) -> Option<Arc<str>> {
     ACTIVE.with_borrow(|active| active.get(path).cloned())
 }
 
-/// The first of `probed` with an open buffer in the snapshot in force.
+/// Whether an open buffer is at `path` in the snapshot in force: a file
+/// selection treats it as present at a location that holds no file.
 #[cfg_attr(not(feature = "file"), allow(dead_code))]
-pub(super) fn first_open(probed: &[PathBuf]) -> Option<PathBuf> {
-    ACTIVE.with_borrow(|active| {
-        if active.is_empty() {
-            return None;
-        }
-        probed.iter().find(|path| active.get(path).is_some()).cloned()
-    })
+pub(super) fn is_open(path: &Path) -> bool {
+    ACTIVE.with_borrow(|active| active.get(path).is_some())
 }
 
-/// `path`'s bytes: the open buffer's text in force, else the file's.
-pub(super) fn read(path: &Path) -> std::io::Result<Vec<u8>> {
-    match text(path) {
-        Some(text) => Ok(text.as_bytes().to_vec()),
-        None => std::fs::read(path),
+/// `path`'s bytes, read as the resolver reads a schema source: the open
+/// buffer's text in force on this thread, else the file's. Outside a
+/// [`with`] scope this is [`std::fs::read`]. A host reading a file that a
+/// resolution depends on (a data file a slot loads) reads it here, so an
+/// editor's unsaved text is what it sees.
+///
+/// ## Errors
+///
+/// The file read's I/O error; [`std::io::ErrorKind::PermissionDenied`] when
+/// a [`guarded`] scope refuses `path`.
+pub fn read(path: &Path) -> std::io::Result<Vec<u8>> {
+    if !permitted(path) {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "the host refused the read"));
     }
+    if let Some(text) = text(path) {
+        record(path, &text);
+        return Ok(text.as_bytes().to_vec());
+    }
+    let bytes = std::fs::read(path)?;
+    super::observed::opened(path);
+    // Non-UTF-8 bytes fail the read's caller, so there is nothing to keep.
+    if let Ok(text) = std::str::from_utf8(&bytes)
+        && (RETAINING.get() > 0 || RECORDING.with_borrow(|frames| !frames.is_empty()))
+    {
+        let text: Arc<str> = Arc::from(text);
+        record(path, &text);
+        if RETAINING.get() > 0 {
+            ACTIVE.with_borrow_mut(|active| active.insert(path, text));
+        }
+    }
+    Ok(bytes)
+}
+
+/// Adds the text read at `path` to every running [`recording`] scope that
+/// has not read it yet.
+fn record(path: &Path, text: &Arc<str>) {
+    RECORDING.with_borrow_mut(|frames| {
+        for frame in frames.iter_mut() {
+            if !frame.iter().any(|(seen, _)| seen == path) {
+                frame.push((path.to_path_buf(), Arc::clone(text)));
+            }
+        }
+    });
+}
+
+/// Runs `resolve`, returning its result with every schema source text it
+/// read (from a buffer or the disk), each path once, in read order: the
+/// exact bytes a template's resolution depended on. A host that hashes what
+/// a resolution read (a data contract's imports) takes the texts from here
+/// rather than reading the files again.
+pub fn recording<T>(resolve: impl FnOnce() -> T) -> (T, ReadSources) {
+    struct Pop;
+    impl Drop for Pop {
+        fn drop(&mut self) {
+            RECORDING.with_borrow_mut(Vec::pop);
+        }
+    }
+    RECORDING.with_borrow_mut(|frames| frames.push(Vec::new()));
+    let pop = Pop;
+    let result = resolve();
+    let read = RECORDING.with_borrow_mut(|frames| frames.last_mut().map(std::mem::take)).unwrap_or_default();
+    drop(pop);
+    (result, read)
+}
+
+/// The snapshot in force on this thread.
+pub(crate) fn current() -> SourceBuffers {
+    ACTIVE.with_borrow(Clone::clone)
 }
 
 #[cfg(test)]
@@ -138,12 +296,98 @@ mod tests {
 
         assert_eq!(read(&file).unwrap(), b"disk");
         let (inside, found) = with(&buffers, || {
-            (read(&file).unwrap(), first_open(&[dir.path().join("absent.yaml"), dir.path().join("new.yaml")]))
+            (read(&file).unwrap(), [dir.path().join("absent.yaml"), dir.path().join("new.yaml")].map(|path| is_open(&path)))
         });
         assert_eq!(inside, b"buffer");
-        assert_eq!(found, Some(dir.path().join("new.yaml")));
+        assert_eq!(found, [false, true]);
         assert_eq!(read(&file).unwrap(), b"disk");
-        assert_eq!(first_open(&[dir.path().join("new.yaml")]), None);
+        assert!(!is_open(&dir.path().join("new.yaml")));
+    }
+
+    /// A refused path is not read from the disk or a buffer, an allowed one
+    /// is, and the guard ends with its scope.
+    #[test]
+    fn a_guard_is_asked_before_every_read_and_a_refusal_reads_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (open, closed, buffered) = (dir.path().join("open.yaml"), dir.path().join("closed.yaml"), dir.path().join("buffered.yaml"));
+        std::fs::write(&open, "open").unwrap();
+        std::fs::write(&closed, "closed").unwrap();
+        let mut buffers = SourceBuffers::default();
+        buffers.insert(&buffered, Arc::from("unsaved"));
+        let asked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let guard: ReadGuard = std::rc::Rc::new({
+            let (asked, open) = (std::rc::Rc::clone(&asked), open.clone());
+            move |path: &Path| {
+                asked.borrow_mut().push(path.to_path_buf());
+                path == open
+            }
+        });
+
+        let ((allowed, refused, unsaved), recorded) = with(&buffers, || {
+            recording(|| guarded(guard, || (read(&open), read(&closed), read(&buffered))))
+        });
+        assert_eq!(allowed.unwrap(), b"open");
+        assert_eq!(refused.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(unsaved.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied, "a buffer is content too");
+        assert_eq!(*asked.borrow(), vec![open.clone(), closed.clone(), buffered]);
+        assert_eq!(recorded.iter().map(|(path, _)| path.clone()).collect::<Vec<_>>(), vec![open], "only the allowed read");
+        assert_eq!(read(&closed).unwrap(), b"closed", "the guard ended with its scope");
+    }
+
+    /// An unguarded scope inside a guarded one reads without asking, and the
+    /// guard is back in force after it.
+    #[test]
+    fn an_unguarded_scope_suspends_the_guards_around_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("types.yaml");
+        std::fs::write(&file, "types").unwrap();
+        let refuse_all: ReadGuard = std::rc::Rc::new(|_: &Path| false);
+        let (inside, after) = guarded(refuse_all, || (unguarded(|| read(&file)), read(&file)));
+        assert_eq!(inside.unwrap(), b"types");
+        assert_eq!(after.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    /// A retaining scope serves a file's first read for the rest of the scope,
+    /// joins an enclosing scope, and keeps nothing once it ends.
+    #[test]
+    fn a_retaining_scope_reads_each_file_once_and_forgets_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("types.yaml");
+        std::fs::write(&file, "first").unwrap();
+
+        let (outer, inner) = with_reads_retained(|| {
+            let outer = read(&file).unwrap();
+            std::fs::write(&file, "second").unwrap();
+            (outer, with_reads_retained(|| read_to_string(&file).unwrap()))
+        });
+        assert_eq!((outer.as_slice(), inner.as_str()), (b"first".as_slice(), "first"));
+        assert_eq!(read(&file).unwrap(), b"second", "nothing is kept past the scope");
+        assert!(text(&file).is_none());
+    }
+
+    /// A recording scope lists each source once, in read order, from a
+    /// buffer or the disk, with the exact text read; nothing is recorded
+    /// outside one.
+    #[test]
+    fn a_recording_scope_lists_every_text_read_once_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let (disk, open) = (dir.path().join("disk.yaml"), dir.path().join("open.yaml"));
+        std::fs::write(&disk, "on disk").unwrap();
+        let mut buffers = SourceBuffers::default();
+        buffers.insert(&open, Arc::from("in the editor"));
+
+        read(&disk).unwrap();
+        let ((), recorded) = recording(|| {
+            with(&buffers, || {
+                read(&open).unwrap();
+                read(&disk).unwrap();
+                read(&open).unwrap();
+            })
+        });
+        let recorded: Vec<(PathBuf, String)> = recorded.into_iter().map(|(path, text)| (path, text.to_string())).collect();
+        assert_eq!(recorded, vec![(open, "in the editor".to_string()), (disk.clone(), "on disk".to_string())]);
+        let ((), outside) = recording(|| ());
+        assert!(outside.is_empty());
     }
 
     /// The resolver's reads, through the public entry point: an unsaved

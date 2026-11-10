@@ -67,7 +67,7 @@ pub(crate) fn resolve(
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
-    match resolve_core(parsed, magic_paths, vault_roots, ctx).outcome {
+    match resolve_core(parsed, magic_paths, vault_roots, ctx, &mut |_| true, &mut |_| false).outcome {
         CoreOutcome::Matched(p) => Ok(Some(p)),
         CoreOutcome::NoMatch => Ok(None),
         CoreOutcome::Failed(_, e) => Err(e),
@@ -80,11 +80,25 @@ pub(crate) fn resolve(
 /// anchor on it, so an explicit/absolute/home/vault reference performs no git
 /// lookup. The kind-specific candidate plan is then probed with a fallible
 /// metadata operation.
+///
+/// `admit` is asked about each location, normalized as
+/// [`DetailedResolution::probed_paths`](crate::DetailedResolution::probed_paths)
+/// spells it, immediately before it is touched: a direct candidate before its
+/// containment check and probe, and every recursive search root before the
+/// walk (which lists them all). `false` stops the resolution there with
+/// [`CoreOutcome::NoMatch`]; the caller that refused discards the outcome.
+///
+/// `present` is asked, in the same spelling, about a direct candidate that
+/// passed admission and containment but holds nothing on disk; `true` makes
+/// it the match (a file the caller holds that is not saved yet). A recursive
+/// walk lists only the disk and never asks it.
 pub(crate) fn resolve_core(
     parsed: &ParsedReference,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
+    admit: &mut dyn FnMut(&Path) -> bool,
+    present: &mut dyn FnMut(&Path) -> bool,
 ) -> CoreResolution {
     #[cfg(feature = "url")]
     if matches!(parsed.kind, ReferenceKind::Url(_)) {
@@ -125,6 +139,7 @@ pub(crate) fn resolve_core(
             ctx,
             repository_root,
             effective_kind,
+            admit,
         )
     } else {
         resolve_direct_core(
@@ -136,6 +151,8 @@ pub(crate) fn resolve_core(
             ctx,
             repository_root,
             effective_kind,
+            admit,
+            present,
         )
     }
 }
@@ -389,6 +406,8 @@ fn resolve_direct_core(
     ctx: &ResolutionContext,
     repository_root: Option<PathBuf>,
     effective_kind: FileReferenceKind,
+    admit: &mut dyn FnMut(&Path) -> bool,
+    present: &mut dyn FnMut(&Path) -> bool,
 ) -> CoreResolution {
     let candidates = match build_candidates(
         parsed,
@@ -413,6 +432,15 @@ fn resolve_direct_core(
 
     let mut probed: Vec<ProbedCandidate> = Vec::with_capacity(candidates.len());
     for candidate in candidates {
+        let location = normalize_absolute(candidate.path(), &ctx.cwd);
+        if !admit(&location) {
+            return CoreResolution {
+                candidates: probed,
+                repository_root,
+                effective_kind: Some(effective_kind),
+                outcome: CoreOutcome::NoMatch,
+            };
+        }
         if let Some(boundary) =
             candidate_boundary(parsed, anchoring, ctx, repository_root.as_deref())
             && let Err(error) = validate_containment(boundary, &parsed.authored, candidate.path())
@@ -434,6 +462,16 @@ fn resolve_direct_core(
                     repository_root,
                     effective_kind: Some(effective_kind),
                     outcome: CoreOutcome::Matched(resolved),
+                };
+            }
+            ProbeStep::Missing if present(&location) => {
+                debug!(resolved = ?location, "resolved file reference to a location the caller holds");
+                probed.push(make_probed(candidate, ProbeDisposition::Matched));
+                return CoreResolution {
+                    candidates: probed,
+                    repository_root,
+                    effective_kind: Some(effective_kind),
+                    outcome: CoreOutcome::Matched(location),
                 };
             }
             ProbeStep::Missing => {
@@ -487,6 +525,7 @@ fn resolve_recursive_core(
     ctx: &ResolutionContext,
     repository_root: Option<PathBuf>,
     effective_kind: FileReferenceKind,
+    admit: &mut dyn FnMut(&Path) -> bool,
 ) -> CoreResolution {
     let failed = |repository_root, error: FileReferenceError| CoreResolution {
         candidates: Vec::new(),
@@ -506,6 +545,17 @@ fn resolve_recursive_core(
         Ok(roots) => roots,
         Err(e) => return failed(repository_root, e),
     };
+
+    // The walk lists every root before choosing, so every root is admitted
+    // before it or a containment check starts.
+    if !roots.iter().all(|root| admit(&normalize_absolute(root.path(), &ctx.cwd))) {
+        return CoreResolution {
+            candidates: Vec::new(),
+            repository_root,
+            effective_kind: Some(effective_kind),
+            outcome: CoreOutcome::NoMatch,
+        };
+    }
 
     // The authored candidate under each root must not land outside its
     // boundary, as for a direct reference, even when nothing is found there.
@@ -1188,6 +1238,19 @@ pub(crate) fn candidate_plan(
             repository_root.as_deref(),
         )
     }
+}
+
+/// The payload text [`resolve_core`] interpolates for `kind`: a URL's lenient
+/// form (an unset variable kept verbatim) or a local path's strict one.
+pub(crate) fn interpolated_payload(
+    kind: &ReferenceKind,
+    ctx: &ResolutionContext,
+) -> Result<String, FileReferenceError> {
+    #[cfg(feature = "url")]
+    if matches!(kind, ReferenceKind::Url(_)) {
+        return interpolated_url_string(kind, ctx);
+    }
+    interpolate(kind.template(), ctx)
 }
 
 /// Interpolate template segments using the resolution context's env vars.

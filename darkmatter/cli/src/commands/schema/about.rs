@@ -8,13 +8,14 @@
 //! catalogs, so the command stays documentation-only — it performs no document
 //! parsing, no context capture, no `EffectEngine` construction, no file
 //! resolution, and no network access. The only observable side effect is
-//! printing to stdout.
+//! printing to stdout. A data output always carries the whole catalog.
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::{InlineProse, LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
+use biscuit_terminal::output::{OutputTarget, WidthRequest};
 use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
@@ -25,6 +26,10 @@ use darkmatter::markdown::highlighting::CodeBlockMode;
 use darkmatter::markdown::highlighting::ColorMode as MarkdownColorMode;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::TerminalOptions;
+use darkmatter::markdown::output::command::{AboutData, CommandValue, prose_document};
+use renderable::{OutputOptions, Width};
+use crate::args::Cli;
+use crate::output::command::{CommandRun, Completed, DataShape};
 use darkmatter::markdown::schemas::{
     AlphanumericOptionDescriptor, CoercionRuleDescriptor, InlineObjectRuleDescriptor, MatchSafeConstraintDescriptor,
     SchemaConstraintDescriptor, SchemaShapeDescriptor, SchemaTypeDescriptor,
@@ -37,7 +42,6 @@ use renderable::markdown::code_span;
 
 const LEFT_MARGIN_CH: u32 = 1;
 const RIGHT_MARGIN_CH: u32 = 2;
-const MIN_REPORT_WIDTH: u32 = 64;
 
 fn markdown_color_mode_from_terminal(mode: TerminalColorMode) -> MarkdownColorMode {
     match mode {
@@ -47,9 +51,21 @@ fn markdown_color_mode_from_terminal(mode: TerminalColorMode) -> MarkdownColorMo
 }
 
 /// Run `md schema about`.
-pub fn run_about(verbose: bool, code_block_mode: CodeBlockMode) -> Result<()> {
-    let terminal = Terminal::default();
-    let mut report = SchemaAboutReport::new(&terminal, code_block_mode);
+pub fn run_about(output: OutputTarget, code_block_mode: CodeBlockMode, cli: &Cli) -> Result<()> {
+    let skeleton = serde_json::json!({ "sections": [] });
+    let run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::Typed(skeleton))?;
+    let verbose = cli.verbose > 0;
+    let data = AboutData::catalog();
+    let prose = prose_document(&about_markdown(&data, verbose));
+    let value = CommandValue::new(data, prose).with_terminal(move |options| {
+        about_report(options, verbose, code_block_mode).unwrap_or_else(|error| error.to_string())
+    });
+    run.finish(Ok(Completed::success(value)))
+}
+
+fn about_report(options: &OutputOptions, verbose: bool, code_block_mode: CodeBlockMode) -> Result<String> {
+    let terminal = Terminal::from_output_options(options);
+    let mut report = SchemaAboutReport::new(&terminal, options, code_block_mode);
 
     report.header()?;
     report.shapes(schema_shape_descriptors())?;
@@ -66,25 +82,62 @@ pub fn run_about(verbose: bool, code_block_mode: CodeBlockMode) -> Result<()> {
         report.verbose_hint();
     }
 
-    Ok(())
+    Ok(report.out)
+}
+
+/// The sections a formatted output shows without `--verbose`.
+const SUMMARY_SECTIONS: &[&str] = &["shapes", "types", "constraints", "trigger_grammar", "match_safe_constraints"];
+
+/// The catalog as a Markdown reference, for the Markdown and HTML outputs.
+fn about_markdown(data: &AboutData, verbose: bool) -> String {
+    let mut out = String::from("# SimplifiedSchema Language Reference\n");
+    for section in data.sections.iter().filter(|section| verbose || SUMMARY_SECTIONS.contains(&section.id)) {
+        out.push_str(&format!("\n## {}\n\n{}\n\n", section.title, section.description));
+        for entry in &section.entries {
+            out.push_str(&format!("- {} — {}\n", code_span(&entry.name), entry.description.replace('\n', " ")));
+            if let Some(example) = &entry.example {
+                out.push_str(&format!("  - example: {}\n", code_span(&example.replace('\n', "\\n"))));
+            }
+            if !entry.constraints.is_empty() {
+                let names: Vec<String> = entry.constraints.iter().map(|name| code_span(name)).collect();
+                out.push_str(&format!("  - constraints: {}\n", names.join(", ")));
+            }
+            for detail in &entry.details {
+                // A keyword such as `<type>` is code, not raw HTML.
+                let value = detail.value.replace('\n', " ");
+                let value = if detail.name == "keyword" { code_span(&value) } else { value };
+                out.push_str(&format!("  - {}: {value}\n", detail.name));
+            }
+        }
+    }
+    out
 }
 
 struct SchemaAboutReport<'a> {
     terminal: &'a Terminal,
-    width: u32,
+    /// The columns components are laid out in, when the report has any.
+    width: Option<u32>,
+    /// The output width, which `width` cannot express when there is none.
+    output_width: Width,
+    profile: renderable::TerminalProfile,
     previous_blank: bool,
     code_block_mode: CodeBlockMode,
+    out: String,
 }
 
 impl<'a> SchemaAboutReport<'a> {
-    fn new(terminal: &'a Terminal, code_block_mode: CodeBlockMode) -> Self {
+    fn new(terminal: &'a Terminal, options: &OutputOptions, code_block_mode: CodeBlockMode) -> Self {
         let margin_width = LEFT_MARGIN_CH + RIGHT_MARGIN_CH;
-        let width = terminal.width().saturating_sub(margin_width).max(MIN_REPORT_WIDTH);
+        let width = terminal.columns().map(|columns| columns.saturating_sub(margin_width).max(1));
+        let output_width = width.map_or(options.width, Width::Columns);
         Self {
             terminal,
             width,
+            output_width,
+            profile: options.terminal_profile.clone(),
             previous_blank: true,
             code_block_mode,
+            out: String::new(),
         }
     }
 
@@ -233,7 +286,7 @@ In this example, constraints are added to a string, a number, and an array of st
             "Constraints go inside `(...)` after a type, separated by commas or semicolons. \
              They narrow what a value may contain or provide metadata such as defaults.",
         )?;
-        let wide = self.width >= 120;
+        let wide = self.width.is_none_or(|width| width >= 120);
         let use_min_width = if wide { 26 } else { 20 };
         let applies_to_max_width = if wide { 24 } else { 16 };
         let meaning_min_width = if wide { 42 } else { 26 };
@@ -366,8 +419,8 @@ In this example, constraints are added to a string, a number, and an array of st
 
     fn prose<T: Into<String>>(&mut self, text: T) {
         let rendered = Prose::new(text.into())
-            .with_word_wrap(WordWrap::WrapProse(Some(8), None))
-            .render_in_width(self.terminal, self.width);
+            .with_word_wrap(WordWrap::WrapProse(Some(8), None));
+        let rendered = self.fit(&rendered);
         self.block(&rendered);
     }
 
@@ -380,9 +433,10 @@ In this example, constraints are added to a string, a number, and an array of st
 
     fn markdown_options(&self) -> TerminalOptions {
         let mut options = TerminalOptions::default();
-        options.max_width = Some(self.width.min(u16::MAX as u32) as u16);
+        options.width = Some(self.output_width);
         options.color_mode = markdown_color_mode_from_terminal(self.terminal.color_mode());
         options.code_block_mode = self.code_block_mode;
+        options.output_profile = Some(self.profile.clone());
         options
     }
 
@@ -414,7 +468,8 @@ In this example, constraints are added to a string, a number, and an array of st
                     .with_word_wrap(WordWrap::WrapProse(Some(8), Some(2))),
             );
         }
-        self.block(&list.render_in_width(self.terminal, self.width));
+        let rendered = self.fit(&list);
+        self.block(&rendered);
         self.blank();
         Ok(())
     }
@@ -429,11 +484,46 @@ In this example, constraints are added to a string, a number, and an array of st
     fn table(&mut self, columns: Vec<TableColumn>, rows: Vec<Vec<TableCellContent>>) {
         self.blank();
         let table = Table::new()
-            .with_columns(columns)
-            .with_data(rows)
+            .with_columns(columns.clone())
+            .with_data(rows.clone())
             .alternate_background_color();
-        self.block(&table.render_in_width(self.terminal, self.width));
+        if self.width.is_none_or(|width| table.plan_widths(width).is_ok()) {
+            let rendered = self.fit(&table);
+            self.block(&rendered);
+        } else {
+            self.stacked_rows(&columns, &rows);
+        }
         self.blank();
+    }
+
+    /// The rows of a table too narrow for its columns, as a list that names each
+    /// column, so a narrow width costs layout rather than content.
+    fn stacked_rows(&mut self, columns: &[TableColumn], rows: &[Vec<TableCellContent>]) {
+        let mut list = UnorderedList::empty();
+        for row in rows {
+            let mut cells = columns.iter().zip(row);
+            let first = cells.next().map(|(_, cell)| cell_markup(cell)).unwrap_or_default();
+            let rest: Vec<String> = cells
+                .map(|(column, cell)| format!("<b>{}</b>: {}", escape_prose(&column.header), cell_markup(cell)))
+                .collect();
+            let item = std::iter::once(first).chain(rest).collect::<Vec<_>>().join("\n");
+            list.add(
+                Prose::new(item)
+                    .with_line_breaks(LineBreaks::Hard)
+                    .with_word_wrap(WordWrap::WrapProse(Some(8), Some(2))),
+            );
+        }
+        let rendered = self.fit(&list);
+        self.block(&rendered);
+    }
+
+    /// `component` inside the report's margins, which an unbounded report does
+    /// not have to fit.
+    fn fit(&self, component: &impl TerminalRenderable) -> String {
+        match self.width {
+            Some(width) => component.render_in_width(self.terminal, width),
+            None => component.render(self.terminal),
+        }
     }
 
     fn block(&mut self, rendered: &str) {
@@ -441,7 +531,9 @@ In this example, constraints are added to a string, a number, and an array of st
             if line.trim().is_empty() {
                 self.blank();
             } else {
-                println!("{}{}", " ".repeat(LEFT_MARGIN_CH as usize), line);
+                self.out.push_str(&" ".repeat(LEFT_MARGIN_CH as usize));
+                self.out.push_str(line);
+                self.out.push('\n');
                 self.previous_blank = false;
             }
         }
@@ -449,7 +541,7 @@ In this example, constraints are added to a string, a number, and an array of st
 
     fn blank(&mut self) {
         if !self.previous_blank {
-            println!();
+            self.out.push('\n');
             self.previous_blank = true;
         }
     }
@@ -519,6 +611,15 @@ fn prose_cell<T: Into<String>>(text: T) -> TableCellContent {
 /// A cell whose single newlines start new rows (a summary, then `- ` rows).
 fn rows_cell<T: Into<String>>(text: T) -> TableCellContent {
     InlineProse::new(text.into()).with_line_breaks(LineBreaks::Hard).into()
+}
+
+/// A cell's Prose markup. Its `Display` is already painted, for a terminal that
+/// may not be this one.
+fn cell_markup(cell: &TableCellContent) -> String {
+    match cell {
+        TableCellContent::StyledInlineProse(prose) => prose.content().to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn format_constraint_use(constraint: &SchemaConstraintDescriptor) -> String {
@@ -703,7 +804,8 @@ mod tests {
 
     fn render_schema_about_markdown(mode: TerminalColorMode) -> String {
         let terminal = terminal_for_mode(mode);
-        let report = SchemaAboutReport::new(&terminal, CodeBlockMode::default());
+        let output = OutputOptions::new(Width::Columns(terminal.width()), terminal.output_profile());
+        let report = SchemaAboutReport::new(&terminal, &output, CodeBlockMode::default());
         let mut options = report.markdown_options();
         options.code_theme = ThemePair::OneHalf;
         options.prose_theme = ThemePair::OneHalf;
@@ -752,6 +854,181 @@ mod tests {
             string_value.r,
             string_value.g,
             string_value.b,
+        );
+    }
+
+    /// The report a color terminal shows, with its escape codes intact.
+    fn styled_about_report(verbose: bool, mode: CodeBlockMode) -> String {
+        let terminal = Terminal::new_optimistic(80);
+        let output = OutputOptions::new(Width::Columns(terminal.width()), terminal.output_profile());
+        about_report(&output, verbose, mode).expect("schema about renders")
+    }
+
+    fn plain_about_report(verbose: bool) -> String {
+        biscuit_terminal::utils::escape_codes::strip_escape_codes(styled_about_report(verbose, CodeBlockMode::default()))
+    }
+
+    #[test]
+    fn code_block_dark_and_light_differ() {
+        assert_ne!(
+            styled_about_report(false, CodeBlockMode::Dark),
+            styled_about_report(false, CodeBlockMode::Light),
+            "forcing the dark vs light code-block variant must change the rendered output"
+        );
+    }
+
+    #[test]
+    fn tables_carry_background_stripes_when_color_is_available() {
+        assert!(styled_about_report(false, CodeBlockMode::default()).contains("\x1b[48"));
+    }
+
+    #[test]
+    fn verbose_report_wraps_each_link_overload_as_its_own_item() {
+        let plain = plain_about_report(true);
+        let link_overloads = concat!(
+            " - link(file: file | null) -> string | null | error \u{2014} Creates a Markdown link\n",
+            "   to a local file, using its relative path as the link text and its\n",
+            "   absolute path as the destination. HTTP(S) URLs are rejected because they\n",
+            "   need a description; null passes through.\n",
+            " - link(target: file | null, desc: string | null) -> string | null | error \u{2014}\n",
+            "   Creates a Markdown link to a local file or an HTTP(S) URL with the given\n",
+            "   description as its text; null passes through.\n",
+        );
+        assert!(plain.contains(link_overloads), "{plain}");
+    }
+
+    #[test]
+    fn report_uses_readable_terminal_components() {
+        let plain = plain_about_report(false);
+        let type_system = plain
+            .split("Type System")
+            .nth(1)
+            .and_then(|after_heading| after_heading.split("Constraint Vocabulary").next())
+            .expect("type system section should precede constraint vocabulary");
+
+        assert!(
+            plain.contains("┌"),
+            "type/constraint sections should render real tables"
+        );
+        assert!(
+            !plain.contains("file://"),
+            "schema examples must not be interpreted as Markdown links"
+        );
+        assert!(
+            !plain.contains("```"),
+            "code examples should render as code blocks instead of literal Markdown fences"
+        );
+        assert!(
+            !plain.contains('`'),
+            "inline code spans should render as styled text instead of raw backtick-delimited Markdown"
+        );
+        assert!(
+            !plain.contains("Table could not be rendered"),
+            "schema about tables should fit the report width"
+        );
+        assert!(
+            !plain.contains("all types (and array properties"),
+            "universal constraint targets should not special-case arrays awkwardly"
+        );
+        assert!(
+            !plain.contains("array-level"),
+            "array constraint rows should use plain `array` language"
+        );
+        assert!(
+            !plain.contains("string context"),
+            "constraint examples should not carry implementation-context labels"
+        );
+        assert!(
+            !plain.contains("min (string)")
+                && !plain.contains("min (number)")
+                && !plain.contains("min (array)")
+                && !plain.contains("max (string)")
+                && !plain.contains("max (number)")
+                && !plain.contains("max (array)"),
+            "min/max should be documented once each instead of repeated per type"
+        );
+        assert!(
+            plain.contains("min(number)")
+                && plain.contains("max(number)")
+                && plain.contains("minimum length")
+                && plain.contains("minimum value")
+                && plain.contains("minimum item count")
+                && plain.contains("maximum length")
+                && plain.contains("maximum value")
+                && plain.contains("maximum item count"),
+            "consolidated min/max rows should explain each applicable type in user-facing terms"
+        );
+        assert!(
+            !plain.contains("│ Arity ") && !plain.contains("│ Form ") && !plain.contains("│ Target "),
+            "constraint table headings should be author-facing"
+        );
+        assert!(
+            plain.contains("│ Write ")
+                && plain.contains("│ Applies To ")
+                && plain.contains("│ Meaning "),
+            "constraint table should name usage and applicability clearly"
+        );
+        assert!(
+            !plain.contains("default(\n") && !plain.contains("pattern(\n"),
+            "constraint usage examples should not wrap immediately after the opening parenthesis"
+        );
+        assert!(
+            !plain.contains("This report is generated from the typed descriptor catalog")
+                && !plain.contains("documentation-only: it performs no document parsing"),
+            "awkward implementation footer should not be user-visible"
+        );
+        assert!(
+            !plain.contains("\n\n\n"),
+            "schema about should not emit more than one blank line between blocks"
+        );
+        assert!(
+            plain.contains("page is rendered.\n\n Use this"),
+            "paragraph blocks should be separated by a blank line"
+        );
+        assert!(
+            plain.contains("frontmatter you expect.\n\n - Single object"),
+            "unordered lists should have a blank line before them"
+        );
+        assert!(
+            plain.contains("Type System\n\n ┌"),
+            "tables should have a blank line before them"
+        );
+        assert!(
+            type_system.contains("│ Type ") && !type_system.contains("│ Keyword "),
+            "type table should use the author-facing `Type` column heading"
+        );
+        assert!(
+            !type_system.contains("match(glob") && !type_system.contains("scheme(http"),
+            "type table should list constraint names without constraint parameters"
+        );
+        assert!(
+            plain.contains("┘\n\n Any of the above types can be made into an array"),
+            "type vocabulary notes should start after the table with a blank line"
+        );
+        assert!(
+            plain.contains("bar: string[]") && plain.contains("baz: \"string[](min(1))\""),
+            "type vocabulary notes should include array and constrained-array examples"
+        );
+        assert!(
+            plain.contains("Note: the values in schemas must be valid YAML strings"),
+            "type notes should explain that schema values are YAML strings and may be quoted"
+        );
+        assert!(
+            plain.contains("use --verbose to see additional details"),
+            "non-verbose output should tell readers how to see additional details"
+        );
+        assert!(
+            !plain.contains("Nested Objects")
+                && !plain.contains("Compose-time Coercion")
+                && !plain.contains("Validation Notes"),
+            "advanced schema details should only render with --verbose"
+        );
+        assert!(
+            plain
+                .lines()
+                .filter(|line| !line.is_empty())
+                .all(|line| line.starts_with(' ')),
+            "nonblank report lines should use the document left margin"
         );
     }
 
@@ -969,12 +1246,13 @@ mod tests {
             (TerminalColorMode::Unknown, MarkdownColorMode::Dark),
         ] {
             let terminal = terminal_for_mode(terminal_mode);
-            let report = SchemaAboutReport::new(&terminal, CodeBlockMode::default());
+            let output = OutputOptions::new(Width::Columns(terminal.width()), terminal.output_profile());
+            let report = SchemaAboutReport::new(&terminal, &output, CodeBlockMode::default());
             let options = report.markdown_options();
 
             assert_eq!(options.color_mode, markdown_mode);
             assert_eq!(options.color_depth, None);
-            assert_eq!(options.max_width, Some(117));
+            assert_eq!(options.width, Some(renderable::output::Width::Columns(117)));
         }
     }
 

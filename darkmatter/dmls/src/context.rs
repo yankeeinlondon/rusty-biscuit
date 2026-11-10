@@ -158,6 +158,11 @@ impl RepositoryContexts {
         Self { snapshot, state: Mutex::new(State::default()) }
     }
 
+    /// The home folder of the request snapshot every context is built from.
+    pub fn home(&self) -> Option<&Path> {
+        self.snapshot.home()
+    }
+
     /// The context for the document at `path`: its repository's context
     /// derived for the document, or the cached build failure.
     pub fn for_document(&self, path: &Path) -> DocumentResolution {

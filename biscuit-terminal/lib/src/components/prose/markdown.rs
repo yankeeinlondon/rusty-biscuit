@@ -186,9 +186,15 @@ pub(super) enum Lifted {
     Comment,
     /// A Markdown link destination, lifted so no later phase reads code,
     /// comments, or tags in it. `href` is the value [`convert_links`] gives
-    /// the link; `source` is the authored text, rendered literally if no
+    /// the link, without its title; `title` is the authored title (between
+    /// its delimiters, unescaped), parsed separately so it never reaches the
+    /// link's URI; `source` is the authored text, rendered literally if no
     /// link consumes the placeholder.
-    Destination { href: String, source: String },
+    Destination {
+        href: String,
+        title: Option<String>,
+        source: String,
+    },
 }
 
 /// Placeholder text referring to `lifted[index]`.
@@ -325,8 +331,10 @@ pub(super) fn lift_opaque(input: &str, paragraphs: bool) -> (String, Vec<Lifted>
                         output.push_str("](");
                         output.push_str(&lift_placeholder(lifted.len()));
                         output.push(')');
+                        let (destination, title) = split_link_title(raw);
                         lifted.push(Lifted::Destination {
-                            href: destination_value(raw),
+                            href: destination_value(destination),
+                            title,
                             source: raw.iter().collect(),
                         });
                         i = close + 1;
@@ -375,6 +383,66 @@ fn destination_end(chars: &[char], start: usize, paragraphs: bool) -> Option<usi
 
 /// The href a raw destination yields: `\(` and `\)` lose their backslash,
 /// and every other character is literal.
+/// Splits a link's `(…)` contents into the destination and its optional
+/// CommonMark title (`"…"`, `'…'`, or `(…)` after whitespace).
+///
+/// The title is returned between its delimiters with backslash-escaped
+/// delimiters unescaped. Contents that do not end in a well-formed title
+/// are all destination, as before titles were recognized.
+fn split_link_title(raw: &[char]) -> (&[char], Option<String>) {
+    let Some(&last) = raw.last() else {
+        return (raw, None);
+    };
+    let open = match last {
+        '"' => '"',
+        '\'' => '\'',
+        ')' => '(',
+        _ => return (raw, None),
+    };
+    // The title opens at the first unescaped `open` that follows whitespace
+    // after the destination.
+    let mut i = 0;
+    while i < raw.len() && raw[i].is_whitespace() {
+        i += 1;
+    }
+    let dest_start = i;
+    if raw.get(i) == Some(&'<') {
+        while i < raw.len() && raw[i] != '>' {
+            i += 1;
+        }
+        i += 1;
+    } else {
+        while i < raw.len() && !raw[i].is_whitespace() {
+            i += 1;
+        }
+    }
+    let dest_end = i.min(raw.len());
+    while i < raw.len() && raw[i].is_whitespace() {
+        i += 1;
+    }
+    if i == dest_end || i + 1 >= raw.len() || raw[i] != open {
+        return (raw, None);
+    }
+    let body = &raw[i + 1..raw.len() - 1];
+    let mut title = String::with_capacity(body.len());
+    let mut j = 0;
+    while j < body.len() {
+        if body[j] == '\\' && matches!(body.get(j + 1), Some(&c) if c == open || c == last || c == '\\') {
+            j += 1;
+        } else if body[j] == last && open == last {
+            // An unescaped closing delimiter inside the title: not a title.
+            return (raw, None);
+        }
+        title.push(body[j]);
+        j += 1;
+    }
+    let mut destination = &raw[dest_start..dest_end];
+    if destination.first() == Some(&'<') && destination.last() == Some(&'>') {
+        destination = &destination[1..destination.len() - 1];
+    }
+    (destination, Some(title))
+}
+
 fn destination_value(raw: &[char]) -> String {
     let mut value = String::with_capacity(raw.len());
     let mut i = 0;
@@ -693,10 +761,19 @@ fn convert_links(input: &str, lifted: &[Lifted]) -> (String, Vec<String>) {
             && let Some((desc, href, end)) = try_parse_link(&chars, i)
         {
             let placeholder = format!("{m}HREF{n}{m}", m = HREF_PLACEHOLDER_MARK, n = hrefs.len());
+            let titled = titled_destination(&href, lifted);
             hrefs.push(resolve_destination(href, lifted));
             output.push_str("<a href=\"");
             output.push_str(&placeholder);
-            output.push_str("\">");
+            output.push('"');
+            if let Some(index) = titled {
+                // The title travels by reference to its lifted destination,
+                // never as text a later phase could read.
+                output.push_str(" title-ref=\"");
+                output.push_str(&lift_placeholder(index));
+                output.push('"');
+            }
+            output.push('>');
             output.push_str(&desc);
             output.push_str("</a>");
             i = end;
@@ -708,6 +785,20 @@ fn convert_links(input: &str, lifted: &[Lifted]) -> (String, Vec<String>) {
     }
 
     (output, hrefs)
+}
+
+/// The index of the lifted destination `href` names, when that destination
+/// has a title.
+fn titled_destination(href: &str, lifted: &[Lifted]) -> Option<usize> {
+    let chars: Vec<char> = href.chars().collect();
+    if chars.first() != Some(&LIFT_MARK) {
+        return None;
+    }
+    let (index, next) = parse_lift_placeholder(&chars, 0)?;
+    match lifted.get(index) {
+        Some(Lifted::Destination { title: Some(_), .. }) if next == chars.len() => Some(index),
+        _ => None,
+    }
 }
 
 /// The href of a destination [`lift_opaque`] lifted whole, or `href`

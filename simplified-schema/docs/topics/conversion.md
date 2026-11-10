@@ -257,6 +257,51 @@ tags: "a"
     - tags "a" is not of type "array" (at line 6, column 7)
 ```
 
+### Located failures
+
+A host that reports a type error location by location, such as one record
+per bad cell of a data file, reads `ConversionError::located_failures()` (or
+`coercion::locate_failures` over a `&[ValueFailure]`). Each `LocatedFailure`
+has:
+
+- `pointer`: the location as a JSON Pointer (`""` for the bound value
+  itself, `/rows/2/port`; a key `a/b` is `/a~1b`, `~` is `~0`, and the empty
+  key is `/`);
+- `expected`: `ExpectedType::Type` (the engine's expected-type text),
+  `ExpectedType::Union` (the arms no single one of which explains the
+  failure), or `ExpectedType::Absent` for an unexpected key or tuple element;
+- `actual`: the found value's kind in schema words (`string`, `number`,
+  `boolean`, `null`, `array`, `object`), or `missing` for a required slot
+  that is not there;
+- `failure`: the engine's `ValueFailure` at that location.
+
+Records come in the engine's order: ascending indexes, the value's own key
+order, union arms as declared. A failure that is not a union failure is one
+record. A union failure is flattened:
+
+1. `null` arms are dropped, so `null` never appears in `expected`;
+2. an arm is *reachable* unless it failed with "no conversion" at the
+   union's own location (the value's kind cannot become that arm's kind at
+   all);
+3. exactly one reachable arm is descended into, and its failures become the
+   records;
+4. otherwise, with no reachable arm or several, the union is one record at
+   its location, listing the remaining arms.
+
+| Type | Value | Records (`pointer` · `expected` · `actual`) |
+| --- | --- | --- |
+| `number[]` | `["macOS", 2, true]` | `/0` · number · string, `/2` · number · boolean |
+| `number[] \| null` | `{ a: 1 }` | `""` · number[] · object |
+| `tuple([string, number])[]` | `[["c"], ["d", "4", "x"]]` | `/0/1` · number · missing, `/1/2` · absent · string |
+| `string[] \| {a: string}` | `{ a: [1] }` | `/a` · string · array (only the object arm is reachable) |
+| `string[] \| {a: string}` | `42` | `""` · both arms · number |
+| `{a: string}[] \| {b: number}[]` | `[{ b: "x" }]` | `""` · both arms · array |
+
+The last row is a deliberate limit: when two arms are containers of the same
+kind, both are reachable, and nothing in the data says which one was meant,
+so the error is one record for the whole value rather than one per element.
+An ambiguous union (several readings, no tie-breaker) is also one record.
+
 ### Converting Through Raw JSON Schema
 
 A raw JSON Schema converts through `type` (including type arrays), `const`,

@@ -85,6 +85,12 @@ pub trait LayoutTerminalExt {
     /// would destroy.
     fn apply_block_layout(&self, content: &str, terminal_width: u32) -> String;
 
+    /// [`apply_block_layout`](Self::apply_block_layout) at `term`'s columns.
+    ///
+    /// On a terminal with no width only a left margin in cells applies: an
+    /// alignment has no slack to use and a percentage has no basis.
+    fn apply_block_layout_on(&self, content: &str, term: &Terminal) -> String;
+
     /// Width available for content after subtracting the left and right
     /// margins, resolved against `terminal_width` in whole terminal cells.
     fn available_width(&self, terminal_width: u32) -> u32;
@@ -127,16 +133,7 @@ impl LayoutTerminalExt for Layout {
             return String::new();
         }
 
-        let had_trailing_newline = content.ends_with('\n');
-        let mut lines = split_lines(content);
-        if had_trailing_newline
-            && let Some(last) = lines.last()
-            && last.is_empty()
-        {
-            lines.pop();
-        }
-
-        let max_line_width = lines.iter().map(|l| visible_width(l)).max().unwrap_or(0);
+        let max_line_width = block_lines(content).iter().map(|l| visible_width(l)).max().unwrap_or(0);
         let block_padding = available_width.saturating_sub(max_line_width);
         let pre_align = match self.alignment {
             Alignment::Left => 0,
@@ -144,22 +141,14 @@ impl LayoutTerminalExt for Layout {
             Alignment::Center => block_padding / 2,
         };
 
-        let left_padding = " ".repeat(left as usize);
-        let block_padding_str = " ".repeat(pre_align as usize);
+        indent_block(content, left + pre_align)
+    }
 
-        let mut result = String::new();
-        for line in &lines {
-            result.push_str(&left_padding);
-            result.push_str(&block_padding_str);
-            result.push_str(line);
-            result.push('\n');
+    fn apply_block_layout_on(&self, content: &str, term: &Terminal) -> String {
+        match term.columns() {
+            Some(columns) => self.apply_block_layout(content, columns),
+            None => indent_block(content, resolve_cells(&self.margin.left, 0)),
         }
-
-        if !had_trailing_newline && result.ends_with('\n') {
-            result.pop();
-        }
-
-        result
     }
 
     fn apply_layout(&self, content: &str, terminal_width: u32) -> String {
@@ -225,6 +214,34 @@ impl LayoutTerminalExt for Layout {
 
         result
     }
+}
+
+/// `content`'s lines, without the empty one a trailing newline produces.
+fn block_lines(content: &str) -> Vec<String> {
+    let mut lines = split_lines(content);
+    if content.ends_with('\n')
+        && let Some(last) = lines.last()
+        && last.is_empty()
+    {
+        lines.pop();
+    }
+    lines
+}
+
+/// Indents every line of `content` by `cells`, keeping a trailing newline
+/// without padding the empty line after it.
+fn indent_block(content: &str, cells: u32) -> String {
+    let indent = " ".repeat(cells as usize);
+    let mut result = String::new();
+    for line in &block_lines(content) {
+        result.push_str(&indent);
+        result.push_str(line);
+        result.push('\n');
+    }
+    if !content.ends_with('\n') && result.ends_with('\n') {
+        result.pop();
+    }
+    result
 }
 
 #[cfg(test)]

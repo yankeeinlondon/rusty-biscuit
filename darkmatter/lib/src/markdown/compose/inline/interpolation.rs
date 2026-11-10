@@ -3,7 +3,7 @@
 use super::super::super::Markdown;
 use super::super::super::types::{AuthoredSpan, MarkdownError, MarkdownResult};
 use super::super::context::effective_state as state;
-use super::super::body_origin::{BodyOrigin, BodyProvenance, DataRanges, ScopeRanges};
+use super::super::body_origin::{BodyOrigin, BodyProvenance, DataRanges, PendingRead, PendingReads, ScopeRanges};
 use super::super::directive_targets::{DirectiveTargetRewrite, rewrite_directive_targets};
 use super::super::interpolation;
 use super::super::shell_expansion;
@@ -12,6 +12,7 @@ use super::super::expression::{
 };
 use super::super::context::report::CandidateLocus;
 use super::super::expression::absence::MissingRoot;
+use super::super::member_sites::MemberFrame;
 use super::super::pipeline::{FinalVerdict, blocking_guard};
 use super::super::schema_validation::PreparedSchemas;
 use super::super::ComposeWarning;
@@ -56,7 +57,7 @@ pub(crate) fn run_stage(
     body: &mut BodyProvenance,
     schemas: &PreparedSchemas,
 ) -> MarkdownResult<usize> {
-    use interpolation::{Evaluator, ScanMode, interpolate_text_guarded};
+    use interpolation::{Evaluator, ScanMode};
 
     let scan_mode = if resolve_interpolate_code_blocks(markdown, options) {
         ScanMode::Plain
@@ -78,6 +79,17 @@ pub(crate) fn run_stage(
     body.data.ensure_describes(markdown.content())?;
     let origin = body.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
     let verdict = FinalVerdict { markdown, state, schemas };
+    // A read after a command that has not run yet waits for it: the shell
+    // stages evaluate it once the commands before it have run.
+    let target_floor = first_command_end(markdown, markdown.content(), &body.data, options);
+    let deferred_targets = std::cell::RefCell::new(Vec::new());
+    let defer_target = |span: std::ops::Range<usize>, source: Option<&str>| {
+        let late = is_late_read(target_floor, &span, source);
+        if late {
+            deferred_targets.borrow_mut().push(PendingRead { range: span, target: true });
+        }
+        !late
+    };
     // A repeated body's sites read the frame of the copy they lie in; the
     // text the target pass leaves has shifted, so the second pass reads the
     // ranges carried past its edits.
@@ -87,7 +99,16 @@ pub(crate) fn run_stage(
             .with_presentation_values(state.presentation_values())
             .observing_missing_roots();
         let targets = rewrite_targets_guarded(
-            markdown, &body.data, &evaluator, origin, &body.scopes, report, options, verdict, Some(&sited),
+            markdown,
+            &body.data,
+            &evaluator,
+            origin,
+            &body.scopes,
+            report,
+            options,
+            verdict,
+            Some(&sited),
+            target_floor.map(|_| &defer_target as _),
         )?;
         // An absent property in a whole-value directive target already warns as a
         // skipped nullable target; a second warning would report one issue twice.
@@ -96,12 +117,90 @@ pub(crate) fn run_stage(
     };
     report.add_warnings(targets.warnings);
     let scopes = body.scopes.after_edits(&targets.edits);
-    let lookup = SiteLookup::new(&document, &scopes, Some(&runtime.iteration));
-    let evaluator = Evaluator::new(&lookup)
-        .with_presentation_values(state.presentation_values())
-        .observing_missing_roots();
     let origin = origin.map(|origin| origin.after_edits(&targets.edits, &targets.output));
     let data = body.data.after_edits(&targets.edits, &targets.output);
+    let mut waiting_targets = PendingReads::new(deferred_targets.into_inner()).after_edits(&targets.edits);
+    let floor = first_command_end(markdown, &targets.output, &data, options);
+    let deferred = std::cell::RefCell::new(Vec::new());
+    let defer = |span: std::ops::Range<usize>, source: Option<&str>| {
+        // A waiting target's expression is the target's to evaluate.
+        if waiting_targets.intersects(&span) {
+            return false;
+        }
+        let late = is_late_read(floor, &span, source);
+        if late {
+            deferred.borrow_mut().push(PendingRead { range: span, target: false });
+        }
+        !late
+    };
+    let select: interpolation::rewrite::SpanSelection<'_> = floor.map(|_| &defer as _);
+    let result = rewrite_body(
+        BodyRewrite { markdown, state, schemas, options, document: &document, runtime, scan_mode },
+        &targets.output,
+        &data,
+        origin.as_ref(),
+        &scopes,
+        report,
+        select,
+    )?;
+
+    let data = data.after_edits(&result.edits, &result.output);
+    body.origin = origin.as_ref().map(|origin| origin.after_edits(&result.edits, &result.output));
+    body.authored = body.authored.take().and_then(|authored| {
+        authored
+            .advanced(markdown.content(), &targets.edits, &targets.output)?
+            .advanced(&targets.output, &result.edits, &result.output)
+    });
+    body.scopes = scopes.after_edits(&result.edits);
+    let mut pending = deferred.into_inner();
+    pending.extend(waiting_targets.take(|_| true));
+    body.pending = PendingReads::new(pending).after_edits(&result.edits);
+    body.data = data;
+    *markdown.content_mut() = result.output;
+    let replacements = targets.replacements + result.replacements;
+    debug!(
+        count = replacements,
+        "compose: interpolations applied"
+    );
+    Ok(replacements)
+}
+
+/// What one body rewrite reads: the document, its state, and how to scan.
+struct BodyRewrite<'a, L> {
+    markdown: &'a Markdown,
+    state: &'a EffectiveState,
+    schemas: &'a PreparedSchemas,
+    options: &'a crate::markdown::compose::ComposeRequest,
+    document: &'a L,
+    runtime: &'a shell_expansion::types::PipelineRuntime,
+    scan_mode: interpolation::ScanMode,
+}
+
+/// Rewrites the expressions of `input` (the current body, or the text the
+/// target pass left of it) that `select` accepts, reporting their warnings
+/// and undeclared reads to `report`. Every site reads the frame of the
+/// repeated copy (`scopes`) it lies in; `origin` anchors a failure to its
+/// authored span.
+fn rewrite_body<L: EvaluationLookup>(
+    rewrite: BodyRewrite<'_, L>,
+    input: &str,
+    data: &DataRanges,
+    origin: Option<&BodyOrigin>,
+    scopes: &ScopeRanges,
+    report: &mut ComposeReport,
+    select: interpolation::rewrite::SpanSelection<'_>,
+) -> MarkdownResult<interpolation::rewrite::InterpolationRewrite> {
+    let BodyRewrite { markdown, state, schemas, options, document, runtime, scan_mode } = rewrite;
+    let verdict = FinalVerdict { markdown, state, schemas };
+    let lookup = SiteLookup::new(document, scopes, Some(&runtime.iteration));
+    let mut evaluator = interpolation::Evaluator::new(&lookup)
+        .with_presentation_values(state.presentation_values())
+        .observing_missing_roots();
+    // A discovery pass reports no member reads; a body with no map to its
+    // authored text names no site.
+    if let Some(origin) = origin.filter(|_| !options.defer_expression_failures) {
+        evaluator = evaluator.with_member_sites(report.member_candidates.clone(), MemberFrame::Body(origin));
+    }
     let authored = markdown.loaded_source_context_for_errors();
     let locate = |root: &MissingRoot| {
         root.span
@@ -109,14 +208,13 @@ pub(crate) fn run_stage(
             .zip(authored.as_ref())
             .and_then(|(span, context)| {
                 origin
-                    .as_ref()
                     .and_then(|origin| origin.project(span))
                     .and_then(|range| AuthoredSpan::locate(&context.content, range))
                     .map(|authored| authored.line())
                     .or_else(|| {
                         super::super::unknown_identifiers::unique_authored_line(
                             &context.content,
-                            targets.output.get(span.clone())?,
+                            input.get(span.clone())?,
                         )
                     })
             })
@@ -128,41 +226,146 @@ pub(crate) fn run_stage(
     };
     let mut guard =
         blocking_guard(report, options, Some(verdict), Some((evaluator.missing_root_mark(), &missing_roots)));
-    let result = interpolate_text_guarded(
-        &targets.output,
-        Some(&data),
+    let result = interpolation::interpolate_text_selected(
+        input,
+        Some(data),
         &evaluator,
         scan_mode,
         options.expression_failure_policy(),
         "interpolation",
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
         Some(&lookup),
-    )
-    .map_err(|failure| anchor_authored_failure(markdown, origin.as_ref(), &scopes, failure))?;
+        select,
+    );
     drop(guard);
-
-    let data = data.after_edits(&result.edits, &result.output);
-    body.origin = origin.as_ref().map(|origin| origin.after_edits(&result.edits, &result.output));
-    body.authored = body.authored.take().and_then(|authored| {
-        authored
-            .advanced(markdown.content(), &targets.edits, &targets.output)?
-            .advanced(&targets.output, &result.edits, &result.output)
-    });
-    body.scopes = scopes.after_edits(&result.edits);
-    body.data = data;
-    *markdown.content_mut() = result.output;
-    report.add_warnings(result.warnings);
+    let mut result = result.map_err(|failure| anchor_authored_failure(markdown, origin, scopes, report, failure))?;
+    report.add_warnings(std::mem::take(&mut result.warnings));
     // The scanner evaluates spans end to start; restore document order so the
     // first authored read of a root is the one kept.
     let mut roots = evaluator.take_missing_roots();
     roots.sort_by_key(|root| root.span.as_ref().map_or(usize::MAX, |span| span.start));
     report.add_unknown_root_candidates("interpolation", roots, locate);
-    let replacements = targets.replacements + result.replacements;
-    debug!(
-        count = replacements,
-        "compose: interpolations applied"
-    );
+    Ok(result)
+}
+
+/// Evaluates the reads body interpolation left pending (see
+/// [`BodyProvenance::pending`]) that `ready` accepts, in the current body.
+///
+/// A shell stage calls this once every command before a read has run, so the
+/// read sees what those commands wrote; the data memo was already emptied as
+/// each of them ran. The evaluation is body interpolation's own: the same
+/// failure policy, blocking checks, warnings, and iteration frames.
+///
+/// ## Returns
+///
+/// The number of interpolations applied.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_pending(
+    markdown: &mut Markdown,
+    state: &EffectiveState,
+    options: &crate::markdown::compose::ComposeRequest,
+    runtime: &shell_expansion::types::PipelineRuntime,
+    report: &mut ComposeReport,
+    body: &mut BodyProvenance,
+    schemas: &PreparedSchemas,
+    ready: impl Fn(&std::ops::Range<usize>) -> bool,
+) -> MarkdownResult<usize> {
+    let selected = body.pending.take(ready);
+    if selected.is_empty() {
+        return Ok(0);
+    }
+    body.data.ensure_describes(markdown.content())?;
+    let scan_mode = if resolve_interpolate_code_blocks(markdown, options) {
+        interpolation::ScanMode::Plain
+    } else {
+        interpolation::ScanMode::MarkdownAware
+    };
+    let document = DeferrableLookup {
+        inner: state::ResolvingLookup::new(state, options.expression_resolution_context(&runtime.remote_fetch)),
+        defer_not_captured: options.defer_missing_runtime_context,
+    };
+    let (targets, plain): (Vec<_>, Vec<_>) = selected.into_iter().partition(|read| read.target);
+    let mut plain = PendingReads::new(plain);
+    let mut replacements = 0;
+    if !targets.is_empty() {
+        let chosen = |span: std::ops::Range<usize>, _: Option<&str>| targets.iter().any(|read| read.range == span);
+        let origin = body.origin.clone().filter(|origin| origin.describes(markdown.content()));
+        let rewrite = {
+            let sited = SiteLookup::new(&document, &body.scopes, Some(&runtime.iteration));
+            let evaluator = interpolation::Evaluator::new(&sited)
+                .with_presentation_values(state.presentation_values())
+                .observing_missing_roots();
+            let rewrite = rewrite_targets_guarded(
+                markdown,
+                &body.data,
+                &evaluator,
+                origin.as_ref(),
+                &body.scopes,
+                report,
+                options,
+                FinalVerdict { markdown, state, schemas },
+                Some(&sited),
+                Some(&chosen),
+            )
+            .map_err(|error| error.with_on_disk_source(&markdown.full_source_context_for_errors()))?;
+            // As in `run_stage`: an absent target root warns as a skipped target.
+            drop(evaluator.take_missing_roots());
+            rewrite
+        };
+        report.add_warnings(rewrite.warnings);
+        replacements += rewrite.replacements;
+        plain = plain.after_edits(&rewrite.edits);
+        let before = std::mem::replace(markdown.content_mut(), rewrite.output);
+        body.advance(&before, &rewrite.edits, markdown.content())?;
+    }
+    let plain = plain.take(|_| true);
+    if !plain.is_empty() {
+        let chosen = |span: std::ops::Range<usize>, source: Option<&str>| {
+            source.is_some() && plain.iter().any(|read| read.range == span)
+        };
+        let origin = body.origin.clone().filter(|origin| origin.describes(markdown.content()));
+        let result = rewrite_body(
+            BodyRewrite { markdown, state, schemas, options, document: &document, runtime, scan_mode },
+            markdown.content(),
+            &body.data,
+            origin.as_ref(),
+            &body.scopes,
+            report,
+            Some(&chosen),
+        )
+        .map_err(|error| error.with_on_disk_source(&markdown.full_source_context_for_errors()))?;
+        replacements += result.replacements;
+        let before = std::mem::replace(markdown.content_mut(), result.output);
+        body.advance(&before, &result.edits, markdown.content())?;
+    }
+    report.interpolations_applied += replacements;
     Ok(replacements)
+}
+
+/// The end of the first command a later stage runs in `content` (the
+/// current text of `markdown`'s body), when it holds an expression: a read
+/// that starts there or later waits for that command.
+fn first_command_end(
+    markdown: &Markdown,
+    content: &str,
+    data: &DataRanges,
+    options: &crate::markdown::compose::ComposeRequest,
+) -> Option<usize> {
+    if !content.contains("{{") {
+        return None;
+    }
+    super::shell_expansion::command_sites(markdown, content, data, options)
+        .first()
+        .map(|site| site.span.end)
+}
+
+/// Whether the expression `source` at `span` reads a file (calls a
+/// read-side function) and starts at or after `floor`.
+fn is_late_read(floor: Option<usize>, span: &std::ops::Range<usize>, source: Option<&str>) -> bool {
+    floor.is_some_and(|floor| span.start >= floor)
+        && source
+            .and_then(|source| interpolation::parse(source).ok())
+            .is_some_and(|expr| super::super::remote::calls_read_side_function(&expr))
 }
 
 /// The directive-target pass of [`run_stage`], checking the blocking policy
@@ -178,27 +381,32 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
     evaluator: &interpolation::Evaluator<'_, L>,
     origin: Option<&BodyOrigin>,
     ranges: &ScopeRanges,
-    report: &ComposeReport,
+    report: &mut ComposeReport,
     options: &crate::markdown::compose::ComposeRequest,
     verdict: FinalVerdict<'_>,
     site: Option<&dyn SiteHook>,
+    select: interpolation::rewrite::SpanSelection<'_>,
 ) -> MarkdownResult<DirectiveTargetRewrite> {
     // A target's absent root is reported as a skipped target, never as an
     // undeclared read, so this pass judges warnings alone.
     let mut guard = blocking_guard(report, options, Some(verdict), None);
-    rewrite_directive_targets(
+    let rewrite = rewrite_directive_targets(
         markdown.content(),
         Some(data),
         evaluator,
         markdown.frontmatter_line_count(),
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
         site,
-    )
-    .map_err(|failure| anchor_authored_failure(markdown, origin, ranges, failure))
+        select,
+    );
+    drop(guard);
+    rewrite.map_err(|failure| anchor_authored_failure(markdown, origin, ranges, report, failure))
 }
 
 /// Anchors a body failure to its authored span when `origin` proves one, and
-/// gives a failure inside a repeated copy (`ranges`) that copy's items.
+/// gives a failure inside a repeated copy (`ranges`) that copy's items. The
+/// warnings the rewrite reported before failing go to `report` first, so the
+/// failed document keeps them.
 ///
 /// `origin` maps the text the failing span indexes back to the loaded
 /// document. An expression inside text an earlier stage inserted (an authored
@@ -208,9 +416,11 @@ fn anchor_authored_failure(
     markdown: &Markdown,
     origin: Option<&BodyOrigin>,
     ranges: &ScopeRanges,
+    report: &mut ComposeReport,
     failure: interpolation::LocatedInterpolationError,
 ) -> MarkdownError {
-    let interpolation::LocatedInterpolationError { error, span } = failure;
+    let interpolation::LocatedInterpolationError { error, span, warnings } = failure;
+    report.add_warnings(warnings);
     let mut error = *error;
     if let Some(context) = markdown.loaded_source_context_for_errors()
         && let Some(authored) = span

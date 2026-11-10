@@ -1,0 +1,51 @@
+---
+source: darkmatter/lib/tests/l1/plain_corpus.rs
+expression: output
+---
+[1m# Plain Corpus[0m
+
+A soft-broken paragraph that continues here and ends here.
+
+A long paragraph that keeps going well past any narrow
+width, so that it has to wrap more than once at forty
+columns and at eighty columns too, while under an unlimited
+width it stays on a single line from its first word all the
+way through to its very last word.
+
+Run [38;2;152;195;121m[48;2;40;44;52mmd compose[0m with [1mbold words[0m and [3mitalic words[0m.
+
+                                                      [0m[48;2;250;250;250m[38;2;0;0;0m yaml [0m
+[0m[48;2;250;250;250m                                                            [0m
+[0m[48;2;250;250;250m [38;2;228;86;73mname[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79mstring(required)                                     [0m
+[0m[48;2;250;250;250m                                                            [0m
+
+┌──────┬──────┐
+│ Name │ Type │
+├──────┼──────┤
+│ id   │ ulid │
+└──────┴──────┘
+
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+[38;2;100;100;100m▐   [39mQuoted text keeps a visible marker.
+
+- Item one
+  - Nested item
+- Item two
+
+1. First
+2. Second
+
+See ]8;;https://example.com/docs\the docs]8;;\ and ]8;;https://example.com/same\https://example.com/same]8;;\.
+
+IMAGE[A diagram]
+
+Disclosure summary
+
+[38;2;106;114;130m│[0m [2m[3mDisclosure body.[0m
+
+                                                   [0m[48;2;250;250;250m[38;2;0;0;0m mermaid [0m
+[0m[48;2;250;250;250m                                                            [0m
+[0m[48;2;250;250;250m [38;2;166;38;164mflowchart[38;2;56;58;66m [38;2;193;132;1mLR                                               [0m
+[0m[48;2;250;250;250m [38;2;56;58;66m    [38;2;228;86;73mA[38;2;56;58;66m [38;2;166;38;164m-->[38;2;56;58;66m [38;2;228;86;73mB                                                [0m
+[0m[48;2;250;250;250m                                                            [0m

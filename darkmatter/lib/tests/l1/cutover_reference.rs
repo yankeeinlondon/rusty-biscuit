@@ -55,8 +55,7 @@ use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
 use darkmatter::style::{
-    BespokeStyleOverrides, ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides,
-    PageStyleOverrides, apply_bespoke_style, apply_color_style, apply_component_style,
+    apply_bespoke_style, apply_color_style, apply_component_style,
     apply_hr_style, apply_list_style, apply_page_style, from_frontmatter,
 };
 
@@ -102,23 +101,25 @@ fn indent(text: &str, spaces: usize) -> String {
 fn apply_all_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
 
-    let page = apply_page_style(page, &style, PageStyleOverrides::default())
+    let page = apply_page_style(page, &style)
         .expect("apply_page_style");
-    let page = apply_component_style(page, &style, ComponentStyleOverrides::default())
+    let page = apply_component_style(page, &style)
         .expect("apply_component_style");
-    let page = apply_list_style(page, &style, ListStyleOverrides::default())
+    let page = apply_list_style(page, &style)
         .expect("apply_list_style");
-    let page = apply_hr_style(page, &style, HrStyleOverrides::default())
+    let page = apply_hr_style(page, &style)
         .expect("apply_hr_style");
     let page = apply_color_style(page, &style).expect("apply_color_style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+    apply_bespoke_style(page, &style, darkmatter::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .expect("apply_bespoke_style")
 }
 
 /// Render `md` to terminal through a `DarkmatterPage` at the given width.
 fn render_terminal(md: &Markdown, width: u32) -> String {
     let term = Terminal::new_optimistic(width);
-    let page = DarkmatterPage::new(&term);
+    // A policy that paints nothing renders at ambient color detection, so an
+    // unpinned depth would make these snapshots depend on the host's COLORTERM.
+    let page = DarkmatterPage::new(&term).with_color_depth(darkmatter::markdown::output::terminal::ColorDepth::TrueColor);
     let page = apply_all_styles(page, md);
     page.render(md).expect("terminal render")
 }
@@ -192,7 +193,7 @@ fn reference_page_background_pronounced() {
 #[test]
 fn reference_page_margin_and_padding() {
     let md = with_style(
-        "page:\n  left-margin: 2\n  right-margin: 2\n  top-padding: 1\n  bottom-padding: 1\n",
+        "page:\n  margin-left: 2\n  margin-right: 2\n  padding-top: 1\n  padding-bottom: 1\n",
         SIMPLE_DOC,
     );
     insta::assert_snapshot!(

@@ -475,45 +475,55 @@ fn suggested_rules(stderr: &str) -> Vec<String> {
 /// empty argument included), the template shape, and the program prefix,
 /// with quotes, backslashes, and underscores printed as the rule spells them.
 /// A command that can run only as a template is offered no exact key.
-#[test]
-fn every_suggested_rule_approves_the_command() {
-    let cases = [
-        (
-            QUOTED_EMPTY_DOC,
-            vec![
-                r#"exact argv-recorder -m "" -s "" tail"#,
-                r#"template argv-recorder -m {{ string }} -s "" tail"#,
-                "prefix argv-recorder",
-            ],
-        ),
-        (
-            "---\nv: \"a;b\"\n---\n::shell argv-recorder {{ v }}\n",
-            vec!["template argv-recorder {{ string }}", "prefix argv-recorder"],
-        ),
-        (
-            "---\nv: x_y\n---\n::shell argv-recorder \"say \\\"hi\\\" a\\\\b\" {{ v }}\n",
-            vec![
-                r#"exact argv-recorder "say \"hi\" a\\b" x_y"#,
-                r#"template argv-recorder "say \"hi\" a\\b" {{ string }}"#,
-                "prefix argv-recorder",
-            ],
-        ),
-    ];
-    for (doc, expected) in cases {
-        let refused = Recorder::new("suggested_rules_refused");
-        refused.write("doc.md", doc);
-        let assert = refused.compose(&[]).failure();
-        let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
-        let rules = suggested_rules(&stderr);
-        assert_eq!(rules, expected, "{stderr}");
-        assert!(!rules.iter().any(|rule| rule.starts_with("exact") && rule.contains("{{")), "{rules:?}");
+///
+/// One test per document, so each document's `md` runs proceed in parallel.
+#[track_caller]
+fn assert_every_suggested_rule_approves(doc: &str, expected: &[&str]) {
+    let refused = Recorder::new("suggested_rules_refused");
+    refused.write("doc.md", doc);
+    let assert = refused.compose(&[]).failure();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+    let rules = suggested_rules(&stderr);
+    assert_eq!(rules, expected, "{stderr}");
+    assert!(!rules.iter().any(|rule| rule.starts_with("exact") && rule.contains("{{")), "{rules:?}");
 
-        for rule in rules {
-            let approved = Recorder::new("suggested_rules_approved");
-            approved.write("doc.md", doc);
-            approved.whitelist(&format!("{rule}\n"));
-            approved.compose(&[]).success();
-            assert_eq!(approved.runs().len(), 1, "{rule}");
-        }
+    for rule in rules {
+        let approved = Recorder::new("suggested_rules_approved");
+        approved.write("doc.md", doc);
+        approved.whitelist(&format!("{rule}\n"));
+        approved.compose(&[]).success();
+        assert_eq!(approved.runs().len(), 1, "{rule}");
     }
+}
+
+#[test]
+fn every_suggested_rule_approves_a_quoted_empty_argument() {
+    assert_every_suggested_rule_approves(
+        QUOTED_EMPTY_DOC,
+        &[
+            r#"exact argv-recorder -m "" -s "" tail"#,
+            r#"template argv-recorder -m {{ string }} -s "" tail"#,
+            "prefix argv-recorder",
+        ],
+    );
+}
+
+#[test]
+fn every_suggested_rule_approves_a_template_only_command() {
+    assert_every_suggested_rule_approves(
+        "---\nv: \"a;b\"\n---\n::shell argv-recorder {{ v }}\n",
+        &["template argv-recorder {{ string }}", "prefix argv-recorder"],
+    );
+}
+
+#[test]
+fn every_suggested_rule_approves_quotes_backslashes_and_underscores() {
+    assert_every_suggested_rule_approves(
+        "---\nv: x_y\n---\n::shell argv-recorder \"say \\\"hi\\\" a\\\\b\" {{ v }}\n",
+        &[
+            r#"exact argv-recorder "say \"hi\" a\\b" x_y"#,
+            r#"template argv-recorder "say \"hi\" a\\b" {{ string }}"#,
+            "prefix argv-recorder",
+        ],
+    );
 }

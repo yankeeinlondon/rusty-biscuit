@@ -1,0 +1,82 @@
+$schema:
+    files: file-record[](required) -> one per file argument, in order; empty when the baseline could not be loaded
+    outcome: enum(success,failure) -> present when the run failed or has run diagnostics
+    diagnostics: diagnostic[] -> present with outcome
+types:
+    file-record:
+        file: string(required) -> the file as given
+        valid: boolean(required)
+        schema: string -> the document's schema reference or definition
+        problems: problem[](required)
+        layers: layers -> absent when no validation ran
+        error: enum(file_reference,frontmatter_parse,yaml_parse,schema,slots) -> why validation could not run; slots means the schema is a template whose slots did not resolve for this run
+        failure: string -> the file-reference failure class
+        message: string -> the error's message
+        code: string -> with error schema, the diagnostic code of a slot written where none may appear, e.g. dm.schema.slot_not_allowed_in_kind
+        line: number
+        column: number
+        warnings: warning[] -> discovery findings, then schema advisories
+        diagnostics: diagnostic[] -> with error slots, each slot's own record at the slot
+        grants_needed: grant-needed[] -> with error slots, the grants any one of which would allow an unapproved read, each once
+    problem:
+        path: string(required)
+        property: string
+        message: string(required)
+        kind: enum(missing,type,invalid,kind_check;required)
+        line: number
+        column: number
+        arm_index: number
+        description: string
+    layers:
+        document: layer
+        triggers: string[](required)
+        baseline: layer
+    layer:
+        form: string(required)
+        reference: string
+    warning:
+        source: string(required)
+        code: string(required)
+        path: string
+        message: string(required)
+    diagnostic:
+        code: string(required) -> stable code, e.g. dm.output.fractional_width
+        severity: enum(info,warning,error;required)
+        message: string(required)
+        source: source -> null when no file is known
+        expected_type: string
+        actual_type: string
+        span: span
+        iteration_path: iteration-step[](required)
+        reason: string -> e.g. "file not found"
+        construct: string -> e.g. "hyperlink", "::code"
+        reference: string -> the reference as written
+        failure: string -> file-reference failure class, e.g. no-match
+        included_via: trail-step[] -> outermost first
+        data_location: data-location -> where in a loaded data file the problem is; dm.data.malformed and dm.data.contract_mismatch only
+        grants_needed: grant-needed[] -> any one of these grants would allow the read; dm.schema.slot_approval_required only
+    source:
+        file: string -> null for stdin
+        line: number -> 1-based authored line; null when unknown
+        column: number -> 1-based authored column, in characters; null when unknown
+        section: string -> composed anchor slug of the innermost heading at or before the problem
+        inserted: boolean -> true when an expression, shell step, or replace value created the reference
+    span:
+        start: number(required)
+        end: number(required)
+    iteration-step:
+        collection: string(required)
+        position: unknown(required) -> a number for an index, a string for a key
+    trail-step:
+        file: string(required)
+        line: number -> authored line of the directive; null when the parent was built in memory
+    data-location:
+        file: string(required) -> the resolved data file (portable path) or URL
+        pointer: string -> JSON Pointer of the offending value, e.g. /0; absent when the parser proves none
+        line: number -> 1-based line in the data
+        column: number -> 1-based column in the data, in characters
+        byte_offset: number -> zero-based byte offset of invalid UTF-8; no line or column accompanies it
+    grant-needed:
+        kind: enum(file,dir,url,url-any-query,site;required) -> the grant store's kind word
+        target: string(required) -> the path, URL, or scheme://host[:port] the grant covers
+        scope: enum(once,persisted;required) -> once for this run; persisted writes the user's grant store

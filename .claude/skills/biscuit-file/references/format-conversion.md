@@ -34,6 +34,12 @@ let raw: &str = toml.raw();                     // original TOML text
 let value: &toml::Value = toml.value();           // parsed tree
 ```
 
+`as_json_value` (private `toml_to_json`) is lenient and must stay so for its
+existing callers: `nan`/`inf` become `null`, datetimes become strings. A caller
+that must reject what JSON cannot hold walks `toml.value()` itself, as
+Darkmatter's `load_data` parser (`compose/expression/data/parse.rs`) does; do
+not change the shared conversion to get that behavior.
+
 ### Yaml
 
 ```rust

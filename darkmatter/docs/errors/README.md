@@ -103,8 +103,9 @@ output fails the build.
 
 ## See Also
 
-- [File reference failures](./file-reference-failures.md): the `failure: <class>`
-  row every failed file reference carries
+- [Composition problems](./composition-problems.md): what stops a run, and how
+  a problem is located
+- [File reference failures](./file-reference-failures.md): the class every
+  failed file reference carries
 - [biscuit-terminal/lib/src/errors/source_context.rs](../../../biscuit-terminal/lib/src/errors/source_context.rs)
 - [biscuit-terminal/lib/src/components/status_block.rs](../../../biscuit-terminal/lib/src/components/status_block.rs)
-- [features/2026-05-08-good-errors/spec.md](../../features/2026-05-08-good-errors/spec.md)

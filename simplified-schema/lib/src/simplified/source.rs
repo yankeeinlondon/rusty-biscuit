@@ -19,12 +19,13 @@ use std::{collections::BTreeMap, ops::Range};
 use serde_yaml_ng::Value as YamlValue;
 
 use crate::errors::SchemaError;
+use crate::expression::scan::scan_expression_at;
 
 use super::grammar;
 use super::yaml_scalar::{self, DecodedScalar};
 use super::{
-    Constraint, DefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
-    SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, parse_property_definition_located,
+    Constraint, DefinitionFailure, DynamicElement, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
+    SchemaShape, SchemaRoot, SimplifiedType, Slot, TypeExpr, parse_property_definition_located,
     parse_schema_declaration_located, parse_yaml_schema,
 };
 
@@ -592,12 +593,13 @@ fn locate_keyed_failure(
         LocatedKind::Mapping(pairs) => pairs.iter().find(|pair| pair.key == key).map(|pair| &pair.value),
         _ => None,
     });
-    project_definition_failure(
+    let located = project_definition_failure(
         failure,
         located_value.map(|located| (located, value)),
         &SchemaSourcePath::root().property(key),
         source_offset,
-    )
+    );
+    quote_unquoted_slot(located, mapping_source, source_offset)
 }
 
 /// A projection error after a successful semantic parse: nothing was
@@ -622,12 +624,59 @@ fn locate_definition_failure(
     source_offset: usize,
 ) -> LocatedDefinitionFailure {
     let located = locate_yaml_value(yaml_source).ok();
-    project_definition_failure(
+    let located = project_definition_failure(
         failure,
         located.as_ref().map(|located| (located, value)),
         &SchemaSourcePath::root(),
         source_offset,
-    )
+    );
+    quote_unquoted_slot(located, yaml_source, source_offset)
+}
+
+/// `failure` with its non-string property name error replaced by the
+/// "quote the slot" hint when the rejected value is an unquoted `{{ … }}` in
+/// `source` (the text its path starts at and its spans index, before
+/// `source_offset`). Any other failure is returned unchanged.
+///
+/// YAML read the slot as a flow mapping with a mapping key, which neither
+/// the semantic error nor the located tree can represent. So the proof is
+/// structural: with every unquoted slot value single-quoted, the failure's
+/// path must lead to exactly one of them.
+fn quote_unquoted_slot(
+    mut failure: LocatedDefinitionFailure,
+    source: &str,
+    source_offset: usize,
+) -> LocatedDefinitionFailure {
+    let SchemaError::Grammar { property, message, .. } = &*failure.error else {
+        return failure;
+    };
+    if message != super::NON_STRING_PROPERTY_NAME {
+        return failure;
+    }
+    let slots = crate::slots::unquoted_slot_spans(source);
+    let (quoted, quoted_starts) = crate::slots::quote_slots(source, &slots);
+    let Ok(value) = serde_yaml_ng::from_str::<YamlValue>(&quoted) else {
+        return failure;
+    };
+    let Ok(located) = locate_yaml_value(&quoted) else {
+        return failure;
+    };
+    let Some(slot) = follow_path(&located, &value, &failure.path)
+        .and_then(|(node, _)| quoted_starts.iter().position(|start| *start == node.span.start))
+        .map(|index| slots[index].clone())
+    else {
+        return failure;
+    };
+    failure.error = Box::new(SchemaError::Grammar {
+        property: property.clone(),
+        message: crate::slots::quote_the_slot_message(source, &slot),
+        span: 0..0,
+        related: Vec::new(),
+    });
+    let located = offset_span(&slot, source_offset);
+    failure.authored_span = Some(located.clone());
+    failure.value_span = Some(located);
+    failure
 }
 
 /// Projects `failure` through `root`, the located tree paired with the YAML
@@ -785,10 +834,82 @@ fn project_standalone_payload(
         }
         SchemaDeclaration::Schema(schema) => {
             project_schema_source(schema, payload, 0, &mut source_map)?;
-            project_located_schema_suggestions(schema, payload)?;
+            project_located_schema_suggestions(schema, payload, 0)?;
         }
     }
     Ok(SourceAware { value, source_map })
+}
+
+/// Projects the suggestion-candidate and `{{ … }}` slot spans of
+/// `declaration`, the value of the entry `key` of the YAML mapping authored
+/// as `mapping_source`, into the document `mapping_source` starts
+/// `source_offset` bytes into, through the same located scalars the
+/// standalone loader uses. A whole-file reference carries no spans.
+pub(crate) fn project_keyed_declaration_spans(
+    declaration: &mut SchemaDeclaration,
+    mapping_source: &str,
+    key: &str,
+    source_offset: usize,
+) -> Result<(), SchemaError> {
+    let SchemaDeclaration::Schema(schema) = declaration else {
+        return Ok(());
+    };
+    let located = locate_yaml_value(mapping_source)?;
+    let LocatedKind::Mapping(pairs) = &located.kind else {
+        return Err(projection_error());
+    };
+    let value = pairs.iter().find(|pair| pair.key == key).map(|pair| &pair.value).ok_or_else(projection_error)?;
+    project_located_schema_suggestions(schema, value, source_offset)
+}
+
+/// An inline `$schema` value located in the text it was read from, and
+/// checked against the parsed value, so a parse of that value (or of one of
+/// its root-union arms) can project its candidate and slot spans into the
+/// file ([`Self::project`]).
+#[derive(Debug, Clone)]
+pub(crate) struct LocatedSchemaValue {
+    node: LocatedValue,
+    source_offset: usize,
+}
+
+impl LocatedSchemaValue {
+    /// The entry `key` of the YAML mapping authored as `mapping_source`,
+    /// which starts `source_offset` bytes into its file. `None` unless the
+    /// located entry agrees with `value` node for node, scalar for scalar:
+    /// a value that is not what the text says has no proven position.
+    ///
+    /// The mapping is read with the frontmatter grammar (comments, tags,
+    /// multi-line quoted scalars, and other keys' presentations around the
+    /// entry are tolerated); only the entry itself must be locatable.
+    pub(crate) fn locate(mapping_source: &str, key: &str, source_offset: usize, value: &YamlValue) -> Option<Self> {
+        let located = locate_yaml_value_with(mapping_source, LocatorGrammar::Tolerant).ok()?;
+        let LocatedKind::Mapping(pairs) = located.kind else {
+            return None;
+        };
+        let node = pairs.into_iter().find(|pair| pair.key == key)?.value;
+        verify_located(&node, value).ok()?;
+        Some(Self { node, source_offset })
+    }
+
+    /// Arm `index` of a located root union; `None` when the value is not a
+    /// sequence with that item.
+    pub(crate) fn arm(&self, index: usize) -> Option<Self> {
+        match &self.node.kind {
+            LocatedKind::Sequence(items) => {
+                items.get(index).map(|node| Self { node: node.clone(), source_offset: self.source_offset })
+            }
+            _ => None,
+        }
+    }
+
+    /// Projects `schema`, parsed from this value, so its candidate and slot
+    /// spans are byte ranges in the file. On error `schema` is unchanged.
+    pub(crate) fn project(&self, schema: &mut SchemaRoot) -> Result<(), SchemaError> {
+        let mut projected = schema.clone();
+        project_located_schema_suggestions(&mut projected, &self.node, self.source_offset)?;
+        *schema = projected;
+        Ok(())
+    }
 }
 
 /// Projects every `suggest(...)` candidate span through the located scalar
@@ -801,17 +922,18 @@ fn project_standalone_payload(
 fn project_located_schema_suggestions(
     schema: &mut SchemaRoot,
     located: &LocatedValue,
+    source_offset: usize,
 ) -> Result<(), SchemaError> {
     match (schema, &located.kind) {
         (SchemaRoot::Single(shape), LocatedKind::Mapping(_)) => {
-            project_located_shape_suggestions(shape, located)
+            project_located_shape_suggestions(shape, located, source_offset)
         }
         (SchemaRoot::Union(arms), LocatedKind::Sequence(items))
             if arms.len() == items.len() =>
         {
             for (arm, item) in arms.iter_mut().zip(items) {
                 if let SchemaArm::Inline(shape) = arm {
-                    project_located_shape_suggestions(shape, item)?;
+                    project_located_shape_suggestions(shape, item, source_offset)?;
                 }
             }
             Ok(())
@@ -837,6 +959,7 @@ fn project_located_schema_suggestions(
 fn project_located_shape_suggestions(
     shape: &mut SchemaShape,
     located: &LocatedValue,
+    source_offset: usize,
 ) -> Result<(), SchemaError> {
     let LocatedKind::Mapping(pairs) = &located.kind else {
         return Err(projection_error());
@@ -857,7 +980,7 @@ fn project_located_shape_suggestions(
                     .ok_or_else(projection_error)?
             }
         };
-        project_located_property_suggestions(definition, &pair.value)?;
+        project_located_property_suggestions(definition, &pair.value, source_offset)?;
     }
     Ok(())
 }
@@ -865,6 +988,7 @@ fn project_located_shape_suggestions(
 fn project_located_property_suggestions(
     definition: &mut PropertyDef,
     located: &LocatedValue,
+    source_offset: usize,
 ) -> Result<(), SchemaError> {
     if let LocatedKind::Scalar(scalar) = &located.kind
         && scalar.decoded().starts_with('*')
@@ -876,16 +1000,16 @@ fn project_located_property_suggestions(
         };
     }
     match (definition, &located.kind) {
-        (PropertyDef::Single(atom), _) => project_located_atom_suggestions(atom, located),
+        (PropertyDef::Single(atom), _) => project_located_atom_suggestions(atom, located, source_offset),
         (PropertyDef::Union(atoms), LocatedKind::Scalar(scalar)) => {
             for atom in atoms {
-                project_atom_suggestions(atom, scalar, 0)?;
+                project_atom_suggestions(atom, scalar, source_offset)?;
             }
             Ok(())
         }
         (PropertyDef::Union(atoms), LocatedKind::Sequence(items)) if atoms.len() == items.len() => {
             for (atom, item) in atoms.iter_mut().zip(items) {
-                project_located_atom_suggestions(atom, item)?;
+                project_located_atom_suggestions(atom, item, source_offset)?;
             }
             Ok(())
         }
@@ -896,12 +1020,13 @@ fn project_located_property_suggestions(
 fn project_located_atom_suggestions(
     atom: &mut PropertyAtom,
     located: &LocatedValue,
+    source_offset: usize,
 ) -> Result<(), SchemaError> {
     match (&mut atom.ty, &located.kind) {
         (TypeExpr::InlineObject(shape), LocatedKind::Mapping(_)) => {
-            project_located_shape_suggestions(shape, located)
+            project_located_shape_suggestions(shape, located, source_offset)
         }
-        (_, LocatedKind::Scalar(scalar)) => project_atom_suggestions(atom, scalar, 0),
+        (_, LocatedKind::Scalar(scalar)) => project_atom_suggestions(atom, scalar, source_offset),
         _ => Err(projection_error()),
     }
 }
@@ -1001,7 +1126,8 @@ pub fn locate_schema_value(yaml_source: &str, source_offset: usize) -> Option<Sc
 
 /// [`locate_schema_value`] for a document's frontmatter, which also follows a
 /// multi-line quoted scalar, a tag, and an empty value instead of giving up,
-/// and does not require every line to belong to the value.
+/// follows a flow collection across lines and past its comments, and does not
+/// require every line to belong to the value.
 ///
 /// Schema documents keep [`locate_schema_value`]'s strict grammar, which
 /// rejects those presentations.
@@ -1077,8 +1203,8 @@ enum LocatorGrammar {
     /// model fails instead of leaving lines unread.
     Strict,
     /// Frontmatter lookup, which also follows tags, multi-line quoted
-    /// scalars, empty (null) values, and compact sequence items wider than
-    /// `- `.
+    /// scalars, empty (null) values, compact sequence items wider than `- `,
+    /// multi-line flow collections, and comments beside a node.
     Tolerant,
 }
 
@@ -1179,9 +1305,12 @@ impl BlockLocator<'_> {
             self.next += 1;
             let range = line.content_start..line.end;
             if self.tolerant {
+                if self.source[range.clone()].starts_with(['[', '{']) {
+                    return self.flow_collection(range.start);
+                }
                 // Frontmatter lookup keeps reading a scalar that opens its own
                 // line as that line alone.
-                locate_inline(self.source, range)
+                locate_inline(self.source, range, LocatorGrammar::Tolerant)
             } else {
                 self.inline_value(range, indent)
             }
@@ -1227,7 +1356,7 @@ impl BlockLocator<'_> {
             };
             self.next += 1;
             let item_start = line.content_start + relative;
-            if item_start < line.end {
+            if item_start < line.end && !(self.tolerant && self.source[item_start..line.end].starts_with('#')) {
                 let item_content = &self.source[item_start..line.end];
                 if explicit_indicator_content(item_content, '?').is_some()
                     || mapping_separator(item_content, false).is_some()
@@ -1344,7 +1473,9 @@ impl BlockLocator<'_> {
         value_range: Range<usize>,
         indent: usize,
     ) -> Result<LocatedValue, SchemaError> {
-        if value_range.start < value_range.end {
+        // A comment after the key leaves the value to the following lines.
+        let is_comment = self.tolerant && self.source[value_range.clone()].starts_with('#');
+        if value_range.start < value_range.end && !is_comment {
             if let Some(after_properties) =
                 node_properties_end(self.source, &value_range, self.tolerant)
             {
@@ -1355,7 +1486,7 @@ impl BlockLocator<'_> {
                     node
                 } else if self.tolerant {
                     // A tagged empty value (`key: !!str`) has no node to descend into.
-                    locate_inline(self.source, value_range.clone())?
+                    locate_inline(self.source, value_range.clone(), LocatorGrammar::Tolerant)?
                 } else {
                     return Err(projection_error());
                 };
@@ -1409,14 +1540,15 @@ impl BlockLocator<'_> {
         parent_indent: usize,
     ) -> Result<LocatedValue, SchemaError> {
         let raw = &self.source[range.clone()];
+        if self.tolerant && raw.starts_with(['[', '{']) {
+            return self.flow_collection(range.start);
+        }
         let continues = self
             .lines
             .get(self.next)
             .is_some_and(|line| line.indent > parent_indent);
         let multi_line = if self.tolerant {
-            is_block_scalar_header(raw)
-                || raw.starts_with(['\'', '"'])
-                || (continues && !raw.starts_with(['[', '{']))
+            is_block_scalar_header(raw) || raw.starts_with(['\'', '"']) || continues
         } else {
             // A literal or folded block scalar, the form multi-line type
             // expressions such as `function(...)` signatures are written in,
@@ -1427,7 +1559,8 @@ impl BlockLocator<'_> {
                 || (continues && !raw.starts_with(['\'', '"', '[', '{', '!', '&', '*']))
         };
         if !multi_line {
-            return locate_inline(self.source, range);
+            let grammar = if self.tolerant { LocatorGrammar::Tolerant } else { LocatorGrammar::Strict };
+            return locate_inline(self.source, range, grammar);
         }
         let (scalar, end) =
             yaml_scalar::decode_scalar_node(self.source, range.start, parent_indent)
@@ -1443,6 +1576,17 @@ impl BlockLocator<'_> {
             span: range.start..end,
             kind: LocatedKind::Scalar(scalar),
         })
+    }
+
+    /// The flow collection opening at `start`, which may close on a later line
+    /// at any indentation. Its lines are consumed here because a line inside
+    /// it says nothing about the block structure around it.
+    fn flow_collection(&mut self, start: usize) -> Result<LocatedValue, SchemaError> {
+        let end = flow_collection_end(self.source, start).ok_or_else(projection_error)?;
+        while self.lines.get(self.next).is_some_and(|line| line.content_start <= end) {
+            self.next += 1;
+        }
+        locate_inline(self.source, start..end + 1, LocatorGrammar::Tolerant)
     }
 }
 
@@ -1527,8 +1671,15 @@ fn located_mapping(pairs: Vec<LocatedPair>) -> Result<LocatedValue, SchemaError>
     })
 }
 
-fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, SchemaError> {
-    let range = trim_range(source, range);
+fn locate_inline(
+    source: &str,
+    range: Range<usize>,
+    grammar: LocatorGrammar,
+) -> Result<LocatedValue, SchemaError> {
+    let range = match grammar {
+        LocatorGrammar::Strict => trim_range(source, range),
+        LocatorGrammar::Tolerant => node_without_comments(source, range),
+    };
     let raw = &source[range.clone()];
     if is_block_scalar_header(raw) {
         return Err(projection_error());
@@ -1541,9 +1692,9 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
         // no child node, and is itself the smallest authored node there is.
         let items = split_flow_entries(source, range.start + 1..end)
             .into_iter()
-            .map(|item| trim_range(source, item))
+            .map(|item| flow_entry(source, item, grammar))
             .filter(|item| item.start < item.end)
-            .map(|item| locate_inline(source, item))
+            .map(|item| locate_inline(source, item, grammar))
             .collect::<Result<Vec<_>, _>>()?;
         return Ok(LocatedValue {
             span: range,
@@ -1556,7 +1707,7 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
             .ok_or_else(projection_error)?;
         let mut pairs = Vec::new();
         for pair in split_flow_entries(source, range.start + 1..end) {
-            let pair = trim_range(source, pair);
+            let pair = flow_entry(source, pair, grammar);
             if pair.start == pair.end {
                 continue;
             }
@@ -1564,7 +1715,7 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
             let colon = mapping_separator(raw_pair, true).ok_or_else(projection_error)?;
             let key_span = trim_range(source, pair.start..pair.start + colon);
             let key = decoded_text(source, &key_span)?;
-            let value = locate_inline(source, pair.start + colon + 1..pair.end)?;
+            let value = locate_inline(source, pair.start + colon + 1..pair.end, grammar)?;
             let pair_span = key_span.start..value.span.end;
             pairs.push(LocatedPair {
                 key,
@@ -1584,6 +1735,46 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
         span: range.start..range.start + consumed,
         kind: LocatedKind::Scalar(scalar),
     })
+}
+
+/// One entry of a flow collection, past the comments the tolerant grammar reads
+/// before it. An entry holding only comments is empty.
+fn flow_entry(source: &str, entry: Range<usize>, grammar: LocatorGrammar) -> Range<usize> {
+    match grammar {
+        LocatorGrammar::Strict => trim_range(source, entry),
+        LocatorGrammar::Tolerant => trim_range(source, past_leading_comments(source, entry)),
+    }
+}
+
+fn past_leading_comments(source: &str, range: Range<usize>) -> Range<usize> {
+    let bytes = source.as_bytes();
+    let mut start = range.start;
+    loop {
+        while start < range.end && bytes[start].is_ascii_whitespace() {
+            start += 1;
+        }
+        if start >= range.end || bytes[start] != b'#' {
+            return start..range.end;
+        }
+        while start < range.end && !matches!(bytes[start], b'\n' | b'\r') {
+            start += 1;
+        }
+    }
+}
+
+/// The one node `range` holds, without the blanks and comments around it. A
+/// quoted scalar or collection ends at its own close, so what follows it can
+/// only be a comment; a plain scalar ends at its first comment.
+fn node_without_comments(source: &str, range: Range<usize>) -> Range<usize> {
+    let bytes = source.as_bytes();
+    let range = past_leading_comments(source, range);
+    let end = match bytes[range.clone()].first() {
+        Some(b'[' | b'{') => flow_collection_end(source, range.start).map(|end| end + 1),
+        Some(b'\'' | b'"') => quoted_flow_scalar_end(bytes, range.start, range.end),
+        _ => (range.start..range.end)
+            .find(|index| bytes[*index] == b'#' && *index > range.start && bytes[*index - 1].is_ascii_whitespace()),
+    };
+    trim_range(source, range.start..end.map_or(range.end, |end| end.min(range.end)))
 }
 
 /// Where the raw YAML flow collection opening at byte `start` of `source`
@@ -2546,8 +2737,10 @@ impl ExpressionLevel {
 ///   visited. `{` opens an inline object and `(` a constraint list.
 /// - **Argument lists**, inside a constraint list's `(…)`: `(`/`)` nest and a
 ///   quote opens a string the lexer reads with `\` escapes, so
-///   `suggest('a)b', c)` holds two arguments. `[`, `{`, and the rest are
-///   argument text. String contents are not visited.
+///   `suggest('a)b', c)` holds two arguments. A `{{ … }}` slot is skipped
+///   whole, to the end [`scan_expression_at`] finds, so
+///   `enum(a, {{ f(x, [1; 2]) }})` holds two members. `[`, `{`, and the rest
+///   are argument text. String and slot contents are not visited.
 /// - **Descriptions** after `->` are prose, never visited: quotes and brackets
 ///   in them mean nothing, so `(it's fine)` and `plain [x` hide no boundary.
 ///   Inside an inline object one ends where
@@ -2583,6 +2776,16 @@ pub(super) fn scan_expression(
                     return;
                 };
                 index = next;
+                continue;
+            }
+            // A `{{ … }}` slot is one argument whatever it holds: its
+            // brackets, quotes, `,`, `;`, and `(` are expression text, ended
+            // by the expression scanner's one closing rule.
+            if byte == b'{'
+                && let Some(slot) = scan_expression_at(source, index)
+                && slot.end <= end
+            {
+                index = slot.end;
                 continue;
             }
             if visit(index, byte, level) {
@@ -2723,6 +2926,19 @@ impl Projector<'_> {
     }
 
     fn property(&mut self, def: &mut PropertyDef) -> Result<(), SchemaError> {
+        // A `|` union written in one scalar (`string | {{ … }}`) is matched
+        // as a whole; a list-form union's options are scalars of their own.
+        if let PropertyDef::Union(_) = def
+            && property_has_suggestions(def)
+            && let Some((scalar_index, scalar)) = self.scalars[self.next_scalar..]
+                .iter()
+                .enumerate()
+                .find(|(_, scalar)| scalar_matches_definition(scalar, def))
+                .map(|(relative, scalar)| (self.next_scalar + relative, scalar))
+        {
+            self.next_scalar = scalar_index + 1;
+            return project_property_suggestions(def, scalar, self.source_offset);
+        }
         match def {
             PropertyDef::Single(atom) => self.atom(atom),
             PropertyDef::Union(atoms) => {
@@ -2749,24 +2965,30 @@ impl Projector<'_> {
         if let TypeExpr::InlineObject(shape) = &mut atom.ty {
             self.shape(shape)?;
         }
-        if atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Suggest(_))) {
+        if atom.is_pending_type() || atom.constraints.iter().chain(&atom.array_constraints).any(carries_spans) {
             return Err(projection_error());
         }
         Ok(())
     }
 }
 
+/// Whether `constraint` records authored spans that source-aware parsing
+/// projects into the document: suggestion candidates and `{{ … }}` slots.
+fn carries_spans(constraint: &Constraint) -> bool {
+    matches!(constraint, Constraint::Suggest(_) | Constraint::Dynamic(_) | Constraint::TemplateConstraint { .. })
+}
+
 fn atom_has_suggestions(atom: &PropertyAtom) -> bool {
-    atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Suggest(_)))
+    atom.constraints.iter().chain(&atom.array_constraints).any(carries_spans)
         || match &atom.ty {
             TypeExpr::InlineObject(shape) => shape.properties.values().any(property_has_suggestions)
                 || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def)),
             TypeExpr::Union(arms) => arms.iter().any(atom_has_suggestions),
-            TypeExpr::Primitive(_)
-            | TypeExpr::Imported { .. }
-            | TypeExpr::Tuple(_)
-            | TypeExpr::Function(_)
-            | TypeExpr::Ref(_) => false,
+            // A template type's slot is itself an authored span.
+            TypeExpr::Slot(_) => true,
+            // A tuple element may be a template type.
+            TypeExpr::Tuple(tuple) => tuple.any_atom(atom_has_suggestions),
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Ref(_) => false,
         }
 }
 
@@ -2782,6 +3004,10 @@ fn scalar_matches_atom(scalar: &DecodedScalar, expected: &PropertyAtom) -> bool 
         .is_ok_and(|actual| actual == *expected)
 }
 
+fn scalar_matches_definition(scalar: &DecodedScalar, expected: &PropertyDef) -> bool {
+    super::grammar::parse_type_definition("<source>", scalar.decoded()).is_ok_and(|actual| actual == *expected)
+}
+
 fn project_atom_suggestions(
     atom: &mut PropertyAtom,
     scalar: &DecodedScalar,
@@ -2795,16 +3021,50 @@ fn project_atom_suggestions(
             project_property_suggestions(&mut pattern.def, scalar, source_offset)?;
         }
     }
-    if let Some(candidates) = atom.constraints.iter_mut().find_map(|constraint| {
-        if let Constraint::Suggest(candidates) = constraint {
-            Some(candidates)
-        } else {
-            None
+    let project = |span: &mut Range<usize>| -> Result<(), SchemaError> {
+        let projected = scalar.project(span.clone()).ok_or_else(projection_error)?;
+        *span = offset_span(&projected, source_offset);
+        Ok(())
+    };
+    let project_slot = |slot: &mut Slot| -> Result<(), SchemaError> {
+        project(&mut slot.span)?;
+        project(&mut slot.expression_span)
+    };
+    match &mut atom.ty {
+        TypeExpr::Slot(slot) => project_slot(slot)?,
+        TypeExpr::Union(arms) => {
+            for arm in arms {
+                project_atom_suggestions(arm, scalar, source_offset)?;
+            }
         }
-    }) {
-        for candidate in candidates {
-            let span = scalar.project(candidate.span.clone()).ok_or_else(projection_error)?;
-            candidate.span = offset_span(&span, source_offset);
+        TypeExpr::Tuple(tuple) => {
+            for element in &mut tuple.elements {
+                project_property_suggestions(&mut element.def, scalar, source_offset)?;
+            }
+            if let Some(spread) = &mut tuple.spread {
+                project_atom_suggestions(spread, scalar, source_offset)?;
+            }
+        }
+        _ => {}
+    }
+    for constraint in atom.constraints.iter_mut().chain(atom.array_constraints.iter_mut()) {
+        match constraint {
+            Constraint::Suggest(candidates) => {
+                for candidate in candidates {
+                    project(&mut candidate.span)?;
+                }
+            }
+            Constraint::Dynamic(list) => {
+                for element in &mut list.elements {
+                    match element {
+                        DynamicElement::Suggestion(candidate) => project(&mut candidate.span)?,
+                        DynamicElement::Slot(slot) => project_slot(slot)?,
+                        DynamicElement::Member(_) => {}
+                    }
+                }
+            }
+            Constraint::TemplateConstraint { slot, .. } => project_slot(slot)?,
+            _ => {}
         }
     }
     Ok(())

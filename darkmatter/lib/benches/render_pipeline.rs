@@ -78,7 +78,7 @@ fn build_code_document(index: usize) -> String {
 /// terminal the benchmark happens to run in.
 fn render_terminal_options() -> TerminalOptions {
     let mut options = TerminalOptions::default();
-    options.max_width = Some(120);
+    options.width = Some(renderable::output::Width::Columns(120));
     options
 }
 

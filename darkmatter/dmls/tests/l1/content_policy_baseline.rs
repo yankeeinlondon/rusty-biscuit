@@ -212,10 +212,35 @@ fn the_authoring_example_and_a_policy_free_document_are_clean() {
 
 /// Every shared declaration case, in every presentation, publishes exactly
 /// the baseline problems the library reports, at the authored anchor and
-/// carrying the problem's instance path.
+/// carrying the problem's instance path. The table is split across
+/// [`DECLARATION_PARTS`] sessions that run in parallel: every edit is a full
+/// validation round trip, and one session for the whole table took over 5 s
+/// on a loaded host.
 #[test]
-fn every_shared_declaration_publishes_the_baseline_verdict_at_its_anchor() {
+fn every_shared_declaration_publishes_the_baseline_verdict_at_its_anchor_part_1() {
     let _ = include_str!("../../../lib/tests/content_policy_fixtures/mod.rs");
+    assert_declarations_publish_the_baseline_verdict(0);
+}
+
+#[test]
+fn every_shared_declaration_publishes_the_baseline_verdict_at_its_anchor_part_2() {
+    let _ = include_str!("../../../lib/tests/content_policy_fixtures/mod.rs");
+    assert_declarations_publish_the_baseline_verdict(1);
+}
+
+#[test]
+fn every_shared_declaration_publishes_the_baseline_verdict_at_its_anchor_part_3() {
+    let _ = include_str!("../../../lib/tests/content_policy_fixtures/mod.rs");
+    assert_declarations_publish_the_baseline_verdict(2);
+}
+
+const DECLARATION_PARTS: usize = 3;
+
+fn assert_declarations_publish_the_baseline_verdict(part: usize) {
+    let cases = DECLARATIONS
+        .chunks(DECLARATIONS.len().div_ceil(DECLARATION_PARTS))
+        .nth(part)
+        .expect("a non-empty part");
     let workspace = LspWorkspace::new();
     let mut fixture = session(&workspace);
     // One open buffer, edited per case: opening a document per case slows
@@ -223,7 +248,7 @@ fn every_shared_declaration_publishes_the_baseline_verdict_at_its_anchor() {
     let (document, _) = open_text(&mut fixture, &workspace, "declaration.md", &document("title: start\n"));
     let mut version = 1;
     let mut checked = 0;
-    for case in DECLARATIONS {
+    for case in cases {
         for rendered in render(case.declaration) {
             let label = format!("{} ({:?})", case.name, rendered.presentation);
             version += 1;
@@ -262,7 +287,7 @@ fn every_shared_declaration_publishes_the_baseline_verdict_at_its_anchor() {
             checked += 1;
         }
     }
-    assert!(checked > DECLARATIONS.len(), "both presentations of the list cases ran");
+    assert!(checked > cases.len(), "both presentations of the list cases ran");
     fixture.shutdown();
 }
 

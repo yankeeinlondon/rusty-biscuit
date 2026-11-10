@@ -56,6 +56,14 @@ where a YAML list cannot: a tuple position, a function parameter or return
 type, or an inline object property. `id: "string | number"` is exactly the
 same definition as `id: [string, number]` and compiles to the same `anyOf`.
 
+A value of a `type-definition` property (as opposed to a declaration under
+`$schema`) may also hold the list as one string: `"[string, number]"` there
+is the union `string | number`, exactly as the unquoted list is. The string
+is read as a YAML list only when the type grammar rejects it, so an item
+ending in `[]` is quoted (`"['string[]', null]"`), and text that is not a list
+of definitions, such as `"[string,"`, keeps the grammar's error. A
+declaration's own string, `id: "[string, number]"`, is still an error.
+
 `[]` binds tighter than `|`, and parentheses group, as in TypeScript:
 
 ```yaml

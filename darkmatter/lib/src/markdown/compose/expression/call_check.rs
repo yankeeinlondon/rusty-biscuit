@@ -47,7 +47,9 @@ use super::prepared::PreparedValue;
 use super::scope::{Polarity, Shape as ScopeShape, TypeScope};
 use simplified_schema::coercion::{Additional, ContentFormat, NumberShape, Shape, ValueKind, bind};
 use simplified_schema::simplified::serialize_property_atom;
-use simplified_schema::{Constraint, DefinitionTable, PropertyAtom, PropertyDef, is_subtype_with_definitions};
+use simplified_schema::{
+    Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, is_subtype_with_definitions,
+};
 use crate::markdown::span::SourceSpan;
 
 /// How an argument's design-time type relates to a parameter's type.
@@ -115,13 +117,26 @@ pub enum ArgumentType {
     /// No usable type: an undeclared or untyped variable, a call or operator
     /// expression whose type is `unknown`.
     Unknown,
+    /// An object literal with some literal and some computed members. It is
+    /// classified, and displays, as [`Self::Typed`] with `shape`; its
+    /// literal members stay visible to the checks that judge a value no
+    /// computed member can change (a literal `load_data` option).
+    PartialObject {
+        /// The whole object's type.
+        shape: ScopeShape,
+        /// The members written as literals.
+        literals: serde_json::Map<String, Value>,
+        /// The names of the members that are computed.
+        computed: Vec<String>,
+    },
 }
 
 impl ArgumentType {
     /// The design-time type of `arg` at the site `scope` describes.
     ///
     /// Literals (including lists and objects of literals, and a negated
-    /// number) carry their value; anything else carries
+    /// number) carry their value; an object literal mixing literal and
+    /// computed members is a [`Self::PartialObject`]; anything else carries
     /// [`expression_type`].
     pub fn of(arg: &SpannedExpr, scope: &TypeScope<'_>) -> Self {
         if let Some(value) = literal_value(arg) {
@@ -129,9 +144,33 @@ impl ArgumentType {
         }
         match expression_type(arg, scope) {
             ScopeShape::Unknown { .. } => Self::Unknown,
-            shape @ ScopeShape::Arms { .. } => Self::Typed(shape),
+            shape @ ScopeShape::Arms { .. } => match partial_object(arg) {
+                Some((literals, computed)) => Self::PartialObject { shape, literals, computed },
+                None => Self::Typed(shape),
+            },
         }
     }
+}
+
+/// The literal members and the computed member names of an object literal
+/// that has at least one of each.
+fn partial_object(arg: &SpannedExpr) -> Option<(serde_json::Map<String, Value>, Vec<String>)> {
+    let entries = match &arg.kind {
+        SpannedExprKind::Paren(inner) => return partial_object(inner),
+        SpannedExprKind::ObjectLiteral(entries) => entries,
+        _ => return None,
+    };
+    let mut literals = serde_json::Map::new();
+    let mut computed = Vec::new();
+    for (key, value) in entries {
+        match literal_value(value) {
+            Some(value) => {
+                literals.insert(key.value.clone(), value);
+            }
+            None => computed.push(key.value.clone()),
+        }
+    }
+    (!literals.is_empty() && !computed.is_empty()).then_some((literals, computed))
 }
 
 /// The design-time type of `expr` at the site `scope` describes, without
@@ -144,6 +183,8 @@ impl ArgumentType {
 /// | an object literal | a closed object declaring each member at its own type (shorthand `{a, b}` is `{a: a, b: b}`) |
 /// | an array literal | an array of the union of its items' types |
 /// | a call | the union of the declared `returns` of every overload its argument count can select |
+/// | `load_data(file, '<contract>')`, with or without an options argument | the literal contract's type (named references `unknown`), with `null` when `file` may be null; `null` for a literal `null` file |
+/// | `try(expr, fallback)` | the union of both operands' types; an authored `[]` operand adds nothing when the other operand's type provably accepts `[]` |
 /// | `x \|\| y` | `x`'s type without `null`, joined with `y`'s type where `x` is falsy |
 /// | `c ? a : b` | `a`'s type where `c` holds, joined with `b`'s where it does not |
 /// | any other operator | `unknown` |
@@ -172,7 +213,11 @@ pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape 
                 .reduce(|left, right| left.union(&right))
                 .unwrap_or(ScopeShape::Unknown { non_null: false }),
         ),
-        SpannedExprKind::FunctionCall { name, args } => call_returns(name, args.len()),
+        SpannedExprKind::FunctionCall { name, args } => {
+            load_data_type(name, args, scope)
+                .or_else(|| try_type(name, args, scope))
+                .unwrap_or_else(|| call_returns(name, args.len()))
+        }
         SpannedExprKind::CallbackCall { name, args } => {
             let Some(SpannedCallArgument::Callback(callback)) = args.get(1) else {
                 return call_returns(name, args.len());
@@ -212,6 +257,120 @@ pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape 
     }
 }
 
+/// Whether a call to `name` dispatches to the built-in `load_data`, by any
+/// spelling (`LOAD_DATA`, the `loaddata` alias).
+fn is_load_data(name: &str) -> bool {
+    functions::inspect_registration(name, |registration| registration.name() == LOAD_DATA).unwrap_or(false)
+}
+
+/// The canonical name of the data-loading function.
+const LOAD_DATA: &str = "load_data";
+
+/// The type a `load_data` call (two arguments, or three with options)
+/// returns when its `as` is a literal contract the passive judgment accepts;
+/// `None` (the catalog's `any | null`) for a computed or invalid contract.
+/// Options, literal or computed, never change the type.
+///
+/// A named-type reference, which a shape cannot resolve, is `unknown` in
+/// place. The signature's null passthrough survives: a literal `null` file
+/// returns `null`, and a file that may be `null` adds `null` to the type.
+fn load_data_type(name: &str, args: &[SpannedExpr], scope: &TypeScope<'_>) -> Option<ScopeShape> {
+    let (file, contract) = match args {
+        [file, contract] | [file, contract, _] => (file, contract),
+        _ => return None,
+    };
+    if !is_load_data(name) {
+        return None;
+    }
+    let carrier = literal_value(contract)?;
+    let written = super::data::written_contract(&carrier)?;
+    let mut denoted = super::data::judge_written_contract(&written).ok()?;
+    unresolved_as_unknown(&mut denoted);
+    let denoted = ScopeShape::of_type(&denoted);
+    let file = expression_type(file, scope);
+    Some(match &file {
+        ScopeShape::Arms { arms, nullable: true } if arms.is_empty() => file,
+        file if file.admits_null() => denoted.union(&ScopeShape::of_literal(&Value::Null)),
+        _ => denoted,
+    })
+}
+
+/// The type a two-operand `try(expr, fallback)` call returns: either
+/// operand may be the result, so the union of their types, each read in the
+/// call's own scope (neither operand narrows the other). `None` for another
+/// function or argument count.
+///
+/// An authored `[]` operand (through parentheses) would add `unknown[]` and
+/// erase a typed array's items, so it contributes nothing when some
+/// alternative of the other operand's type provably accepts `[]`, judged
+/// with the scope's definitions. Otherwise (a `min(1)` array, a non-empty
+/// tuple, an object, a recursive reference that cannot be proven) the
+/// ordinary union stands. General array-literal typing is unchanged.
+fn try_type(name: &str, args: &[SpannedExpr], scope: &TypeScope<'_>) -> Option<ScopeShape> {
+    let [expr, fallback] = args else {
+        return None;
+    };
+    if !functions::inspect_registration(name, |registration| registration.name() == TRY).unwrap_or(false) {
+        return None;
+    }
+    let expr_type = expression_type(expr, scope);
+    let fallback_type = expression_type(fallback, scope);
+    let absorbs_empty = |other: &ScopeShape| match other {
+        ScopeShape::Unknown { .. } => true,
+        ScopeShape::Arms { arms, .. } => arms.iter().any(|arm| {
+            simplified_schema::completion::alternative_accepts_in(arm, &Value::Array(Vec::new()), scope.definitions())
+        }),
+    };
+    Some(match (is_empty_array_literal(expr), is_empty_array_literal(fallback)) {
+        (false, true) if absorbs_empty(&expr_type) => expr_type,
+        (true, false) if absorbs_empty(&fallback_type) => fallback_type,
+        _ => expr_type.union(&fallback_type),
+    })
+}
+
+/// The canonical name of the recovery form.
+const TRY: &str = "try";
+
+/// Whether `expr` is the literal `[]`, through parentheses.
+fn is_empty_array_literal(expr: &SpannedExpr) -> bool {
+    match &expr.kind {
+        SpannedExprKind::Paren(inner) => is_empty_array_literal(inner),
+        SpannedExprKind::ArrayLiteral(items) => items.is_empty(),
+        _ => false,
+    }
+}
+
+/// Rewrites every named-type reference in `def`, at any depth, to `unknown`.
+fn unresolved_as_unknown(def: &mut PropertyDef) {
+    match def {
+        PropertyDef::Single(atom) => unresolved_atom_as_unknown(atom),
+        PropertyDef::Union(atoms) => atoms.iter_mut().for_each(unresolved_atom_as_unknown),
+    }
+}
+
+fn unresolved_atom_as_unknown(atom: &mut PropertyAtom) {
+    match &mut atom.ty {
+        // A pending template type is untyped here, like an unresolved
+        // reference: the check proves nothing against an unknown type.
+        TypeExpr::Imported { .. } | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {
+            atom.ty = TypeExpr::Primitive(SimplifiedType::Unknown);
+            atom.constraints.retain(|constraint| matches!(constraint, Constraint::Required));
+        }
+        TypeExpr::InlineObject(shape) => {
+            shape.properties.values_mut().for_each(unresolved_as_unknown);
+            shape.pattern_keys.iter_mut().for_each(|pattern| unresolved_as_unknown(&mut pattern.def));
+        }
+        TypeExpr::Union(arms) => arms.iter_mut().for_each(unresolved_atom_as_unknown),
+        TypeExpr::Tuple(tuple) => {
+            tuple.elements.iter_mut().for_each(|element| unresolved_as_unknown(&mut element.def));
+            if let Some(spread) = tuple.spread.as_deref_mut() {
+                unresolved_atom_as_unknown(spread);
+            }
+        }
+        TypeExpr::Primitive(_) | TypeExpr::Function(_) => {}
+    }
+}
+
 /// The union of the declared `returns` of every overload of `name` that
 /// takes `count` arguments; `unknown` for a name nothing dispatches or a
 /// count no overload takes. Overloads are never selected by argument type.
@@ -233,6 +392,7 @@ impl fmt::Display for ArgumentType {
         match self {
             Self::Literal(value) => write!(f, "literal {value}"),
             Self::Callback => f.write_str("inline callback"),
+            Self::PartialObject { shape, .. } => Self::Typed(shape.clone()).fmt(f),
             Self::Unknown | Self::Typed(ScopeShape::Unknown { .. }) => f.write_str("unknown"),
             Self::Typed(ScopeShape::Arms { arms, nullable }) => {
                 let mut parts: Vec<String> = arms.iter().map(type_text).collect();
@@ -280,6 +440,9 @@ pub fn classify_argument_with_definitions(
     parameter: &CompiledParameter,
     definitions: &DefinitionTable,
 ) -> ArgumentCategory {
+    if let ArgumentType::PartialObject { shape, .. } = source {
+        return classify_argument_with_definitions(&ArgumentType::Typed(shape.clone()), parameter, definitions);
+    }
     if matches!(source, ArgumentType::Callback) {
         return if parameter.callback().is_some_and(|callback| {
             let parameters = callback.parameters.as_slice();
@@ -290,7 +453,7 @@ pub fn classify_argument_with_definitions(
         return ArgumentCategory::Incompatible;
     }
     match source {
-        ArgumentType::Callback => unreachable!("callbacks classified above"),
+        ArgumentType::Callback | ArgumentType::PartialObject { .. } => unreachable!("classified above"),
         ArgumentType::Literal(value) => {
             if parameter.binds(value) {
                 ArgumentCategory::Compatible
@@ -704,6 +867,26 @@ pub struct CallCheck {
     /// [`false_for_malformed_reference`](super::call_binding::RegistrationBuilder::false_for_malformed_reference):
     /// the call is always `false`. Never set on a rejected call.
     pub always_false: Option<usize>,
+    /// A `load_data` contract the passive check proves wrong; when set, the
+    /// call is rejected with this problem's `dm.data.*` code at its argument.
+    pub data_problem: Option<DataProblem>,
+}
+
+/// A static `load_data` failure ([`CallCheck::data_problem`]), found from
+/// the literal `as` argument, literal option values, and the provable
+/// effective format (a literal `format`, or a literal file's extension)
+/// before anything runs.
+///
+/// Its message is the one execution reports for the same contract or
+/// option, so a literal and a computed value fail alike.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataProblem {
+    /// The `dm.data.*` code, always an error.
+    pub code: &'static str,
+    /// The argument the problem is ranged at: `2` (options) for
+    /// `dm.data.invalid_options`, `1` (`as`) for every other code.
+    pub argument: usize,
+    pub message: String,
 }
 
 /// The diagnostic code of a call that is always `false` because an authored
@@ -716,7 +899,7 @@ impl CallCheck {
     /// The call's category: 5 for a call problem, otherwise the most
     /// concerning argument category, recovered arguments excluded.
     pub fn category(&self) -> ArgumentCategory {
-        if self.problem.is_some() {
+        if self.problem.is_some() || self.data_problem.is_some() {
             return ArgumentCategory::Incompatible;
         }
         self.arguments
@@ -732,9 +915,12 @@ impl CallCheck {
     }
 
     /// What composition reports when it rejects the document because of
-    /// this call: the binder's own type error for a literal call, otherwise
-    /// the first category 5 finding.
+    /// this call: a data problem's message, else the binder's own type error
+    /// for a literal call, otherwise the first category 5 finding.
     pub fn rejection_message(&self) -> String {
+        if let Some(problem) = self.data_problem.as_ref().filter(|_| self.problem.is_none()) {
+            return problem.message.clone();
+        }
         if let Some(error) = &self.binding_error {
             return error.to_string();
         }
@@ -761,7 +947,8 @@ impl CallCheck {
 
     /// The findings to show: the call problem ranged at the call, else each
     /// argument whose category is not 1 (and not recovered), ranged at the
-    /// argument. Severity is the consumer's choice.
+    /// argument, with a data problem standing for its argument's own verdict.
+    /// Severity is the consumer's choice.
     pub fn findings(&self) -> Vec<CallFinding> {
         if let Some(problem) = &self.problem {
             return vec![CallFinding {
@@ -771,16 +958,29 @@ impl CallCheck {
                 message: self.problem_message(problem),
             }];
         }
-        self.arguments
+        let data = self.data_problem.as_ref();
+        let mut found: Vec<CallFinding> = self
+            .arguments
             .iter()
             .filter(|argument| !argument.recovered && argument.category != ArgumentCategory::Compatible)
+            .filter(|argument| data.is_none_or(|problem| problem.argument != argument.index))
             .map(|argument| CallFinding {
                 span: self.argument_spans.get(argument.index).cloned().unwrap_or_else(|| self.span.clone()),
                 category: argument.category,
                 argument: Some(argument.index),
                 message: self.argument_message(argument),
             })
-            .collect()
+            .collect();
+        if let Some(problem) = data {
+            let at = found.iter().take_while(|finding| finding.argument < Some(problem.argument)).count();
+            found.insert(at, CallFinding {
+                span: self.argument_spans.get(problem.argument).cloned().unwrap_or_else(|| self.span.clone()),
+                category: ArgumentCategory::Incompatible,
+                argument: Some(problem.argument),
+                message: problem.message.clone(),
+            });
+        }
+        found
     }
 
     fn problem_message(&self, problem: &CallProblem) -> String {
@@ -878,8 +1078,14 @@ pub fn check_call_with_definitions(
             problem: None,
             binding_error: None,
             always_false: None,
+            data_problem: None,
         };
         classify_call(registration, arguments, definitions, &mut check);
+        if check.problem.is_none() && registration.name() == LOAD_DATA {
+            let options_bind = !binder_refuses(&check, 2);
+            let leading_bind = !binder_refuses(&check, 0) && !binder_refuses(&check, 1);
+            check.data_problem = load_data_problem(registration, arguments, options_bind, leading_bind);
+        }
         if !check.is_rejected() {
             check.always_false = registration.malformed_reference_parameter().filter(|index| {
                 matches!(arguments.get(*index), Some(ArgumentType::Literal(Value::String(text)))
@@ -966,6 +1172,265 @@ fn shared_failing_argument(verdicts: &[Vec<ArgumentCheck>]) -> Option<usize> {
         [index] if verdicts.iter().all(|checks| failing(checks) == [*index]) => Some(*index),
         _ => None,
     }
+}
+
+/// Whether the binder already refuses argument `index` of a `load_data`
+/// call: the binder's error is what execution reports first, so the passive
+/// data checks defer to it.
+fn binder_refuses(check: &CallCheck, index: usize) -> bool {
+    check.arguments.iter().any(|argument| argument.index == index && argument.category == ArgumentCategory::Incompatible)
+        || check.binding_error.as_ref().is_some_and(|error| error.argument_errors().any(|failure| failure.index == index))
+}
+
+/// The static failure of a `load_data` call (two arguments, or three with
+/// options), judged with no I/O in the order execution meets them, so the
+/// one problem reported is the one a run reports first:
+///
+/// 1. A literal `delimiter` value that is not one usable character
+///    (`dm.data.invalid_options`, ranged at the options).
+/// 2. A literal `as` contract (a string, or a list or mapping literal read as
+///    [`super::data::written_contract`] reads it): the text alone decides a
+///    document-local reference and a scalar; shipped
+///    `Name@darkmatter:<stem>` imports are expanded from the embedded
+///    sources, and a contract importing a file is accepted provisionally.
+/// 3. When the effective format is provable, literal `delimiter` and `header`
+///    options that cannot apply to it (`dm.data.invalid_options`).
+/// 4. When the provable format is CSV or TSV, the tabular row rule, and with
+///    a literal `header: false` the positional-row rule.
+///
+/// The effective format is provable from a literal `format`, even beside a
+/// computed file; otherwise only when no computed value can set `format`
+/// (the options omitted, `null`, fully literal, or an object whose computed
+/// members do not include `format`) and the file is a literal whose
+/// extension names a data format. A computed options value, or a computed
+/// `format`, defers steps 3 and 4 to execution. Step 1 never looks at the
+/// file, so a literal mistake is refused even beside a literal `null` file.
+/// Options the binder refuses (`options_bind` false) are its error alone.
+/// When it refuses the file or the contract (`leading_bind` false), only a
+/// step 2 contract problem, which names the refused contract more exactly,
+/// is reported; steps 1, 3, and 4 would outrank the binder's error, which
+/// execution meets first.
+///
+/// Every literal option is judged as the binder converts it to its declared
+/// field type, the value execution receives: `{header: "false"}` is a
+/// headerless read and `{delimiter: 10}` is the delimiter `"10"`. Literal
+/// members of a partly computed object are bound on their own; when they do
+/// not bind, nothing about the options is judged.
+///
+/// A computed `as` the checker types as known string literals (a callback
+/// item over a literal list) is judged per literal, and is proven wrong only
+/// when every literal is; the first literal's problem is reported. Any other
+/// computed `as` is unknown: it skips step 2 and the row rules of step 4,
+/// while steps 1 and 3, which never depend on the contract, still run.
+///
+/// Malformed contract syntax is `None`: the binder's own type error already
+/// rejects it. So is an unknown shipped type, which execution reports.
+fn load_data_problem(
+    registration: &FunctionRegistration,
+    arguments: &[ArgumentType],
+    options_bind: bool,
+    leading_bind: bool,
+) -> Option<DataProblem> {
+    let (file, contract, options) = match arguments {
+        [file, contract] => (file, contract, OptionsView::Closed(None)),
+        [file, contract, options] if options_bind => (file, contract, OptionsView::of(registration, options)),
+        [file, contract, _] => (file, contract, OptionsView::Unknown),
+        _ => return None,
+    };
+    // 1. Literal option values.
+    let delimiter = match options.literal("delimiter") {
+        Some(Value::String(text)) => match super::data::options::delimiter_byte(text) {
+            Ok(byte) => Some(byte),
+            Err(error) if leading_bind => return Some(data_problem(&error)),
+            Err(_) => None,
+        },
+        _ => None,
+    };
+    // 2. The contract, per literal carrier; `None` when it is not known.
+    let verdicts: Option<Vec<ContractVerdict>> =
+        literal_carriers(contract).map(|carriers| carriers.into_iter().map(judge_literal_contract).collect());
+    if let Some(verdicts) = &verdicts
+        && let Some(ContractVerdict::Problem(problem)) = verdicts.first()
+        && verdicts.iter().all(|verdict| matches!(verdict, ContractVerdict::Problem(_)))
+    {
+        return Some(problem.clone());
+    }
+    if !leading_bind {
+        return None;
+    }
+    let format = provable_format(file, &options)?;
+    // 3. Applicability of literal options to the provable format.
+    let header = match options.literal("header") {
+        Some(Value::Bool(header)) => Some(*header),
+        _ => None,
+    };
+    let chosen = super::data::options::DataOptions { format: Some(format), delimiter, header };
+    if let Err(error) = chosen.check_applicability(format) {
+        return Some(data_problem(&error));
+    }
+    // 4. The row rules.
+    if !matches!(format, biscuit_file::DataFormat::Csv | biscuit_file::DataFormat::Tsv) {
+        return None;
+    }
+    let mut problems = verdicts?.into_iter().map(|verdict| match verdict {
+        ContractVerdict::Problem(problem) => Some(problem),
+        ContractVerdict::Rows { written, property, definitions } => row_problem(&written, &property, &definitions, header),
+        ContractVerdict::Open => None,
+    });
+    let first = problems.next()??;
+    problems.all(|problem| problem.is_some()).then_some(first)
+}
+
+/// The literal `as` values a `load_data` contract argument can take: the
+/// literal itself, or every arm of a non-null union of string literals.
+/// `None` when any value is computed, so the contract is unknown.
+fn literal_carriers(contract: &ArgumentType) -> Option<Vec<&Value>> {
+    let carriers: Vec<&Value> = match contract {
+        ArgumentType::Literal(carrier) => vec![carrier],
+        ArgumentType::Typed(ScopeShape::Arms { arms, nullable: false }) => arms
+            .iter()
+            .map(|arm| arm.literal_value().filter(|value| !arm.is_array && value.is_string()))
+            .collect::<Option<_>>()?,
+        _ => return None,
+    };
+    (!carriers.is_empty()).then_some(carriers)
+}
+
+/// What the passive check can read of a `load_data` options argument: its
+/// literal members as the shared binder binds them (so `{header: "false"}`
+/// is `false` and `{delimiter: 10}` is `"10"`, exactly as execution receives
+/// them), `null` members dropped.
+enum OptionsView<'a> {
+    /// Nothing computed: omitted or `null` (`None`), or a literal object.
+    Closed(Option<serde_json::Map<String, Value>>),
+    /// An object literal with some computed members.
+    Partial { bound: serde_json::Map<String, Value>, computed: &'a [String] },
+    /// A computed value, a literal the binder judges, or literal members
+    /// that do not bind on their own (execution's binder error comes first).
+    Unknown,
+}
+
+impl<'a> OptionsView<'a> {
+    fn of(registration: &FunctionRegistration, argument: &'a ArgumentType) -> Self {
+        let (literals, computed) = match argument {
+            ArgumentType::Literal(Value::Null) => return Self::Closed(None),
+            ArgumentType::Literal(Value::Object(members)) => (members, None),
+            ArgumentType::PartialObject { literals, computed, .. } => (literals, Some(computed.as_slice())),
+            _ => return Self::Unknown,
+        };
+        // Every option field is optional, so the literal members bind as an
+        // object of their own exactly as they do beside the computed ones.
+        let present = literals.iter().filter(|(_, value)| !value.is_null()).map(|(key, value)| (key.clone(), value.clone())).collect();
+        let Ok(Value::Object(bound)) = registration.bind_callback_value(2, Value::Object(present)) else {
+            return Self::Unknown;
+        };
+        match computed {
+            None => Self::Closed(Some(bound)),
+            Some(computed) => Self::Partial { bound, computed },
+        }
+    }
+
+    /// The bound, non-null value of literal option `key`.
+    fn literal(&self, key: &str) -> Option<&Value> {
+        let members = match self {
+            Self::Closed(members) => members.as_ref()?,
+            Self::Partial { bound, .. } => bound,
+            Self::Unknown => return None,
+        };
+        members.get(key).filter(|value| !value.is_null())
+    }
+
+    /// Whether no computed value can choose the format.
+    fn format_is_closed(&self) -> bool {
+        match self {
+            Self::Closed(_) => true,
+            Self::Partial { computed, .. } => !computed.iter().any(|key| key == "format"),
+            Self::Unknown => false,
+        }
+    }
+}
+
+/// The effective format a call provably reads; see [`load_data_problem`].
+fn provable_format(file: &ArgumentType, options: &OptionsView<'_>) -> Option<biscuit_file::DataFormat> {
+    if let Some(Value::String(name)) = options.literal("format") {
+        return super::data::options::format_from_name(name);
+    }
+    if !options.format_is_closed() {
+        return None;
+    }
+    let ArgumentType::Literal(Value::String(path)) = file else {
+        return None;
+    };
+    format_of_path(path)
+}
+
+/// What a literal contract alone proves.
+enum ContractVerdict {
+    /// The contract is wrong whatever the data.
+    Problem(DataProblem),
+    /// The contract is valid; its rows are judged against a tabular format.
+    Rows { written: String, property: PropertyDef, definitions: std::sync::Arc<DefinitionTable> },
+    /// Nothing is provable (malformed syntax the binder reports, or an
+    /// unknown shipped type execution reports).
+    Open,
+}
+
+/// Steps 2 of [`load_data_problem`] for one literal `as` value.
+fn judge_literal_contract(carrier: &Value) -> ContractVerdict {
+    use super::data::DataError;
+    let Some(written) = super::data::written_contract(carrier) else {
+        return ContractVerdict::Open;
+    };
+    match super::data::judge_written_contract(&written) {
+        Err(DataError::ContractSchema { .. }) => ContractVerdict::Open,
+        Err(error) => ContractVerdict::Problem(data_problem(&error)),
+        Ok(parsed) => match super::data::contract::expand_embedded_contract(&parsed, &written) {
+            None => ContractVerdict::Rows {
+                written: written.to_string(),
+                property: parsed,
+                definitions: std::sync::Arc::new(DefinitionTable::default()),
+            },
+            Some(Ok(expanded)) => ContractVerdict::Rows {
+                written: written.to_string(),
+                property: expanded.property,
+                definitions: expanded.definitions,
+            },
+            Some(Err(error)) if matches!(*error, DataError::NotAContainer { .. }) => {
+                ContractVerdict::Problem(data_problem(&error))
+            }
+            Some(Err(_)) => ContractVerdict::Open,
+        },
+    }
+}
+
+/// Step 4 of [`load_data_problem`]: the contract's rows against a tabular
+/// format, and against positional reading for a literal `header: false`.
+fn row_problem(written: &str, property: &PropertyDef, definitions: &DefinitionTable, header: Option<bool>) -> Option<DataProblem> {
+    use super::data::DataError;
+    let conflict = match super::data::classify_rows(property, definitions) {
+        Ok(class) if header == Some(false) => super::data::require_positional_rows(class).err()?,
+        Ok(_) => return None,
+        Err(conflict) => conflict,
+    };
+    Some(data_problem(&DataError::RowShapeConflict { written: written.to_string(), conflict }))
+}
+
+fn data_problem(error: &super::data::DataError) -> DataProblem {
+    let argument = if matches!(error, super::data::DataError::InvalidOptions { .. }) { 2 } else { 1 };
+    DataProblem {
+        code: error.code().unwrap_or(super::data::NOT_A_CONTAINER_CODE),
+        argument,
+        message: error.to_string(),
+    }
+}
+
+/// The data format a literal file reference names by its extension: an
+/// `http(s)` URL by its path (query and fragment ignored), anything else as
+/// a local path. `None` for an extension `load_data` cannot read.
+fn format_of_path(reference: &str) -> Option<biscuit_file::DataFormat> {
+    let url = url::Url::parse(reference).ok().filter(|url| matches!(url.scheme(), "http" | "https"));
+    let path = url.as_ref().map_or(reference, url::Url::path);
+    super::data::load::data_format_of(std::path::Path::new(path))
 }
 
 /// A call whose every argument is a literal binds exactly as it will at
@@ -1505,5 +1970,122 @@ mod callback_tests {
         assert!(min[1].is_rejected());
         assert_eq!(scope.type_of_expr(&super::super::parse("x").unwrap()).unwrap().shape(),
             &expression_type(&parse_spanned("x").unwrap(), &scope));
+    }
+}
+
+#[cfg(test)]
+mod load_data_options_tests {
+    use super::*;
+    use crate::markdown::compose::expression::parse_spanned;
+
+    /// The `load_data` call's data problem as `(code, argument)`, or `None`
+    /// when the passive check proves nothing.
+    fn problem(source: &str) -> Option<(&'static str, usize)> {
+        let declared = super::super::DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared);
+        let checks = check_expression_calls(&parse_spanned(source).unwrap(), &scope);
+        let check = checks.iter().find(|check| check.function == "load_data").expect("a load_data call");
+        check.data_problem.as_ref().map(|problem| (problem.code, problem.argument))
+    }
+
+    const INVALID: Option<(&str, usize)> = Some(("dm.data.invalid_options", 2));
+    const ROWS: Option<(&str, usize)> = Some(("dm.data.row_shape_conflict", 1));
+
+    #[test]
+    fn a_partial_object_keeps_its_literal_members_and_classifies_as_its_shape() {
+        let declared = super::super::DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared);
+        let partial = ArgumentType::of(&parse_spanned("{delimiter: ';', format: x}").unwrap(), &scope);
+        let ArgumentType::PartialObject { shape, literals, computed } = &partial else {
+            panic!("{partial:?}");
+        };
+        assert_eq!(literals.get("delimiter"), Some(&Value::String(";".to_string())));
+        assert_eq!(computed, &["format".to_string()]);
+        assert_eq!(partial.to_string(), ArgumentType::Typed(shape.clone()).to_string());
+        // Every member literal, or every member computed, is not partial.
+        assert!(matches!(ArgumentType::of(&parse_spanned("{a: 1}").unwrap(), &scope), ArgumentType::Literal(_)));
+        assert!(matches!(ArgumentType::of(&parse_spanned("{a: x}").unwrap(), &scope), ArgumentType::Typed(_)));
+    }
+
+    #[test]
+    fn literal_option_values_are_judged_in_execution_order() {
+        // 1. A bad delimiter, whatever the file or the other members.
+        assert_eq!(problem("load_data(f, 'tuple([string])[]', {delimiter: ';;'})"), INVALID);
+        assert_eq!(problem("load_data(null, 'tuple([string])[]', {delimiter: ''})"), INVALID);
+        assert_eq!(problem("load_data('rows.csv', 'tuple([string])[]', {delimiter: ';;', format: x})"), INVALID);
+        // 2. The contract comes before applicability.
+        assert_eq!(problem("load_data('rows.json', 'string', {delimiter: ';'})"), Some(("dm.data.not_a_container", 1)));
+        // 3. Applicability to the provable format.
+        assert_eq!(problem("load_data('rows.json', 'string[]', {delimiter: ';'})"), INVALID);
+        assert_eq!(problem("load_data('rows.json', 'string[]', {header: true})"), INVALID);
+        assert_eq!(problem("load_data(f, 'string[]', {format: 'yml', header: false})"), INVALID);
+        assert_eq!(problem("load_data('rows.tsv', 'tuple([string])[]', {delimiter: ','})"), INVALID);
+        assert_eq!(problem("load_data('rows.csv', 'tuple([string])[]', {format: 'tsv', delimiter: ';'})"), INVALID);
+        // 4. The row rules on a provably tabular format.
+        assert_eq!(problem("load_data('rows.csv', '{a: string}[]', {header: false})"), ROWS);
+        assert_eq!(problem("load_data(f, '{a: string}[]', {format: 'csv', header: false})"), ROWS);
+        assert_eq!(problem("load_data('rows.txt', 'string', {format: 'csv'})"), Some(("dm.data.not_a_container", 1)));
+        assert_eq!(problem("load_data('rows.json', '{a: string}', {format: 'csv'})"), ROWS);
+    }
+
+    #[test]
+    fn valid_or_unprovable_options_are_not_judged() {
+        for source in [
+            "load_data('rows.csv', 'tuple([string])[]', {delimiter: ';', header: false})",
+            "load_data('rows.csv', 'tuple([string])[]', {format: 'csv', delimiter: '\\t'})",
+            "load_data('rows.tsv', 'tuple([string])[]', {delimiter: '\\t'})",
+            "load_data('rows.json', 'string[]', {header: null, delimiter: null})",
+            "load_data('rows.json', 'string[]', null)",
+            "load_data('rows.json', 'string[]', {})",
+            // A computed options value or format may override the extension.
+            "load_data('rows.json', 'string[]', opts)",
+            "load_data('rows.json', 'string[]', {format: x, delimiter: ';'})",
+            "load_data('rows.csv', '{a: string}[]', {format: x, header: false})",
+            "load_data('rows.json', '{a: string}', {format: x})",
+            // A computed header is judged at execution.
+            "load_data('rows.csv', '{a: string}[]', {header: h})",
+            // A file import decides its row mode only at execution.
+            "load_data('rows.csv', 'Row@./row.yaml', {header: false})",
+            // Unknown extension, no format: execution reports it.
+            "load_data('rows.txt', 'string[]', {header: true})",
+        ] {
+            assert_eq!(problem(source), None, "{source}");
+        }
+        // A computed member beside a literal one still lets the literal be judged.
+        assert_eq!(problem("load_data('rows.json', 'string[]', {header: h, delimiter: ';'})"), INVALID);
+    }
+
+    #[test]
+    fn options_the_binder_refuses_are_the_binders_error_alone() {
+        let declared = super::super::DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared);
+        for source in ["load_data('rows.json', 'string[]', {quote: ',', delimiter: ';'})", "load_data('rows.json', 'string[]', {format: 'CSV', header: true})"] {
+            let checks = check_expression_calls(&parse_spanned(source).unwrap(), &scope);
+            let check = checks.iter().find(|check| check.function == "load_data").unwrap();
+            assert!(check.is_rejected(), "{source}");
+            assert_eq!(check.data_problem, None, "{source}");
+        }
+    }
+
+    #[test]
+    fn both_arities_keep_the_contract_type() {
+        let declared = super::super::DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared);
+        let typed = |source: &str| ArgumentType::Typed(expression_type(&parse_spanned(source).unwrap(), &scope)).to_string();
+        let two = typed("load_data('rows.csv', 'tuple([string, number])[]')");
+        assert_eq!(typed("load_data('rows.csv', 'tuple([string, number])[]', {header: false})"), two);
+        assert_eq!(typed("load_data('rows.csv', 'tuple([string, number])[]', opts)"), two);
+        assert_eq!(typed("load_data(null, 'string[]', {format: 'csv'})"), typed("load_data(null, 'string[]')"));
+    }
+
+    #[test]
+    fn the_passive_message_is_the_execution_message() {
+        let declared = super::super::DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared);
+        let checks = check_expression_calls(&parse_spanned("load_data('rows.json', 'string[]', {delimiter: ';'})").unwrap(), &scope);
+        let passive = checks[0].data_problem.as_ref().unwrap().message.clone();
+        let options = super::super::data::options::DataOptions::from_bound(Some(&serde_json::json!({"delimiter": ";"}))).unwrap();
+        let execution = options.check_applicability(biscuit_file::DataFormat::Json).unwrap_err().to_string();
+        assert_eq!(passive, execution);
     }
 }

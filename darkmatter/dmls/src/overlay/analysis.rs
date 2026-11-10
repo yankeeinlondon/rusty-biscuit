@@ -124,6 +124,10 @@ pub(crate) struct AnalysisIdentity {
     /// selected schema alone, with no Darkmatter base properties (and empty
     /// when no schema was selected).
     pub yaml_document: bool,
+    /// The literal shape of an unresolved template schema, layered over the
+    /// base properties when no bundle serves the document (see
+    /// [`SlotStatus`](crate::overlay::SlotStatus)).
+    pub template_shape: Option<Arc<SchemaShape>>,
 }
 
 impl AnalysisIdentity {
@@ -140,6 +144,11 @@ impl AnalysisIdentity {
             }
             && Arc::ptr_eq(&self.named_types, &other.named_types)
             && self.yaml_document == other.yaml_document
+            && match (&self.template_shape, &other.template_shape) {
+                (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
     }
 }
 
@@ -352,7 +361,15 @@ impl FrontmatterAnalysis {
                     .property_shape(&bundle.extension_shapes, &bundle.frontmatter_json)
             }),
             None if yaml_document => self.root.get_or_init(SchemaShape::default),
-            None => baseline_root(),
+            // An unresolved template still offers its literal parts: its
+            // declared properties and every constraint that is not a slot.
+            None => match self.identity.as_ref().and_then(|identity| identity.template_shape.as_ref()) {
+                Some(template) => self.root.get_or_init(|| {
+                    work_counters::record_root_assembly();
+                    effective_property_shape(std::slice::from_ref(template.as_ref()), None, &Value::Null)
+                }),
+                None => baseline_root(),
+            },
         }
     }
 

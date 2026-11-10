@@ -192,7 +192,7 @@ The policy-style variants are primarily tied to helper checks; they are not all 
   both are, `49` below an odd last row), partial alpha blends onto
   `SixelBackground::for_terminal`; triangle filter. Not image support:
   `ImageSupport`/route `format` unchanged. Render-tree image nodes and
-  Darkmatter's legacy `▉ IMAGE[...]` never draw half-blocks.
+  their `IMAGE[alt]` fallback never draw half-blocks.
 - A Kitty route to `TerminalApp::ITerm2` uses the iTerm2 format unless the
   route is `Forced` (iTerm2 ignores `q=2` and places nothing for width-only `c=`).
 - A Sixel route draws via `sixel.rs` (`Encoder::Sixel`, `icy_sixel` 0.7, no

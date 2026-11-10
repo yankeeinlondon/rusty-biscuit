@@ -32,6 +32,46 @@ pub fn resolve_schema_with_roots(
     simplified_schema::resolve::resolve_schema_with_roots(value, base_dir, schema_roots, request_context, SHIPPED_SOURCES)
 }
 
+/// [`simplified_schema::resolve::resolve_authored_schema_with_roots`] with
+/// Darkmatter's shipped documents.
+pub fn resolve_authored_schema_with_roots(
+    value: &Value,
+    authored: Option<&AuthoredSchemaValue>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &FileResolutionContext,
+) -> Result<ResolvedSchema, SchemaError> {
+    simplified_schema::resolve::resolve_authored_schema_with_roots(
+        value,
+        authored,
+        base_dir,
+        schema_roots,
+        request_context,
+        SHIPPED_SOURCES,
+    )
+}
+
+/// [`simplified_schema::resolve::resolve_authored_yaml_schema`] with
+/// Darkmatter's shipped documents.
+pub fn resolve_authored_yaml_schema(
+    value: &YamlValue,
+    owner: InlineOwner<'_>,
+    authored: Option<&AuthoredSchemaValue>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &FileResolutionContext,
+) -> Result<ResolvedSchema, SchemaError> {
+    simplified_schema::resolve::resolve_authored_yaml_schema(
+        value,
+        owner,
+        authored,
+        base_dir,
+        schema_roots,
+        request_context,
+        SHIPPED_SOURCES,
+    )
+}
+
 /// [`simplified_schema::resolve::resolve_yaml_schema`] with Darkmatter's
 /// shipped documents.
 pub fn resolve_yaml_schema(

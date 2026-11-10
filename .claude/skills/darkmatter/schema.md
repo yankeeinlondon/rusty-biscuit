@@ -32,7 +32,9 @@ Path shorthand in this file:
   `coercion/`, `phase.rs`, `file_match.rs`, `json_shape.rs`, `completion.rs`
   (the passive helpers; Darkmatter's `schemas/completion.rs` re-exports them
   and adds `for_list_item`/`for_property_value`/`for_path` over an
-  `EffectiveSchema`), `positions.rs` (`PositionMap`, `build_position_map`),
+  `EffectiveSchema`; `for_root_property(root, definitions, name)` is
+  `for_property` over any `DefinitionLookup`, which Claudine uses to complete
+  a pending template's slot-free properties without resolving it), `positions.rs` (`PositionMap`, `build_position_map`),
   `timings.rs`, `errors.rs`
   (`SchemaError`), `pending.rs` (re-exported as
   `darkmatter::markdown::literal_token`).
@@ -204,7 +206,7 @@ Ownership and lifecycle:
   selection rule, not a data defect. As an opened document it is never an
   envelope: its `description`/`categories`/`types` are data, and a sibling
   `types` is no type library (a `$schema` naming an entry is an unknown named
-  type, exit `2`). The informal envelope applies only where a file is loaded
+  type, record `error: "schema"`, exit `1`). The informal envelope applies only where a file is loaded
   as a schema (a `$schema` target, a `Name@file` import, a root-file
   classification). DMLS reads an opened `kind: schema`/`yaml-schema` with
   `parse_selected_standalone_schema_document` over
@@ -316,9 +318,13 @@ validation report, shared by every problem and root-union arm):
   a new top-level path has no position. A replaced path keeps its authored
   node.
 - The alignment witness: `PositionMap::project` accepts the locator's tree
-  only when its mappings match the parsed `MappingOrders` and it holds no
-  alias. Otherwise (aliases, `<<`, unquoted `{{ }}`, multi-line or
-  commented flow collections) it falls back to top-level key line, column 1.
+  only when its mappings match the parsed `MappingOrders`. An alias is an
+  authored leaf at its `*name` token: anything at or below it is located
+  there, and the indexed mappings it expands to are accounted for by the
+  leaf. A literal `<<` is an ordinary key (merge keys are never applied).
+  Otherwise (an unproven layout: an anchored key `&k a: 1`, unquoted `{{ }}`)
+  it falls back to top-level key line, column 1. The tolerant locator reads
+  a flow collection across lines and past its comments.
   Positions never change validity.
 - `positions_for(&Markdown)` needs loaded text (parsed from text or a file);
   a constructed `Markdown` is located in its serialized YAML view.
@@ -360,6 +366,174 @@ one (`cli/src/commands/schema/validate.rs::validate_one` records discovery, the 
 `effective_for`, and validation plus its presence lookup) or the first build
 lands outside the report and a cold request reads as a `hit`.
 
+### Schema templates (`{{ … }}` slots)
+
+A schema whose `enum`/`suggest` elements or `literal`/`default`/`min`/`max`/
+`pattern` argument is a `{{ … }}` slot parses passively in the
+`simplified-schema` crate (`Constraint::Dynamic`/`TemplateConstraint`, the
+**template constraint**) and every
+lowering of it returns `SchemaError::UnresolvedSlots`, so Darkmatter's
+existing resolution, validation, and trigger paths fail closed with that
+typed error rather than seeing a partial list. A trigger match condition
+never admits a slot (`triggers::grammar::is_match_safe_constraint` excludes
+them). `triggers/finding.rs::related_path` names the file of the template's
+first slot written in a file (`Slot::origin`), and a refused slot value (`SchemaError::SlotResult`) or refused read (`SchemaError::SlotReadRefused`) its slot's file.
+A **template type** (a slot as a property's whole type, `TypeExpr::Slot`)
+also parses passively, and resolves in the library. Every read a returned
+definition causes (import, transitive import, example, candidate probe) is
+asked of `slots/host.rs::DarkmatterTemplateReads` first: `admit` asks the
+session's gate for the slot's defining file (or the request base,
+`DarkmatterSlotHost::with_request_base`) as a `ReadTarget { function: "schema
+import" }` (deny → `SLOT_DENIED_CODE`, none → `SLOT_APPROVAL_REQUIRED_CODE`,
+the handler asked for this computed target; pre-flight never sees it), and
+`observe` records `Observation`s in the `DataRuntime` (read set, cache
+`InputCheck`s, DMLS watches). The refusal arrives as
+`SlotResolutionError::Refused`, so `session::needs_grant` and
+`cache::caches_failure` judge `Refused` codes as well as `Failed` ones. The
+template-type `SlotResultKind`s map to their own codes in
+`codes::slot_result_code`; an unresolved slot's pending record names its
+property and role (`slots/pending_report.rs`). `md schema validate <schema
+file>`'s library half is `schemas/schema_files.rs`
+(`resolve_schema_file`, `schema_file_templates`, `approve_template_reads`):
+the export and every slot-bearing named type resolve through the session.
+A `load_data` contract naming a template holding a template type is not
+supported (`resolve_contract_slots` substitutes template constraints only).
+Darkmatter's
+expression-typing readers (`compose/expression/scope/*`, `call_binding`,
+`call_check`, `data/contract.rs`, `context/catalog.rs`) treat it as untyped
+(diagnostic suppression, never the schema type `unknown`); completion,
+detection, trigger matching, and DMLS hover claim nothing for it ("type
+pending").
+The library's resolution hook is `simplified_schema::slots::SlotHost`
+(`PendingSchema::resolve`, `SimplifiedSchema::resolve_slots`). Darkmatter's
+host is `schemas::slots::DarkmatterSlotHost` (`schemas/slots/`):
+`admission.rs::slot_class_report` is the passive walk (every branch and
+callback; allowed roots `ctx` minus `cwd`/`self`/`last_updated`/`hash`/`id`/
+`sid`, `env`, literals, callback locals, `current`/`local` only inside a
+callback; a `SlotClass::Rejected` call refused), `evaluator.rs::SlotEvaluator`
+evaluates in `request.for_source(defining_file)` over the command's
+`DataRuntime` with a fresh default `IterationBudget` and a `ReadGate`
+(default `DenyAllReads`), returning observations (thread-local
+`data::runtime::capture_observations`) and context digests (`ctx` groups,
+`env.NAME`, whole `env`). A failure is a `SlotFailure` wrapping the
+`ExpressionError` (`host::failure_code`); `compose::report_diagnostics::slot_resolution_diagnostics`
+positions it at the slot in its defining file and keeps `data_location` and
+reference fields. Codes: `schemas/slots/codes.rs::SLOT_DIAGNOSTIC_CODES`.
+Positions come only from text the resolution kept, never a re-read: every
+inline `$schema` resolution passes its authored text
+(`simplified_schema::resolve::AuthoredSchemaValue`) through
+`resolve::resolve_authored_*`: the document's (`mod.rs::authored_document_schema`,
+in `effective_for` and `pending_templates_for` alike, so pre-flight pins and
+runtime share keys), a trigger file's (`LoadedTrigger::text`, part of the
+payload memo key), and a YAML document's. Failures are built with
+`SlotResolutionFailure::of_pending`, and every record reads
+`failure.slot_text(slot)` (`report_diagnostics::template_slot_text`, which
+DMLS uses too). A new route that resolves a parsed `$schema` value passes its
+text the same way, or its slots have no position. Tests:
+`lib/tests/l1/dynamic_schema_slot_positions.rs`.
+The gate is chosen per slot by its defining file
+(`evaluator.rs::SlotGates`; `with_gate` is one gate for all).
+Approval is `schemas/slots/grants/`: `store.rs` (the user-level
+`<home>/.config/darkmatter/schema-read-policy`, path from
+`FileResolutionContext::home_dir()`, never a repo or workspace file; any bad
+line fails the whole store), `matching.rs::GrantBook` (deny wins anywhere;
+`--allow host=` is a run-only site allow), `auto.rs::RepositoryGrounds`
+(Sniff `GitRepo::tracked_state` + `worktree_blob_id` at the request's
+observed root, `ComposeOptions::slot_repository_root`; probes and absent
+targets need only "schema and target in the repo"; listings/URLs never),
+`gate.rs::SlotGrants`/`RunGates` (deny → allow → automatic (memoized per run,
+post-read BLAKE3 must equal the granted bytes) → handler → `ApprovalRequired
+{ needed }`; slots fetch through their own `remote_runtime`),
+`targets.rs::collect_targets` (passive; literal/pure-folded args, URL or
+absolute/`./`/`../` path only; a listing names the folder it enumerates), and `request.rs` (`SlotGrantRequest`,
+`SlotGrantDecision`; a decision not among `choices` is unanswered).
+`ShellApprovalHandler::approve_slot_reads` (provided, default unanswered) is
+asked by `compose_preflight_approvals*` before shell prompts
+(`ComposePreflightApprovals::slot_grants`, `stats.slot_reads_asked`); the CLI
+prompt is `cli/src/approval.rs::approve_slot_reads_with_io`. A discovery pass
+(`defer_shell_pending_schema_problems`) leaves an `UnresolvedSlots` schema to
+the terminal pass (`schema_validation::defers_template`).
+Resolution: `slots/session.rs::SlotSession` (one per command; built by
+`run_root_pipeline_collecting` from the request unless
+`ComposeOptions::with_slot_session` attached one; `prepare_schemas` hands it to
+`DarkmatterSchemas::with_slot_session`, pins-only when the pass defers).
+`DarkmatterSchemas::resolve_template` turns a layer's `UnresolvedSlots
+{ pending }` (document `$schema`, `validate_yaml_document`'s root `$schema`, a
+matched trigger payload: `ResolvedPayload::pending`, finished by
+`assemble::finish_file_payload`) into a concrete `ResolvedSchema`; a failure is
+`SchemaError::SlotResolution` (projected by
+`report_diagnostics::template_diagnostics`). The session holds one
+`SlotGrants` (Q17), pins per `cache::ResolutionKey` (re-verified when
+`DataRuntime::memo_generation` moved), and a thread-local resolution stack
+(`slot_cycle`; nested `load_data` contracts resolve through
+`session::resolve_contract_slots`, keyed apart in the contract memo; their
+slots evaluate under `buffers::unguarded`, judged by their own gates only;
+their failure is always a `SchemaError::SlotResolution` inside
+`DataError::ContractSchema`, which `host::contract_template_failure` finds:
+`host::failure_code` gives the outer slot the inner code and
+`report_diagnostics::with_expression_cause` the inner records, at the outer
+slot).
+`slots/cache.rs` is the process cache (grant coverage: `session.rs::RecordingGates`
+notes every allowed read with its defining file into
+`SlotDependencies::reads` via `dependencies::note_read`; nested contracts use
+the same recording gates, so their reads reach the outer entry, the contract
+memo, and its replay under the contract's own file, and `serves` judges each
+`entry.dependencies.reads` for its own defining file, before the stat-first rechecks reread an input, command-scoped entries for volatile/URL/listing
+reads, no grant-dependent failures; cleared by
+`reset_process_caches_for_bench`). What an entry depends on beyond observed
+files is evaluation-driven, never derived from `pending.slots()`:
+`slots/dependencies.rs` collects it thread-locally while slots run
+(`host.rs` notes each evaluated slot's `ctx`/`env` inputs;
+`functions::call_function` notes every `Captured` call with an answer digest
+and every `Volatile` call), so later root-union rounds and nested contract
+slots count. A session's structured observations are
+`slots/observations.rs::SessionObservations`: `SlotEvaluator::evaluate`
+asks it to cover the groups the slot's own calls read (`capture::function_group`
+over the parsed slot, so referenced, imported, trigger, contract, and
+later-round slots all demand theirs) and it captures a missing `Repo`/
+`Network`/`Agent` part once per session: `for_request` from the request's
+repository observation (`ComposeOptions::slot_repository`) and context
+authority (frozen = stays missing), `for_context` with the context's env at
+its repository root (`RepositoryObservation::default()` when it has none),
+`SlotSession::new` never. `serves` re-calls each captured call against the
+requesting session's `SessionObservations`, covered for the calls' groups (a
+pin does so when the memo generation moved); a contract memo hit replays its slots' observations and dependencies
+(`DataRuntime::prepare_contract`). Work counters: `Work::SlotResolution`
+(one per slot evaluated), `Work::SlotInputRehash` (a cached input reread). `pending_templates_for` returns `PendingTemplate`s
+(document + matched trigger payloads). Q14 (only the effective schema's slots
+resolve) has one selection, `mod.rs::discarded_by_higher_layers`, shared by
+`pending_templates_for` and `resolve_trigger_layers`: each matched payload is
+taken as `PendingSchema::without_properties(<names the document or a later
+trigger declares in every arm>)` before any slot is collected, prompted for,
+cached, or evaluated; a payload left with no slot resolves through
+`resolve_without_slots` (no session, never pending, not listed as a template)
+and the omitted names join its slot-cache identity. A doc template met in a
+root union declares what every arm declares, before and after it resolves
+(`declared_by_template` reads `PendingSchema::declared_properties`). Kind definitions, the
+baseline/catalog, DMLS extensions, and trigger `match` refuse slots
+(`codes::slot_prohibition_code`).
+CLI surfaces (one session per invocation): `md compose` builds it after
+pre-flight with `commands/compose.rs::with_command_slot_session`
+(`SlotSession::for_request` + `with_run_grants(slot_grants)` + the handler only
+on an interactive formatted run); with no shell operation enabled it asks via
+`Markdown::compose_slot_approvals`. `md graph`/`md validate refs` attach
+`with_reference_check_slot_session` (`SessionMode::ReferenceCheck`: an
+approval/deny failure becomes `UnresolvedSlots`, which `defers_template` defers
+for a ReferenceCheck session too). `md schema validate` and `md clean` build
+`SlotSession::for_context` and batch-ask with
+`DarkmatterSchemas::approve_slot_reads` (clean: `CleanSchemaConfig::with_slot_session`,
+asked once in `CleanSchemaContext::effective_schema`); a template failure is the
+`FileOutcome::Slots` record (`error: slots`, `diagnostics`, `grants_needed`). A
+schema file argument resolves too (`validate.rs::resolve_schema_file`: after its
+envelope passes, `schema_file_templates` → `approve_template_reads` →
+`DarkmatterSchemas::resolve_schema_file`); there is no passive template mode and no
+`slots` count. Assignments read the resolved effective schema, so a template
+type converts `<prop>=<value>` like its static equivalent. `Diagnostic::grants_needed`
+(`GrantNeeded`, filled from `GateRefusal::ApprovalRequired` in
+`report_diagnostics::with_expression_cause`) is in all 18 `cli/schemas/output/` files.
+User-facing: `darkmatter/docs/topics/schemas/schema-slots.md`;
+language rules: `simplified-schema/docs/topics/language/slots.md`.
+
 ## Runtime baseline
 
 The runtime baseline is the resolved `fm` declaration of the global catalog
@@ -400,12 +574,12 @@ first match wins:
 5. built-in (`with_darkmatter_baseline_json_schema`).
 
 Custom paths resolve in the launch context (`crate::io::resolve_file_path`);
-a failed load is exit 2 with no fallback. Opting out keeps document `$schema`
+a failed load is exit 1 with no fallback. Opting out keeps document `$schema`
 and triggers; `--disable schema-triggers` is independent. JSON `schema` stays null
 for a document without `$schema`. Compatibility: `last_updated: not-a-date`
 with no `$schema` now fails validate as it fails compose. Compose keeps
-`--baseline-schema`/`--disable baseline-schema`/the env (live
-`env_disables_baseline_schema`); DMLS layers built-in → extensions →
+`--baseline-schema`/`--disable baseline-schema`/the env from its request snapshot
+(`commands::compose::compose_baseline`), and does not read `BASELINE_SCHEMA`; DMLS layers built-in → extensions →
 triggers → document. Each document with a distinct schema/context compiles the
 merged baseline (validator cache keys on the full resolution context), so
 tests that judge only document schemas pass `--disable baseline-schema` to stay in
@@ -615,7 +789,7 @@ Baseline, Selecting the Baseline; both stay Darkmatter's); Content Policy's typi
   `x-darkmatter-match-property` because its `$defs` location cannot (the
   keyword factory reads it for the caller origin). The eager-file rewrite
   compiles a property-level union arm alone, so it judges the arm with
-  `CallerOrigins::whole_instance(<owning top-level property's origin>)`
+  `CallerOrigins::scoped_to(<owning top-level property>)`
   (`rewrite.rs::ArmValidators::enter_property`) and retains validators by
   arm address *and* that origin; never compile such an arm with the
   property-keyed map or with no origins
@@ -690,6 +864,30 @@ Baseline, Selecting the Baseline; both stay Darkmatter's); Content Policy's typi
   AND-ed groups: one alternative of every group for a property, one per
   `file` arm for a root union; empty means a bare `file`.
   `file_match::file_match_groups` is public for consumers such as Claudine.
+- `completion::path_candidates` answers what Tab may offer next in a `PropertyPath`
+  or its value, per `PathCommand`. `PathSchema::Effective` reads
+  `EffectiveSchema::declared_property_shape`, the layers that schema was actually
+  assembled with: its custom, compiled, or absent baseline, then triggers and the
+  document, a raw JSON Schema layer through `RawDeclarations` (not `for_path`, which
+  sees only the document's layer, nor `property_shape`, the editor's projection over
+  the compiled baseline). `PathSchema::CompiledBaseline` is the fallback and
+  `PathSchema::Nothing` the request that selected no schema; none are combined.
+  `cli/src/args/path_completion.rs::select_schema` picks one from the command's own
+  policy. `insert` is the whole word, with no
+  shell quoting; a value keeps its label unless `SetterValue` would read it as
+  something else. `path_value_takes_files` tells the caller to add files, since
+  this code does no I/O.
+- `completion::declared_shape` is what a setter is read through. Past a pattern key or
+  an element of an element it walks the lowered `Shape`, because `def_at_path` stops
+  there. Unquoted text under an `unknown` result is checked by `keeps_text_at`: a raw
+  JSON Schema projects `$ref` and `allOf` to `unknown`, which reads as undeclared unless
+  the schema accepts that exact text there (a `pattern`, `format`, or `enum` behind the
+  `$ref` makes the fit depend on content, so never probe with a fixed string). `md set`
+  then writes the value validation judges, `cli/src/commands/frontmatter.rs::value_as_judged`,
+  read from `EffectiveSchema::data_copy`. `coerce.rs::partial_copy` never sets the root
+  aside, so a required key `properties` does not declare, which fails the root's
+  complete-schema assertion, does not stop the other values converting. A host must not
+  validate a converted copy and persist the original.
 - Pattern dictionary keys lower to `additionalProperties` or
   `patternProperties`; literal keys take precedence.
 - `min-keys` and `max-keys` constrain dictionaries; `uncounted-keys(a, b)`
@@ -793,6 +991,21 @@ References; Choosing an Arm: Reporting versus Changing Data).
   schema accepts it; else each top-level property that converts cleanly
   (root unions keep the whole-document rule). Never reintroduce per-surface
   conversion rules there (`coercion_engine_parity::old_frontmatter_rule_code_is_gone`).
+- One failure flattening: `ConversionError::located_failures()` /
+  `coercion::locate_failures` (JSON Pointer path, `ExpectedType`,
+  `ActualKind` incl. `Missing`, the original `ValueFailure`; null arms
+  dropped, one reachable arm descended, ambiguous or same-kind unions one
+  record). Frontmatter annotation, `partial_copy`, and `load_data` all read
+  it; Darkmatter only words and orders the records.
+- A failed soft validation reports on `coerce.rs::partial_copy`'s diagnostic
+  copy: converted siblings, failing values as written, and unexpected keys
+  and tuple elements masked from the retry and then reinserted, so closed
+  objects and fixed tuples still reject them. That copy is never returned as
+  success, and the production binder is not relaxed.
+- `PreparationSummary.dependencies` (`#[non_exhaustive]`) lists the schema
+  files a successful preparation read, imports included (embedded schemas
+  add none). `validate_schema(...)` does not use it for the read set: it
+  records the resolver's observed reads, which survive a failed preparation.
 - Performance: `EffectiveSchema` keeps a `ConversionPlan` keyed by the digest
   `ValidatorCache::shared_schema_hash` already records, and checks
   `accepts_as_is` with its own compiled validators first. Never hash or
@@ -1102,7 +1315,7 @@ library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
   `payload_path`) take `ResolvedSchema::origin.file()`, the last file of an
   alias chain. `from_invalid_trigger` fills `ComposeWarning::diagnostic`
   with the trigger file at `position()` (source-free otherwise and for
-  embedded), which `report-json` prints. The
+  embedded), which a data output prints. The
   passive parsers (`parse_trigger_envelope_from_str`, `resolve_trigger_payload`)
   stay strict. `file_claims_trigger_envelope` counts a malformed claimed
   envelope as a trigger file, so an authored `$schema` naming a skipped
@@ -1116,15 +1329,15 @@ library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
   warning rows, as compose prints them), `FindingRow` (`{source, code, path,
   message}`, `path` null for embedded), and `DeliveredFindings` (one warning
   per `identity()` per invocation; `schema validate` attaches a shared
-  trigger to the first file). `schema validate --format json` puts rows
+  trigger to the first file). `schema validate --output json` puts rows
   first in a record's `warnings` on any outcome; `schema triggers` (no
   report mode) writes the warning rows to stderr and lists only each
   source and code in its stdout "Skipped invalid triggers" section; `md clean` reads
-  `CleanResult::trigger_findings` (stderr, or `--json`'s top-level
+  `CleanResult::trigger_findings` (stderr, or a data output's top-level
   `warnings`), and a schema failure carries them on
   `FrontmatterRepairError::Schema { trigger_findings, .. }`, which
   `clean.rs::CleanFailure` hands back so the caller prints them on stderr
-  or, under `--json`, in `json::schema_failure_report`'s v1 envelope. Ordinary
+  or, in a data output, in `clean_schema_failure_report`'s v1 value. Ordinary
   `md compose` prints a failed run's trigger warnings before its error
   (`report_failure_trigger_warnings`), except the ones a `--deny` block
   already shows. Tests: `cli/tests/l1/invalid_trigger_warnings.rs`.

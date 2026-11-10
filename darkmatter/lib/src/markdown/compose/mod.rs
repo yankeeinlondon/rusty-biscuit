@@ -116,8 +116,11 @@ pub mod policy;
 pub mod report_diagnostics;
 pub(crate) mod pipeline;
 pub(crate) mod schema_validation;
+pub(crate) mod link_title_warnings;
+pub(crate) mod member_sites;
 pub(crate) mod site_scope;
 pub use schema_validation::effective_schema_for;
+pub mod setters;
 pub mod subtree;
 mod unknown_identifiers;
 mod util;
@@ -162,6 +165,7 @@ pub use remote::{
     resolve_remote_concurrency,
 };
 pub use remote_fetch::RemoteFetchStats;
+pub use expression::data::{DataRuntime, DataRuntimeStats};
 pub use frontmatter_shell_expansion::{
     FRONTMATTER_SHELL_SUFFIXES, FrontmatterShellAction, FrontmatterShellBody,
     FrontmatterShellPipeline, FrontmatterShellSuffix, FrontmatterShellTernary,
@@ -170,6 +174,7 @@ pub use frontmatter_shell_expansion::{
     execute_resolved_shell_values, execute_shell_values_with, expected_suffixes,
     parse_frontmatter_shell_suffixes, parse_frontmatter_shell_value_spanned,
 };
+pub use member_sites::{ShellPiece, placeholders_keep_expression_structure};
 pub use icmp::PlannedIcmpProbe;
 pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, ExtraShellSources, PreflightApprovalStats, collect_frontmatter_shell_commands, collect_shell_commands};
 pub use shell_blocks::ShellBlockError;
@@ -272,11 +277,21 @@ impl Markdown {
     /// returns, with the failed documents' warnings, the outer document's
     /// first. A child that had already succeeded reported into its parent, so
     /// its warnings appear there.
+    ///
+    /// The report or failure carries the read set of the request's data
+    /// runtime: the command's whole read set when the caller attached one
+    /// ([`ComposeOptions::with_shared_data_runtime`]), otherwise this
+    /// composition's own.
     pub fn compose_with_warnings(&self, request: &ComposeRequest) -> Result<(Markdown, ComposeReport), Box<ComposeFailure>> {
         let mut result = self.clone();
-        match result.run_root_pipeline_collecting(request.clone(), None) {
+        let mut request = request.clone();
+        let data_runtime = request.data_runtime();
+        request.data_runtime = Some(data_runtime.clone());
+        match result.run_root_pipeline_collecting(request, None) {
             (Ok(report), _) => Ok((result, report)),
-            (Err(error), warnings) => Err(Box::new(ComposeFailure { error, warnings })),
+            (Err(error), warnings) => {
+                Err(Box::new(ComposeFailure { error, warnings, read_set: data_runtime.read_set() }))
+            }
         }
     }
 
@@ -307,16 +322,6 @@ impl Markdown {
         Ok((result, report))
     }
 
-    /// Composes the document over a request derived from an entry point's
-    /// request, for an inline pass inside that entry point.
-    pub(crate) fn compose_with_options(
-        &self,
-        options: ComposeRequest,
-    ) -> MarkdownResult<(Markdown, ComposeReport)> {
-        let mut result = self.clone();
-        let report = result.run_root_pipeline(options)?;
-        Ok((result, report))
-    }
 }
 
 #[cfg(test)]

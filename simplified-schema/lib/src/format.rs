@@ -65,10 +65,11 @@ use url::Url;
 use crate::coercion::{ContentFormat, content_error};
 use crate::file_context::resolve_document_file_ref;
 use crate::simplified::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaRoot, SchemaShape, SimplifiedType,
-    TypeExpr, declaration_options_payload, parse_property_definition, parse_schema_declaration,
-    serialize_property_atom,
+    Constraint, DynamicElement, DynamicKind, DynamicList, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaRoot, SchemaShape, SimplifiedType,
+    TypeExpr, declaration_options_payload, parse_schema_declaration, parse_type_definition_value,
+    serialize_property_atom, serialize_property_def,
 };
+use crate::simplified::narrowing::{ContainerAdmission, container_admission};
 
 /// Format name registered for eager `file(eager)` SimplifiedSchema atoms and
 /// for raw JSON Schema authors who want existence-checking.
@@ -560,7 +561,7 @@ impl<'i> Keyword<'i> for DarkmatterUrlSchemeKeyword {
 /// Factory for the grammar-backed `x-darkmatter-type-definition` keyword.
 ///
 /// The payload is `true` (any definition) or an options object
-/// `{"forms": ["literal", "enum"], "declaredRequired": true}`.
+/// `{"forms": ["literal", "enum"], "declaredRequired": true, "container": true}`.
 pub fn type_definition_keyword_factory<'a>(
     _parent: &'a Map<String, Value>,
     schema: &'a Value,
@@ -587,7 +588,7 @@ pub fn schema_keyword_factory<'a>(
 
 /// Judges `instance` as the value of a `type-definition` atom carrying
 /// `constraints`: it must parse as one property definition and satisfy the
-/// atom's declaration options (`forms`, `declared-required`). The same check
+/// atom's declaration options (`forms`, `declared-required`, `container`). The same check
 /// the lowered `x-darkmatter-type-definition` keyword makes, for a caller
 /// holding the parsed atom instead of its JSON Schema.
 ///
@@ -621,6 +622,8 @@ struct TypeDefinitionOptions {
     forms: Option<Vec<SimplifiedType>>,
     /// `declared-required`.
     declared_required: bool,
+    /// `container`.
+    container: bool,
 }
 
 /// The `schema(...)` declaration options a keyword payload carries.
@@ -661,7 +664,7 @@ fn bool_option(map: &Map<String, Value>, keyword: &str, key: &str) -> Result<boo
 
 impl TypeDefinitionOptions {
     fn from_payload(payload: &Value, keyword: &str) -> Result<Self, String> {
-        let Some(map) = options_object(payload, keyword, &["forms", "declaredRequired"])? else {
+        let Some(map) = options_object(payload, keyword, &["forms", "declaredRequired", "container"])? else {
             return Ok(Self::default());
         };
         let forms = match map.get("forms") {
@@ -678,14 +681,18 @@ impl TypeDefinitionOptions {
             ),
             Some(_) => return Err(format!("{keyword} option `forms` must be a non-empty array of type keywords")),
         };
-        Ok(Self { forms, declared_required: bool_option(map, keyword, "declaredRequired")? })
+        Ok(Self {
+            forms,
+            declared_required: bool_option(map, keyword, "declaredRequired")?,
+            container: bool_option(map, keyword, "container")?,
+        })
     }
 
     /// Judges a parsed declaration. `subject` names it in messages.
     ///
-    /// Parse-only: a named-type reference alternative passes `forms`
-    /// provisionally, because what it denotes is known only once resolved
-    /// (`crate::claims` checks it then). A `literal` or `enum` alternative
+    /// Parse-only: a named-type reference alternative passes `forms` and
+    /// `container` provisionally, because what it denotes is known only once
+    /// resolved (`crate::claims` checks `forms` then). A `literal` or `enum` alternative
     /// passes only when it denotes non-empty strings: these constructors
     /// declare names, and a numeric or boolean literal claims none.
     fn judge(&self, def: &PropertyDef, subject: &str) -> Result<(), String> {
@@ -720,6 +727,13 @@ impl TypeDefinitionOptions {
         if self.declared_required && !def.is_required() {
             return Err(format!("{subject} must be declared `required`, with no alternative that admits null"));
         }
+        if self.container && container_admission(def) == ContainerAdmission::NotContainer {
+            return Err(format!(
+                "{subject} must denote a container (an array, tuple, object, or dictionary, \
+                 optionally `| null`); `{}` does not",
+                serialize_property_def(def)
+            ));
+        }
         Ok(())
     }
 }
@@ -735,7 +749,9 @@ fn alternative_form(atom: &PropertyAtom, forms: &[SimplifiedType]) -> FormVerdic
         return FormVerdict::OtherForm;
     }
     let ty = match &atom.ty {
-        TypeExpr::Imported { .. } => return FormVerdict::Admitted,
+        // A reference's or a pending template type's form is judged once it
+        // resolves.
+        TypeExpr::Imported { .. } | TypeExpr::Slot(_) => return FormVerdict::Admitted,
         TypeExpr::Primitive(ty) if forms.contains(ty) => *ty,
         _ => return FormVerdict::OtherForm,
     };
@@ -743,9 +759,14 @@ fn alternative_form(atom: &PropertyAtom, forms: &[SimplifiedType]) -> FormVerdic
         SimplifiedType::Literal => {
             matches!(atom.literal_value(), Some(Value::String(text)) if !text.is_empty())
         }
-        SimplifiedType::Enum => atom.property_constraints().any(|constraint| {
-            matches!(constraint, Constraint::Members(members)
-                if !members.is_empty() && members.iter().all(|member| !member.is_empty()))
+        SimplifiedType::Enum => atom.property_constraints().any(|constraint| match constraint {
+            Constraint::Members(members) => !members.is_empty() && members.iter().all(|member| !member.is_empty()),
+            // A template's literal members are judged now; its slots return
+            // strings, and an empty one is a resolution error.
+            Constraint::Dynamic(DynamicList { kind: DynamicKind::Members, elements, .. }) => {
+                elements.iter().all(|element| !matches!(element, DynamicElement::Member(member) if member.is_empty()))
+            }
+            _ => false,
         }),
         _ => true,
     };
@@ -833,7 +854,7 @@ impl SchemaOptions {
 
 fn parse_type_definition_instance(instance: &Value) -> Result<PropertyDef, String> {
     let yaml = serde_yaml_ng::to_value(instance).map_err(|error| error.to_string())?;
-    parse_property_definition("<instance>", &yaml).map_err(|error| error.to_string())
+    parse_type_definition_value("<instance>", &yaml).map_err(|error| error.to_string())
 }
 
 fn parse_schema_instance(instance: &Value) -> Result<SchemaDeclaration, String> {

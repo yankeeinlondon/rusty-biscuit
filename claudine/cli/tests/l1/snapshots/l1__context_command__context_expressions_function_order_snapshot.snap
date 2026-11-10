@@ -72,6 +72,7 @@ Date Arithmetic
 Logical
   and(...)
   or(...)
+  try(expr, fallback)
 Type Conversion
   number(x, [fallback])
 Filesystem
@@ -100,6 +101,7 @@ Filesystem
   join(left, right)
   link(file)
   link(target, desc)
+  load_data(file, as, [options])
   markdown_body_empty(file)
   markdown_title(file)
   parent_dir(file)

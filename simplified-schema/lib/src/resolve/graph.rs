@@ -238,7 +238,9 @@ impl ImportEngine<'_> {
                 }
                 self.discover_def(&function.returns, namespace, path, signature, from, graph);
             }
-            TypeExpr::Primitive(_) | TypeExpr::Ref(_) => {}
+            // A template type's definition is unknown until it resolves, so
+            // first-pass discovery passes it through untouched.
+            TypeExpr::Primitive(_) | TypeExpr::Ref(_) | TypeExpr::Slot(_) => {}
         }
     }
 
@@ -393,7 +395,9 @@ impl Graph {
                 .targets
                 .get(&(Some(node), path.clone()))
                 .is_some_and(|&target| self.is_structured(target, cyclic, memo, visiting)),
-            TypeExpr::Primitive(_) | TypeExpr::Function(_) => false,
+            // A pending template type names no definition, so it closes no
+            // cycle and proves no structure.
+            TypeExpr::Primitive(_) | TypeExpr::Function(_) | TypeExpr::Slot(_) => false,
         }
     }
 

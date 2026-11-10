@@ -117,7 +117,7 @@ fn property_names_offers_root_union_arm_properties() {
 
 #[test]
 fn property_value_offers_files_for_root_union_arm() {
-    // The value slot for a root-union arm's file property must surface the
+    // The setter value for a root-union arm's file property must surface the
     // arm's `match(...)` candidates.
     let effective = effective_from_doc(concat!(
         "---\n",
@@ -1147,3 +1147,177 @@ fn shipped_container_schema_resolves_for_authored_parameter_completion() {
 
 #[cfg(test)]
 mod x2_spike;
+
+/// A prompt whose `$schema` file is a template: `os` holds a template
+/// constraint, `status` a required template type, and `title` and `kind`
+/// are static. Returns the context completion runs in, with a home of its own
+/// outside the repository so no persisted grant of the host applies.
+fn seed_template_prompt(root: &Path) -> ScopeContext {
+    let repo = root.join("repo");
+    write(&repo.join("os.yaml"), "- macOS\n- Linux\n");
+    write(&repo.join("status.yaml"), "type: enum(draft, published)\n");
+    write(
+        &repo.join("prompt.schema.yaml"),
+        concat!(
+            "$schema:\n",
+            "  title: string -> the title\n",
+            "  status: '{{ load_data(\"./status.yaml\", \"{ type: string }\").type }}(required)'\n",
+            "  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }}) -> the target OS\n",
+            "  kind: enum(a, b)\n",
+        ),
+    );
+    write(&repo.join("p.md"), "---\n$schema: ./prompt.schema.yaml\n---\nbody\n");
+    fs::create_dir_all(root.join("home")).unwrap();
+    let mut ctx = ScopeContext::discover_from(&repo);
+    ctx.home = Some(root.join("home"));
+    ctx
+}
+
+/// Commits everything under `repo` to a new repository, so the automatic
+/// grant covers the template's reads.
+fn commit_all(repo: &Path) {
+    git_init(repo);
+    for args in [&["add", "-A"][..], &["commit", "-q", "-m", "fixture"][..]] {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(repo)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?}");
+    }
+}
+
+fn write_grant_store(home: &Path, lines: &str) {
+    write(&home.join(".config/darkmatter/schema-read-policy"), lines);
+}
+
+#[test]
+fn template_names_complete_from_the_authored_template_without_resolving_it() {
+    let (_tmp, root) = canonical_tempdir();
+    let ctx = seed_template_prompt(&root);
+    commit_all(&root.join("repo"));
+
+    // Even where every read is granted, a name request leaves the template
+    // pending: had anything resolved it, it would load as concrete.
+    let Some(PromptSchema::Pending(pending)) = load_prompt_schema("p.md", &ctx) else {
+        panic!("a template schema must load as pending, not as nothing");
+    };
+    assert_eq!(pending.slots.len(), 2);
+    assert!(load_effective_schema("p.md", &ctx).is_none(), "a template is never a concrete schema");
+
+    let schema = PromptSchema::Pending(pending);
+    let names = property_names_in(schema.declarations(), "", &HashSet::new(), &[]);
+    // The template type's authored `(required)` orders it first; its
+    // requiredness is not resolved for ordering.
+    assert_eq!(names, ["status=", "title=", "os=", "kind="]);
+    assert_eq!(property_names_in(schema.declarations(), "stat", &HashSet::new(), &[]), ["status="]);
+}
+
+#[test]
+fn a_template_type_without_a_required_suffix_orders_with_the_optional_properties() {
+    let (_tmp, root) = canonical_tempdir();
+    write(&root.join("status.yaml"), "type: enum(draft, published)\n");
+    write(
+        &root.join("p.md"),
+        concat!(
+            "---\n$schema:\n",
+            "  status: '{{ load_data(\"./status.yaml\", \"{ type: string }\").type }}'\n",
+            "  title: string(required)\n",
+            "---\nbody\n",
+        ),
+    );
+    let ctx = ScopeContext::discover_from(&root);
+    let schema = load_prompt_schema("p.md", &ctx).expect("the template loads");
+    let names = property_names_in(schema.declarations(), "", &HashSet::new(), &[]);
+    assert_eq!(names, ["title=", "status="]);
+}
+
+#[test]
+fn a_template_constraint_value_resolves_with_the_automatic_grant() {
+    let (_tmp, root) = canonical_tempdir();
+    let ctx = seed_template_prompt(&root);
+    commit_all(&root.join("repo"));
+    assert_eq!(setter_value_candidates("p.md", "os", "", &ctx), ["os='macOS'", "os='Linux'"]);
+    assert_eq!(setter_value_candidates("p.md", "os", "li", &ctx), ["os='Linux'"]);
+}
+
+#[test]
+fn a_template_type_value_resolves_with_the_automatic_grant() {
+    let (_tmp, root) = canonical_tempdir();
+    let ctx = seed_template_prompt(&root);
+    commit_all(&root.join("repo"));
+    assert_eq!(
+        setter_value_candidates("p.md", "status", "", &ctx),
+        ["status='draft'", "status='published'"],
+    );
+}
+
+#[test]
+fn an_ungranted_read_offers_nothing_while_static_properties_still_complete() {
+    let (_tmp, root) = canonical_tempdir();
+    let ctx = seed_template_prompt(&root);
+    let repo = root.join("repo");
+    commit_all(&repo);
+    // A dirty file is outside the automatic grant, and nothing persisted
+    // covers it: the template cannot resolve, and nothing asks.
+    write(&repo.join("os.yaml"), "- macOS\n- Linux\n- Windows\n");
+
+    assert!(setter_value_candidates("p.md", "os", "", &ctx).is_empty());
+    // The template resolves as a whole, so the other slot's property offers
+    // nothing either.
+    assert!(setter_value_candidates("p.md", "status", "", &ctx).is_empty());
+    // A property with no slot completes from the authored declaration,
+    // which needs no resolution.
+    assert_eq!(setter_value_candidates("p.md", "kind", "", &ctx), ["kind='a'", "kind='b'"]);
+    assert!(setter_value_candidates("p.md", "title", "", &ctx).is_empty(), "a string offers no values");
+    assert!(setter_value_candidates("p.md", "missing", "", &ctx).is_empty());
+}
+
+#[test]
+fn a_persisted_user_grant_resolves_a_template_outside_any_repository() {
+    let (_tmp, root) = canonical_tempdir();
+    let ctx = seed_template_prompt(&root);
+    // No repository: no automatic grant.
+    assert!(setter_value_candidates("p.md", "os", "", &ctx).is_empty(), "control: nothing grants the read");
+
+    let repo = root.join("repo");
+    write_grant_store(&root.join("home"), &format!("allow dir {}\n", repo.display()));
+    assert_eq!(setter_value_candidates("p.md", "os", "", &ctx), ["os='macOS'", "os='Linux'"]);
+    assert_eq!(
+        setter_value_candidates("p.md", "status", "pub", &ctx),
+        ["status='published'"],
+    );
+}
+
+#[test]
+fn a_persisted_deny_wins_over_the_automatic_grant() {
+    let (_tmp, root) = canonical_tempdir();
+    let ctx = seed_template_prompt(&root);
+    let repo = root.join("repo");
+    commit_all(&repo);
+    write_grant_store(&root.join("home"), &format!("deny file {}\n", repo.join("os.yaml").display()));
+    assert!(setter_value_candidates("p.md", "os", "", &ctx).is_empty());
+    assert_eq!(setter_value_candidates("p.md", "kind", "", &ctx), ["kind='a'", "kind='b'"]);
+}
+
+#[test]
+fn an_invalid_grant_store_offers_nothing_for_a_slot_property() {
+    let (_tmp, root) = canonical_tempdir();
+    let ctx = seed_template_prompt(&root);
+    commit_all(&root.join("repo"));
+    write_grant_store(&root.join("home"), "allow nonsense\n");
+    assert!(setter_value_candidates("p.md", "os", "", &ctx).is_empty());
+    assert_eq!(setter_value_candidates("p.md", "kind", "", &ctx), ["kind='a'", "kind='b'"]);
+}
+
+#[test]
+fn a_concrete_schema_loads_as_resolved() {
+    let tmp = TempDir::new().unwrap();
+    seed_repo(tmp.path());
+    write(&tmp.path().join("p.md"), "---\n$schema:\n  status: 'enum(a, b)'\n---\n");
+    let ctx = ScopeContext::discover_from(tmp.path());
+    let schema = load_prompt_schema("p.md", &ctx).expect("schema loads");
+    assert!(schema.resolved().is_some());
+    assert!(schema.declarations().is_some());
+}

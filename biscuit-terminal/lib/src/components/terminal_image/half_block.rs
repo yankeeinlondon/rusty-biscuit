@@ -53,7 +53,7 @@ impl TerminalImage {
         term: &Terminal,
     ) -> Result<Vec<String>, TerminalImageError> {
         let (pixel_width, pixel_height) = pixels.size();
-        let dims = self.resolve_dimensions_for_image(term.width().max(1), term.cell_size(), pixel_width);
+        let dims = self.dimensions_on(term, pixel_width);
         let cell = term.cell_size().unwrap_or(CellSize::FALLBACK);
         let rows = half_block_pixel_rows(dims.image_width, (pixel_width, pixel_height), cell);
         let background = SixelBackground::for_terminal(term);

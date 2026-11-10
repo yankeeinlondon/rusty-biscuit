@@ -1,0 +1,202 @@
+outcome = "failure"
+references_scanned = 10
+references_valid = 4
+valid = false
+warnings = []
+
+[[diagnostics]]
+code = "dm.reference.missing_hyperlink"
+construct = "hyperlink"
+failure = "no-match"
+included_via = []
+iteration_path = []
+message = "Missing local target: ./missing-one.md"
+reason = "file not found"
+reference = "./missing-one.md"
+severity = "error"
+
+[diagnostics.source]
+column = 5
+file = "<root>/root.md"
+inserted = false
+line = 9
+section = "intro-root"
+
+[diagnostics.span]
+end = 152
+start = 121
+
+[[diagnostics]]
+code = "dm.reference.missing_hyperlink"
+construct = "hyperlink"
+failure = "no-match"
+included_via = []
+iteration_path = []
+message = "Missing local target: ./missing-two.md"
+reason = "file not found"
+reference = "./missing-two.md"
+severity = "error"
+
+[diagnostics.source]
+column = 9
+file = "<root>/root.md"
+inserted = false
+line = 15
+section = "second"
+
+[diagnostics.span]
+end = 217
+start = 186
+
+[[diagnostics]]
+code = "dm.reference.missing_hyperlink"
+construct = "hyperlink"
+failure = "no-match"
+included_via = []
+iteration_path = []
+message = "Missing local target: ./missing-three.md"
+reason = "file not found"
+reference = "./missing-three.md"
+severity = "error"
+
+[diagnostics.source]
+column = 13
+file = "<root>/root.md"
+inserted = false
+line = 22
+section = "second"
+
+[diagnostics.span]
+end = 348
+start = 313
+
+[[diagnostics]]
+code = "dm.reference.missing_hyperlink"
+construct = "hyperlink"
+failure = "no-match"
+included_via = []
+iteration_path = []
+message = "Missing local target: ./missing-five.md"
+reason = "file not found"
+reference = "./missing-five.md"
+severity = "error"
+
+[diagnostics.source]
+column = 8
+file = "<root>/root.md"
+inserted = false
+line = 24
+section = "second"
+
+[diagnostics.span]
+end = 393
+start = 360
+
+[[diagnostics]]
+code = "dm.reference.missing_hyperlink"
+construct = "hyperlink"
+failure = "no-match"
+iteration_path = []
+message = "Missing local target: ./missing-four.md"
+reason = "file not found"
+reference = "./missing-four.md"
+severity = "error"
+
+[[diagnostics.included_via]]
+file = "<root>/root.md"
+line = 26
+
+[diagnostics.source]
+column = 43
+file = "<root>/child.md"
+inserted = false
+line = 7
+section = "child-heading"
+
+[diagnostics.span]
+end = 167
+start = 134
+
+[[issues]]
+code = "MissingLocalTarget"
+column = 5
+included_via = []
+inserted = false
+kind = "hyperlink"
+line = 9
+message = "Missing local target: ./missing-one.md"
+reference = "./missing-one.md"
+section = "intro-root"
+severity = "error"
+source = "<root>/root.md"
+
+[[issues]]
+code = "MissingLocalTarget"
+column = 9
+included_via = []
+inserted = false
+kind = "hyperlink"
+line = 15
+message = "Missing local target: ./missing-two.md"
+reference = "./missing-two.md"
+section = "second"
+severity = "error"
+source = "<root>/root.md"
+
+[[issues]]
+code = "MissingLocalTarget"
+column = 13
+included_via = []
+inserted = false
+kind = "hyperlink"
+line = 22
+message = "Missing local target: ./missing-three.md"
+reference = "./missing-three.md"
+section = "second"
+severity = "error"
+source = "<root>/root.md"
+
+[[issues]]
+code = "MissingLocalTarget"
+column = 8
+included_via = []
+inserted = false
+kind = "hyperlink"
+line = 24
+message = "Missing local target: ./missing-five.md"
+reference = "./missing-five.md"
+section = "second"
+severity = "error"
+source = "<root>/root.md"
+
+[[issues]]
+code = "MissingLocalTarget"
+column = 43
+inserted = false
+kind = "hyperlink"
+line = 7
+message = "Missing local target: ./missing-four.md"
+reference = "./missing-four.md"
+section = "child-heading"
+severity = "error"
+source = "<root>/child.md"
+
+[[issues.included_via]]
+file = "<root>/root.md"
+line = 26
+
+[[issues]]
+code = "MissingLocalTarget"
+column = 7
+inserted = true
+kind = "hyperlink"
+line = 9
+message = "Missing local target: ./missing-ins.md"
+reference = "./missing-ins.md"
+section = "child-heading"
+severity = "warning"
+source = "<root>/child.md"
+
+[[issues.included_via]]
+file = "<root>/root.md"
+line = 26

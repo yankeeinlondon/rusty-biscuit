@@ -27,6 +27,8 @@ use serde::Deserialize;
 ///
 /// `style.markdown` has no field: it holds cleanup rules, which the parser
 /// validates through `markdown::cleanup::rules` and rendering never reads.
+/// The page keys and shorthands accepted at the top level of `style` have no
+/// field either: style normalization moves them onto `page` first.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "kebab-case", default)]
 pub struct StyleFrontmatter {
@@ -59,7 +61,7 @@ mod tests {
     #[test]
     fn only_page_set_leaves_others_none() {
         let s: StyleFrontmatter =
-            serde_json::from_str(r#"{"page": {"left-margin": "2ch"}}"#).unwrap();
+            serde_json::from_str(r#"{"page": {"margin-left": "2ch"}}"#).unwrap();
         assert!(s.page.is_some());
         assert!(s.table.is_none());
         assert!(s.ul.is_none());
@@ -73,7 +75,7 @@ mod tests {
         assert!(s.code_block.is_none());
 
         let page = s.page.unwrap();
-        assert_eq!(page.left_margin, Some(Length::Ch(2)));
+        assert_eq!(page.margin_left, Some(Length::Ch(2)));
     }
 
     #[test]

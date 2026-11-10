@@ -126,7 +126,7 @@ macro_rules! recovery {
                 assert!(stderr.contains("has no declared iterable type"), "the warning is reported: {stderr}");
             }
 
-            let report = recorder.compose(&["--allow", $id, "--output", "report-json"]);
+            let report = recorder.compose(&["--allow", $id, "--output", "json"]);
             let report: serde_json::Value = serde_json::from_str(&stdout_of(&report)).expect("one JSON object");
             assert_eq!(report["outcome"], "success");
             let diagnostics = report["diagnostics"].as_array().expect("an array");
@@ -165,7 +165,7 @@ fn a_recovered_source_warning_survives_a_later_static_rejection_in_the_report() 
         ("untyped-filter-variables", "::filter unknown\n- {{i}}\n::end-filter\n", "::map scalar\n- x\n::end-map\n", "dm.collection.untyped_filter_source"),
     ] {
         recorder.document(&format!("---\n$schema:\n  scalar: number(required)\nunknown: [1]\nscalar: 2\n---\n{earlier}{later}"));
-        let output = recorder.compose(&["--allow", id, "--output", "report-json"]);
+        let output = recorder.compose(&["--allow", id, "--output", "json"]);
         assert_eq!(output.status.code(), Some(1), "--allow {id}: {}", stderr_of(&output));
         let report: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("one JSON object");
         assert_eq!(report["outcome"], "failure", "{report:#}");

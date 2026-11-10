@@ -488,3 +488,23 @@ fn a_shell_before_preflight_is_refused_without_running() {
     let lines = evaluate_event(&config, LifecycleSignal::Finalize, false);
     assert!(lines.iter().all(|line| !line.contains("command stdout")), "{lines:?}");
 }
+
+#[test]
+fn a_late_interrupt_flag_is_seen_and_a_missing_one_gives_up() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::{Duration, Instant};
+
+    // The flag is set on the handler's thread, a little after the command died.
+    let polls = AtomicU32::new(0);
+    let late = || polls.fetch_add(1, Ordering::SeqCst) >= 2;
+    assert!(wait_for_interrupt(&late, Duration::from_secs(30)));
+
+    let started = Instant::now();
+    assert!(!wait_for_interrupt(&|| false, Duration::from_millis(20)));
+    assert!(started.elapsed() >= Duration::from_millis(20));
+
+    // An interrupt already recorded does not wait.
+    let started = Instant::now();
+    assert!(wait_for_interrupt(&|| true, Duration::from_secs(30)));
+    assert!(started.elapsed() < Duration::from_secs(30));
+}

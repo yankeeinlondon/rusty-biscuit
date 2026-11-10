@@ -24,7 +24,7 @@
 //!
 //! 1. A token matching Claudine's clap surface (option name, alias, or short,
 //!    in space or `=`/attached form) always belongs to Claudine, with the
-//!    value slot of a value-bearing option in space form. After the file, the
+//!    option value of a value-bearing option in space form. After the file, the
 //!    removed option leaves a [`CallerArgument::ClaudineOption`] marker so the
 //!    tokens on either side never join one provider value run.
 //! 2. The first bare non-setter token is the composition file. Setters before

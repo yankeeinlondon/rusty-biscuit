@@ -1,0 +1,8 @@
+kind: schema
+description: currently the initial schema in `_schema.yaml` is very generic and does not reach the narrow type goals we need to achieve in this research!
+$schema:
+    schema_revision: literal(5; required)
+    has_native_support: boolean(required) -> a boolean flag indicating whether the provider does or does not provide native sandboxing features
+    os_support: os[](required) -> which OS's provide this native sandboxing feature?
+types:
+    os: enum({{ load_data("../../../os.yaml", "string[]") }}; required) -> the list of supported operating systems that Claudine supports

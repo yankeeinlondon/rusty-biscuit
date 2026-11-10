@@ -10,7 +10,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
 use darkmatter::markdown::render_tree::{render_tree_markdown, render_tree_markdown_dialect};
 use darkmatter::style::{
-    DisclosureStyleOverrides, apply_color_style, apply_disclosure_style, from_frontmatter,
+    apply_color_style, apply_disclosure_style, from_frontmatter,
 };
 use renderable::tree::MarkdownDialect;
 
@@ -269,7 +269,7 @@ fn terminal_target_honors_frontmatter_disclosure_style() {
     let term = Terminal::new_optimistic(80);
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("style parse must succeed");
     let page = DarkmatterPage::new(&term);
-    let page = apply_disclosure_style(page, &style, DisclosureStyleOverrides::default())
+    let page = apply_disclosure_style(page, &style)
         .expect("disclosure style apply must succeed");
     let page = apply_color_style(page, &style).expect("color style apply must succeed");
     let rendered = page.render(&md).expect("render must succeed");

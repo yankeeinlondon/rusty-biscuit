@@ -196,7 +196,10 @@ fn level2_page_no_double_blank_rows_between_code_blocks() {
 
     let is_blank = |idx: usize| -> bool {
         let visibly_empty = plain_rows.get(idx).is_none_or(|p| p.trim().is_empty());
-        let no_panel_bg = target_extent(raw_rows[idx], target).is_none();
+        // A terminal capture may write a painted empty row as an erase under
+        // the panel's background, which holds no text for `target_extent`.
+        let erased_in_panel = raw_rows[idx].contains(&format!("\x1b[48:2::{}:{}:{}m\x1b[K", target.0, target.1, target.2));
+        let no_panel_bg = target_extent(raw_rows[idx], target).is_none() && !erased_in_panel;
         visibly_empty && no_panel_bg
     };
 

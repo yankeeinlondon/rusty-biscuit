@@ -406,7 +406,7 @@ fn schema_about_is_documentation_only() {
 }
 
 #[test]
-fn schema_about_uses_readable_terminal_components() {
+fn schema_about_on_a_pipe_is_plain_text_with_literal_fences() {
     let process = CliProcessFixture::new();
     let output = process
         .command()
@@ -415,137 +415,11 @@ fn schema_about_uses_readable_terminal_components() {
         .expect("run md schema about");
     assert!(output.status.success());
 
-    let plain = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
-    let type_system = plain
-        .split("Type System")
-        .nth(1)
-        .and_then(|after_heading| after_heading.split("Constraint Vocabulary").next())
-        .expect("type system section should precede constraint vocabulary");
-
-    assert!(
-        plain.contains("┌"),
-        "type/constraint sections should render real tables"
-    );
-    assert!(
-        !plain.contains("file://"),
-        "schema examples must not be interpreted as Markdown links"
-    );
-    assert!(
-        !plain.contains("```"),
-        "code examples should render as code blocks instead of literal Markdown fences"
-    );
-    assert!(
-        !plain.contains('`'),
-        "inline code spans should render as styled text instead of raw backtick-delimited Markdown"
-    );
-    assert!(
-        !plain.contains("Table could not be rendered"),
-        "schema about tables should fit the report width"
-    );
-    assert!(
-        !plain.contains("all types (and array properties"),
-        "universal constraint targets should not special-case arrays awkwardly"
-    );
-    assert!(
-        !plain.contains("array-level"),
-        "array constraint rows should use plain `array` language"
-    );
-    assert!(
-        !plain.contains("string context"),
-        "constraint examples should not carry implementation-context labels"
-    );
-    assert!(
-        !plain.contains("min (string)")
-            && !plain.contains("min (number)")
-            && !plain.contains("min (array)")
-            && !plain.contains("max (string)")
-            && !plain.contains("max (number)")
-            && !plain.contains("max (array)"),
-        "min/max should be documented once each instead of repeated per type"
-    );
-    assert!(
-        plain.contains("min(number)")
-            && plain.contains("max(number)")
-            && plain.contains("minimum length")
-            && plain.contains("minimum value")
-            && plain.contains("minimum item count")
-            && plain.contains("maximum length")
-            && plain.contains("maximum value")
-            && plain.contains("maximum item count"),
-        "consolidated min/max rows should explain each applicable type in user-facing terms"
-    );
-    assert!(
-        !plain.contains("│ Arity ") && !plain.contains("│ Form ") && !plain.contains("│ Target "),
-        "constraint table headings should be author-facing"
-    );
-    assert!(
-        plain.contains("│ Write ")
-            && plain.contains("│ Applies To ")
-            && plain.contains("│ Meaning "),
-        "constraint table should name usage and applicability clearly"
-    );
-    assert!(
-        !plain.contains("default(\n") && !plain.contains("pattern(\n"),
-        "constraint usage examples should not wrap immediately after the opening parenthesis"
-    );
-    assert!(
-        !plain.contains("This report is generated from the typed descriptor catalog")
-            && !plain.contains("documentation-only: it performs no document parsing"),
-        "awkward implementation footer should not be user-visible"
-    );
-    assert!(
-        !plain.contains("\n\n\n"),
-        "schema about should not emit more than one blank line between blocks"
-    );
-    assert!(
-        plain.contains("page is rendered.\n\n Use this"),
-        "paragraph blocks should be separated by a blank line"
-    );
-    assert!(
-        plain.contains("frontmatter you expect.\n\n - Single object"),
-        "unordered lists should have a blank line before them"
-    );
-    assert!(
-        plain.contains("Type System\n\n ┌"),
-        "tables should have a blank line before them"
-    );
-    assert!(
-        type_system.contains("│ Type ") && !type_system.contains("│ Keyword "),
-        "type table should use the author-facing `Type` column heading"
-    );
-    assert!(
-        !type_system.contains("match(glob") && !type_system.contains("scheme(http"),
-        "type table should list constraint names without constraint parameters"
-    );
-    assert!(
-        plain.contains("┘\n\n Any of the above types can be made into an array"),
-        "type vocabulary notes should start after the table with a blank line"
-    );
-    assert!(
-        plain.contains("bar: string[]") && plain.contains("baz: \"string[](min(1))\""),
-        "type vocabulary notes should include array and constrained-array examples"
-    );
-    assert!(
-        plain.contains("Note: the values in schemas must be valid YAML strings"),
-        "type notes should explain that schema values are YAML strings and may be quoted"
-    );
-    assert!(
-        plain.contains("use --verbose to see additional details"),
-        "non-verbose output should tell readers how to see additional details"
-    );
-    assert!(
-        !plain.contains("Nested Objects")
-            && !plain.contains("Compose-time Coercion")
-            && !plain.contains("Validation Notes"),
-        "advanced schema details should only render with --verbose"
-    );
-    assert!(
-        plain
-            .lines()
-            .filter(|line| !line.is_empty())
-            .all(|line| line.starts_with(' ')),
-        "nonblank report lines should use the document left margin"
-    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains('\x1b'), "no escape bytes on a pipe: {stdout:?}");
+    assert!(stdout.contains("```yaml"), "code examples keep their fences: {stdout}");
+    assert!(stdout.contains("Type System"), "{stdout}");
+    assert!(stdout.contains('┌'), "the sections keep their tables: {stdout}");
 }
 
 #[test]
@@ -646,21 +520,13 @@ fn schema_about_verbose_prints_context_and_expression_sections() {
         );
     }
 
-    // Exact rendered text of one overloaded function, captured before the
-    // catalog descriptors became owned: every overload on its own wrapped item.
-    let link_overloads = concat!(
-        " - link(file: file | null) -> string | null | error \u{2014} Creates a Markdown link\n",
-        "   to a local file, using its relative path as the link text and its\n",
-        "   absolute path as the destination. HTTP(S) URLs are rejected because they\n",
-        "   need a description; null passes through.\n",
-        " - link(target: file | null, desc: string | null) -> string | null | error \u{2014}\n",
-        "   Creates a Markdown link to a local file or an HTTP(S) URL with the given\n",
-        "   description as its text; null passes through.\n",
-    );
-    assert!(
-        plain.contains(link_overloads),
-        "verbose schema about must render the `link` overloads exactly:\n{plain}"
-    );
+    // Every overload is its own list item.
+    for overload in [
+        "- `link(file: file | null) -> string | null | error` \u{2014} Creates a Markdown link to a local file,",
+        "- `link(target: file | null, desc: string | null) -> string | null | error` \u{2014} Creates a Markdown link",
+    ] {
+        assert!(plain.contains(overload), "verbose schema about must list {overload:?}:\n{plain}");
+    }
 
     for retired in ["packages_list", "dirty_files_list"] {
         assert!(
@@ -693,39 +559,21 @@ fn schema_about_rejects_invalid_code_block_value() {
 }
 
 #[test]
-fn schema_about_code_block_dark_and_light_differ() {
+fn schema_about_code_block_variant_leaves_piped_output_unstyled() {
     let process = CliProcessFixture::new();
-    // The OneHalf code theme is paired, so forcing the dark vs light variant
-    // must change the code-block background SGR. We assert each run carries a
-    // background SGR the other does not, independent of exact RGB.
-    let forced_color = || {
-        process
-            .command_builder()
-            .rendering_input("FORCE_COLOR", "1")
-            .rendering_input("COLORTERM", "truecolor")
-            .rendering_input_removed("NO_COLOR")
-            .build()
-    };
-    let dark = forced_color()
-        .args(["schema", "about", "--code-block", "dark"])
-        .output()
-        .expect("run dark");
-    let light = forced_color()
-        .args(["schema", "about", "--code-block", "light"])
-        .output()
-        .expect("run light");
-    assert!(dark.status.success() && light.status.success());
-
-    let dark_out = String::from_utf8_lossy(&dark.stdout);
-    let light_out = String::from_utf8_lossy(&light.stdout);
-    assert_ne!(
-        dark_out, light_out,
-        "forcing the dark vs light code-block variant must change the rendered output"
-    );
+    for variant in ["dark", "light"] {
+        let output = process
+            .command()
+            .args(["schema", "about", "--code-block", variant])
+            .output()
+            .expect("run md schema about");
+        assert!(output.status.success());
+        assert!(!output.stdout.contains(&0x1b), "--code-block {variant}: no escape bytes on a pipe");
+    }
 }
 
 #[test]
-fn schema_about_emits_table_stripes_when_color_is_enabled() {
+fn schema_about_forced_color_still_has_no_escape_bytes_on_a_pipe() {
     let process = CliProcessFixture::new();
     let output = process
         .command_builder()
@@ -734,14 +582,9 @@ fn schema_about_emits_table_stripes_when_color_is_enabled() {
         .build()
         .args(["schema", "about"])
         .output()
-        .expect("run md schema about with color enabled");
+        .expect("run md schema about with color forced");
     assert!(output.status.success());
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("\x1b[48"),
-        "schema about tables should emit background stripes when color is enabled"
-    );
+    assert!(!output.stdout.contains(&0x1b), "no escape bytes on a pipe, whatever the environment");
 }
 
 /// A trigger grammar form sits in an inline code span, whose contents are

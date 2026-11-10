@@ -46,6 +46,25 @@ Markdown presentation is retained separately and the raw record remains
 available for fresh preparation. Ordinary strings and document-authored file
 references keep their existing source-relative and repository-aware rules.
 
+Command-line setters (`md compose doc.md author.name=Alice`) apply here too, per
+document, in `compose/setters.rs`. `classify_token` is the one setter grammar;
+`SetterPlan::new` settles overlaps before any document is read. `apply_setter_plan`
+runs right after `prepare_schemas` and before caller-file projection, at the
+pipeline and at both pre-flight walks: a copy with every value guessed selects the
+schema, then each value is read once through its declared type. A setter is not in
+`set_overrides`, so any new reader of caller overrides must also consult
+`options.setters`. Caller records cover only what a setter supplied:
+`setter_bindings.whole_keys` joins `caller_input_records`, and a nested setter is a
+`NestedSetterRecord`, so an authored sibling keeps its own origin. The schema stage
+walks both into `SuppliedLeaf`s (`schema_validation::CallerInput`, every string below
+a top-level property), which arm selection, classification, and projection share;
+`PreparedSchemas::adopt_supplied_values` carries their origins to later validation,
+and `reported_from_caller_origin` rewrites a no-match verdict on a value no union arm
+projected, which the validator looked for in the document's folder.
+Failures are
+`MarkdownError::Setter` (`dm.setter.invalid`, `source: null`); a schema problem on a
+setter's value keeps `dm.schema.*`, names the setter, and has no position.
+
 1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; materialized caller-file parameters already expose their origin-resolved native values, and keys referencing an authored whole-value `$(...)` are deferred to pass 2; each string is scanned once (see [Inserted Text Is Data](#inserted-text-is-data))
 2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Converts** values to their declared types at every declared depth through the shared coercion engine (default-on, e.g. the string `"true"` → real boolean; each top-level property commits on its own) and writes the converted values back into frontmatter, skipping pending values. The passive call check (`call_precheck.rs`) runs before this stage and before frontmatter interpolation. Each pass gets a `schema_validation::PendingDeferral` saying what a later stage will resolve: `BeforeShell` defers an authored whole-value `$(...)` key (even after pass 1 interpolated its arguments), a problem whose own path (or nearest existing ancestor) holds an authored `{{ }}` template the schema did not already accept as `deferred` (`schemas::awaits_rendering`, shared with `validate_with_options(Defer)` and Claudine's launch pre-validation; a literal sibling's problem, and an unknown or missing key on a collection, are always reported; `PendingDeferral::defers_problem`), and the `provisional_keys` a non-deferring pass 1 (shell discovery) resolved from a command's unexpanded text; `$(...)` text anywhere else is never expanded and is judged now. Other data (a data override, an expression result, a decoded literal token) is never pending. Deferral applies only when frontmatter shell expansion is enabled (or `defer_shell_pending_schema_problems`); when it is disabled every problem fails fast. After shell expansion and interpolation pass 2, `run_with_registry` runs again against the same effective schema (document, baseline, matched triggers) and judges the resolved values with `PendingDeferral::Final` (nothing deferred). The only opt-out is `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (set by Claudine's `canonical_compose_options`, whose `prepare_*_with_schema` re-validates and drops invalid optionals): then, unless `trigger_schemas` is on, compose runs only `verify_projection_stability` and `validate_typed_shell_values`. **Trap:** never gate this pass on `trigger_schemas` alone — `--disable schema-triggers` removes trigger schemas, not the document/baseline verdict on resolved values
 3. **Frontmatter Shell Expansion** - top-level frontmatter values whose *authored source* is a whole-value `$(cmd)` execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
@@ -501,6 +520,27 @@ optional-target idiom is condition-aware and warning-free:
 ::end-block
 ```
 
+### Reads after a command (`BodyProvenance::pending`)
+
+Body interpolation leaves pending every expression (plain or whole-value
+target) that calls a read-side function (`remote::calls_read_side_function`,
+the read-set list) and starts after the end of the first command site
+(`inline::shell_expansion::command_sites`: enabled `::shell` lines and shell
+blocks). `PendingReads` rides `BodyProvenance` and drops any read an edit
+touches. When pending is non-empty the shell stages interleave
+(`phases.rs::run_directives_between_reads`, the `ShellBlocks` arm): before each
+command, `inline::interpolation::resolve_pending` evaluates the reads with no
+unrun command before them plus those inside the command, then the stage runs
+only that command (`StageWindow::First`, `run_shell_blocks_stage_in(first)`);
+the first call still pre-reads every directive. Directives all run before
+blocks, so a read after a block waits for the block stage; the last enabled
+shell stage settles the rest. Structural decisions (page-block and `when=`
+conditions, collection gates, sources, callbacks) are not deferred. A command
+whose own line held pending reads is prepared with `prepare_refreshed_site`:
+under pre-approvals its new bytes run when an exact whitelist rule covers every
+segment (or its shape is a member), else `NotPreApproved`. Tests:
+`lib/tests/l1/load_data_runtime.rs`.
+
 ### Variable Resolution
 
 | Pattern | Description |
@@ -619,6 +659,69 @@ message). The moving parts:
 - Directive targets are not observed. A null `::file {{ x }}` target already
   warns as a skipped nullable target, and a second warning would duplicate it.
 
+### Undeclared members (`dm.expression.undeclared_member`)
+
+The verdict is the shared classifier ([expressions.md](expressions.md),
+"Undeclared member check"); composition adds only **reachability**: a
+warning exists where the precheck found a candidate *and* the evaluator
+reached that selector. Never emit from a static scan alone.
+
+- **Candidates.** `call_precheck.rs::check_document(&SiteSchema)` returns
+  `(warnings, MemberCandidates)`, computed once per document under the
+  prepared schema (template while slots are pending), at every surface it
+  call-checks. `ComposeReport.member_candidates: Arc<MemberCandidates>` is
+  per document, never merged from a child report.
+- **Reach.** A `MissingRootObserver` with `OBSERVES_MEMBERS` records each
+  selector node at entry (`member_read`); `absence::Observation { roots,
+  reached, addresses }` turns addresses into ordinals
+  (`member_check::reached_ordinals`, mirroring `spanned_nodes` on the
+  span-erased tree). The `()` and `Vec<MissingRoot>` observers are unchanged.
+- **Join** (`compose/member_sites.rs`). `MemberSiteKey` is the authored site:
+  `body` (offset projected through `BodyOrigin`, so `::map` copies and repeat
+  includes share it), `leaf` (frontmatter key path + `{{` offset in the
+  value), `shell` (a `$( … )` ternary piece by role). `MemberCandidates::warnings`
+  also requires the evaluated text to match the candidate's
+  `AuthoredExpression`: the trimmed authored text, or that text with each
+  `{{ }}` placeholder lying inside one string literal filled by text free of
+  that quote and `\` (token structure, hence ordinals, unchanged). Any other
+  rewritten text never inherits a candidate. Warnings collapse by identity in the report: one per
+  authored site, two same-spelled sites stay two.
+- **Routing per surface.** Interpolation: `Evaluator::with_member_sites(candidates,
+  MemberFrame::Body | Leaf)` (`set_member_leaf` per frontmatter leaf), warnings
+  appended right after `eval` so the next `before_eval` sees them; the
+  discovery pass and the directive-target pass install none. Conditions
+  (`::block`, `::file`/`::code when=`): `BodyMembers`; a transclusion re-checks
+  its `ReportWatch` before composing the child. Collections:
+  `Execution::with_members`; callbacks run behind `&self`, so their warnings
+  wait in a `RefCell` and are flushed before the next gate's stop and at the
+  end (failure included). Frontmatter `$( … )`: `ShellMembers`; the condition
+  and chosen value branch are joined, and the stage's check hook runs before
+  any command. A `{{ }}` in a `$( … )` piece (or a `::file`/`::code` `when=`, filled
+  by body interpolation first) is its own interpolation site; the piece's
+  other selectors keep their candidates through the in-string match above.
+  The precheck lists a ternary's pieces with
+  `FrontmatterShellTernary::member_pieces`, which drops a piece whose
+  placeholder is outside a string; DMLS inventories through the same call.
+- **Not covered:** whole-value directive targets (nullable-target warning
+  instead), lifecycle stacks, `expression`-typed frontmatter values (DMLS
+  only), discovery passes, standalone unobserved evaluators.
+- **Pending schemas.** Composition resolves the schema before any expression;
+  a passive `SlotSession` fails with `dm.schema.slot_pending` before any member
+  warning exists. Only DMLS reports from an unresolved template.
+- **A failure keeps what was read before it (all warning families).** A
+  stage that collects warnings hands them to the report before it propagates
+  an error: `LocatedInterpolationError::warnings` (body and frontmatter
+  `{{ }}`, directive targets; `LocatedFrontmatterError::warnings` across
+  leaves and keys) and `execute_frontmatter_shell_expansion_into`'s
+  `warnings` out-parameter; a condition (`::block`, collection gate,
+  `::file`/`::code` `when=`) records its observation before returning its
+  evaluation error. A failing ternary piece reports its own members (the
+  selected branch is unknown). A policy stop already carries its warnings,
+  so they are not added again. `md compose` runs a passive reference check
+  first, which reports no member warning: an expression failure it reaches
+  (a body or frontmatter `{{ }}`, a `::block` condition) fails the run
+  before composition, without them.
+
 ### Context Values (`ctx.*`)
 
 Context is captured once per compose run and reused across the full document
@@ -728,6 +831,22 @@ Full specification lives in `darkmatter/docs/topics/context-variables.md`.
 
 Uses first truthy value, or the fallback.
 
+### Recovering from read failures (`try`)
+
+Every surface that evaluates expressions (body and frontmatter interpolation,
+`::block`/`when=` conditions, transclusion targets, map/filter callbacks and
+predicates, shell-template expressions, schema slots) gets `try` from the one
+evaluator, `expression/mod.rs::evaluate_recovery`; lifecycle operands use
+`lifecycle/executor.rs::call_recovery` (see [lifecycle.md](lifecycle.md)).
+Never add a surface-specific recovery. Discovery passes (the reference check,
+approval discovery) never pick the fallback for a read they cannot perform:
+a remote read without remote permission is `FileRefFailure::RemoteNotEnabled`
+(`DataError::is_deferral`), which is not recoverable, so it propagates as the
+usual lenient deferral, the expression is kept, and composition loads the real
+value. A discovery-time fallback must never be frozen as the final value.
+Static dependency and approval collection walk both arguments. Behavior:
+[Recovering from read failures](../../../darkmatter/docs/topics/darkmatter-expressions.md#recovering-from-read-failures).
+
 ### Ternary Expressions
 
 ```handlebars
@@ -798,6 +917,22 @@ on every surface. `lint_expression` / `lint_spanned`
 proven-equivalent `+` rewrite. `is_whole_value_span` is the shared syntactic
 classifier, and the caller decides whether its surface is single-pass. See
 `darkmatter/docs/inline/interpolation.md#braces-inside-string-literals`.
+
+### Where an expression ends
+
+One rule, owned by `simplified_schema::expression::scan`: a `{{` expression
+ends at the quote- and brace-balanced `}}`, but only when that span parses
+and the old first-unnested-`}}` span does not; otherwise the old span (kept
+as a private fallback) wins, so no span that parsed before changes. That is
+what lets `{{ load_data(f, "{a: {b: string}}") }}` work. Editors use
+`expression_region_at(text, offset, excluded)` (same lexical rules, no parse
+gate, open regions allowed). Every other end detector routes through these:
+DMLS `overlay` `completion_partial` and the `dsl`/`frontmatter` providers,
+`mask_interpolations`, `protect_interpolation_expressions`, and Claudine's
+`whole_value_span` (old rule first, the scanner as fallback) and
+`SpanScanner` (scanner ranges are opaque). Literal (`{{{ … }}}`) and token
+openers keep their old closing rule. Never add a private `rfind("{{")` or depth scan. See
+the `simplified-schema` skill's "One `{{ }}` closing rule".
 
 ### Escaping an Opener
 
@@ -955,7 +1090,10 @@ Shell approval and shell execution are separate concerns:
 - **Execution is condition-aware.** The inline shell stages run only the
   commands whose branch is reached, gated by
   `ComposeOptions::with_pre_approved_commands(set)`. The invariant
-  `execution_set ⊆ approval_set` makes the gate a pure membership check.
+  `execution_set ⊆ approval_set` makes the gate a pure membership check,
+  except for a refreshed site (its arguments read a file after an earlier
+  command ran), which an exact whitelist rule may also admit
+  (`site::prepare_refreshed_site`).
 - A body/`::shell-block` command embedding a frontmatter value still pending
   frontmatter-shell expansion is rejected up front as
   `ShellExpansionError::DynamicCommandShape` (never a late `NotPreApproved`).
@@ -987,6 +1125,16 @@ Shell approval and shell execution are separate concerns:
   snapshot of the document taken before frontmatter pass 1 for the same reason.
 - Frontmatter interpolation runs before the root's pre-approved gate, so the
   first nested call there runs the gate against the root document first.
+- Schema slot reads are the third approvable kind and are asked **before**
+  shell commands: `compose_preflight_approvals*` collects the document
+  schema's known slot targets passively (`schemas/slots/grants/targets.rs`)
+  and asks `ShellApprovalHandler::approve_slot_reads`; the run-only answers
+  (`ComposePreflightApprovals::slot_grants`) reach composition through one
+  `SlotSession` (`ComposeOptions::with_slot_session`). With no shell
+  operation enabled, `Markdown::compose_slot_approvals` asks alone. A
+  pre-flight or reference-check pass uses pinned schemas only and defers a
+  template (`schema_validation::defers_template`). Details:
+  [schema.md](schema.md), "Schema templates".
 
 ### Interactive approval: the stage policy snapshot
 
@@ -1218,6 +1366,22 @@ otherwise it is file-only `SourceRef::OnDisk`, never a guess.
   text it describes, so a body rewritten by an untracked path stops
   projecting instead of projecting wrongly. A new stage that rewrites the body
   before interpolation must report its edits through `body_origin::advance`.
+  It also records the construct each written run came from
+  (`BodyOrigin::producer_of`), resolved through the map before the edit, so an
+  edit inside produced text keeps the original producer. Never infer a producer
+  from the gap between neighboring segments: adjacent replacements and
+  replacements at a body edge have no unique gap.
+- **References.** `reference/graph.rs` reads the map from
+  `ComposeReport::body_origin` and fills `ReferenceOrigin::authored`,
+  `ReferenceOrigin::section`, and `ReferenceInsertion::authored_directive_line`
+  (`AuthoredLocator`). `origin.line`, `origin.span`, and `directive_line` stay in
+  prepared space because the file-tree model matches in that frame. Only a
+  document with a `File` source and loaded text is located; an in-memory or
+  remote one has `authored: None` and still has a section.
+- **`when=` on a transclusion.** `TransclusionError::ConditionEval` carries the
+  loaded file as `ctx`, the authored `line`, and the opener as `authored`
+  (`site_scope::authored_opener`); without a proven opener `ctx` is the current
+  body and `authored` is `None`, which reports no diagnostic `source`.
 - **Frontmatter.** `interpolate_frontmatter_located` records the failing
   string's key/index path and the construct's span in it; the pipeline walks
   the crate-private `locate_frontmatter_value` (the schema locator's tolerant

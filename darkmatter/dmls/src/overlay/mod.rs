@@ -228,6 +228,32 @@ pub struct DocumentOverlay {
     /// [`analysis`](Self::analysis) describe the whole document against that
     /// schema alone.
     pub yaml_document: Option<Arc<YamlDocumentOverlay>>,
+    /// Set when the document's schema is a template (its `$schema` or a
+    /// matched trigger payload holds `{{ … }}` slots); see [`SlotStatus`].
+    pub slots: Option<SlotStatus>,
+}
+
+/// How a template schema is being served to a request.
+///
+/// Requests never resolve a slot: they serve the slot worker's last
+/// installed snapshot ([`crate::slot_jobs`]).
+#[derive(Clone, Debug)]
+pub struct SlotStatus {
+    /// What is served is not current: a refresh is queued or running, or
+    /// something the last resolution read changed since it ran.
+    pub refreshing: bool,
+    /// No resolved snapshot is served (the template is pending, or its last
+    /// resolution failed). [`Self::template_shape`] then offers the
+    /// template's literal parts.
+    pub unresolved: bool,
+    /// The template's root shape, cloned with its slot constraints still in
+    /// place (readers use only the literal parts), when the template is
+    /// unresolved and its root is one object shape.
+    pub template_shape: Option<Arc<simplified_schema::simplified::SchemaShape>>,
+    /// The document layer of the unresolved template, which types expression
+    /// sites (the call and member checks) while no snapshot is served; `None`
+    /// when a snapshot is served or that layer has no SimplifiedSchema root.
+    pub template: Option<Arc<darkmatter::markdown::schemas::DocumentTemplate>>,
 }
 
 impl DocumentOverlay {
@@ -281,6 +307,7 @@ impl DocumentOverlay {
             file_failures: FileFailures::default(),
             analysis: Arc::new(FrontmatterAnalysis::detached()),
             yaml_document: None,
+            slots: None,
         }
         .with_yaml(yaml)
     }
@@ -318,6 +345,9 @@ pub struct OverlayState {
     /// workspace folders, whose scopes
     /// [`workspace_probes`](Self::workspace_probes) adds. A separate lock, so recording them never waits for a lookup.
     workspace_repositories: Mutex<Vec<PathBuf>>,
+    /// Every document's slot snapshot, filled by the slot worker; requests
+    /// only read it.
+    slots: Arc<crate::slot_jobs::SlotSnapshots>,
 }
 
 #[derive(Default)]
@@ -410,6 +440,7 @@ struct CachedSchema {
     /// references, judged against the resolved targets.
     reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
     file_failures: FileFailures,
+    slots: Option<SlotStatus>,
 }
 
 /// What [`OverlayCache::schema_for`] assembled for a Markdown document.
@@ -422,6 +453,7 @@ struct FrontmatterSchema {
     /// The cache key the outcome was assembled under, or `None` when
     /// assembly was skipped.
     key: Option<u64>,
+    slots: Option<SlotStatus>,
 }
 
 impl FrontmatterSchema {
@@ -433,6 +465,7 @@ impl FrontmatterSchema {
             reference_suggestions: Arc::default(),
             file_failures: FileFailures::default(),
             key: None,
+            slots: None,
         }
     }
 }
@@ -567,6 +600,7 @@ impl OverlayState {
                 reference_suggestions,
                 file_failures,
                 key: schema_key,
+                slots: slot_status,
             } =
                 timings.time(Stage::SchemaAssembly, || {
                     cache.schema_for(
@@ -577,6 +611,7 @@ impl OverlayState {
                         workspace_roots,
                         resolution,
                         timings,
+                        (uri, &self.slots),
                     )
                 });
             let text_hash = xx_hash_bytes(text.as_bytes());
@@ -592,6 +627,7 @@ impl OverlayState {
                 },
                 named_types: Arc::clone(&named_types),
                 yaml_document: false,
+                template_shape: slot_status.as_ref().and_then(|status| status.template_shape.clone()),
             };
             let analysis = match cache.analysis.get(&uri_key) {
                 Some(current) if current.matches(&identity) => Arc::clone(current),
@@ -630,9 +666,16 @@ impl OverlayState {
                 file_failures,
                 analysis,
                 yaml_document: None,
+                slots: slot_status,
             });
         }
 
+        // A Markdown body is prose, never a schema envelope: reading it as one
+        // would let a column-zero `$schema:` inside a fenced example claim the
+        // whole page.
+        if crate::graph::is_markdown_path(path) {
+            return None;
+        }
         self.envelope_overlay(uri, text, path, workspace_roots, resolution, timings, None)
     }
 
@@ -687,6 +730,7 @@ impl OverlayState {
                         file_failures: FileFailures::default(),
                         analysis: Arc::new(FrontmatterAnalysis::detached()),
                         yaml_document: None,
+                        slots: None,
                     });
                 }
                 // The selected definition's report owns the shape of a
@@ -717,6 +761,7 @@ impl OverlayState {
                             file_failures: FileFailures::default(),
                             analysis: Arc::new(FrontmatterAnalysis::detached()),
                             yaml_document: None,
+                            slots: None,
                         });
                     }
                 }
@@ -778,6 +823,7 @@ impl OverlayState {
                     file_failures: resolved.file_failures,
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
                     yaml_document: None,
+                    slots: None,
                 });
             }
             Ok(None) if claim.is_none() => {}
@@ -832,6 +878,7 @@ impl OverlayState {
                     file_failures: FileFailures::default(),
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
                     yaml_document: None,
+                    slots: None,
                 });
             }
         }
@@ -851,20 +898,24 @@ impl OverlayState {
         cache.yaml_documents.remove(uri.as_str());
         if let Some(path) = crate::workspace::uri_to_file_path(uri) {
             cache.contracts.forget(&path);
+            self.slots.forget(&path);
         }
     }
 
-    /// Records the unsaved text of the open YAML or JSON buffer at `path`
-    /// (`None` once it closes), which the kind registries and schema
-    /// resolution for YAML documents read in place of the file (a JSON file
-    /// can be a `$schema` target); a registry that read the file with other
-    /// text, or could read a new one there, goes stale. Does nothing for any
-    /// other path.
+    /// Every document's slot snapshot.
+    pub fn slots(&self) -> &Arc<crate::slot_jobs::SlotSnapshots> {
+        &self.slots
+    }
+
+    /// Records the unsaved text of the open buffer at `path` (`None` once it
+    /// closes), whatever its extension, which the kind registries, schema
+    /// resolution for YAML documents, and slot jobs read in place of the
+    /// file; a registry that read the file with other text, or could read a
+    /// new one there, goes stale.
     pub fn set_schema_buffer(&self, path: &Path, text: Option<&str>) {
-        let json = path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
-        if !is_yaml_path(path) && !json {
-            return;
-        }
+        // Every buffer, not only YAML and JSON: what a resolution depends on
+        // (a `load_data` file in any format, a Markdown file `frontmatter()`
+        // reads, an import of any extension) is known only once it runs.
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.set_buffer(path, text.map(Arc::from));
         let OverlayCache { triggers, contracts, .. } = &mut *cache;
@@ -1186,6 +1237,7 @@ impl OverlayCache {
         workspace_roots: &[PathBuf],
         resolution: &DocumentResolution,
         timings: &RequestTimings,
+        (uri, slots): (&Uri, &crate::slot_jobs::SlotSnapshots),
     ) -> FrontmatterSchema {
         validation_timing::note_assembly(false);
         // A document whose context failed resolves no `$schema` reference or
@@ -1219,7 +1271,11 @@ impl OverlayCache {
         // whose package catalog changed.
         let context_key = file_resolution_context_identity(context)
             ^ xx_hash_bytes(resolution.generation().to_string().as_bytes());
-        let key = schema_cache_key(text, config) ^ registry_key ^ context_key;
+        let base_key = schema_cache_key(text, config) ^ registry_key ^ context_key;
+        // A template is served from the slot worker's installed snapshot, so
+        // the key also carries the snapshot's state.
+        let view = slots.view(path);
+        let key = base_key ^ slot_key_part(view.generation);
         if let Some(cached) = self.schema.get(uri_key)
             && cached.key == key
             && deps_unchanged(&cached.deps)
@@ -1235,6 +1291,7 @@ impl OverlayCache {
                 reference_suggestions: Arc::clone(&cached.reference_suggestions),
                 file_failures: Arc::clone(&cached.file_failures),
                 key: Some(key),
+                slots: cached.slots.clone(),
             };
         }
         let schema_roots: Vec<PathBuf> = registry
@@ -1245,13 +1302,73 @@ impl OverlayCache {
             .as_ref()
             .map(|registry| registry.dependencies().map(Path::to_path_buf).collect())
             .unwrap_or_default();
-        let assembled = validation_timing::part(|| {
-            schema::assemble(path, text, config, workspace_roots, registry, context)
-        });
-        let outcome = match assembled {
-            Ok(bundle) => SchemaOutcome::Ready(bundle.map(Arc::new)),
-            Err(error) => SchemaOutcome::Failed(Arc::new(error)),
+        let job_registry = registry.clone();
+        let slot_use = match &view.session {
+            Some(session) => schema::SlotUse::Pins(session),
+            None => schema::SlotUse::None,
         };
+        let assembled = validation_timing::part(|| {
+            schema::assemble(path, text, config, workspace_roots, registry, context, slot_use)
+        });
+        let (outcome, pins_missed, template_shape, template) = match assembled {
+            Ok(bundle) => (SchemaOutcome::Ready(bundle.map(Arc::new)), false, None, None),
+            Err(schema::AssemblyError { error, template }) => match crate::slot_jobs::find_unresolved(&error) {
+                // No snapshot serves this template: the last resolution's
+                // failure, when there is one, stays shown until a refresh
+                // replaces it.
+                Some(unresolved) => {
+                    let shape = crate::slot_jobs::template_shape(unresolved);
+                    let outcome = match &view.error {
+                        Some(installed) => SchemaOutcome::Failed(Arc::clone(installed)),
+                        None => SchemaOutcome::Failed(Arc::new(error)),
+                    };
+                    (outcome, true, shape, template)
+                }
+                // The installed resolution failed: its failure is shown, and
+                // the template's literal parts are still offered, read from
+                // a passive assembly that evaluates nothing.
+                None if crate::slot_jobs::is_slot_failure(&error) => {
+                    let passive = validation_timing::part(|| {
+                        schema::assemble(path, text, config, workspace_roots, job_registry.clone(), context, schema::SlotUse::None)
+                    });
+                    let (shape, template) = match passive {
+                        Err(schema::AssemblyError { error: passive, template }) => {
+                            (crate::slot_jobs::find_unresolved(&passive).and_then(crate::slot_jobs::template_shape), template)
+                        }
+                        Ok(_) => (None, None),
+                    };
+                    (SchemaOutcome::Failed(Arc::new(error)), false, shape, template)
+                }
+                None => (SchemaOutcome::Failed(Arc::new(error)), false, None, None),
+            },
+        };
+        let templated = pins_missed
+            || match &outcome {
+                SchemaOutcome::Ready(Some(bundle)) => bundle.templated,
+                SchemaOutcome::Failed(error) => crate::slot_jobs::is_slot_failure(error),
+                SchemaOutcome::Ready(None) => false,
+            };
+        let mut key = key;
+        let slot_status = templated.then(|| {
+            let demanded = slots.demand(path, base_key, pins_missed, || crate::slot_jobs::JobInputs {
+                uri: uri.clone(),
+                text: text.to_string(),
+                config: config.clone(),
+                workspace_roots: workspace_roots.to_vec(),
+                registry: job_registry,
+                context: context.clone(),
+                buffers: self.triggers.source_buffers().clone(),
+            });
+            if demanded {
+                key = base_key ^ slot_key_part(slots.view(path).generation);
+            }
+            SlotStatus {
+                refreshing: view.refreshing || demanded,
+                unresolved: !matches!(outcome, SchemaOutcome::Ready(_)),
+                template_shape,
+                template,
+            }
+        });
         let named_types = Arc::new(frontmatter_named_types(text, path, &schema_roots, context));
         let schema_references =
             Arc::new(SchemaReferenceFacts::select(
@@ -1288,6 +1405,7 @@ impl OverlayCache {
             reference_suggestions,
             file_failures,
             key: Some(key),
+            slots: slot_status,
         };
         self.schema.insert(
             uri_key.to_string(),
@@ -1300,6 +1418,7 @@ impl OverlayCache {
                 schema_references: Arc::clone(&schema.schema_references),
                 reference_suggestions: Arc::clone(&schema.reference_suggestions),
                 file_failures: Arc::clone(&schema.file_failures),
+                slots: schema.slots.clone(),
             },
         );
         schema
@@ -1311,7 +1430,7 @@ impl OverlayCache {
     ///
     /// Local references read nothing; explicit references read their targets
     /// through the document's context, as resolving the saved file would,
-    /// from the open YAML and JSON buffers where one is open
+    /// from the open buffers where one is open
     /// ([`buffers::with`]), so an unsaved edit of an imported file, or an
     /// unsaved file at a probed location, counts as that file's change.
     fn standalone_named_types(
@@ -1692,6 +1811,30 @@ fn probes_unchanged(probes: &[(PathBuf, bool)]) -> bool {
     probes.iter().all(|(path, existed)| path.is_file() == *existed)
 }
 
+
+/// The part of a schema cache key a slot snapshot's state contributes.
+fn slot_key_part(generation: u64) -> u64 {
+    generation.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+}
+
+/// The slot worker's resolution of a document's templates: the schema
+/// assembled with `session` resolving every template layer, in the job's
+/// captured inputs. The worker installs `session`, whose pinned snapshots
+/// requests then serve.
+pub(crate) fn resolve_slot_templates(
+    path: &Path,
+    text: &str,
+    config: &DmlsConfig,
+    workspace_roots: &[PathBuf],
+    registry: Option<darkmatter::markdown::schemas::TriggerRegistry>,
+    context: &FileResolutionContext,
+    session: &Arc<darkmatter::markdown::schemas::slots::SlotSession>,
+) -> Result<(), SchemaError> {
+    schema::assemble(path, text, config, workspace_roots, registry, context, schema::SlotUse::Resolve(session))
+        .map(|_| ())
+        .map_err(|failure| failure.error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1727,6 +1870,27 @@ mod tests {
                 )
                 .is_none()
         );
+    }
+
+    /// A column-zero `$schema:` in a fenced example once made the lexical
+    /// envelope claim treat the whole page as a malformed schema document.
+    #[test]
+    fn markdown_without_frontmatter_is_never_a_standalone_schema() {
+        let state = OverlayState::default();
+        for text in [
+            "# Types\n\n```yaml\n$schema:\n    name: string\n```\n\nprose: more\n\n```yaml\na: 1\n---\nb: 2\n```\n",
+            "$schema:\n  name: string\n",
+        ] {
+            let overlay = state.for_document(
+                &uri("file:///w/types.md"),
+                text,
+                Path::new("/w/types.md"),
+                &DmlsConfig::default(),
+                &[PathBuf::from("/w")],
+                &crate::context::test_support::resolution_for(Path::new("/w/types.md")),
+            );
+            assert!(overlay.is_none(), "{text:?}");
+        }
     }
 
     #[test]

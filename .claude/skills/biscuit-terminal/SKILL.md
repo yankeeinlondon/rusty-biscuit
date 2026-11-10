@@ -13,6 +13,16 @@ library, and renders `renderable::tree` nodes to terminal output.
 ## Start Here
 
 - Detect capabilities with `Terminal::new()` or `Terminal::new_optimistic`.
+- To print a command result in a chosen `--output` target, implement
+  `renderable::CommandOutput` (`as_prose`, `as_data`, optional per-target
+  overrides) and call `biscuit_terminal::output::write_output`; it renders
+  completely before writing. `OutputTarget` is the one target enum,
+  `terminal_target_options` pins `TerminalProfile::plain()` for `plain` (and
+  for `terminal` off a color TTY), `serialize_data` owns JSON/JSON5/YAML/TOML
+  (TOML omits null fields, rejects null array elements by path, wraps a
+  non-object root as `value`), and `parse_width_request`/`resolve_width`
+  turn `--width` into `renderable::Width` (`OUTPUT_COLUMNS`, then the
+  stream's terminal columns, else `Unlimited`; never a fallback of 80).
 - Prefer components from `biscuit_terminal::prelude` for rich terminal output.
 - Use `Prose` for styled rich text instead of hand-written escape codes.
   `Prose` is **block** content (paragraphs split on blank lines, fenced code,
@@ -95,6 +105,7 @@ Open only the topic file needed for the task:
 | Terminal struct and capability fields | `terminal-struct.md` |
 | Component catalog | `components.md` |
 | Render-tree terminal renderer | `render-tree.md` |
+| `write_output`, `OutputTarget`, `--width` resolution, plain rules, `Terminal::from_output_options` | [`biscuit-terminal/docs/output.md`](../../../biscuit-terminal/docs/output.md) |
 | Inline images | `image-rendering.md` |
 | Diagram hook, package boundary, `bt` diagram commands | `diagrams.md` |
 | Colors | `color-system.md` |

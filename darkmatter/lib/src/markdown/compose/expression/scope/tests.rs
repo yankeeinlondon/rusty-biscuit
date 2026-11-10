@@ -149,3 +149,81 @@ mod lexical {
         assert_eq!(layer.names(), ["person"]);
     }
 }
+
+mod member_declarations {
+    use std::path::Path;
+
+    use super::*;
+    use crate::markdown::compose::expression::parse;
+    use crate::markdown::schemas::DarkmatterSchemas;
+    use crate::markdown::{Markdown, compose::ComposeSource};
+    use simplified_schema::{SchemaRoot, parse_yaml_schema};
+    use MemberDeclaration::{Declared, Undeclared, Unknown};
+
+    /// The verdict for `member` on `x`, declared by the one-property schema
+    /// `x: <definition>`.
+    fn verdict(definition: &str, member: &str) -> MemberDeclaration {
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&format!("x: {definition}")).unwrap();
+        let schema: SchemaRoot = parse_yaml_schema(&value).unwrap_or_else(|error| panic!("{definition}: {error}"));
+        let declared = DeclaredTypes::new(Some(&schema));
+        let site = TypeScope::unguarded(&declared);
+        let shape = site.type_of_expr(&parse("x").unwrap()).unwrap().shape().clone();
+        declares_member(&shape, member, site.definitions())
+    }
+
+    #[test]
+    fn the_type_table_decides_each_verdict() {
+        for (definition, member, expected) in [
+            ("'{ name: string }'", "nmae", Undeclared),
+            ("'{ name: string }'", "name", Declared),
+            ("'{ name: string(required), port: number }'", "port", Declared),
+            ("'{ name: string } | null'", "nmae", Undeclared),
+            ("'{ name: string } | null'", "name", Declared),
+            ("'null'", "nmae", Unknown),
+            ("'{ name: string } | { port: number }'", "name", Declared),
+            ("'{ name: string } | { port: number }'", "nmae", Undeclared),
+            ("'{ name: string } | string'", "nmae", Unknown),
+            ("unknown", "nmae", Unknown),
+            ("object", "nmae", Unknown),
+            ("'{ <string>: number }'", "nmae", Unknown),
+            ("'{ name: string }[]'", "nmae", Unknown),
+            ("'Server@./types.yaml'", "nmae", Unknown),
+        ] {
+            assert_eq!(verdict(definition, member), expected, "{definition} .{member}");
+        }
+    }
+
+    /// A recursive named type is a reference into the definition table: it
+    /// is checked through the table, and unknown without it.
+    #[test]
+    fn a_reference_is_checked_through_its_definition() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("types.yaml"),
+            "kind: schema\ntypes:\n    node:\n        label: string(required)\n        children: node[](required)\n",
+        )
+        .unwrap();
+        let path = dir.path().join("doc.md");
+        std::fs::write(&path, "---\n$schema:\n  tree: node(required)@./types.yaml\n---\nBody\n").unwrap();
+        let effective = DarkmatterSchemas::new(context_at(dir.path()))
+            .effective_for(&markdown_at(&path))
+            .unwrap()
+            .expect("an effective schema");
+        let declared = DeclaredTypes::for_schema(Some(&effective));
+        let site = TypeScope::unguarded(&declared);
+        let child = site.type_of_expr(&parse("tree.children[0]").unwrap()).unwrap().shape().clone();
+        assert!(matches!(&child, Shape::Arms { arms, .. } if matches!(arms[0].ty, simplified_schema::TypeExpr::Ref(_))));
+        assert_eq!(declares_member(&child, "label", site.definitions()), Declared);
+        assert_eq!(declares_member(&child, "nmae", site.definitions()), Undeclared);
+        let missing = simplified_schema::DefinitionTable::default();
+        assert_eq!(declares_member(&child, "nmae", &missing), Unknown, "a missing definition is unknown");
+    }
+
+    fn context_at(dir: &Path) -> biscuit_file::FileResolutionContext {
+        biscuit_file::FileResolutionContext::new(dir).with_repository_root(dir)
+    }
+
+    fn markdown_at(path: &Path) -> Markdown {
+        Markdown::try_from(path).unwrap().with_source(ComposeSource::File(path.to_path_buf()))
+    }
+}

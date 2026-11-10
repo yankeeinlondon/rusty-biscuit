@@ -117,14 +117,14 @@ feature layer.
   surface already reports, and never reuse a code for a different condition.
 - **Severity is per surface.** Each surface picks the severity that fits its
   moment, but the same condition should not contradict itself without reason.
-  `dm.expression.undeclared_property` is a **Warning** both here and in
-  `md compose`. `dm.expression.malformed` is a Warning squiggle while you type,
+  `dm.expression.undeclared_property` and `dm.expression.undeclared_member`
+  are **Warnings** both here and in `md compose`. `dm.expression.malformed` is a Warning squiggle while you type,
   while compose fails outright on the same expression.
 - **Shared codes come from the library.** A code that composition also
   reports (the frontmatter YAML parse error, the `dm.schema.*` codes, and the
   expression call codes such as `dm.expression.incompatible_call`) is defined
   once in the `darkmatter` library, and `codes.rs` re-exports it. So
-  `md compose`, `md compose --output report-json`, and the editor always spell
+  `md compose`, `md compose --output json`, and the editor always spell
   it the same way.
 - **Adding a code.** Add a documented constant to `codes.rs` and a row to the
   layer table below. When composition reports the same condition, define the
@@ -231,6 +231,7 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.style.deprecated_key` | A deprecated `style:` key (a canonical replacement exists). |
 | `dm.expression.malformed` | An `expression`-typed value that does not parse. Emitted only for untagged single-line plain and quoted scalars; block and tagged values keep the schema problem. Pending `{{ … }}` / `$(…)` values are deferred. |
 | `dm.expression.undeclared_property` | **Warning (advisory).** A bare root of an `expression`-typed value that is an undeclared document property: valid, of unknown type, and `null` unless supplied at runtime. A root is classified against the binding view of its site: inside a lifecycle stack of the document's host (md's `initialize`, `composed`, `failed`, `cancelled`, `finalize`, or a host's events from its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md), such as Claudine's `start` and `success`) that event's view, which declares `err` and `timing`; elsewhere Darkmatter's baseline view, where `err` and `timing` are document properties like any other. A global a host catalog in the document's schema roots declares (Claudine's `seq`, `loop`, and `group`) is never reported, inside a stack or not. `current` is a reserved namespace and is never reported. |
+| `dm.expression.undeclared_member` | **Warning (advisory)**, matching `md compose`'s code, message, and severity, under both `expressions.strict` settings. A constant member read (`server.nmae`, `fm.server.nmae`, `server["nmae"]`) whose base's known type is a closed object, or a union of closed objects and `null`, that does not declare the member, in a frontmatter `{{ … }}` span, an `expression`-typed value, or the condition or either value branch of a top-level frontmatter `$( … )` ternary. Ranged on the member name (on the quoted key of a bracket read). Every branch and callback body is checked, including ones composition would not run, by the same classifier and absence rules as `md compose` (see [Misspelled members](../../docs/topics/darkmatter-expressions.md#misspelled-members)). While the document's schema still has unresolved slots and no resolved schema has been published, members are checked against the unresolved schema, whose declarations slots never change. Both value branches of a `$( … )` ternary are checked without running anything, as is a piece holding a `{{ … }}` placeholder inside a quoted string (the placeholder is checked as its own span, once); a piece whose placeholder sits outside a string is skipped, as composition skips it. Ternary pieces get member warnings only, never call findings, as in composition. Not reported inside a lifecycle stack. |
 | `dm.expression.unknown_function` | **Error.** A call to a function outside Darkmatter's closed catalog, ranged on the function name, in every branch. Compose fails on the call. Also checked in every `{{ … }}` span and `when` condition inside a lifecycle stack of the document's host. |
 | `dm.expression.unavailable_global` | **Error.** A read, inside a lifecycle stack of the document's host, of a global the event's binding view declares unavailable: `err` in md's `initialize` or `composed` (Claudine's `initialize`, `start`, `success`, or `loop`), which handle no failure. The message names the event and the view's reason. Checked in `{{ … }}` spans at any depth of the stack, `when` conditions, and expression-typed values. It never falls back to a frontmatter key of the same name, so an `err:` key does not silence it. A host-catalog global is never reported, because the editor cannot know whether the stack runs inside a loop or a group. |
 | `dm.expression.incompatible_call` | **Error.** A function call Darkmatter's design-time check proves wrong, so `md compose` rejects the document: an argument that can never bind (`min(flag, 5)` with `flag: boolean(required)`), a wrong argument count, or an ambiguous overload. Ranged on the argument, or on the whole call for a count or overload problem. Checked in every branch, including ones that never run. Emitted on Expression-typed values, every frontmatter `{{ … }}` span, and `when` conditions inside lifecycle stacks. Inside a lifecycle stack each call is typed at its site exactly as the document's host types it before launch (`md compose`, or a host such as Claudine through its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md)): narrowed by the enclosing `when:` items, until a `set` writes the guarded property, and never across events. Under a host, its own events (Claudine's `start`, `success`, `blocked`, `failure`, and `loop` gate) and its verbs' operands (`say`, `speak`, `effect`, `notify`, `retry`/`proxy`/`prep` `with:` values, `resume`, `break`, `defer`) are such sites; a Darkmatter spelling the host renamed (`composed` under Claudine) is not a stack, and the host refuses the document before launch. |
@@ -265,7 +266,7 @@ content_policy:
   - action: archive  # data: {"instance_path": "/content_policy/2"}
 ```
 
-The pointer is the same one `md schema validate --format json` reports as
+The pointer is the same one `md schema validate --output json` reports as
 `path`: a missing or unknown key's pointer names the parent object, and the
 message names the key. A file-reference failure carries both keys,
 `{"instance_path": "/spec", "resolution_failure": "NoMatch"}`.
@@ -359,6 +360,7 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 | `dm.transclusion.cycle` | A `::file` / `::code` transclusion cycle (ancestry in `relatedInformation`). |
 | `dm.expression.malformed` | A malformed `{{ … }}` interpolation or `when=` expression. |
 | `dm.expression.undeclared_property` | **Warning** (advisory), matching `md compose`. An identifier, in any operand position and ranged at itself, whose root is an undeclared document property: no frontmatter key, schema-declared property, or function names it, and Darkmatter's binding model does not classify it as a reserved namespace (`fm`, `ctx`, `env`, `current`) or the `null` literal. `doc` and `current_env` are ordinary property names. A bare runtime-context name such as `repo` is a document property, never `ctx.repo`. The message says the property is valid, of unknown type, and `null` unless supplied at runtime. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter.) Handled absence stays silent, as at compose time: a fallback primary (`x \|\| "d"`), a ternary condition, a direct argument to a parameter that declares `\| null`, whatever the function returns, unless the call is itself another call's argument (`is_null(x)`, `is_empty(x)`, `file_exists(x)`, `trim(x)`, `lower(x)`, `x && …`, a host function's `string \| null` parameter; never a plain `unknown` one, and an overloaded function only when every signature taking that many arguments declares it), and a read an enclosing branch proves present — the true branch of its ternary condition (`x ? x : "none"`) or a later `&&` operand (`x && lower(x.name)`). `min(x, 5)` and `is_empty(trim(x))` still warn. The false branch does not inherit the condition's proof (`x ? "some" : x` still warns), and a proof of `x.a` covers neither `x` nor `x.b`. The branch facts are Darkmatter's own, shared with compose. Unlike compose, both ternary branches are checked, each with its own side's facts. A document without frontmatter is never diagnosed, since any name could be a `--set` value. A subtraction whose whitespace-free text is a frontmatter key (`foo--bar`, `a- b`) is reported once, over the subtraction, with a quick-fix. Content inside a `{{{ … }}}` literal is inert and never diagnosed. Also emitted on Expression-typed frontmatter values (`source: darkmatter.frontmatter`). |
+| `dm.expression.undeclared_member` | **Warning** (advisory), matching `md compose`. As in frontmatter: a constant member read that the base's known closed object type does not declare, ranged on the member name, in every branch of every body `{{ … }}` span, directive `when=` condition, and `::map`/`::filter` gate and callback, with each site's guards applied. A typed base can come from the schema, a literal `load_data` contract (`map(load_data("hosts.yaml", "{ name: string }[]"), h => h.nmae)`), a callback item, a literal object, or a function's return type. `md compose` reports only the reads it evaluates, so a read in an unchosen branch or a callback over an empty list is reported here and not there. |
 | `dm.expression.unknown_function` | **Error**, matching `md compose`, which fails on the call. A call to a function outside Darkmatter's closed catalog, ranged on the function name and reported in every branch. Unlike the advisory, it is reported on a document without frontmatter too. |
 | `dm.expression.incompatible_call` | **Error**, matching `md compose`, which rejects the document. As in frontmatter: a call argument that can never bind, a wrong argument count, or an ambiguous overload, in every branch of every body `{{ … }}` span and every directive `when=` condition, including the body of a `::block` whose condition is false. Types come from the document's `$schema` alone, narrowed by guards (`is_number(foo) ? min(foo, 5) : 0` is silent); a frontmatter value never narrows a type. Fenced code and `{{{ … }}}` literals are not checked. |
 | `dm.expression.uncertain_call` | **Warning.** As in frontmatter; see [Severity](#severity). |
@@ -398,6 +400,7 @@ The expression family follows one ladder: a **warning** means the construct
 | `dm.expression.malformed` on a schema-typed frontmatter value | Error |
 | `dm.expression.malformed` on a body `{{ … }}` span | Warning (the braces may be foreign template syntax) |
 | `dm.expression.undeclared_property` | Warning (advisory: the property is valid) |
+| `dm.expression.undeclared_member` | Warning (advisory: the lookup returns `null`, and runtime data may still hold the member) |
 | `dm.expression.unknown_function` | Error (the function catalog is closed) |
 | `dm.expression.unavailable_global` | Error (the read fails when the stack runs) |
 | `dm.expression.nested_span_in_literal` | Error |
@@ -524,6 +527,35 @@ suppress its code; the category number stays visible in the message.
 | Warning, category 3, a union | `min(foo, 5)` with `foo` declared as `[string(required), number(required)]` | Narrow it with a guard: `is_number(foo) ? min(foo, 5) : 0`. |
 | Strict warning, category 2 | `min(maybe, 5)` with `maybe: number` | Make the property required (`maybe: number(required)`), or guard the call: `maybe != null ? min(maybe, 5) : 5`. |
 | Strict warning, category 4 | `min(untyped_var, 5)` | Declare the variable in `$schema`: `untyped_var: number(required)`. |
+
+#### `load_data` data diagnostics
+
+`load_data(file, as, options?)` gets the same call check, plus a few
+data-specific errors. Each one is proven from literal arguments alone, and
+`md compose` rejects the document with the same code before it reads anything:
+
+| Code | When | Ranged at |
+|------|------|-----------|
+| `dm.data.not_a_container`, `dm.data.this_import_rejected` | The literal `as` contract is not an object or list type, or names a `@this` import. | `as` |
+| `dm.data.row_shape_conflict` | The file is CSV or TSV and `as` cannot describe its rows (it mixes object and list rows, or its elements are not rows), or the options say `header: false` (or a value that converts to it, such as `"false"`), which reads rows by position, and `as` asks for object rows. The format is known from a literal `format` option or a literal file extension. | `as` |
+| `dm.data.invalid_options` | A literal options value, converted to its field's type (`{delimiter: 10}` is `"10"`), is wrong for the format: a `delimiter` that is not one ASCII character, is a double quote, CR, or LF, or is not a tab on TSV; or a `delimiter` or `header` on a non-tabular format. | the options argument |
+
+```markdown
+{{ load_data("rows.csv", "{ name: string }[]", {header: false}) }}   row_shape_conflict at "{ name: string }[]"
+{{ load_data("rows.tsv", "string[]", {delimiter: ","}) }}           invalid_options at {delimiter: ","}
+{{ load_data("hosts.json", "string[]", {header: false}) }}          invalid_options at {header: false}
+```
+
+An unknown option key, a value of the wrong type (`{header: [1]}`), or a
+format name the catalog does not declare (`{format: "CSV"}`) is an
+`incompatible_call` error on the options argument. Anything computed defers
+the check to composition: a variable or call as the options value, a computed
+`format` (which might change the format the extension implies), or a
+computed `file` with no literal `format`. So
+`{{ load_data(name, "string[]", opts) }}` shows nothing. A computed `as`
+defers only the `row_shape_conflict` check, so
+`{{ load_data("rows.json", t, {header: true}) }}` still shows
+`invalid_options` at `{header: true}`.
 
 ## Ranging
 

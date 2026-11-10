@@ -61,7 +61,7 @@ use std::time::Duration;
 
 use super::{
     CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, TerminalHarness, current_process_id,
-    pid_from_tag, process_is_alive, run_with_timeout,
+    pid_from_tag, process_is_alive, run_with_timeout, shell_quote,
 };
 
 const WINDOW_TITLE_PREFIX: &str = "biscuit-test-terminal-";
@@ -1710,22 +1710,6 @@ fn xml_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// Wraps `s` in single quotes and escapes embedded single quotes using
-/// the POSIX `'\''` trick, matching the convention used by
-/// [`crate::TerminalHarness::send_command_with_env`].
-fn shell_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    for ch in s.chars() {
-        if ch == '\'' {
-            out.push_str("'\\''");
-        } else {
-            out.push(ch);
-        }
-    }
-    out.push('\'');
-    out
-}
 
 #[cfg(test)]
 mod tests {
@@ -1785,21 +1769,15 @@ mod tests {
     fn login_shell_command_line_survives_the_applescript_escape() {
         let line = super::super::login_shell_command_line("bash", true);
         let escaped = applescript_escape(&format!("BISCUIT_TEST_BIN_DIR='/b' {line}"));
+        // The script is built for the host; only Windows adds `--noediting`.
+        let flags = if cfg!(windows) { "--norc --noediting" } else { "--norc" };
         assert!(
-            escaped.contains(r#"-c 'unset ENV BASH_ENV; export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; unset BISCUIT_TEST_BIN_DIR; exec \"$0\" --norc -i' bash"#),
+            escaped.contains(&format!(
+                r#"-c 'unset ENV BASH_ENV; export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; unset BISCUIT_TEST_BIN_DIR; exec \"$0\" {flags} -i' bash"#
+            )),
             "{escaped}"
         );
         assert!(!escaped.contains('\n'), "a newline would break the literal");
-    }
-
-    #[test]
-    fn shell_quote_simple() {
-        assert_eq!(shell_quote("/usr/local/bin"), "'/usr/local/bin'");
-    }
-
-    #[test]
-    fn shell_quote_embedded_single_quote() {
-        assert_eq!(shell_quote("it's"), r"'it'\''s'");
     }
 
     #[test]

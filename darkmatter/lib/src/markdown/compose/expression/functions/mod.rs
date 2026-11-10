@@ -9,7 +9,7 @@
 //! and its successful result is checked against the selected overload's
 //! return type without conversion.
 
-use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, Utc};
+use chrono::{Datelike, FixedOffset, NaiveDate, NaiveDateTime};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fmt;
@@ -21,10 +21,11 @@ use super::{
     scalar_string,
 };
 use super::resolve_ctx::{
-    ResolutionContext, is_remote_url, is_well_formed_reference, normalize_path_arg, resolve_document_file_ref,
+    RemoteTextError, ResolutionContext, is_remote_url, is_well_formed_reference, normalize_path_arg, resolve_document_file_ref,
     resolve_document_file_ref_shape, resolve_document_file_ref_target,
 };
 use crate::markdown::Markdown;
+use crate::markdown::compose::context::capture::ClockReading;
 use simplified_schema::coercion::ValueKind;
 use simplified_schema::numeric::{self, NumberTextError};
 use crate::markdown::schemas::DarkmatterSchemas;
@@ -34,6 +35,7 @@ pub(in crate::markdown::compose) mod agentic_cli_generated;
 mod cicd;
 mod collections;
 mod composition;
+mod data;
 mod dates;
 pub(in crate::markdown::compose) mod escape;
 mod git;
@@ -59,19 +61,75 @@ use super::catalog::{FunctionCatalog, expression_function_catalog};
 pub(crate) type PureFn = fn(&BoundCall<'_>) -> Result<Value, String>;
 /// A handler that also reads the document resolution context.
 pub(crate) type ContextFn = fn(&BoundCall<'_>, &ResolutionContext) -> Result<Value, ExpressionError>;
+/// A handler that reads the request's captured clock reading, and nothing
+/// else outside its arguments. Without a resolution context it reads the
+/// clock once for the call.
+pub(crate) type ClockFn = fn(&BoundCall<'_>, &ClockReading) -> Result<Value, String>;
+/// A function's own reading of a binding failure: the domain error the
+/// failed call means (`load_data`'s scalar contract is
+/// `dm.data.not_a_container`, not a generic type error), or `None` to keep
+/// the binder's error. Consulted only after binding failed; the handler is
+/// still never entered.
+pub(crate) type BindingRefiner = fn(&CallBindingError, &[Value]) -> Option<ExpressionError>;
 
 #[derive(Clone, Copy)]
 enum FunctionHandler {
     Pure(PureFn),
     Context(ContextFn),
+    Clock(ClockFn),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EvaluationMode {
     Pure,
     Context,
+    Clock,
     Lazy,
     Callback,
+}
+
+/// What a function may do when it is called inside a schema slot, a
+/// registration fact every binding declares.
+///
+/// The variants are ordered by how much they restrict a slot: a slot's class
+/// is the greatest class of any call it can reach.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SlotClass {
+    /// Computes from its arguments alone.
+    Pure,
+    /// Reads local files, existence, or listings, or a URL (see
+    /// [`ReadFact`]); every read is recorded and can be fingerprinted.
+    InputReading,
+    /// Reads a value the request captured once: the clock, the captured
+    /// environment's `PATH`, repository topology, interface addresses.
+    Captured,
+    /// Reads live state (git history, a network probe); resolved once per
+    /// command and never reused across commands.
+    Volatile,
+    /// Never allowed in a slot: nested composition, a login shell, a
+    /// provider API, or an ICMP probe.
+    Rejected,
+}
+
+/// What the first argument of a read-side function names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReadKind {
+    /// The target's bytes are read.
+    Content,
+    /// Only whether the target (or one of its candidates) exists.
+    Probe,
+    /// A directory's entries.
+    Listing,
+}
+
+/// A read-side function's registered read: what its first argument names and
+/// whether an HTTP(S) URL there is fetched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ReadFact {
+    /// What the first argument names.
+    pub kind: ReadKind,
+    /// Whether an HTTP(S) URL there is fetched.
+    pub remote: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -89,6 +147,13 @@ struct FunctionBinding {
     /// Registered malformed-reference rule: the parameter whose malformed
     /// reference text makes the call `false`.
     malformed_reference: Option<&'static str>,
+    /// Registered binding-failure refinement ([`BindingRefiner`]).
+    refine_binding: Option<BindingRefiner>,
+    /// The function's slot class. A context handler must declare it
+    /// ([`Self::slot`]); the registry refuses one that does not.
+    slot_class: Option<SlotClass>,
+    /// The read its first argument names, for an input-reading function.
+    reads: Option<ReadFact>,
 }
 
 impl FunctionBinding {
@@ -97,6 +162,7 @@ impl FunctionBinding {
         aliases: &'static [&'static str],
         evaluation: EvaluationMode,
         handler: Option<FunctionHandler>,
+        slot_class: Option<SlotClass>,
     ) -> Self {
         Self {
             canonical,
@@ -106,23 +172,63 @@ impl FunctionBinding {
             rejects: &[],
             recovery: None,
             malformed_reference: None,
+            refine_binding: None,
+            slot_class,
+            reads: None,
         }
     }
 
+    /// A handler of its bound arguments alone, so its slot class is
+    /// [`SlotClass::Pure`]: it has no context to read through, and the clock
+    /// is read only by a [`Self::clock`] handler (a source guard holds every
+    /// pure handler to that).
     const fn pure(canonical: &'static str, aliases: &'static [&'static str], handler: PureFn) -> Self {
-        Self::new(canonical, aliases, EvaluationMode::Pure, Some(FunctionHandler::Pure(handler)))
+        Self::new(canonical, aliases, EvaluationMode::Pure, Some(FunctionHandler::Pure(handler)), Some(SlotClass::Pure))
     }
 
+    /// A context handler; it must also declare its [`Self::slot`] class.
     const fn context(canonical: &'static str, aliases: &'static [&'static str], handler: ContextFn) -> Self {
-        Self::new(canonical, aliases, EvaluationMode::Context, Some(FunctionHandler::Context(handler)))
+        Self::new(canonical, aliases, EvaluationMode::Context, Some(FunctionHandler::Context(handler)), None)
     }
 
+    /// A handler of its arguments and the request's captured clock reading.
+    const fn clock(canonical: &'static str, aliases: &'static [&'static str], handler: ClockFn) -> Self {
+        Self::new(
+            canonical,
+            aliases,
+            EvaluationMode::Clock,
+            Some(FunctionHandler::Clock(handler)),
+            Some(SlotClass::Captured),
+        )
+    }
+
+    /// The evaluator computes a lazy function from its operands, so its class
+    /// is theirs; it adds nothing of its own.
     const fn lazy(canonical: &'static str) -> Self {
-        Self::new(canonical, &[], EvaluationMode::Lazy, None)
+        Self::new(canonical, &[], EvaluationMode::Lazy, None, Some(SlotClass::Pure))
     }
 
+    /// As [`Self::lazy`]: a callback function's class is its arguments' and
+    /// callback bodies'.
     const fn callback(canonical: &'static str) -> Self {
-        Self::new(canonical, &[], EvaluationMode::Callback, None)
+        Self::new(canonical, &[], EvaluationMode::Callback, None, Some(SlotClass::Pure))
+    }
+
+    /// Declares the function's slot class.
+    const fn slot(self, class: SlotClass) -> Self {
+        Self { slot_class: Some(class), ..self }
+    }
+
+    /// Declares an input-reading function whose first argument names a local
+    /// target of `kind`.
+    const fn reads(self, kind: ReadKind) -> Self {
+        Self { slot_class: Some(SlotClass::InputReading), reads: Some(ReadFact { kind, remote: false }), ..self }
+    }
+
+    /// [`Self::reads`] for a function that also fetches an HTTP(S) URL given
+    /// as its first argument.
+    const fn reads_or_fetches(self, kind: ReadKind) -> Self {
+        Self { slot_class: Some(SlotClass::InputReading), reads: Some(ReadFact { kind, remote: true }), ..self }
     }
 
     const fn rejecting(self, rejects: &'static [(&'static str, &'static [ValueKind])]) -> Self {
@@ -136,6 +242,13 @@ impl FunctionBinding {
         }
     }
 
+    const fn refining_binding_errors(self, refine: BindingRefiner) -> Self {
+        Self {
+            refine_binding: Some(refine),
+            ..self
+        }
+    }
+
     const fn false_for_malformed_reference(self, parameter: &'static str) -> Self {
         Self {
             malformed_reference: Some(parameter),
@@ -144,22 +257,35 @@ impl FunctionBinding {
     }
 }
 
-/// How a lazy function ends early. Which operand value stops evaluation is
-/// the evaluator's domain logic (truthiness); this only names the side.
+/// How the evaluator computes a lazy function from its operands. Which
+/// operand value stops evaluation is the evaluator's domain logic
+/// (truthiness, recoverability); this only names the rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShortCircuit {
+pub(crate) enum LazyKind {
     /// Stop at the first falsy operand and return `false` (`and`).
-    OnFalsy,
+    All,
     /// Stop at the first truthy operand and return `true` (`or`).
-    OnTruthy,
+    Any,
+    /// Return the first operand's value; evaluate the second only after the
+    /// first fails with a recoverable read failure (`try`).
+    Recover,
 }
 
-const LAZY_BINDINGS: &[FunctionBinding] = &[FunctionBinding::lazy("and"), FunctionBinding::lazy("or")];
+const LAZY_BINDINGS: &[FunctionBinding] =
+    &[FunctionBinding::lazy("and"), FunctionBinding::lazy("or"), FunctionBinding::lazy("try")];
 
-fn short_circuit(canonical: &str) -> ShortCircuit {
+/// The kind of the lazy function `canonical` names. Mapped by name with no
+/// default arm: a lazy binding left unmapped would otherwise run as some
+/// other function's rule.
+fn lazy_kind(canonical: &str) -> Option<LazyKind> {
     match canonical {
-        "or" => ShortCircuit::OnTruthy,
-        _ => ShortCircuit::OnFalsy,
+        "and" => Some(LazyKind::All),
+        "or" => Some(LazyKind::Any),
+        "try" => Some(LazyKind::Recover),
+        _ => {
+            debug_assert!(false, "lazy function `{canonical}` has no LazyKind");
+            None
+        }
     }
 }
 
@@ -179,6 +305,7 @@ const BINDING_GROUPS: &[&[FunctionBinding]] = &[
     agentic_cli::BINDINGS,
     skills::BINDINGS,
     markdown_docs::BINDINGS,
+    data::BINDINGS,
     composition::BINDINGS,
     LAZY_BINDINGS,
 ];
@@ -212,6 +339,8 @@ enum RegistryError {
     BindingWithoutCatalog(String),
     NameCollision(String),
     InvalidHandler(String),
+    UndeclaredSlotClass(String),
+    InconsistentReadFact(String),
     Registration(RegistrationError),
 }
 
@@ -223,6 +352,10 @@ impl fmt::Display for RegistryError {
             Self::BindingWithoutCatalog(name) => ("runtime binding has no catalog function", name),
             Self::NameCollision(name) => ("expression canonical/alias name collision", name),
             Self::InvalidHandler(name) => ("runtime binding has an invalid evaluation/handler pairing", name),
+            Self::UndeclaredSlotClass(name) => ("runtime binding declares no slot class", name),
+            Self::InconsistentReadFact(name) => {
+                ("runtime binding's read fact disagrees with its slot class", name)
+            }
             Self::Registration(error) => return write!(formatter, "function registration failed: {error}"),
         };
         write!(formatter, "{kind}: {name}")
@@ -246,10 +379,23 @@ fn build_registry(catalog: &FunctionCatalog) -> Result<Registry, RegistryError> 
             (EvaluationMode::Pure, Some(FunctionHandler::Pure(_))) | (
                 EvaluationMode::Context,
                 Some(FunctionHandler::Context(_))
-            ) | (EvaluationMode::Lazy | EvaluationMode::Callback, None)
+            ) | (EvaluationMode::Clock, Some(FunctionHandler::Clock(_)))
+                | (EvaluationMode::Lazy | EvaluationMode::Callback, None)
         );
         if !valid_handler {
             return Err(RegistryError::InvalidHandler(binding.canonical.to_string()));
+        }
+        let Some(class) = binding.slot_class else {
+            return Err(RegistryError::UndeclaredSlotClass(binding.canonical.to_string()));
+        };
+        // Only a context handler can read, and an input-reading one must say
+        // what it reads.
+        let reads_consistent = match binding.reads {
+            Some(_) => class == SlotClass::InputReading && binding.evaluation == EvaluationMode::Context,
+            None => class != SlotClass::InputReading,
+        };
+        if !reads_consistent {
+            return Err(RegistryError::InconsistentReadFact(binding.canonical.to_string()));
         }
     }
     for descriptor in &catalog.descriptors {
@@ -590,13 +736,13 @@ pub fn parse_iso_date(s: &str) -> Option<NaiveDate> {
 }
 
 /// Parses a string as either an ISO date or an ISO datetime, returning the
-/// date portion. Datetime strings without an offset are interpreted in the
-/// requested timezone (`assume_utc == true` → UTC, else Local).
-pub fn parse_date_or_datetime(s: &str, assume_utc: bool) -> Option<NaiveDate> {
+/// date portion. A datetime with an offset is converted to `zone` first; a
+/// naive datetime keeps its own date.
+pub fn parse_date_or_datetime(s: &str, zone: FixedOffset) -> Option<NaiveDate> {
     if let Some(date) = parse_iso_date(s) {
         return Some(date);
     }
-    if let Some(date) = parse_iso_datetime_to_date(s, assume_utc) {
+    if let Some(date) = parse_iso_datetime_to_date(s, zone) {
         return Some(date);
     }
     None
@@ -617,13 +763,9 @@ pub fn parse_iso_datetime(s: &str) -> bool {
         || NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").is_ok()
 }
 
-fn parse_iso_datetime_to_date(s: &str, assume_utc: bool) -> Option<NaiveDate> {
+fn parse_iso_datetime_to_date(s: &str, zone: FixedOffset) -> Option<NaiveDate> {
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
-        return Some(if assume_utc {
-            dt.with_timezone(&Utc).date_naive()
-        } else {
-            dt.with_timezone(&Local).date_naive()
-        });
+        return Some(dt.with_timezone(&zone).date_naive());
     }
     // Naive datetimes carry no offset; the date portion is the same regardless
     // of whether we treat the wall-clock time as local or UTC.
@@ -635,50 +777,50 @@ fn parse_iso_datetime_to_date(s: &str, assume_utc: bool) -> Option<NaiveDate> {
 
 
 /// Pure helper for relative date predicates with an injectable reference
-/// date and an explicit timezone hint for naive datetime interpretation.
-pub fn is_today_with(value: &Value, today: NaiveDate, assume_utc: bool) -> bool {
+/// date and the offset a datetime with an offset is converted to.
+pub fn is_today_with(value: &Value, today: NaiveDate, zone: FixedOffset) -> bool {
     let Value::String(s) = value else {
         return false;
     };
-    parse_date_or_datetime(s, assume_utc)
+    parse_date_or_datetime(s, zone)
         .map(|d| d == today)
         .unwrap_or(false)
 }
 
-pub fn is_yesterday_with(value: &Value, today: NaiveDate, assume_utc: bool) -> bool {
+pub fn is_yesterday_with(value: &Value, today: NaiveDate, zone: FixedOffset) -> bool {
     let Value::String(s) = value else {
         return false;
     };
     let yesterday = today.pred_opt();
-    parse_date_or_datetime(s, assume_utc)
+    parse_date_or_datetime(s, zone)
         .and_then(|d| yesterday.map(|y| d == y))
         .unwrap_or(false)
 }
 
-pub fn is_tomorrow_with(value: &Value, today: NaiveDate, assume_utc: bool) -> bool {
+pub fn is_tomorrow_with(value: &Value, today: NaiveDate, zone: FixedOffset) -> bool {
     let Value::String(s) = value else {
         return false;
     };
     let tomorrow = today.succ_opt();
-    parse_date_or_datetime(s, assume_utc)
+    parse_date_or_datetime(s, zone)
         .and_then(|d| tomorrow.map(|t| d == t))
         .unwrap_or(false)
 }
 
-pub fn is_this_month_with(value: &Value, today: NaiveDate, assume_utc: bool) -> bool {
+pub fn is_this_month_with(value: &Value, today: NaiveDate, zone: FixedOffset) -> bool {
     let Value::String(s) = value else {
         return false;
     };
-    parse_date_or_datetime(s, assume_utc)
+    parse_date_or_datetime(s, zone)
         .map(|d| d.year() == today.year() && d.month() == today.month())
         .unwrap_or(false)
 }
 
-pub fn is_this_year_with(value: &Value, today: NaiveDate, assume_utc: bool) -> bool {
+pub fn is_this_year_with(value: &Value, today: NaiveDate, zone: FixedOffset) -> bool {
     let Value::String(s) = value else {
         return false;
     };
-    parse_date_or_datetime(s, assume_utc)
+    parse_date_or_datetime(s, zone)
         .map(|d| d.year() == today.year())
         .unwrap_or(false)
 }
@@ -702,6 +844,45 @@ pub(crate) fn accepts_call_arity(canonical: &str, arity: usize) -> bool {
         .iter()
         .find(|entry| entry.binding.canonical == canonical)
         .is_some_and(|entry| entry.registration.overloads().iter().any(|signature| signature.accepts_count(arity)))
+}
+
+/// The registered read of the built-in a call to `name` dispatches to,
+/// resolved as dispatch resolves it: a thread's test function or a host
+/// function shadows the built-in and reads nothing through it. `None` for a
+/// function that reads nothing and for an unknown name.
+pub(crate) fn read_fact(name: &str) -> Option<ReadFact> {
+    let name = name.to_ascii_lowercase();
+    #[cfg(any(test, feature = "effects-instrumentation"))]
+    if test_hooks::lookup(&name).is_some() {
+        return None;
+    }
+    if host::lookup(&name).is_some() {
+        return None;
+    }
+    find_binding(&name).and_then(|entry| entry.binding.reads)
+}
+
+/// The slot class of the function a call to `name` dispatches to, resolved
+/// as dispatch resolves it. A thread's test function and a host function are
+/// [`SlotClass::Pure`]: their handlers see only their bound arguments. `None`
+/// for an unknown name.
+pub(crate) fn slot_class(name: &str) -> Option<SlotClass> {
+    let name = name.to_ascii_lowercase();
+    #[cfg(any(test, feature = "effects-instrumentation"))]
+    if test_hooks::lookup(&name).is_some() {
+        return Some(SlotClass::Pure);
+    }
+    if host::lookup(&name).is_some() {
+        return Some(SlotClass::Pure);
+    }
+    find_binding(&name).and_then(|entry| entry.binding.slot_class)
+}
+
+/// Every built-in registered [`SlotClass::InputReading`], for tests that
+/// must cover each one.
+#[cfg(test)]
+pub(crate) fn input_reading_functions() -> Vec<&'static str> {
+    bindings().filter(|binding| binding.reads.is_some()).map(|binding| binding.canonical).collect()
 }
 
 /// Whether the lowercased `name` is a built-in's canonical name or alias.
@@ -760,10 +941,10 @@ pub(crate) fn is_context_function(name: &str) -> bool {
     find_binding(name).is_some_and(|entry| entry.binding.evaluation == EvaluationMode::Context)
 }
 
-/// The registration and short-circuit side of the lazy function `name`
-/// names; `None` for an eager or unknown name. Test and host functions are
-/// always eager.
-pub(crate) fn lazy_function(name: &str) -> Option<(&'static FunctionRegistration, ShortCircuit)> {
+/// The registration and [`LazyKind`] of the lazy function `name` names;
+/// `None` for an eager or unknown name. Test and host functions are always
+/// eager.
+pub(crate) fn lazy_function(name: &str) -> Option<(&'static FunctionRegistration, LazyKind)> {
     #[cfg(any(test, feature = "effects-instrumentation"))]
     if test_hooks::lookup(&name.to_ascii_lowercase()).is_some() {
         return None;
@@ -772,8 +953,10 @@ pub(crate) fn lazy_function(name: &str) -> Option<(&'static FunctionRegistration
         return None;
     }
     let entry = find_binding(name)?;
-    (entry.binding.evaluation == EvaluationMode::Lazy)
-        .then(|| (&entry.registration, short_circuit(entry.binding.canonical)))
+    if entry.binding.evaluation != EvaluationMode::Lazy {
+        return None;
+    }
+    Some((&entry.registration, lazy_kind(entry.binding.canonical)?))
 }
 
 fn call_error(error: CallBindingError) -> ExpressionError {
@@ -795,10 +978,12 @@ fn call_error(error: CallBindingError) -> ExpressionError {
 ///
 /// ## Errors
 ///
-/// [`ExpressionError::Call`] when the call does not bind (the handler is
-/// never entered) or the handler's result breaks its declared return type;
-/// a pure handler's domain failure as [`ExpressionError::Other`]; a context
-/// handler's own error as returned.
+/// [`ExpressionError::ContractViolation`] for an evaluator-owned function
+/// (lazy, such as `try`, `and`, and `or`, or callback-taking, such as `map`),
+/// which supplied values cannot invoke; [`ExpressionError::Call`] when the
+/// call does not bind (the handler is never entered) or the handler's result
+/// breaks its declared return type; a pure handler's domain failure as
+/// [`ExpressionError::Other`]; a context handler's own error as returned.
 pub(crate) fn call_function(
     name: &str,
     args: &[Value],
@@ -813,7 +998,17 @@ pub(crate) fn call_function(
         return Some(call_host(&entry, &name, args));
     }
     let entry = find_binding(&name)?;
-    Some(call_entry(entry, &name, args, ctx))
+    let answer = call_entry(entry, &name, args, ctx);
+    // A schema slot's cached resolution must be re-checked against what a
+    // captured or volatile call answered (`schemas::slots::dependencies`).
+    crate::markdown::schemas::slots::dependencies::note_call(
+        entry.binding.slot_class,
+        entry.binding.canonical,
+        args,
+        ctx,
+        &answer,
+    );
+    Some(answer)
 }
 
 /// Calls a host function through the same steps as a built-in pure handler:
@@ -856,9 +1051,12 @@ fn call_entry(
     ctx: Option<&ResolutionContext>,
 ) -> Result<Value, ExpressionError> {
     let canonical = entry.binding.canonical;
+    // Supplied values cannot stand in for unevaluated operands or a callback
+    // body, so this is a broken call contract, never a handler failure that
+    // a lenient surface could demote or `try` could recover.
     let Some(handler) = entry.binding.handler else {
-        return Err(ExpressionError::Other {
-            function: name.to_string(),
+        return Err(ExpressionError::ContractViolation {
+            function: canonical.to_string(),
             message: if entry.binding.evaluation == EvaluationMode::Lazy {
                 format!("{canonical}() evaluates its arguments lazily and is called only by the evaluator")
             } else {
@@ -880,18 +1078,36 @@ fn call_entry(
                 });
             }
         },
-        FunctionHandler::Pure(_) => None,
+        FunctionHandler::Pure(_) | FunctionHandler::Clock(_) => None,
     };
     let registration = &entry.registration;
-    let call = registration.bind_call(args).map_err(call_error)?;
+    let call = registration.bind_call(args).map_err(|error| {
+        entry.binding.refine_binding.and_then(|refine| refine(&error, args)).unwrap_or_else(|| call_error(error))
+    })?;
     #[cfg(any(test, feature = "effects-instrumentation"))]
     test_hooks::record_entry(canonical);
     let domain = |message: String| ExpressionError::Other {
         function: name.to_string(),
         message,
     };
+    // A slot's gate sees every input the call observed before its result
+    // can reach the slot; the read sites have already asked before reading.
+    if let (Some(context), FunctionHandler::Context(handler)) = (context, handler)
+        && context.slot_gate.is_some()
+        && entry.binding.reads.is_some()
+    {
+        let (value, observed) = super::data::runtime::capture_observations(|| handler(&call, context));
+        context.authorize_slot_observations(canonical, &observed)?;
+        let value = value?;
+        registration.check_return(&call, &value).map_err(call_error)?;
+        return Ok(value);
+    }
     let value = match (handler, context) {
         (FunctionHandler::Pure(handler), _) => handler(&call).map_err(domain)?,
+        (FunctionHandler::Clock(handler), _) => {
+            let reading = ctx.map_or_else(ClockReading::now, |context| context.observations.clock().reading());
+            handler(&call, &reading).map_err(domain)?
+        }
         (FunctionHandler::Context(handler), Some(context)) => handler(&call, context)?,
         (FunctionHandler::Context(_), None) => {
             unreachable!("a context handler without a context returned above")
@@ -909,6 +1125,7 @@ fn call_entry(
 mod tests {
     use super::*;
     use crate::markdown::compose::expression::call_binding::CallErrorKind;
+    use chrono::{Local, Utc};
     use serde_json::json;
 
     /// A pure call through the one dispatch entry, without a context.
@@ -1744,36 +1961,45 @@ mod tests {
             Some(d) => d,
             None => panic!(),
         };
+        const UTC: FixedOffset = match FixedOffset::east_opt(0) {
+            Some(zone) => zone,
+            None => panic!(),
+        };
+        /// A non-UTC offset; the naive inputs keep their own date whatever it is.
+        const LOCAL: FixedOffset = match FixedOffset::east_opt(2 * 3600) {
+            Some(zone) => zone,
+            None => panic!(),
+        };
 
         #[test]
         fn istoday_with_matches_today_date() {
-            assert!(is_today_with(&json!("2024-06-15"), TODAY, false));
-            assert!(!is_today_with(&json!("2024-06-14"), TODAY, false));
-            assert!(is_today_with(&json!("2024-06-15T08:00:00"), TODAY, false));
-            assert!(is_today_with(&json!("2024-06-15T08:00:00Z"), TODAY, true));
-            assert!(!is_today_with(&json!(null), TODAY, false));
-            assert!(!is_today_with(&json!(20240615), TODAY, false));
-            assert!(!is_today_with(&json!("not-a-date"), TODAY, false));
+            assert!(is_today_with(&json!("2024-06-15"), TODAY, LOCAL));
+            assert!(!is_today_with(&json!("2024-06-14"), TODAY, LOCAL));
+            assert!(is_today_with(&json!("2024-06-15T08:00:00"), TODAY, LOCAL));
+            assert!(is_today_with(&json!("2024-06-15T08:00:00Z"), TODAY, UTC));
+            assert!(!is_today_with(&json!(null), TODAY, LOCAL));
+            assert!(!is_today_with(&json!(20240615), TODAY, LOCAL));
+            assert!(!is_today_with(&json!("not-a-date"), TODAY, LOCAL));
         }
 
         #[test]
         fn relative_helpers_match_their_windows() {
-            assert!(is_yesterday_with(&json!("2024-06-14"), TODAY, false));
-            assert!(!is_yesterday_with(&json!("2024-06-15"), TODAY, false));
-            assert!(is_tomorrow_with(&json!("2024-06-16"), TODAY, false));
-            assert!(!is_tomorrow_with(&json!("2024-06-15"), TODAY, false));
-            assert!(is_this_month_with(&json!("2024-06-01"), TODAY, false));
-            assert!(!is_this_month_with(&json!("2024-07-01"), TODAY, false));
-            assert!(!is_this_month_with(&json!("2023-06-15"), TODAY, false));
-            assert!(is_this_year_with(&json!("2024-12-31"), TODAY, false));
-            assert!(!is_this_year_with(&json!("2023-12-31"), TODAY, false));
+            assert!(is_yesterday_with(&json!("2024-06-14"), TODAY, LOCAL));
+            assert!(!is_yesterday_with(&json!("2024-06-15"), TODAY, LOCAL));
+            assert!(is_tomorrow_with(&json!("2024-06-16"), TODAY, LOCAL));
+            assert!(!is_tomorrow_with(&json!("2024-06-15"), TODAY, LOCAL));
+            assert!(is_this_month_with(&json!("2024-06-01"), TODAY, LOCAL));
+            assert!(!is_this_month_with(&json!("2024-07-01"), TODAY, LOCAL));
+            assert!(!is_this_month_with(&json!("2023-06-15"), TODAY, LOCAL));
+            assert!(is_this_year_with(&json!("2024-12-31"), TODAY, LOCAL));
+            assert!(!is_this_year_with(&json!("2023-12-31"), TODAY, LOCAL));
         }
 
         #[test]
         fn relative_validators_accept_datetime_strings() {
-            assert!(is_today_with(&json!("2024-06-15T23:59:00Z"), TODAY, true));
+            assert!(is_today_with(&json!("2024-06-15T23:59:00Z"), TODAY, UTC));
             // An explicit offset that lands on a different UTC date.
-            assert!(is_today_with(&json!("2024-06-16T01:00:00+03:00"), TODAY, true));
+            assert!(is_today_with(&json!("2024-06-16T01:00:00+03:00"), TODAY, UTC));
         }
     }
 }
@@ -1970,7 +2196,10 @@ mod registration_tests {
 
     use serde_json::{Value, json};
 
-    use super::{EvaluationMode, FunctionHandler, bindings, call_function, joined_bindings, registry};
+    use super::{
+        EvaluationMode, FunctionHandler, ReadFact, ReadKind, SlotClass, bindings, call_function, find_binding,
+        joined_bindings, registry,
+    };
     use crate::markdown::compose::expression::call_binding::CallErrorKind;
     use crate::markdown::compose::expression::catalog::expression_function_descriptors;
     use crate::markdown::compose::expression::{ExpressionError, ResolutionContext};
@@ -2046,11 +2275,128 @@ mod registration_tests {
                     binding.handler,
                     Some(FunctionHandler::Context(_))
                 ),
+                EvaluationMode::Clock => matches!(binding.handler, Some(FunctionHandler::Clock(_))),
                 EvaluationMode::Lazy | EvaluationMode::Callback => binding.handler.is_none(),
             };
             assert!(paired, "{}", binding.canonical);
             assert_eq!(super::lazy_function(binding.canonical).is_some(), binding.evaluation == EvaluationMode::Lazy);
             assert_eq!(super::is_context_function(binding.canonical), binding.evaluation == EvaluationMode::Context);
+        }
+    }
+
+    #[test]
+    fn every_lazy_function_maps_to_its_own_kind() {
+        let kind = |name: &str| super::lazy_function(name).map(|(_, kind)| kind);
+        assert_eq!(kind("and"), Some(super::LazyKind::All));
+        assert_eq!(kind("or"), Some(super::LazyKind::Any));
+        assert_eq!(kind("try"), Some(super::LazyKind::Recover));
+        assert_eq!(kind("TRY"), Some(super::LazyKind::Recover), "lookup is case-insensitive");
+        let lazy: Vec<_> = bindings().filter(|binding| binding.evaluation == EvaluationMode::Lazy).map(|b| b.canonical).collect();
+        assert_eq!(lazy, ["and", "or", "try"], "a new lazy binding needs its own LazyKind arm");
+    }
+
+    #[test]
+    fn direct_value_call_of_try_is_rejected() {
+        // Supplied values cannot represent an earlier failure, so a value
+        // call never runs the recovery rule.
+        let error = call_function("try", &[Value::Null, serde_json::json!(7)], None).expect("registered").unwrap_err();
+        assert!(
+            matches!(&error, ExpressionError::ContractViolation { function, message }
+                if function == "try" && message.contains("evaluates its arguments lazily")),
+            "{error:?}"
+        );
+        assert!(!error.is_recoverable_read_failure());
+        assert!(error.is_authoring_fatal());
+    }
+
+    /// Every evaluator-owned function shares the value-only rejection:
+    /// the other lazy functions and the callback-taking ones.
+    #[test]
+    fn direct_value_call_of_evaluator_owned_functions_is_a_contract_violation() {
+        let cases = [
+            ("and", vec![serde_json::json!(true), serde_json::json!(false)], "evaluates its arguments lazily"),
+            ("or", vec![serde_json::json!(false), serde_json::json!(true)], "evaluates its arguments lazily"),
+            ("map", vec![serde_json::json!([1, 2]), serde_json::json!(1)], "requires evaluator-owned callback evaluation"),
+            ("filter", vec![serde_json::json!([1, 2]), serde_json::json!(true)], "requires evaluator-owned callback evaluation"),
+        ];
+        for (name, args, explanation) in cases {
+            let error = call_function(name, &args, None).expect("registered").unwrap_err();
+            assert!(
+                matches!(&error, ExpressionError::ContractViolation { function, message }
+                    if function == name && message.contains(explanation)),
+                "{name}: {error:?}"
+            );
+            assert!(!error.is_recoverable_read_failure(), "{name}");
+        }
+    }
+
+    #[test]
+    fn try_is_pure_and_reads_nothing_of_its_own() {
+        let entry = find_binding("try").expect("try is registered");
+        assert_eq!(entry.binding.slot_class, Some(SlotClass::Pure));
+        assert!(entry.binding.reads.is_none());
+        assert!(entry.binding.aliases.is_empty());
+    }
+
+    /// The slot classes of the S4 classification: every binding declares
+    /// one (the registry refuses an undeclared one), and the readers name
+    /// what they read.
+    #[test]
+    fn every_binding_declares_its_slot_class() {
+        let class = |name: &str| find_binding(name).and_then(|entry| entry.binding.slot_class);
+        let reads = |name: &str| find_binding(name).and_then(|entry| entry.binding.reads);
+        for binding in bindings() {
+            assert!(binding.slot_class.is_some(), "{} declares no slot class", binding.canonical);
+        }
+        for name in ["length", "as_csv", "lower", "is_date", "map", "and", "terminal"] {
+            assert_eq!(class(name), Some(SlotClass::Pure), "{name}");
+        }
+        for name in ["date", "is_today", "is_this_year_utc", "date_delta", "older_than", "newer_than", "has_command",
+            "has_binary", "package", "package_area", "ipv4", "ipv6", "has_agentic_cli"]
+        {
+            assert_eq!(class(name), Some(SlotClass::Captured), "{name}");
+        }
+        for name in ["recent_commits", "predict_conflicts", "branch_exists_on_remote", "remote_vendor"] {
+            assert_eq!(class(name), Some(SlotClass::Volatile), "{name}");
+        }
+        for name in ["as_markdown", "pr", "pr_list", "cicd", "cicd_list", "ping", "ping_under", "has_alias",
+            "has_builtin_function", "has_user_function", "can_execute"]
+        {
+            assert_eq!(class(name), Some(SlotClass::Rejected), "{name}");
+        }
+        let content = ReadFact { kind: ReadKind::Content, remote: true };
+        for name in ["load_data", "frontmatter", "try_frontmatter", "markdown_title", "markdown_body_empty", "validate_schema"] {
+            assert_eq!(reads(name), Some(content), "{name}");
+        }
+        assert_eq!(reads("file_exists"), Some(ReadFact { kind: ReadKind::Probe, remote: true }));
+        for name in ["find_files", "find_first_index", "find_last_index"] {
+            assert_eq!(reads(name), Some(ReadFact { kind: ReadKind::Listing, remote: false }), "{name}");
+        }
+        for name in ["absolute", "relative", "basename", "join", "link", "has_skill", "has_local_skill"] {
+            assert_eq!(reads(name), Some(ReadFact { kind: ReadKind::Probe, remote: false }), "{name}");
+        }
+        let input_reading = bindings().filter(|binding| binding.slot_class == Some(SlotClass::InputReading)).count();
+        assert_eq!(input_reading, 28, "the S4 input-reading set");
+    }
+
+    /// A pure or clock handler reads nothing outside its arguments: no live
+    /// clock, process environment, or `PATH` search in the handler sources.
+    #[test]
+    fn no_handler_source_reads_the_live_clock_or_process_state() {
+        let sources = [
+            ("mod.rs", include_str!("mod.rs")),
+            ("dates.rs", include_str!("dates.rs")),
+            ("predicates.rs", include_str!("predicates.rs")),
+            ("collections.rs", include_str!("collections.rs")),
+            ("strings.rs", include_str!("strings.rs")),
+            ("terminal.rs", include_str!("terminal.rs")),
+            ("fs.rs", include_str!("fs.rs")),
+        ];
+        for (file, source) in sources {
+            let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+            for needle in ["Local::now", "Utc::now", "std::env::var", "which::which("] {
+                assert!(!production.contains(needle), "{file} reads `{needle}` outside its tests");
+            }
         }
     }
 

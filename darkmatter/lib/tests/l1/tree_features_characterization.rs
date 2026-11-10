@@ -101,8 +101,7 @@ use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::HtmlOptions;
 use darkmatter::style::{
-    BespokeStyleOverrides, ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides,
-    PageStyleOverrides, apply_bespoke_style, apply_color_style, apply_component_style,
+    apply_bespoke_style, apply_color_style, apply_component_style,
     apply_hr_style, apply_list_style, apply_page_style, from_frontmatter,
 };
 
@@ -136,16 +135,16 @@ fn indent(text: &str, spaces: usize) -> String {
 fn apply_all_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
 
-    let page = apply_page_style(page, &style, PageStyleOverrides::default())
+    let page = apply_page_style(page, &style)
         .expect("apply_page_style");
-    let page = apply_component_style(page, &style, ComponentStyleOverrides::default())
+    let page = apply_component_style(page, &style)
         .expect("apply_component_style");
-    let page = apply_list_style(page, &style, ListStyleOverrides::default())
+    let page = apply_list_style(page, &style)
         .expect("apply_list_style");
-    let page = apply_hr_style(page, &style, HrStyleOverrides::default())
+    let page = apply_hr_style(page, &style)
         .expect("apply_hr_style");
     let page = apply_color_style(page, &style).expect("apply_color_style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+    apply_bespoke_style(page, &style, darkmatter::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .expect("apply_bespoke_style")
 }
 
@@ -264,7 +263,7 @@ fn char_structured_link_attributes() {
     // a `prompt` (consumed into the Phase-4 popover structure), and a custom
     // data-* attribute.
     let md = Markdown::try_from_content(
-        "[Click](https://example.com \"class='btn' style='color: blue;' target='_blank' title='Go' prompt='Run it' data-id='42'\")\n",
+        "[Click](https://example.com '{ class: \"btn\", style: \"color: blue;\", target: \"_blank\", title: \"Go\", prompt: \"Run it\", \"data-id\": \"42\" }')\n",
     )
     .expect("parse structured link");
     let body = render_as_html_body(&md);

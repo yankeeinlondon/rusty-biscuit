@@ -30,11 +30,11 @@ const ROUTES: [(&[&str], Observable); 14] = [
     (&["@doc.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),
     (&["compose", "@doc.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),
     (&["compose", "main.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),
-    (&["toc", "--json", "@doc.md"], |out, _| out.contains("\"title\": \"Configured\"")),
+    (&["toc", "--output", "json", "@doc.md"], |out, _| out.contains("\"title\": \"Configured\"")),
     (&["clean", "@doc.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),
     (&["get", "@doc.md", "title"], |out, _| out.trim() == "\"Configured\""),
     (&["hash", "@doc.md"], |out, facts| out.trim() == facts.hash),
-    (&["graph", "--json", "@doc.md"], |out, _| {
+    (&["graph", "--output", "json", "@doc.md"], |out, _| {
         serde_json::from_str::<serde_json::Value>(out).is_ok_and(|graph| {
             graph["source"].as_str().is_some_and(|source| {
                 let source = std::path::Path::new(source);
@@ -42,9 +42,10 @@ const ROUTES: [(&[&str], Observable); 14] = [
             })
         })
     }),
-    (&["validate", "refs", "main.md"], |out, _| out.contains("Valid: 1")),
+    (&["validate", "refs", "main.md"], |out, _| out.contains("across 2 documents")),
     (&["validate", "refs", "--graph", "mermaid", "@doc.md"], |out, _| out.contains("roots_doc_md")),
-    (&["schema", "validate", "@doc.md"], |out, _| out.contains("roots/doc.md") || out.contains("roots\\doc.md")),
+    // `-v`: a piped link prints its resolved destination only when verbose.
+    (&["-v", "schema", "validate", "@doc.md"], |out, _| out.contains("roots/doc.md") || out.contains("roots\\doc.md")),
     (&["schema", "detect", "@doc.md"], |out, _| out.contains("title:")),
     (&["code-block", "--file", "@doc.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),
     (&["code-block", "@doc.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),

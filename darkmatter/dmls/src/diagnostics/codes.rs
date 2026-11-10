@@ -18,9 +18,12 @@
 //! | `dm.expression.malformed`, document-body span | `WARNING` | A body `{{ … }}` is only inferred to be an expression. |
 //! | `dm.expression.undeclared_property` | `WARNING` | Advisory: the property is valid and `null` unless supplied at runtime. |
 //! | `dm.expression.unknown_function` | `ERROR` | The function catalog is closed, so compose fails on the call. |
+//! | `dm.expression.undeclared_member` | `WARNING` | Advisory: the member's base has a known closed object type that does not declare it, so the read is `null`; composition warns only where it reaches the read. |
 //! | `dm.expression.unavailable_global` | `ERROR` | The event's view declares the global unavailable, so the read fails when the stack runs. |
 //! | `dm.expression.nested_span_in_literal` | `ERROR` | Its surfaces never re-interpolate the literal. |
 //! | `dm.expression.incompatible_call` | `ERROR` | Argument category 5 (or a wrong argument count or ambiguous overload): composition rejects the document. |
+//! | `dm.data.not_a_container`, `dm.data.this_import_rejected`, `dm.data.row_shape_conflict` | `ERROR` | A literal `load_data` contract (with a literal CSV/TSV path or `format`, and for row shape a literal `header: false`) the passive call check proves wrong, ranged at `as`; composition rejects the document under the same code. |
+//! | `dm.data.invalid_options` | `ERROR` | A literal `load_data` options object the passive call check proves wrong for its format (a bad `delimiter`, or `delimiter`/`header` on a non-tabular format), ranged at the third argument; composition rejects the document under the same code. |
 //! | `dm.expression.uncertain_call` | `WARNING` | Argument category 3; with `expressions.strict`, also 2 (may be `null`) and 4 (type unknown). |
 //! | `dm.expression.always_false_call` | `WARNING` | An authored literal argument is not a well-formed file reference (`file_exists("https://")`), so the call is always `false`; composition reports the same warning. |
 //! | `dm.expression.incomplete_analysis` | `WARNING` | The host function's facts artifact is missing, stale, or invalid, so nothing is known about the call; it may still be right. |
@@ -162,6 +165,9 @@ pub mod code {
     pub const EXPRESSION_UNDECLARED_PROPERTY: &str = "dm.expression.undeclared_property";
     /// A call to a function outside Darkmatter's closed function catalog.
     pub const EXPRESSION_UNKNOWN_FUNCTION: &str = darkmatter::markdown::compose::report_diagnostics::UNKNOWN_FUNCTION_CODE;
+    /// A constant member read whose base has a known closed object type
+    /// that does not declare the member.
+    pub const EXPRESSION_UNDECLARED_MEMBER: &str = darkmatter::markdown::compose::expression::UNDECLARED_MEMBER_CODE;
     /// A read, inside a lifecycle stack, of a global the event's binding view
     /// declares unavailable (`err` outside an error event).
     pub const EXPRESSION_UNAVAILABLE_GLOBAL: &str = "dm.expression.unavailable_global";

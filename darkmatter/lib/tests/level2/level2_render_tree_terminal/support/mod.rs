@@ -5,7 +5,7 @@ pub(super) use biscuit_terminal::render_tree::{
 pub(super) use biscuit_terminal::terminal::Terminal;
 pub(super) use biscuit_test_harness::shared::SharedHarness;
 pub(super) use biscuit_test_harness::wezterm::WezTermHarness;
-pub(super) use biscuit_test_harness::{CapturedFrame, TerminalHarness};
+pub(super) use biscuit_test_harness::{CLEAR_SCREEN, CapturedFrame, run_to_sentinel, shell_path};
 pub(super) use darkmatter::layout::{ComponentPolicy, DarkmatterPage, PageComponent};
 pub(super) use darkmatter::markdown::Markdown;
 pub(super) use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
@@ -19,7 +19,7 @@ pub(super) use serial_test::serial;
 pub(super) use std::fs;
 pub(super) use std::rc::Rc;
 pub(super) use std::sync::atomic::{AtomicU32, Ordering};
-pub(super) use std::time::{Duration, Instant};
+pub(super) use std::time::Duration;
 pub(super) use tempfile::tempdir;
 pub(super) use test_toolkit::{Backend, Level, LevelDecision, decide_harness};
 
@@ -30,41 +30,14 @@ pub(super) fn wezterm_decision() -> LevelDecision {
 
 pub(super) static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
 pub(super) static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
-pub(super) const SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
-
-pub(super) fn wait_for_sentinel(
-    harness: &mut WezTermHarness,
-    sentinel: &str,
-) -> Result<CapturedFrame, CapturedFrame> {
-    let deadline = Instant::now() + SENTINEL_TIMEOUT;
-    let mut last = CapturedFrame::from_raw(String::new());
-    while Instant::now() < deadline {
-        if let Ok(frame) = harness.capture() {
-            if frame.plain.lines().any(|l| l.trim() == sentinel) {
-                return Ok(frame);
-            }
-            last = frame;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    Err(last)
-}
+/// Kept under nextest's 30 s termination so a stuck wait panics with its last
+/// capture instead of being killed silently.
+pub(super) const SENTINEL_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub(super) fn run_with_sentinel(harness: &mut WezTermHarness, cmd: &str) -> CapturedFrame {
     let id = SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
     let sentinel = format!("__DM_TREE_LVL2_DONE_{id}__");
-    let wrapped = format!("{cmd}; printf '\\n{sentinel}\\n'");
-    harness
-        .send_command_with_env(&wrapped, &[])
-        .expect("send_command_with_env failed");
-    match wait_for_sentinel(harness, &sentinel) {
-        Ok(frame) => frame,
-        Err(last) => panic!(
-            "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
-             last plain capture:\n{}",
-            last.plain
-        ),
-    }
+    run_to_sentinel(harness, cmd, &[], &sentinel, SENTINEL_TIMEOUT).unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Renders `body` through the render-tree terminal pipeline using the
@@ -237,9 +210,7 @@ pub(super) fn drive_pane(
     let harness = guard.as_mut().unwrap();
 
     // Reset visible region between tests.
-    run_with_sentinel(harness, "clear");
-
-    let cmd = format!("cat {}", path.display());
+    let cmd = format!("{CLEAR_SCREEN}; cat {}", shell_path(&path));
     let frame = run_with_sentinel(harness, &cmd);
     Some((frame, dir))
 }
@@ -426,13 +397,12 @@ pub(super) fn drive_render_probe(variant: &str) -> Option<CapturedFrame> {
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
 
-    run_with_sentinel(harness, "clear");
     // `--nocapture` lets the probe's `print!` reach the pane stdout; `--exact`
     // selects only the probe entry point so the rest of the suite never runs in
     // the spawned process.
     let cmd = format!(
-        "{RENDER_PROBE_ENV}={variant} {} --exact level2_render_tree_terminal::public_entry_points::level2_render_probe_entrypoint --nocapture --test-threads=1",
-        exe.display()
+        "{CLEAR_SCREEN}; {RENDER_PROBE_ENV}={variant} {} --exact level2_render_tree_terminal::public_entry_points::level2_render_probe_entrypoint --nocapture --test-threads=1",
+        shell_path(&exe)
     );
     Some(run_with_sentinel(harness, &cmd))
 }
@@ -711,8 +681,7 @@ pub(super) fn run_page_in_pane(
     let path = dir.path().join(format!("{name}.ansi"));
     fs::write(&path, rendered).unwrap();
 
-    run_with_sentinel(harness, "clear");
-    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+    let frame = run_with_sentinel(harness, &format!("{CLEAR_SCREEN}; cat {}", shell_path(&path)));
     Some((frame, cols))
 }
 
@@ -746,7 +715,7 @@ pub(super) fn render_public_as_terminal_to_tempfile(
 ) -> (tempfile::TempDir, std::path::PathBuf) {
     let md: Markdown = body.into();
     let mut opts = TerminalOptions::default();
-    opts.max_width = Some(120);
+    opts.width = Some(renderable::output::Width::Columns(120));
     opts.color_depth = Some(ColorDepth::TrueColor);
     let rendered = md
         .as_terminal(opts)
@@ -894,7 +863,7 @@ pub(super) fn render_unmatched_policy_page_to_tempfile(
 // this drives the resolved bytes through a real WezTerm pane so a regression in
 // the decorated-frame offset/width is observable on the cell grid.
 //
-// Built at the pane's true column width with `style.page.left-margin: 25%` and
+// Built at the pane's true column width with `style.page.margin-left: 25%` and
 // `style.page.max-width: 50%`, the captured paragraph rows must (a) begin at
 // the 25%-of-width left offset and (b) cap their content at 50% of the
 // post-margin width — mirroring [`length_to_cells`]'s `f32::round`.
@@ -999,8 +968,7 @@ pub(super) fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempf
     let mut guard = SHARED_HARNESS
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
-    run_with_sentinel(harness, "clear");
-    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+    let frame = run_with_sentinel(harness, &format!("{CLEAR_SCREEN}; cat {}", shell_path(&path)));
     Some((frame, dir))
 }
 
