@@ -2,7 +2,7 @@ use crate::common;
 
 use common::level2::{
     CODE_DOC, is_sentinel_line, max_bg_luma_on_line, max_fg_luma_on_line, min_fg_luma_on_line,
-    raw_line_is_blank, rendered_region, rtrim, run_md, run_md_env, run_md_in_tmux,
+    blank_raw_rows, rendered_region, rtrim, run_md, run_md_env, run_md_in_tmux,
 };
 use biscuit_test_harness::tmux::TmuxHarness;
 use serial_test::serial;
@@ -327,10 +327,10 @@ fn level2_no_trailing_blank_offset_after_code() {
     // Count genuinely-blank rows immediately above the sentinel. With mb=1 this
     // must be at most 2 (1 bottom margin + 1 printf newline); the pre-fix
     // constant +2 offset would have made it 4.
-    let trailing_blanks = raw_lines[..sentinel_idx]
-        .iter()
+    let trailing_blanks = blank_raw_rows(&raw_lines[..sentinel_idx])
+        .into_iter()
         .rev()
-        .take_while(|l| raw_line_is_blank(l))
+        .take_while(|blank| *blank)
         .count();
     assert!(
         trailing_blanks <= 2,

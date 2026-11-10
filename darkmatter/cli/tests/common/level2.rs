@@ -4,7 +4,8 @@ use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{
-    CapturedFrame, TerminalHarness, bin_exe, capture_settled, shell_path, shell_quote, strip_ansi,
+    CLEAR_SCREEN, CapturedFrame, TerminalHarness, bin_exe, run_to_sentinel, shell_path, shell_quote,
+    strip_ansi,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -144,13 +145,16 @@ pub fn link_or_copy(target: &std::path::Path, link: &std::path::Path) -> std::io
 /// Fast path (Unix only): inode identity. Works for symlinks (after
 /// `metadata` follows them) and for hard links.
 ///
-/// Slow path: byte-for-byte content comparison. Handles the copy
-/// fallback from [`link_or_copy`] where shim and target are different
-/// inodes but identical content. This is the only path on Windows —
-/// `MetadataExt::{volume_serial_number, file_index}` are the unstable
-/// `windows_by_handle` feature, and `rust-toolchain.toml` pins stable, so
-/// the equivalent identity check cannot be written here. Content
-/// comparison returns the same answer; it is merely slower.
+/// Fast path (every OS): both paths canonicalize to the same file, which
+/// is the symlink case. Windows has no stable file-identity query
+/// (`MetadataExt::{volume_serial_number, file_index}` are the unstable
+/// `windows_by_handle` feature), so without this a symlinked shim paid the
+/// slow path's read of two debug binaries (about 150 MB each) in every test
+/// process.
+///
+/// Slow path: byte-for-byte content comparison. Handles a Windows hard link
+/// and the copy fallback from [`link_or_copy`], where shim and target are
+/// different paths but identical content.
 pub fn is_same_binary(candidate: &std::path::Path, built: &std::path::Path) -> bool {
     #[cfg(unix)]
     if let (Ok(ma), Ok(mb)) = (fs::metadata(candidate), fs::metadata(built)) {
@@ -158,6 +162,11 @@ pub fn is_same_binary(candidate: &std::path::Path, built: &std::path::Path) -> b
         if ma.ino() == mb.ino() && ma.dev() == mb.dev() {
             return true;
         }
+    }
+    if let (Ok(a), Ok(b)) = (fs::canonicalize(candidate), fs::canonicalize(built))
+        && a == b
+    {
+        return true;
     }
     matches!(
         (fs::read(candidate), fs::read(built)),
@@ -267,51 +276,22 @@ pub fn run_md_in_tmux(
     run_tmux_command(harness, &command, env)
 }
 
-/// Polls the pane every 50 ms looking for `sentinel`, returning the final
-/// captured frame once it appears. Returns the last attempted capture on
-/// timeout so callers can include it in panic diagnostics.
-pub fn wait_for_sentinel(
-    harness: &mut WezTermHarness,
-    sentinel: &str,
-) -> Result<CapturedFrame, CapturedFrame> {
-    let deadline = Instant::now() + SENTINEL_TIMEOUT;
-    let mut last = CapturedFrame::from_raw(String::new());
-    while Instant::now() < deadline {
-        if let Ok(frame) = harness.capture() {
-            // The sentinel also appears inline in the command echo
-            // (e.g. `$ md ...; printf '\n__DM_DONE_0__\n'`). Only treat the
-            // sentinel as completion when it appears on a line of its own,
-            // which only happens after `printf` actually runs.
-            if frame.plain.lines().any(|l| l.trim() == sentinel) {
-                return Ok(frame);
-            }
-            last = frame;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    Err(last)
+/// Runs `cmd` in the shared pane and returns a settled capture showing a
+/// unique completion sentinel printed after it, so completion never depends
+/// on the shell's prompt format.
+pub fn run_with_sentinel(harness: &mut WezTermHarness, cmd: &str) -> CapturedFrame {
+    run_with_sentinel_env(harness, cmd, &[])
 }
 
-/// Runs `cmd` in the shared pane, appending a unique completion sentinel so
-/// we can detect when `cmd` has finished without depending on the user's
-/// shell prompt format.
-pub fn run_with_sentinel(harness: &mut WezTermHarness, cmd: &str) -> CapturedFrame {
+/// Like [`run_with_sentinel`] but applies inline env assignments to `cmd`.
+pub fn run_with_sentinel_env(
+    harness: &mut WezTermHarness,
+    cmd: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
     let id = SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
     let sentinel = format!("__DM_LVL2_DONE_{id}__");
-    // `printf` is portable across bash/zsh and emits the sentinel on its own
-    // line so it never visually fuses with `md`'s last row.
-    let wrapped = format!("{cmd}; printf '\\n{sentinel}\\n'");
-    harness
-        .send_command_with_env(&wrapped, &[])
-        .expect("send_command_with_env failed");
-    match wait_for_sentinel(harness, &sentinel) {
-        Ok(frame) => frame,
-        Err(last) => panic!(
-            "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
-             last plain capture:\n{}",
-            last.plain
-        ),
-    }
+    run_to_sentinel(harness, cmd, env, &sentinel, SENTINEL_TIMEOUT).unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Helper: write a markdown fixture, run `md` with the given flags inside the
@@ -385,36 +365,22 @@ where
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
 
-    // Reset the visible region so the previous test's output does not bleed
-    // into this capture. `clear` is portable across bash and zsh.
-    run_with_sentinel(harness, "clear");
-
-    let cmd = format!("{} {} {extra_args}", shell_path(Path::new(bin)), shell_path(&file_path));
-    let frame = run_with_sentinel_env(harness, &cmd, env);
+    // The screen clear shares the `md` line so the previous output is gone
+    // without a round trip of its own (each costs about 0.4 s on Windows). A
+    // harness env prefix would bind to the clear, the first command, so the
+    // assignments are written onto `md` here instead.
+    let assignments: String = env
+        .iter()
+        .map(|(key, value)| format!("{key}={} ", shell_quote(value)))
+        .collect();
+    let cmd = format!(
+        "{CLEAR_SCREEN}; {assignments}{} {} {extra_args}",
+        shell_path(Path::new(bin)),
+        shell_path(&file_path)
+    );
+    let frame = run_with_sentinel_env(harness, &cmd, &[]);
     // Keep tempdir alive past capture by returning its path.
     Some((frame, file_path))
-}
-
-/// Like [`run_with_sentinel`] but applies inline env assignments to `cmd`.
-pub fn run_with_sentinel_env(
-    harness: &mut WezTermHarness,
-    cmd: &str,
-    env: &[(&str, &str)],
-) -> CapturedFrame {
-    let id = SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let sentinel = format!("__DM_LVL2_DONE_{id}__");
-    let wrapped = format!("{cmd}; printf '\\n{sentinel}\\n'");
-    harness
-        .send_command_with_env(&wrapped, env)
-        .expect("send_command_with_env failed");
-    match wait_for_sentinel(harness, &sentinel) {
-        Ok(frame) => capture_settled(harness).unwrap_or(frame),
-        Err(last) => panic!(
-            "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
-             last plain capture:\n{}",
-            last.plain
-        ),
-    }
 }
 
 /// Strip trailing whitespace from a line for visible-width comparisons.
@@ -444,12 +410,11 @@ pub fn run_md_after_shell_prefix(
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().unwrap();
 
-    run_with_sentinel(harness, "clear");
-
     // Use the Cargo-built `md` via the shim so prefix-wrapped invocations
-    // also verify the code under review (review-2 finding #1).
+    // also verify the code under review (review-2 finding #1). The screen
+    // clear shares the line, as in [`run_md_env_bin`].
     let cmd = format!(
-        "{prefix} {} {} {extra_args}",
+        "{CLEAR_SCREEN}; {prefix} {} {} {extra_args}",
         md_shim_word(),
         shell_path(&file_path)
     );
@@ -547,12 +512,63 @@ pub fn regex_lite_fg() -> impl Fn(&str) -> Vec<(u32, u32, u32)> {
     }
 }
 
-pub fn raw_line_is_blank(line: &str) -> bool {
-    biscuit_test_harness::strip_ansi(line).trim().is_empty() && !line.contains("\x1b[48")
+/// For each raw captured row, whether it shows no text and no background.
+///
+/// WezTerm re-emits only changed attributes, so a code block's padding row
+/// arrives as a bare erase (`\e[K`) under a background set rows earlier. The
+/// background is therefore replayed from the first row; an erase under a
+/// background paints the row.
+pub fn blank_raw_rows(lines: &[&str]) -> Vec<bool> {
+    let mut background = false;
+    lines
+        .iter()
+        .map(|line| {
+            let mut painted = false;
+            let mut rest = *line;
+            while let Some(at) = rest.find("\x1b[") {
+                let csi = &rest[at + 2..];
+                let Some(end) = csi.find(|c: char| c.is_ascii_alphabetic()) else {
+                    break;
+                };
+                match &csi[end..=end] {
+                    "m" => {
+                        let mut params = csi[..end].split(';');
+                        while let Some(param) = params.next() {
+                            match param {
+                                "" | "0" | "49" => background = false,
+                                "48" => {
+                                    background = true;
+                                    painted = true;
+                                }
+                                _ if param.starts_with("48:") => {
+                                    background = true;
+                                    painted = true;
+                                }
+                                _ => {}
+                            }
+                            // Skip a semicolon-form color's arguments so a
+                            // `0` component is not read as a reset.
+                            if param == "38" || param == "48" || param == "58" {
+                                let skip = if params.next() == Some("5") { 1 } else { 3 };
+                                params.by_ref().take(skip).for_each(drop);
+                            }
+                        }
+                    }
+                    "K" if background => painted = true,
+                    _ => {}
+                }
+                rest = &csi[end + 1..];
+            }
+            !painted && strip_ansi(line).trim().is_empty()
+        })
+        .collect()
 }
 
+/// Matches a completion sentinel row, whose raw spelling may lead with an
+/// attribute change carried over from the command's output.
 pub fn is_sentinel_line(line: &str) -> bool {
-    let t = line.trim();
+    let stripped = strip_ansi(line);
+    let t = stripped.trim();
     t.strip_prefix("__DM_LVL2_DONE_")
         .and_then(|r| r.strip_suffix("__"))
         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
