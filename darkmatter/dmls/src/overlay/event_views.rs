@@ -96,6 +96,10 @@ impl LifecycleHost {
     /// ## Errors
     ///
     /// The parser's [`LifecycleError`].
+    // `LifecycleError` is 136 bytes on Windows, where `PathBuf` is 8 bytes
+    // wider, and 128 elsewhere. Shrinking it means changing public fields that
+    // Claudine's twin enum copies, which allows the lint on Windows the same way.
+    #[cfg_attr(windows, allow(clippy::result_large_err))]
     pub fn parse_lifecycle(&self, frontmatter: &serde_json::Value, path: &Path) -> Result<LifecycleConfig, LifecycleError> {
         let Some(profile) = &self.profile else {
             return md_host::parse_lifecycle(frontmatter, path, None);

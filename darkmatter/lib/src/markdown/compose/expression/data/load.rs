@@ -235,8 +235,10 @@ enum Refusal {
     /// No `format` option, and the source's extension names no data format.
     /// The error is built by the caller, which alone knows what to name.
     UnsupportedExtension(Option<String>),
-    /// The options or contract cannot apply to the effective format.
-    Invalid(DataError),
+    /// The options or contract cannot apply to the effective format. Boxed:
+    /// a `DataError` with this enum's tag crosses the workspace's
+    /// `large-error-threshold` on Windows, where `PathBuf` is wider.
+    Invalid(Box<DataError>),
 }
 
 impl Refusal {
@@ -245,7 +247,7 @@ impl Refusal {
     fn into_error(self, identity: impl FnOnce() -> DataSourceIdentity) -> DataError {
         match self {
             Self::UnsupportedExtension(extension) => DataError::UnsupportedFormat { identity: identity(), extension },
-            Self::Invalid(error) => error,
+            Self::Invalid(error) => *error,
         }
     }
 }
@@ -271,10 +273,11 @@ fn plan_read(
         Some(format) => format,
         None => extension.map_err(Refusal::UnsupportedExtension)?,
     };
-    options.check_applicability(format).map_err(Refusal::Invalid)?;
+    options.check_applicability(format).map_err(|error| Refusal::Invalid(Box::new(error)))?;
     let delimiter = effective_delimiter(format, options.delimiter);
     let header = effective_header(format, options.header);
-    let row_shape = |conflict| Refusal::Invalid(DataError::RowShapeConflict { written: contract.written.clone(), conflict });
+    let row_shape =
+        |conflict| Refusal::Invalid(Box::new(DataError::RowShapeConflict { written: contract.written.clone(), conflict }));
     let row_mode = match header {
         Some(header) => {
             let mode = contract.row_mode().map_err(row_shape)?;
