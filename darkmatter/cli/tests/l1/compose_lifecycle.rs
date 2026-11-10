@@ -483,11 +483,14 @@ fn ctrl_c_runs_cancelled_then_finalize_and_exits_130() {
 
     let fixture = CliProcessFixture::named("lifecycle-ctrl-c");
     // The command announces itself only once it is the running program, so
-    // the interrupt cannot land before it starts.
+    // the interrupt cannot land before it starts. The marker is a builtin
+    // redirection, never `touch`: the file exists before `touch` exits, and a
+    // shell interrupted while waiting on a child that then exits 0 assumes the
+    // child handled it and runs on into the full `sleep`.
     let started = fixture.cwd().join("started");
     common::write_executable(
         &fixture.bin_dir().join("slow-step"),
-        &format!("#!/bin/sh\ntouch '{}'\nexec sleep 5\n", started.display()),
+        &format!("#!/bin/sh\n: > '{}'\nexec sleep 5\n", started.display()),
     );
     fixture.write_file("cwd/.darkmatter-shell-whitelist", "exact slow-step\n");
     let doc = fixture.write_file(

@@ -115,20 +115,49 @@ fn a_setter_and_a_style_file_move_the_page_and_the_later_layer_wins() {
     assert_eq!(plain(&["style.ml=1", "--style", "style.yaml"]), document - 2, "order on the line does not matter");
 }
 
+/// A bad setter on a formatted `target` exits 1 with nothing on stdout and no
+/// artifact opened.
+fn assert_bad_setter_stops_a_formatted_target(target: &str) {
+    let fixture = fixture(&format!("dispatch-bad-setter-{target}"), DOCUMENT);
+    let output = run(&fixture, &["doc.md", "style.page.margin-top=abc", "--output", target, "--show"]);
+    assert_eq!(output.status.code(), Some(1), "{target}: {}", stderr(&output));
+    assert!(output.stdout.is_empty(), "{target}: {}", stdout(&output));
+    assert!(!stderr(&output).contains("no default application"), "{target} opened an artifact: {}", stderr(&output));
+}
+
+/// A bad setter on a data `target` exits 1 with nothing on stderr.
+fn assert_bad_setter_stops_a_data_target(target: &str) {
+    let fixture = fixture(&format!("dispatch-bad-setter-{target}"), DOCUMENT);
+    let output = run(&fixture, &["render", "doc.md", "style.page.margin-top=abc", "--output", target, "--show"]);
+    assert_eq!(output.status.code(), Some(1), "{target}: {}", stdout(&output));
+    assert!(output.stderr.is_empty(), "{target}: {}", stderr(&output));
+}
+
+/// One test per target, so the spawns spread across cores.
+macro_rules! bad_setter_stops {
+    ($($name:ident => $assert:ident($target:literal);)+) => {
+        $(
+            #[test]
+            fn $name() {
+                $assert($target);
+            }
+        )+
+    };
+}
+
+bad_setter_stops! {
+    a_bad_setter_fails_terminal_before_anything_is_printed_or_opened => assert_bad_setter_stops_a_formatted_target("terminal");
+    a_bad_setter_fails_plain_before_anything_is_printed_or_opened => assert_bad_setter_stops_a_formatted_target("plain");
+    a_bad_setter_fails_html_before_anything_is_printed_or_opened => assert_bad_setter_stops_a_formatted_target("html");
+    a_bad_setter_fails_markdown_before_anything_is_printed_or_opened => assert_bad_setter_stops_a_formatted_target("markdown");
+    a_bad_setter_fails_markdown_plus_before_anything_is_printed_or_opened => assert_bad_setter_stops_a_formatted_target("markdown-plus");
+    a_bad_setter_fails_json_before_anything_is_printed_or_opened => assert_bad_setter_stops_a_data_target("json");
+    a_bad_setter_fails_yaml_before_anything_is_printed_or_opened => assert_bad_setter_stops_a_data_target("yaml");
+}
+
 #[test]
-fn a_bad_setter_fails_every_target_before_anything_is_printed_or_opened() {
-    let fixture = fixture("dispatch-bad-setter", DOCUMENT);
-    for target in ["terminal", "plain", "html", "markdown", "markdown-plus"] {
-        let output = run(&fixture, &["doc.md", "style.page.margin-top=abc", "--output", target, "--show"]);
-        assert_eq!(output.status.code(), Some(1), "{target}: {}", stderr(&output));
-        assert!(output.stdout.is_empty(), "{target}: {}", stdout(&output));
-        assert!(!stderr(&output).contains("no default application"), "{target} opened an artifact: {}", stderr(&output));
-    }
-    for target in ["json", "yaml"] {
-        let output = run(&fixture, &["render", "doc.md", "style.page.margin-top=abc", "--output", target, "--show"]);
-        assert_eq!(output.status.code(), Some(1), "{target}: {}", stdout(&output));
-        assert!(output.stderr.is_empty(), "{target}: {}", stderr(&output));
-    }
+fn a_bad_setter_is_one_type_mismatch_record_in_no_file() {
+    let fixture = fixture("dispatch-bad-setter-record", DOCUMENT);
     let output = run(&fixture, &["doc.md", "style.page.margin-top=abc", "--output", "json"]);
     let value = one_value(&output);
     assert_eq!(value["outcome"], "failure");

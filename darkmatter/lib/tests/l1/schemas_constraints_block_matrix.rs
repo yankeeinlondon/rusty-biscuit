@@ -526,7 +526,7 @@ fn walk_matrix(format: Format, part: usize) {
                     Site::Reused => &column.reuse_probes,
                     Site::Inline => &column.inline_probes,
                 };
-                let observed = matrix.observe(&column, edit, site);
+                let observed = matrix.observe(column, edit, site);
                 let label = format!("{format:?} / {} / {row} / {site:?}", column.name);
                 writeln!(table, "{label}: {observed:?}").unwrap();
                 let verdicts = |pick: fn(&Probe) -> bool| Observed::Verdicts(probes.iter().map(pick).collect());
