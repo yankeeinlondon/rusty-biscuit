@@ -298,7 +298,7 @@ only the way the terminal is reached differs.
 | Platform | How the terminal is reached | Queries |
 |----------|-----------------------------|---------|
 | macOS, Linux, WSL2 | `/dev/tty` in raw mode, read through `select(2)`; the terminal modes are restored afterwards | All of them |
-| Native Windows | The console input and output handles (`CONIN$` / `CONOUT$`), with the console modes restored afterwards | Colors, the ANSI palette, the cell size, and the graphics probe; not cursor position or window pixels |
+| Native Windows | The console input and output handles (`CONIN$` / `CONOUT$`), with the console modes restored afterwards | Colors, the ANSI palette, the cell size, the graphics probe, and cursor position; not window pixels |
 
 The request goes to the controlling terminal rather than stdout, so it reaches
 the terminal even when stdout is captured.
