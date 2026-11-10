@@ -51,13 +51,9 @@ static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 /// Process-shared tmux pane for the half-block test.
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 
-/// Returns the absolute path to a fixture file.
+/// A fixture file's absolute path as one pane-shell word.
 fn fixture_path(name: &str) -> String {
-    manifest_dir!()
-        .join("tests/fixtures")
-        .join(name)
-        .display()
-        .to_string()
+    biscuit_test_harness::shell_path(&manifest_dir!().join("tests/fixtures").join(name))
 }
 
 /// Counts the lines that contain at least one printable, non-prompt
@@ -470,7 +466,7 @@ fn level2_image_half_blocks_in_tmux_without_passthrough() {
     let path = fixture_path("13x13.png");
     let output = common::run_bt_output(
         harness,
-        &format!("image --width 8 '{path}'"),
+        &format!("image --width 8 {path}"),
         &[
             ("COLORTERM", "truecolor"),
             ("LANG", "en_US.UTF-8"),

@@ -28,9 +28,8 @@ pub use output_region::{OutputRow, marked_command, rows_between_markers};
 
 /// Builds a shell-safe command for the nextest-provided bt binary.
 pub fn bt_command(args: &str) -> String {
-    let bin = biscuit_test_harness::bin_exe!("bt");
-    let escaped = bin.to_string_lossy().replace('\'', "'\\''");
-    format!("'{escaped}' {args}")
+    let bin = biscuit_test_harness::shell_path(&biscuit_test_harness::bin_exe!("bt"));
+    format!("{bin} {args}")
 }
 
 /// Finds the newest command-echo row where a `bt` subcommand marker finishes.
