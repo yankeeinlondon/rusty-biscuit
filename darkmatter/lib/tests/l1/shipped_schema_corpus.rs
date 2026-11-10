@@ -1681,7 +1681,7 @@ fn every_shipped_yaml_schema_definition_is_in_the_shipped_table() {
 /// sandboxing schema) passes passively: admission evaluates no slot.
 #[test]
 fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
-    use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
+    use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context, build_resolution_context_with_catalog};
     use darkmatter::markdown::schemas::yaml_documents::{Claim, DefinitionSource};
     use darkmatter::markdown::schemas::{DarkmatterSchemas, KindRegistry, RegistryScope, YamlOutcome};
 
@@ -1706,6 +1706,12 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
                 && matches!(exception.class, Class::Draft { .. } | Class::EnvelopeRejected | Class::Placeholder)
         })
     };
+    // Every folder is in this one checkout, so one repository discovery serves
+    // them all; on Windows each discovery costs a quarter second.
+    let catalog = build_resolution_context(&RequestSnapshot::new(&root).with_home(None))
+        .expect("checkout context")
+        .repository_scope_catalog()
+        .cloned();
     let mut checked = 0usize;
     let mut failures = Vec::new();
     for (dir, path) in &areas {
@@ -1713,7 +1719,7 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
         // One context and registry per folder: the folder's package area
         // decides its schema roots, and every artifact in it shares them.
         let snapshot = RequestSnapshot::new(path).with_home(None);
-        let context = build_resolution_context(&snapshot).expect("checkout context");
+        let context = build_resolution_context_with_catalog(&snapshot, catalog.clone()).expect("checkout context");
         let registry = std::sync::Arc::new(KindRegistry::from_filesystem(&context, RegistryScope::WithRoots));
         for (kind, claim) in registry.claims() {
             if let Claim::Duplicate(files) = claim {
