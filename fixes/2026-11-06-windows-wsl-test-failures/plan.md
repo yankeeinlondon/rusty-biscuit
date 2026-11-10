@@ -2,14 +2,57 @@
 kind: plan
 total_phases: 4
 created: 2026-11-08
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+- .github/workflows/_package-ci.yml
+- biscuit-visualized/src/src/tests/embed_render_tests.rs
+- claudine/cli/tests/l1/compose_schema_cli.rs
+- darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/lib/tests/l1/kind_semantic_checks.rs
+- messenger/lib/tests/research_refresh.rs
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+- tree-hugger/cli/src/changed.rs
+- tree-hugger/cli/tests/changed/index_corruption.rs
+- tree-hugger/cli/tests/changed/ownership.rs
+- unchained-ai/model_id/Cargo.toml
+- unchained-ai/model_id/tests/ui.rs
+- worktree/cli/tests/list_output.rs
+- worktree/lib/src/git/program.rs
+- worktree/lib/src/remove/lifecycle/tests.rs
+docs_updated_during_phase_2:
+- tree-hugger/docs/symbol-reports/changed-files.md
+- worktree/docs/performance-testing.md
+docs_created_during_phase_2:
+- unchained-ai/docs/testing.md
+- worktree/docs/git-for-windows.md
+skills_files_updated_during_phase_2:
+- .claude/skills/os/SKILL.md
+- .claude/skills/os/windows-paths.md
+- .claude/skills/os/windows.md
+- .claude/skills/worktree/SKILL.md
+packages:
+- biscuit-visualized
+- claudine-cli
+- darkmatter
+- darkmatter-cli
+- git-wt-cli
+- messenger
+- model_id
+- test-toolkit
+- tree-hugger-cli
+- worktree
+source_files_during_phase_3: []
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/os/windows-paths.md
+- .claude/skills/os/wsl.md
 ---
 
 # Windows and WSL2 failure repair plan
@@ -59,20 +102,20 @@ Checkpoint: every original row has an identified repair task and its existing ev
 
 These tasks have disjoint implementation ownership and can run concurrently. Delegate bounded tasks to subagents, passing the non-interactive constraint and the applicable rules. Only the coordinator edits the log and shared workflow files. No subagent runs an area-wide suite.
 
-- [ ] **Repair tree fixtures**
+- [x] **Repair tree fixtures**
   - Apply rules 2–3 to index corruption and ownership. Run focused `tree-hugger-cli` filters, proving ordinary traversal still succeeds and foreign ownership still fails. Require Developer Mode or symlink privilege explicitly on Windows; missing privilege is a failure to provision this reproduction.
-- [ ] **Repair path assertions**
+- [x] **Repair path assertions**
   - Apply rules 4–6 in worktree lifecycle, claudine CLI, darkmatter CLI, and Darkmatter kind checks. Preserve complete message/path contracts and all positive and negative controls. Update drifted nearby comments in the same edit.
-- [ ] **Repair Git resolution**
+- [x] **Repair Git resolution**
   - Apply rules 7–8. Parameterize synthetic tests across all four prefixes, launcher/direct entries, ambiguous installations, git-bash.config, unknown shims, and missing files. Replace the existing direct-binary-is-None assertion with the new supported behavior.
   - Split launcher-environment parity from direct-environment parity: locate the sibling cmd launcher explicitly for the launcher test; compare direct mode with an unwrapped invocation of the found binary for direct mode. Exercise each PATH shape in a fresh subprocess because `windows::resolved` caches once per process. Retain the gix-prefix/child-hint tests and `worktree/cli/tests`' `list_output::a_listing_never_asks_git_for_its_exec_path` guarantee.
   - Perform a real local Git init/status operation on Windows for both entry shapes. Verify exit status, output, gix prefix, and environment capture. Use a current disposable Git for Windows installation containing ucrt64 for ucrt64 parity evidence; do not upgrade the shared host's installation. Update module docs and the area's Git execution topic documentation to cover both entry shapes.
-- [ ] **Repair compiler prerequisites**
+- [x] **Repair compiler prerequisites**
   - Apply rules 9–10. Coordinator owns the narrow workflow insertion, preserving unrelated edits. Add no capability gaps; expose the existing one through truthful package metadata. Document offline nested-build prerequisites in the unchained-ai testing topic page.
   - Reproduce UI execution from an extracted Windows archive with a fresh Cargo home: prerequisite fetch succeeds, then offline compile-pass and compile-fail cases execute. A missing crate must fail before any passing evidence is issued.
-- [ ] **Repair render compilation**
+- [x] **Repair render compilation**
   - Apply rule 11. Build and execute the containing Windows test binary, including the embedded font/CSS checks; retain its exact compile command and executed test listing.
-- [ ] **Repair descendant fixture**
+- [x] **Repair descendant fixture**
   - Capture messenger's original assertion, child status, stdout/stderr, and readiness state once on native Windows. Apply rule 12; helper mode is inert in normal test discovery and never recursively launches itself without an explicit role.
   - Bound every helper lifetime and ensure RAII cleanup on assertion failure. Replace the final fixed sleep with process-exit synchronization followed by the no-write assertion. Record elapsed duration and preserve fleet-lock, stop-reason, process-death, and refused-run assertions.
 
@@ -82,11 +125,11 @@ Checkpoint: targeted tests pass with real execution. Windows path groups run wit
 
 ### Wave 3
 
-- [ ] **Execute relocated archives**
+- [x] **Execute relocated archives**
   - After the prerequisite supplies usable archives, run `just cross-check <package> --os wsl <test-substring>` for each affected package. Use no Cargo build flags or target selectors, which switch modes or invalidate archive execution. Preserve the toolchain-free guest and unavailable builder target directory; retain producer/consumer manifest identities and archive execution logs.
   - Inventory failures by exact package/test identity and distinguish missing provisioning from test assertions. Apply rule 14 to runtime fixture, binary, and resolver-root failures, updating every caller of the repaired helper rather than adding fallback paths. Keep original expected behavior and assertions. Execute the failed filters again once repaired and record both outcomes.
   - A failure outside those relocation patterns remains a required failed acceptance item with full assertion, child status, and output in the log; do not suppress it, create an unscheduled follow-up, invent a capability gap, or label the overall fix complete. Finish all independent repair and validation tasks regardless.
-- [ ] **Document platform facts**
+- [x] **Document platform facts**
   - Update `.claude/skills/os/windows-paths.md` with short-name reproduction and slash-containing relative symlink behavior from S5. Update the Windows topic with launcher/direct Git distinctions and ucrt64 evidence; update the WSL topic with newly verified relocation facts. State current behavior directly without links to dated feature/fix directories.
   - Update package topic docs for public behavior changed by Git discovery. Keep READMEs at overview level. No dependency additions are planned; helper subprocesses use std and existing test infrastructure.
 

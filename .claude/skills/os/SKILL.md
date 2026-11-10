@@ -61,6 +61,7 @@ environment's cell and how to record an execution ban.
 | WSL guest red at provisioning with a 403 | anonymous GitHub API rate limit | [wsl.md](wsl.md) |
 | WSL guest "lost communication with the server", killed with no log | the runner agent died during provisioning | [wsl.md](wsl.md) |
 | Red only on `windows-latest`, a path in the message | 8.3 short-name TEMP (`RUNNER~1`) or verbatim `\\?\` spelling | [windows-paths.md](windows-paths.md) |
+| A symlink test red only on Windows | `/` in a relative target, or `..` read by name | [windows-paths.md](windows-paths.md) |
 | `wt remove` exits 3 on Windows naming `SearchProtocolHost.exe` | Windows Search held a file through the usage check's one 500 ms recheck (holds measured at ≤ 17 ms), or the first check also found another holder | [windows.md](windows.md#transient-system-holders-and-wt-remove) |
 | A shell test red only on native Windows, a recorded argument is `''` where `""` (empty) was expected | exact-approved bytes run under `cmd.exe` on native Windows, which has no single quotes; author the empty word as `""` there | [windows.md](windows.md#environment-and-processes) |
 | `clippy -D warnings` red only on Windows (`result_large_err`, `set_readonly(false)`, dead test helpers) | `PathBuf` is 8 bytes wider; `#[cfg(unix)]`-only callers; CI lints on Linux only | [windows.md](windows.md#clippy-findings-only-windows-produces) |
@@ -138,7 +139,7 @@ environment's cell and how to record an execution ban.
 | [linux.md](linux.md) | Ubuntu hook fixtures, shallow checkouts, `read_dir` order, `LANG=C`, wrap-dependent counts, `sysinfo` threads |
 | [wsl.md](wsl.md) | The archive-mode contract, faithful reproduction on `BUILD_WSL`, provisioning failures (the 403 rate limit, a lost runner), the guest's packages, Level 2 on WSL, the guest's network-share `~/.config`, which red step means what |
 | [windows.md](windows.md) | Environment and processes (handle inheritance, Job Objects, stack size, killing `git`, `python3` alias, batch arguments, Ctrl+C), POSIX tools shadowed on PATH inside recipes, current-directory locks, the `windows-latest` leg, compile evidence from macOS |
-| [windows-paths.md](windows-paths.md) | Verbatim `\\?\` paths, home and cache known folders, 8.3 short names, separators, `file://` URIs, Markdown escapes, junctions and reparse points |
+| [windows-paths.md](windows-paths.md) | Verbatim `\\?\` paths, home and cache known folders, 8.3 short names, separators, `file://` URIs, Markdown escapes, junctions and reparse points, symlink targets (`/` and by-name `..`) |
 | [windows-console.md](windows-console.md) | WezTerm on `build-win`, PowerShell output streams and encoding, a windowless ConPTY console for L2, attaching a console under nextest, which escape sequences survive the Windows OpenSSH server's conhost |
 | [macos.md](macos.md) | `/var` symlink, Docker for Linux evidence, L2 capture wedges, terminal-detection forks, perf triage, lldb work counters, shell-init and `cd` traps, the kache `DYLD_*` link failure |
 

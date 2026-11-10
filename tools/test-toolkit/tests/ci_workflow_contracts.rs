@@ -8119,16 +8119,22 @@ fn no_test_tier_carries_a_compile_in_place_path() {
         // The one Cargo invocation a tier may still make, and only under the
         // opt-in measurement dispatch: a consumer's compiler-work count must be
         // ZERO, which is the cleanest proof the cutover worked, and the tool
-        // that counts it has to exist to say so.
-        for line in executable_lines(&job).lines() {
-            let line = line.trim();
-            if !line.contains("cargo ") {
-                continue;
+        // that counts it has to exist to say so. The other exception compiles
+        // nothing: a toolchain-gated step may `cargo fetch --locked` the
+        // registry sources a suite's own nested, offline Cargo builds need.
+        for step in steps(&job) {
+            let toolchain_gated = step.contains("steps.cell.outputs.requires_toolchain == 'true'");
+            for line in executable_lines(&step).lines() {
+                let line = line.trim();
+                if !line.contains("cargo ") {
+                    continue;
+                }
+                let gated_fetch = toolchain_gated && line.starts_with("cargo fetch --locked ");
+                assert!(
+                    line.contains("just _ci_build_counter") || line.contains("cargo-nextest") || gated_fetch,
+                    "{header}: `{line}` is a compiler invocation in an archive consumer"
+                );
             }
-            assert!(
-                line.contains("just _ci_build_counter") || line.contains("cargo-nextest"),
-                "{header}: `{line}` is a compiler invocation in an archive consumer"
-            );
         }
     }
 }

@@ -7,7 +7,11 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2: [".github/workflows/_package-ci.yml", "biscuit-visualized/src/src/tests/embed_render_tests.rs", "claudine/cli/tests/l1/compose_schema_cli.rs", "darkmatter/cli/tests/l1/invalid_trigger_warnings.rs", "darkmatter/lib/tests/l1/kind_semantic_checks.rs", "messenger/lib/tests/research_refresh.rs", "tools/test-toolkit/tests/ci_workflow_contracts.rs", "tree-hugger/cli/src/changed.rs", "tree-hugger/cli/tests/changed/index_corruption.rs", "tree-hugger/cli/tests/changed/ownership.rs", "unchained-ai/model_id/Cargo.toml", "unchained-ai/model_id/tests/ui.rs", "worktree/cli/tests/list_output.rs", "worktree/lib/src/git/program.rs", "worktree/lib/src/remove/lifecycle/tests.rs"]
+docs_updated_during_phase_2: ["tree-hugger/docs/symbol-reports/changed-files.md", "worktree/docs/performance-testing.md"]
+docs_created_during_phase_2: ["unchained-ai/docs/testing.md", "worktree/docs/git-for-windows.md"]
+skills_files_updated_during_phase_2: [".claude/skills/os/SKILL.md", ".claude/skills/os/windows-paths.md", ".claude/skills/os/windows.md", ".claude/skills/worktree/SKILL.md"]
+packages: ["biscuit-visualized", "claudine-cli", "darkmatter", "darkmatter-cli", "git-wt-cli", "messenger", "model_id", "test-toolkit", "tree-hugger-cli", "worktree"]
 decisions_for_review:
   - |-
     Build-host roles. The plan recorded that only `BUILD_WSL=build-win` was
@@ -36,31 +40,156 @@ decisions_for_review:
     still required for the child status and output. Alternative: keep
     "intermittent" until the rig capture; that would understate a failure
     that has never passed on the hosted runner.
+  - |-
+    Where `requires-toolchain` lives (rule 9). The plan says to add
+    `[package.metadata.ci] requires-toolchain = true` to model_id. The CI
+    planner only accepts that key inside `[package.metadata.ci.tests]` (its
+    `CI_TEST_FIELDS`), and would reject it as an unknown field at the top
+    level. The two packages that already declare it use `.tests`. I put it
+    in `[package.metadata.ci.tests]`. The resolved plan then shows model_id
+    executing L1 on ubuntu, macOS and windows, and the WSL2 cell as the
+    governed `cargo_toolchain` accepted gap. There is no alternative short of
+    changing the planner's schema, which the plan did not ask for. Nothing
+    needs redoing.
+  - |-
+    Git for Windows 2.56 (`ucrt64`) and gix. The rule 7/8 repair recognizes
+    `ucrt64` and direct entry, and names the installation to gix through
+    `EXEPATH`. But the pinned gix (`=0.84.0` in six packages: sniff,
+    darkmatter, biscuit-file, content-policy, simplified-schema, worktree)
+    uses gix-path 0.12.x, which looks under `EXEPATH` only for
+    `clangarm64`/`mingw64`/`mingw32`. No 0.12.x release adds `ucrt64`
+    (checked through 0.12.6); gix-path 0.14 does, and only gix 0.89+ uses it.
+    On a ucrt64 install (the hosted runner) gix therefore still runs
+    `git --exec-path` once, which the `list_output` exec-path tests forbid.
+    Measured on the rig with a disposable PortableGit 2.56.0.windows.4:
+    5 worktree Windows tests fail on ucrt64 under both entries (the two
+    `named_installation` tests and the three `list_output` exec-path tests),
+    and all pass on mingw64. So the three original Git ledger rows stay red
+    on the hosted runner. I did not upgrade gix in this phase. A trial bump
+    to `=0.90.0` (reverted) showed gix replaced its typed error enums with
+    `gix_error::Error`/`Exn`: biscuit-file stops compiling at
+    `gix::discover::Error`, and 11 typed gix-error references exist across
+    the six packages. That is an API migration of its own, outside a
+    test-failure repair, and the plan says no dependency changes are
+    planned. The
+    alternatives are: (a) upgrade gix to 0.89+ workspace-wide, which is the
+    clean fix but a large change; (b) set `GIT_CONFIG_SYSTEM` for gix in
+    worktree, which mirrors gix internals and leaks into child Git unless
+    removed like `EXEPATH`; (c) accept the remaining ucrt64 failure until
+    (a). The rig results with a disposable 2.56 install are in the log. If
+    the reviewer picks (a), only the dependency bump and a re-run of the
+    worktree Windows tests are needed; the resolver code stays.
+  - |-
+    Leftover prefix directories make a Git installation ambiguous. The Git
+    resolver counts a prefix as installed when its directory exists, not
+    only when its `bin\git.exe` does, so `mingw64\` left beside a new
+    `ucrt64\` means plain `git`. gix-path also picks the prefix by
+    directory, so otherwise the `EXEPATH` hint could send gix to the
+    leftover's configuration. Alternative: require the binary, which accepts
+    more installations but risks the wrong system config. Redo: one
+    predicate in `launcher_layout` and its rejection row.
+  - |-
+    Messenger helper role passing (rule 12). The plan says the helper's roles
+    are identified through process-local environment. The runner takes an
+    argv only and its child inherits the test process's environment, so the
+    parent role travels as an extra libtest filter argument
+    (`barrier-parent-dir=<dir>`, which `--exact` matches to no test). Only
+    the grandchild's role uses an environment variable, set on that child
+    alone. Alternative: mutate the test process's environment before calling
+    the runner, which races with other tests in the same process. Redo: the
+    two constants and the parent branch of `barrier_process_helper`.
+  - |-
+    Tree-hugger ownership on Windows (rule 3 went further than planned). Rule
+    3 assumed component-joined link targets would clear `parent_traversal`;
+    on Windows 36 tests still failed. Windows reads `..` in a link target by
+    name, and normalizes absolute targets when the link is created. The
+    ownership walk in `tree-hugger/cli/src/changed.rs` modeled Unix physical
+    `..`, so on Windows an alias could be judged by one file while Windows
+    opened another, possibly in another checkout. I changed the product: on
+    Windows `..` returns to the walk's state before the last name, and every
+    spelled name is still checked. Normalizing the whole target first was
+    tried and rejected (48 failures: it erased names the policy must
+    check). The Windows fixtures for `directory-alias` and `external` now
+    spell targets that express the same scenario under Windows' rules, and
+    four new tests pin the per-OS reading. Alternatives: gate those shapes
+    to Unix (drops coverage and leaves the bypass), or keep the fixture
+    change only (leaves the bypass). Redo: the `cfg(windows)` block in
+    `checkout_path`, the two Windows target spellings, and the new tests.
+  - |-
+    Lifecycle refusal spelling depends on its source (rule 4). The rule asks
+    for the expected path from "the resolved parent plus the entry name".
+    That holds for entries Git or the link resolver reports. The worktree
+    admin record is named from the repository path the request was given,
+    in that spelling, and under the 8.3 TEMP the canonicalized expectation
+    failed (`a_worktree_record_rebuilt_after_the_question_is_refused`). So
+    `assert_changed` now takes the expected spelling, and callers pass
+    `resolved_spelling(..)` for Git-reported entries or the admin path as
+    held. Alternative: change the product to canonicalize admin paths, an
+    unrequested presentation change. Redo: the helper's callers.
+  - |-
+    New docs pages. The plan names an "area's Git execution topic" and an
+    "unchained-ai testing topic page"; neither existed. I created
+    `worktree/docs/git-for-windows.md` and `unchained-ai/docs/testing.md`
+    rather than append to unrelated pages. Redo: move the content if the
+    reviewer prefers another page.
+  - |-
+    WSL2 evidence source (Phase 3). The plan says to run the WSL2 legs
+    "after the prerequisite supplies usable archives". That prerequisite
+    (the Ubuntu archive-disk fix) is still not on main, so no hosted WSL2
+    cell can run. I did not wait. I ran `just cross-check <pkg> --os wsl`,
+    which builds the same `ubuntu-latest` record inside the WSL2 rig, hides
+    the builder's target directory, and runs it from a second checkout at
+    another path. That proves relocation, but it is weaker than CI in two
+    ways: the record is built in the guest, not on a hosted Ubuntu machine
+    and moved between machines, and the rig's guest has Cargo on PATH
+    (so model_id's toolchain gap is not visible there; I showed it by
+    hand instead). Alternatives: stop the phase until the prerequisite
+    merges, which blocks every later step; or treat the rig runs as the
+    final proof, which they are not. The hosted proof is still the nightly
+    after merge, collected in Phase 4. Nothing needs redoing.
+  - |-
+    Unfiltered WSL2 runs. The plan writes the command with a test-name
+    substring. I ran each changed package's whole L1 tier unfiltered (ten
+    packages, about 42 minutes on the idle rig), because the task is to
+    find relocation failures, and a filter limited to the edited tests could
+    not find one elsewhere in the package. None was found. Alternative:
+    filtered runs, which are faster but miss failures outside the edited
+    tests. Nothing needs redoing.
+  - |-
+    Phase 3 gates. The skip check is "the uncommitted working tree is
+    exactly this phase's changes", but Phase 2's edits are also still
+    uncommitted, so the prescribed command lists all ten packages. Run on
+    only the four files this phase changed, the calculator selects
+    `darkmatter` (two of its tests read skill Markdown). I ran the two
+    narrowed tests, then darkmatter's full `just test` and `just lint`. I did
+    not rerun the other seven areas' suites on macOS: this phase changed no
+    source, and Phase 2's gates ran on the same source. The ten WSL2 legs
+    also ran those packages' L1 tiers. Alternative: rerun all eight areas'
+    `just test` (about an hour, the same source). Redo: run those recipes if
+    the reviewer wants macOS gates repeated.
 message_to_agent: |-
-  Phase 1 changed no code. The full 141-row ledger, excerpts, and contract
-  clarifications are under "## Phase 1" in this log. Points for Phase 2:
-  (1) No BUILD_* variables are set in the session environment. Pass them per
-  command: BUILD_WIN=build-win (native Windows, PowerShell, Git 2.55 mingw64
-  only, CODING_DIR=B:\coding), BUILD_WSL=build-wsl (toolchain-free WSL2
-  guest), BUILD_LINUX=build-linux. The S5 alias build-win-native no longer
-  resolves. Always use ssh -o BatchMode=yes.
-  (2) No affected source file has changed since a816f1447, so no earlier
-  repair exists. Only .github/workflows/_package-ci.yml has moved (the
-  archive-disk prerequisite's edits on this branch); insert the rule 10
-  fetch step into the current file and keep those edits.
-  (3) The rule 11 fix must clear E0283 as well as E0284 (same line;
-  encode_unicode adds a Vec<u16> FromIterator impl on Windows).
-  parse::<u16>() fixes both.
-  (4) The messenger runner is messenger/lib/src/research/refresh/runner.rs.
-  The test failed deterministically in 4/4 hosted nightlies.
-  (5) 8.3 short-TEMP reproduction works only on the rig's C: volume: use a
-  long-named directory under C:\Users\ken\AppData\Local\Temp and its %~sI
-  spelling (S5). B: cannot produce short names.
-  (6) The ucrt64 parity evidence needs a disposable Git for Windows >=2.56
-  install. Do not upgrade the rig's shared install.
-  (7) WSL2 archives are still unavailable on main: the prerequisite is
-  implemented on this branch but not merged. Every nightly fails all 66 WSL2
-  cells on "Artifact not found".
+  Phase 3 ran all ten changed packages' L1 tiers on the WSL2 rig in
+  archive mode (Ubuntu record, builder target hidden, second checkout): 0
+  failures, so no relocation repair was needed. Evidence: "## Phase 3".
+  For Phase 4:
+  (1) Rigs, per invocation, ssh -o BatchMode=yes: BUILD_WIN=build-win,
+  BUILD_WSL=build-wsl, BUILD_LINUX=build-linux. The WSL rig clone is
+  ~/coding/bolt--main/rusty-biscuit.
+  (2) No rig observation was published; every leg tested uncommitted
+  work. Receipts need a committed, clean head.
+  (3) The rig's WSL consumer has cargo on PATH, so model_id ui passes
+  there. The CI guest's cargo_toolchain gap stays unmet (shown by hand:
+  exit 100 without cargo).
+  (4) Still unmet from Phase 2: the ucrt64 Git rows (gix >= 0.89 needed),
+  messenger on the hosted runner, and model_id on WSL2. The main nightly
+  can confirm WSL2 only once the archive-disk prerequisite merges.
+  (5) darkmatter `just lint` still stops at check-zed on this Mac
+  (wasm32-wasip2 missing); clippy is clean.
+source_files_during_phase_3: []
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: [".claude/skills/os/windows-paths.md", ".claude/skills/os/wsl.md"]
+
 ---
 
 # Implementation Log for 2026-11-06-windows-wsl-test-failures (4 phases)
@@ -488,3 +617,436 @@ Checkpoint met: every original row (141 identities plus the compile failure)
 has an identified repair rule, its existing reproduction evidence, a filter,
 and a reproduction environment. No contract above needed to change before
 edits begin.
+
+## Phase 2
+
+Phase 2 repairs the known Windows failures. Code edits were split across four
+parallel subagents (tree-hugger fixtures; path assertions in worktree,
+claudine and darkmatter; Git resolution; messenger fixture). Each verified
+only its own tests on macOS. The coordinator made the rule 9–11 edits and the
+workflow insertion, and ran all native-Windows evidence serially on
+`build-win`. Rigs used per invocation: `BUILD_WIN=build-win` (native Windows),
+with `BUILD_WSL=build-wsl` and `BUILD_LINUX=build-linux` declared but not needed
+in this phase.
+
+### Windows evidence setup
+
+- The S5 private clone `B:\coding\a3-spike-s5\rusty-biscuit` was reused, not
+  `just cross-check`, because cross-check cannot set `TEMP`. It ran first at
+  `a816f1447` (clean) for messenger's before-capture, then at a throwaway
+  snapshot commit `df882ddf0` of this working tree. The snapshot was built
+  with a temporary index (`GIT_INDEX_FILE`), shipped as a bundle, and checked
+  out detached with a clean tree. The local branch and index were not touched.
+- TEMP modes: long `C:\Users\ken\AppData\Local\Temp\a3-spike-long-temporary`
+  and its 8.3 spelling `C:\Users\ken\AppData\Local\Temp\A3-SPI~1`, the same
+  directory under two names. Both were set for `TEMP` and `TMP`, with
+  `NEXTEST_PROFILE=ci`, in native mode from PowerShell.
+
+### Rule 12 before-capture (messenger, native Windows rig, `a816f1447`)
+
+- `cargo nextest run -p messenger --features research --test research_refresh -E 'test(=a_timed_out_run_settles_its_descendants_before_releasing_the_fleet_lock)'`
+  at `a816f1447`: **PASS in 3.834 s** on the idle rig. The hosted failure
+  (4/4 nightlies, `research_refresh.rs:1467`, "the grandchild started") does
+  not reproduce here.
+- The exact grandchild the old test launched
+  (`cmd /D /C powershell -NoProfile -NonInteractive -EncodedCommand …`,
+  writing the PID and readiness file) was started three times directly on
+  the rig and timed to its readiness file: **0.239 s, 0.222 s, 0.209 s**.
+  Stdout was `child-ok`. Stderr was PowerShell's CLIXML progress record
+  "Preparing modules for first use", the module-cache step a fresh hosted
+  image pays on its first PowerShell start. That step runs inside the test's
+  2 s elapsed limit, which is consistent with the deterministic hosted
+  failure and an idle-rig pass. (`Start-Process` reported no exit code for
+  the redirected child.)
+- So the before/after contrast for rule 12 is only observable on the hosted
+  runner. The rig gives the after-run (below) and the child's timing and
+  output.
+
+### Tree-hugger ownership: an unplanned Windows product defect
+
+Rule 3 assumed that joining link targets component by component repairs
+`parent_traversal`. On Windows that cleared 108 of 144 ownership tests
+(0 passed before), but 36 still failed at snapshot `df882ddf0`:
+`external_parent_*` (12, product accepted the alias) and
+`directory_alias_parent_*` and `ordinary_directory_alias_parent_*` (24,
+fixture precondition "fixture returns to the unchanged outer identity").
+
+A probe on the rig used the same `std` calls as the fixture (symlinks in
+`…\a3-spike-long-temporary\p2-link-probe2`, with `bridge` a directory link to
+`inner\subdir`):
+
+| Link in `repo\` | `read_link` | Windows opens |
+|---|---|---|
+| `alias.rs → bridge\..\..\clean.rs` | verbatim | `OUTSIDE-CLEAN`, the file beside the repo (`..` read by name) |
+| absolute `…\foreign\subdir\..\..\repo\clean.rs` | `…\repo\clean.rs`, normalized **at creation** | `REPO-CLEAN` |
+| relative `..\foreign\subdir\..\..\repo\clean.rs` | verbatim | `REPO-CLEAN` |
+
+So Windows reads `..` in a link target by name, and normalizes an absolute
+target when the link is created. `tree-hugger/cli/src/changed.rs`'s
+`checkout_path` walked `..` physically (Unix semantics). On Windows an alias
+such as `bridge\..\nested\leaf.rs` was therefore judged by
+`inner\nested\leaf.rs` (clean) while Windows opened `nested\leaf.rs` in
+another checkout. That is an ownership-check bypass.
+
+- **First attempt (snapshot `dec19f989`, rejected):** normalize the whole
+  target by name before the walk. On the rig that produced 48 failures
+  (12 tests each of `nested_directory_parent`, `nested_file_parent`,
+  `dot_parent` and `recursive_file_alias_parent`). Erasing `inner\..` before
+  the walk drops the documented rule that a name in another checkout is
+  excluded even when `..` follows it.
+- **Fix:** the walk still visits and checks every spelled component. On
+  Windows only, `..` returns to the walk's state before the last name (the
+  link's own directory) instead of the physical parent of what that name
+  resolved to. Unix behavior is unchanged.
+- **Tests:** in `ownership.rs`, the `directory-alias` shapes use
+  `bridge\..\clean.rs` on Windows (the hops that return to `clean.rs` there)
+  and keep `bridge/../../clean.rs` on Unix. `external` uses the relative
+  spelling on Windows, because an absolute one loses its `..` at creation;
+  the Unix target is unchanged. New `parent_after_directory_link_untracked::*`
+  (4 tests) use one link, `bridge\..\nested\leaf.rs`: on Unix it opens a
+  clean file and is accepted, on Windows it opens another checkout's file and
+  is rejected. Under the old walk the Windows case was accepted, and the
+  `ordinary_directory_alias` cases errored on `inner\clean.rs`.
+- Docs: `tree-hugger/docs/symbol-reports/changed-files.md` now states the
+  per-OS reading with an example table.
+
+### Native Windows results: path groups (rules 2–6)
+
+Run by `p2-run.ps1` on `build-win` in the private clone, one `cargo nextest
+run` per group, `NEXTEST_PROFILE=ci`, `TEMP`/`TMP` set as listed. Each group
+ran in long and in 8.3 short mode. Logs are under
+`B:\coding\a3-spike-s5\{p2,p2b,p2c}-{long,short}\`.
+
+| Group (filter) | Snapshot | Long TEMP | Short TEMP (`A3-SPI~1`) |
+|---|---|---|---|
+| `worktree` (`test(remove::lifecycle) \| test(git::program)`) | `df882ddf0` | 92/92 pass | 80 pass, **1 fail** (`a_worktree_record_rebuilt_after_the_question_is_refused`, admin-record spelling; see decisions) |
+| `worktree` (same) | `dec19f989` (spelling fix) | 92/92 pass | **92/92 pass** |
+| `claudine-cli` (`test(compose_schema_cli)`) | `dec19f989` | 26/26 pass | 26/26 pass |
+| `darkmatter-cli` (`test(invalid_trigger_warnings)`) | `dec19f989` | 44/44 pass | 44/44 pass |
+| `darkmatter` (`test(kind_semantic_checks)`) | `dec19f989` | 15/15 pass | 15/15 pass |
+| `tree-hugger-cli --test changed` (`test(index_corruption) \| test(ownership)`) | `df882ddf0` (fixture only) | 36 ownership fail (see above) | same |
+| same | `dec19f989` (`by_name`, rejected) | 125 pass, 48 fail | not rerun |
+| same | `0b0284d3e` (final walk) | **173/173 pass** | see below |
+
+The snapshot `dec19f989` rows for worktree, claudine and darkmatter are final:
+none of those files changed afterwards.
+
+The final tree-hugger rows at `0b0284d3e`: long TEMP **173/173 pass**, short
+TEMP **173/173 pass** (`p2c-{long,short}`). That covers all 24
+`index_corruption` rows, all 96 ownership rows from the ledger, the 48 other
+ownership controls, and the 4 new `parent_after_directory_link_untracked::*`
+tests. On macOS, the same filter gives 173/173.
+
+### Native Windows results: rules 11 and 12 (snapshot `0b0284d3e`, long TEMP)
+
+- **Rule 11:** CI's exact command
+  `cargo test --no-run --message-format=json-render-diagnostics --package=biscuit-visualized --all-features --profile=test --target=x86_64-pc-windows-msvc`
+  exits 0, with no `E0283`/`E0284`. Then
+  `cargo nextest run -p biscuit-visualized --all-features --no-fail-fast`
+  gives **1163/1163 pass**, 1 skipped, including all 16
+  `tests::embed_render_tests::*` identities
+  (`B:\coding\a3-spike-s5\p2-rest\bv-{compile,run}.log`).
+- **Rule 12 (after):**
+  `cargo nextest run -p messenger --features research --test research_refresh --no-fail-fast`
+  gives **53/53 pass** on Windows (the 54th test is `cfg(unix)`). The
+  target test alone passed three times: 2.479 s, 2.449 s, 2.464 s (the old
+  version took 3.834 s at `a816f1447`). On macOS it takes 1.34–1.44 s alone,
+  and the binary gives 54/54.
+  - The time is the 2 s elapsed limit plus settlement. The readiness wait has
+    a 10 s bound and also ends if the runner returns first, so a starved
+    runner fails on "the grandchild started inside the elapsed-time limit",
+    not on a timeout.
+  - The hosted-runner contrast needs a nightly after merge; see the handoff.
+
+### Native Windows results: rules 7–8 (Git entry shapes, snapshot `0b0284d3e`)
+
+`p2-git.ps1 -Shape <shape>` puts one entry first on `PATH`, drops every
+other Git directory, and clears `EXEPATH`/`GIT_EXEC_PATH`/`MSYSTEM`. It then
+runs a real `git init` and `git status`, and
+`cargo nextest run -p worktree -E 'test(git::program)'` and
+`cargo nextest run -p git-wt-cli -E 'binary(list_output)'`. The ucrt64 rows
+use a disposable PortableGit 2.56.0.windows.4 (the hosted runner's version)
+extracted to `B:\coding\a3-spike-s5\portable-git-2.56\git`. It has
+`ucrt64\`, no `mingw64\`, and no `etc\git-bash.config`. The shared
+`C:\Program Files\Git` (2.55.0.windows.3, mingw64) was not changed.
+PortableGit's self-extractor hung in its post-install `git-bash.exe` with no
+desktop and was stopped; Git ran normally without that step.
+
+| Shape | `git init` / `status` | `git::program` | `list_output` |
+|---|---|---|---|
+| mingw64 launcher (`…\Git\cmd`) | exit 0 / `?? a.txt` | 35/35 | 10/10 |
+| mingw64 direct (`…\Git\mingw64\bin`) | exit 0 / `?? a.txt` | 35/35 | **10/10** (S5b: 3 failed here) |
+| ucrt64 launcher (`…\cmd`) | exit 0 / `?? a.txt` | 33/35 | 7/10 |
+| ucrt64 direct (`…\ucrt64\bin`) | exit 0 / `?? a.txt` | 33/35 | 7/10 |
+
+The five ucrt64 failures are the same under both entries:
+
+- `git::program::tests::entries::through_the_{launcher,direct_binary}_the_named_installation_is_the_prefix_git_reports`
+  at `program.rs:465`: gix reports the system prefix as
+  `…\portable-git-2.56\git` (the top), while Git reports
+  `…/git/ucrt64`. gix-path 0.12 does not recognize `ucrt64` under `EXEPATH`.
+- `list_output::a_listing_never_asks_git_for_its_exec_path` and its
+  launcher-first and direct-first variants, at `list_output.rs:135`: gix
+  still runs `git --exec-path`.
+
+So on the hosted runner's layout, the three original Git ledger rows are
+**not cleared by the resolver repair alone**; they need gix-path ≥ 0.14
+(gix ≥ 0.89). See the decision item and the follow-up below.
+
+### Native Windows results: rules 9–10 (model_id, snapshot `0b0284d3e`)
+
+`p2-model-id.ps1` mirrors the CI consumer:
+
+1. Producer: `cargo nextest archive -p model_id --archive-file …\model_id.tar.zst`
+   with the normal Cargo home → exit 0.
+2. Consumer, **fresh `CARGO_HOME`**, `CARGO_NET_OFFLINE=true`, no fetch:
+   `cargo-nextest nextest run --archive-file … --workspace-remap <clone> -E 'test(=ui)'`
+   → **FAIL in 0.373 s** with `no matching package named proc-macro2 found …
+   offline mode`, the same error as hosted job 128082099316. A missing crate
+   fails; it is not reported as a pass.
+3. Workflow step, same fresh home:
+   `cargo fetch --locked --manifest-path unchained-ai/model_id/Cargo.toml` → exit 0.
+4. Same consumer command, offline → **PASS in 10.308 s**. Trybuild compiled
+   the `tests/pass` cases and checked the `tests/fail` cases against their
+   `.stderr` files.
+
+On macOS: `ui` passes (9.1 s). With `PATH=/usr/bin:/bin` (no `cargo`), the
+binary fails at `ui.rs:8` with "the trybuild UI tests need `cargo` on PATH",
+where it used to print a skip and pass. The resolved plan
+(`affected_scope.py --event workflow_dispatch --resolved-plan`) shows model_id
+L1 executing on ubuntu, macOS and windows, and wsl2-ubuntu as
+`state: accepted-gap` on `cargo_toolchain`. The gap record (owner, expiry)
+was not edited.
+
+Workflow: the fetch step sits right after "Set up the pinned Rust
+toolchain" in `_package-ci.yml`'s `test` job. It is gated on
+`matrix.package == 'model_id' && steps.cell.outputs.requires_toolchain == 'true'`
+and appends `CARGO_NET_OFFLINE=true` to `$GITHUB_ENV` for the later steps.
+The archive-disk edits already on this branch were kept.
+
+The test-toolkit gate then failed
+`ci_workflow_contracts::no_test_tier_carries_a_compile_in_place_path`, which
+forbids any `cargo ` line in an archive consumer apart from the counter and
+nextest. The contract now also allows `cargo fetch --locked …`, but only in
+a step gated on `requires_toolchain`: fetching compiles nothing. Every other
+`cargo` line, and an ungated fetch, still fail it.
+
+The `ui` test takes 9–10 s, over the 5 s L1 budget. That is unchanged by
+this fix (it ran the same nested builds before, where Cargo existed); it is
+inherent to trybuild. It was not renamed `slow_`, because the WSL2 archive
+cell is already a governed gap and the hosted cells must execute it.
+
+### Requirement-to-test mapping
+
+| Changed behavior | Boundary / fidelity | Tests (targeted) | Windows evidence |
+|---|---|---|---|
+| Rule 2: index-corruption diagnostic names the canonical repo path | CLI spawn, filesystem (F3, L1) | `tree-hugger-cli::changed index_corruption::*` (25) | 25/25 long and short TEMP |
+| Rule 3 + product walk: link targets joined by name; Windows `..` read by name; every name still checked | CLI spawn, real symlinks (F3, L1) | `ownership::*` (144, including outside-owner rejection and ordinary-directory acceptance controls) and new `ownership::parent_after_directory_link_untracked::{functions,types,symbols,classes}` | 148/148 long and short; the new tests are Windows-rejected and Unix-accepted for the same link |
+| Rule 4: refusal names the entry in its source's spelling | library, real Git (F2, L1) | `worktree remove::lifecycle::tests::*` (59, including admin-record and link-replacement) | 92/92 (with `git::program`) long and short |
+| Rule 5a: plan route in the launch spelling | CLI spawn (F3, L1) | `claudine-cli compose_schema_cli::*` (26) | 26/26 long and short |
+| Rule 5b: native trigger spelling in both warnings | CLI spawn (F3, L1) | `darkmatter-cli invalid_trigger_warnings::*` (44) | 44/44 long and short |
+| Rule 6: definition label equals the copy's native path | library (F2, L1) | `darkmatter kind_semantic_checks::*` (15) | 15/15 long and short |
+| Rules 7–8: launcher and direct entry, four prefixes, environment per entry | path logic on every OS (F1); real Git for Windows (F3) | `worktree git::program::tests::*` (12 recognized + guard + 15 plain-git rows), Windows `entries::*` (4 parents), `git-wt-cli list_output` (10 on Windows) | mingw64 launcher and direct 35/35 + 10/10; ucrt64 33/35 + 7/10 (gix-path gap) |
+| Rule 9: `ui` fails without `cargo`; `requires-toolchain` declared | test binary, planner | `model_id::ui ui`; resolved plan | no-cargo fail on macOS; plan shows the WSL2 gap |
+| Rule 10: fetch, then offline nested builds | archive consumer, fresh Cargo home (F3) | `model_id::ui ui` from an archive; `test-toolkit ci_workflow_contracts::no_test_tier_carries_a_compile_in_place_path` | no-fetch FAIL (proc-macro2), fetch, then PASS |
+| Rule 11: `parse::<u16>()` | compile on the MSVC target | CI's exact `cargo test --no-run` command; `biscuit-visualized` full run | compile exit 0; 1163/1163, 16 embed_render |
+| Rule 12: native helper roles, bounded readiness, no fixed sleep | real processes (F3, L1) | `messenger::research_refresh a_timed_out_run_settles_its_descendants_before_releasing_the_fleet_lock` (+ inert `barrier_process_helper`) | 3/3 (2.45–2.48 s); binary 53/53 |
+
+The input robustness matrix does not apply (plan rule 15). The only
+configuration edit is one boolean key that the existing planner validator
+already parses.
+
+### Phase 2 gates (macOS, serial, after all edits; no subagent running)
+
+| Area | `just test` | `just lint` |
+|---|---|---|
+| tree-hugger | 5827/5827 | pass |
+| worktree | 1510 pass, 13 skipped | pass |
+| unchained-ai | 367 pass, 1 skipped | pass |
+| biscuit-visualized | 1163 pass, 1 skipped | pass |
+| messenger | 784 pass, 2 skipped | pass |
+| tools (test-toolkit) | first run: 1 fail (the compile-in-place contract, see rules 9–10); after the contract change: **526/526** | pass |
+| claudine | 11818 pass, 15 skipped | pass |
+| darkmatter | 13051 pass, 10 skipped | clippy passes for all 4 packages; the recipe exits 1 at its last step `check-zed`, because the `wasm32-wasip2` target is not installed on this host (pre-existing environment gap, unrelated to this change) |
+
+No package outside the changed areas depends on changed library code:
+`worktree`'s only dependent is `git-wt-cli` (tested above), and
+`tree-hugger-cli` is a binary. No test failed for load reasons; no rerun of
+a wider suite was needed.
+
+Scope calculator, run after all edits:
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+gave `packages: [biscuit-visualized, claudine-cli, darkmatter, darkmatter-cli, git-wt-cli, messenger, model_id, test-toolkit, tree-hugger-cli, worktree]`
+and `change_class: package`, so the gates were required and ran.
+
+### Remaining and unmet items after Phase 2
+
+- **ucrt64 Git rows (3 ledger rows: `program.rs:285`, `program.rs:310`,
+  `list_output.rs:94`):** these pass on mingw64 in both entry shapes, but on
+  the hosted runner's ucrt64 layout 5 tests still fail until gix-path ≥ 0.14
+  (gix ≥ 0.89, an error-API migration across six packages). This item is
+  unmet.
+- **Messenger on the hosted runner:** the rig cannot reproduce the hosted
+  failure (the old test passed there). Only a post-merge nightly shows the
+  fix there.
+- **model_id on WSL2:** unchanged governed `cargo_toolchain` gap; unmet by
+  design, not a pass.
+- **WSL2 archive execution:** Phase 3; the archive prerequisite is still
+  unmerged.
+- Rig state left behind: the private clone `B:\coding\a3-spike-s5\rusty-biscuit`
+  (detached at throwaway snapshot `0b0284d3e`), its logs, and the disposable
+  `portable-git-2.56`. The clone falls under cross-check's standalone-clone
+  pruning. No shared install or standing clone was touched. The local
+  throwaway ref `refs/tmp/p2snap` was deleted.
+
+## Phase 3
+
+Phase 3 runs the changed packages' Ubuntu-built nextest archives on the WSL2
+rig with the builder's target directory hidden (`just cross-check <pkg> --os
+wsl`), inventories what fails, and documents the platform facts. Rig, per
+invocation: `BUILD_WSL=build-wsl` (WSL2 Ubuntu, kernel
+`6.18.33.2-microsoft-standard-WSL2`, idle at start, load 0.00).
+
+### Archive prerequisite at the start of Phase 3
+
+- `main` still has no usable WSL2 archives: `2026-11-06-ubuntu-archive-disk`
+  is on this branch only (Phase 1 "Archive prerequisite status"; unchanged).
+  So no hosted `wsl2-ubuntu` cell can run yet, and no hosted WSL2 test
+  identity exists to inventory.
+- The rig path does not depend on that prerequisite.
+  `just cross-check <pkg> --os wsl` builds the plan's `ubuntu-latest` record
+  inside the WSL2 guest (same build key CI's Linux producer writes), moves it
+  to a consumer-owned directory, checks out a **second** worktree at another
+  path, **hides the producer's `target`** (`mv target target.hold`), verifies
+  the record with `just _ci_build_verify`, lists the expected tests, and runs
+  the canonical `just _test <pkg>` recipe in archive mode
+  (`--archive-file … --workspace-remap <second checkout>`,
+  `BISCUIT_NEXTEST_BIN='cargo-nextest nextest'`). That is the plan's
+  relocation check: a builder path baked in at compile time cannot resolve.
+  No Cargo build flags or target selectors were passed.
+
+### Relocated archive runs (WSL2 rig, 2026-11-09)
+
+Command, once per package, serially, unfiltered (the whole L1 tier, not
+just the edited tests):
+`BUILD_WSL=build-wsl ./scripts/cross-check.sh --os wsl <pkg>` (the script
+behind `just cross-check`). Base `origin/feat/fuzz-infra-release`
+(`ed0688acc`) plus this working tree's 267 changed files as a throwaway
+commit. Every remote worktree was clean (`cross-check-dirty: 0`), and every
+leg reported `cross-check-manifest-exit: 0`, so each run listed its
+expected tests first.
+
+| Package | Archive key (producer → consumer) | Digest | Remote tree | Result | Leg time |
+|---|---|---|---|---|---|
+| messenger | `f9f30aa3548e28da` ubuntu-latest → wsl2-ubuntu | `599fcaadbbc4179c` | `25f7042fc` | 683 passed, 2 skipped | 341 s |
+| worktree | `659fd1aa01bfff12` | `c5cebd5eddaa99e8` | `90df205f5` | 898 passed, 0 skipped | 173 s |
+| git-wt-cli | `53356c6cd0f2801a` | `21d90728698ae43d` | `90df205f5` | 614 passed, 55 skipped | 231 s |
+| tree-hugger-cli | `e71470fea44fefb2` | `3ddff90e58a5f415` | `90df205f5` | 2746 passed, 31 skipped | 187 s |
+| model_id | `49816661be381944` | `f6c6bc2652be7df8` | `90df205f5` | 2 passed (see below) | 64 s |
+| biscuit-visualized | `f661ea90d91b100f` | `4b4b842b050ec7fe` | `90df205f5` | 1166 passed, 1 skipped | 169 s |
+| test-toolkit | `edb3be5b5a795fc8` | `265882b49a5d64ac` | `90df205f5` | 525 passed, 4 skipped | 76 s |
+| claudine-cli | `ad4e53feb837b325` | `f9363ab766d21014` | `90df205f5` | 4951 passed, 306 skipped | 698 s |
+| darkmatter | `91bcfbd8c5e6c9b2` | `cae666c0c3477cb6` | `90df205f5` | 9812 passed, 66 skipped | 307 s |
+| darkmatter-cli | `ae44092af3e39ad5` | `b69c271b4db8ddb7` | `90df205f5` | 1489 passed, 69 skipped | 260 s |
+
+- messenger's tree differs from the rest only because this log and the
+  skill pages changed between its leg and the others; no source differed.
+- Skipped counts are tests the L1 recipe's filter leaves out (other tiers'
+  markers). They are not failures. I did not audit them one by one, because
+  each leg's expected-test listing exited 0.
+- Every leg declined to publish a `wsl2-ubuntu` observation ("the remote
+  tested tree … is not this head's tree 7e1167faa"), as designed: it
+  tested uncommitted work. These are targeted rig evidence, not receipts.
+
+**Failure inventory: none.** No test failed in any of the ten packages, so
+rule 14 had nothing to repair: no `bin_exe!`, `manifest_dir!()`, or
+resolver-root change was needed, and no helper or caller was edited. No
+failure fell outside the relocation patterns either. There is therefore no
+"before"/"after" pair to record for any WSL2 identity.
+
+### model_id on the rig is not the CI guest
+
+The `ui` PASS above is **not** evidence for the WSL2 cell. The rig's guest
+builds its own archive, so the consumer has `~/.cargo/bin` on `PATH`. CI's
+guest has no Cargo, and the planner renders that cell as the governed
+`cargo_toolchain` accepted gap (Phase 2). To show what the guest sees, the
+same archive was run by hand in the rig clone (`a32592a55`, clean), with
+the target hidden and a fresh `--extract-to` directory:
+
+- `env PATH=<dir with only cargo-nextest>:/usr/bin:/bin CARGO_NET_OFFLINE=true cargo-nextest nextest run --archive-file … --workspace-remap … --extract-to …`
+  → **exit 100**, `model_id::ui ui` FAIL: "the trybuild UI tests need
+  `cargo` on PATH: Err(Os { code: 2, kind: NotFound, … })". The unit test
+  passed. A toolchain-free consumer fails explicitly, with no early-return
+  pass (rule 9).
+- With the login `PATH` (Cargo present) and a fresh extract directory:
+  **exit 0**, `ui` PASS in 6.19 s (SLOW over 5 s, as on macOS and Windows).
+- A first attempt at the second run reused the first run's extract
+  directory and reported `ui` FAIL with exit 96; the rerun in a fresh
+  directory passed. That came from how I ran it (a reused
+  `--extract-to`), not from the product, and it went into `wsl.md`.
+
+The WSL2 model_id gap stays **unmet**, as before. It closes only with a
+changed execution contract (Cargo in the guest, or a native WSL2 build).
+
+### Documentation
+
+- `.claude/skills/os/windows-paths.md` item 6: the 8.3 short-name
+  reproduction recipe from S5 (short names exist only on C:; the rig's own
+  TEMP has no distinct short form, so create a long-named directory; run
+  from a private PowerShell clone because cross-check cannot set `TEMP`;
+  pass-long/fail-short identifies the trap). The symlink-target section
+  from Phase 2 was not duplicated.
+- `.claude/skills/os/wsl.md`: `cross-check --os wsl` is not toolchain-free
+  (a `requires-toolchain` suite passes there but is a gap in CI) and how to
+  reproduce the guest's view; use a fresh `--extract-to` per manual run.
+- The Windows topic's launcher/direct Git and ucrt64 facts
+  (`.claude/skills/os/windows.md`) and the package topic
+  `worktree/docs/git-for-windows.md` were written in Phase 2 and checked
+  against the code; nothing in them drifted. No README needed a change, and
+  no dependency was added.
+
+### Requirement-to-test mapping (Phase 3)
+
+| Requirement | Evidence | Result |
+|---|---|---|
+| Ubuntu-built archives run on WSL2 with builder paths unavailable | the ten `cross-check --os wsl` legs above (unfiltered L1, target hidden, second checkout) | 22,886 tests passed, 0 failed |
+| Failures inventoried by package/test identity | same legs | none to inventory |
+| Rule 14 repairs (bin_exe!, manifest_dir!, resolver root) | not needed; no failure | no code changed |
+| model_id gap is not reported as a pass | manual no-cargo archive run in the guest | `ui` FAIL at its prerequisite, exit 100 |
+
+No new tests were added in this phase. No code changed, and there was no
+failure to write a regression test for. The input robustness matrix does
+not apply (rule 15).
+
+### Phase 3 gates (macOS, after all edits, no other job running)
+
+- Scope calculator, the prescribed command over the whole uncommitted
+  tree: `packages` = all ten Phase 2 packages, `change_class: package`
+  (Phase 2's edits are still uncommitted). Over this phase's four files
+  alone: `packages: [darkmatter]`, `change_class: package`; the two skill
+  pages are test inputs that the resolved plan narrows to
+  `shipped_schema_corpus::shipped_markdown_inline_schemas_parse_passively`
+  and `…::shipped_markdown_named_type_references_resolve`. Gates required.
+- Narrowed tests: 2/2 pass.
+- darkmatter `just test`: **13051 passed** (2 slow), 10 skipped, exit 0.
+- darkmatter `just lint`: clippy clean for darkmatter, darkmatter-cli,
+  darkmatter-lsp, and zed-dmls-cli. The recipe then exits 1 at
+  `check-zed`, because `wasm32-wasip2` is not installed on this Mac (the
+  same gap Phase 2 recorded). Cargo also printed a harmless
+  "failed to auto-clean cache data … Permission denied" warning about one
+  file in `~/.cargo/registry`.
+- The other areas were not rerun on macOS, because no source changed since
+  their Phase 2 gates (see `decisions_for_review`). Their L1 tiers did run
+  on WSL2 above.
+
+### Remaining and unmet items after Phase 3
+
+- **Hosted WSL2 confirmation:** blocked until the archive-disk prerequisite
+  is on `main`; Phase 4 collects nightlies.
+- **model_id on WSL2:** governed `cargo_toolchain` gap, unmet by design.
+- **ucrt64 Git rows** and **messenger on the hosted runner:** unchanged
+  from Phase 2.
+- Rig state: the WSL clone `~/coding/bolt--main/rusty-biscuit` sits at the
+  last throwaway commit `a32592a55` with `target` restored; the manual
+  run's temp files were removed. Cross-check retired the unused clone
+  `shazam--feat-better-research` on its own (unused 3 days).
