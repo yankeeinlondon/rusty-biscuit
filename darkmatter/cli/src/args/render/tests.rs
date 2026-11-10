@@ -158,7 +158,7 @@ fn a_non_unicode_token_is_kept_native() {
     use std::os::windows::ffi::OsStringExt as _;
     let native = OsString::from_wide(&[0x64, 0xD800, 0x2E, 0x6D, 0x64]);
     let cli = Cli::try_parse_from([OsString::from("md"), native.clone()]).expect("a native token parses");
-    assert_eq!(cli.render.args, [native.clone()]);
+    assert_eq!(cli.render.args, std::slice::from_ref(&native));
     let input = classify_render_args(&cli.render.args, &cli.render.literal_args).unwrap();
     assert_eq!(input.input.map(PathBuf::into_os_string), Some(native));
 }
