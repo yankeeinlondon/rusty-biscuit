@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-11-09
-phase: 8
+phase: 9
 agent: claude/sonnet
 yolo: true
 packages:
@@ -162,19 +162,6 @@ source_files_during_phase_7:
 - claudine/cli/src/completion/schema_completion/keys.rs
 - claudine/cli/src/completion/schema_completion/tests.rs
 - claudine/cli/tests/l1/completion_committed_prompt_schema.rs
-docs_updated_during_phase_8:
-- simplified-schema/docs/topics/language/slots.md
-- darkmatter/docs/topics/schemas/schema-slots.md
-- darkmatter/docs/topics/schemas/authoring-schemas.md
-- darkmatter/docs/topics/schemas/dmls-schema-support.md
-- darkmatter/dmls/docs/autocomplete.md
-- darkmatter/dmls/docs/hover.md
-- claudine/docs/topics/completions/shell-completions.md
-skills_files_updated_during_phase_8:
-- .claude/skills/simplified-schema/SKILL.md
-- .claude/skills/darkmatter/schema.md
-- .claude/skills/darkmatter/dmls.md
-- .claude/skills/darkmatter/cli.md
 docs_updated_during_phase_1:
 - simplified-schema/docs/topics/language/slots.md
 - simplified-schema/lib/tests/fixtures/dynamic_slots/README.md
@@ -223,6 +210,145 @@ docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
 - .claude/skills/claudine/topics/execution-flow.md
 - .claude/skills/darkmatter/schema.md
+source_files_during_phase_8:
+- simplified-schema/lib/tests/l1/quote_the_slot.rs
+docs_updated_during_phase_8:
+- simplified-schema/docs/topics/language/slots.md
+- darkmatter/docs/topics/schemas/schema-validation.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/simplified-schema/templates.md
+- .claude/skills/simplified-schema/schema-documents.md
+- .claude/skills/simplified-schema/build-and-guards.md
+- .claude/skills/darkmatter/cli.md
+source_code:
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/recursive.rs
+- simplified-schema/lib/src/schema/view.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/grammar/slot_tests.rs
+- simplified-schema/lib/src/simplified/lint.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/narrowing.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/slots.rs
+- simplified-schema/lib/src/slots/substitute.rs
+- simplified-schema/lib/tests/fixtures/dynamic_slots/template-constraints.yaml
+- simplified-schema/lib/tests/l1/declaration_grammar.rs
+- simplified-schema/lib/tests/l1/dynamic_slots.rs
+- simplified-schema/lib/tests/l1/schema_object.rs
+- darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slots.rs
+- darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+- claudine/cli/src/argv/partition.rs
+- claudine/cli/src/argv/partition/tests.rs
+- claudine/cli/src/completion/engine/mod.rs
+- claudine/cli/src/completion/engine/tests.rs
+- claudine/cli/src/completion/schema_completion/candidates.rs
+- claudine/cli/src/completion/schema_completion/tests.rs
+- claudine/cli/src/completion/setter_value.rs
+- claudine/cli/tests/common/owned_value_options.rs
+- claudine/cli/tests/l1/completion_cli.rs
+- claudine/cli/tests/l1/completion_ownership.rs
+- claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/schema_files.rs
+- darkmatter/lib/src/markdown/schemas/slots/cache.rs
+- darkmatter/lib/src/markdown/schemas/slots/codes.rs
+- darkmatter/lib/src/markdown/schemas/slots/evaluator.rs
+- darkmatter/lib/src/markdown/schemas/slots/host.rs
+- darkmatter/lib/src/markdown/schemas/slots/mod.rs
+- darkmatter/lib/src/markdown/schemas/slots/pending_report.rs
+- darkmatter/lib/src/markdown/schemas/slots/session.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_schema_files.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_template_triggers.rs
+- darkmatter/lib/tests/l1/dynamic_schema_slot_template_types.rs
+- claudine/gen/src/schema_compat.rs
+- claudine/lib/src/composition/schema/classify.rs
+- darkmatter/cli/src/commands/schema/assignment.rs
+- darkmatter/dmls/src/overlay/named_types.rs
+- darkmatter/dmls/src/overlay/suggestions.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/lib/src/lifecycle/schema_projection.rs
+- darkmatter/lib/src/markdown/compose/context/catalog.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+- darkmatter/lib/src/markdown/frontmatter.rs
+- darkmatter/lib/src/markdown/schemas/completion.rs
+- darkmatter/lib/src/markdown/schemas/detect.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+- simplified-schema/lib/src/completion.rs
+- simplified-schema/lib/src/envelope.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/file_match.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/frontmatter_shape.rs
+- simplified-schema/lib/src/phase.rs
+- simplified-schema/lib/src/resolve/graph.rs
+- simplified-schema/lib/src/schema/mod.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/definitions.rs
+- simplified-schema/lib/src/simplified/query.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/src/simplified/subtype.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/src/slots/unquoted.rs
+- simplified-schema/lib/tests/fixtures/dynamic_slots/template-types/properties.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/template-types/status-type.yaml
+- simplified-schema/lib/tests/l1/quote_the_slot.rs
+- simplified-schema/lib/tests/l1/template_types_passive.rs
+- simplified-schema/lib/src/slots/host.rs
+- simplified-schema/lib/src/slots/pending.rs
+- simplified-schema/lib/src/slots/reads.rs
+- simplified-schema/lib/src/slots/template_type.rs
+- simplified-schema/lib/src/resolve/select.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/tests/l1/template_type_results.rs
+- simplified-schema/lib/tests/l1/template_type_imports.rs
+- simplified-schema/lib/tests/l1/template_type_refusals.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/args/target.rs
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slots.rs
+- darkmatter/cli/tests/l1/dynamic_schema_slot_template_types.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/tests/l1/schema_slots_editor.rs
+- claudine/cli/src/completion/schema_completion/mod.rs
+- claudine/cli/src/completion/schema_completion/keys.rs
+- claudine/cli/tests/l1/completion_committed_prompt_schema.rs
+documentation:
+- simplified-schema/docs/topics/language/slots.md
+- simplified-schema/lib/tests/fixtures/dynamic_slots/README.md
+- darkmatter/docs/topics/schemas/schema-slots.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- claudine/docs/topics/completions/shell-completions.md
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/execution-flow.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/docs/topics/schemas/schema-validation.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+completed_phase: 8
+implemented: true
 ---
 
 # Template types — implementation plan
@@ -927,19 +1053,19 @@ and one invalid document).
 
 ### Wave 15 — Documentation (parallel; every page written for a developer new to the repo, with a worked example per rule and a Mermaid diagram for the resolution flow and for the read-approval flow)
 
-- [ ] **SimplifiedSchema docs** — `simplified-schema/docs/topics/language/slots.md`
+- [x] **SimplifiedSchema docs** — `simplified-schema/docs/topics/language/slots.md`
     - Replace "Whole Types (Planned)" with **Template Types**: the grammar and suffix, the **slot-position table** (same text the diagnostics print: allowed rows and each refused row, R6), the result shape table (R8) and failure table, defining-file import bases, reachable-slot refusal and pattern limits, the host's `template_reads` hooks, what a pending template type reports through each operation (extend "What a Template Reports"), and `PendingSchema`/`omit` behavior. Remove every "planned" marker.
-- [ ] **Darkmatter docs** — `darkmatter/docs/topics/schemas/schema-slots.md`, `authoring-schemas.md`, `schema-triggers.md` (trigger payload decision), `schema-validation.md`, the `md schema validate` command reference page under `darkmatter/docs/` (find with `rg -l "schema validate" darkmatter/docs`: schema-file mode now resolves, no `slots` count, exit 1 when unavailable), `dmls-schema-support.md`, `darkmatter/dmls/docs/autocomplete.md` and `hover.md` ("type pending", stale marking). Cache and grants: document that returned imports are computed targets asked at resolution time.
-- [ ] **Claudine docs** — `claudine/docs/topics/completions/shell-completions.md`: replace the "switched off for every property" description with the new behavior, the table of name vs value requests, and the non-prompting grants; "setter value" vocabulary per R2.
-- [ ] **READMEs** — touch `simplified-schema/README.md`, `darkmatter/README.md`, `claudine/README.md` only where an example or description changed (check with `rg -n "slot|whole" <README>`).
-- [ ] **Skills** — `.claude/skills/simplified-schema/SKILL.md`, `.claude/skills/darkmatter/schema.md`, `dmls.md`, `cli.md`: names, positions, host hooks, validate-schema-file behavior. Keep `SKILL.md` under 200 lines with links.
-- [ ] **Docs never name this feature**: `rg -n "template-types" -g '!**/features/**' -g '!**/fixes/**'` prints nothing.
+- [x] **Darkmatter docs** — `darkmatter/docs/topics/schemas/schema-slots.md`, `authoring-schemas.md`, `schema-triggers.md` (trigger payload decision), `schema-validation.md`, the `md schema validate` command reference page under `darkmatter/docs/` (find with `rg -l "schema validate" darkmatter/docs`: schema-file mode now resolves, no `slots` count, exit 1 when unavailable), `dmls-schema-support.md`, `darkmatter/dmls/docs/autocomplete.md` and `hover.md` ("type pending", stale marking). Cache and grants: document that returned imports are computed targets asked at resolution time.
+- [x] **Claudine docs** — `claudine/docs/topics/completions/shell-completions.md`: replace the "switched off for every property" description with the new behavior, the table of name vs value requests, and the non-prompting grants; "setter value" vocabulary per R2.
+- [x] **READMEs** — touch `simplified-schema/README.md`, `darkmatter/README.md`, `claudine/README.md` only where an example or description changed (check with `rg -n "slot|whole" <README>`).
+- [x] **Skills** — `.claude/skills/simplified-schema/SKILL.md`, `.claude/skills/darkmatter/schema.md`, `dmls.md`, `cli.md`: names, positions, host hooks, validate-schema-file behavior. Keep `SKILL.md` under 200 lines with links.
+- [x] **Docs never name this feature**: `rg -n "template-types" -g '!**/features/**' -g '!**/fixes/**'` prints nothing.
 
 ### Wave 16 — Final verification (sequential)
 
-- [ ] **Terminology and drift** — rerun the Phase 1 guard; confirm no comment still says "value slot", "whole-type slot", or "planned" for template types; fix comment drift in every symbol this plan changed (CLAUDE.md "Code Comment Quality": code is right, comment is wrong).
-- [ ] **Corpus and regression** — keep the passive shipped-schema corpus (`darkmatter/lib/tests/l1/shipped_schema_corpus.rs`) and static-schema regression checks green; static schemas take no new path.
-- [ ] **Full runs** — `just test` and `just lint` in `simplified-schema`, `darkmatter`, `claudine`; `just test-minimal` in `simplified-schema`; from the repo root `just ci-local --plan` to confirm the affected-scope plan names only expected packages (informational; nothing is pushed).
-- [ ] **Implementation log** — write `implementation-log.md` beside this plan: the R27 audit (count and each wildcard disposition), anything built that a human will want to judge (the "quote the slot" wording, refusal sentences, the all-or-nothing Claudine resolution, whole-template resolve for completion), and every departure from the spec. The terminal state is "implementation complete, ready for review"; do not move the directory, do not run `just complete`.
+- [x] **Terminology and drift** — rerun the Phase 1 guard; confirm no comment still says "value slot", "whole-type slot", or "planned" for template types; fix comment drift in every symbol this plan changed (CLAUDE.md "Code Comment Quality": code is right, comment is wrong).
+- [x] **Corpus and regression** — keep the passive shipped-schema corpus (`darkmatter/lib/tests/l1/shipped_schema_corpus.rs`) and static-schema regression checks green; static schemas take no new path.
+- [x] **Full runs** — `just test` and `just lint` in `simplified-schema`, `darkmatter`, `claudine`; `just test-minimal` in `simplified-schema`; from the repo root `just ci-local --plan` to confirm the affected-scope plan names only expected packages (informational; nothing is pushed).
+- [x] **Implementation log** — write `implementation-log.md` beside this plan: the R27 audit (count and each wildcard disposition), anything built that a human will want to judge (the "quote the slot" wording, refusal sentences, the all-or-nothing Claudine resolution, whole-template resolve for completion), and every departure from the spec. The terminal state is "implementation complete, ready for review"; do not move the directory, do not run `just complete`.
 
 **Checkpoint 8 (done):** every item in "Definition of done" holds; all commands above are green; the implementation log exists.

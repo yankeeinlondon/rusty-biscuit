@@ -28,8 +28,11 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-09
-review_iterations: 0
+review_iterations: 3
+completed: true
 needs_rulings: false
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Template types
