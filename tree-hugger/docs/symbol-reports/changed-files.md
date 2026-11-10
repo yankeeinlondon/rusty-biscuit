@@ -80,9 +80,20 @@ explicit alias or target selector. Directory and file aliases cannot cross
 those boundaries and return eligibility to an outer source file, including
 targets such as `inner/../clean.rs` when `inner` is a nested repository.
 Ordinary directory parents remain valid: `ordinary/../clean.rs` can select
-`clean.rs` when `ordinary` belongs to the active checkout. Parents after
-directory aliases follow the alias destination, matching filesystem
-resolution.
+`clean.rs` when `ordinary` belongs to the active checkout.
+
+A `..` right after a directory alias follows the operating system, so the
+alias is judged by the file that actually opens. Every directory named on the
+way is still checked, so a name in another checkout is excluded either way.
+
+| Target of `alias.rs` (`bridge` → `inner/subdir`) | Unix opens | Windows opens |
+| --- | --- | --- |
+| `bridge/../../clean.rs` | `clean.rs` (`..` climbs out of `inner/subdir`) | the file beside the checkout |
+| `bridge/../clean.rs` | `inner/clean.rs` | `clean.rs` (`..` cancels the name `bridge`) |
+
+Windows also removes the `..` from an absolute link target when the link is
+created, so such a link no longer names the directories it was written
+through.
 
 ## Empty results
 
