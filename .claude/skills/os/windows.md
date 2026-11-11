@@ -152,6 +152,13 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   (0.14, gix 0.89+, adds `ucrt64`). gix 0.90 replaced its typed error enums
   (`gix::discover::Error`) with `gix_error::Error`, so that upgrade is an API
   migration across every gix consumer, not a version bump.
+- **A rig receipt does not prove the hosted Git layout.** `build-win` runs
+  Git 2.55 (`mingw64`); the hosted image runs 2.56 (`ucrt64`). A passing
+  `cross-check --os windows` observation is keyed on package, environment,
+  and inputs, not on the Git layout, so the nightly reuses it for
+  `windows-latest` and skips a hosted run that would fail on `ucrt64`. Test
+  layout-dependent Git behavior against a disposable `ucrt64` install (next
+  item) before you rely on a rig receipt for it.
 - **Reproduce the hosted `ucrt64` layout without touching the rig's shared
   install:** download `PortableGit-<version>-64-bit.7z.exe` from the
   git-for-windows releases and run it with `-o<dir> -y`. It unpacks, then
