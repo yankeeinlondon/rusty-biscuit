@@ -2,9 +2,21 @@
 kind: plan
 total_phases: 3
 created: 2026-11-08
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
-yolo: "true"
+yolo: 'true'
+source_files_during_phase_1:
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+- features/2026-11-06-legible-ci-names/workflow_structure.py
+docs_updated_during_phase_1:
+- features/2026-11-06-legible-ci-names/plan.md
+docs_created_during_phase_1:
+- features/2026-11-06-legible-ci-names/implementation.md
+- features/2026-11-06-legible-ci-names/implementation-log.md
+- features/2026-11-06-legible-ci-names/workflow-structure-baseline.json
+skills_files_updated_during_phase_1: []
+packages:
+- test-toolkit
 ---
 
 # Legible CI names implementation plan
@@ -62,11 +74,11 @@ Completion means:
 
 ### Wave 1 — Contract baseline
 
-- [ ] **Capture naming evidence**
+- [x] **Capture naming evidence**
   - Create `implementation.md` beside this plan. Record the fallback decision, the source symbols and observed names in Rules 1–2, the exact templates, and the limitation that automatic suffixes retain stored wording and duplicate runners. Label new-name examples as projected until corroborated by run records.
   - Read existing Actions and PR check-run records through `gh api` only; use the known PR head `5a2760470df3cec36fe8668859efd5549ca4dd12` with the commit check-runs endpoint to capture available historical check names. An unavailable endpoint is recorded with its error, without a retry loop or new run. API evidence is supplementary; the selected fallback and subsequent phases do not depend on network availability.
   - Record complete native, WSL2-shaped, two-level, nested-area, and empty-selection examples. Use fixture examples for cases absent from retrieved records, explicitly labeled as such. Do not fabricate observed names.
-- [ ] **Freeze safety assertions**
+- [x] **Freeze safety assertions**
   - In `tools/test-toolkit/tests/ci_workflow_contracts.rs`, extend the existing contracts with the naming map and invariants: the ten top-level identifiers, literal static names, retained automatic producer/area/build names, the exact `ci-gate` context, and advisory reporting.
   - Keep a baseline of non-presentation workflow structure for comparison: commands and `with` values (including artifact `name` fields), identifiers, guards, `needs`, matrices, permissions, runner selection, and timeouts. Treat only top-level workflow titles, job display names, step display names, and adjacent comments as presentation. Do not erase every YAML `name` field during comparison.
   - This task and evidence capture can run concurrently: they own separate files. New assertions may be red before Phase 2; identify those expected failures explicitly.
