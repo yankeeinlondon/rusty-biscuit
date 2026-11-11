@@ -1636,3 +1636,103 @@ documentation:
   to `main`; then run the demonstration steps and `just test-real`. Phase 1's
   feasibility tasks ("Measure capacity", "Prove D1") remain open on the same
   credentials.
+
+### Phase 6 — credentialed run (2026-11-11)
+
+Run on macOS (`bolt`) with a scoped Cloudflare token (D1, Workers Scripts,
+and Workers R2 Storage, all Edit) and a GitHub token. Every artifact below
+is in this directory and was checked for the Cloudflare token, the account
+ID, the GitHub token, the operator token, and `ebt_` prefixes: none appear.
+
+- **Provision and deploy.** New `just evidence-store provision` creates an
+  environment's D1 database, private R2 bucket, `database_id`, and
+  `CURSOR_HMAC_KEY`, idempotently (a rerun on a provisioned environment
+  makes three read-only checks and changes nothing). `development` was
+  provisioned and deployed; `deploy-development.json` is the redacted
+  manifest (8 migrations by SHA-256, endpoint
+  `https://evidence-store-development.inocan.workers.dev`).
+- **Registration.** `yankeeinlondon/rusty-biscuit` (1131837348) and a
+  private, empty `yankeeinlondon/evidence-store-acceptance` (1454439808)
+  are registered and allowlisted, so acceptance writes never enter the real
+  repository's history. Only the demo workflow on `main` is OIDC-trusted.
+- **Deployed acceptance.** `just test-real` → 6 passed, 1 skipped (expiry
+  needs a movable clock), 0 failed (`test-real-development.json`).
+- **Prove D1: PASSED** (`prove-d1-development.json`). All 10 D1 checks pass
+  on a disposable database, including 20 concurrent conflicting pairs with
+  no surviving loser sibling, manifest, member, event, or revision. The
+  spike's CPU proxy passed at 256 observations / 1,044,480 bytes. The real
+  validator was then sampled on the deployed service: a 256-observation,
+  925,964-byte submission was accepted (200, ~750 ms wall), and its replay
+  answered `already_present` for all 256. No CPU-limit error occurred, so
+  the advertised limits stand. The account's Workers plan (Free or Paid)
+  could not be read with this token, so whether Free's 10 ms CPU limit
+  applied is not established.
+- **Measure capacity: FAILED** (`inventory-2026-11-11.json`, exit 1), for
+  the two reasons Phase 1 recorded: the `cloudflare-account-usage` source is
+  still unimplemented, and the 12-month no-pruning forecast puts R2 at
+  71.2 GB, 829% of the 8 GiB allowance (refusal crossed in month 1; p95
+  report 982 KiB). D1 bytes (28%), D1 rows written (6%), and R2 class A
+  (2.6%) stay within limits. Admitting the R2 forecast is an owner decision.
+- **Host ingestion.** An authentic retained `just ci-seed` collection
+  (windows-latest, head `758c3985`, 7 observations, original IDs) was
+  ingested into `rusty-biscuit` with a temporary producer grant; all 20
+  report, expected-listing, and completion-record files were staged and
+  finalized with a separate temporary verifier grant.
+- **Hosted ingestion: NOT DONE.** `.github/workflows/evidence-store-demo.yml`
+  is not on `main`; dispatching it waits for the merge.
+- **Backup and restore** (`recovery-report-restore-test.json`,
+  `proof-digest-check.json`). A reader captured a change-feed cursor, then
+  backup `a6873e19…` was taken (boundary quiesced 3.1 s; 22 objects;
+  `verify-backup` ok). After the boundary, a second authentic collection
+  (wsl2-ubuntu, 7 observations, 21 files) was ingested into `development`
+  and deliberately killed with 3 uploads staged and 18 pending. The restore
+  into a freshly provisioned `restore-test` replayed that state: 0
+  recovered, 7 replayed, 0 unrecoverable, 0 missing objects; both
+  repositories' generations rotated and a new cursor key was set. On
+  `restore-test`, the 21 replayed uploads were finalized, all 14
+  observations' 41 files (9,713,679 bytes) were fetched and matched their
+  SHA-256 in body and `X-Content-SHA256`, and the pre-restore cursor was
+  refused with `400 invalid_cursor`. `recover-jobs` found nothing to do.
+  The interrupted job was then resumed and finalized on `development`, where
+  the same 41-file digest check passes. Acknowledged loss: known only for
+  the replayed state; none was unrecoverable.
+- **Cleanup.** The producer, verifier, reader, and capacity-sample grants
+  were revoked (each now answers 401). The `restore-test` Worker, D1
+  database, and R2 bucket (43 objects) were deleted, and its `database_id`
+  returned to the placeholder. `development` and its genuine records remain.
+
+Defects found and fixed during the run (each with a test):
+
+- Completion records from `rig` and `seed` producers were bound by `head`,
+  so every authentic seed proof was rejected: a seed run proves each cell
+  on its own same-tree commit. `completionBindingProblems` now binds head,
+  run, and attempt for `hosted` producers only, as `local_evidence.py` does.
+  This departs from the plan's wording ("package, gate, environment, head,
+  and target match"); the docs now state the per-producer rule.
+- `evidence-finalize` could not recover a rejected or expired upload. It
+  now returns such an upload to the producer (state `pending`), keeps going,
+  and names `evidence-resume` then `evidence-finalize`; the service already
+  opens a fresh upload for the same reference. The service's message for an
+  already-rejected upload no longer claims a byte mismatch.
+- `prove-d1` treated Cloudflare's HTML 404 for a not-yet-routed workers.dev
+  address as "ready", and its `wrangler delete` cleanup failed after the
+  Worker was gone (it lists KV, outside the token's scope). Readiness now
+  needs the spike's JSON 404, and cleanup deletes through the API.
+- `deploy` recorded Wrangler's telemetry URL as the endpoint; it now takes
+  only `https://<worker>.<subdomain>.workers.dev`.
+- The `operator`, `inventory`, `prove-d1`, `capture-parity`, `install`, and
+  `test` recipes passed `{{ args }}`, splitting quoted arguments (a revoke
+  `--reason` with spaces failed); they pass `"$@"`.
+- `restore-test` had an empty repository allowlist, so a restored copy would
+  deny everything; it now lists the same repositories and trusts no
+  workflow. `provision` no longer suggests a migrating `deploy` for it, and
+  the docs give the code-only `just evidence-store wrangler deploy`.
+  Preview URLs are off in both environments.
+
+Gates after the fixes (macOS): `just evidence-store lint` → exit 0;
+`just evidence-store test` → 36 files, 916 tests passed.
+
+**Phase 6 outcome: still incomplete.** "Demonstrate service" stays unchecked
+until the hosted ingestion runs (needs the merge to `main`), and Phase 1's
+"Measure capacity" fails on the R2 forecast and the unimplemented account
+usage source. `implemented` is not set.
