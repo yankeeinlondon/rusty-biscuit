@@ -708,6 +708,14 @@ The `claudine` library's modules and what each owns are in
 
 The `claudine` binary provides interactive setup, hook inspection, event handling, shared-resource management, MCP management, log reporting, provider wrapping, and Markdown composition. Output flows through a structured logging system that separates pipeable data (stdout) from status messages (stderr), formatted with biscuit-terminal components. Provider names accept fuzzy matching (exact → prefix → contains), so `cl` resolves to `claude`. Full reference: [cli-reference.md](cli-reference.md).
 
+Composition help (`compose`/`inline-compose`/`sequence` `-h`) is selected
+from the original argv in `main.rs::run`, before normalization and the
+ownership partition, and rendered from the same clap model normal parsing
+builds (`build_cli_command`); help before the command is the grouped overview,
+help after `--` is the provider's. Direct wrappers keep their custom help;
+other subcommands use clap's injected help. See
+[CLI Pre-Parsing](topics/cli-pre-parsing.md#composition-help-is-selected-first).
+
 Every command group and the cross-cutting behaviors (schema validation,
 `match()` completion walks, retry/resume, shell pre-flight, dry run, protect)
 are in [cli-commands.md](cli-commands.md); read it before changing a
