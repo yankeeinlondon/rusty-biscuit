@@ -585,6 +585,9 @@ init: _ensure-native-bash
     just _ensure-kache
     just _ensure-gitnexus
     just _ensure-git-hooks
+    # The pnpm workspace packages (evidence-store's pinned Wrangler among them);
+    # pnpm itself comes from _ensure-ci-tools above.
+    pnpm install --frozen-lockfile
     echo
     (cd sniff && just install)
     sniff runtime

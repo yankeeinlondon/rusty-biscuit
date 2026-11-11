@@ -319,7 +319,8 @@ describe("POST /retention/certificates", () => {
 
   it("answers 404 for an unregistered repository after authorization", async () => {
     const p = await pair();
-    const unknown = "9" + p.repo.slice(1);
+    // A different leading digit; the ID generator can itself start with 9.
+    const unknown = (p.repo.startsWith("9") ? "8" : "9") + p.repo.slice(1);
     const request = harness([unknown]);
     const body = { ...(await prunes(p)), snapshot: { ...(await currentSnapshot(p.request, p.repo)), repository_id: unknown } };
     await expectError(await submit(request, unknown, body), 404, "not_found");

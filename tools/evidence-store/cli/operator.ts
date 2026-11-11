@@ -2,7 +2,7 @@
 //! and host credentials through the operator API.
 //!
 //! ```text
-//! operator bootstrap --env <development|restore-test> --label L --token-file PATH [--expires-in-days N]
+//! operator bootstrap [--env development|restore-test] --label L --token-file PATH [--expires-in-days N]
 //! operator register  --endpoint URL --token-file PATH --slug owner/name
 //! operator issue     --endpoint URL --token-file PATH --grant FILE
 //! operator revoke    --endpoint URL --token-file PATH --credential ID --reason TEXT
@@ -33,6 +33,8 @@ import type { RecoveryCommand, RecoveryIo } from "./recovery.ts";
 
 export const BOOTSTRAP_ENVIRONMENT = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"] as const;
 export const WRANGLER_ENVIRONMENTS = ["development", "restore-test"] as const;
+/** The working service; `restore-test` exists only as a restore target, so it is always named explicitly. */
+export const DEFAULT_ENVIRONMENT = "development";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DAY_MS = 86_400_000;
@@ -429,7 +431,7 @@ export async function revoke(options: RevokeOptions, io: OperatorIo): Promise<vo
 }
 
 const USAGE = `usage:
-  operator bootstrap --env <development|restore-test> --label L --token-file PATH [--expires-in-days N]
+  operator bootstrap [--env development|restore-test] --label L --token-file PATH [--expires-in-days N]
   operator register  --endpoint URL --token-file PATH --slug owner/name
   operator issue     --endpoint URL --token-file PATH --grant FILE
   operator revoke    --endpoint URL --token-file PATH --credential ID --reason TEXT
@@ -475,11 +477,12 @@ export async function run(argv: readonly string[], io: RecoveryIo = defaultIo())
     switch (command) {
       case "bootstrap": {
         const v = options(rest, ["env", "label", "token-file", "expires-in-days"]);
-        required(v, ["env", "label", "token-file"]);
+        required(v, ["label", "token-file"]);
+        const environment = v["env"] ?? DEFAULT_ENVIRONMENT;
         await bootstrap(
           v["expires-in-days"] === undefined
-            ? { environment: v["env"]!, label: v["label"]!, tokenFile: v["token-file"]! }
-            : { environment: v["env"]!, label: v["label"]!, tokenFile: v["token-file"]!, expiresInDays: v["expires-in-days"] },
+            ? { environment, label: v["label"]!, tokenFile: v["token-file"]! }
+            : { environment, label: v["label"]!, tokenFile: v["token-file"]!, expiresInDays: v["expires-in-days"] },
           io,
         );
         return 0;

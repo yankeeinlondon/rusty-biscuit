@@ -2,7 +2,8 @@
 // (`--env development` or `--env restore-test`); the top level declares no
 // bindings and no workers.dev address, so an environment-less deploy has
 // nothing to write to and is unreachable.
-// Every `database_id` below is a placeholder, set at deployment.
+// Each `database_id` is written by `just evidence-store provision`; the
+// all-zero value means that environment has not been provisioned yet.
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "evidence-store",
@@ -21,8 +22,7 @@
         {
           "binding": "EVIDENCE_DB",
           "database_name": "evidence-store-development",
-          // Placeholder: set at deployment.
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "960d8e9e-7a45-4823-bff5-5436c46889a8",
           "migrations_dir": "migrations"
         }
       ],
@@ -41,10 +41,10 @@
         { "name": "OPERATOR_LIMITER", "namespace_id": "1003", "simple": { "limit": 30, "period": 60 } }
       ],
       "vars": {
-        // `api/schemas/service-config.schema.json`, as JSON text. The empty
-        // allowlists deny every repository and OIDC token until the
-        // deployment registers the real repository and workflow.
-        "SERVICE_CONFIG": "{\"api_version\":\"v1\",\"repositories\":[],\"oidc\":{\"issuer\":\"https://token.actions.githubusercontent.com\",\"audience\":\"rusty-biscuit-evidence-store\",\"clock_tolerance_seconds\":60,\"trusted_workflows\":[]},\"quotas\":{\"rate_mutations_per_minute\":60,\"rate_reads_per_minute\":300,\"operator_rate_mutations_per_minute\":30,\"capacity\":{\"alert_ratio\":0.7,\"refuse_ratio\":0.8,\"r2_live_plus_staging_bytes\":8589934592,\"r2_class_a_per_month\":800000,\"r2_class_b_per_month\":8000000,\"d1_database_bytes\":500000000,\"d1_rows_read_per_day\":5000000,\"d1_rows_written_per_day\":100000,\"worker_requests_per_day\":100000}}}"
+        // `api/schemas/service-config.schema.json`, as JSON text. Allows this
+        // repository (by its stable GitHub IDs) and the demo workflow on main;
+        // anything not listed is denied.
+        "SERVICE_CONFIG": "{\"api_version\":\"v1\",\"repositories\":[{\"repository_id\":\"1131837348\",\"owner_id\":\"980757\",\"slug\":\"yankeeinlondon/rusty-biscuit\"}],\"oidc\":{\"issuer\":\"https://token.actions.githubusercontent.com\",\"audience\":\"rusty-biscuit-evidence-store\",\"clock_tolerance_seconds\":60,\"trusted_workflows\":[{\"repository_id\":\"1131837348\",\"workflow\":\".github/workflows/evidence-store-demo.yml\",\"ref\":\"refs/heads/main\",\"event_name\":\"workflow_dispatch\",\"roles\":[\"producer\",\"reader\"]}]},\"quotas\":{\"rate_mutations_per_minute\":60,\"rate_reads_per_minute\":300,\"operator_rate_mutations_per_minute\":30,\"capacity\":{\"alert_ratio\":0.7,\"refuse_ratio\":0.8,\"r2_live_plus_staging_bytes\":8589934592,\"r2_class_a_per_month\":800000,\"r2_class_b_per_month\":8000000,\"d1_database_bytes\":500000000,\"d1_rows_read_per_day\":5000000,\"d1_rows_written_per_day\":100000,\"worker_requests_per_day\":100000}}}"
       }
     },
     "restore-test": {
@@ -57,7 +57,6 @@
         {
           "binding": "EVIDENCE_DB",
           "database_name": "evidence-store-restore-test",
-          // Placeholder: set at deployment.
           "database_id": "00000000-0000-0000-0000-000000000000",
           "migrations_dir": "migrations"
         }

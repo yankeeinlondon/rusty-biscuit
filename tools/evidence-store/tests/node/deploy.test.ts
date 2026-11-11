@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseVersionId, run } from "../../cli/deploy.ts";
 import type { OperatorIo, SpawnResult } from "../../cli/operator.ts";
+import { PLACEHOLDER_DATABASE_ID, unprovisionedConfig } from "./unprovisioned-config.ts";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DATABASE_ID = "0f9e8d7c-6b5a-4321-8fed-cba987654321";
@@ -28,9 +29,9 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 /** The checked-in configuration, with `development` provisioned when `provisioned` is true. */
 function writeConfig(provisioned: boolean): void {
-  const text = readFileSync(join(PACKAGE_ROOT, "wrangler.jsonc"), "utf8");
+  const text = unprovisionedConfig();
   // The first placeholder belongs to `development`, the second to `restore-test`.
-  writeFileSync(join(root, "wrangler.jsonc"), provisioned ? text.replace("00000000-0000-0000-0000-000000000000", DATABASE_ID) : text);
+  writeFileSync(join(root, "wrangler.jsonc"), provisioned ? text.replace(PLACEHOLDER_DATABASE_ID, DATABASE_ID) : text);
 }
 
 function fakeIo(env: NodeJS.ProcessEnv, answers: SpawnResult[] = []) {
@@ -67,15 +68,13 @@ describe("deploy preconditions", () => {
     expect(none.stderr()).toContain("CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID");
   });
 
-  it("refuses the placeholder database ID with the provisioning steps, spawning nothing", async () => {
+  it("refuses the placeholder database ID, pointing at provision, spawning nothing", async () => {
     writeConfig(false);
     const fake = fakeIo(CREDENTIALS);
     expect(await run(["--env", "development"], fake.io, root)).toBe(2);
     const message = fake.stderr();
     expect(message).toContain("placeholder database_id for development");
-    expect(message).toContain("wrangler d1 create evidence-store-development");
-    expect(message).toContain("wrangler r2 bucket create evidence-store-development");
-    expect(message).toContain("wrangler secret put CURSOR_HMAC_KEY --env development");
+    expect(message).toContain("just evidence-store provision --env development");
     expect(fake.spawns).toEqual([]);
   });
 
@@ -131,6 +130,14 @@ describe("deploy", () => {
     });
     for (const secret of Object.values(CREDENTIALS)) expect(text + fake.stdout() + fake.stderr()).not.toContain(secret);
     expect(fake.stdout()).toBe("");
+  });
+
+  it("deploys development when no --env is given", async () => {
+    writeConfig(true);
+    const fake = fakeIo(CREDENTIALS);
+    expect(await run([], fake.io, root)).toBe(0);
+    expect(fake.spawns.map((spawn) => spawn.args.slice(1, 4).join(" "))).toEqual(["d1 migrations apply", "deploy --env development"]);
+    expect(JSON.parse(fake.stdout()).environment).toBe("development");
   });
 
   it("prints the manifest to stdout without --manifest and records a missing version as null", async () => {

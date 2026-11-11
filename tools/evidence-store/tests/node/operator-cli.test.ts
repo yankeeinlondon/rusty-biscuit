@@ -193,6 +193,14 @@ describe("operator bootstrap", () => {
     expect(fake.stdout() + fake.stderr()).not.toContain(secret);
   });
 
+  it("bootstraps development when no --env is given", async () => {
+    const tokenFile = join(dir, "new-operator.token");
+    const fake = fakeIo(() => json({}), cloudflare);
+    expect(await run(["bootstrap", "--label", "ken", "--token-file", tokenFile], fake.io)).toBe(0);
+    expect(fake.spawns[0]!.args.slice(1, 5)).toEqual(["d1", "execute", "evidence-store-development", "--env"]);
+    expect(fake.spawns[0]!.args[5]).toBe("development");
+  });
+
   it("removes the token file when Wrangler fails", async () => {
     const tokenFile = join(dir, "new-operator.token");
     const fake = fakeIo(() => json({}), cloudflare, { status: 1, stdout: "", stderr: "Authentication error" });

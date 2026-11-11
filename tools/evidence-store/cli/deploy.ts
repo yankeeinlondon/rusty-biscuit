@@ -1,7 +1,7 @@
 //! Deploy the Worker to one Wrangler environment and record what was deployed.
 //!
 //! ```text
-//! deploy --env <development|restore-test> [--manifest /abs/path.json]
+//! deploy [--env development|restore-test] [--manifest /abs/path.json]
 //! ```
 //!
 //! Applies the numbered D1 migrations, then deploys the Worker, both through
@@ -10,9 +10,9 @@
 //! resources, the migration files by digest, and the Worker version; it never
 //! carries a token, a secret, or the account ID.
 //!
-//! The resources themselves are provisioned once, by hand, before the first
-//! deploy (see `PROVISIONING`); a placeholder `database_id` in
-//! `wrangler.jsonc` stops the command before anything runs.
+//! The resources themselves are created once, before the first deploy, by
+//! `provision.ts`; a placeholder `database_id` in `wrangler.jsonc` stops the
+//! command before anything runs.
 //!
 //! Exit codes: 0 deployed; 1 a Wrangler step or file failed; 2 usage error,
 //! missing credentials, or an unprovisioned environment.
@@ -22,10 +22,10 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { BOOTSTRAP_ENVIRONMENT, CliError, defaultIo, missingEnvironment, stripJsonComments, WRANGLER_ENVIRONMENTS, type OperatorIo } from "./operator.ts";
+import { BOOTSTRAP_ENVIRONMENT, CliError, DEFAULT_ENVIRONMENT, defaultIo, missingEnvironment, stripJsonComments, WRANGLER_ENVIRONMENTS, type OperatorIo } from "./operator.ts";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const PLACEHOLDER_DATABASE_ID = "00000000-0000-0000-0000-000000000000";
+export const PLACEHOLDER_DATABASE_ID = "00000000-0000-0000-0000-000000000000";
 const VERSION_ID = /Version ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 const HTTPS_URL = /https:\/\/[A-Za-z0-9.-]+(?:\/[^\s]*)?/;
 
@@ -72,17 +72,6 @@ export function environmentResources(wranglerConfig: string, environment: string
   return { workerName: section.name, databaseName: database.database_name, databaseId: database.database_id, bucketName: bucket.bucket_name };
 }
 
-/** The one-time steps that replace the placeholder, as an operator would type them. */
-export function provisioningSteps(environment: string, resources: EnvironmentResources): string {
-  return (
-    `one-time provisioning for ${environment} (run from tools/evidence-store with the same credentials):\n` +
-    `  1. pnpm exec wrangler d1 create ${resources.databaseName}\n` +
-    `  2. pnpm exec wrangler r2 bucket create ${resources.bucketName}\n` +
-    `  3. set env.${environment}.d1_databases[EVIDENCE_DB].database_id in wrangler.jsonc to the ID step 1 printed, and commit it\n` +
-    `  4. feed a fresh random key on stdin (never argv): <generate a key> | pnpm exec wrangler secret put CURSOR_HMAC_KEY --env ${environment}\n`
-  );
-}
-
 /** Every `migrations/*.sql` file in apply order, with the SHA-256 of its bytes. */
 export function migrationDigests(directory: string): { file: string; sha256: string }[] {
   return readdirSync(directory)
@@ -100,7 +89,7 @@ export function parseEndpoint(output: string): string | null {
 }
 
 /** Wrangler's output with the credential values blanked, for an error message. */
-function redact(output: string, env: NodeJS.ProcessEnv): string {
+export function redact(output: string, env: NodeJS.ProcessEnv): string {
   let text = output;
   for (const name of BOOTSTRAP_ENVIRONMENT) {
     const value = env[name];
@@ -136,7 +125,7 @@ export async function deploy(options: DeployOptions, io: OperatorIo, packageRoot
     throw new CliError(
       2,
       `wrangler.jsonc still holds the placeholder database_id for ${options.environment}, so there is nothing to deploy to. Nothing was run.\n` +
-        provisioningSteps(options.environment, resources),
+        `Create its resources first: just evidence-store provision --env ${options.environment}`,
     );
   }
   const migrations = migrationDigests(join(packageRoot, "migrations"));
@@ -190,7 +179,7 @@ export async function deploy(options: DeployOptions, io: OperatorIo, packageRoot
   return manifest;
 }
 
-const USAGE = "usage:\n  deploy --env <development|restore-test> [--manifest /abs/path.json]\n";
+const USAGE = "usage:\n  deploy [--env development|restore-test] [--manifest /abs/path.json]\n";
 
 /** Runs the command; answers the exit code and reports failures on `io.stderr`. */
 export async function run(argv: readonly string[], io: OperatorIo = defaultIo(), packageRoot: string = PACKAGE_ROOT): Promise<number> {
@@ -206,8 +195,8 @@ export async function run(argv: readonly string[], io: OperatorIo = defaultIo(),
     } catch (error) {
       throw new CliError(2, (error as Error).message);
     }
-    if (values.env === undefined) throw new CliError(2, "missing --env");
-    await deploy(values.manifest === undefined ? { environment: values.env } : { environment: values.env, manifest: values.manifest }, io, packageRoot);
+    const environment = values.env ?? DEFAULT_ENVIRONMENT;
+    await deploy(values.manifest === undefined ? { environment } : { environment, manifest: values.manifest }, io, packageRoot);
     return 0;
   } catch (error) {
     if (!(error instanceof CliError)) throw error;

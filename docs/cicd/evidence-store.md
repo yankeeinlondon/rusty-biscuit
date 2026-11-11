@@ -144,55 +144,89 @@ comes from `just operator bootstrap` (below). More detail:
 
 ### One-time provisioning
 
-Before the first deployment of an environment, create its resources and
-configuration. These steps need a Cloudflare API token and account ID in
+Before the first deployment of an environment, create its Cloudflare
+resources. This needs a Cloudflare API token and account ID in
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; nothing logs in
-interactively. Run Wrangler through the package (`pnpm exec wrangler …` from
-`tools/evidence-store`):
+interactively.
 
-1. Create the database and the bucket:
+Create the token in the Cloudflare dashboard (My Profile → API Tokens →
+Create Token → custom token), limited to the one account whose ID is in
+`CLOUDFLARE_ACCOUNT_ID`. Copy the secret from the confirmation page: it is
+shown only once and is about 40 characters. A value of another length, such
+as the 37-character Global API Key or a 36-character ID, makes every
+Wrangler call fail with `Invalid format for Authorization header [code: 6111]`.
+The token needs these **Account** permissions:
+
+| Permission | Used by |
+| --- | --- |
+| D1: Edit | `provision`, `deploy` (migrations), `operator bootstrap`, `operator backup` and `restore`, `prove-d1` |
+| Workers Scripts: Edit | `deploy`, and the `CURSOR_HMAC_KEY` secret set by `provision` and `restore` |
+| Workers R2 Storage: Edit | `provision` (the bucket), `operator backup` and `restore` (the objects) |
+| Workers Tail: Read (optional) | `just evidence-store wrangler tail` for live logs |
+
+Both environments are served on `workers.dev`, so the account must have a
+workers.dev subdomain. If it has never registered one, choose it once in the
+dashboard (Workers & Pages) before the first deploy.
+
+`provision`, `deploy`, and `operator bootstrap` act on the `development`
+environment unless you pass `--env restore-test`. Raw Wrangler commands
+(`just evidence-store wrangler …`) have no default, so they always name
+`--env`.
+
+1. Create the resources. From the repository root (or any directory):
 
    ```sh
-   pnpm exec wrangler d1 create evidence-store-development
-   pnpm exec wrangler r2 bucket create evidence-store-development
+   just evidence-store provision
    ```
 
-   The bucket is private by default. Never enable public access on it.
-2. Put the database ID Wrangler printed into the environment's `database_id`
-   in `tools/evidence-store/wrangler.jsonc`, and commit it (the ID is not a
-   secret). The checked-in value is an all-zero placeholder, and `just deploy`
-   refuses to run while it is.
-3. Fill the environment's `SERVICE_CONFIG` allowlists in `wrangler.jsonc`:
+   This creates the D1 database and the private R2 bucket, writes the
+   database's ID into the environment's `database_id` in
+   `tools/evidence-store/wrangler.jsonc`, and sets the `CURSOR_HMAC_KEY`
+   secret that signs paging cursors. The key goes to Wrangler on stdin, so it
+   never appears on a command line. Commit the `wrangler.jsonc` change; the ID
+   is not a secret.
+
+   `provision` is safe to run again. Each step first looks for what it would
+   create and reuses it, so a run that failed part-way finishes the job, and a
+   run against a provisioned environment changes nothing:
+
+   ```text
+   development is already provisioned; nothing was changed:
+     D1 database   evidence-store-development (0f9e8d7c-…) already existed
+     R2 bucket     evidence-store-development already existed
+     wrangler.jsonc already held the database_id
+     CURSOR_HMAC_KEY already existed
+   ```
+
+   It never replaces an existing cursor key, because that would invalidate
+   every paging cursor clients hold. If `wrangler.jsonc` names a different
+   database ID than Cloudflare has for that name, it stops without editing the
+   file. Never enable public access on the bucket.
+2. Fill the environment's `SERVICE_CONFIG` allowlists in `wrangler.jsonc`:
    `repositories` (the repositories the service will accept) and
    `oidc.trusted_workflows` (the workflow, ref, and event GitHub tokens may come
    from). Both are empty in the checked-in file, and **an empty list denies
-   everything**, so the service is useless until they are set.
-4. Set the secret that signs paging cursors, fed through stdin so it never
-   appears on a command line:
-
-   ```sh
-   node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64url'))" \
-     | pnpm exec wrangler secret put CURSOR_HMAC_KEY --env development
-   ```
-
-5. After the first `just deploy` (next section), mint the first operator token.
+   everything**, so the service is useless until they are set. `provision`
+   names any that are still empty.
+3. Deploy (next section).
+4. After the first deploy, mint the first operator token.
    It goes straight into an owner-only file:
 
    ```sh
-   just operator bootstrap --env development --label operator-laptop --token-file /abs/operator.token
+   just evidence-store operator bootstrap --label operator-laptop --token-file /abs/operator.token
    ```
 
-6. Register the repository by the stable IDs GitHub reports for it (needs
+5. Register the repository by the stable IDs GitHub reports for it (needs
    `GITHUB_TOKEN` or `GH_TOKEN`):
 
    ```sh
-   just operator register --endpoint https://… --token-file /abs/operator.token --slug owner/name
+   just evidence-store operator register --endpoint https://… --token-file /abs/operator.token --slug owner/name
    ```
 
 ### Deploy and apply migrations
 
 ```sh
-just deploy --env development --manifest /abs/deploy-development.json
+just evidence-store deploy --manifest /abs/deploy-development.json
 ```
 
 `deploy` first applies any pending migrations to the remote database
@@ -394,9 +428,11 @@ holds credential digests and grants but no bearer tokens. See
 
 A restore never writes to the environment it came from. It refuses a
 destination whose environment, database, or bucket equals the source's, and a
-destination database that is not empty. Use `restore-test`, provisioned as in
-[One-time provisioning](#one-time-provisioning) with its own database and
-bucket. Do not run `just deploy --env restore-test` into that database before
+destination database that is not empty. Use `restore-test`, provisioned with
+`just evidence-store provision --env restore-test` (see
+[One-time provisioning](#one-time-provisioning)), which gives it its own
+database and bucket. Do not run `just evidence-store deploy --env restore-test`
+into that database before
 restoring: deploying applies migrations, and a database with migrations
 applied is not empty.
 
@@ -442,11 +478,29 @@ This expires stale open uploads, advances unfinished retention jobs in small
 batches, and releases cell locks left by finished jobs. Rerunning it is always
 safe; run it after an outage or a restore.
 
+## Run Wrangler directly
+
+For anything the recipes do not cover, run the package's pinned Wrangler
+through `just evidence-store wrangler …`. It works from any directory and
+always uses `tools/evidence-store/wrangler.jsonc`:
+
+```sh
+just evidence-store wrangler d1 list
+just evidence-store wrangler tail --env development
+```
+
+Do not use a bare `wrangler` or `pnpm exec wrangler` from the root: either can
+pick up a different Wrangler on your `PATH`. A common one is the retired
+Wrangler 1 that `cargo install wrangler` provides, which fails with
+`Found argument 'd1' which wasn't expected`. If the recipe says the pinned
+Wrangler is not installed, run `just evidence-store install` (`just init` also
+installs it).
+
 ## Roll back a deployment
 
 - **A bad Worker build:** restore a compatible prior build with
-  `pnpm exec wrangler rollback --env development` (or
-  `wrangler versions deploy`). The deployment manifest's Worker version ID
+  `just evidence-store wrangler rollback --env development` (or
+  `just evidence-store wrangler versions deploy`). The deployment manifest's Worker version ID
   tells you what was live.
 - **Migrations are never reversed.** A rolled-back Worker must work with the
   current schema, so roll back only to a build that does.

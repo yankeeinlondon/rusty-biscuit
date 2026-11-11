@@ -394,8 +394,10 @@ describe("restore refuses before any mutation", () => {
     writeFileSync(path("shared.jsonc"), JSON.stringify(shared));
     expect(await run(restoreArgs(backup).map((arg) => (arg === config() ? path("shared.jsonc") : arg)), io())).toBe(2);
     expect(err.join("")).toContain("r2_bucket");
-    // The checked-in configuration's placeholder database IDs coincide, so it is refused too.
-    expect(await run(restoreArgs(backup).filter((arg, index, all) => arg !== "--config" && all[index - 1] !== "--config"), io())).toBe(2);
+    const sharedDatabase = JSON.parse(readFileSync(config(), "utf8").replace(/^\/\/.*\n/, "")) as { env: Record<string, { d1_databases: { database_id: string }[] }> };
+    sharedDatabase.env["restore-test"]!.d1_databases[0]!.database_id = sharedDatabase.env["development"]!.d1_databases[0]!.database_id;
+    writeFileSync(path("shared-database.jsonc"), JSON.stringify(sharedDatabase));
+    expect(await run(restoreArgs(backup).map((arg) => (arg === config() ? path("shared-database.jsonc") : arg)), io())).toBe(2);
     expect(err.join("")).toContain("d1_database_id");
     expect(wrangler.calls).toEqual([]);
     expect(existsSync(path("restored.token"))).toBe(false);

@@ -49,6 +49,8 @@ are not enabled. To deploy, operate, back up, or restore it, follow the
   credential is provisioned, so real evidence is never pruned yet.
   `wrangler.jsonc` declares the `development` and `restore-test`
   environments; nothing is deployed.
+- `cli/provision.ts` (`just provision`): creates an environment's D1
+  database, R2 bucket, `database_id`, and cursor secret; safe to rerun.
 - `cli/deploy.ts` (`just deploy`): applies the numbered migrations and
   deploys the Worker to one environment, then writes a redacted manifest.
 - `cli/operator.ts` (`just operator …`): operator bootstrap through Wrangler,
@@ -87,7 +89,8 @@ just test                 # node, workers (spike), and service projects (local M
 just lint
 just capture-parity --check   # confirm the frozen fixtures still match Python
 just inventory --out /tmp/evidence-inventory.json
-just deploy --env development --manifest /abs/deploy.json   # needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+just provision                                               # needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+just deploy --manifest /abs/deploy.json                     # needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
 just test-real --report /abs/results.json                    # deployed acceptance suite
 ```
 

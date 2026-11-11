@@ -90,9 +90,27 @@ inventory *args="":
 operator *args="":
     pnpm --dir "{{ justfile_directory() }}" exec tsx cli/operator.ts {{ args }}
 
-# Apply migrations and deploy the Worker: --env development|restore-test [--manifest /abs/path.json] (needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID).
+# Create an environment's D1 database, R2 bucket, database_id, and cursor secret; safe to rerun: [--env development|restore-test] (defaults to development; needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID).
+provision *args:
+    node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/provision.ts" "$@"
+
+# Apply migrations and deploy the Worker: [--env development|restore-test] (defaults to development) [--manifest /abs/path.json] (needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID).
 deploy *args:
     node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/deploy.ts" "$@"
+
+# Run the package's pinned Wrangler against this package's wrangler.jsonc, e.g. `d1 create evidence-store-development` (needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID).
+wrangler *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Never `pnpm exec wrangler`: when the package is not installed it falls
+    # through to any `wrangler` on PATH, such as the retired Wrangler 1 that
+    # cargo installs, which rejects every current subcommand.
+    bin="{{ justfile_directory() }}/node_modules/wrangler/bin/wrangler.js"
+    if [ ! -f "$bin" ]; then
+        echo "evidence-store wrangler: the pinned Wrangler is not installed; run 'just evidence-store install' (or 'just init')." >&2
+        exit 2
+    fi
+    exec node "$bin" "$@"
 
 # Dispatch the hosted OIDC ingestion workflow on main: --run-id ID --artifact NAME --collection PATH [--proof-dir PATH] [--repo owner/name] (needs GITHUB_TOKEN or GH_TOKEN).
 demo-hosted *args:
