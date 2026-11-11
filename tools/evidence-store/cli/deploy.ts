@@ -27,7 +27,6 @@ import { BOOTSTRAP_ENVIRONMENT, CliError, DEFAULT_ENVIRONMENT, defaultIo, missin
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const PLACEHOLDER_DATABASE_ID = "00000000-0000-0000-0000-000000000000";
 const VERSION_ID = /Version ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
-const HTTPS_URL = /https:\/\/[A-Za-z0-9.-]+(?:\/[^\s]*)?/;
 
 export interface DeployManifest {
   readonly manifest_version: 1;
@@ -38,7 +37,7 @@ export interface DeployManifest {
   readonly migrations: readonly { readonly file: string; readonly sha256: string }[];
   /** Null when Wrangler's output names no version. */
   readonly worker_version_id: string | null;
-  /** The first HTTPS URL Wrangler reports for the deploy; null when it reports none. */
+  /** The Worker's workers.dev address from Wrangler's output; null when it reports none. */
   readonly endpoint: string | null;
   readonly wrangler_version: string;
   readonly deployed_at: string;
@@ -84,8 +83,13 @@ export function parseVersionId(output: string): string | null {
   return VERSION_ID.exec(output)?.[1]?.toLowerCase() ?? null;
 }
 
-export function parseEndpoint(output: string): string | null {
-  return HTTPS_URL.exec(output)?.[0] ?? null;
+/**
+ * The Worker's own workers.dev address. Wrangler's output carries other URLs
+ * (its telemetry notice comes first), so only `https://<worker>.<subdomain>.workers.dev` counts.
+ */
+export function parseEndpoint(output: string, workerName: string): string | null {
+  const escaped = workerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`https://${escaped}\\.[A-Za-z0-9-]+\\.workers\\.dev\\b`).exec(output)?.[0] ?? null;
 }
 
 /** Wrangler's output with the credential values blanked, for an error message. */
@@ -161,7 +165,7 @@ export async function deploy(options: DeployOptions, io: OperatorIo, packageRoot
     r2_bucket: resources.bucketName,
     migrations,
     worker_version_id: parseVersionId(deployOutput),
-    endpoint: parseEndpoint(deployOutput),
+    endpoint: parseEndpoint(deployOutput, resources.workerName),
     wrangler_version: wranglerVersion,
     deployed_at: new Date(io.now()).toISOString(),
   };

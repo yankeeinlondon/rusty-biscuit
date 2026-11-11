@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseVersionId, run } from "../../cli/deploy.ts";
+import { parseEndpoint, parseVersionId, run } from "../../cli/deploy.ts";
 import type { OperatorIo, SpawnResult } from "../../cli/operator.ts";
 import { PLACEHOLDER_DATABASE_ID, unprovisionedConfig } from "./unprovisioned-config.ts";
 
@@ -167,6 +167,19 @@ describe("deploy", () => {
   it("reads the version ID from Wrangler's deploy output", () => {
     expect(parseVersionId(`Current Version ID: ${VERSION_ID.toUpperCase()}`)).toBe(VERSION_ID);
     expect(parseVersionId("no version here")).toBeNull();
+  });
+
+  it("reads the Worker's workers.dev address, not the telemetry notice printed before it", () => {
+    const output = [
+      "Cloudflare collects anonymous telemetry. Read more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md",
+      "Uploaded evidence-store-development (3.10 sec)",
+      "Deployed evidence-store-development triggers (0.50 sec)",
+      "  https://evidence-store-development.example-sub.workers.dev",
+      "  schedule: 17 3 * * *",
+    ].join("\n");
+    expect(parseEndpoint(output, "evidence-store-development")).toBe("https://evidence-store-development.example-sub.workers.dev");
+    expect(parseEndpoint(output, "evidence-store-restore-test")).toBeNull();
+    expect(parseEndpoint("Read more at https://github.com/cloudflare/workers-sdk", "evidence-store-development")).toBeNull();
   });
 });
 
