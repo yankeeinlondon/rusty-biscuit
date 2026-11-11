@@ -1,7 +1,7 @@
 ---
 total_phases: 3
 created: 2026-11-10
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 source_files_during_phase_1:
@@ -17,8 +17,58 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- claudine/cli/src/argv/rule1_provider_bool.rs
+- claudine/cli/src/argv/rule4_help_hoist.rs
+- claudine/cli/src/completion/engine/mod.rs
+- claudine/cli/src/completion/engine/tests.rs
+- claudine/cli/src/completion/mod.rs
+- claudine/cli/src/main.rs
+- claudine/cli/tests/l1/argv_normalization.rs
+- claudine/cli/tests/l1/completion_ownership.rs
+- claudine/cli/tests/l1/sequence_errors_cli.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
 - claudine-cli
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+- claudine/docs/cli/index.md
+- claudine/cli/README.md
+- claudine/docs/topics/cli-pre-parsing.md
+- claudine/docs/topics/argv-normalization.md
+docs_created_during_phase_3:
+- claudine/fixes/2026-11-08-composition-subcommand-help/implementation.md
+skills_files_updated_during_phase_3:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/cli-commands.md
+source_code:
+- claudine/cli/src/main.rs
+- claudine/cli/src/argv/mod.rs
+- claudine/cli/src/argv/rule1_provider_bool.rs
+- claudine/cli/src/argv/rule4_help_hoist.rs
+- claudine/cli/src/commands/compose/mod.rs
+- claudine/cli/src/commands/compose/prep/tests.rs
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/completion/mod.rs
+- claudine/cli/src/completion/engine/mod.rs
+- claudine/cli/src/completion/engine/tests.rs
+- claudine/cli/tests/l1/argv_normalization.rs
+- claudine/cli/tests/l1/completion_ownership.rs
+- claudine/cli/tests/l1/exit_site_guard.rs
+- claudine/cli/tests/l1/provider_tail_ownership.rs
+- claudine/cli/tests/l1/sequence_errors_cli.rs
+documentation:
+- claudine/docs/cli/index.md
+- claudine/cli/README.md
+- claudine/docs/topics/cli-pre-parsing.md
+- claudine/docs/topics/argv-normalization.md
+- claudine/fixes/2026-11-08-composition-subcommand-help/implementation.md
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/cli-commands.md
+completed_phase: 3
+implemented: true
 ---
 
 # Composition subcommand help implementation plan
@@ -90,14 +140,14 @@ The phases run consecutively without a human gate. Waves identify concurrent tas
 
 ### Wave 2
 
-- [ ] **Cover selection**
+- [x] **Cover selection**
   - Own unit tests in `argv/rule4_help_hoist.rs` and the `main.rs::composition_help` test module. Table-test all specification destinations, all three commands, root options with values (`--debug trace`, `--debug=trace`), and first-command recognition (`mcp compose --help` must not select composition help).
   - Add empty/bare argv, repeated mixed help spellings, embedded setter/JSON text, `--help=…`, `-hh`, help after `--`, help on both sides of `--`, and opaque-token pass-through cases. Test completion with the injected Boolean rather than mutating `COMPLETE` in unit tests. Cover root version precedence without changing ordinary version parsing.
   - Render the model in process for option inventory checks. For each composition child, compare visible shortcut declarations against every provider's first catalog alias. Assert every visible option has nonempty help, skipped field IDs are absent, visible aliases remain, provider values remain canonical, and rate-limit values are exactly `pause`, `abort`, `continue`.
   - Verify both compact spellings share the same renderer and user text contains no retired YOLO discussion or internal Rust paths. Preserve the existing hoist tests as syntactic API coverage.
   - Add no-help controls through `partition_composition_tail` and `build_cli_command(false).try_get_matches_from`: an unknown provider, missing provider value, `--dry-run-shell` alone, and conflicting interactive switches produce clap errors; an unknown switch before the file produces the existing partition error. Assert malformed setter JSON still fails through `commands::compose::merge_set_overrides(Some("{broken"), Default::default(), Vec::new())`. These controls never call the exit-on-error `parse_cli_from`, initialize config, or execute a command.
 
-- [ ] **Prove CLI wiring**
+- [x] **Prove CLI wiring**
   - Own `cli/tests/l1/argv_normalization.rs` and `cli/tests/l1/sequence_errors_cli.rs`. Keep these modules in the existing consolidated L1 target; create no new target or module registration.
   - Replace the grouped-heading assertions in `headline_compose_with_interleaved_flag_renders_help` and `headline_compose_with_trailing_help_renders_help` with compose-specific usage and option assertions. Preserve the original interleaved `--gemini name=Ken --help` input and checks excluding the misleading clap tip, unexpected-help error, and second-file-reference error. Replace history-heavy/drifted comments with the current regression contract.
   - Use four independently scheduled cases per command: `-h` without a file, `--help` without a file, `-h` with a nonexistent file, and `--help` with a nonexistent file. Each checks exit 0, empty stderr, nonempty stdout, matching `Usage: claudine <command>`, positional/forwarding explanations, and `--help`, `--provider`, `--set`, `--dry-run`, `--dry-run-shell`, `--max-iterations`, `--on-rate-limit`. Exclude root group headings `Shared Resources:` and `Composition:`. Use a small assertion helper, not twelve duplicated bodies or one long test loop.
@@ -108,7 +158,7 @@ The phases run consecutively without a human gate. Waves identify concurrent tas
   - Add a feature-gated portable `compose prompt.md --claude -- --help` execution case using the compiled Claude stream fixture from Rule 12 and a seeded user config. Assert the recorded provider argv contains exactly one `--help` and the authored separator is consumed. Assert this output is provider output rather than a composition help screen. This invocation deliberately executes; do not use dry run as a forwarding proof.
   - Strengthen `removed_fail_fast_is_absent_from_sequence_help`: first require sequence-specific usage and shared public options, then assert `--fail-fast` is absent and stderr empty.
 
-- [ ] **Preserve completions**
+- [x] **Preserve completions**
   - Own `cli/src/completion/mod.rs`, `cli/src/completion/engine/mod.rs`, `cli/src/completion/engine/tests.rs`, and `cli/tests/l1/completion_ownership.rs`. Keep production completion algorithms unchanged; update only the drifted comment and tests.
   - Check `completion_command` exposes all catalog-derived shortcuts for every composition child, including the three newly declared flags, without adding injected help candidates. Extend the existing custom engine catalog test to assert no duplicate provider tokens.
   - Retain representative admin/wrapper completion and provider-owned-tail cases. Add a generated `__complete` invocation whose payload contains `compose` and `--help`; assert candidate protocol output rather than a usage screen. Extend the existing `COMPLETE=bash` bootstrap proof to carry composition help tokens and assert registration output with empty stderr, no help usage, and no config creation.
@@ -116,7 +166,7 @@ The phases run consecutively without a human gate. Waves identify concurrent tas
 
 ### Validation checkpoint
 
-- [ ] **Run focused checks**
+- [x] **Run focused checks**
   - After all Wave 2 tasks join, run the affected filters through `just test-cli`: `composition_help`, `rule4_help_hoist`, `argv_normalization`, `sequence_errors_cli`, and `completion`. Inspect nextest counts to establish that new cases actually ran.
   - Confirm new subprocess tests use the area builder, fixture paths, and compiled binaries, contain no Unix-only shell dependency, and each remains within the L1 runtime budget. Resolve failures before continuing; do not add sleeps, retries, or timeout increases.
 
@@ -124,13 +174,13 @@ The phases run consecutively without a human gate. Waves identify concurrent tas
 
 ### Wave 3
 
-- [ ] **Update current docs**
+- [x] **Update current docs**
   - Own `claudine/docs/cli/index.md`, `claudine/cli/README.md`, `claudine/docs/topics/argv-normalization.md`, and `claudine/docs/topics/cli-pre-parsing.md`.
   - Replace the CLI guide's planned marker with the completed behavior. Include root overview, command reference, help without an existing file, plain mode, and explicit provider forwarding examples. Keep the README help change to a compact overview with a link to the CLI guide; add no option inventory or implementation narrative there.
   - Correct both topic pages' rule 4 explanations and Mermaid pipeline diagrams: completion intercept → original-argv help selection → help renderer/exit, or normal normalization → partition → clap → execution. Describe retained hoisting as a normalization contract rather than the command-help destination mechanism.
   - Explain why a trailing command-help request bypasses validation while a token after `--` belongs to the provider. Examples must show actual command-specific help, not an internal hoisted root invocation as the displayed outcome. No docs link to or name this fix directory.
 
-- [ ] **Update skill guidance**
+- [x] **Update skill guidance**
   - Own `.claude/skills/claudine/SKILL.md`, `.claude/skills/claudine/cli-commands.md`, `.claude/skills/claudine/topics/cli-pre-parsing.md`, and `.claude/skills/claudine/topics/argv-normalization.md`.
   - Add a concise pointer in the main skill to early help selection and the shared built command model; correct the `cli-commands.md` argv row. Bring the two skill topic copies into agreement with the corresponding current docs without copying unrelated changes.
   - Remove claims that composition help always reaches grouped root help or that accepted provider shortcuts are missing from the clap reference. Preserve the distinction between custom wrapper help and generated non-wrapper help.
@@ -138,7 +188,7 @@ The phases run consecutively without a human gate. Waves identify concurrent tas
 
 ### Final validation
 
-- [ ] **Verify final behavior**
+- [x] **Verify final behavior**
   - From `claudine/`, run `just test-cli` once over the integrated change, then `just lint`. These are the specification's canonical gates; nextest runs L1, and lint may check formatting but must not mutate it. Fix affected source manually, with no `cargo fmt` or `just lint-fix`.
   - Review the diff for unrelated changes, all touched rendered comments, docs/skill agreement, and exact shortcut coverage. Confirm no dependency manifest, configuration parser, CI schedule, wrapper-help layout, or provider argument-ownership algorithm changed.
   - Record the commands, results, covered behavior, and any deviation from the specification in `claudine/fixes/2026-11-08-composition-subcommand-help/implementation.md`. Include one captured compact help output per composition command for the final review. Do not modify the finalized specification to match implementation.
