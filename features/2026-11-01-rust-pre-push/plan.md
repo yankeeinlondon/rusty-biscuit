@@ -2,9 +2,40 @@
 kind: plan
 total_phases: 5
 created: 2026-11-08
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1:
+- Cargo.lock
+- scripts/Cargo.toml
+- scripts/lib.rs
+- scripts/ci-push.rs
+- scripts/ci-push/mod.rs
+- scripts/ci-push/host.rs
+- scripts/ci-push/json.rs
+- scripts/ci-push/mode.rs
+- scripts/ci-push/updates.rs
+- scripts/ci-push/documents.rs
+- scripts/ci-push/tests/mod.rs
+- scripts/ci-push/tests/documents.rs
+- scripts/ci-push/tests/run.rs
+- scripts/ci-push/tests/updates.rs
+- scripts/ci/fixtures/pre-push/constraints/minimal.json
+- scripts/ci/fixtures/pre-push/constraints/scoped.json
+- scripts/ci/fixtures/pre-push/plans/plan-macos-executing.json
+- scripts/ci/fixtures/pre-push/plans/plan-macos-two-packages.json
+- scripts/ci/fixtures/pre-push/plans/plan-wsl-absent.json
+- scripts/ci/fixtures/pre-push/plans/plan-wsl-executing.json
+- scripts/ci/fixtures/pre-push/plans/plan-wsl-reused.json
+- scripts/ci/fixtures/pre-push/pull-requests/none.json
+- scripts/ci/fixtures/pre-push/pull-requests/two-open.json
+docs_updated_during_phase_1:
+- docs/dependencies.md
+docs_created_during_phase_1:
+- scripts/ci/fixtures/pre-push/README.md
+skills_files_updated_during_phase_1: []
+packages:
+- repo-deps
 ---
 
 # Rust Pre-push Implementation Plan
@@ -66,11 +97,11 @@ The five phases execute consecutively without human gates. Waves identify indepe
 
 ### Wave 1
 
-- [ ] **Freeze parity**
+- [x] **Freeze parity**
   - Create `implementation-log.md` with one row per current Bash `run_test` registration, original function name, assigned Rust test name, and eventual result. Include the separate dispatcher contract. Preserve the inventory after retiring files.
   - Add shared fixtures under `scripts/ci/fixtures/pre-push/` for constraints, valid resolved plans, PR output, path inventories, and evidence scenarios. Derive controls from existing hook/Python fixtures; mutate one load-bearing field per negative case.
   - Record the malformed-constraint correction and the first-context/all-zero state separation as explicit spec departures, without editing the spec snapshot.
-- [ ] **Build foundation**
+- [x] **Build foundation**
   - Add the binary/library/module layout and optional dependencies specified above. Add `PushMode`, `RefUpdate`, `ReviewContext`, `PythonCommand`, `PushRequest`, `PushOutcome`, `PushServices`, and structured review/withholding errors.
   - Implement complete update parsing and strict document validators. The binary reads environment/stdin and renders the library result; validators remain usable in-process through `run`.
   - This task owns Cargo manifests, library wiring, and `ci-push/mod.rs`; fixture inventory work owns only fixtures/logs, allowing concurrency.
