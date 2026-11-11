@@ -251,6 +251,189 @@ decisions_for_review:
     that path is untested because the cross-OS rigs run Cargo packages only.
     No deployed run was possible: the Cloudflare and GitHub credentials are
     still unset.
+  - |-
+    Upload parts do not use R2 multipart upload, although plan rule 10 says
+    "complete R2 multipart upload into a private staging key". R2 requires
+    every multipart part except the last to be at least 5 MiB, and the plan
+    fixes parts at 1 MiB. Each 1 MiB part is instead stored as its own
+    private staging object named by the part's SHA-256, and finalization
+    streams the parts, in order, into the final object while hashing them.
+    Naming parts by their hash makes two racing writes of one part safe: the
+    first database row wins and the other is refused as a conflict.
+    Alternatives: 5 MiB parts with real multipart upload (changes the
+    published part size and the CLI), or buffering parts in the Worker (memory
+    limits). Switching to multipart later touches src/uploads.ts and the
+    part-size constant only.
+  - |-
+    Whole-object SHA-256 at finalization uses the Workers-native incremental
+    `crypto.DigestStream` rather than @noble/hashes, which plan rule 16 names.
+    Both hash incrementally; the native one costs far less CPU, which matters
+    on Workers Free's 10 ms CPU limit. Even native hashing of a 64 MiB object
+    will exceed 10 ms, so the deployed Phase 6 check must measure
+    finalization CPU; large proofs may need Workers Paid or a lower object
+    cap. Reverting to @noble/hashes changes one function in src/uploads.ts.
+  - |-
+    Fetching an object ignores the 24-hour expiry of its `verified` location
+    event; only a newer `withdrawn` or `unavailable` event for that object
+    denies retrieval. Plan rule 11 says verifier attestations last 24 hours,
+    and the OpenAPI text said an expired object answers 404. Bytes in the
+    service's own bucket were digest-checked at finalization and cannot
+    change, so making them unreadable a day later would force a verifier to
+    re-attest every object daily for nothing. The expiry still applies to
+    every reader's view of host-dir and artifact locations. Alternative:
+    honor the expiry (one condition in the fetch query) and add a periodic
+    re-verification job.
+  - |-
+    Finalization records its `verified` object location event under an event
+    ID derived from the upload ID, so a retry after "R2 write succeeded but
+    the D1 write failed" inserts the event exactly once, and a replay after a
+    withdrawal returns the original result without reviving the object.
+    Rejected proofs (wrong digest, wrong length, a completion record or
+    expected listing that fails the ported structural checks or names another
+    cell) mark the upload `rejected` and answer 400; only structural and
+    cell-binding checks are ported, never plan selection or coverage
+    acceptance.
+  - |-
+    The ingestion command takes flags, as the plan's command line shows, plus
+    an `--endpoint` flag the plan omitted (the service URL has to come from
+    somewhere). `--proof-dir` is the explicit map: each report resolves to
+    `proof-dir/<its recorded path>` and each proof file to its standard
+    `{package}-{gate}.expected.json` / `.completion.json` name, which is the
+    retained-directory layout producers already write. Every mapped file must
+    exist and match its digest before anything is sent; a report path that is
+    absolute or uses `..` is refused. Plain `http://` is accepted only for
+    loopback hosts (local `wrangler dev` and tests). Producer ingestion stops
+    at "staged"; a separate `just evidence-finalize STATE --token-file PATH`
+    runs with the verifier credential. Alternative: a JSON map file (the
+    Phase 1 ingest-config `proofs` list) for collections whose files live in
+    several directories.
+  - |-
+    The daily staging cleanup is implemented and tested as a function
+    (`cleanupStaging`), but no cron trigger calls it yet: Phase 5's "daily
+    staging cleanup and budget admission accounting" task schedules it with
+    the other daily work. Uploads do not reserve capacity in
+    `quota_reservations` yet for the same reason.
+  - |-
+    Two createUpload requests for the same file that arrive at the same
+    moment can each open their own upload. Either one can still be finalized
+    correctly, and each finalized upload is a separate object location.
+    Preventing this needs a partial unique index on uploads plus
+    conflict handling in the handler. That was left out as unneeded
+    complexity, since the CLI sends one request per file. Adding it later
+    touches migration 0004 (or a new migration once deployed) and
+    src/db/uploads.ts.
+  - |-
+    The proof checks never quote content from the uploaded document in an
+    error, though the Python messages echo `repr` values. Errors give the
+    Python problem code, the field name, and the observation's own stored
+    value. Completion records bind run and attempt only for hosted
+    producers: rig, seed, and hook observations record no attempt, and their
+    run ID is a label local to the host. The expected listing's `target` is
+    checked against `proof.target`, the only toolchain identity an
+    observation records. Its `nextest_version` must be present but is not
+    compared with the observation's value, because hosted producers copy that
+    value from the completion record.
+  - |-
+    The ingestion just recipes run `node <pkg>/node_modules/tsx/dist/cli.mjs
+    <pkg>/cli/ingest.ts <command> "$@"` from the caller's directory
+    (`[no-cd]`). They do not go through `pnpm --dir … exec`, because pnpm
+    changes into the package directory: relative INPUT, state, and proof
+    paths would then resolve in the wrong place, and paths containing spaces
+    would be split. `ingest` refuses to start if the state file already
+    exists and points to `evidence-resume` instead. Retry backoff uses a
+    1-second base, which CLIENT_RETRY did not specify. The resume-state
+    schema now records `endpoint`, `repository_id`, and `token_file` (a path
+    only) where it had `config_file`, because the CLI takes flags, not a
+    config file.
+  - |-
+    Phase 5 adds a persisted maintenance mode (migration 0007). While the
+    store is quiesced for a backup, database triggers refuse every evidence,
+    location, upload, retention, repository, and credential-issue write, and
+    the Worker answers 503 `unavailable` (retry after 60 s) before a mutation
+    starts. The triggers, not the Worker check, decide: a write either
+    committed before the quiesce and is in the backup, or it was refused and
+    never acknowledged. Two exceptions: the audit log (so refusals are still
+    recorded) and credential revocation (stopping a leaked credential matters
+    more than the boundary). The backup records revocations made during its
+    window and restore re-applies them; revocations made on the old service
+    after the backup are not carried over, and the docs say to repeat them.
+    Alternative: block revocation too (simpler restore, but a leak could not
+    be stopped during a backup).
+  - |-
+    The plan says a revision change invalidates a retention job that has not
+    started. The repository revision moves on every ingest, location event,
+    and upload finalization, so a job that waited for the daily run would
+    almost always be invalidated, and pruning would almost never happen. The
+    grace period is counted from an observation's first certification and
+    persists across certificates, so a verifier that resubmits after 14 days
+    gets a job whose grace is already over. Such a job now starts
+    (`withdrawing`) in the same database write that accepts the certificate,
+    while the certificate's snapshot is proven current; only a job still in
+    its grace period waits as `scheduled` and can be invalidated.
+    Alternatives: compare only the certified cells' contents instead of the
+    whole-repository revision (a weaker check than the plan's), or keep
+    waiting for the daily run (pruning effectively disabled). Reverting is
+    one CASE expression in `writeCertificate` (src/db/retention.ts) plus one
+    test.
+  - |-
+    Retention details the plan left open (all in src/retention.ts and
+    migration 0008):
+    - A write into a cell locked by a retention job answers 503
+      `unavailable` (retryable, 60 s), not a new 409 code, so clients retry
+      without changes. The lock also covers uploads and every location event
+      except `withdrawn`, so a `verified` event cannot land between the
+      withdrawals and the deletions.
+    - Withdrawal event IDs come from (job, newest location row), so a
+      location re-verified after its withdrawal is withdrawn again rather
+      than skipped as a replay.
+    - The first-certification time is kept in a new `retention_supersessions`
+      table, deleted only together with a pruned observation.
+    - Refusals: a candidate set that is partial, or names an observation
+      the store does not hold, is 409 `stale_snapshot`; an edge, chain, or
+      retained ID outside the cell's candidates is 400; a release pin on a
+      member is 400.
+    - Replay equality compares the SHA-256 of the canonical certificate,
+      so key order and whitespace do not matter.
+    - Tombstone expiry deletes an expired `pruned` tombstone together with
+      every earlier event of the same observation or location event, and
+      advances the replay horizon in the same transaction.
+  - |-
+    Budget admission reserves capacity only for uploads (R2 storage bytes and
+    monthly write operations) when an upload opens, commits them on
+    finalization, and releases the storage of rejected, expired, cleaned, and
+    pruned uploads. Spent write operations are never released. Collection
+    ingestion is never refused for capacity, so a failure can never be
+    suppressed, and admission never deletes anything. D1 rows and Worker
+    requests are not metered per request (each would cost a D1 write against
+    the 100,000/day allowance); the daily run reports R2 usage and logs a
+    numbers-only alert at 70%. Alternative: meter D1 writes per request.
+  - |-
+    Recovery choices (cli/recovery.ts, src/recovery.ts):
+    - Backups go to a local operator-owned directory (`--destination`), one
+      subdirectory per backup, with seven kept. Scheduling the daily backup
+      is the operator's job (Phase 6 documents it); the Worker cannot copy
+      its own database.
+    - The pending-upload, job, credential, and grant lists are kept in the
+      manifest itself rather than in separate files.
+    - Restore reorders the D1 export (tables, rows, indexes, then triggers)
+      so restored rows do not fire triggers and duplicate change events.
+    - Restore refuses a destination that shares an environment name, D1
+      database name or ID, or bucket with the source. Because the checked-in
+      `wrangler.jsonc` still uses placeholder IDs for both environments, it
+      refuses until real IDs are set.
+    - After restore, every repository's generation is rotated, the restored
+      operator credentials are revoked and a new one is minted into an
+      owner-only file, and the cursor key is replaced through
+      `wrangler secret put` fed on stdin.
+    - Restore appends an `unavailable` event for every object the backup
+      lacks, marks pending uploads expired, and stays quiesced until a
+      separate reopen.
+    - Replay of retained ingestion bundles classifies acknowledged IDs as
+      recovered, replayed, or unrecoverable. Without replay inputs, the
+      report says post-boundary loss is unknown.
+    - Three assumptions about real Wrangler output are unproven until the
+      Phase 6 demonstration: the `d1 export` format, the `d1 execute --json`
+      result shape, and the missing-object error text.
 source_files_during_phase_2:
   - tools/evidence-store/vitest.config.ts
   - tools/evidence-store/wrangler.jsonc
@@ -329,30 +512,109 @@ docs_updated_during_phase_3:
   - tools/evidence-store/docs/contract-inventory.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - tools/evidence-store/src/uploads.ts
+  - tools/evidence-store/src/db/uploads.ts
+  - tools/evidence-store/src/contracts/proofs.ts
+  - tools/evidence-store/src/locations.ts
+  - tools/evidence-store/src/worker.ts
+  - tools/evidence-store/migrations/0004_uploads.sql
+  - tools/evidence-store/cli/ingest.ts
+  - tools/evidence-store/justfile
+  - tools/evidence-store/api/openapi.yaml
+  - tools/evidence-store/api/examples/finalizeUpload.response.json
+  - tools/evidence-store/api/schemas/ingest-config.schema.json
+  - tools/evidence-store/api/schemas/resume-state.schema.json
+  - tools/evidence-store/tests/service/helpers.ts
+  - tools/evidence-store/tests/service/uploads.test.ts
+  - tools/evidence-store/tests/service/fetch.test.ts
+  - tools/evidence-store/tests/node/proofs.test.ts
+  - tools/evidence-store/tests/node/ingest.test.ts
+  - tools/evidence-store/tests/node/ingest-cli.test.ts
+  - tools/evidence-store/tests/fixtures/ingest/fake-service.ts
+docs_updated_during_phase_4:
+  - tools/evidence-store/README.md
+  - tools/evidence-store/api/README.md
+  - tools/evidence-store/docs/contract-inventory.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - tools/evidence-store/migrations/0003_credentials.sql
+  - tools/evidence-store/migrations/0004_uploads.sql
+  - tools/evidence-store/migrations/0007_maintenance.sql
+  - tools/evidence-store/migrations/0008_retention_state.sql
+  - tools/evidence-store/src/backup-manifest.ts
+  - tools/evidence-store/src/capacity.ts
+  - tools/evidence-store/src/contracts/api.ts
+  - tools/evidence-store/src/daily.ts
+  - tools/evidence-store/src/db/audit.ts
+  - tools/evidence-store/src/db/retention.ts
+  - tools/evidence-store/src/db/uploads.ts
+  - tools/evidence-store/src/maintenance.ts
+  - tools/evidence-store/src/operator.ts
+  - tools/evidence-store/src/recovery.ts
+  - tools/evidence-store/src/retention.ts
+  - tools/evidence-store/src/uploads.ts
+  - tools/evidence-store/src/worker.ts
+  - tools/evidence-store/cli/operator.ts
+  - tools/evidence-store/cli/recovery.ts
+  - tools/evidence-store/justfile
+  - tools/evidence-store/wrangler.jsonc
+  - tools/evidence-store/api/openapi.yaml
+  - tools/evidence-store/api/schemas/backup-manifest.schema.json
+  - tools/evidence-store/api/examples/error.quota_exhausted.json
+  - tools/evidence-store/api/examples/error.stale_snapshot.json
+  - tools/evidence-store/api/examples/finalizeUpload.response.json
+  - tools/evidence-store/api/examples/getMaintenance.response.json
+  - tools/evidence-store/api/examples/recoverJobs.request.json
+  - tools/evidence-store/api/examples/recoverJobs.response.json
+  - tools/evidence-store/api/examples/setMaintenance.request.json
+  - tools/evidence-store/api/examples/setMaintenance.response.json
+  - tools/evidence-store/tests/fixtures/recovery/
+  - tools/evidence-store/tests/node/proofs.test.ts
+  - tools/evidence-store/tests/node/recovery-cli.test.ts
+  - tools/evidence-store/tests/node/recovery.test.ts
+  - tools/evidence-store/tests/service/capacity.test.ts
+  - tools/evidence-store/tests/service/db-migrations.test.ts
+  - tools/evidence-store/tests/service/fetch.test.ts
+  - tools/evidence-store/tests/service/helpers.ts
+  - tools/evidence-store/tests/service/maintenance.test.ts
+  - tools/evidence-store/tests/service/recover-jobs.test.ts
+  - tools/evidence-store/tests/service/recovery-helpers.ts
+  - tools/evidence-store/tests/service/retention-daily.test.ts
+  - tools/evidence-store/tests/service/retention-fixtures.ts
+  - tools/evidence-store/tests/service/retention-jobs.test.ts
+  - tools/evidence-store/tests/service/retention.test.ts
+  - tools/evidence-store/tests/service/uploads.test.ts
+docs_updated_during_phase_5:
+  - tools/evidence-store/README.md
+  - tools/evidence-store/api/README.md
+  - tools/evidence-store/docs/contract-inventory.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 message_to_agent: |-
-  Phase 3 is implemented; `just test` (668 at first gate run) and `just
-  lint` pass in tools/evidence-store. Phase 1's deployed feasibility
-  checkpoint is still open (Cloudflare/GitHub credentials unset), and the
-  Phase 2 tree is still uncommitted alongside Phase 3.
-  Seams for Phase 4:
-  - Routes live in `src/worker.ts`: add upload/finalize/fetch to
-    `matchRepositoryRoute` with their OperationId and rate class; roles come
-    from `OPERATIONS` and are already enforced before your handler runs.
-  - Parse JSON bodies with `src/requests.ts` readers (strict, located 400s).
-  - `src/locations.ts` refuses `verified` object locators on purpose: finalize
-    must insert the verified `object` location itself (reuse its insert, and
-    `renderLocationEvent` in `src/reads.ts` with `readLocationEvent` in
-    `src/db/reads.ts`).
-  - Real auth: `createAuthenticator({ jwks })` in `src/auth.ts`; tokens in
-    `src/tokens.ts`. Tests mostly inject principals via `harness`/`principal`
-    in `tests/service/helpers.ts`.
-  - `SERVICE_CONFIG` and three rate-limit bindings are now required bindings
-    (vitest.config.ts and wrangler.jsonc have them).
-  - For the Phase 4 CLI: `cli/operator.ts` has reusable owner-only file
-    writing, strict file loading, and the API error printing; Windows icacls
-    behavior is untested.
-  Migrations 0001-0006 are still undeployed and may be edited until the first
-  deployment applies them.
+  Phase 5 is implemented; `just test` (32 files, 880 tests) and `just lint`
+  pass in tools/evidence-store. Phases 4 and 5 are both uncommitted. Phase 1's
+  deployed feasibility checkpoint is still open (Cloudflare/GitHub
+  credentials unset). Notes for Phase 6:
+  - Migrations now run 0001-0008 (0007 maintenance mode, 0008 retention
+    state); all are still undeployed and editable until the first deploy.
+  - Operator recovery commands: `just operator backup | verify-backup |
+    restore | recover-jobs | maintenance` (see api/README.md, "Maintenance,
+    backup, and restore"). Restore refuses until wrangler.jsonc has real,
+    distinct database IDs for development and restore-test.
+  - The fake Wrangler in tests/fixtures/recovery/fake-wrangler.ts assumes
+    the `d1 export` SQL format, the `d1 execute --json` result shape
+    `[{"results":[...]}]`, and R2 missing-object error text matching
+    `does not exist|NoSuchKey|not found`; check all three against the real
+    Wrangler during the deployed restore demonstration.
+  - The Worker has a daily cron (`17 3 * * *`) running staging cleanup,
+    retention jobs, tombstone expiry, and capacity alerts (src/daily.ts).
+  - No retention-verifier credential is provisioned anywhere, by design.
+  - `docs/cicd/evidence-store.md` (Phase 6) should draw on api/README.md's
+    new "Storage budget", "Retention", and "Maintenance, backup, and
+    restore" sections.
+---
 ---
 
 # Implementation Log for 2026-10-26-next-gen-pipeline (6 phases)
@@ -769,3 +1031,289 @@ message_to_agent: |-
 - **Phase 3 outcome: implementation complete.** "Enforce identities" and
   "Implement reads" are checked off. Phase 1's Wave 2 feasibility tasks stay
   unchecked; they are still blocked on credentials.
+
+## Phase 4
+
+- 2026-11-11: preflight. Phases 2 and 3 are now committed (`423595f3e`), so
+  the uncommitted tree is this phase alone. Cloudflare/GitHub credentials are
+  still unset; Phase 4 deploys nothing (Worker routes, CLI, local Workers-pool
+  and Node tests), so it proceeds on the same basis as Phases 2 and 3.
+- Design settled in the main session before fan-out (recorded in
+  `decisions_for_review`): R2 multipart needs 5 MiB parts, so each 1 MiB part
+  is its own content-addressed staging object and finalization streams the
+  parts into the final object; whole-object SHA-256 uses the Workers-native
+  `crypto.DigestStream`; finalization inserts a deterministic `verified`
+  `object` location event so replays are idempotent; ingestion uses flags
+  (`--endpoint` added) and resolves every reference inside `--proof-dir`
+  before any network request; a separate `evidence-finalize` command runs the
+  verifier credential.
+- Wave 6 runs as two parallel foreground subagents: transfers (Worker) and
+  ingestion (CLI).
+- **Implement transfers** (done): `src/uploads.ts`, `src/db/uploads.ts`,
+  `src/contracts/proofs.ts`, routes in `src/worker.ts` (a new
+  `matchTransferRoute` for the 4-segment upload paths), and a shared
+  `checkReference`/`locationInsert` in `src/locations.ts`.
+  - `POST /uploads`: the reference must exist in the stored observation (a
+    report's `bytes` must match). Above 64 MiB → 413 while the observation
+    stays recorded. An open or finalized upload for the same reference is
+    returned with 200; a conflicting length → 409.
+  - `PUT …/parts/{index}`: each part is a content-addressed staging object.
+    Parts are sequential, sizes are exact, an identical replay → 200, and
+    different bytes → 409. An expired upload → 404 and is marked `expired`.
+  - `POST …/finalize` (verifier only):
+    - before writing, an R2 `head` checks every part's size;
+    - the parts are streamed into the final object through
+      `crypto.DigestStream` (it works in the vitest workers pool; the
+      @noble/hashes fallback was not needed), and the length and digest
+      are verified;
+    - proof documents get the ported structural and cell-binding checks;
+    - one D1 batch marks the upload finalized and inserts the deterministic
+      `verified` object event. A failure rejects the upload, deletes the
+      final object, and answers 400.
+  - `GET /objects/…`: streams a finalized object with `Content-Length` and
+    `X-Content-SHA256` unless a newer withdrawn or unavailable event exists.
+    A missing R2 object → 503.
+  - `cleanupStaging`: expires stale open uploads; removes staging older than
+    48 h for unfinalized uploads, and leftover parts and orphans for the
+    rest.
+- **Build ingestion** (done): `cli/ingest.ts` with `ingest`, `resume`, and
+  `finalize`, plus the just recipes `evidence-ingest`, `evidence-resume`, and
+  `evidence-finalize`.
+  - Every input is read and checked before any request: flags, token file,
+    the strict input, v2 adaptation on this host, and the `--proof-dir` map
+    with every file's digest checked.
+  - The state file is written atomically before the first request and after
+    every acknowledgment. The original input and the submitted collection
+    are kept beside it.
+  - Retry policy: 429, 503, and network failures only; 5 attempts; full
+    jitter capped at 30 s; Retry-After honored up to 60 s; 60 s timeout per
+    request. On a persistent failure the CLI prints
+    `just evidence-resume <state>` and exits 1.
+  - Nothing calls the CLI from publish-receipt, hooks, `ci.yml`, `seed.py`,
+    or `affected_scope.py`.
+- Main-session integration: dropped the dead `r2_upload_id` column from the
+  undeployed migration 0004 (the subagent flagged its comment as stale);
+  added "Uploaded proof documents" and "Ingestion CLI inputs" sections to
+  `docs/contract-inventory.md`.
+- Requirement → test mapping:
+  - interrupted parts, wrong part size/index gap, identical vs different
+    replay, expiry → `tests/service/uploads.test.ts` "parts" block.
+  - wrong size (tampered staged part) and wrong digest → rejected with the
+    observation unchanged; missing proof reference, unreferenced upload,
+    completion mismatch (package/gate/head/environment), target mismatch,
+    non-strict JSON proof → `uploads.test.ts` "finalize" and "POST /uploads".
+  - finalize after R2 success and D1 failure (a `Proxy` database whose
+    `batch()` throws once) → one event after retry → "finalizes once when the
+    D1 batch fails after the object was written".
+  - verifier only: producer → 403 with nothing written; reader → 403 on
+    upload.
+  - withdrawal during retrieval, withdrawal without revival on finalize
+    replay, independent host-dir vs object locations, expiry ignored, lost
+    R2 object → 503 → `tests/service/fetch.test.ts`.
+  - staging cleanup → `uploads.test.ts` "cleanupStaging".
+  - proof validators: each field shape once, control rows, binding →
+    `tests/node/proofs.test.ts`.
+  - CLI: v3 and v2 end to end, refusals before network (zero requests),
+    lost response, 503/429/give-up/no-retry-on-400, resume from the server's
+    `parts_received`, tampered retained collection, part 409, state field and
+    document shapes, no token or report bytes in output or state →
+    `tests/node/ingest.test.ts`; spawned control over loopback http (paths
+    with spaces) plus malformed input and malformed state → exit 2 with a
+    location → `tests/node/ingest-cli.test.ts`.
+- Plan checkpoint: no report content or token appears in errors or logs
+  (proof errors never quote document content; the CLI test asserts no
+  token or report bytes in output or state). Upload retry never reruns a
+  test or modifies an observation (interrupted, rejected, and replayed
+  uploads leave the export unchanged).
+- Code-smell search (`??`, `.filter(`, `catch`, defaults) over the new code:
+  - the `.filter` in proofs.ts selects missing required fields;
+  - the `catch` blocks in uploads.ts swallow only best-effort deletes and
+    stream-abort promises after the main error is decided;
+  - the CLI's `catch` blocks rethrow located `CliError`s;
+  - the `??` uses only shape the summary printout.
+- Gates (2026-11-11, macOS, run once after both subagents finished, nothing
+  else running), in `tools/evidence-store`: `just lint` → exit 0; `just
+  test` → 24 files, 769 tests passed, none skipped, about 3 s. No failures,
+  no load-sensitive reruns.
+- Scope calculator over the uncommitted tree → `packages: []`,
+  `change_class: documentation` (the pnpm tool is outside CI's Cargo scope
+  registry). The gates ran anyway because source files changed. No package
+  depends on `@rusty-biscuit/evidence-store`, so there were no dependent
+  tests to run.
+- Cross-OS: no Cargo package changed, so `just cross-check` does not apply.
+  The CLI uses `node:path`, no shell quoting, and no stdin; it is untested
+  on Windows.
+- Deferred: cron scheduling of cleanup and capacity reservations (Phase 5),
+  and any deployed transfer run (Phase 6, credentials unset).
+- **Phase 4 outcome: implementation complete.** "Implement transfers" and
+  "Build ingestion" are checked off.
+
+## Phase 5
+
+- 2026-11-11: preflight. Phase 4 is still uncommitted (git status shows its
+  files), so the uncommitted tree is Phases 4 and 5 together; the scope
+  calculator result at the end covers both. Cloudflare/GitHub credentials
+  remain unset; Phase 5 deploys nothing (Worker routes, migrations, operator
+  CLI, local Workers-pool and Node tests).
+- Shared foundation written in the main session before fan-out, so the two
+  Wave 7 subagents own disjoint files:
+  - `migrations/0007_maintenance.sql`: single-row `service_state` with a
+    persisted `maintenance_mode` (`open` / `quiesced`), plus triggers that
+    refuse every evidence, location, upload, retention, repository, and
+    credential-issue write with `maintenance_mode` while quiesced. The audit
+    log and credential revocation are not blocked.
+  - `src/maintenance.ts`: `readMaintenance`, `assertWritable`, and the
+    trigger-error mapping. The Worker checks the mode before every mutation
+    route (503 `unavailable`, retry after 60 s) and maps a trigger refusal
+    that races the check to the same answer.
+  - `src/daily.ts` and the Worker's `scheduled` handler, with a daily cron
+    (`17 3 * * *`) in both Wrangler environments. It skips everything while
+    quiesced and currently runs the Phase 4 staging cleanup.
+  - Migration 0003's audit actions gained `retention.recover`,
+    `maintenance.quiesce`, and `maintenance.resume` (undeployed, so edited in
+    place), mirrored in `src/db/audit.ts`, `src/operator.ts`, and OpenAPI.
+  - `src/retention.ts` interface stub (`advanceRetentionJobs`) shared by the
+    retention runner and the operator `recover-jobs` route.
+  - `just test` after the foundation: 24 files, 769 tests passed.
+- Wave 7 runs as two parallel foreground subagents: retention (certificates,
+  jobs, capacity, daily steps) and recovery (maintenance routes, backup,
+  restore, verify-backup, recover-jobs).
+- The subagents ran in the background, not the foreground as briefed; the
+  main session waited for both to finish within the same turn and did not
+  run tests while they worked.
+- **Guard retention** (done): `src/retention.ts`, `src/db/retention.ts`,
+  `src/capacity.ts`, `migrations/0008_retention_state.sql`, budget
+  admission in `src/uploads.ts`, retention routes in `src/worker.ts`, and
+  the daily steps in `src/daily.ts`.
+  - `POST /retention/certificates` (retention-verifier only) checks
+    everything before writing: exact snapshot, exact candidate set per
+    cell, a protected maximal set, same-cell acyclic edges, ancestry heads
+    bound to stored heads, retry chains against stored `retry_of`, and
+    release pins. It then writes the certificate, first-certification
+    times, the job, the members, the pins, and the audit row in one batch.
+  - `GET /retention/jobs/{id}` is answered to a retention verifier or an
+    operator.
+  - `advanceRetentionJobs` runs the job in order: withdraw, lock the cells,
+    delete the objects, advance the epoch, delete the rows, then complete
+    and unlock. Each step is a bounded, idempotent batch.
+  - Main-session follow-up on the subagent's finding: a job whose grace
+    has already ended now starts at acceptance (see `decisions_for_review`).
+    New test: "starts a job at submission when its grace has already ended,
+    so a later write cannot invalidate it". `api/README.md` and OpenAPI
+    were updated to match; OpenAPI also had "earliest time" where the code
+    uses the latest first certification (a drifted description, corrected
+    to follow the code).
+- **Implement recovery** (done): `src/recovery.ts` adds the operator routes
+  `POST`/`GET /v1/operator/maintenance` and `POST /v1/operator/jobs/recover`.
+  `src/backup-manifest.ts` is the strict manifest reader. `cli/recovery.ts`
+  implements `backup`, `verify-backup`, `restore`, `recover-jobs`, and
+  `maintenance`, dispatched from `cli/operator.ts` and run through
+  `just operator …`. `api/schemas/backup-manifest.schema.json` was
+  rewritten.
+- Main-session integration:
+  - Fixed the shared `retentionJob` test helper: its `submitted_by` was not
+    publisher JSON, and the real runner parses that field.
+  - Split the crash-at-every-boundary test, which had looped over every
+    failure point in one 2.7 s test, into twelve range tests plus a guard
+    test proving the ranges cover a clean run's operations. Each takes
+    under 0.35 s.
+  - Added the "Retention certificates" and "Backup manifest and recovery
+    commands" sections to `docs/contract-inventory.md`.
+  - Updated the README status list.
+- Requirement → test mapping:
+  - Retention, in `tests/service/retention.test.ts`:
+    - "protects the current pass…"
+    - "protects an unresolved failure…"
+    - "protects a same-head pass/fail conflict…"
+    - "protects observations on unrelated heads and binds ancestry claims
+      to the stored heads"
+    - "prunes a failed attempt resolved by a stored retry link…"
+    - "refuses a stale or pruned snapshot…"
+    - "refuses a partial candidate set and missing store data…"
+    - "refuses edges that cross cells…"
+    - "stores release pins idempotently and never prunes a release-cited
+      observation"
+    - "answers an identical replay with 200…"
+    - "treats an empty prune set as a completed no-op job"
+    - "refuses every role but retention-verifier with 403 and writes
+      nothing"
+    - "answers 503 and writes nothing when the D1 write fails"
+    - field-shape walk, field wiring, and loader wiring.
+  - Retention jobs, in `tests/service/retention-jobs.test.ts`:
+    - "withdraws, deletes objects, then deletes rows, keeping a retained
+      observation's identical bytes" (shared objects)
+    - "answers snapshot_pruned to a snapshot or cursor captured before the
+      epoch advanced"
+    - "measures the grace from the first certified supersession…"
+    - "starts a job at submission when its grace has already ended…"
+    - "invalidates a scheduled job when the revision changed…"
+    - "locks the cell during deletion…"
+    - "does nothing while the store is quiesced"
+    - "crash at every boundary" (13 tests: D1 statements, batches, and R2
+      deletes, failing both before and after taking effect).
+  - Daily run and tombstones, in `tests/service/retention-daily.test.ts`:
+    the scheduled run, tombstone expiry, and the horizon moving to
+    `cursor_expired`.
+  - Budget admission, in `tests/service/capacity.test.ts`: reserve and
+    commit, the storage threshold (429, nothing written, ingestion
+    unaffected), the monthly class A threshold, release, and the
+    numbers-only alert.
+  - Maintenance, in `tests/service/maintenance.test.ts`:
+    - the boundary and idempotent quiesce;
+    - 503 with zero D1/R2 writes on all eight mutation routes;
+    - reads and audit still work;
+    - revocation is allowed;
+    - a racing write is refused by the trigger;
+    - reopening restores writes.
+  - Recover jobs, in `tests/service/recover-jobs.test.ts`.
+  - Recovery, in `tests/node/recovery.test.ts`:
+    - the round trip into isolated resources over a fake Wrangler backed
+      by `node:sqlite` built from the real migrations (identical rows, no
+      duplicated events, rotated generations and keys, an `unavailable`
+      event for a missing object, the pending upload expired);
+    - proof of the statement reorder;
+    - replay classification;
+    - window revocations;
+    - backup always reopens and handles a lost quiesce answer;
+    - seven-backup rotation;
+    - refusing the live source as destination, a tampered backup (nothing
+      executed), and a non-empty destination;
+    - 29 manifest field-shape cases plus loader wiring.
+  - Spawned CLI wiring, in `tests/node/recovery-cli.test.ts`: one control
+    and two malformed manifests.
+- Plan checkpoint:
+  - Synthetic pruning with fault injection at every D1 and R2 boundary
+    never leaves a row advertising deleted bytes (`expectNoDanglingAvailability`
+    after every injected crash). Restore appends `unavailable` for every
+    object the backup lacks.
+  - Protected evidence survives quota exhaustion (admission only refuses
+    new uploads and never deletes) and cleanup (staging cleanup touches
+    only unfinalized or orphaned staging).
+- Code-smell search over the new code:
+  - `??` defaults: graph adjacency lookups, absent optional ingest-state
+    lists, and absent repeated CLI flags. All are intentional and recorded
+    in the inventory.
+  - `.filter`: selection only (present versus absent IDs, active operator
+    credentials, replayable uploads whose digest still matches; the dropped
+    ones are counted in `uploads_not_replayed`), never silently discarding
+    invalid input.
+- Gates (2026-11-11, macOS, run after both subagents had finished and
+  nothing else was running), in `tools/evidence-store`:
+  - `just lint` → exit 0.
+  - `just test` → 32 files, 880 tests passed, none skipped.
+  - No failures and no load-sensitive reruns. The slowest single test is
+    now under 0.4 s.
+- Scope calculator over the uncommitted tree (`git status --porcelain
+  --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`) → `packages: []`, `change_class:
+  documentation`. The pnpm tool is outside CI's Cargo scope registry. The
+  gates ran anyway, because source files changed. No package depends on
+  `@rusty-biscuit/evidence-store`, so there were no dependent tests.
+- Cross-OS: no Cargo package changed, so `just cross-check` does not apply.
+  The recovery CLI uses `node:path`, spawns without a shell, and pipes the
+  cursor key through stdin. Its Windows behavior (token-file ACL, paths) is
+  untested.
+- Deferred to Phase 6: any deployed backup or restore, and checking the
+  three Wrangler output assumptions listed in `message_to_agent`.
+- **Phase 5 outcome: implementation complete.** "Guard retention" and
+  "Implement recovery" are checked off.

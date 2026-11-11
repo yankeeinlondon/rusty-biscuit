@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 6
 created: 2026-11-08
-phase: 4
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -118,6 +118,86 @@ docs_updated_during_phase_3:
 - tools/evidence-store/docs/contract-inventory.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+- tools/evidence-store/src/uploads.ts
+- tools/evidence-store/src/db/uploads.ts
+- tools/evidence-store/src/contracts/proofs.ts
+- tools/evidence-store/src/locations.ts
+- tools/evidence-store/src/worker.ts
+- tools/evidence-store/migrations/0004_uploads.sql
+- tools/evidence-store/cli/ingest.ts
+- tools/evidence-store/justfile
+- tools/evidence-store/api/openapi.yaml
+- tools/evidence-store/api/examples/finalizeUpload.response.json
+- tools/evidence-store/api/schemas/ingest-config.schema.json
+- tools/evidence-store/api/schemas/resume-state.schema.json
+- tools/evidence-store/tests/service/helpers.ts
+- tools/evidence-store/tests/service/uploads.test.ts
+- tools/evidence-store/tests/service/fetch.test.ts
+- tools/evidence-store/tests/node/proofs.test.ts
+- tools/evidence-store/tests/node/ingest.test.ts
+- tools/evidence-store/tests/node/ingest-cli.test.ts
+- tools/evidence-store/tests/fixtures/ingest/fake-service.ts
+docs_updated_during_phase_4:
+- tools/evidence-store/README.md
+- tools/evidence-store/api/README.md
+- tools/evidence-store/docs/contract-inventory.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+- tools/evidence-store/migrations/0003_credentials.sql
+- tools/evidence-store/migrations/0004_uploads.sql
+- tools/evidence-store/migrations/0007_maintenance.sql
+- tools/evidence-store/migrations/0008_retention_state.sql
+- tools/evidence-store/src/backup-manifest.ts
+- tools/evidence-store/src/capacity.ts
+- tools/evidence-store/src/contracts/api.ts
+- tools/evidence-store/src/daily.ts
+- tools/evidence-store/src/db/audit.ts
+- tools/evidence-store/src/db/retention.ts
+- tools/evidence-store/src/db/uploads.ts
+- tools/evidence-store/src/maintenance.ts
+- tools/evidence-store/src/operator.ts
+- tools/evidence-store/src/recovery.ts
+- tools/evidence-store/src/retention.ts
+- tools/evidence-store/src/uploads.ts
+- tools/evidence-store/src/worker.ts
+- tools/evidence-store/cli/operator.ts
+- tools/evidence-store/cli/recovery.ts
+- tools/evidence-store/justfile
+- tools/evidence-store/wrangler.jsonc
+- tools/evidence-store/api/openapi.yaml
+- tools/evidence-store/api/schemas/backup-manifest.schema.json
+- tools/evidence-store/api/examples/error.quota_exhausted.json
+- tools/evidence-store/api/examples/error.stale_snapshot.json
+- tools/evidence-store/api/examples/finalizeUpload.response.json
+- tools/evidence-store/api/examples/getMaintenance.response.json
+- tools/evidence-store/api/examples/recoverJobs.request.json
+- tools/evidence-store/api/examples/recoverJobs.response.json
+- tools/evidence-store/api/examples/setMaintenance.request.json
+- tools/evidence-store/api/examples/setMaintenance.response.json
+- tools/evidence-store/tests/fixtures/recovery/
+- tools/evidence-store/tests/node/proofs.test.ts
+- tools/evidence-store/tests/node/recovery-cli.test.ts
+- tools/evidence-store/tests/node/recovery.test.ts
+- tools/evidence-store/tests/service/capacity.test.ts
+- tools/evidence-store/tests/service/db-migrations.test.ts
+- tools/evidence-store/tests/service/fetch.test.ts
+- tools/evidence-store/tests/service/helpers.ts
+- tools/evidence-store/tests/service/maintenance.test.ts
+- tools/evidence-store/tests/service/recover-jobs.test.ts
+- tools/evidence-store/tests/service/recovery-helpers.ts
+- tools/evidence-store/tests/service/retention-daily.test.ts
+- tools/evidence-store/tests/service/retention-fixtures.ts
+- tools/evidence-store/tests/service/retention-jobs.test.ts
+- tools/evidence-store/tests/service/retention.test.ts
+- tools/evidence-store/tests/service/uploads.test.ts
+docs_updated_during_phase_5:
+- tools/evidence-store/README.md
+- tools/evidence-store/api/README.md
+- tools/evidence-store/docs/contract-inventory.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 ---
 
 # Evidence store implementation plan
@@ -224,11 +304,11 @@ Checkpoint: all routes enforce repository and role grants; no producer can creat
 
 ### Wave 6 — Transfer and client
 
-- [ ] **Implement transfers**
+- [x] **Implement transfers**
   - Implement bounded resumable upload, immutable private R2 staging, streaming integrity verification, verifier-only idempotent finalization, and authorized fetch. Validate expected-listing and completion JSON with existing executable contracts, cell identity, and proof digests; no passing location certifies coverage.
   - Port proof structure checks from `schema.validate_completion_record`, `completion.manifest_problems`, `hosted_observations._expected_manifest/_completion_record`, and `local_evidence._proof_problem`. Bind expected-manifest package/environment/gate/head/target/toolchain to the observation and collection; do not port plan selection, skip approvals, or coverage acceptance into the store. Reject a proof that requires plan-dependent validation as a coverage claim; integrity storage remains permitted. Oversized existing proofs return explicit size errors while their observations remain recorded.
   - Test interrupted parts, wrong size/digest, missing proof, completion mismatch, unreferenced upload, finalize-after-R2-success/D1-failure, withdrawal during retrieval, independent locations, and staging cleanup.
-- [ ] **Build ingestion**
+- [x] **Build ingestion**
   - Implement `just evidence-ingest INPUT --repo ID --token-file PATH --proof-dir PATH --state PATH` and `just evidence-resume STATE` in the service justfile. The CLI reads configuration before any network mutation, converts v2 locally, preserves original bundles, submits once, uploads explicitly mapped proof files, and stores durable resume acknowledgments atomically.
   - Producer-only ingestion reports staged bytes pending verifier finalization; the demo operator runs a separate verifier credential to finalize. Keep claimed historical provenance distinct from actual publisher. No call site is added to `publish-receipt`, `publish_directory`, hooks, `ci.yml`, `seed.py`, or `affected_scope.py`.
   - Test public CLI library results in process; spawn CLI only for control plus malformed-file/wiring cases. Commands must work with Node on macOS, Linux, Windows, and WSL2 without shell-specific quoting or interactive stdin.
@@ -239,11 +319,11 @@ Checkpoint: no report content or token appears in errors/logs; upload retry neve
 
 ### Wave 7 — Independent operational paths
 
-- [ ] **Guard retention**
+- [x] **Guard retention**
   - Implement certificate validation, protected-set checks, release-pin protection, 14-day grace, withdrawal events, cell locks, and resumable bounded prune jobs. Do not provision a production retention-verifier grant. Keep deletion permission inaccessible through generic operator SQL routes; no public SQL endpoint exists.
   - Test current pass, unresolved failure, same-head conflict, unrelated heads, retry resolution, stale/partial snapshot, missing store data, release-cited rows, shared objects, replay, and crashes at every withdraw/delete boundary. These tests use an isolated verifier fixture, not a producer-supplied passing claim.
   - Add daily staging cleanup and budget admission accounting. Admission denial never evicts protected evidence or suppresses failures. Append deletion tombstones before removal.
-- [ ] **Implement recovery**
+- [x] **Implement recovery**
   - Add non-interactive `backup`, `restore`, `verify-backup`, and `recover-jobs` operator commands with explicit source/destination IDs and manifests. Restore forbids the live source as destination. Backups cover schema/version, D1, objects, pending uploads, event counters, and credentials/grants; secrets remain external.
   - Persist mutation maintenance mode and require all acknowledged writes to fall on a documented backup boundary. Recovery emits recovered/unrecoverable acknowledged IDs and missing-object lists. Deployment rollback restores a compatible prior Worker build; destructive schema rollback uses isolated restore and generation rotation.
 
