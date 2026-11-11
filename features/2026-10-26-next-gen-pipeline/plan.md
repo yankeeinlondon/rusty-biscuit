@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 6
 created: 2026-11-08
-phase: 6
+phase: 7
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -198,6 +198,162 @@ docs_updated_during_phase_5:
 - tools/evidence-store/docs/contract-inventory.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+- .github/workflows/evidence-store-demo.yml
+- justfile
+- tools/evidence-store/justfile
+- tools/evidence-store/package.json
+- tools/evidence-store/vitest.config.ts
+- tools/evidence-store/wrangler.jsonc
+- tools/evidence-store/cli/deploy.ts
+- tools/evidence-store/cli/dispatch-demo.ts
+- tools/evidence-store/tests/acceptance/cases.ts
+- tools/evidence-store/tests/node/deploy.test.ts
+- tools/evidence-store/tests/node/dispatch-demo.test.ts
+- tools/evidence-store/tests/real/acceptance.test.ts
+- tools/evidence-store/tests/service/acceptance.test.ts
+docs_updated_during_phase_6:
+- docs/cicd/evidence.md
+- docs/dependencies.md
+- tools/evidence-store/README.md
+docs_created_during_phase_6:
+- docs/cicd/evidence-store.md
+skills_files_updated_during_phase_6:
+- .claude/skills/rust-devops/ci-cd.md
+source_code:
+- pnpm-workspace.yaml
+- pnpm-lock.yaml
+- tools/evidence-store/package.json
+- tools/evidence-store/tsconfig.json
+- tools/evidence-store/vitest.config.ts
+- tools/evidence-store/justfile
+- tools/evidence-store/src/contracts/api.ts
+- tools/evidence-store/src/contracts/evidence.ts
+- tools/evidence-store/src/contracts/index.ts
+- tools/evidence-store/src/contracts/json.ts
+- tools/evidence-store/cli/capture-parity.ts
+- tools/evidence-store/cli/inventory.ts
+- tools/evidence-store/cli/prove-d1.ts
+- tools/evidence-store/spike/d1-guard/schema.sql
+- tools/evidence-store/spike/d1-guard/worker.ts
+- tools/evidence-store/spike/d1-guard/scenarios.ts
+- tools/evidence-store/api/openapi.yaml
+- tools/evidence-store/api/schemas/
+- tools/evidence-store/api/examples/
+- tools/evidence-store/tests/node/api-contract.test.ts
+- tools/evidence-store/tests/node/inventory.test.ts
+- tools/evidence-store/tests/node/parity-fixtures.test.ts
+- tools/evidence-store/tests/node/prove-d1.test.ts
+- tools/evidence-store/tests/workers/d1-spike.test.ts
+- tools/evidence-store/tests/workers/env.d.ts
+- tools/evidence-store/tests/fixtures/parity/
+- tools/evidence-store/wrangler.jsonc
+- tools/evidence-store/migrations/0001_evidence.sql
+- tools/evidence-store/migrations/0002_retention.sql
+- tools/evidence-store/migrations/0003_credentials.sql
+- tools/evidence-store/migrations/0004_uploads.sql
+- tools/evidence-store/migrations/0005_evaluations.sql
+- tools/evidence-store/src/auth.ts
+- tools/evidence-store/src/cursor.ts
+- tools/evidence-store/src/http.ts
+- tools/evidence-store/src/ingestion.ts
+- tools/evidence-store/src/worker.ts
+- tools/evidence-store/src/db/ingest.ts
+- tools/evidence-store/src/db/repositories.ts
+- tools/evidence-store/src/contracts/adapter.ts
+- tools/evidence-store/src/contracts/canonical.ts
+- tools/evidence-store/src/contracts/loader.ts
+- tools/evidence-store/src/contracts/node-report-reader.ts
+- tools/evidence-store/src/contracts/parse.ts
+- tools/evidence-store/src/contracts/validate.ts
+- tools/evidence-store/tests/node/contracts-parity.test.ts
+- tools/evidence-store/tests/node/contracts-robustness.test.ts
+- tools/evidence-store/tests/service/apply-migrations.ts
+- tools/evidence-store/tests/service/db-ingest.test.ts
+- tools/evidence-store/tests/service/db-migrations.test.ts
+- tools/evidence-store/tests/service/env.d.ts
+- tools/evidence-store/tests/service/helpers.ts
+- tools/evidence-store/tests/service/ingestion.test.ts
+- tools/evidence-store/src/env.ts
+- tools/evidence-store/src/requests.ts
+- tools/evidence-store/src/config.ts
+- tools/evidence-store/src/tokens.ts
+- tools/evidence-store/src/credential-request.ts
+- tools/evidence-store/src/operator.ts
+- tools/evidence-store/src/reads.ts
+- tools/evidence-store/src/locations.ts
+- tools/evidence-store/src/db/audit.ts
+- tools/evidence-store/src/db/reads.ts
+- tools/evidence-store/cli/operator.ts
+- tools/evidence-store/migrations/0006_feed_horizons.sql
+- tools/evidence-store/tests/service/auth.test.ts
+- tools/evidence-store/tests/service/operator.test.ts
+- tools/evidence-store/tests/service/reads.test.ts
+- tools/evidence-store/tests/service/changes.test.ts
+- tools/evidence-store/tests/service/locations.test.ts
+- tools/evidence-store/tests/node/requests.test.ts
+- tools/evidence-store/tests/node/service-config.test.ts
+- tools/evidence-store/tests/node/operator-cli.test.ts
+- tools/evidence-store/tests/node/credential-request.test.ts
+- tools/evidence-store/src/uploads.ts
+- tools/evidence-store/src/db/uploads.ts
+- tools/evidence-store/src/contracts/proofs.ts
+- tools/evidence-store/cli/ingest.ts
+- tools/evidence-store/api/examples/finalizeUpload.response.json
+- tools/evidence-store/api/schemas/ingest-config.schema.json
+- tools/evidence-store/api/schemas/resume-state.schema.json
+- tools/evidence-store/tests/service/uploads.test.ts
+- tools/evidence-store/tests/service/fetch.test.ts
+- tools/evidence-store/tests/node/proofs.test.ts
+- tools/evidence-store/tests/node/ingest.test.ts
+- tools/evidence-store/tests/node/ingest-cli.test.ts
+- tools/evidence-store/tests/fixtures/ingest/fake-service.ts
+- tools/evidence-store/migrations/0007_maintenance.sql
+- tools/evidence-store/migrations/0008_retention_state.sql
+- tools/evidence-store/src/backup-manifest.ts
+- tools/evidence-store/src/capacity.ts
+- tools/evidence-store/src/daily.ts
+- tools/evidence-store/src/db/retention.ts
+- tools/evidence-store/src/maintenance.ts
+- tools/evidence-store/src/recovery.ts
+- tools/evidence-store/src/retention.ts
+- tools/evidence-store/cli/recovery.ts
+- tools/evidence-store/api/schemas/backup-manifest.schema.json
+- tools/evidence-store/api/examples/error.quota_exhausted.json
+- tools/evidence-store/api/examples/error.stale_snapshot.json
+- tools/evidence-store/api/examples/getMaintenance.response.json
+- tools/evidence-store/api/examples/recoverJobs.request.json
+- tools/evidence-store/api/examples/recoverJobs.response.json
+- tools/evidence-store/api/examples/setMaintenance.request.json
+- tools/evidence-store/api/examples/setMaintenance.response.json
+- tools/evidence-store/tests/fixtures/recovery/
+- tools/evidence-store/tests/node/recovery-cli.test.ts
+- tools/evidence-store/tests/node/recovery.test.ts
+- tools/evidence-store/tests/service/capacity.test.ts
+- tools/evidence-store/tests/service/maintenance.test.ts
+- tools/evidence-store/tests/service/recover-jobs.test.ts
+- tools/evidence-store/tests/service/recovery-helpers.ts
+- tools/evidence-store/tests/service/retention-daily.test.ts
+- tools/evidence-store/tests/service/retention-fixtures.ts
+- tools/evidence-store/tests/service/retention-jobs.test.ts
+- tools/evidence-store/tests/service/retention.test.ts
+- .github/workflows/evidence-store-demo.yml
+- justfile
+- tools/evidence-store/cli/deploy.ts
+- tools/evidence-store/cli/dispatch-demo.ts
+- tools/evidence-store/tests/acceptance/cases.ts
+- tools/evidence-store/tests/node/deploy.test.ts
+- tools/evidence-store/tests/node/dispatch-demo.test.ts
+- tools/evidence-store/tests/real/acceptance.test.ts
+- tools/evidence-store/tests/service/acceptance.test.ts
+documentation:
+- tools/evidence-store/README.md
+- tools/evidence-store/api/README.md
+- tools/evidence-store/docs/contract-inventory.md
+- docs/cicd/evidence.md
+- docs/dependencies.md
+- docs/cicd/evidence-store.md
+- .claude/skills/rust-devops/ci-cd.md
 ---
 
 # Evidence store implementation plan
@@ -333,7 +489,7 @@ Checkpoint: synthetic pruning and fault-injected recovery prove rows are never l
 
 ### Wave 8 — Final integration
 
-- [ ] **Publish operations**
+- [x] **Publish operations**
   - Add `docs/cicd/evidence-store.md` with task-oriented examples, role/credential rotation, deployment/migrations, bounded ingestion/resume, proof staging/finalization, outage diagnosis, quota alerts, retention, daily backups, restore, and rollback. Include upload/recovery Mermaid flows. Explain that notes remain authoritative and retention qualification/evaluation consumers are not enabled.
   - Update `docs/cicd/evidence.md` with a short service/tool link and its non-authoritative status, `docs/dependencies.md` for added tooling, and `.claude/skills/rust-devops/ci-cd.md` for the explicit ingestion workflow. Do not link current docs to dated feature directories. Review changed symbols' comments for drift and record spec departures in `implementation-log.md` without rewriting the spec.
   - Expose service `just typecheck`, `test`, `lint`, `test-real`, `deploy`, and operator recipes. Use pinned pnpm scripts; do not invoke `cargo fmt`. Wire local service checks through explicit root recipes only; do not add scheduled CI cells or alter the canonical scope registry for this delivery.

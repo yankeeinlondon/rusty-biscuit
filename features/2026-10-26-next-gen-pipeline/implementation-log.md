@@ -434,6 +434,61 @@ decisions_for_review:
     - Three assumptions about real Wrangler output are unproven until the
       Phase 6 demonstration: the `d1 export` format, the `d1 execute --json`
       result shape, and the missing-object error text.
+  - |-
+    Phase 6 is reported as FAILED. "Publish operations" is done, but
+    "Demonstrate service" could not run. There are no Cloudflare credentials
+    (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are unset, and Wrangler's
+    saved login has expired and cannot be renewed without a person) and no valid
+    GitHub token. So nothing was deployed, no repository was registered, nothing
+    was ingested, the demo workflow was not dispatched (it also has to be merged
+    to main first), and no backup or restore ran. The plan says to mark the work
+    complete only after the acceptance checks pass, so `implemented` is left
+    unset on the spec, plan, and log. Everything that needs no credentials is
+    built and tested: the deploy command, the dispatch command, the demo
+    workflow, and the acceptance suite. To finish, supply the credentials,
+    follow docs/cicd/evidence-store.md's first-time setup, merge the workflow,
+    and run the demonstration and `just test-real`.
+  - |-
+    The deployed acceptance suite runs the same seven cases in two places:
+    locally inside `just test`, against the Worker with real tokens, and
+    deployed through `just test-real`. That way the cases themselves are proven
+    before any deployment. Credential expiry can only be tested locally, because
+    the shortest credential lasts one day. The deployed run reports that case as
+    skipped, never as passed. Each run leaves small synthetic records (and two
+    small stored files) in the repository named by EVIDENCE_STORE_ACCEPTANCE_REPO,
+    because the store has no delete route. The intent is for that to be a
+    dedicated acceptance repository, not the real one. Alternatives:
+    - share one credential across roles, which avoids hitting the 30-per-minute
+      operator limit (now absorbed by retries) but blurs the role checks;
+    - add a second registered repository to test "granted elsewhere, used here"
+      literally (now the reverse direction is tested), about ten lines.
+  - |-
+    Turned on `workers_dev` for the development and restore-test environments
+    in wrangler.jsonc. Before this, a deployed Worker had no address, so the
+    endpoint, the demo workflow, and the acceptance run had nothing to call.
+    Every route still requires authentication. Alternative: a custom domain
+    route, which needs a Cloudflare zone; switching means setting `routes` and
+    turning `workers_dev` off again.
+  - |-
+    The hosted demonstration uses GitHub's identity token only as a producer
+    (stage uploads, read), as the plan allows. Staged files are published
+    afterward from a host with a verifier credential, using the resume state the
+    workflow uploads as an artifact. The dispatcher refuses to run until the
+    workflow is on main, and never pushes or merges. Smaller choices: the root
+    `just evidence-store` recipe runs from the caller's directory, so relative
+    ingest paths still work; `deploy --manifest` must be an absolute path, like
+    the other operator commands; the pnpm `test-real` script relies on the
+    justfile to set EVIDENCE_STORE_REAL=1 instead of adding a cross-platform env
+    helper dependency. Run bare, it fails, so it can never pass with zero tests.
+  - |-
+    Unchecked ordering risk for the first restore. `operator restore` refuses
+    a destination database that already has migrations, so `just deploy --env
+    restore-test` cannot run before it. But restore sets the cursor key with
+    `wrangler secret put`, which may need the restore-test Worker to exist
+    already. The guide says to restore before deploying, but this has never run
+    against Cloudflare. The deployed restore demonstration has to confirm it. A
+    likely fix, if it fails, is to deploy the Worker without applying migrations
+    first.
 source_files_during_phase_2:
   - tools/evidence-store/vitest.config.ts
   - tools/evidence-store/wrangler.jsonc
@@ -593,27 +648,171 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
 message_to_agent: |-
-  Phase 5 is implemented; `just test` (32 files, 880 tests) and `just lint`
-  pass in tools/evidence-store. Phases 4 and 5 are both uncommitted. Phase 1's
-  deployed feasibility checkpoint is still open (Cloudflare/GitHub
-  credentials unset). Notes for Phase 6:
-  - Migrations now run 0001-0008 (0007 maintenance mode, 0008 retention
-    state); all are still undeployed and editable until the first deploy.
-  - Operator recovery commands: `just operator backup | verify-backup |
-    restore | recover-jobs | maintenance` (see api/README.md, "Maintenance,
-    backup, and restore"). Restore refuses until wrangler.jsonc has real,
-    distinct database IDs for development and restore-test.
-  - The fake Wrangler in tests/fixtures/recovery/fake-wrangler.ts assumes
-    the `d1 export` SQL format, the `d1 execute --json` result shape
-    `[{"results":[...]}]`, and R2 missing-object error text matching
-    `does not exist|NoSuchKey|not found`; check all three against the real
-    Wrangler during the deployed restore demonstration.
-  - The Worker has a daily cron (`17 3 * * *`) running staging cleanup,
-    retention jobs, tombstone expiry, and capacity alerts (src/daily.ts).
-  - No retention-verifier credential is provisioned anywhere, by design.
-  - `docs/cicd/evidence-store.md` (Phase 6) should draw on api/README.md's
-    new "Storage budget", "Retention", and "Maintenance, backup, and
-    restore" sections.
+  Phase 6 (the final phase) FAILED on external prerequisites; read the
+  "Phase 6" section of this log. Docs, recipes, the deploy and dispatch
+  commands, the manual demo workflow, and the acceptance suite (7 cases,
+  passing locally) are done; `just test` (35 files, 901 tests) and `just lint`
+  pass in tools/evidence-store. Not done: every deployed step of "Demonstrate
+  service", plus Phase 1's "Measure capacity" and "Prove D1", all blocked on
+  missing CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID and a valid GitHub token.
+  The demo workflow must be merged to main before `just demo-hosted` can
+  dispatch it. `implemented` is deliberately not set.
+source_files_during_phase_6:
+  - .github/workflows/evidence-store-demo.yml
+  - justfile
+  - tools/evidence-store/justfile
+  - tools/evidence-store/package.json
+  - tools/evidence-store/vitest.config.ts
+  - tools/evidence-store/wrangler.jsonc
+  - tools/evidence-store/cli/deploy.ts
+  - tools/evidence-store/cli/dispatch-demo.ts
+  - tools/evidence-store/tests/acceptance/cases.ts
+  - tools/evidence-store/tests/node/deploy.test.ts
+  - tools/evidence-store/tests/node/dispatch-demo.test.ts
+  - tools/evidence-store/tests/real/acceptance.test.ts
+  - tools/evidence-store/tests/service/acceptance.test.ts
+docs_updated_during_phase_6:
+  - docs/cicd/evidence.md
+  - docs/dependencies.md
+  - tools/evidence-store/README.md
+docs_created_during_phase_6:
+  - docs/cicd/evidence-store.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/rust-devops/ci-cd.md
+source_code:
+  - pnpm-workspace.yaml
+  - pnpm-lock.yaml
+  - tools/evidence-store/package.json
+  - tools/evidence-store/tsconfig.json
+  - tools/evidence-store/vitest.config.ts
+  - tools/evidence-store/justfile
+  - tools/evidence-store/src/contracts/api.ts
+  - tools/evidence-store/src/contracts/evidence.ts
+  - tools/evidence-store/src/contracts/index.ts
+  - tools/evidence-store/src/contracts/json.ts
+  - tools/evidence-store/cli/capture-parity.ts
+  - tools/evidence-store/cli/inventory.ts
+  - tools/evidence-store/cli/prove-d1.ts
+  - tools/evidence-store/spike/d1-guard/schema.sql
+  - tools/evidence-store/spike/d1-guard/worker.ts
+  - tools/evidence-store/spike/d1-guard/scenarios.ts
+  - tools/evidence-store/api/openapi.yaml
+  - tools/evidence-store/api/schemas/
+  - tools/evidence-store/api/examples/
+  - tools/evidence-store/tests/node/api-contract.test.ts
+  - tools/evidence-store/tests/node/inventory.test.ts
+  - tools/evidence-store/tests/node/parity-fixtures.test.ts
+  - tools/evidence-store/tests/node/prove-d1.test.ts
+  - tools/evidence-store/tests/workers/d1-spike.test.ts
+  - tools/evidence-store/tests/workers/env.d.ts
+  - tools/evidence-store/tests/fixtures/parity/
+  - tools/evidence-store/wrangler.jsonc
+  - tools/evidence-store/migrations/0001_evidence.sql
+  - tools/evidence-store/migrations/0002_retention.sql
+  - tools/evidence-store/migrations/0003_credentials.sql
+  - tools/evidence-store/migrations/0004_uploads.sql
+  - tools/evidence-store/migrations/0005_evaluations.sql
+  - tools/evidence-store/src/auth.ts
+  - tools/evidence-store/src/cursor.ts
+  - tools/evidence-store/src/http.ts
+  - tools/evidence-store/src/ingestion.ts
+  - tools/evidence-store/src/worker.ts
+  - tools/evidence-store/src/db/ingest.ts
+  - tools/evidence-store/src/db/repositories.ts
+  - tools/evidence-store/src/contracts/adapter.ts
+  - tools/evidence-store/src/contracts/canonical.ts
+  - tools/evidence-store/src/contracts/loader.ts
+  - tools/evidence-store/src/contracts/node-report-reader.ts
+  - tools/evidence-store/src/contracts/parse.ts
+  - tools/evidence-store/src/contracts/validate.ts
+  - tools/evidence-store/tests/node/contracts-parity.test.ts
+  - tools/evidence-store/tests/node/contracts-robustness.test.ts
+  - tools/evidence-store/tests/service/apply-migrations.ts
+  - tools/evidence-store/tests/service/db-ingest.test.ts
+  - tools/evidence-store/tests/service/db-migrations.test.ts
+  - tools/evidence-store/tests/service/env.d.ts
+  - tools/evidence-store/tests/service/helpers.ts
+  - tools/evidence-store/tests/service/ingestion.test.ts
+  - tools/evidence-store/src/env.ts
+  - tools/evidence-store/src/requests.ts
+  - tools/evidence-store/src/config.ts
+  - tools/evidence-store/src/tokens.ts
+  - tools/evidence-store/src/credential-request.ts
+  - tools/evidence-store/src/operator.ts
+  - tools/evidence-store/src/reads.ts
+  - tools/evidence-store/src/locations.ts
+  - tools/evidence-store/src/db/audit.ts
+  - tools/evidence-store/src/db/reads.ts
+  - tools/evidence-store/cli/operator.ts
+  - tools/evidence-store/migrations/0006_feed_horizons.sql
+  - tools/evidence-store/tests/service/auth.test.ts
+  - tools/evidence-store/tests/service/operator.test.ts
+  - tools/evidence-store/tests/service/reads.test.ts
+  - tools/evidence-store/tests/service/changes.test.ts
+  - tools/evidence-store/tests/service/locations.test.ts
+  - tools/evidence-store/tests/node/requests.test.ts
+  - tools/evidence-store/tests/node/service-config.test.ts
+  - tools/evidence-store/tests/node/operator-cli.test.ts
+  - tools/evidence-store/tests/node/credential-request.test.ts
+  - tools/evidence-store/src/uploads.ts
+  - tools/evidence-store/src/db/uploads.ts
+  - tools/evidence-store/src/contracts/proofs.ts
+  - tools/evidence-store/cli/ingest.ts
+  - tools/evidence-store/api/examples/finalizeUpload.response.json
+  - tools/evidence-store/api/schemas/ingest-config.schema.json
+  - tools/evidence-store/api/schemas/resume-state.schema.json
+  - tools/evidence-store/tests/service/uploads.test.ts
+  - tools/evidence-store/tests/service/fetch.test.ts
+  - tools/evidence-store/tests/node/proofs.test.ts
+  - tools/evidence-store/tests/node/ingest.test.ts
+  - tools/evidence-store/tests/node/ingest-cli.test.ts
+  - tools/evidence-store/tests/fixtures/ingest/fake-service.ts
+  - tools/evidence-store/migrations/0007_maintenance.sql
+  - tools/evidence-store/migrations/0008_retention_state.sql
+  - tools/evidence-store/src/backup-manifest.ts
+  - tools/evidence-store/src/capacity.ts
+  - tools/evidence-store/src/daily.ts
+  - tools/evidence-store/src/db/retention.ts
+  - tools/evidence-store/src/maintenance.ts
+  - tools/evidence-store/src/recovery.ts
+  - tools/evidence-store/src/retention.ts
+  - tools/evidence-store/cli/recovery.ts
+  - tools/evidence-store/api/schemas/backup-manifest.schema.json
+  - tools/evidence-store/api/examples/error.quota_exhausted.json
+  - tools/evidence-store/api/examples/error.stale_snapshot.json
+  - tools/evidence-store/api/examples/getMaintenance.response.json
+  - tools/evidence-store/api/examples/recoverJobs.request.json
+  - tools/evidence-store/api/examples/recoverJobs.response.json
+  - tools/evidence-store/api/examples/setMaintenance.request.json
+  - tools/evidence-store/api/examples/setMaintenance.response.json
+  - tools/evidence-store/tests/fixtures/recovery/
+  - tools/evidence-store/tests/node/recovery-cli.test.ts
+  - tools/evidence-store/tests/node/recovery.test.ts
+  - tools/evidence-store/tests/service/capacity.test.ts
+  - tools/evidence-store/tests/service/maintenance.test.ts
+  - tools/evidence-store/tests/service/recover-jobs.test.ts
+  - tools/evidence-store/tests/service/recovery-helpers.ts
+  - tools/evidence-store/tests/service/retention-daily.test.ts
+  - tools/evidence-store/tests/service/retention-fixtures.ts
+  - tools/evidence-store/tests/service/retention-jobs.test.ts
+  - tools/evidence-store/tests/service/retention.test.ts
+  - .github/workflows/evidence-store-demo.yml
+  - justfile
+  - tools/evidence-store/cli/deploy.ts
+  - tools/evidence-store/cli/dispatch-demo.ts
+  - tools/evidence-store/tests/acceptance/cases.ts
+  - tools/evidence-store/tests/node/deploy.test.ts
+  - tools/evidence-store/tests/node/dispatch-demo.test.ts
+  - tools/evidence-store/tests/real/acceptance.test.ts
+  - tools/evidence-store/tests/service/acceptance.test.ts
+documentation:
+  - tools/evidence-store/README.md
+  - tools/evidence-store/api/README.md
+  - tools/evidence-store/docs/contract-inventory.md
+  - docs/cicd/evidence.md
+  - docs/dependencies.md
+  - docs/cicd/evidence-store.md
+  - .claude/skills/rust-devops/ci-cd.md
 ---
 ---
 
@@ -1317,3 +1516,123 @@ message_to_agent: |-
   three Wrangler output assumptions listed in `message_to_agent`.
 - **Phase 5 outcome: implementation complete.** "Guard retention" and
   "Implement recovery" are checked off.
+
+## Phase 6
+
+- Started 2026-11-11 on macOS. Phases 1–5 are committed, so the
+  uncommitted tree is this phase alone. External prerequisites were checked
+  first and are **still missing**: `CLOUDFLARE_API_TOKEN`,
+  `CLOUDFLARE_ACCOUNT_ID`, `GITHUB_TOKEN`, and `GH_TOKEN` are unset; Wrangler's
+  stored OAuth token has expired and cannot refresh non-interactively; the
+  `gh` CLI token is invalid. Nothing can be deployed, dispatched, or restored
+  from this host.
+- Work was split across three subagents with separate files (docs; deployed
+  acceptance suite; deploy/dispatch/workflow tooling), then integrated and
+  gated here once all three had finished.
+- **Publish operations** (done):
+  - `docs/cicd/evidence-store.md` (new): a task-by-task operating guide
+    covering status (Git notes stay authoritative; retention qualification and
+    evaluation consumers not enabled), roles and credential rotation,
+    provisioning and deployment/migrations, bounded ingestion and resume, proof
+    staging and finalization, outage diagnosis, quota alerts, retention, daily
+    backups, restore, recovering jobs, rollback, the hosted demonstration, and
+    the deployed acceptance run. It has Mermaid diagrams for the upload and
+    recovery flows. It names no feature directory.
+  - `docs/cicd/evidence.md`: short link section that also states the service
+    is not authoritative. `docs/dependencies.md`: a `tools/evidence-store` note.
+    `.claude/skills/rust-devops/ci-cd.md`: "The evidence store (explicit
+    ingestion only)". `tools/evidence-store/README.md`: cut back to an
+    overview that links to the guide.
+  - Recipes: package `typecheck`, `test`, `lint`, `test-real`, `deploy`,
+    `demo-hosted`, and the operator/ingest recipes, plus pnpm scripts
+    `deploy`, `demo-hosted`, `test-real`. The root justfile gains one explicit
+    delegation, `just evidence-store <recipe>`. No CI cell was added and no
+    scope registry was changed.
+  - `cli/deploy.ts`: exits 2 when Cloudflare credentials are missing or the
+    environment's `database_id` is the placeholder. Otherwise it runs
+    `wrangler d1 migrations apply --remote` and then `wrangler deploy`, and
+    writes a redacted manifest (resources, migration SHA-256s, Worker version,
+    endpoint; no secrets or account ID).
+  - `cli/dispatch-demo.ts` plus `.github/workflows/evidence-store-demo.yml`
+    (workflow_dispatch only; contents/actions read, id-token write). It
+    downloads a named retained artifact, mints an OIDC token for the service
+    audience into a 0600 file, ingests as a producer, and uploads the resume
+    state for host-side finalization. The dispatcher exits 2 ("external
+    prerequisite unavailable") when the workflow is not on `main`, and never
+    pushes.
+  - `wrangler.jsonc`: `workers_dev: true` for both environments. Before this,
+    a deployed Worker would have had no address at all.
+  - Drift review of comments: `vitest.config.ts`'s project header (now four
+    projects) and the `test-l2` stub text, which pointed at `prove-d1` and now
+    points at `test-real`, were corrected; the wrangler header comment now
+    mentions the workers.dev choice.
+- **Demonstrate service** (NOT done, blocked):
+  - Built: the deployed acceptance suite. `tests/acceptance/cases.ts` holds 7
+    transport-neutral cases: concurrent mixed-identity rollback; revoked and
+    unauthorized identities; expired identity; interrupted upload/finalization
+    replay; location withdrawal without revival (including object fetch 404
+    after withdrawal); change-feed replay; finite snapshot pagination during
+    writes. Each case issues its own credentials through the operator API and
+    revokes them in `finally`.
+    - `tests/service/acceptance.test.ts` runs every case in process against
+      the real authenticator (real `ebt_` tokens, digests in local D1): 7
+      passed. Two assertions were broken deliberately and failed as expected,
+      then restored.
+    - `tests/real/acceptance.test.ts` (vitest project `real`, present only
+      under `EVIDENCE_STORE_REAL=1`) runs the same cases over HTTP. With its
+      variables missing, every case fails naming them; `just test-real`
+      exits 2 before vitest starts. The expiry case is reported as skipped
+      deployed, because it needs a movable clock.
+  - Not done, and not possible without the credentials: deploying the
+    development Worker/D1/R2; the redacted resource manifest; registering the
+    real repository; demonstration grants; authentic host and hosted
+    ingestion; dispatching the demo workflow (it must first be merged to
+    `main`); `just test-real` against the deployment; backup, isolated
+    restore, digest-checked retrieval, interrupted-job resume, pre-restore
+    cursor rejection; and checking the three Wrangler output assumptions from
+    Phase 5. No result was fabricated.
+- Requirement → test mapping (new tests):
+  - deploy prerequisites, placeholder refusal, argv order, manifest content,
+    failing-migration stop, spawned wiring → `tests/node/deploy.test.ts` (8).
+  - dispatch token check, workflow-absent exit 2, dispatch body →
+    `tests/node/dispatch-demo.test.ts` (5).
+  - deployed correctness cases → `tests/service/acceptance.test.ts` (7,
+    local) and `tests/real/acceptance.test.ts` (deployed; blocked).
+  - Input robustness: no new file-format or configuration loader was added.
+    `deploy.ts` reads `wrangler.jsonc` through the existing
+    `stripJsonComments` path; it is a tool-owned build input, which the plan
+    excludes from the matrix. CLI flags are validated with located exit-2
+    errors.
+- Gates (2026-11-11, macOS, run after every subagent had finished), in
+  `tools/evidence-store`:
+  - `just lint` → exit 0.
+  - `just test` → 35 files, 901 tests passed, none skipped.
+- Scope calculator (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`) → `packages:
+  [test-toolkit, darkmatter, repo-deps]`, `change_class: package`. The
+  workflow, skill, and docs are read by test-toolkit's workflow contracts,
+  `docs/cicd` by darkmatter's shipped-schema corpus, and the root justfile by
+  repo-deps' archive test. Run serially:
+  - `cargo nextest run -p darkmatter -E 'test(shipped_markdown_inline_schemas_parse_passively) | test(shipped_markdown_named_type_references_resolve)'`
+    → 2 passed.
+  - `cargo nextest run -p test-toolkit --test ci_workflow_contracts` → 228
+    passed. `the_shipped_planner_emits_plans_the_guards_reader_accepts` was
+    slow (5.4 s); it is a pre-existing planner test this phase did not change.
+  - `cargo nextest run -p repo-deps --bin ci-build -E 'test(the_archive_runs_every_tier_from_another_checkout_with_no_compiler_in_reach)'`
+    → 1 passed. `just _tier_filter` and `just _native_path` also run cleanly
+    against the edited root justfile.
+- Cross-OS: no Rust source changed, so `just cross-check` does not apply.
+  The new CLIs spawn Wrangler through Node without a shell. The pnpm
+  `test-real` script relies on the justfile to set `EVIDENCE_STORE_REAL`,
+  because the `VAR=1 cmd` syntax does not work in Windows shells. Windows
+  behavior of the new CLIs is untested.
+- **Phase 6 outcome: FAILED (blocked on external prerequisites).** "Publish
+  operations" is checked off. "Demonstrate service" stays unchecked, and the
+  plan's final checkpoint ("mark implementation complete only after all
+  acceptance checks pass") is not met. `implemented` is therefore NOT set.
+  To finish: provide `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and a
+  valid GitHub token; run the one-time provisioning in
+  `docs/cicd/evidence-store.md`; merge `.github/workflows/evidence-store-demo.yml`
+  to `main`; then run the demonstration steps and `just test-real`. Phase 1's
+  feasibility tasks ("Measure capacity", "Prove D1") remain open on the same
+  credentials.
