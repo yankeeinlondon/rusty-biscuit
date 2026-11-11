@@ -29,9 +29,10 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-08
-review_iterations: 0
+review_iterations: 2
 implemented: true
 implemented_by: "claude/opus"
+completed: true
 ---
 
 # Clear the Windows and WSL2 test failures
