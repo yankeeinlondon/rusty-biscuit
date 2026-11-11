@@ -503,8 +503,9 @@ interrupted:
 The time is wall-clock and includes compiling. A recipe that chains several
 others, such as `test-real` running one package after another, prints one line
 for all of them. A `not applicable` stub prints none, and neither do runs on
-GitHub Actions. `just test-githooks` prints one line for each of its two suites,
-because it runs them as separate dependencies.
+GitHub Actions. `just test-githooks` prints one line for each of the three
+`just _test` runs it makes (the dispatcher test, then the hook's library and
+integration tests), because it runs them as separate recipes.
 
 The shared `_test*` recipes already do this, so an area recipe that only calls
 one of them needs nothing extra. A recipe that does more, by calling several or
@@ -875,7 +876,8 @@ it is one of the four supported platforms. Using a hosted runner to rediscover
 what your own machine could have told you is pure waste.
 
 The versioned `.githooks/pre-push` hook therefore runs `just ci-local --l2`
-before a push completes. That is the same scope calculation and the same gate
+before a push completes (through `ci-push`, the Rust program the hook launches
+with Cargo; see [How the hook runs](topics/ci-cd.md#how-the-hook-runs)). That is the same scope calculation and the same gate
 recipes CI would use, applied to the source-changed packages: clippy, Level 1,
 and every Level 2 suite the host can run without taking window focus. Apple
 Terminal and Level 3 are excluded for that reason. A comparison containing
@@ -886,7 +888,8 @@ when the push itself starts a CI run (an update of `main`, or of a branch with
 an open pull request) and `scope-only` otherwise; `just pr` pushes in `strict`
 because the pull request it opens does not exist yet. `strict` publishes
 complete outcomes before blocking on failure; `warn` publishes them without
-blocking. `scope-only` checks constraints and publishes scope but runs no
+blocking; review failures, constraint refusals, and an interrupted run still
+block in every mode. `scope-only` checks constraints and publishes scope but runs no
 gates; `off` is its deprecated alias. `RUSTY_BISCUIT_PRE_PUSH_AREAS`
 replaces the computed scope with a fixed selection and prevents reusable
 validation publication.

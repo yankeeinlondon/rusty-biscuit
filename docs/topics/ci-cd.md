@@ -37,7 +37,8 @@ The pipeline has four conceptual layers. Each layer answers a different question
 
 ### Layer 1 — Local pre-push hook
 
-For a push that updates a branch, `.githooks/pre-push` runs `just pre-push` before `git push`
+For a push that updates a branch, `.githooks/pre-push` (a launcher for the Rust `ci-push` program;
+see [How the hook runs](#how-the-hook-runs)) runs `just pre-push` before `git push`
 completes. A tag-only or deletion-only push exits without running gates. `just pre-push` is
 `just ci-local --l2`: lint and L1 plus every hostable non-focusing L2 suite for source-changed
 packages. On a clean checkout the gates run FROM the reviewed plan described next (`just ci-local
@@ -238,8 +239,112 @@ resolves `git rev-parse --show-toplevel` and executes that worktree's
 `.githooks/pre-push`; this prevents an older checkout's receipt schema from
 silently replacing the branch's current evidence protocol.
 
-Run the hook's local regression suite with
-`bash .githooks/tests/test-pre-push.sh` when changing its contract.
+#### How the hook runs
+
+Everything described above is decided by one Rust program, `ci-push`, in the
+`repo-deps` package (`scripts/ci-push.rs`; its logic is the library function
+`repo_deps::ci_push::run`). The versioned `.githooks/pre-push` is only a
+launcher: it changes to the top level of the checkout being pushed and runs
+
+```sh
+cargo run --quiet -p repo-deps --no-default-features --features local-tools --bin ci-push -- "$@"
+```
+
+passing on Git's arguments (remote name and URL) and the ref updates Git
+writes to its standard input, unchanged. Nothing else is cached: Cargo
+rebuilds `ci-push` exactly when its sources change, so the first push after a
+change to `scripts/` compiles it (the `local-tools` feature, which includes
+`gix`, `git2`, and `sniff`) and later pushes start at once. A failed build
+refuses the push.
+
+```mermaid
+flowchart LR
+    Git[git push] --> Dispatcher[installed dispatcher] --> Launcher[".githooks/pre-push<br/>(this worktree)"]
+    Launcher --> CiPush[ci-push]
+    CiPush --> Review["review every update<br/>(all modes)"]
+    Review -->|blocked| Refuse[push refused]
+    Review --> Scope[publish scope receipt]
+    Scope -->|scope-only, or auto with no CI run| Pass[push continues]
+    Scope -->|strict / warn, or auto starting a run| Gates["just pre-push"]
+    Gates --> Validation[publish validation receipt]
+    Validation --> Pass
+```
+
+**Python.** The planner and evidence helpers are Python 3.10 or newer.
+`ci-push` picks one interpreter before the first review by *running* each
+candidate with a version probe (2 s each), in this order: `python3`, `py -3`
+(native Windows only), `python`. A name that exists but does not answer, such
+as Windows' `python3` App Execution Alias stub or a Cygwin shim, is skipped.
+Every Python helper the hook starts, and the gates, use that interpreter; the
+gates receive it as two variables, which `just ci-local` honors and you can
+set yourself:
+
+| Variable | Contract |
+| --- | --- |
+| `BISCUIT_CI_PYTHON` | Native path of an executable regular file to use instead of `python3`. |
+| `BISCUIT_CI_PYTHON_ARGS_FILE` | A file with the interpreter's leading arguments, each followed by a NUL byte (`-3` for `py -3`); empty or unset for none. Setting it without `BISCUIT_CI_PYTHON` is an error, and so is a final argument with no NUL. |
+
+When no candidate qualifies, the push is refused with one message naming
+every candidate and why it was rejected.
+
+**Review in every mode.** The ref updates are read strictly: a malformed line,
+an object id that is not the repository's hash length in lowercase hex, or a
+destination that is not a `refs/...` name refuses the push before anything
+runs. A revision other than the clean checkout's HEAD is reviewed in a
+temporary detached worktree of its committed tree, named
+`ci-push-review-<pid>-<random>` and created in the system temp directory; it
+is removed before the hook exits, and only that one worktree record is pruned.
+Review failures (an unreadable context, a planner or helper failure, no
+Python) refuse the push in every mode with exit status 2; an execution
+constraint refuses it with status 1. `warn` lets through only an ordinary gate
+failure.
+
+**Gates and reports.** The gates are `just pre-push`, started in the
+checkout's top level with the reviewed plan, the selected Python, and a
+staging directory (`ci-push-*` in the system temp directory) for their JUnit
+reports. Reports move to `$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`
+before any receipt names them. If that move fails, no validation receipt is
+published and the hook prints the path where the staged reports were kept.
+Validation is withheld, with the reason printed, when the push does not carry
+HEAD, `RUSTY_BISCUIT_PRE_PUSH_AREAS` is set, the checkout was dirty before or
+after the gates, HEAD moved, or the run was interrupted or incomplete. A
+withheld or failed publication never blocks the push; CI then plans and runs
+those cells itself.
+
+**Cancellation.** Every child process (planner, helpers, gates, and anything
+they start) runs as one owned process tree: a process group on Unix, a
+kill-on-close Job Object on Windows. Ctrl-C or a termination signal is
+forwarded to the tree, which is killed after a one-second grace; the
+temporary worktree is removed, nothing is published, and the push is refused
+with 130 (interrupt), 143 (terminate), or 129 (hang-up). An interrupted gate
+run blocks even in `warn`. Two limits remain:
+
+- a force-killed `ci-push` (`kill -9`, closing the terminal window on
+  Windows) cleans up nothing: on Windows the Job still ends the children, but
+  a temporary `ci-push-review-*` directory and its worktree record can
+  survive. `git worktree list` shows the record; `git worktree prune` removes
+  it once the directory is deleted;
+- on Windows, where a session forbids nested Jobs (some SSH sessions), a
+  child runs without tree ownership and only that child is ended.
+
+**Testing the hook.** The hook's tests are ordinary `repo-deps` L1 tests:
+decision tests in the library (`ci_push::tests::*`), and the `ci-push`
+integration target, which drives the real binary, a real repository with a
+bare remote, and an actual `git push` through the installed dispatcher and the
+launcher. Fixture tools (`gh`, `just`, Python, `cargo` stand-ins) are one
+compiled binary, `ci-push-test-tool`.
+
+```sh
+just test-pre-push-hook          # ci_push:: library tests, then the ci-push integration target
+just test-pre-push-dispatcher    # the dispatcher's worktree-selection test
+just test-githooks               # both
+just test repo-deps              # the whole package
+```
+
+On native Windows, two integration tests push through the launcher from Git
+Bash (`bash.exe -c`) and from PowerShell (`powershell.exe -NoProfile
+-NonInteractive -Command`), in `auto` and `strict`; a missing shell fails
+them rather than skipping.
 
 ### Layer 2 — Dependency-scoped CI
 
@@ -1425,5 +1530,6 @@ Before adding a new workflow, check:
 - Test tier taxonomy: [`testing-strategy.md`](../testing-strategy.md) and
     `.claude/skills/rust-testing/SKILL.md`
 
-- Pre-push hook: `.githooks/pre-push`, tested by `.githooks/tests/`
+- Pre-push hook: `.githooks/pre-push` (launcher) and `scripts/ci-push.rs`
+    (`repo-deps`), tested by `just test-githooks`
 - Canonical recipe definitions: root `justfile` and `just/*.just`

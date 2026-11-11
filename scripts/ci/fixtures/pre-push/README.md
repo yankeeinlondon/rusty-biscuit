@@ -13,6 +13,17 @@ the Python constraint reader's tests.
 Each is a **control**: a test reads it unchanged for the positive result, and
 derives each negative case from it by changing exactly one field.
 
+`affected_scope_stub.py` is not a control: it is the stand-in planner the
+end-to-end tests (`scripts/ci-push/integration/parity.rs`) commit as
+`scripts/ci/affected_scope.py` in their fixture repositories, beside the real
+evidence helpers; the real planner needs the Cargo workspace it lives in. It
+logs each call to `TEST_PLANNER_LOG`, emits the plan named by
+`TEST_PLANNER_PLAN` with its base and head rewritten (an empty path set yields
+an empty plan), reads `preflight_reason` from its own tree's
+`.github/ci/policy.json`, fails on `TEST_PLANNER_FAIL=1`, and with
+`TEST_PLANNER_HANG=<file>` writes its pid there and waits to be killed. Its
+docstring is the full contract.
+
 ## Constraint parity cases
 
 `constraints/parity.json` is not a control. It is a table of cases that both

@@ -1392,10 +1392,12 @@ Version 5 added `deleted`, the subset of those paths the diff reported as
 removed. A deleted path is still in its bucket — it changed — and the extra
 list is what lets a reader tell it from a path that is simply absent, which
 `git diff --name-only` cannot express. Every boundary therefore takes
-`git diff --name-status -z` and renders it through `scripts/ci/diff_scope.py`
-into `--deleted <path>... --renamed-from <path>... -- <changed path>...`: the
-scope step of `ci.yml`, `just/ci-local.just` (which unions untracked files,
-never deletions), and `.githooks/pre-push`. A rename's destination is the
+`git diff --name-status -z` and renders it into
+`--deleted <path>... --renamed-from <path>... -- <changed path>...`: the
+scope step of `ci.yml` and `just/ci-local.just` (which unions untracked files,
+never deletions) through `scripts/ci/diff_scope.py`, and the pre-push hook's
+`ci-push` (`scripts/ci-push/git.rs`), which diffs the committed trees itself
+and writes the same tail byte for byte. A rename's destination is the
 changed path; its source is neither a declared removal nor a file left to read,
 so it enters neither list and is passed as `--renamed-from` for the test-input
 search alone.

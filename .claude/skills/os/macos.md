@@ -296,8 +296,7 @@ no longer watches files, so its user docs no longer describe fseventsd.
   - After any edit made through a relative `cd`, check
     `git -C <main checkout> status`.
   - An exported `CDPATH` also makes `cd` print the path, so `$(cd … && pwd)`
-    captures it twice. Run `.githooks/tests/test-pre-push.sh` as
-    `env -u CDPATH bash .githooks/tests/test-pre-push.sh`.
+    captures it twice. Run Bash test scripts as `env -u CDPATH bash <script>`.
   - `CDPATH` also lists `~/coding/personal`, which holds unrelated
     repositories (for example `~/coding/personal/repo`). A scratch script
     that runs `cd repo` and then `git init`/`git add`/`git commit` there

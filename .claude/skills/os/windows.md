@@ -74,15 +74,16 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   `C:\Program Files\Git\usr\bin` and the real Python directory.
   - From Git Bash, the Cygwin `python3` shim (`/c/cygwin64/bin/python3`)
     fails outright: it `exec`s `/cygdrive/c/.../python.exe`, a path only
-    Cygwin resolves. The pre-push hook then blocks every push with "the
-    planner could not resolve the committed scope" even though Python is
-    installed. Put the real Python directory (it has `python3.exe`) first on
-    `PATH`; `py -3` also works.
+    Cygwin resolves. The pre-push hook's `ci-push` runs each candidate's
+    version probe, so a failing shim is skipped for `py -3` or `python`; a
+    `just ci-local` started by hand has no such probe and fails with
+    `FileNotFoundError`. Put the real Python directory (it has `python3.exe`)
+    first on `PATH`, or hand an interpreter over with `BISCUIT_CI_PYTHON`.
 - **Bash scripts lose data on Windows three ways:**
   - Native `jq.exe -r` ends lines with CRLF, so a value read back keeps a
     `\r` and matches nothing (for example a PR base of `main\r`). Use
-    `jq --binary`; `just ci-local` and the pre-push hook do when
-    `OS=Windows_NT`. Cygwin's `jq` writes LF and hides this.
+    `jq --binary`; `just ci-local` does when `OS=Windows_NT` (the pre-push
+    hook's `ci-push` reads JSON in Rust and runs no `jq`). Cygwin's `jq` writes LF and hides this.
   - `subprocess.run([bash, "-c", script])` lets MSYS/Cygwin bash re-split the
     script at nested quotes and run only the first fragment, exiting 0. Write
     the script to a file and run `bash <file>`.
@@ -547,6 +548,36 @@ on Windows sees the timeout instead of the refusal (schematic-schema's
 `query_secret_is_absent_from_every_dial_error` got `HandshakeTimeout(2s)`).
 Give such a dial a budget well past 2 s (10 s costs nothing, since the
 refusal ends it), or assert on a live listener that rejects instead.
+
+## Pushing from native Windows
+
+Git runs every hook through its bundled `sh`, so the pre-push launcher
+(`.githooks/pre-push`) works the same whether `git push` starts from Git Bash
+or PowerShell; it only `cd`s to the top level and `exec`s `cargo run … --bin
+ci-push`. What differs is around it:
+
+- **Both entry shells are supported and tested.** `launcher::windows_git_bash_…`
+  pushes through `bash.exe -c`, `launcher::windows_powershell_…` through
+  `powershell.exe -NoProfile -NonInteractive -Command`, in `auto` and
+  `strict`, from a checkout path with a space and `ü`. A missing shell fails
+  those tests rather than skipping them. A Git Bash ancestor can still hit the
+  `0xC0000005` local-transport crash above; confirm a Git Bash-only failure
+  from PowerShell before diagnosing it.
+- **Python is picked by running it.** `ci-push` probes `python3`, then
+  `py -3`, then `python` (3.10+, 2 s each) and hands the winner to every
+  helper and to `just ci-local` as `BISCUIT_CI_PYTHON` plus a NUL-separated
+  `BISCUIT_CI_PYTHON_ARGS_FILE` (`-3` for `py`). An App Execution Alias stub
+  or Cygwin shim fails the probe and is skipped. Only `.exe` names are found
+  on `PATH`: a `.bat`/`.cmd` would re-parse arguments through `cmd.exe`.
+- **Children are owned through a kill-on-close Job Object.** A child is
+  created suspended, assigned, then resumed, so no grandchild escapes. Where
+  the session's own Job forbids nesting (some SSH sessions), the child runs
+  without the Job and cancellation ends only that child.
+- **Committed-tree reviews use a temporary linked worktree**
+  (`ci-push-review-<pid>-<random>` under `%TEMP%`), removed with no repository
+  handle left open so the directory can be deleted. A force-killed `ci-push`
+  can leave the directory and its worktree record; `git worktree prune` clears
+  the record once the directory is gone.
 
 ## The `windows-latest` leg
 

@@ -291,10 +291,12 @@ empty scan and a full one. It is exactly one of `{selected: false, reason}`,
 `paths` is the real "nothing eligible changed" state and is never upgraded to a
 full scan. `--deleted PATH` is how a caller declares a removal, because
 `git diff --name-only` cannot tell one from a missing file. Every selection
-boundary — `ci.yml`'s scope step, `just/ci-local.just`, and `.githooks/pre-push`
-— therefore takes `git diff --name-status -z` and renders it through
-`scripts/ci/diff_scope.py`, the one parser that emits
-`--deleted <path>... --renamed-from <path>... -- <changed path>...`. A rename
+boundary — `ci.yml`'s scope step and `just/ci-local.just` — therefore takes
+`git diff --name-status -z` and renders it through `scripts/ci/diff_scope.py`,
+the one parser that emits
+`--deleted <path>... --renamed-from <path>... -- <changed path>...`; the
+pre-push hook's `ci-push` diffs the committed trees itself and writes the same
+tail, held byte-equal to the parser's by `ci_push::tests::git`. A rename
 contributes its destination to the changed list; its source is not a reported
 deletion, and listing it as changed would be exactly the unexplained absence
 the declaration exists to remove. It travels only as `--renamed-from`, whose
@@ -367,6 +369,34 @@ installer would make every sibling execute that checkout's version. `just
 init` installs the stable `.githooks/pre-push-dispatcher` as a regular file;
 at invocation it resolves `git rev-parse --show-toplevel` and executes the
 active worktree's `.githooks/pre-push`.
+
+That hook is a launcher only: it `cd`s to the top level and `exec`s `cargo run
+-p repo-deps --no-default-features --features local-tools --bin ci-push`.
+Every decision lives in `repo_deps::ci_push::run` (`scripts/ci-push/`); the
+behavior is documented in
+[How the hook runs](../../../docs/topics/ci-cd.md#how-the-hook-runs). When
+changing it:
+
+- **Put logic in Rust, never in the launcher.** The launcher forwards argv,
+  stdin, cwd, and exit status; nothing else. Its tests read it with
+  `include_str!` inside each `launcher::` test, so editing it schedules
+  exactly those tests (and the dispatcher's D1 test reads the dispatcher).
+- **Decisions are tested in-process** through the `PushSession` fake in
+  `scripts/ci-push/tests/orchestration.rs`, which asserts the exact helper
+  argv; the `ci-push` integration target runs the real binary, real Git
+  transport, and the real Python helpers. Fixture tools are one compiled
+  binary (`ci-push-test-tool`) copied under each name, found with
+  `bin_exe!`, so archives work. Run `just test-githooks`.
+- **Every Python child uses the interpreter `ci-push` selected.** A Python
+  helper or recipe must never relaunch `python3` itself; the gates get it as
+  `BISCUIT_CI_PYTHON` plus a NUL-separated `BISCUIT_CI_PYTHON_ARGS_FILE`, which
+  `just ci-local` honors.
+- **Review blocks in every mode.** Only an ordinary gate failure passes in
+  `warn`; an interruption, a constraint refusal (exit 1), and a review failure
+  (exit 2) never do.
+- Seven end-to-end parity tests are `#[cfg(unix)]` (they run the Bash
+  `ci-local.just` or send Unix signals); the two native Windows launch paths
+  (Git Bash, PowerShell) are `launcher::windows_*`.
 
 Parallel test workers default to `max(1, logical_cores - 2)` locally. CI uses
 all logical cores on runners with four or fewer, otherwise `logical_cores - 2`.
@@ -1089,10 +1119,11 @@ Three rules when adding a Python suite to the registry:
   `ci-build` is not on disk and `build_key.py` falls back to `cargo run`:
   correct, but ~14–26s rather than the 0.1s it costs beside a built binary.
 
-The `just ci-local` self-test list is spelled out in four coupled files
-(`just/ci-local.just`, `scripts/ci/test_ci_local.py` twice, and
-`.githooks/tests/test-pre-push.sh`). Editing the recipe alone produces ten
-failures — the fixtures stub each suite by name.
+The `just ci-local` self-test list is spelled out in `just/ci-local.just` and
+twice in `scripts/ci/test_ci_local.py`; editing the recipe alone produces ten
+failures — the fixtures stub each suite by name. `ci-push`'s end-to-end
+fixture (`scripts/ci-push/integration/evidence_fixture.rs`) reads the list from
+the recipe itself, so it follows without an edit.
 
 Measurements: `reviews/2026-09-15-python-test-code/spike-3-results.md` and
 `spike-4-results.md`.
@@ -1358,7 +1389,7 @@ Each update is planned against the base of every run it triggers, because
 `ci.yml` fires `push` for `main` only and `pull_request` for every target
 branch: the remote's `main` for a push to `main`; otherwise the current remote
 tip of each open pull request's target branch (`gh pr list` on a GitHub
-remote — `gh` or `jq` missing, unauthenticated, or failing blocks the push
+remote — `gh` missing, unauthenticated, or failing blocks the push
 and names the command), each context planned and checked in turn with the
 first failure blocking; or a provisional plan against the remote's `main` when
 no pull request is open. When the same push also updates a target branch, the
