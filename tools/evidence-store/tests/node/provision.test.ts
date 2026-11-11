@@ -171,3 +171,29 @@ describe("emptyAllowlists", () => {
     expect(emptyAllowlists(filled, "development")).toEqual([]);
   });
 });
+
+describe("progress", () => {
+  it("says what each step is for: checks only on a rerun, creations on a fresh account", async () => {
+    const account = empty();
+    const fresh = fakeIo(account);
+    expect(await run([], fresh.io, root)).toBe(0);
+    expect(fresh.stderr().trim().split("\n")).toEqual([
+      "provision: checking D1 database evidence-store-development…",
+      "provision: creating D1 database evidence-store-development…",
+      "provision: reading the new database's ID…",
+      "provision: checking R2 bucket evidence-store-development…",
+      "provision: creating R2 bucket evidence-store-development…",
+      `provision: writing database_id ${DATABASE_ID} for development into wrangler.jsonc`,
+      "provision: checking secret CURSOR_HMAC_KEY on Worker evidence-store-development…",
+      "provision: setting secret CURSOR_HMAC_KEY on Worker evidence-store-development…",
+    ]);
+
+    const rerun = fakeIo(account);
+    expect(await run([], rerun.io, root)).toBe(0);
+    expect(rerun.stderr().trim().split("\n")).toEqual([
+      "provision: checking D1 database evidence-store-development…",
+      "provision: checking R2 bucket evidence-store-development…",
+      "provision: checking secret CURSOR_HMAC_KEY on Worker evidence-store-development…",
+    ]);
+  });
+});

@@ -89,24 +89,25 @@ export async function provision(environment: string, io: OperatorIo, packageRoot
   const resources = environmentResources(configText, environment);
   const wrangler = join(packageRoot, "node_modules", "wrangler", "bin", "wrangler.js");
   // Node runs Wrangler's entry directly: no shell, so nothing needs quoting on any OS.
-  const step = (label: string, args: string[], input?: string): SpawnResult => {
-    io.stderr(`provision: ${label} (${environment})\n`);
+  // `progress` says what the step is for; failures name the Wrangler command instead.
+  const step = (progress: string, args: string[], input?: string): SpawnResult => {
+    io.stderr(`provision: ${progress}\n`);
     return io.spawn(process.execPath, [wrangler, ...args], input === undefined ? undefined : { input });
   };
   const must = (label: string, result: SpawnResult): SpawnResult => {
     if (result.status !== 0) throw new CliError(1, `${label} failed (exit ${result.status}).\n${redact(`${result.stdout}${result.stderr}`, io.env)}`);
     return result;
   };
-  const listDatabases = (): { name: string; uuid: string }[] =>
-    parseJson("wrangler d1 list", must("wrangler d1 list", step("wrangler d1 list", ["d1", "list", "--json", "--config", configPath])), io.env);
+  const listDatabases = (progress: string): { name: string; uuid: string }[] =>
+    parseJson("wrangler d1 list", must("wrangler d1 list", step(progress, ["d1", "list", "--json", "--config", configPath])), io.env);
 
-  const existingId = listDatabases().find((db) => db.name === resources.databaseName)?.uuid;
+  const existingId = listDatabases(`checking D1 database ${resources.databaseName}…`).find((db) => db.name === resources.databaseName)?.uuid;
   const databaseCreated = existingId === undefined;
   let databaseId: string;
   if (existingId === undefined) {
-    must("wrangler d1 create", step("wrangler d1 create", ["d1", "create", resources.databaseName, "--config", configPath]));
+    must("wrangler d1 create", step(`creating D1 database ${resources.databaseName}…`, ["d1", "create", resources.databaseName, "--config", configPath]));
     // Read the ID back rather than scraping the create command's prose.
-    const createdId = listDatabases().find((db) => db.name === resources.databaseName)?.uuid;
+    const createdId = listDatabases(`reading the new database's ID…`).find((db) => db.name === resources.databaseName)?.uuid;
     if (createdId === undefined) throw new CliError(1, `wrangler d1 create reported success, but ${resources.databaseName} is not listed`);
     databaseId = createdId;
   } else {
@@ -114,8 +115,8 @@ export async function provision(environment: string, io: OperatorIo, packageRoot
   }
 
   // `info` fails for a missing bucket; any other cause resurfaces from `create`.
-  const bucketCreated = step("wrangler r2 bucket info", ["r2", "bucket", "info", resources.bucketName, "--json", "--config", configPath]).status !== 0;
-  if (bucketCreated) must("wrangler r2 bucket create", step("wrangler r2 bucket create", ["r2", "bucket", "create", resources.bucketName, "--config", configPath]));
+  const bucketCreated = step(`checking R2 bucket ${resources.bucketName}…`, ["r2", "bucket", "info", resources.bucketName, "--json", "--config", configPath]).status !== 0;
+  if (bucketCreated) must("wrangler r2 bucket create", step(`creating R2 bucket ${resources.bucketName}…`, ["r2", "bucket", "create", resources.bucketName, "--config", configPath]));
 
   let configUpdated = false;
   if (resources.databaseId !== databaseId) {
@@ -127,18 +128,18 @@ export async function provision(environment: string, io: OperatorIo, packageRoot
       );
     }
     writeFileSync(configPath, withDatabaseId(configText, resources.databaseName, databaseId));
-    io.stderr(`provision: wrote database_id ${databaseId} for ${environment} into wrangler.jsonc\n`);
+    io.stderr(`provision: writing database_id ${databaseId} for ${environment} into wrangler.jsonc\n`);
     configUpdated = true;
   }
 
   // Listing fails while the Worker does not exist yet; then there is no secret either.
-  const listed = step("wrangler secret list", ["secret", "list", "--env", environment, "--format", "json", "--config", configPath]);
+  const listed = step(`checking secret ${CURSOR_SECRET} on Worker ${resources.workerName}…`, ["secret", "list", "--env", environment, "--format", "json", "--config", configPath]);
   const secrets = listed.status === 0 ? parseJson<{ name: string }[]>("wrangler secret list", listed, io.env) : [];
   const secretCreated = !secrets.some((secret) => secret.name === CURSOR_SECRET);
   if (secretCreated) {
     // On stdin, never argv. Before the first deploy Wrangler creates a stub Worker to hold it.
     const key = randomBytes(32).toString("base64url");
-    must("wrangler secret put", step(`wrangler secret put ${CURSOR_SECRET}`, ["secret", "put", CURSOR_SECRET, "--env", environment, "--config", configPath], key));
+    must("wrangler secret put", step(`setting secret ${CURSOR_SECRET} on Worker ${resources.workerName}…`, ["secret", "put", CURSOR_SECRET, "--env", environment, "--config", configPath], key));
   }
 
   return {
