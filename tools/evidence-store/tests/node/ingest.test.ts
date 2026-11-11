@@ -95,6 +95,27 @@ describe("ingest a version-3 collection", () => {
     expect(out.join("")).toContain("3 upload(s) finalized");
   });
 
+  it("returns a rejected or expired upload to the producer and finishes after resume", async () => {
+    const w = rigWorkspace(dir);
+    expect(await ingestRig(w)).toBe(0);
+    // The first finalize the verifier sends is rejected.
+    service.fault({ match: (method, path) => method === "POST" && path.endsWith("/finalize"), times: 1, action: { kind: "respond", status: 400, body: { error: { code: "invalid_input", message: "completion-cell-unknown: wrong cell", location: null, retryable: false, retry_after_ms: null }, request_id: "r" } } });
+    const finalizeArgs = ["finalize", statePath(), "--token-file", join(dir, "verifier.token")];
+    expect(await run(finalizeArgs, io())).toBe(1);
+    expect(err.join("")).toContain("completion-cell-unknown: wrong cell");
+    expect(err.join("")).toContain("1 upload(s) were rejected or expired and must be staged again");
+    const afterReject = readState().uploads;
+    expect(afterReject.map((upload) => upload.state)).toEqual(["pending", "finalized", "finalized"]);
+    expect(afterReject[0]!.upload_id).toBeUndefined();
+
+    // Finalize refuses until the producer restages.
+    expect(await run(finalizeArgs, io())).toBe(2);
+    expect(await run(["resume", statePath()], io())).toBe(0);
+    expect(readState().uploads[0]!.state).toBe("staged");
+    expect(await run(finalizeArgs, io())).toBe(0);
+    expect(readState().uploads.every((upload) => upload.state === "finalized")).toBe(true);
+  });
+
   it("submits without uploads when --proof-dir is absent", async () => {
     const w = rigWorkspace(dir);
     expect(await run(["ingest", w.input, ...flags()], io())).toBe(0);

@@ -163,8 +163,11 @@ sequenceDiagram
    with the same bytes is harmless, and with different bytes answers 409.
 3. **Finalize (verifier only).** The store joins the parts into the final
    object while checking its length and SHA-256 against the reference. An
-   expected listing or completion record must also be strict JSON whose
-   package, gate, environment, head, and target match the observation. A
+   expected listing or completion record must also be strict JSON bound to
+   the observation: a listing by package, gate, environment, and target; a
+   completion record by package, gate, and environment, plus head, run, and
+   attempt when the producer is `hosted` (a seed or rig run proves each cell
+   on its own same-tree commit, so its head is not compared). A
    mismatch rejects the upload (400) and deletes the joined object; open a new
    upload to try again. Success appends one `verified` `object` location
    event; repeating `finalize` returns the same result and adds nothing.

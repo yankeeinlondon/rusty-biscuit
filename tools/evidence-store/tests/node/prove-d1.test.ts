@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { missingEnvironment, parseDatabaseId, parseWorkerUrl } from "../../cli/prove-d1.ts";
+import { isSpikeNotFound, missingEnvironment, parseDatabaseId, parseWorkerUrl } from "../../cli/prove-d1.ts";
 
 describe("prove-d1 preconditions", () => {
   it("names every missing credential in declaration order", () => {
@@ -39,5 +39,14 @@ describe("prove-d1 Wrangler output parsing", () => {
       "https://evidence-spike-1a2b.acct.workers.dev",
     );
     expect(parseWorkerUrl("https://example.com")).toBeNull();
+  });
+});
+
+describe("isSpikeNotFound", () => {
+  it("accepts only the spike's JSON 404, not Cloudflare's HTML page for a workers.dev address that is not routing yet", () => {
+    expect(isSpikeNotFound({ status: 404, body: { error: "not_found" } })).toBe(true);
+    expect(isSpikeNotFound({ status: 404, body: "<!DOCTYPE html>\n<html class=\"no-js\">" })).toBe(false);
+    expect(isSpikeNotFound({ status: 200, body: { error: "not_found" } })).toBe(false);
+    expect(isSpikeNotFound(null)).toBe(false);
   });
 });

@@ -455,13 +455,23 @@ describe("POST /uploads/{upload_id}/finalize", () => {
       expect((await locationState(repo)).locations).toBe(2);
     });
 
-    it("binds a hosted completion record to the producer's run and attempt", async () => {
+    it("accepts a seed or rig completion record proven on another same-tree commit", async () => {
+      // A seed run records each cell's own commit; local_evidence.py compares package and gate, not head.
+      const completion = completionRecord({ head: "c".repeat(40) });
+      const { repo, request, fixture } = await proofSetup({ expected: expectedManifest(), completion });
+      const uploadId = await stage(request, repo, proofUpload(fixture, "completion-record", completion), completion);
+      expect((await finalize(request, repo, uploadId)).status).toBe(200);
+    });
+
+    it("binds a hosted completion record to the producer's head, run, and attempt", async () => {
       const hosted = { package: "alpha", environment: "ubuntu-latest", head: "b".repeat(40) };
       const good = completionRecord({ ...hosted, run: "100", attempt: 1, reports: ["L1/alpha.xml"] });
       const otherRun = completionRecord({ ...hosted, run: "101", attempt: 1, reports: ["L1/alpha.xml"] });
+      const otherHead = completionRecord({ ...hosted, head: "c".repeat(40), run: "100", attempt: 1, reports: ["L1/alpha.xml"] });
       for (const [bytes, status] of [
         [good, 200],
         [otherRun, 400],
+        [otherHead, 400],
       ] as const) {
         const { repo, request, fixture } = await proofSetup({ expected: expectedManifest(), completion: bytes }, hostedFixture);
         const uploadId = await stage(request, repo, proofUpload(fixture, "completion-record", bytes), bytes);
@@ -469,8 +479,8 @@ describe("POST /uploads/{upload_id}/finalize", () => {
       }
     });
 
-    it("rejects a completion record for another cell or head", async () => {
-      for (const override of [{ package: "other" }, { gate: "L2" }, { head: "c".repeat(40) }, { environment: "ubuntu-latest" }]) {
+    it("rejects a completion record for another cell", async () => {
+      for (const override of [{ package: "other" }, { gate: "L2" }, { environment: "ubuntu-latest" }]) {
         const completion = completionRecord(override);
         const { repo, request, fixture } = await proofSetup({ expected: expectedManifest(), completion });
         const uploadId = await stage(request, repo, proofUpload(fixture, "completion-record", completion), completion);

@@ -70,6 +70,24 @@ function wrangler(args: string[], options: { cwd: string; input?: string }): str
   return output;
 }
 
+/**
+ * Deletes the spike Worker through the API. `wrangler delete` also lists KV
+ * namespaces, which a token scoped to D1, R2, and Workers Scripts may not do,
+ * so it fails after the Worker is already gone. A 404 means already deleted.
+ */
+async function deleteWorker(name: string): Promise<void> {
+  const account = process.env["CLOUDFLARE_ACCOUNT_ID"]!;
+  const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/${name}?force=true`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${process.env["CLOUDFLARE_API_TOKEN"]!}` },
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (response.status !== 200 && response.status !== 404) {
+    const body = (await response.json().catch(() => ({}))) as { errors?: { code?: number; message?: string }[] };
+    throw new Error(`DELETE workers/scripts/${name} answered ${response.status}: ${(body.errors ?? []).map((e) => `${e.code} ${e.message}`).join("; ")}`);
+  }
+}
+
 function httpPost(base: string, token: string): SpikePost {
   return async (path, body) => {
     const response = await fetch(`${base}${path}`, {
@@ -90,13 +108,17 @@ function httpPost(base: string, token: string): SpikePost {
   };
 }
 
+/** True only for the spike's own JSON 404: a new workers.dev address answers Cloudflare's HTML 404 until it routes. */
+export function isSpikeNotFound(response: { status: number; body: unknown } | null): boolean {
+  return response !== null && response.status === 404 && (response.body as { error?: unknown } | null)?.error === "not_found";
+}
+
 async function waitUntilReady(post: SpikePost): Promise<void> {
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    const response = await post("/state", { repository_id: "readiness-probe" }).catch(() => null);
-    if (response !== null && response.status === 404) return;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (isSpikeNotFound(await post("/state", { repository_id: "readiness-probe" }).catch(() => null))) return;
     await new Promise((done) => setTimeout(done, 2_000));
   }
-  throw new Error("the deployed spike Worker never became ready (60 s)");
+  throw new Error("the deployed spike Worker never became ready (120 s)");
 }
 
 /** Halve the collection size from the declared maximum until a CPU sample passes. */
@@ -164,7 +186,7 @@ export async function proveD1(): Promise<ProveResult> {
   } finally {
     if (workerDeployed) {
       try {
-        wrangler(["delete", "--name", name, "--force"], { cwd: workDir });
+        await deleteWorker(name);
       } catch (error) {
         result.failure = `${result.failure ?? ""} cleanup: worker ${name} was not deleted: ${String(error)}`.trim();
       }

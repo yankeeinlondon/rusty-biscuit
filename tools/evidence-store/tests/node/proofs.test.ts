@@ -138,9 +138,15 @@ describe("completionBindingProblems", () => {
     }
   });
 
-  it("binds run and attempt only for a hosted producer that records them", () => {
+  it("binds head, run, and attempt only for a hosted producer", () => {
     const rig = { ...CELL, producer: load('{"kind":"rig","run_id":"run7","host":{"os":"Darwin","kernel":"27"}}') as JsonObject };
     expect(completionBindingProblems(edited(RECORD, "run", '"elsewhere"') as JsonObject, rig)).toEqual([]);
+    // A seed or rig run proves a cell on a same-tree commit of its own, as local_evidence.py accepts.
+    for (const kind of ["rig", "seed"]) {
+      const local = { ...CELL, producer: load(`{"kind":"${kind}","host":{"os":"Windows","kernel":"native"}}`) as JsonObject };
+      expect(completionBindingProblems(edited(RECORD, "head", JSON.stringify("c".repeat(40))) as JsonObject, local), kind).toEqual([]);
+      expect(codes(completionBindingProblems(edited(RECORD, "gate", '"L2"') as JsonObject, local)), kind).toEqual(["completion-cell-unknown"]);
+    }
   });
 
   it("requires a nextest version for a test tier only", () => {

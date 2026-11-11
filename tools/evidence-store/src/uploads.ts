@@ -108,7 +108,8 @@ async function openUpload(context: RequestContext, repositoryId: string, uploadI
   if (upload === null) throw new ApiError("not_found", `upload ${uploadId} does not exist`);
   if (upload.state === "expired") throw expiredError(uploadId);
   if (upload.state === "rejected") {
-    throw new ApiError("invalid_input", `upload ${uploadId} was rejected because its bytes did not match the reference; open a new upload`);
+    // Rejection covers a length, digest, or proof-binding failure; the original reason was answered then.
+    throw new ApiError("invalid_input", `upload ${uploadId} was rejected when it was finalized; open a new upload`);
   }
   if (upload.state === "open" && context.nowMs >= upload.expires_at_ms) {
     await closeUpload(context.db, uploadId, "expired", context.nowMs);

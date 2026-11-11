@@ -16,6 +16,8 @@
       "name": "evidence-store-development",
       // Reachable at its workers.dev address; every route still requires authentication.
       "workers_dev": true,
+      // No per-version preview addresses: nothing uses them.
+      "preview_urls": false,
       // Daily staging cleanup, retention jobs, tombstone expiry, and capacity checks (src/daily.ts).
       "triggers": { "crons": ["17 3 * * *"] },
       "d1_databases": [
@@ -53,6 +55,8 @@
       "name": "evidence-store-restore-test",
       // Reachable at its workers.dev address; every route still requires authentication.
       "workers_dev": true,
+      // No per-version preview addresses: nothing uses them.
+      "preview_urls": false,
       // Daily staging cleanup, retention jobs, tombstone expiry, and capacity checks (src/daily.ts).
       "triggers": { "crons": ["17 3 * * *"] },
       "d1_databases": [
@@ -76,10 +80,10 @@
         { "name": "OPERATOR_LIMITER", "namespace_id": "2003", "simple": { "limit": 30, "period": 60 } }
       ],
       "vars": {
-        // `api/schemas/service-config.schema.json`, as JSON text. The empty
-        // allowlists deny every repository and OIDC token until the
-        // deployment registers the real repository and workflow.
-        "SERVICE_CONFIG": "{\"api_version\":\"v1\",\"repositories\":[],\"oidc\":{\"issuer\":\"https://token.actions.githubusercontent.com\",\"audience\":\"rusty-biscuit-evidence-store\",\"clock_tolerance_seconds\":60,\"trusted_workflows\":[]},\"quotas\":{\"rate_mutations_per_minute\":60,\"rate_reads_per_minute\":300,\"operator_rate_mutations_per_minute\":30,\"capacity\":{\"alert_ratio\":0.7,\"refuse_ratio\":0.8,\"r2_live_plus_staging_bytes\":8589934592,\"r2_class_a_per_month\":800000,\"r2_class_b_per_month\":8000000,\"d1_database_bytes\":500000000,\"d1_rows_read_per_day\":5000000,\"d1_rows_written_per_day\":100000,\"worker_requests_per_day\":100000}}}"
+        // `api/schemas/service-config.schema.json`, as JSON text. The same
+        // repositories as development, so a restored copy serves them; no
+        // workflow is trusted, because nothing publishes to a restore target.
+        "SERVICE_CONFIG": "{\"api_version\":\"v1\",\"repositories\":[{\"repository_id\":\"1131837348\",\"owner_id\":\"980757\",\"slug\":\"yankeeinlondon/rusty-biscuit\"},{\"repository_id\":\"1454439808\",\"owner_id\":\"980757\",\"slug\":\"yankeeinlondon/evidence-store-acceptance\"}],\"oidc\":{\"issuer\":\"https://token.actions.githubusercontent.com\",\"audience\":\"rusty-biscuit-evidence-store\",\"clock_tolerance_seconds\":60,\"trusted_workflows\":[]},\"quotas\":{\"rate_mutations_per_minute\":60,\"rate_reads_per_minute\":300,\"operator_rate_mutations_per_minute\":30,\"capacity\":{\"alert_ratio\":0.7,\"refuse_ratio\":0.8,\"r2_live_plus_staging_bytes\":8589934592,\"r2_class_a_per_month\":800000,\"r2_class_b_per_month\":8000000,\"d1_database_bytes\":500000000,\"d1_rows_read_per_day\":5000000,\"d1_rows_written_per_day\":100000,\"worker_requests_per_day\":100000}}}"
       }
     }
   }

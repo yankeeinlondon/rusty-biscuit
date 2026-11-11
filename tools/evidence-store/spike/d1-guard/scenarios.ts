@@ -95,7 +95,12 @@ export async function runScenarios(post: SpikePost, options: ScenarioOptions): P
   const check = (name: string, ok: boolean, detail: unknown) =>
     checks.push({ name, ok, detail: typeof detail === "string" ? detail : JSON.stringify(detail) });
   const repository = `spike-${crypto.randomUUID()}`;
-  const state = async () => (await post("/state", { repository_id: repository })).body as StateBody;
+  const state = async (): Promise<StateBody> => {
+    const response = await post("/state", { repository_id: repository });
+    // Fail with what the Worker said, not a TypeError on a missing field.
+    if (response.status !== 200) throw new Error(`/state answered ${response.status}: ${JSON.stringify(response.body).slice(0, 300)}`);
+    return response.body as StateBody;
+  };
 
   const registered = await post("/repo", { repository_id: repository, slug: repository });
   check("register repository", registered.status === 200, registered);

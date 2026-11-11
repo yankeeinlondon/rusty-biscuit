@@ -144,10 +144,13 @@ describe("provision", () => {
     expect(fake.stdout()).toContain("just evidence-store deploy --manifest /abs/deploy-development.json");
   });
 
-  it("names restore-test explicitly in its next step", async () => {
+  it("points restore-test at a code-only deploy and a restore, never a migrating deploy", async () => {
     const fake = fakeIo(empty());
     expect(await run(["--env", "restore-test"], fake.io, root)).toBe(0);
-    expect(fake.stdout()).toContain("just evidence-store deploy --env restore-test --manifest");
+    expect(fake.stdout()).toContain("just evidence-store wrangler deploy --env restore-test");
+    expect(fake.stdout()).not.toContain("just evidence-store deploy");
+    // It trusts no workflow by design, so only its repositories are asked for.
+    expect(fake.stdout()).toContain("fill SERVICE_CONFIG repositories for restore-test");
   });
 
   it("names missing credentials and rejects an unknown environment without calling Wrangler", async () => {
@@ -169,6 +172,7 @@ describe("emptyAllowlists", () => {
     expect(emptyAllowlists(text, "development")).toEqual(["repositories", "oidc.trusted_workflows"]);
     const filled = text.replace('\\"repositories\\":[]', '\\"repositories\\":[{}]').replace('\\"trusted_workflows\\":[]', '\\"trusted_workflows\\":[{}]');
     expect(emptyAllowlists(filled, "development")).toEqual([]);
+    expect(emptyAllowlists(text, "restore-test")).toEqual(["repositories"]);
   });
 });
 

@@ -29,6 +29,8 @@ import { BOOTSTRAP_ENVIRONMENT, CliError, DEFAULT_ENVIRONMENT, defaultIo, missin
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CURSOR_SECRET = "CURSOR_HMAC_KEY";
+/** Receives restores only: it trusts no workflow, and its database must stay empty until a restore fills it. */
+const RESTORE_ENVIRONMENT = "restore-test";
 
 /** What each step found or did, for the summary and for tests. */
 export interface ProvisionReport {
@@ -56,7 +58,11 @@ export function withDatabaseId(text: string, databaseName: string, id: string): 
   return `${text.slice(0, match.index)}"database_id": "${id}"${text.slice(match.index + match[0].length)}`;
 }
 
-/** The empty `repositories` / `oidc.trusted_workflows` allowlists in an environment's `SERVICE_CONFIG`. */
+/**
+ * The empty `repositories` / `oidc.trusted_workflows` allowlists in an
+ * environment's `SERVICE_CONFIG` that still need filling. The restore target
+ * trusts no workflow by design, so only its repositories count.
+ */
 export function emptyAllowlists(wranglerConfig: string, environment: string): string[] {
   const config = JSON.parse(stripJsonComments(wranglerConfig)) as { env?: Record<string, { vars?: { SERVICE_CONFIG?: string } }> };
   const raw = config.env?.[environment]?.vars?.SERVICE_CONFIG;
@@ -64,7 +70,7 @@ export function emptyAllowlists(wranglerConfig: string, environment: string): st
   const service = JSON.parse(raw) as { repositories?: unknown[]; oidc?: { trusted_workflows?: unknown[] } };
   const empty: string[] = [];
   if ((service.repositories ?? []).length === 0) empty.push("repositories");
-  if ((service.oidc?.trusted_workflows ?? []).length === 0) empty.push("oidc.trusted_workflows");
+  if (environment !== RESTORE_ENVIRONMENT && (service.oidc?.trusted_workflows ?? []).length === 0) empty.push("oidc.trusted_workflows");
   return empty;
 }
 
@@ -168,8 +174,14 @@ function summary(report: ProvisionReport): string {
       `  - fill SERVICE_CONFIG ${report.empty_allowlists.join(" and ")} for ${report.environment} in tools/evidence-store/wrangler.jsonc (an empty list denies everything)`,
     );
   }
-  const envFlag = report.environment === DEFAULT_ENVIRONMENT ? "" : ` --env ${report.environment}`;
-  lines.push(`  - just evidence-store deploy${envFlag} --manifest /abs/deploy-${report.environment}.json`);
+  if (report.environment === RESTORE_ENVIRONMENT) {
+    // `deploy` applies migrations, and a restore refuses a database that is not empty.
+    lines.push(`  - deploy its code without migrations: just evidence-store wrangler deploy --env ${report.environment}`);
+    lines.push("  - restore a backup into it (docs/cicd/evidence-store.md, Restore into isolated resources)");
+  } else {
+    const envFlag = report.environment === DEFAULT_ENVIRONMENT ? "" : ` --env ${report.environment}`;
+    lines.push(`  - just evidence-store deploy${envFlag} --manifest /abs/deploy-${report.environment}.json`);
+  }
   return `${lines.join("\n")}\n`;
 }
 

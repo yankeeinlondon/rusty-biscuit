@@ -157,20 +157,23 @@ function sameInteger(left: JsonValue | undefined, right: JsonNumber): boolean {
 }
 
 /**
- * A structurally valid record bound to `cell`, as `_completion_record` binds
- * a hosted record. `run`/`attempt` bind only for a `hosted` producer that
- * records them: a rig, seed, or hook observation carries no attempt (and
- * its `run_id`, when present, is a host-local label, not the record's run),
- * so those observations bind the cell and head alone.
+ * A structurally valid record bound to `cell`. A `hosted` record binds as
+ * `_completion_record` binds it: package, environment, gate, head, and the
+ * run and attempt it records. Any other producer binds package, environment,
+ * and gate only, as `local_evidence.py` checks a rig or seed record: those
+ * runs prove each cell on whichever same-tree commit they ran it on, so the
+ * record's head need not be the observation's (its tree is, but a record
+ * carries no tree to compare).
  */
 export function completionBindingProblems(record: JsonObject, cell: ProofCell): ProofProblem[] {
   const problems: ProofProblem[] = [];
   const mismatch = (name: string, value: string) =>
     problem("completion-cell-unknown", `the completion record's ${name} is not this observation's ${pythonRepr(value)}; a record from another cell or run proves nothing here`);
-  for (const name of ["package", "environment", "gate", "head"] as const) {
+  for (const name of ["package", "environment", "gate"] as const) {
     if (record[name] !== cell[name]) problems.push(mismatch(name, cell[name]));
   }
   if (memberOf(cell.producer, "kind") === "hosted") {
+    if (record["head"] !== cell.head) problems.push(mismatch("head", cell.head));
     const runId = memberOf(cell.producer, "run_id");
     if (typeof runId === "string" && record["run"] !== runId) problems.push(mismatch("run", runId));
     const attempt = memberOf(cell.producer, "attempt");

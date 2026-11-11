@@ -729,11 +729,27 @@ export async function finalize(statePathArgument: string, tokenFileArgument: str
   if (state.ingest.state !== "acknowledged" || pending > 0) {
     throw new CliError(2, `${statePath} has unfinished producer work (${pending} upload(s) pending); first run: ${resumeCommand(statePath)}`);
   }
+  const restage: string[] = [];
   try {
     for (const upload of state.uploads) {
       if (upload.state !== "staged") continue;
       const path = repoPath(state, `/uploads/${upload.upload_id}/finalize`);
-      const { body } = await send(io, state.endpoint, token, { method: "POST", path, body: "{}", contentType: "application/json" });
+      let body: unknown;
+      try {
+        ({ body } = await send(io, state.endpoint, token, { method: "POST", path, body: "{}", contentType: "application/json" }));
+      } catch (error) {
+        // 400 is a rejected upload, 404 an expired one: both are terminal, and the
+        // service opens a fresh upload for the same reference, so the producer
+        // stages the bytes again. The rejection reason is reported, not swallowed.
+        if (!(error instanceof ServiceError) || (error.status !== 400 && error.status !== 404)) throw error;
+        io.stderr(`${error.message}\n`);
+        restage.push(upload.file);
+        upload.state = "pending";
+        upload.parts_acknowledged = 0;
+        delete upload.upload_id;
+        saveState(statePath, state, io);
+        continue;
+      }
       const result = body as { upload?: { state?: unknown } };
       if (result.upload?.state !== "finalized") throw malformed(`POST ${path}`);
       upload.state = "finalized";
@@ -742,6 +758,13 @@ export async function finalize(statePathArgument: string, tokenFileArgument: str
   } catch (error) {
     if (!(error instanceof CliError)) throw error;
     throw new CliError(1, `${error.message}\nprogress is saved in ${statePath}; retry with: ${finalizeCommand(statePath, tokenFile)}`);
+  }
+  if (restage.length > 0) {
+    throw new CliError(
+      1,
+      `${restage.length} upload(s) were rejected or expired and must be staged again: ${restage.join(", ")}\n` +
+        `progress is saved in ${statePath}; run ${resumeCommand(statePath)}, then ${finalizeCommand(statePath, tokenFile)}`,
+    );
   }
   const result = summary(state);
   io.stdout(`collection ${result.collection_id}: ${result.finalized} upload(s) finalized\n`);
