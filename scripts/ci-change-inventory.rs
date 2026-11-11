@@ -3,11 +3,11 @@
 //!
 //! ## Notes
 //!
-//! Included by `ci-plan` (terminal, `TerminalRenderable`) and by `ci-rollup
-//! summarize` (GitHub Markdown) with `#[path]`, so the local and hosted reports
-//! read the same field through the same typed model. Spec section 7 requires
-//! both renderers to consume one payload; a second deserializer is how they
-//! would come to describe different changes.
+//! Included by the library's `ci_plan_render` (terminal, `TerminalRenderable`)
+//! and by `ci-rollup summarize` (GitHub Markdown) with `#[path]`, so the local
+//! and hosted reports read the same field through the same typed model. Spec
+//! section 7 requires both renderers to consume one payload; a second
+//! deserializer is how they would come to describe different changes.
 //!
 //! Deliberately links nothing: `ci-rollup` is the always-runs merge-gate binary
 //! and builds with `--no-default-features`.

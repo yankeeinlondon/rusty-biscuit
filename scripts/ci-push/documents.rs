@@ -213,7 +213,9 @@ pub fn parse_constraint_record(bytes: &[u8], document: &str) -> Result<Constrain
     let value = json::load(bytes).map_err(error)?;
     let parsed = (|| {
         let record = json::object(&value, "")?;
-        if let Some(unknown) = record.keys().find(|key| !CONSTRAINT_FIELDS.contains(&key.as_str())) {
+        // The alphabetically first unknown key, whatever order the map keeps,
+        // so both constraint readers name the same field.
+        if let Some(unknown) = record.keys().filter(|key| !CONSTRAINT_FIELDS.contains(&key.as_str())).min() {
             return Err(Located::new(unknown.clone(), "is not a constraint field"));
         }
         Ok(ConstraintRecord {

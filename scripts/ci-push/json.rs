@@ -248,6 +248,11 @@ pub(crate) fn parse_calendar_date(text: &str) -> Option<chrono::NaiveDate> {
         return None;
     }
     let year = text[0..4].parse().ok()?;
+    // chrono's proleptic year 0 has no Python `date`; refusing it keeps the
+    // two constraint readers in agreement.
+    if year == 0 {
+        return None;
+    }
     let month = text[5..7].parse().ok()?;
     let day = text[8..10].parse().ok()?;
     chrono::NaiveDate::from_ymd_opt(year, month, day)

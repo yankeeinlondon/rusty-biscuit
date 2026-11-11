@@ -40,7 +40,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import stat
 import sys
 from datetime import date
 from pathlib import Path
@@ -118,36 +120,220 @@ def repository_identity(remote: str) -> str:
     return remote
 
 
-class Constraint:
-    """One recorded prohibition, valid or not."""
+class DocumentError(ValueError):
+    """A document that cannot be trusted, and the JSON path of the problem.
 
-    def __init__(self, path: Path, document: Any) -> None:
+    `location` is a path such as `cells[2].gate`; it is empty when the problem
+    is the document as a whole. Locations and validation order match the Rust
+    reader in `scripts/ci-push/documents.rs`, which the shared parity fixture
+    checks, and so does the message.
+    """
+
+    def __init__(self, location: str, problem: str, document: str = "") -> None:
+        if location:
+            message = f"{document}: `{location}` {problem}" if document else f"`{location}` {problem}"
+        else:
+            message = f"{document} {problem}" if document else problem
+        super().__init__(message)
+        self.location = location
+        self.problem = problem
+        self.document = document
+
+
+class StoreError(ValueError):
+    """A store that exists but could not be walked or read. It blocks: the
+    records it hides might bind."""
+
+    def __init__(self, path: Path, error: OSError) -> None:
+        super().__init__(f"cannot read the constraint store at {path}: {error}")
+        self.path = path
+
+
+def _refuse_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not a JSON number")
+
+
+def _finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"number out of range: {text}")
+    return value
+
+
+def _finite_int(text: str) -> int:
+    # The Rust reader holds an integer beyond 64 bits as a float, and refuses
+    # one too large for that.
+    if not math.isfinite(float(text)):
+        raise ValueError(f"number out of range: {text}")
+    return int(text)
+
+
+def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    document: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in document:
+            raise ValueError(f"duplicate key {key!r}")
+        document[key] = value
+    return document
+
+
+def _lone_surrogate(value: Any) -> bool:
+    if isinstance(value, str):
+        return any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+    if isinstance(value, dict):
+        return any(_lone_surrogate(key) or _lone_surrogate(item) for key, item in value.items())
+    if isinstance(value, list):
+        return any(_lone_surrogate(item) for item in value)
+    return False
+
+
+def loads_strict(data: bytes) -> Any:
+    """Exactly one JSON value from UTF-8 `data`, or a `DocumentError`.
+
+    Refuses what `json.loads` quietly accepts and the Rust reader does not: a
+    duplicate key (the last would otherwise win), `NaN`/`Infinity`, a number
+    out of float range, and an unpaired surrogate escape. Empty documents,
+    trailing content, comments, and trailing commas are already refused.
+    """
+    try:
+        document = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=_unique,
+            parse_constant=_refuse_constant,
+            parse_float=_finite_float,
+            parse_int=_finite_int,
+        )
+    except ValueError as error:  # JSONDecodeError and UnicodeDecodeError are ValueErrors
+        raise DocumentError("", f"is not valid JSON: {error}") from None
+    if _lone_surrogate(document):
+        raise DocumentError("", "is not valid JSON: a string holds an unpaired surrogate")
+    return document
+
+
+def _kind(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "a boolean"
+    if isinstance(value, (int, float)):
+        return "a number"
+    if isinstance(value, str):
+        return "a string"
+    if isinstance(value, list):
+        return "an array"
+    return "an object"
+
+
+def _field_path(at: str, field: str) -> str:
+    return f"{at}.{field}" if at else field
+
+
+def _object(value: Any, at: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise DocumentError(at, f"must be an object, found {_kind(value)}")
+    return value
+
+
+def _required_text(document: dict[str, Any], at: str, field: str) -> str:
+    location = _field_path(at, field)
+    if field not in document:
+        raise DocumentError(location, "is required")
+    value = document[field]
+    if value == "":
+        raise DocumentError(location, 'must be a nonempty string, found ""')
+    if not isinstance(value, str):
+        raise DocumentError(location, f"must be a nonempty string, found {_kind(value)}")
+    return value
+
+
+def _optional_wildcard_text(document: dict[str, Any], at: str, field: str) -> str:
+    """Absence and `""` both mean "every value"; explicit null is refused."""
+    if field not in document:
+        return ""
+    value = document[field]
+    if not isinstance(value, str):
+        raise DocumentError(
+            _field_path(at, field), f"must be a string when present, found {_kind(value)}"
+        )
+    return value
+
+
+_ASCII_DIGITS = frozenset("0123456789")
+
+
+def _calendar_date(document: dict[str, Any], at: str, field: str) -> date:
+    """Exactly `YYYY-MM-DD` naming a real day. `date.fromisoformat` (3.11+)
+    also reads basic (`20261105`) and week-date (`2026-W45-1`) spellings."""
+    text = _required_text(document, at, field)
+    shaped = (
+        len(text) == 10
+        and text[4] == "-"
+        and text[7] == "-"
+        and all(character in _ASCII_DIGITS for index, character in enumerate(text) if index not in (4, 7))
+    )
+    if shaped:
+        try:
+            return date(int(text[0:4]), int(text[5:7]), int(text[8:10]))
+        except ValueError:
+            pass
+    raise DocumentError(
+        _field_path(at, field), f"must be a YYYY-MM-DD calendar date, found {json.dumps(text)}"
+    )
+
+
+def validate_record(document: Any) -> date:
+    """The expiry of a valid constraint record, or a `DocumentError`.
+
+    Unknown fields are refused: the store is written by hand, and a misspelled
+    `branchh` would otherwise widen the record to every branch.
+    """
+    record = _object(document, "")
+    unknown = sorted(set(record) - set(REQUIRED_FIELDS) - set(OPTIONAL_FIELDS))
+    if unknown:
+        raise DocumentError(unknown[0], "is not a constraint field")
+    for field in ("environment", "reason", "owner"):
+        _required_text(record, "", field)
+    expiry = _calendar_date(record, "", "expiry")
+    for field in OPTIONAL_FIELDS:
+        _optional_wildcard_text(record, "", field)
+    return expiry
+
+
+class Constraint:
+    """One recorded prohibition, valid or not.
+
+    `error` is a document that could not be parsed at all; otherwise
+    `document` is validated here. `problem` and `location` are set for a
+    malformed record.
+    """
+
+    def __init__(self, path: Path, document: Any, error: DocumentError | None = None) -> None:
         self.path = path
         self.document = document
+        self.location = ""
         self.problem: str | None = None
-        if not isinstance(document, dict):
-            self.problem = "must be a JSON object"
-            return
-        missing = [field for field in REQUIRED_FIELDS if not document.get(field)]
-        if missing:
-            self.problem = f"is missing {missing}"
-            return
-        unknown = sorted(set(document) - set(REQUIRED_FIELDS) - set(OPTIONAL_FIELDS))
-        if unknown:
-            self.problem = f"has unknown field(s) {unknown}"
-            return
-        try:
-            self.expiry = date.fromisoformat(str(document["expiry"]))
-        except ValueError:
-            self.problem = f"has an unparseable expiry {document['expiry']!r}"
+        if error is None:
+            try:
+                self.expiry = validate_record(document)
+            except DocumentError as invalid:
+                error = invalid
+        if error is not None:
+            self.location = error.location
+            self.problem = error.problem
+
+    def _text(self, field: str) -> str:
+        # A malformed record still names its environment to the planner when
+        # it spells one; anything else is no environment.
+        value = self.document.get(field) if isinstance(self.document, dict) else None
+        return value if isinstance(value, str) else ""
 
     @property
     def environment(self) -> str:
-        return str(self.document.get("environment", "")) if isinstance(self.document, dict) else ""
+        return self._text("environment")
 
     @property
     def gate(self) -> str:
-        return str(self.document.get("gate", "")) if isinstance(self.document, dict) else ""
+        return self._text("gate")
 
     def applies_to(self, repository: str, branches: Sequence[str]) -> bool:
         """Whether this constraint governs a push to `repository` under any of `branches`.
@@ -155,15 +341,15 @@ class Constraint:
         An unset `repository` or `branch` means "everywhere", so the common
         case — one prohibition, one branch, one host — needs neither field. An
         empty `repository` or an empty `branches` is an unknown identity, which
-        cannot prove exemption either.
+        cannot prove exemption either. A malformed record applies everywhere.
         """
-        if not isinstance(self.document, dict):
+        if self.problem is not None:
             return True
-        declared_repository = repository_identity(str(self.document.get("repository") or ""))
+        declared_repository = repository_identity(self.document.get("repository", ""))
         actual_repository = repository_identity(repository)
         if declared_repository and actual_repository and declared_repository != actual_repository:
             return False
-        declared_branch = self.document.get("branch")
+        declared_branch = self.document.get("branch", "")
         names = [name for name in branches if name]
         if declared_branch and names and declared_branch not in names:
             return False
@@ -174,13 +360,48 @@ class Constraint:
 
     def describe(self) -> str:
         if self.problem is not None:
-            return f"{self.path.name}: {self.problem}"
+            if self.location:
+                return f"{self.path}: `{self.location}` {self.problem}"
+            return f"{self.path} {self.problem}"
         return (
             f"{self.environment}"
             + (f" {self.gate}" if self.gate else "")
             + f": {self.document['reason']} "
             f"(set by {self.document['owner']}, expires {self.document['expiry']})"
         )
+
+
+def _is_record_name(name: str) -> bool:
+    # Windows filesystems are case-insensitive, and its glob matched so.
+    suffix = name[-5:]
+    return (suffix.lower() if os.name == "nt" else suffix) == ".json"
+
+
+def _record_paths(root: Path) -> list[Path]:
+    """Every `*.json` entry under `root`, recursively, without descending
+    symlinked directories, ordered by path component (lowercased on Windows),
+    as the Rust reader orders them. `Path.rglob` is not used: it skips a
+    directory it cannot read."""
+    found: list[Path] = []
+
+    def walk(directory: str) -> None:
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if _is_record_name(entry.name):
+                        found.append(Path(entry.path))
+                    if entry.is_dir(follow_symlinks=False):
+                        walk(entry.path)
+        except OSError as error:
+            raise StoreError(Path(directory), error) from None
+
+    walk(str(root))
+
+    def key(path: Path) -> tuple[str, ...]:
+        parts = path.relative_to(root).parts
+        return tuple(part.lower() for part in parts) if os.name == "nt" else parts
+
+    return sorted(found, key=key)
 
 
 def load(
@@ -199,7 +420,13 @@ def load(
 
     Records are read recursively: the store root holds one directory per
     repository, and a caller that could not name its repository is handed the
-    root so that all of them bind.
+    root so that all of them bind. A missing store, or one that is not a
+    directory, holds none.
+
+    ## Errors
+
+    `StoreError` when the store exists but a directory or record cannot be
+    read; skipping it could hide a record that binds.
     """
     today = today or date.today()
     active: list[Constraint] = []
@@ -208,17 +435,23 @@ def load(
     if not directory:
         return active, expired, malformed
     root = Path(directory)
-    if not root.is_dir():
+    try:
+        mode = os.stat(root).st_mode
+    except (FileNotFoundError, NotADirectoryError):
         return active, expired, malformed
-    for path in sorted(root.rglob("*.json")):
+    except OSError as error:
+        raise StoreError(root, error) from None
+    if not stat.S_ISDIR(mode):
+        return active, expired, malformed
+    for path in _record_paths(root):
         try:
-            document = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            constraint = Constraint(path, None)
-            constraint.problem = f"is unreadable: {error}"
-            malformed.append(constraint)
-            continue
-        constraint = Constraint(path, document)
+            data = path.read_bytes()
+        except OSError as error:
+            raise StoreError(path, error) from None
+        try:
+            constraint = Constraint(path, loads_strict(data))
+        except DocumentError as error:
+            constraint = Constraint(path, None, error)
         if constraint.problem is not None:
             malformed.append(constraint)
         elif not constraint.applies_to(repository, branches):
@@ -238,19 +471,26 @@ def unsatisfied(constraints: list[Constraint], plan: dict[str, Any] | None) -> l
     or absent. A cell the planner already resolved to `prohibited` counts as an
     execution: it is the coverage a constraint left unsatisfied, not a cell that
     was satisfied. Without a plan nothing is satisfied: the fail-safe direction
-    at a trigger boundary is to stop and explain, never to assume.
+    at a trigger boundary is to stop and explain, never to assume. A malformed
+    constraint is never satisfied.
+
+    `plan` is what `read_plan` returned: every cell has `environment`, `gate`,
+    and `execution`, and `state` only when the plan carries one.
     """
     if plan is None:
         return list(constraints)
     executing = {
         (cell["environment"], cell["gate"])
-        for cell in plan.get("cells", [])
-        if cell.get("execution") == "execute" or cell.get("state") == "prohibited"
+        for cell in plan["cells"]
+        # An absent `state` is no prohibited-state override; it is never
+        # synthesized.
+        if cell["execution"] == "execute" or cell.get("state") == "prohibited"
     }
     return [
         constraint
         for constraint in constraints
-        if any(
+        if constraint.problem is not None
+        or any(
             environment == constraint.environment
             and (not constraint.gate or gate == constraint.gate)
             for environment, gate in executing
@@ -267,19 +507,34 @@ def read_plan(path: str) -> dict[str, Any]:
     """The resolved plan at `path`, or a `ValueError` naming why it cannot be trusted.
 
     Only the cell fields the satisfaction rule reads are checked; the planner's
-    own schema is `schema.validate_resolved_plan`.
+    own schema is `schema.validate_resolved_plan`. `cells` is a required array
+    (`[]` is no cells); each cell needs nonempty `environment`, `gate`, and
+    `execution`, and a `state` that is absent or a nonempty string. Other
+    fields are tolerated. A `DocumentError` names the JSON path.
     """
     try:
-        document = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        data = Path(path).read_bytes()
+    except OSError as error:
         raise ValueError(f"cannot read the resolved plan at {path}: {error}") from None
-    cells = document.get("cells") if isinstance(document, dict) else None
-    if not isinstance(cells, list) or not all(
-        isinstance(cell, dict)
-        and all(isinstance(cell.get(field), str) for field in ("environment", "gate", "execution"))
-        for cell in cells
-    ):
-        raise ValueError(f"the resolved plan at {path} has no readable 'cells' list")
+    try:
+        document = loads_strict(data)
+        root = _object(document, "")
+        if "cells" not in root:
+            raise DocumentError("cells", "is required")
+        cells = root["cells"]
+        if not isinstance(cells, list):
+            raise DocumentError("cells", f"must be an array, found {_kind(cells)}")
+        for index, cell in enumerate(cells):
+            at = f"cells[{index}]"
+            cell = _object(cell, at)
+            # Checked first, in the Rust reader's order, so both name the
+            # same field when a cell has several problems.
+            if "state" in cell:
+                _required_text(cell, at, "state")
+            for field in ("environment", "gate", "execution"):
+                _required_text(cell, at, field)
+    except DocumentError as error:
+        raise DocumentError(error.location, error.problem, f"the resolved plan at {path}") from None
     return document
 
 
@@ -316,7 +571,12 @@ def main() -> None:
         print(directory)
         return
 
-    active, expired, malformed = load(directory, args.repository, args.branch or ())
+    try:
+        active, expired, malformed = load(directory, args.repository, args.branch or ())
+    except StoreError as error:
+        # A store that cannot be read may hide a record that binds.
+        print(f"ci-constraints: {error}", file=sys.stderr)
+        raise SystemExit(1)
 
     if args.command == "environments":
         # The planner's input: every environment a recorded constraint forbids,

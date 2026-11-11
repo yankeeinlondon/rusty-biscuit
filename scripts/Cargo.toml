@@ -44,9 +44,11 @@ local-tools = [
     "dep:windows-sys",
 ]
 
-# The library exists only for `ci-push`: its decisions are tested in-process
+# The library holds the code more than one binary calls in-process:
+# `ci_plan_render` (`build-tools`), the resolved-plan renderer `ci-plan` and
+# `ci-push` share, and `ci_push` (`local-tools`), whose decisions are tested
 # through `ci_push::run`. `[lib]` cannot declare `required-features`, so
-# `lib.rs` gates its one module itself and compiles empty for `ci-rollup`.
+# `lib.rs` gates each module itself and compiles empty for `ci-rollup`.
 [lib]
 path = "lib.rs"
 
@@ -87,6 +89,22 @@ path = "ci-rollup.rs"
 [[bin]]
 name = "ci-push"
 path = "ci-push.rs"
+required-features = ["local-tools"]
+
+# Test fixture only: the gh/just/python/cargo stand-ins `ci-push`'s tests copy
+# under each tool's name. A `[[bin]]` because a test can locate a built binary
+# portably (archives included) only through `CARGO_BIN_EXE_*`, which Cargo
+# sets for integration tests alone; hence the `ci-push` test target below.
+[[bin]]
+name = "ci-push-test-tool"
+path = "ci-push-test-tool.rs"
+required-features = ["local-tools"]
+
+# `ci-push`'s tests that drive a compiled executable. Its decision tests stay
+# lib unit tests (`ci_push::tests`).
+[[test]]
+name = "ci-push"
+path = "ci-push/integration/main.rs"
 required-features = ["local-tools"]
 
 [dependencies]

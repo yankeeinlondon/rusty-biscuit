@@ -101,6 +101,13 @@
 # checkout — is `just cross-check`, which uses the same `ci-build` producer,
 # manifest, verifier, and archive-mode tier recipes CI uses.
 #
+# Every Python helper runs under one interpreter: the one `ci-push` selected,
+# when it hands one over as `BISCUIT_CI_PYTHON` (a native executable path) and
+# `BISCUIT_CI_PYTHON_ARGS_FILE` (its argv prefix, each argument NUL-terminated;
+# empty or unset for none), else `python3`. A helper must never re-launch
+# `python3` itself: on native Windows that can be a broken shim, and ci-push
+# may have selected `py -3` precisely to avoid it.
+#
 # Usage:
 #   just ci-local                       affected packages vs origin/main
 #   just ci-local --lint-only           clippy gates only
@@ -161,9 +168,41 @@ ci-local *args="":
         esac
         shift
     done
-    if ! command -v python3 > /dev/null 2>&1; then
-        echo "ci-local: python3 is required (scripts/ci/affected_scope.py); run 'just init'." >&2
+    # Every helper below runs as "${python[@]}" (see the header). An args file
+    # without an interpreter is refused rather than applied to `python3`: its
+    # prefix (`-3` for `py -3`) belongs to the launcher it was selected with.
+    if [[ -n "${BISCUIT_CI_PYTHON:-}" ]]; then
+        if [[ ! -f "${BISCUIT_CI_PYTHON}" || ! -x "${BISCUIT_CI_PYTHON}" ]]; then
+            echo "ci-local: BISCUIT_CI_PYTHON '${BISCUIT_CI_PYTHON}' is not an executable file." >&2
+            exit 2
+        fi
+        python=("${BISCUIT_CI_PYTHON}")
+        python_args_file="${BISCUIT_CI_PYTHON_ARGS_FILE:-}"
+        if [[ -n "${python_args_file}" ]]; then
+            if [[ ! -f "${python_args_file}" || ! -r "${python_args_file}" ]]; then
+                echo "ci-local: BISCUIT_CI_PYTHON_ARGS_FILE '${python_args_file}' is not a readable file." >&2
+                exit 2
+            fi
+            # `read` fails at end of input; a nonempty `arg` left behind is a
+            # final record with no terminating NUL, which is a truncated file.
+            arg=""
+            while IFS= read -r -d '' arg; do
+                python+=("${arg}")
+            done < "${python_args_file}"
+            if [[ -n "${arg}" ]]; then
+                echo "ci-local: BISCUIT_CI_PYTHON_ARGS_FILE '${python_args_file}' ends in a record with no terminating NUL byte; refusing a truncated interpreter prefix." >&2
+                exit 2
+            fi
+        fi
+    elif [[ -n "${BISCUIT_CI_PYTHON_ARGS_FILE:-}" ]]; then
+        echo "ci-local: BISCUIT_CI_PYTHON_ARGS_FILE is set without BISCUIT_CI_PYTHON; set both or neither." >&2
         exit 2
+    else
+        if ! command -v python3 > /dev/null 2>&1; then
+            echo "ci-local: python3 is required (scripts/ci/affected_scope.py); run 'just init'." >&2
+            exit 2
+        fi
+        python=(python3)
     fi
     ci_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
     # The reserved directory exists because of a rustc wrapper (see above).
@@ -191,7 +230,7 @@ ci-local *args="":
     # repository from the remote being pushed to; this preview has no push, so
     # it uses origin's URL — empty without one, which is the store root, where
     # every repository's records bind.
-    constraints_dir="$(python3 scripts/ci/constraints.py directory \
+    constraints_dir="$("${python[@]}" scripts/ci/constraints.py directory \
         --repository "$(git remote get-url origin 2>/dev/null || true)" \
         --directory "${constraints_dir}")"
 
@@ -230,12 +269,12 @@ ci-local *args="":
             exit 2
         fi
         cp "${plan_in}" "${plan_file}"
-        python3 scripts/ci/affected_scope.py --apply-to "${plan_file}" > "${scope_file}"
+        "${python[@]}" scripts/ci/affected_scope.py --apply-to "${plan_file}" > "${scope_file}"
         plan_view="${plan_file}"
         echo
         echo "Plan supplied by the caller: ${plan_in}"
     elif (( select_all == 1 )) || (( ${#selectors[@]} > 0 )); then
-        python3 scripts/ci/affected_scope.py "${scope_args[@]}" --all > "${scope_file}"
+        "${python[@]}" scripts/ci/affected_scope.py "${scope_args[@]}" --all > "${scope_file}"
     else
         if ! merge_base="$(git merge-base "${base}" HEAD 2>/dev/null)"; then
             echo "ci-local: cannot resolve base ref '${base}' (set --base or CI_LOCAL_BASE)." >&2
@@ -254,7 +293,7 @@ ci-local *args="":
         done < <(git ls-files --others --exclude-standard -z)
         diff_arguments="$(mktemp)"
         git diff --name-status -z "${merge_base}" \
-            | python3 scripts/ci/diff_scope.py ${untracked[@]+"${untracked[@]}"} > "${diff_arguments}"
+            | "${python[@]}" scripts/ci/diff_scope.py ${untracked[@]+"${untracked[@]}"} > "${diff_arguments}"
         path_args=()
         while IFS= read -r -d '' argument; do
             path_args+=("${argument}")
@@ -275,7 +314,7 @@ ci-local *args="":
         # The revision pair is part of the plan: a receipt records the head it
         # tested, and a reviewer reconciles the plan against the outgoing work.
         scope_args+=(--base "${merge_base}" --head "$(git rev-parse HEAD)")
-        python3 scripts/ci/affected_scope.py "${scope_args[@]}" "${path_args[@]}" > "${scope_file}"
+        "${python[@]}" scripts/ci/affected_scope.py "${scope_args[@]}" "${path_args[@]}" > "${scope_file}"
         echo
         echo "Changed vs ${base} (${merge_base:0:9}): ${changed_count} file(s)"
     fi
@@ -293,10 +332,10 @@ ci-local *args="":
     # separate `scope_file`.
     if (( show_plan == 1 )) && [[ -n "${merge_base}" ]] && [[ -f scripts/ci/local_evidence.py ]]; then
         head_sha="$(git rev-parse HEAD)"
-        if python3 scripts/ci/local_evidence.py verify --cells \
+        if "${python[@]}" scripts/ci/local_evidence.py verify --cells \
             --plan "${plan_view}" --base "${merge_base}" --head "${head_sha}" \
             --rejections "${rejected_file}" > "${accepted_file}" 2>/dev/null; then
-            python3 scripts/ci/affected_scope.py --apply-to "${plan_file}" \
+            "${python[@]}" scripts/ci/affected_scope.py --apply-to "${plan_file}" \
                 --accepted-cells "${accepted_file}" \
                 --evidence-rejections "${rejected_file}" \
                 --resolved-plan --plan-out "${plan_file}" > "${scope_file}"
@@ -538,7 +577,7 @@ ci-local *args="":
     # `test_evidence_index.py` covers `just ci-evidence`, which reads the store
     # this recipe's hook writes; it is local-only for the same reason.
     for suite in test_schema.py test_affected_scope.py test_resolved_plan.py test_ci_local.py test_completion.py test_constraints.py test_publish_gaps.py test_runner_loss.py test_build_key.py test_consolidation.py test_evidence_index.py; do
-        if python3 "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
+        if "${python[@]}" "scripts/ci/${suite}" > "${selftest_log}" 2>&1; then
             passed+=("ci-infra ${suite}")
         else
             cat "${selftest_log}"
@@ -625,7 +664,7 @@ ci-local *args="":
                 echo "  A pass here is a local check only; the planned ubuntu-latest execution of"
                 echo "  ${package}/ubuntu-latest/lint remains OUTSTANDING and no local result stands in for it."
             fi
-            if BISCUIT_ARCHIVE_GUARD_PLAN="${plan_file}" python3 scripts/ci/companion_suites.py \
+            if BISCUIT_ARCHIVE_GUARD_PLAN="${plan_file}" "${python[@]}" scripts/ci/companion_suites.py \
                 --suites '["archive-path-guard"]' \
                 --environment ubuntu-latest \
                 --gate lint \

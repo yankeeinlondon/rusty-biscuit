@@ -8,7 +8,7 @@ use gix::hash::Kind;
 use rstest::rstest;
 
 use crate::ci_push::{
-    BlockReason, Diagnostic, HostServices, PushMode, PushOutcome, PushRequest, PushServices,
+    BlockReason, Diagnostic, HostServices, PushMode, PushOutcome, PushRequest, PushServices, PushSession,
     SkipReason, run,
 };
 
@@ -21,6 +21,8 @@ const ZERO: &str = "0000000000000000000000000000000000000000";
 struct Recorder {
     discoveries: Vec<PathBuf>,
     fail_discovery: bool,
+    sessions: usize,
+    emitted: Vec<Diagnostic>,
 }
 
 impl PushServices for Recorder {
@@ -30,6 +32,21 @@ impl PushServices for Recorder {
             anyhow::bail!("{} is not inside a Git repository", cwd.display());
         }
         Ok(Kind::Sha1)
+    }
+
+    fn emit(&mut self, diagnostic: &Diagnostic) {
+        self.emitted.push(diagnostic.clone());
+    }
+
+    /// Counts the session and opens none: a reviewable push gets this far
+    /// only after everything this module tests was decided.
+    fn session(
+        &mut self,
+        _request: &PushRequest,
+        _body: &mut dyn FnMut(&mut dyn PushSession) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        self.sessions += 1;
+        anyhow::bail!("this fake opens no session")
     }
 }
 
@@ -167,14 +184,15 @@ fn a_push_of_only_deletions_and_tags_names_each_skip_and_passes() {
 }
 
 #[test]
-fn a_branch_update_is_never_passed_unreviewed() {
-    // Until review is wired in, a reviewable push blocks rather than passing
-    // without the checks the shell hook performs.
+fn a_branch_update_opens_a_review_session_after_reporting_every_skip() {
+    // A reviewable push never passes on these checks alone: it goes on to a
+    // review session, and a session that cannot open blocks it.
     let input = format!("refs/tags/v1 {B} refs/tags/v1 {ZERO}\nrefs/heads/a {A} refs/heads/a {ZERO}\n");
-    let (outcome, _) = decide(request(Some("scope-only"), &input));
-    assert_eq!(outcome.exit_code, 1);
-    assert!(matches!(outcome.diagnostics[0], Diagnostic::UpdateSkipped { .. }));
-    assert_eq!(outcome.diagnostics.last(), Some(&Diagnostic::Blocked(BlockReason::ReviewUnavailable)));
+    let mut recorder = Recorder::default();
+    let error = run(request(Some("scope-only"), &input), &mut recorder).unwrap_err();
+    assert_eq!(error.to_string(), "this fake opens no session");
+    assert_eq!(recorder.sessions, 1);
+    assert!(matches!(recorder.emitted.as_slice(), [Diagnostic::UpdateSkipped { .. }]));
 }
 
 #[test]
