@@ -4,6 +4,7 @@ mod constraints;
 mod documents;
 mod git;
 mod orchestration;
+mod parity;
 mod process;
 mod python;
 mod run;

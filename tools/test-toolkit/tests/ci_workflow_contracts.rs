@@ -5735,14 +5735,13 @@ fn no_guard_consumer_derives_its_own_source_scope() {
 /// `change_inventory.deleted` was empty on every hosted and local run, and the
 /// guard had to read an absent file as "probably a deletion". Source contracts
 /// here; `scripts/ci/test_ci_local.py`, `scripts/ci/test_affected_scope.py`,
-/// and `.githooks/tests/test-pre-push.sh` run the three boundaries against
-/// real repositories that delete and rename.
+/// and repo-deps' `ci_push::tests::git` run the three boundaries against real
+/// repositories that delete and rename.
 #[test]
 fn every_selection_boundary_declares_its_deletions_to_the_planner() {
     let boundaries = [
         (".github/workflows/ci.yml", job_block("ci.yml", "  scope:")),
         ("just/ci-local.just", read("just/ci-local.just")),
-        (".githooks/pre-push", read(".githooks/pre-push")),
     ];
     for (name, source) in &boundaries {
         assert!(
@@ -5760,8 +5759,21 @@ fn every_selection_boundary_declares_its_deletions_to_the_planner() {
         );
     }
 
-    // And the parser is the only thing that emits the argument, so a fourth
-    // boundary cannot hand-roll a list that drifts from these three.
+    // The pre-push hook launches `ci-push`, which diffs the committed trees
+    // itself and writes the same arguments file; `ci_push::tests::git` holds
+    // its bytes equal to `diff_scope.py`'s for one diff.
+    assert!(
+        read(".githooks/pre-push").contains("--bin ci-push"),
+        "the pre-push hook must hand the push to ci-push"
+    );
+    let rust = read("scripts/ci-push/git.rs");
+    assert!(
+        rust.contains(r#"push(b"--deleted")"#),
+        "ci-push must declare deletions to the planner"
+    );
+
+    // And the parser is the only other thing that emits the argument, so a
+    // further boundary cannot hand-roll a list that drifts from these.
     let parser = read("scripts/ci/diff_scope.py");
     assert!(
         parser.contains(r#"parts.extend((b"--deleted", path))"#),
@@ -7129,10 +7141,13 @@ fn ci_never_reads_the_execution_constraint_store() {
              trigger, never CI scheduling"
         );
     }
-    let hook = read(".githooks/pre-push");
     assert!(
-        hook.contains("ci/constraints.py"),
-        "the pre-push hook is where a recorded constraint is enforced"
+        read(".githooks/pre-push").contains("--bin ci-push"),
+        "the pre-push hook must hand the push to ci-push"
+    );
+    assert!(
+        read("scripts/ci-push/review.rs").contains("constraints::unsatisfied"),
+        "ci-push, behind the pre-push hook, is where a recorded constraint is enforced"
     );
 }
 

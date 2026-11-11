@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stand-in for `scripts/ci/affected_scope.py` inside the hook test repositories.
+"""Stand-in for `scripts/ci/affected_scope.py` inside the `ci-push` test repositories.
 
 The real planner reads `cargo metadata` from the repository it lives in, and
 the fixture repositories hold no Cargo workspace, so the hook's scope
@@ -12,6 +12,9 @@ with stdout carrying the legacy projection of that plan. The plan is the fixed
 one-cell `alpha` plan below unless `TEST_PLANNER_PLAN` names a fixture, in
 which case that fixture's plan is emitted with its `base` and `head` rewritten.
 `TEST_PLANNER_FAIL=1` makes the calculation fail, as a real planner error would.
+`TEST_PLANNER_HANG=<file>` makes a calculation write its pid to that file and
+then wait until it is killed (capped at 30 s), so a test can interrupt the
+review while a helper runs.
 An empty path set (a `--` with nothing after it and no `--all`) yields the
 empty plan the real planner yields for it — no package, no cell — whatever
 `TEST_PLANNER_PLAN` names, so a base that equals the head selects nothing.
@@ -32,6 +35,7 @@ the names it reads are present (and empty).
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -425,6 +429,13 @@ def main() -> None:
         with open(log, "a", encoding="utf-8") as handle:
             handle.write(" ".join(argv) + "\n")
             handle.write(f"root {ROOT} cwd {Path.cwd()}\n")
+    hang = os.environ.get("TEST_PLANNER_HANG")
+    if hang and "--apply-to" not in argv:
+        staging = Path(hang + ".partial")
+        staging.write_text(str(os.getpid()), encoding="utf-8")
+        staging.replace(hang)
+        time.sleep(30)
+        raise SystemExit("stub planner: was not interrupted")
     if os.environ.get("TEST_PLANNER_FAIL") == "1":
         raise SystemExit("stub planner: calculation failed on request")
     options = argv

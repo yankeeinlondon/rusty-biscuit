@@ -4,7 +4,8 @@
 An instruction such as "WSL was already run; do not run it again" outlived the
 session that gave it in PR #76: a later push from a fresh terminal scheduled WSL
 anyway. A constraint recorded here survives that, and `just ci-local --plan` and
-`.githooks/pre-push` consult it before anything can trigger a workflow.
+the pre-push hook (`ci-push`, which reads this store with a Rust port of this
+module) consult it before anything can trigger a workflow.
 
 CI never reads this store (Design Decision 8). A constraint without qualifying
 evidence must block the push; it must never make CI silently skip required

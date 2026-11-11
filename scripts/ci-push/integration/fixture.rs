@@ -80,11 +80,38 @@ impl Fixture {
         }
     }
 
+    /// Forgets every recorded invocation.
+    pub fn clear_log(&self) {
+        let _ = std::fs::remove_file(self.log());
+    }
+
     pub fn only_invocation(&self) -> Value {
         let mut invocations = self.invocations();
         assert_eq!(invocations.len(), 1, "{invocations:#?}");
         invocations.remove(0)
     }
+}
+
+/// Copies the tool into `dir` as `name` (`.exe` on Windows) beside its own
+/// control file holding `tools`, with no invocation log: a stub placed where
+/// another program looks for it (a bare remote's `hooks/`). Returns the copy.
+pub fn install_tool(dir: &Path, name: &str, tools: Value) -> PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
+    let file = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    };
+    let copy = dir.join(file);
+    let tool = biscuit_test_harness::bin_exe!("ci-push-test-tool");
+    std::fs::copy(&tool, &copy)
+        .unwrap_or_else(|error| panic!("copy {} as {name}: {error}", tool.display()));
+    std::fs::write(
+        dir.join("ci-push-test-tool.json"),
+        serde_json::to_vec_pretty(&json!({ "tools": tools })).unwrap(),
+    )
+    .unwrap();
+    copy
 }
 
 /// Polls `condition` until it holds, panicking with `what` after `limit`.

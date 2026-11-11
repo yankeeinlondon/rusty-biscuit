@@ -26,23 +26,23 @@ use crate::ci_push::{
     PushSession, ReviewStatus, ScopePublication, TreeSource, Validation, WithholdReason, run,
 };
 
-const MACOS_EXECUTING: &str = include_str!("../../ci/fixtures/pre-push/plans/plan-macos-executing.json");
-const WSL_EXECUTING: &str = include_str!("../../ci/fixtures/pre-push/plans/plan-wsl-executing.json");
-const WSL_REUSED: &str = include_str!("../../ci/fixtures/pre-push/plans/plan-wsl-reused.json");
-const WSL_ABSENT: &str = include_str!("../../ci/fixtures/pre-push/plans/plan-wsl-absent.json");
-const TWO_OPEN: &str = include_str!("../../ci/fixtures/pre-push/pull-requests/two-open.json");
-const NONE_OPEN: &str = include_str!("../../ci/fixtures/pre-push/pull-requests/none.json");
+pub(super) const MACOS_EXECUTING: &str = include_str!("../../ci/fixtures/pre-push/plans/plan-macos-executing.json");
+pub(super) const WSL_EXECUTING: &str = include_str!("../../ci/fixtures/pre-push/plans/plan-wsl-executing.json");
+pub(super) const WSL_REUSED: &str = include_str!("../../ci/fixtures/pre-push/plans/plan-wsl-reused.json");
+pub(super) const WSL_ABSENT: &str = include_str!("../../ci/fixtures/pre-push/plans/plan-wsl-absent.json");
+pub(super) const TWO_OPEN: &str = include_str!("../../ci/fixtures/pre-push/pull-requests/two-open.json");
+pub(super) const NONE_OPEN: &str = include_str!("../../ci/fixtures/pre-push/pull-requests/none.json");
 
-const HEAD: &str = "1111111111111111111111111111111111111111";
-const OTHER: &str = "2222222222222222222222222222222222222222";
-const MAIN_TIP: &str = "3333333333333333333333333333333333333333";
-const BASE_TIP: &str = "4444444444444444444444444444444444444444";
-const ZERO: &str = "0000000000000000000000000000000000000000";
-const GITHUB: &str = "git@github.com:owner/repo.git";
-const ELSEWHERE: &str = "https://example.com/owner/repo.git";
-const ARGUMENTS: &[u8] = b"--deleted\0gone.rs\0--\0kept.rs\0";
+pub(super) const HEAD: &str = "1111111111111111111111111111111111111111";
+pub(super) const OTHER: &str = "2222222222222222222222222222222222222222";
+pub(super) const MAIN_TIP: &str = "3333333333333333333333333333333333333333";
+pub(super) const BASE_TIP: &str = "4444444444444444444444444444444444444444";
+pub(super) const ZERO: &str = "0000000000000000000000000000000000000000";
+pub(super) const GITHUB: &str = "git@github.com:owner/repo.git";
+pub(super) const ELSEWHERE: &str = "https://example.com/owner/repo.git";
+pub(super) const ARGUMENTS: &[u8] = b"--deleted\0gone.rs\0--\0kept.rs\0";
 
-fn id(hex: &str) -> ObjectId {
+pub(super) fn id(hex: &str) -> ObjectId {
     ObjectId::from_hex(hex.as_bytes()).unwrap()
 }
 
@@ -70,7 +70,7 @@ fn exited(code: i32, stdout: impl Into<Vec<u8>>, stderr: &str) -> Completed {
 
 /// Every boundary the session crossed, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Call {
+pub(super) enum Call {
     SelectPython,
     RemoteTip(String),
     EnsureCommit(ObjectId, String),
@@ -86,7 +86,7 @@ enum Call {
 }
 
 /// What `gh pr list` answers.
-enum Gh {
+pub(super) enum Gh {
     Missing,
     Fails(&'static str),
     Lists(&'static str),
@@ -94,15 +94,15 @@ enum Gh {
 
 /// What `just pre-push` does.
 #[derive(Clone)]
-struct Gates {
-    code: i32,
-    manifest: bool,
-    plan: bool,
-    marker: bool,
-    signal: Option<CancelSignal>,
-    head_after: Option<ObjectId>,
-    dirty_after: bool,
-    report: Option<(&'static str, &'static str)>,
+pub(super) struct Gates {
+    pub(super) code: i32,
+    pub(super) manifest: bool,
+    pub(super) plan: bool,
+    pub(super) marker: bool,
+    pub(super) signal: Option<CancelSignal>,
+    pub(super) head_after: Option<ObjectId>,
+    pub(super) dirty_after: bool,
+    pub(super) report: Option<(&'static str, &'static str)>,
 }
 
 impl Default for Gates {
@@ -120,40 +120,44 @@ impl Default for Gates {
     }
 }
 
-struct Fake {
+pub(super) struct Fake {
     _temp: tempfile::TempDir,
-    root: PathBuf,
-    home: PathBuf,
-    url: Option<String>,
-    head: ObjectId,
-    dirty: bool,
-    python_missing: bool,
-    tips: HashMap<String, ObjectId>,
+    pub(super) root: PathBuf,
+    pub(super) home: PathBuf,
+    pub(super) url: Option<String>,
+    pub(super) head: ObjectId,
+    pub(super) dirty: bool,
+    pub(super) python_missing: bool,
+    pub(super) tips: HashMap<String, ObjectId>,
     /// Commits `ensure_commit` cannot find.
-    missing: Vec<ObjectId>,
-    gh: Gh,
+    pub(super) missing: Vec<ObjectId>,
+    pub(super) gh: Gh,
+    /// What `gh pr list` answers for one head branch, in place of `gh`.
+    pub(super) gh_by_branch: HashMap<String, &'static str>,
     /// The planner's plan per reviewed revision; MACOS_EXECUTING otherwise.
-    plans: HashMap<ObjectId, &'static str>,
+    pub(super) plans: HashMap<ObjectId, &'static str>,
+    /// The planner's plan per `(base, revision)`, ahead of `plans`.
+    pub(super) context_plans: HashMap<(ObjectId, ObjectId), &'static str>,
     /// `(step, nth occurrence from 1, exit code)`.
-    fail: Option<(&'static str, usize, i32)>,
+    pub(super) fail: Option<(&'static str, usize, i32)>,
     /// A signal arrives while this step runs.
-    signal_during: Option<(&'static str, CancelSignal)>,
-    unreadable_review: bool,
-    gates: Gates,
-    environment: Option<&'static str>,
-    variables: HashMap<String, OsString>,
-    note_fails: bool,
+    pub(super) signal_during: Option<(&'static str, CancelSignal)>,
+    pub(super) unreadable_review: bool,
+    pub(super) gates: Gates,
+    pub(super) environment: Option<&'static str>,
+    pub(super) variables: HashMap<String, OsString>,
+    pub(super) note_fails: bool,
     cancelled: Cell<Option<CancelSignal>>,
     /// The `--arguments-file` contents each planner run was handed.
     arguments_seen: Vec<Vec<u8>>,
     counts: HashMap<&'static str, usize>,
     worktrees: usize,
-    calls: Vec<Call>,
-    emitted: Vec<String>,
+    pub(super) calls: Vec<Call>,
+    pub(super) emitted: Vec<String>,
 }
 
 impl Fake {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("checkout");
         let home = temp.path().join("home");
@@ -177,7 +181,9 @@ impl Fake {
             tips,
             missing: Vec::new(),
             gh: Gh::Lists(NONE_OPEN),
+            gh_by_branch: HashMap::new(),
             plans: HashMap::new(),
+            context_plans: HashMap::new(),
             fail: None,
             signal_during: None,
             unreadable_review: false,
@@ -194,18 +200,18 @@ impl Fake {
         }
     }
 
-    fn constraint(&self, name: &str, record: &str) {
+    pub(super) fn constraint(&self, name: &str, record: &str) {
         let directory = PathBuf::from(&self.variables["BISCUIT_CI_CONSTRAINTS_DIR"]);
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(directory.join(name), record).unwrap();
     }
 
-    fn evidence_root(&self) -> PathBuf {
+    pub(super) fn evidence_root(&self) -> PathBuf {
         self.home.join(".rusty-biscuit").join("ci-evidence")
     }
 
     /// The helper calls, as `script subcommand` labels.
-    fn helpers(&self) -> Vec<String> {
+    pub(super) fn helpers(&self) -> Vec<String> {
         self.calls
             .iter()
             .filter_map(|call| match call {
@@ -215,15 +221,15 @@ impl Fake {
             .collect()
     }
 
-    fn gate_calls(&self) -> Vec<&Call> {
+    pub(super) fn gate_calls(&self) -> Vec<&Call> {
         self.calls.iter().filter(|call| matches!(call, Call::Gates { .. })).collect()
     }
 
-    fn notes(&self) -> usize {
+    pub(super) fn notes(&self) -> usize {
         self.calls.iter().filter(|call| matches!(call, Call::Note(_))).count()
     }
 
-    fn python_args(&self, label: &str) -> Vec<Vec<String>> {
+    pub(super) fn python_args(&self, label: &str) -> Vec<Vec<String>> {
         self.calls
             .iter()
             .filter_map(|call| match call {
@@ -250,7 +256,7 @@ impl Fake {
     }
 }
 
-fn value<'a>(args: &'a [String], flag: &str) -> &'a str {
+pub(super) fn value<'a>(args: &'a [String], flag: &str) -> &'a str {
     let at = args.iter().position(|arg| arg == flag).unwrap_or_else(|| panic!("no {flag} in {args:?}"));
     &args[at + 1]
 }
@@ -305,6 +311,9 @@ impl PushSession for Fake {
 
     fn list_pull_requests(&mut self, repository: &str, branch: &str) -> Result<Completed, ProcessError> {
         self.calls.push(Call::PullRequests(repository.to_owned(), branch.to_owned()));
+        if let Some(json) = self.gh_by_branch.get(branch) {
+            return Ok(exited(0, *json, ""));
+        }
         match self.gh {
             Gh::Missing => Err(ProcessError {
                 program: "gh".into(),
@@ -362,7 +371,13 @@ impl PushSession for Fake {
                     self.arguments_seen.push(std::fs::read(value(&args, "--arguments-file")).unwrap());
                 }
                 let head = id(value(&args, "--head"));
-                let plan = self.plans.get(&head).copied().unwrap_or(MACOS_EXECUTING);
+                let base = id(value(&args, "--base"));
+                let plan = self
+                    .context_plans
+                    .get(&(base, head))
+                    .or_else(|| self.plans.get(&head))
+                    .copied()
+                    .unwrap_or(MACOS_EXECUTING);
                 std::fs::write(value(&args, "--plan-out"), plan).unwrap();
                 b"{\"scope\": \"doc\"}\n".to_vec()
             }
@@ -491,13 +506,23 @@ impl PushServices for Services {
     }
 }
 
-fn push(fake: Fake, mode: &str, selection: Option<&str>, input: &str) -> (PushOutcome, Fake) {
+pub(super) fn push(fake: Fake, mode: &str, selection: Option<&str>, input: &str) -> (PushOutcome, Fake) {
+    push_with(fake, Some(mode), selection, input)
+}
+
+/// [`push`] with the mode variable possibly unset.
+pub(super) fn push_with(
+    fake: Fake,
+    mode: Option<&str>,
+    selection: Option<&str>,
+    input: &str,
+) -> (PushOutcome, Fake) {
     let request = PushRequest {
         cwd: fake.root.clone(),
         remote_name: "origin".to_owned(),
         remote_url: fake.url.clone(),
         input: input.as_bytes().to_vec(),
-        mode: Some(mode.into()),
+        mode: mode.map(OsString::from),
         selection: selection.map(OsString::from),
     };
     let mut services = Services(fake);
@@ -505,19 +530,19 @@ fn push(fake: Fake, mode: &str, selection: Option<&str>, input: &str) -> (PushOu
     (outcome, services.0)
 }
 
-fn line(local_ref: &str, local: &str, remote_ref: &str, remote: &str) -> String {
+pub(super) fn line(local_ref: &str, local: &str, remote_ref: &str, remote: &str) -> String {
     format!("{local_ref} {local} {remote_ref} {remote}\n")
 }
 
-fn feature(local: &str) -> String {
+pub(super) fn feature(local: &str) -> String {
     line("refs/heads/feature", local, "refs/heads/feature", ZERO)
 }
 
-fn main_push(remote: &str) -> String {
+pub(super) fn main_push(remote: &str) -> String {
     line("refs/heads/main", HEAD, "refs/heads/main", remote)
 }
 
-fn blocked(outcome: &PushOutcome) -> &BlockReason {
+pub(super) fn blocked(outcome: &PushOutcome) -> &BlockReason {
     outcome
         .diagnostics
         .iter()
@@ -528,14 +553,14 @@ fn blocked(outcome: &PushOutcome) -> &BlockReason {
         .unwrap_or_else(|| panic!("not blocked: {:#?}", outcome.diagnostics))
 }
 
-fn problem(outcome: &PushOutcome) -> String {
+pub(super) fn problem(outcome: &PushOutcome) -> String {
     match blocked(outcome) {
         BlockReason::Review { problem, .. } => problem.clone(),
         other => panic!("not a review failure: {other:?}"),
     }
 }
 
-fn record(environment: &str, extra: &str) -> String {
+pub(super) fn record(environment: &str, extra: &str) -> String {
     format!(
         "{{\"environment\": \"{environment}\", \"reason\": \"no {environment} here\", \"owner\": \"ken\", \"expiry\": \"2099-01-01\"{extra}}}"
     )
@@ -741,6 +766,9 @@ fn a_pull_request_lookup_that_fails_blocks_every_mode(#[case] gh: Gh, #[case] ex
         let (outcome, fake) = push(fake, mode, None, &feature(HEAD));
         assert_eq!(outcome.exit_code, 2, "{mode}");
         assert!(problem(&outcome).contains(expected), "{mode}: {}", problem(&outcome));
+        if matches!(gh, Gh::Missing | Gh::Fails(_)) {
+            assert!(problem(&outcome).contains("push with --no-verify"), "{mode}: {}", problem(&outcome));
+        }
         assert!(fake.helpers().is_empty() && fake.gate_calls().is_empty() && fake.notes() == 0);
     }
 }
@@ -762,6 +790,10 @@ fn a_non_github_remote_never_asks_gh_and_gets_a_provisional_plan() {
     assert!(!fake.calls.iter().any(|call| matches!(call, Call::PullRequests(..))));
     assert_eq!(outcome.reviews[0].context.source, ContextSource::Provisional { incoming: false });
     assert_eq!(outcome.reviews[0].context.base, id(MAIN_TIP));
+    assert!(fake.emitted.iter().any(|line| line.contains(&format!(
+        "provisional: no open pull request, since {ELSEWHERE} is not a GitHub remote"
+    ))));
+    assert_eq!(outcome.scope, ScopePublication::Published { base: id(MAIN_TIP) });
     // A provisional plan starts no run: auto runs no gate.
     assert!(outcome.diagnostics.contains(&Diagnostic::NoGateRuns));
     assert!(fake.gate_calls().is_empty());
@@ -773,9 +805,30 @@ fn a_github_branch_with_no_open_pull_request_gets_a_provisional_plan() {
     fake.url = Some(GITHUB.to_owned());
     let (outcome, fake) = push(fake, "auto", None, &feature(HEAD));
     assert_eq!(outcome.exit_code, 0);
-    assert_eq!(fake.calls.iter().filter(|call| matches!(call, Call::PullRequests(..))).count(), 1);
+    assert_eq!(
+        fake.calls.iter().filter(|call| matches!(call, Call::PullRequests(..))).collect::<Vec<_>>(),
+        [&Call::PullRequests("owner/repo".to_owned(), "feature".to_owned())]
+    );
     assert_eq!(outcome.reviews[0].context.source, ContextSource::Provisional { incoming: false });
+    assert!(fake.emitted.iter().any(|line| line.contains(
+        "provisional: no open pull request from feature on owner/repo; a pull request opened against main before main advances will run this plan"
+    )));
+    let planner = &fake.python_args("affected_scope.py --event")[0];
+    assert_eq!((value(planner, "--base"), value(planner, "--head")), (MAIN_TIP, HEAD));
+    assert_eq!(outcome.scope, ScopePublication::Published { base: id(MAIN_TIP) });
     assert!(outcome.diagnostics.contains(&Diagnostic::NoGateRuns));
+
+    // The pull request opened next is the trigger, so the provisional plan
+    // is constrained all the same.
+    let mut fake = Fake::new();
+    fake.url = Some(GITHUB.to_owned());
+    fake.plans.insert(id(HEAD), WSL_EXECUTING);
+    fake.constraint("wsl.json", &record("wsl2-ubuntu", ""));
+    let (outcome, fake) = push(fake, "scope-only", None, &feature(HEAD));
+    assert_eq!(outcome.exit_code, 1);
+    let BlockReason::Constraint { refusals, .. } = blocked(&outcome) else { panic!() };
+    assert!(refusals[0].contains("no wsl2-ubuntu here"), "{refusals:?}");
+    assert_eq!(fake.notes(), 0);
 }
 
 #[test]
@@ -933,8 +986,10 @@ fn a_reused_or_absent_prohibited_environment_does_not_block(#[case] plan: &'stat
     let mut fake = Fake::new();
     fake.plans.insert(id(HEAD), plan);
     fake.constraint("wsl.json", &record("wsl2-ubuntu", ""));
-    let (outcome, _) = push(fake, "scope-only", None, &feature(HEAD));
+    let (outcome, fake) = push(fake, "strict", None, &feature(HEAD));
     assert_eq!(outcome.exit_code, 0, "{:#?}", outcome.diagnostics);
+    assert!(!outcome.diagnostics.iter().any(|diagnostic| matches!(diagnostic, Diagnostic::Blocked(_))));
+    assert_eq!(fake.gate_calls().len(), 1, "the gates still run");
 }
 
 #[test]
@@ -956,9 +1011,10 @@ fn a_renamed_refspec_binds_a_record_under_either_branch_name(#[case] branch: &st
     fake.plans.insert(id(HEAD), WSL_EXECUTING);
     fake.constraint("wsl.json", &record("wsl2-ubuntu", &format!(", \"branch\": \"{branch}\"")));
     let input = line("refs/heads/work", HEAD, "refs/heads/feature", ZERO);
-    let (outcome, _) = push(fake, "scope-only", None, &input);
+    let (outcome, fake) = push(fake, "scope-only", None, &input);
     assert_eq!(outcome.exit_code, exit_code, "{:#?}", outcome.diagnostics);
     assert_eq!(outcome.reviews[0].branches, ["feature", "work"]);
+    assert!(fake.emitted.iter().any(|line| line.starts_with("Branch identity: feature (pushed from work;")));
 }
 
 #[rstest]
@@ -968,8 +1024,9 @@ fn the_repository_identity_is_the_remote_being_pushed_to(#[case] repository: &st
     let mut fake = Fake::new();
     fake.plans.insert(id(HEAD), WSL_EXECUTING);
     fake.constraint("wsl.json", &record("wsl2-ubuntu", &format!(", \"repository\": \"{repository}\"")));
-    let (outcome, _) = push(fake, "scope-only", None, &feature(HEAD));
+    let (outcome, fake) = push(fake, "scope-only", None, &feature(HEAD));
     assert_eq!(outcome.exit_code, exit_code, "{:#?}", outcome.diagnostics);
+    assert!(fake.emitted.contains(&format!("Remote: origin ({ELSEWHERE})")));
 }
 
 #[test]
@@ -1120,6 +1177,8 @@ fn a_strict_failure_publishes_its_complete_evidence_then_blocks() {
     let (outcome, fake) = push(fake, "strict", None, &main_push(MAIN_TIP));
     assert_eq!(outcome.exit_code, 3);
     assert_eq!(blocked(&outcome), &BlockReason::GateFailed { exit_code: 3 });
+    let verdict = fake.emitted.last().unwrap();
+    assert!(verdict.contains("validation failed (exit 3)") && verdict.contains("--no-verify"), "{verdict}");
     assert_eq!(fake.python_args("observation_notes.py publish-receipt").len(), 1);
     assert!(matches!(outcome.validation, Some(Validation::Published { .. })));
     // Publication comes before the verdict.

@@ -189,13 +189,14 @@ cross-check-test:
 ci-seed *args:
     @python3 scripts/ci/seed.py {{ args }}
 
-# run Level 1 tests for the .githooks/pre-push shell hook itself
+# run Level 1 tests for the pre-push hook (ci-push's library and integration tests)
 test-pre-push-hook:
-    @eval "$(just _test_run_scope)"; ./.githooks/tests/test-pre-push.sh
+    @just _test repo-deps --lib ci_push::
+    @just _test repo-deps --test ci-push
 
 # prove the shared hook directory dispatches to each linked worktree's hook
 test-pre-push-dispatcher:
-    @eval "$(just _test_run_scope)"; ./.githooks/tests/test-pre-push-dispatcher.sh
+    @just _test repo-deps --test ci-push dispatcher::
 
 # run Level 1 tests for every versioned git hook
 test-githooks: test-pre-push-dispatcher test-pre-push-hook

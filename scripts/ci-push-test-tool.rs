@@ -1,10 +1,13 @@
 //! Test fixture: one executable that stands in for `python3`, `py`, `python`,
-//! `gh`, `just`, `cargo`, and `git` in `ci-push`'s tests.
+//! `gh`, `just`, `cargo`, `git`, and `sniff` in `ci-push`'s tests, and for a
+//! bare remote's `pre-receive` hook.
 //!
 //! A test copies this binary into a fixture `bin` directory under each tool's
-//! name (with `.exe` on Windows; never a symlink or a script) and builds `PATH`
-//! from fixture directories only, so a missing stub can never fall through to
-//! a real tool.
+//! name (with `.exe` on Windows; never a symlink or a script) and puts that
+//! directory first on `PATH`. Most tests build `PATH` from fixture directories
+//! only, so a missing stub can never fall through to a real tool; the
+//! end-to-end parity tests append only the real tools they run (Git, Python,
+//! and for the `ci-local` recipe `just`, `jq`, and Bash).
 //!
 //! # Choosing a behavior
 //!
@@ -33,10 +36,19 @@
 //!
 //! - `python_version`: when argv contains `-c`, print it and exit 0 (the
 //!   version probe); other invocations fall through to the keys below.
+//! - `dispatch`: `[{ "args": [...], "behavior": {...} }, ...]`; the first
+//!   entry whose `args` are a prefix of argv replaces this behavior, and acts
+//!   on the rest of argv (a `just` answering `pre-push`, `_lint`, and `_test
+//!   <pkg>` differently). With no match, the keys below apply.
 //! - `write_files`: `{ "relative/or/absolute": "content" }`, relative to the
-//!   cwd, parents created (staged reports).
+//!   cwd, parents created (staged reports). A path starting with `$NAME`
+//!   starts with that environment variable's value instead
+//!   (`"$BISCUIT_CI_REPORTS_OUT/L1/alpha.xml"`); an unset variable panics.
+//! - `append_files`: as `write_files`, appending (manifest lines).
 //! - `stdout`, `stderr`: text to print; `stdout_fill`, `stderr_fill`: a byte
 //!   count to write, interleaved in 64 KiB chunks.
+//! - `signal_parent` (Unix): a signal number sent to the parent process
+//!   (a gate interrupting the hook that runs it).
 //! - `spawn_grandchild`: a path; start a copy of this tool that writes its pid
 //!   there (atomically, by rename) and then hangs, inside this process's
 //!   group or Job.
@@ -46,8 +58,18 @@
 //! - `supervise`: a path; install `ci-push`'s cancellation handlers, run a
 //!   hanging grandchild (pid written as above) through `ChildCommand`, and
 //!   exit with the cancellation exit code when a signal ends it.
+//! - `delegate`: `{ "program": path, "args": [...] }`; run the program with
+//!   `args` and then the rest of argv, inheriting cwd, environment, stdin,
+//!   stdout, and stderr, and exit with its status (128 + the signal when a
+//!   signal ended it) — a stub `just` that hands `pre-push` to the real one.
+//! - `refuse_stdin_containing`: with `read_stdin`, exit 1 when the input
+//!   contains this text (a remote `pre-receive` refusing one ref).
 //! - `hang`: wait until killed (capped at 30 s so a supervision bug cannot
 //!   leave an immortal process).
+//! - `forward`: a program path; run it with every argument after the first
+//!   `--` (a `cargo run ... -- <args>` stand-in), in this cwd and environment,
+//!   with this process's stdin (the recorded bytes when `read_stdin` consumed
+//!   them), and exit with its status. Its stdout and stderr are inherited.
 //! - `exit`: the exit code (default 0).
 
 use std::collections::BTreeMap;
@@ -77,7 +99,7 @@ struct Control {
 struct Behavior {
     python_version: Option<String>,
     #[serde(default)]
-    write_files: BTreeMap<PathBuf, String>,
+    write_files: BTreeMap<String, String>,
     stdout: Option<String>,
     stderr: Option<String>,
     stdout_fill: Option<usize>,
@@ -85,6 +107,14 @@ struct Behavior {
     spawn_grandchild: Option<PathBuf>,
     escape_grandchild: Option<PathBuf>,
     supervise: Option<PathBuf>,
+    forward: Option<PathBuf>,
+    #[serde(default)]
+    dispatch: Vec<Dispatch>,
+    #[serde(default)]
+    append_files: BTreeMap<String, String>,
+    signal_parent: Option<i32>,
+    delegate: Option<Delegate>,
+    refuse_stdin_containing: Option<String>,
     #[serde(default)]
     hang: bool,
     #[serde(default)]
@@ -93,6 +123,21 @@ struct Behavior {
     record_env: Vec<String>,
     #[serde(default)]
     read_stdin: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Dispatch {
+    args: Vec<String>,
+    behavior: Behavior,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Delegate {
+    program: PathBuf,
+    #[serde(default)]
+    args: Vec<String>,
 }
 
 fn main() -> ExitCode {
@@ -129,10 +174,11 @@ fn main() -> ExitCode {
     let stdin = behavior.filter(|behavior| behavior.read_stdin).map(|_| {
         let mut bytes = Vec::new();
         let _ = std::io::stdin().read_to_end(&mut bytes);
-        String::from_utf8_lossy(&bytes).into_owned()
+        bytes
     });
     if let Some(log) = control.as_ref().and_then(|control| control.log.as_deref()) {
-        record(log, &name, &argv, behavior, stdin);
+        let text = stdin.as_deref().map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+        record(log, &name, &argv, behavior, text);
     }
 
     let Some(control) = control else {
@@ -146,13 +192,20 @@ fn main() -> ExitCode {
         eprintln!("ci-push-test-tool: no behavior configured for {name:?}");
         return ExitCode::from(98);
     };
-    act(&exe, behavior, &argv)
+    act(&exe, behavior, &argv, stdin.as_deref())
 }
 
 // The grandchildren are never waited for: ending them is the job of the
 // supervisor under test, and a reap here would hide its failure.
 #[allow(clippy::zombie_processes)]
-fn act(exe: &Path, behavior: &Behavior, argv: &[String]) -> ExitCode {
+fn act(exe: &Path, behavior: &Behavior, argv: &[String], stdin: Option<&[u8]>) -> ExitCode {
+    if let Some(entry) = behavior
+        .dispatch
+        .iter()
+        .find(|entry| argv.starts_with(&entry.args))
+    {
+        return act(exe, &entry.behavior, &argv[entry.args.len()..], stdin);
+    }
     if let Some(version) = &behavior.python_version {
         if argv.iter().any(|arg| arg == "-c") {
             println!("{version}");
@@ -160,13 +213,10 @@ fn act(exe: &Path, behavior: &Behavior, argv: &[String]) -> ExitCode {
         }
     }
     for (path, content) in &behavior.write_files {
-        if let Some(parent) = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            std::fs::create_dir_all(parent).expect("create a staged file's directory");
-        }
-        std::fs::write(path, content).expect("write a staged file");
+        stage(path, content, false);
+    }
+    for (path, content) in &behavior.append_files {
+        stage(path, content, true);
     }
     if let Some(text) = &behavior.stdout {
         print!("{text}");
@@ -180,6 +230,16 @@ fn act(exe: &Path, behavior: &Behavior, argv: &[String]) -> ExitCode {
     );
     let _ = std::io::stdout().flush();
 
+    #[cfg(unix)]
+    if let Some(signal) = behavior.signal_parent {
+        // SAFETY: plain syscalls on this process's parent.
+        unsafe { libc::kill(libc::getppid(), signal) };
+    }
+    #[cfg(not(unix))]
+    if behavior.signal_parent.is_some() {
+        eprintln!("ci-push-test-tool: signal_parent is Unix-only");
+        return ExitCode::from(96);
+    }
     if let Some(pid_file) = &behavior.spawn_grandchild {
         std::process::Command::new(exe)
             .args(["--scenario", GRANDCHILD])
@@ -197,10 +257,92 @@ fn act(exe: &Path, behavior: &Behavior, argv: &[String]) -> ExitCode {
     if let Some(pid_file) = &behavior.supervise {
         return supervise(exe, pid_file);
     }
+    if let Some(program) = &behavior.forward {
+        return forward(program, argv, stdin);
+    }
+    if let Some(delegate) = &behavior.delegate {
+        return run_delegate(delegate, argv);
+    }
+    if let Some(needle) = &behavior.refuse_stdin_containing {
+        let input = String::from_utf8_lossy(stdin.unwrap_or_default());
+        if input.contains(needle.as_str()) {
+            return ExitCode::from(1);
+        }
+    }
     if behavior.hang {
         hang();
     }
     ExitCode::from(behavior.exit)
+}
+
+fn forward(program: &Path, argv: &[String], stdin: Option<&[u8]>) -> ExitCode {
+    let args = argv
+        .iter()
+        .position(|arg| arg == "--")
+        .map_or(&[][..], |at| &argv[at + 1..]);
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    if stdin.is_some() {
+        command.stdin(std::process::Stdio::piped());
+    }
+    let mut child = command
+        .spawn()
+        .unwrap_or_else(|error| panic!("forward to {}: {error}", program.display()));
+    if let Some(bytes) = stdin {
+        // Dropping the handle closes the pipe, so the child reads end of file.
+        let mut pipe = child.stdin.take().expect("a piped stdin");
+        pipe.write_all(bytes).expect("forward stdin");
+    }
+    let status = child.wait().expect("wait for the forwarded program");
+    // A signal-ended child has no code; report it as an interruption.
+    ExitCode::from(status.code().map_or(130, |code| code.clamp(0, 255) as u8))
+}
+
+fn run_delegate(delegate: &Delegate, argv: &[String]) -> ExitCode {
+    let status = std::process::Command::new(&delegate.program)
+        .args(&delegate.args)
+        .args(argv)
+        .status()
+        .unwrap_or_else(|error| panic!("delegate to {}: {error}", delegate.program.display()));
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+        return ExitCode::from((128 + signal).clamp(0, 255) as u8);
+    }
+    ExitCode::from(status.code().map_or(1, |code| code.clamp(0, 255) as u8))
+}
+
+/// Writes or appends `content` at `path`, after expanding a leading `$NAME`.
+fn stage(path: &str, content: &str, append: bool) {
+    let path = expand(path);
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).expect("create a staged file's directory");
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(append)
+        .truncate(!append)
+        .open(&path)
+        .unwrap_or_else(|error| panic!("open {}: {error}", path.display()));
+    file.write_all(content.as_bytes())
+        .unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+}
+
+fn expand(path: &str) -> PathBuf {
+    let Some(rest) = path.strip_prefix('$') else {
+        return PathBuf::from(path);
+    };
+    let (name, tail) = rest.split_once('/').unwrap_or((rest, ""));
+    let value =
+        std::env::var_os(name).unwrap_or_else(|| panic!("ci-push-test-tool: ${name} is not set"));
+    let mut expanded = PathBuf::from(value);
+    if !tail.is_empty() {
+        expanded.push(tail);
+    }
+    expanded
 }
 
 /// Alternates chunks so a parent that drains one pipe at a time deadlocks.

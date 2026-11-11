@@ -2,13 +2,13 @@
 """The planner's path arguments, derived from one `git diff --name-status -z`.
 
 Every selection boundary — `.github/workflows/ci.yml`, `just/ci-local.just`,
-and `.githooks/pre-push` — feeds `affected_scope.py` the same two lists, and a
-name-only diff cannot produce the second of them: it prints a removed path and
-a modified path identically, so `change_inventory.deleted` stayed empty and the
-archive-path guard had to guess whether an absent file was deleted or merely
-missing. One parser lives here rather than three in three shells, one of which
-(`.githooks/pre-push`) is POSIX `sh` and cannot read NUL-delimited records at
-all.
+and the pre-push hook's `ci-push` — feeds `affected_scope.py` the same two
+lists, and a name-only diff cannot produce the second of them: it prints a
+removed path and a modified path identically, so `change_inventory.deleted`
+stayed empty and the archive-path guard had to guess whether an absent file was
+deleted or merely missing. The two shell boundaries share this parser;
+`ci-push` diffs the committed trees itself and writes the same argument tail,
+held byte-equal to this module's by its `ci_push::tests::git` tests.
 
 Input is the raw `--name-status -z` stream on stdin. Output is the argument
 tail the planner expects, NUL-delimited so a path containing a newline or a
