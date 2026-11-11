@@ -54,7 +54,7 @@ install *args="":
     @just _build biscuit-terminal "biscuit-terminal Library" --release {{ args }}
     @just _build darkmatter "Darkmatter Library" --release {{ args }}
     @just build --release
-    @just _install "./cli" "Claudine" {{ args }}
+    @just _install "./cli" "Claudine" "" {{ args }}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 

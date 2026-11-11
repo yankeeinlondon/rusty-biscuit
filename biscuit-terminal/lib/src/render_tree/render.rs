@@ -84,9 +84,40 @@ use crate::utils::word_wrap::truncate;
 use super::options::{DiagramOutcome, DiagramRenderRequest, TerminalRenderOptions};
 use super::style;
 
-/// Maximum size of an inline terminal image at [`GraphicsMode::Rich`], matching
-/// the legacy terminal image renderer's 10 MiB ceiling.
+/// Maximum size of an inline terminal image at [`GraphicsMode::Rich`].
 const MAX_TERMINAL_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+
+/// Resolves a Markdown image destination to an existing local file with
+/// [`FileReference`](biscuit_file::FileReference)'s relative grammar, so `../`
+/// reaches as far as a link or a transclusion would: anywhere inside the
+/// enclosing repository, or inside `base` itself outside one. `base` is the authoring document's directory
+/// (the current working directory when `None`).
+///
+/// `None` for anything but a relative path (a URL, an absolute path, a `~`,
+/// `@`, `&`, `^`, or `vault:` reference), for a path that leaves that tree,
+/// and for a file that does not exist.
+fn resolve_local_image(url: &str, base: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
+
+    let reference = FileReference::new(url).ok()?;
+    if !matches!(
+        reference.class().kind,
+        FileReferenceKind::ExplicitRelative | FileReferenceKind::ImplicitRelative
+    ) {
+        return None;
+    }
+    // A document named without a directory (`md just.md`) has an empty parent.
+    let base = match base.filter(|b| !b.as_os_str().is_empty()) {
+        Some(base) => std::path::absolute(base).ok()?,
+        None => std::env::current_dir().ok()?,
+    };
+    let context = FileResolutionContext::new(&base);
+    let context = match crate::terminal::find_git_root(&base) {
+        Some(root) => context.with_repository_root(root),
+        None => context.with_base_dir(&base),
+    };
+    reference.resolve_in_context(&context).ok().flatten()
+}
 
 /// The ellipsis used when typed [`TextLayoutHints`] truncate a link label or
 /// image placeholder that exceeds its resolved field.
@@ -2110,42 +2141,12 @@ impl Writer<'_> {
     /// [`GraphicsMode::Rich`], or returns `None` to signal the alt-text
     /// fallback.
     ///
-    /// Ports the legacy terminal image renderer's security contract: remote
-    /// URLs and absolute paths are rejected, a relative path resolves against
-    /// [`image_base_path`](TerminalRenderContext::image_base_path) (the current
-    /// working directory when unset) and must stay within it, and the file must
-    /// exist and be at most [`MAX_TERMINAL_IMAGE_BYTES`]. The capability
-    /// snapshot honors `force_graphics` via [`Self::effective_terminal`].
+    /// Only a relative path is in contract (see [`resolve_local_image`]); the
+    /// file must exist and be at most [`MAX_TERMINAL_IMAGE_BYTES`]. The
+    /// capability snapshot honors `force_graphics` via
+    /// [`Self::effective_terminal`].
     fn render_terminal_image(&self, url: &str, alt: &str) -> Option<String> {
-        // Remote URLs and absolute paths are out of contract — no fetch, no
-        // sandbox escape.
-        if url.starts_with("http://") || url.starts_with("https://") {
-            return None;
-        }
-        let rel = std::path::Path::new(url);
-        if rel.is_absolute() {
-            return None;
-        }
-
-        let base = self
-            .opts
-            .context
-            .image_base_path
-            .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-        let full_path = base.join(rel);
-
-        // Path-traversal guard: when both ends canonicalize, the resolved file
-        // must stay within the base directory.
-        if let Ok(canonical_base) = base.canonicalize()
-            && let Ok(canonical_full) = full_path.canonicalize()
-            && !canonical_full.starts_with(&canonical_base)
-        {
-            return None;
-        }
-        if !full_path.exists() {
-            return None;
-        }
+        let full_path = resolve_local_image(url, self.opts.context.image_base_path.as_deref())?;
         if let Ok(metadata) = std::fs::metadata(&full_path)
             && metadata.len() > MAX_TERMINAL_IMAGE_BYTES
         {
@@ -4417,8 +4418,8 @@ mod render_tree_tests {
 
     /// An image whose source is out of contract (here a relative path with no
     /// matching file) degrades to its alt text. The default render context is
-    /// `Rich`, so this also proves the Rich-tier path falls back cleanly — and
-    /// silently, matching the legacy terminal image renderer's contract.
+    /// `Rich`, so this also proves the Rich-tier path falls back cleanly and
+    /// silently.
     #[test]
     fn render_tree_image_falls_back_to_alt_text() {
         let node = RenderNode::paragraph(vec![RenderNode::image("pic.png", None, "a cat")]);
@@ -4551,7 +4552,8 @@ mod render_tree_tests {
 
     /// Finding 3 (review-3): the security contract. At `Rich` on a fully
     /// image-capable terminal, out-of-contract sources — a remote URL, an
-    /// absolute path, and a path-traversal escape from the base dir — must all
+    /// absolute path, and (outside a repository) a `../` escape from the base
+    /// dir — must all
     /// be rejected and degrade to alt text, never reaching the image pipeline.
     #[test]
     fn render_tree_image_rich_rejects_remote_absolute_and_traversal() {
@@ -4587,6 +4589,48 @@ mod render_tree_tests {
                 "out-of-contract source {url:?} must be rejected to alt text; got: {out:?}",
             );
         }
+    }
+
+    /// A document in a package directory draws an image from a sibling
+    /// directory through `../`, as a link or transclusion could reach it: the
+    /// boundary is the repository root, not the document's directory. Leaving
+    /// the repository still falls back to alt text.
+    #[test]
+    fn render_tree_image_rich_resolves_parent_paths_inside_the_repository() {
+        use crate::discovery::detection::ImageSupport;
+
+        let outer = tempfile::tempdir().expect("tempdir");
+        let repo = outer.path().join("repo");
+        let package = repo.join("package");
+        let assets = repo.join("assets");
+        for dir in [repo.join(".git"), package.clone(), assets.clone()] {
+            std::fs::create_dir_all(dir).expect("mkdir");
+        }
+        let (img_dir, name) = temp_png();
+        std::fs::copy(img_dir.path().join(&name), assets.join("pic.png")).expect("copy into repo");
+        std::fs::copy(img_dir.path().join(&name), outer.path().join("outside.png"))
+            .expect("copy outside repo");
+
+        let term = Terminal::builder()
+            .width(80)
+            .image_support(ImageSupport::Kitty)
+            .is_tty(true)
+            .build();
+        let mut opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        opts.context.graphics_mode = GraphicsMode::Rich;
+        opts.context.image_base_path = Some(package);
+
+        let render = |url: &str| {
+            let node = RenderNode::paragraph(vec![RenderNode::image(url, None, "logo")]);
+            render_terminal_node(&node, &opts).expect("render").output
+        };
+        let inside = render("../assets/pic.png");
+        assert!(inside.contains("\x1b_G"), "../ inside the repository must draw; got: {inside:?}");
+        let escaped = render("../../outside.png");
+        assert!(
+            strip_escape_codes(&escaped).contains("[logo]") && !escaped.contains("\x1b_G"),
+            "../ above the repository must fall back; got: {escaped:?}",
+        );
     }
 
     /// Finding 3 (review-3): `force_graphics`. On a terminal that advertises no

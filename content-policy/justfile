@@ -127,7 +127,7 @@ lint-fix:
 # install CLI binary
 install *args="":
     @just build --release
-    @just _install "./cli" "Content Policy" {{args}}
+    @just _install "./cli" "Content Policy" "" {{args}}
 
 # build and show the docs for the library code
 docs:

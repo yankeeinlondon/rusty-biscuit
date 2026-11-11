@@ -731,10 +731,9 @@ fn render_options_with_capabilities(
     }
     context.verbosity = opts.verbosity;
 
-    // Map legacy image_mode onto the graphics fidelity tier so the tree
-    // renderer honors the same opt-in / never / force contract as the legacy
-    // terminal renderer. Mermaid promotion and inline image rendering both
-    // key off this field.
+    // Map image_mode onto the graphics fidelity tier: `Never` turns inline
+    // images off, and `Force` additionally sets `force_graphics` (below).
+    // Mermaid promotion and inline image rendering both key off this field.
     let graphics_mode = match opts.image_mode {
         crate::markdown::output::terminal::TerminalImageMode::Never => GraphicsMode::Off,
         crate::markdown::output::terminal::TerminalImageMode::Auto => GraphicsMode::Rich,

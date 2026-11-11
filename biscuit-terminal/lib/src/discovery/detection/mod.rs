@@ -43,7 +43,8 @@ pub use probe::{
 pub use route::{
     GRAPHICS_ENV, GRAPHICS_TRANSPORT_ENV, GraphicsFormat, GraphicsPlacement, GraphicsRoute,
     GraphicsTransport, PROBE_ENV, ProbeMode, RouteConfidence, RouteInputs, RouteReason,
-    RouteReasonKind, ToolVersion, graphics_route, probe_plan, resolve_graphics_route,
+    RouteReasonKind, ToolVersion, graphics_route, graphics_route_for_output, probe_plan,
+    resolve_graphics_route,
 };
 pub use styling_caps::{UnderlineSupport, dim_support, italics_support, underline_support};
 pub use tabs::{DEFAULT_TAB_WIDTH, tab_width};

@@ -122,8 +122,8 @@ pub struct TerminalRenderContext {
     /// and the ceiling both allow it (see [`DiagramRenderer`]).
     pub mermaid_mode: TerminalMermaidMode,
     /// Base path for resolving relative image paths at
-    /// [`GraphicsMode::Rich`]. When `None`, the current working directory is
-    /// used (matching the legacy terminal image renderer).
+    /// [`GraphicsMode::Rich`], normally the authoring document's directory.
+    /// When `None`, the current working directory is used.
     pub image_base_path: Option<PathBuf>,
     /// Whether top-level paragraphs are word-wrapped to
     /// [`available_width`](Self::available_width).

@@ -5,9 +5,7 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::components::terminal_image::parse_width_spec;
-use biscuit_terminal::discovery::detection::{
-    GraphicsRoute, ImageSupport, RouteInputs, resolve_graphics_route,
-};
+use biscuit_terminal::discovery::detection::{GraphicsRoute, ImageSupport, graphics_route_for_output};
 use biscuit_terminal::terminal::Terminal;
 use sniff::remote::blocking::credential_env;
 use worktree::WorktreeError;
@@ -534,9 +532,10 @@ fn image_terminal(_base: &Terminal) -> Terminal {
         .build()
 }
 
-/// The graphics route for output written to stderr.
+/// The graphics route for output written to stderr, probing the terminal when
+/// its identity alone cannot decide (Rex, for example).
 fn stderr_graphics_route(stderr_is_tty: bool) -> GraphicsRoute {
-    resolve_graphics_route(&RouteInputs::from_process().with_output_is_tty(stderr_is_tty))
+    graphics_route_for_output(stderr_is_tty)
 }
 
 lib_target_tests! {

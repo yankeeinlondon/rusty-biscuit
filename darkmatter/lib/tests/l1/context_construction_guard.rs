@@ -50,13 +50,6 @@ const ALLOWLIST: &[Allowance] = &[
         "`CODE_THEME` / `THEME` select a code-block theme (rendering)",
     ),
     allow(Gate::AmbientState, "render/metadata_codec.rs", "std::env::var", 1, "image metadata policy variable (rendering)"),
-    allow(
-        Gate::AmbientState,
-        "markdown/output/terminal.rs",
-        "std::env::current_dir",
-        1,
-        "terminal image base when `ImageRenderer::new` is given none (rendering after composition; no production caller passes none)",
-    ),
 ];
 
 #[test]
