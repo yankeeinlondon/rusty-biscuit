@@ -167,29 +167,51 @@ decisions_for_review:
     also ran those packages' L1 tiers. Alternative: rerun all eight areas'
     `just test` (about an hour, the same source). Redo: run those recipes if
     the reviewer wants macOS gates repeated.
-message_to_agent: |-
-  Phase 3 ran all ten changed packages' L1 tiers on the WSL2 rig in
-  archive mode (Ubuntu record, builder target hidden, second checkout): 0
-  failures, so no relocation repair was needed. Evidence: "## Phase 3".
-  For Phase 4:
-  (1) Rigs, per invocation, ssh -o BatchMode=yes: BUILD_WIN=build-win,
-  BUILD_WSL=build-wsl, BUILD_LINUX=build-linux. The WSL rig clone is
-  ~/coding/bolt--main/rusty-biscuit.
-  (2) No rig observation was published; every leg tested uncommitted
-  work. Receipts need a committed, clean head.
-  (3) The rig's WSL consumer has cargo on PATH, so model_id ui passes
-  there. The CI guest's cargo_toolchain gap stays unmet (shown by hand:
-  exit 100 without cargo).
-  (4) Still unmet from Phase 2: the ucrt64 Git rows (gix >= 0.89 needed),
-  messenger on the hosted runner, and model_id on WSL2. The main nightly
-  can confirm WSL2 only once the archive-disk prerequisite merges.
-  (5) darkmatter `just lint` still stops at check-zed on this Mac
-  (wasm32-wasip2 missing); clippy is clean.
+  - |-
+    Publishing rig receipts in Phase 4. With the head committed and clean,
+    each passing `cross-check` leg published a Windows or WSL2 observation
+    at `af7ec2d63`, and the CI plan now reuses them for every L1 cell this
+    fix touches. The plan asked to "run required affected native Windows
+    and WSL package cells" and reuse qualifying receipts, so I let them
+    publish. There is a side effect. The Windows rig has Git 2.55
+    (`mingw64`), while the hosted image has 2.56 (`ucrt64`). The worktree
+    and git-wt-cli receipts therefore stand in for a hosted run that would
+    still fail 5 tests on `ucrt64` (the gix-path gap). The messenger receipt
+    likewise stands in for the hosted run that is the only place the
+    original messenger failure appeared. The next nightly will reuse these
+    cells, not rerun them, so it will be green without exercising those two
+    hosted behaviors. I recorded this in the log and in the os skill. The
+    alternative was to run the legs from a dirty tree so nothing published.
+    That gives the same test evidence but leaves every cell for the hosted
+    nightly, which on 2026-11-10 could not build at all (out of disk,
+    3-hour timeout). To redo: drop the `windows-latest` notes for worktree,
+    git-wt-cli and messenger at `af7ec2d63` (`refs/notes/ci-local/windows-latest`),
+    or change one of their inputs, so the nightly runs them on the hosted
+    image.
+  - |-
+    Main confirmation is recorded as incomplete, not waited for. No
+    scheduled run on `main` contains the fix (the branch is not merged), so
+    none of the required three green nightlies per OS exists. As the plan
+    directs, I did not wait, re-trigger, or dispatch a workflow. The
+    implementation is marked complete and ready for review. The outcome
+    acceptance (three nightlies per OS, the hosted ucrt64 rows, messenger on
+    the hosted runner, model_id on WSL2) stays open in the log's "Remaining
+    capability and access limitations". Nothing needs redoing. A reviewer
+    who wants the spec held open until the nightlies land can keep the
+    lifecycle directory where it is.
 source_files_during_phase_3: []
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: [".claude/skills/os/windows-paths.md", ".claude/skills/os/wsl.md"]
 
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: [".claude/skills/os/windows.md"]
+source_code: [".github/workflows/_package-ci.yml", "biscuit-visualized/src/src/tests/embed_render_tests.rs", "claudine/cli/tests/l1/compose_schema_cli.rs", "darkmatter/cli/tests/l1/invalid_trigger_warnings.rs", "darkmatter/lib/tests/l1/kind_semantic_checks.rs", "messenger/lib/tests/research_refresh.rs", "tools/test-toolkit/tests/ci_workflow_contracts.rs", "tree-hugger/cli/src/changed.rs", "tree-hugger/cli/tests/changed/index_corruption.rs", "tree-hugger/cli/tests/changed/ownership.rs", "unchained-ai/model_id/Cargo.toml", "unchained-ai/model_id/tests/ui.rs", "worktree/cli/tests/list_output.rs", "worktree/lib/src/git/program.rs", "worktree/lib/src/remove/lifecycle/tests.rs"]
+documentation: ["tree-hugger/docs/symbol-reports/changed-files.md", "worktree/docs/performance-testing.md", "unchained-ai/docs/testing.md", "worktree/docs/git-for-windows.md", ".claude/skills/os/SKILL.md", ".claude/skills/os/windows-paths.md", ".claude/skills/os/windows.md", ".claude/skills/os/wsl.md", ".claude/skills/worktree/SKILL.md"]
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-11-06-windows-wsl-test-failures (4 phases)
@@ -1050,3 +1072,171 @@ not apply (rule 15).
   last throwaway commit `a32592a55` with `target` restored; the manual
   run's temp files were removed. Cross-check retired the unused clone
   `shazam--feat-better-research` on its own (unused 3 days).
+
+## Phase 4
+
+Phase 4 runs the scoped gates once, after integration, publishes Windows and
+WSL2 rig evidence for the committed head, inspects the CI plan, looks for
+main confirmation, and closes the ledger. No source changed in this phase.
+Head under test: `af7ec2d63` on `feat/fuzz-infra-release`, a clean,
+committed tree. Phases 2–3 are in `758c39850` and `348d5ee28`, and main is
+merged in. The branch is 282 commits ahead of `origin/main` and **not on
+`main`**.
+
+### Scoped gates (macOS, serial, no subagent running)
+
+One background chain ran each area's canonical recipes in turn. A first
+attempt resolved `cd worktree` through the shell's `CDPATH` into an
+unrelated checkout and was stopped after a few seconds. The rerun used
+absolute paths. Only the rerun's results count:
+
+| Area | `just test` | `just lint` |
+|---|---|---|
+| worktree | 1510 passed, 13 skipped | pass |
+| tree-hugger | 5827 passed | pass |
+| unchained-ai | 367 passed, 1 skipped | pass |
+| biscuit-visualized | 1165 passed, 1 skipped | pass |
+| messenger | 784 passed, 2 skipped | pass |
+| tools (test-toolkit, includes `ci_workflow_contracts`) | 526 passed (4 slow), 4 skipped | pass |
+| claudine | 11859 passed (4 slow), 15 skipped | pass |
+| darkmatter | 16370 passed (3 slow), 10 skipped | pass, including `check-zed` (the `wasm32-wasip2` gap from Phases 2–3 is gone on this host) |
+
+No test failed, so nothing needed a rerun. No L2 test was added or changed,
+so `just test-l2` was not needed (plan: "No L2 is introduced").
+
+### Native Windows and WSL2 rig cells (receipts at `af7ec2d63`)
+
+Command, one leg at a time from the repository root (Windows first, then
+WSL2, both on the same machine):
+`BUILD_WIN=build-win BUILD_WSL=build-wsl BUILD_LINUX=build-linux ./scripts/cross-check.sh --os <os> <pkg>`.
+The head was clean, so each passing leg **published** an observation for
+its own environment (`refs/notes/ci-local/<env>`). Phases 2–3 could not do
+that.
+
+| Package | windows-latest (build-win) | wsl2-ubuntu (build-wsl, archive relocated) |
+|---|---|---|
+| worktree | 877 passed | 898 passed |
+| git-wt-cli | 569 passed, 43 skipped | 614 passed, 55 skipped |
+| tree-hugger-cli | 2726 passed, 31 skipped | 2746 passed, 31 skipped |
+| messenger | 677 passed, 2 skipped | 683 passed, 2 skipped |
+| model_id | 2 passed (`ui` executed) | accepted gap (`cargo_toolchain`), not run |
+| biscuit-visualized | 1165 passed, 1 skipped | not scheduled on WSL2 by this head's plan |
+| test-toolkit | 425 passed, 2 skipped | accepted gap, not run |
+| darkmatter | 11887 passed, 66 skipped | 11942 passed, 66 skipped |
+| darkmatter-cli | 2486 passed, 85 skipped | 2497 passed, 83 skipped |
+| claudine-cli | 3893 passed, 13 skipped | 4980 passed, 306 skipped |
+
+All 17 legs: `cross-check-exit: 0`, "published a passing … observation …
+at af7ec2d63". Skipped counts are other tiers' tests. test-toolkit's
+Windows cell had failed 8 tests at `758c39850`. It passes here because of
+`1a2c5429a` ("make release path tests encoding portable"), which is not
+this fix's work.
+
+### `just ci-local --plan` (inspection only, nothing pushed or dispatched)
+
+- **Before the rig legs:** every changed package's `windows-latest` and
+  `wsl2-ubuntu` L1 cell was `execute ci pending`. The rig receipts from
+  `758c39850` were rejected (`gate-inputs-changed` after the main merge;
+  test-toolkit `failed-cell`).
+- **After the rig legs:** every L1 cell this fix touches on
+  `windows-latest` (claudine-cli, darkmatter, darkmatter-cli, git-wt-cli,
+  messenger, model_id, test-toolkit, tree-hugger-cli, worktree) and on
+  `wsl2-ubuntu` (claudine-cli, darkmatter, darkmatter-cli, git-wt-cli,
+  messenger, tree-hugger-cli, worktree) is `reuse local reused`. Still
+  `execute ci`: `repo-deps/windows-latest/L1` (from the main merge, not this
+  fix), the ubuntu/macOS cells a pull request runs, and the
+  `darkmatter`/`worktree` ubuntu `check` cells.
+- **Accepted gaps:** `model_id`, `repo-deps`, and `test-toolkit` on
+  `wsl2-ubuntu`, and every L2/browser cell on Windows and WSL2. These are
+  existing governed gaps. This fix added none.
+- The `failed-cell` rejections in the "after" listing are the 2026-11-10
+  hosted nightly's failures on main (`8d7d56084`, pre-fix code). They are
+  diagnostic only.
+
+### Main confirmation (scheduled `ci.yml` runs)
+
+`gh run list --workflow ci.yml --event schedule` (read-only):
+
+| Run | Commit | Date | Result | Counts toward the three? |
+|---|---|---|---|---|
+| [42852400418](https://github.com/yankeeinlondon/rusty-biscuit/actions/runs/42852400418) | `8d7d56084` | 2026-11-10 | failure: `build (ubuntu-latest)` "No space left on device", `build (windows-latest)` hit the 3 h limit, so test cells found no archive ("Artifact not found") | no: pre-fix code, and no test executed |
+| [42674352356](https://github.com/yankeeinlondon/rusty-biscuit/actions/runs/42674352356) | `a816f1447` | 2026-11-09 | failure | no: pre-fix code |
+| 42491863852, 42383053581, 42246114963 | `a816f1447` | 2026-11-08 → 06 | failure | no: pre-fix code (42246114963 is the nightly under repair) |
+
+**Zero of three qualifying runs exist for native Windows, and zero for
+WSL2.** The fix is not on `main`, so no scheduled run has executed or reused
+the repaired behavior. This acceptance item stays **incomplete**. It closes
+only after the branch merges and three consecutive green nightlies follow on
+each OS. When that happens, the receipts above will be reused for unchanged
+inputs, so record each run's executed and reused cells. Also, the
+2026-11-10 nightly shows that hosted WSL2 cells still fail before any test
+runs (`wsl-bash: command not found`, missing Ubuntu build). That is the
+archive and runner prerequisite's work, not this fix's. No workflow was
+dispatched to replace the nightlies.
+
+### Evidence ledger closed
+
+The 141 identities plus the compile failure, by repair group (row numbers
+from "Per-identity ledger"). "Targeted" means the Phase 2 filtered
+reproduction on the affected environment; "cell" means this phase's
+published L1 receipt at `af7ec2d63`.
+
+| Group | Rows | Targeted evidence (affected OS) | Cell evidence | Disposition |
+|---|---|---|---|---|
+| tree-hugger index corruption (rule 2) | 24 | 25/25 long and short TEMP, Windows | tree-hugger-cli windows 2726 pass | cleared |
+| tree-hugger ownership (rule 3 + product walk) | 96 | 148/148 long and short, Windows | same | cleared |
+| worktree lifecycle refusal spelling (rule 4) | 6 | 92/92 long and short, Windows | worktree windows 877 pass | cleared |
+| claudine plan route (rule 5a) | 2 | 26/26 long and short, Windows | claudine-cli windows 3893 pass | cleared |
+| darkmatter-cli trigger warnings (rule 5b) | 4 | 44/44 long and short, Windows | darkmatter-cli windows 2486 pass | cleared |
+| darkmatter definition label (rule 6) | 4 | 15/15 long and short, Windows | darkmatter windows 11887 pass | cleared |
+| Git entry shapes (rules 7–8) | 3 | mingw64 launcher and direct 35/35 + 10/10; **ucrt64 33/35 + 7/10** | worktree and git-wt-cli windows pass (the rig is mingw64) | **cleared on mingw64; unmet on the hosted ucrt64 layout** until gix ≥ 0.89 |
+| messenger descendants (rule 12) | 1 | 3/3 on the rig (2.45–2.48 s) | messenger windows 677 pass | cleared on the rig; **the hosted runner is unconfirmed** (the rig never reproduced the hosted failure) |
+| model_id `ui` (rules 9–10) | 1 | archive with a fresh Cargo home: no fetch FAIL, fetch then PASS | model_id windows 2 pass (`ui` executed) | cleared on Windows; **WSL2 unmet** (governed `cargo_toolchain` gap) |
+| biscuit-visualized E0284 (rule 11) | compile row | CI's `cargo test --no-run` exit 0, 16 embed_render tests executed | biscuit-visualized windows 1165 pass | cleared |
+
+**Restored WSL2 failures:** none. Phase 3's ten unfiltered relocated legs
+and this phase's seven published legs found no failure, so no WSL2 row
+exists to reconcile.
+
+### Remaining capability and access limitations
+
+1. **Hosted ucrt64 Git rows (3 identities):** need gix ≥ 0.89 (gix-path
+   0.14), an error-API migration across the six gix consumers. Until then
+   the hosted image's ucrt64 layout fails 5 worktree tests. The rig receipts
+   for worktree and git-wt-cli came from a mingw64 host, and the nightly
+   will reuse them for `windows-latest`, so **the nightly will not show this
+   failure**. Recorded in the os skill and in `decisions_for_review`.
+2. **Messenger on the hosted runner:** confirmed only by a hosted run that
+   executes the new fixture. The rig receipt will be reused while
+   messenger's inputs stay unchanged, so a hosted confirmation needs a
+   messenger input change or a `ci:all-os`/dispatch run, which this plan
+   does not authorize.
+3. **model_id on WSL2:** governed `cargo_toolchain` accepted gap. It closes
+   only with a changed execution contract (Cargo in the WSL2 guest, or a
+   native WSL2 build). It is not a pass.
+4. **Three green nightlies per OS on main:** none yet; blocked on merge. For
+   WSL2 it is also blocked on hosted WSL2 cells reaching test execution
+   (see the 2026-11-10 nightly).
+
+### Requirement-to-test mapping (Phase 4)
+
+No behavior changed in this phase, so no test was added. Phase 2's mapping
+still applies. This phase re-ran each mapped test inside its package's full
+suite on macOS and as published L1 cells on native Windows and WSL2. The
+input robustness matrix does not apply (plan rule 15).
+
+### Scope calculator
+
+`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+over this phase's edits (this log, the plan, the spec, and
+`.claude/skills/os/windows.md`) gave `packages: [darkmatter]`,
+`change_class: package`. The edited skill page is read by two darkmatter
+tests. Both passed after the edit
+(`just test shipped_schema_corpus::shipped_markdown`: 2/2), on top of the
+full darkmatter `just test` and `just lint` above.
+
+### Rig state
+
+The Windows and WSL standing clones `…/bolt--main/rusty-biscuit` hold the
+throwaway checkouts from the last legs, which cross-check restores and
+prunes itself. Nothing else was touched.

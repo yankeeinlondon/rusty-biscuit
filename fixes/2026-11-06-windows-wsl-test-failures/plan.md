@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 4
 created: 2026-11-08
-phase: 4
+phase: 5
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 source_files_during_phase_1: []
@@ -53,6 +53,39 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/os/windows-paths.md
 - .claude/skills/os/wsl.md
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/os/windows.md
+source_code:
+- .github/workflows/_package-ci.yml
+- biscuit-visualized/src/src/tests/embed_render_tests.rs
+- claudine/cli/tests/l1/compose_schema_cli.rs
+- darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/lib/tests/l1/kind_semantic_checks.rs
+- messenger/lib/tests/research_refresh.rs
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+- tree-hugger/cli/src/changed.rs
+- tree-hugger/cli/tests/changed/index_corruption.rs
+- tree-hugger/cli/tests/changed/ownership.rs
+- unchained-ai/model_id/Cargo.toml
+- unchained-ai/model_id/tests/ui.rs
+- worktree/cli/tests/list_output.rs
+- worktree/lib/src/git/program.rs
+- worktree/lib/src/remove/lifecycle/tests.rs
+documentation:
+- tree-hugger/docs/symbol-reports/changed-files.md
+- worktree/docs/performance-testing.md
+- unchained-ai/docs/testing.md
+- worktree/docs/git-for-windows.md
+- .claude/skills/os/SKILL.md
+- .claude/skills/os/windows-paths.md
+- .claude/skills/os/windows.md
+- .claude/skills/os/wsl.md
+- .claude/skills/worktree/SKILL.md
+completed_phase: 4
+implemented: true
 ---
 
 # Windows and WSL2 failure repair plan
@@ -139,13 +172,13 @@ Checkpoint: WSL evidence demonstrates extracted-archive execution, not a normal 
 
 ### Wave 4
 
-- [ ] **Run scoped checks**
+- [x] **Run scoped checks**
   - Coordinator runs each changed area's canonical `just test` and `just lint` once after integration: tree-hugger, worktree, claudine, darkmatter, unchained-ai, and biscuit-visualized, plus messenger. Use nextest through the recipes; never run cargo fmt. Shared CI edits get the existing workflow-contract tests through test-toolkit's canonical recipe. Do not add parser-matrix tests for unchanged manifest loaders.
   - Run required affected native Windows and WSL package cells with canonical cross-check tooling. Reuse qualifying receipts by package/environment/tier; filtered reproductions are targeted evidence only. Local macOS passing tests cannot clear Windows or WSL failures. No L2 is introduced by these repairs; existing required L2 checks run only through `just test-l2` without focus changes.
   - Review `just ci-local --plan` and record selected cells and evidence reuse. This is inspection only; this plan authorizes no push or full-workspace diagnostic dispatch.
-- [ ] **Collect main confirmation**
+- [x] **Collect main confirmation**
   - Inspect existing scheduled runs on main and collect three consecutive green qualifying runs per affected OS, recording run URLs, commits, selected packages/tests, reused evidence, and accepted gaps. Only runs containing execution or qualifying reuse of the repaired behavior count. An empty nightly is not one of the three.
   - Record unavailable future confirmations as incomplete acceptance items in the final review record. Do not wait indefinitely, trigger replacement workflows, or claim the outcome complete without those observations.
-- [ ] **Close evidence ledger**
+- [x] **Close evidence ledger**
   - Reconcile every original failure and every restored WSL failure against passing targeted evidence. List remaining capability and access limitations precisely, including the provisioning or execution-contract change needed to remove them.
   - Mark completed task checkboxes, record spec departures and their evidence in the implementation log, and leave the spec snapshot and lifecycle location unchanged. Final status is implementation complete, ready for review only when implementation and scoped verification passed; outcome acceptance remains explicitly incomplete until all required OS confirmation exists.
