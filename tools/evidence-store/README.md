@@ -6,9 +6,11 @@ proof files those observations cite in a private R2 bucket. It is a
 TypeScript Cloudflare Worker plus the command-line tools that operate it and
 submit evidence to it.
 
-**Status: under construction.** Git notes remain the only authoritative
-evidence store. Nothing in CI reads from or writes to this service, and no
-Worker is deployed yet. What exists today:
+**Status: built, not yet deployed.** Git notes remain the only authoritative
+evidence store. Nothing in CI reads from or writes to this service; evidence
+reaches it only by explicit ingestion. Evaluation publication and retention
+are not enabled. To deploy, operate, back up, or restore it, follow the
+[operating guide](../../docs/cicd/evidence-store.md). What it contains:
 
 - `api/`: the versioned HTTP API contract (`openapi.yaml`), strict JSON
   Schemas for the configuration files, and request/response examples. See
@@ -47,6 +49,8 @@ Worker is deployed yet. What exists today:
   credential is provisioned, so real evidence is never pruned yet.
   `wrangler.jsonc` declares the `development` and `restore-test`
   environments; nothing is deployed.
+- `cli/deploy.ts` (`just deploy`): applies the numbered migrations and
+  deploys the Worker to one environment, then writes a redacted manifest.
 - `cli/operator.ts` (`just operator …`): operator bootstrap through Wrangler,
   repository registration from GitHub's stable IDs, credential issue and
   revoke, and the recovery commands `backup`, `verify-backup`, `restore`, and
@@ -54,7 +58,7 @@ Worker is deployed yet. What exists today:
   [`api/README.md`](api/README.md#credentials).
 - `cli/ingest.ts` (`just evidence-ingest`, `evidence-resume`,
   `evidence-finalize`): submits one collection or version-2 receipt and
-  stages the files it references. See [Ingesting evidence](#ingesting-evidence).
+  stages the files it references. See [Send evidence to the service](../../docs/cicd/evidence-store.md#send-evidence-to-the-service).
 - `tests/fixtures/parity/`: frozen inputs with the exact canonical bytes and
   identities produced by the Python contract in `scripts/ci/schema.py`. A
   TypeScript port must reproduce them byte for byte.
@@ -74,38 +78,24 @@ just install
 
 ## Common tasks
 
+Run these from this directory, or from the repository root as
+`just evidence-store <recipe>`:
+
 ```sh
+just typecheck            # strict TypeScript check
 just test                 # node, workers (spike), and service projects (local Miniflare D1)
-just lint                 # strict TypeScript check
+just lint
 just capture-parity --check   # confirm the frozen fixtures still match Python
 just inventory --out /tmp/evidence-inventory.json
-just operator issue --endpoint https://… --token-file /abs/operator.token --grant /abs/host.grant.json
-CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… just prove-d1
+just deploy --env development --manifest /abs/deploy.json   # needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+just test-real --report /abs/results.json                    # deployed acceptance suite
 ```
 
-`prove-d1` never logs in interactively. It exits 2 and names the missing
-variables when it has no credentials. When it does run, it deletes the
-database and Worker it created.
+Operating the service (`operator`, `evidence-ingest`, `evidence-resume`,
+`evidence-finalize`, `demo-hosted`, backups, and restores) is covered task by
+task in the [operating guide](../../docs/cicd/evidence-store.md), and every
+route, limit, and error code in [`api/README.md`](api/README.md).
 
-## Ingesting evidence
-
-`just evidence-ingest` submits one version-3 collection, or a version-2
-receipt that it converts on your machine (reading the receipt's reports from
-its `report_dir`). With `--proof-dir`, it also uploads every report and proof
-file the collection references, looked up by name inside that directory. Every
-flag, the token file, the input, and each mapped file are checked before
-anything is sent; a problem names its location (for example
-`/observations/0/reports/1`) and exits 2.
-
-```sh
-just evidence-ingest ./collection.json --endpoint https://evidence.example.workers.dev \
-  --repo 873451209 --token-file ~/.config/evidence-store/producer.token \
-  --state ./ingest-0001.json --proof-dir ~/ci-evidence/run-0001
-```
-
-Progress is saved to the `--state` file, with copies of the input and the
-submitted collection beside it, so an interrupted run continues with
-`just evidence-resume ./ingest-0001.json` and never reruns a test. A producer
-credential only stages uploads; a verifier then publishes them with
-`just evidence-finalize ./ingest-0001.json --token-file PATH`. The routes,
-roles, and retry rules are in [`api/README.md`](api/README.md).
+`prove-d1` (the D1 feasibility checkpoint) never logs in interactively. It
+exits 2 and names the missing variables when it has no credentials. When it
+does run, it deletes the database and Worker it created.

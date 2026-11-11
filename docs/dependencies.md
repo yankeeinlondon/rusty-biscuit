@@ -327,6 +327,17 @@
   `typescript`, `tsx`, and `vitest` as dev dependencies. Node is provisioned
   only for `test-toolkit`'s `ubuntu-latest` companion-suite cells, which own
   the tool's typecheck and Vitest suites; Rust test legs never do.
+- `tools/evidence-store` is a TypeScript pnpm-workspace member (registered in
+  the root `pnpm-workspace.yaml`, pinned through the root `pnpm-lock.yaml`),
+  not a Cargo package. It depends on `jose` 6.2.17 (GitHub OIDC JWT
+  verification) and `@noble/hashes` 2.4.0 (incremental SHA-256 over upload
+  parts and synchronous identity hashing), with `wrangler` 4.160.1,
+  `@cloudflare/vitest-plugin` 1.7.0 (Workers-runtime tests; it replaces the
+  deprecated `vitest-pool-workers`), `@cloudflare/workers-types`, `vitest`
+  4.1.12 (newer than `test-audit`'s 3.2.4 because the plugin requires
+  Vitest 4), `typescript`, `tsx`, `yaml`, and `@types/node` as dev
+  dependencies. No CI cell runs it and no job provisions Node for it; its
+  checks run locally through `just evidence-store <recipe>`.
 - `biscuit-test-harness` uses `tempfile` as a regular dependency for the
   private directories its Kitty and Xvfb instances own for their lifetime.
 - `playa/lib` uses `fs4` for its private cross-process spool locks,

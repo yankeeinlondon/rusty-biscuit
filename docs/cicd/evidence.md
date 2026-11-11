@@ -105,3 +105,11 @@ The existing [evidence contract](../../.github/ci/schemas/README.md#observation-
 describes storage and verification in more detail. Release readiness must use
 those checks and the canonical coverage plan; schema validation alone is not
 a release approval.
+
+## The evidence store service
+
+The [evidence store](evidence-store.md) is an optional, private service that
+can hold copies of these records and the report files they cite. It is a
+tool, not part of CI: evidence reaches it only when someone sends it
+explicitly, and nothing reads it to decide reuse or coverage. Git notes
+remain the authoritative evidence store.

@@ -1133,6 +1133,33 @@ the recipe itself, so it follows without an edit.
 Measurements: `reviews/2026-09-15-python-test-code/spike-3-results.md` and
 `spike-4-results.md`.
 
+## The evidence store (explicit ingestion only)
+
+`tools/evidence-store` (a Cloudflare Worker over D1 and a private R2 bucket)
+is **not part of CI scope or gating**. It has no CI cells, no Node
+provisioning, and no entry in `affected_scope.py`'s `SUITE_REGISTRY`; a change
+under it schedules nothing. Git-note publication (`publish-receipt`, the
+pre-push hook, `ci.yml`, `seed.py`) remains the authority and never calls the
+service — do not add a call site.
+
+Evidence reaches the store only by explicit ingestion:
+
+- `just evidence-ingest INPUT --endpoint URL --repo ID --token-file PATH --state PATH [--proof-dir PATH]`
+  from a host submits a v3 collection or a v2 receipt (converted locally) and
+  stages the files `--proof-dir` maps; `just evidence-resume STATE` continues
+  from the `--state` file without rerunning anything.
+- A producer only stages bytes. `just evidence-finalize STATE --token-file PATH`
+  with a **verifier** token publishes them.
+- `.github/workflows/evidence-store-demo.yml` is manual-only
+  (`workflow_dispatch` on `main`): it ingests a named retained artifact with a
+  GitHub OIDC token (audience `rusty-biscuit-evidence-store`), which the
+  service grants producer and reader only. Dispatch it with `just demo-hosted`;
+  it runs no tests and is not a publication hook.
+
+Local checks go through the root delegation, `just evidence-store <recipe>`
+(`typecheck`, `test`, `lint`; `test-real` and `deploy` need a deployment).
+The operating guide is `docs/cicd/evidence-store.md`.
+
 ## The merge gate
 
 `ci.yml`'s `ci-gate` job is the single required check: a policy-free fold
