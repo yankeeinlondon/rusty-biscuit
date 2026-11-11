@@ -1,4 +1,4 @@
-//! A temporary directory of `ci-push-test-tool` copies, their control file,
+//! A temporary directory of `ci-push-test-tool` stubs, their control file,
 //! and their invocation log. See the tool's `//!` for the control format.
 
 use std::ffi::OsString;
@@ -13,7 +13,7 @@ pub struct Fixture {
 }
 
 impl Fixture {
-    /// Installs a copy of the tool under each of `names` and writes `tools`
+    /// Installs the tool under each of `names` and writes `tools`
     /// as the control file's behaviors.
     pub fn new(names: &[&str], tools: Value) -> Self {
         let fixture = Self {
@@ -21,13 +21,30 @@ impl Fixture {
         };
         std::fs::create_dir_all(fixture.bin()).unwrap();
         std::fs::create_dir_all(fixture.work()).unwrap();
-        let tool = biscuit_test_harness::bin_exe!("ci-push-test-tool");
+        link_or_copy(
+            &biscuit_test_harness::bin_exe!("ci-push-test-tool"),
+            &fixture.seed(),
+        );
         for name in names {
-            std::fs::copy(&tool, fixture.tool(name))
-                .unwrap_or_else(|error| panic!("copy {} as {name}: {error}", tool.display()));
+            fixture.install(name);
         }
         fixture.configure(tools);
         fixture
+    }
+
+    /// The fixture's one file of the tool, outside `bin`; every stub is a
+    /// link to it.
+    fn seed(&self) -> PathBuf {
+        self.root.path().join(if cfg!(windows) {
+            "ci-push-test-tool.exe"
+        } else {
+            "ci-push-test-tool"
+        })
+    }
+
+    /// Adds the tool to `bin` as `name`, acting as the control file says.
+    pub fn install(&self, name: &str) {
+        link_or_copy(&self.seed(), &self.tool(name));
     }
 
     /// Replaces the control file's behaviors (for behaviors that name paths
@@ -89,6 +106,23 @@ impl Fixture {
         let mut invocations = self.invocations();
         assert_eq!(invocations.len(), 1, "{invocations:#?}");
         invocations.remove(0)
+    }
+}
+
+/// A hard link to `source` at `destination`, or a copy where links are
+/// refused (another volume). On Windows, Defender scans every new executable
+/// file on its first run, about 0.3 s each on the `BUILD_WIN` rig; a link
+/// shares the file, and its scan, with every other name for it. A link may be
+/// the build's own binary, so nothing may write to or `chmod` a stub.
+fn link_or_copy(source: &Path, destination: &Path) {
+    if std::fs::hard_link(source, destination).is_err() {
+        std::fs::copy(source, destination).unwrap_or_else(|error| {
+            panic!(
+                "copy {} to {}: {error}",
+                source.display(),
+                destination.display()
+            )
+        });
     }
 }
 

@@ -45,6 +45,9 @@
 //!   starts with that environment variable's value instead
 //!   (`"$BISCUIT_CI_REPORTS_OUT/L1/alpha.xml"`); an unset variable panics.
 //! - `append_files`: as `write_files`, appending (manifest lines).
+//! - `copy_files`: `{ "destination": "source" }`, both spelled as in
+//!   `write_files`: copies a file byte for byte, parents created (a gate
+//!   writing back the plan it was fed).
 //! - `stdout`, `stderr`: text to print; `stdout_fill`, `stderr_fill`: a byte
 //!   count to write, interleaved in 64 KiB chunks.
 //! - `signal_parent` (Unix): a signal number sent to the parent process
@@ -112,6 +115,8 @@ struct Behavior {
     dispatch: Vec<Dispatch>,
     #[serde(default)]
     append_files: BTreeMap<String, String>,
+    #[serde(default)]
+    copy_files: BTreeMap<String, String>,
     signal_parent: Option<i32>,
     delegate: Option<Delegate>,
     refuse_stdin_containing: Option<String>,
@@ -218,6 +223,12 @@ fn act(exe: &Path, behavior: &Behavior, argv: &[String], stdin: Option<&[u8]>) -
     for (path, content) in &behavior.append_files {
         stage(path, content, true);
     }
+    for (destination, source) in &behavior.copy_files {
+        let source = expand(source);
+        let content = std::fs::read(&source)
+            .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
+        stage_bytes(destination, &content, false);
+    }
     if let Some(text) = &behavior.stdout {
         print!("{text}");
     }
@@ -313,6 +324,10 @@ fn run_delegate(delegate: &Delegate, argv: &[String]) -> ExitCode {
 
 /// Writes or appends `content` at `path`, after expanding a leading `$NAME`.
 fn stage(path: &str, content: &str, append: bool) {
+    stage_bytes(path, content.as_bytes(), append);
+}
+
+fn stage_bytes(path: &str, content: &[u8], append: bool) {
     let path = expand(path);
     if let Some(parent) = path
         .parent()
@@ -327,7 +342,7 @@ fn stage(path: &str, content: &str, append: bool) {
         .truncate(!append)
         .open(&path)
         .unwrap_or_else(|error| panic!("open {}: {error}", path.display()));
-    file.write_all(content.as_bytes())
+    file.write_all(content)
         .unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
 }
 

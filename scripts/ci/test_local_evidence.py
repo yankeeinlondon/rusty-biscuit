@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 import affected_scope  # noqa: E402
+import local_evidence  # noqa: E402
 import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
 from affected_scope import change_inventory, legacy_scope_document
@@ -445,6 +446,119 @@ class OrchestrationExclusionTests(unittest.TestCase):
             inputs = gate_global_inputs(gate)
             self.assertIn("rust-toolchain.toml", inputs)
             self.assertIn("Cargo.lock", inputs)
+
+
+class BatchedGitReadTests(RepositoryFixture):
+    """The batched reads answer exactly what one Git command per read did."""
+
+    def spy(self) -> list[tuple[str, ...]]:
+        calls: list[tuple[str, ...]] = []
+        original_git = local_evidence.git
+
+        def spy(*args: str) -> str:
+            calls.append(args)
+            return original_git(*args)
+
+        local_evidence.git = spy
+        self.addCleanup(setattr, local_evidence, "git", original_git)
+        return calls
+
+    def test_prefetch_answers_what_rev_parse_answers(self) -> None:
+        names = [self.head, self.base, f"{self.head}^{{tree}}", "HEAD", "main"]
+        resolved = local_evidence.prefetch_revisions(*names, f"{NOTES_PREFIX}/macos-latest")
+        for name in names:
+            self.assertEqual(self.git("rev-parse", "--verify", name), resolved[name], name)
+        self.assertIsNone(resolved[f"{NOTES_PREFIX}/macos-latest"])
+
+    def test_a_present_notes_ref_resolves(self) -> None:
+        self.add_note("macos-latest", "{}")
+        ref = f"{NOTES_PREFIX}/macos-latest"
+        self.assertEqual(
+            self.git("rev-parse", "--verify", ref), local_evidence.prefetch_revisions(ref)[ref]
+        )
+
+    def test_a_prefetched_object_id_and_its_tree_need_no_further_git(self) -> None:
+        local_evidence.prefetch_revisions(self.head, f"{self.head}^{{tree}}", "HEAD")
+        calls = self.spy()
+        self.assertEqual(self.head, local_evidence.revision(self.head))
+        self.assertEqual(
+            self.git("rev-parse", f"{self.head}^{{tree}}"),
+            local_evidence.revision(f"{self.head}^{{tree}}"),
+        )
+        self.assertEqual([], calls)
+        # A ref can move, so its answer is never remembered.
+        self.assertEqual(self.head, local_evidence.revision("HEAD"))
+        self.assertEqual([("rev-parse", "--verify", "HEAD")], calls)
+
+    def test_an_object_id_git_has_not_got_is_left_to_rev_parse(self) -> None:
+        missing = "1" * 40
+        self.assertIsNone(local_evidence.prefetch_revisions(missing)[missing])
+        calls = self.spy()
+        # `rev-parse --verify` accepts a well-formed ID it does not hold.
+        self.assertEqual(missing, local_evidence.revision(missing))
+        self.assertEqual([("rev-parse", "--verify", missing)], calls)
+        with self.assertRaises(subprocess.CalledProcessError):
+            local_evidence.revision(f"{missing}^{{tree}}")
+
+    def test_only_existing_notes_refs_are_listed(self) -> None:
+        self.add_note("macos-latest", "{}")
+        calls = self.spy()
+        plan = {"cells": [], "packages": [], "builds": []}
+        local_evidence._resolve(plan, self.base, self.head, None)
+        listed = [call for call in calls if call[:1] == ("notes",)]
+        self.assertEqual([("notes", "--ref", f"{NOTES_PREFIX}/macos-latest", "list")], listed)
+
+    def test_a_bootstrap_lists_only_existing_notes_refs(self) -> None:
+        self.add_note("ubuntu-latest", "{}")
+        calls = self.spy()
+        commits = local_evidence.candidate_commits(
+            local_evidence.ZERO_REVISION,
+            self.head,
+            absent=frozenset(local_evidence.ENVIRONMENTS) - {"ubuntu-latest"},
+        )
+        self.assertEqual([self.head], commits)
+        listed = [call for call in calls if call[:1] == ("notes",)]
+        self.assertEqual([("notes", "--ref", f"{NOTES_PREFIX}/ubuntu-latest", "list")], listed)
+
+    def per_path_identity(self, paths: list[str]) -> str:
+        entries: set[str] = set()
+        for path in paths:
+            listing = self.git("ls-tree", "-r", "--full-tree", self.head, "--", path)
+            entries.update(line for line in listing.splitlines() if line.strip())
+        return schema.identity("\n".join(sorted(entries)))
+
+    def test_a_batched_identity_is_the_union_of_per_path_listings(self) -> None:
+        for path in ("a/x", "a/nested/y", "b/z", "c", "alphabet/w"):
+            (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / path).write_text(f"{path}\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "inputs")
+        self.head = self.git("rev-parse", "HEAD")
+        paths = ["a", "b/z", "missing", "c", "alpha", "file"]
+        original_batch = local_evidence.LS_TREE_BATCH
+        self.addCleanup(setattr, local_evidence, "LS_TREE_BATCH", original_batch)
+        for batch in (1, 2, original_batch):
+            local_evidence.LS_TREE_BATCH = batch
+            self.assertEqual(
+                self.per_path_identity(paths),
+                local_evidence.gate_input_identity(paths, self.head),
+                batch,
+            )
+
+    def test_a_refused_batch_is_listed_path_by_path(self) -> None:
+        original = local_evidence.git_optional
+
+        def refuse_batches(*args: str) -> str | None:
+            if args[0] == "ls-tree" and len(args) > args.index("--") + 2:
+                return None
+            return original(*args)
+
+        local_evidence.git_optional = refuse_batches
+        self.addCleanup(setattr, local_evidence, "git_optional", original)
+        self.assertEqual(
+            self.per_path_identity(["file", "absent"]),
+            local_evidence.gate_input_identity(["file", "absent"], self.head),
+        )
 
 
 if __name__ == "__main__":

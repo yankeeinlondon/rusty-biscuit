@@ -16,14 +16,12 @@
 
 use std::path::{Path, PathBuf};
 
-#[cfg(unix)]
 use rstest::rstest;
 use serde_json::{json, Value};
 
-#[cfg(unix)]
-use crate::evidence_fixture::{cell_names, TestGate};
 use crate::evidence_fixture::{
-    receipt_view, relabel, Evidence, Run, GITHUB_URL, PROHIBITION_REASON, ZERO,
+    cell_names, receipt_view, relabel, Evidence, Run, TestGate, GATE_PLAN_FILE, GATE_SCOPE_FILE,
+    GITHUB_URL, PROHIBITION_REASON, REPORTS_DIRECTORY, ZERO,
 };
 use crate::fixture::install_tool;
 
@@ -148,74 +146,168 @@ fn printed_path(run: &Run, prefix: &str) -> PathBuf {
 
 // ---------- the real ci-local recipe (rows 1, 2, 69–72) ----------
 //
-// Unix-only: the recipe is a `#!/usr/bin/env bash` script run by Bash 4.4+.
-// On native Windows the other rows reach the same evidence helpers.
+// The recipe is a `#!/usr/bin/env bash` script; on native Windows the real
+// `just` runs it under Git for Windows' Bash, as a push from there does.
+//
+// A hook push through the real recipe pays for both the hook's helpers and
+// the recipe's, more than an L1 test may take on native Windows, so each
+// question is asked at its own public boundary, and the boundaries are
+// pinned to each other:
+//
+// - the recipe's gate and report contract, by running the real recipe as
+//   `ci-push` starts the gates (`the_real_recipe_*`, through
+//   [`Evidence::run_recipe`]); `the_gates_are_started_as_the_direct_recipe_runs_start_them`
+//   pins that start to the hook's;
+// - the hook's receipt and publication contract, with a gate that stages
+//   what the real recipe stages ([`Evidence::model_gate`]); each modeled
+//   outcome is one case of
+//   `the_real_recipe_stages_the_modeled_outcome_of_a_fed_plan`;
+// - the verifier's retry decision, over prior evidence recorded through the
+//   real evidence helpers ([`Evidence::record_evidence`]), which
+//   `seeded_evidence_is_what_a_hook_push_records` pins to a hook push.
 
-#[cfg(unix)]
-#[rstest]
-#[case::malformed_manifest(TestGate::MalformedManifest)]
-#[case::exit_130(TestGate::Exit130)]
-#[case::recorded_143(TestGate::Recorded143)]
-fn a_real_recipe_interruption_withholds_earlier_reports(#[case] beta: TestGate) {
-    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
-    fixture.stage_ci_local_harness(
-        &biscuit_test_harness::manifest_dir!()
-            .parent()
-            .unwrap()
-            .join("just/ci-local.just"),
+/// `plan` with `package`'s L1 cell on `environment` as the hook's overlay
+/// leaves a cell that verified prior evidence covers: reused from the
+/// passing local evidence of `commit`, with its build pruned.
+fn reused(plan: &str, package: &str, environment: &str, commit: &str) -> String {
+    let mut plan: Value = serde_json::from_str(plan).unwrap();
+    let cell = plan["cells"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|cell| {
+            cell["package"] == package && cell["gate"] == "L1" && cell["environment"] == environment
+        })
+        .unwrap_or_else(|| panic!("no {package}/{environment}/L1 cell"));
+    let object = cell.as_object_mut().unwrap();
+    object.remove("build");
+    object.remove("profile");
+    object.insert("execution".into(), json!("reuse"));
+    object.insert("origin".into(), json!("prior-local"));
+    object.insert("state".into(), json!("reused"));
+    object.insert(
+        "evidence".into(),
+        json!({
+            "origin": "prior-local",
+            "outcome": "pass",
+            "package": package,
+            "gate": "L1",
+            "environment": environment,
+            "evidence": { "commit": commit },
+        }),
     );
-    fixture.planner_plan(&relabel(include_str!(
-        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
-    )));
-    fixture.recipe_just(TestGate::Pass, beta);
-
-    let run = fixture.push_feature(Some("strict"));
-
-    assert_ne!(run.code, 0, "an interrupted real recipe passed:\n{run}");
-    assert!(
-        fixture.just_ran("_test alpha"),
-        "{:?}",
-        fixture.just_calls()
-    );
-    assert!(fixture.just_ran("_test beta"), "{:?}", fixture.just_calls());
-    run.assert_says("validation was interrupted");
-    if beta == TestGate::MalformedManifest {
-        run.assert_says("cannot establish run completion from the staged manifest");
-    }
-    assert_no_validation_note(&fixture);
+    plan["builds"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|build| build["package"] != package);
+    plan.to_string()
 }
 
-#[cfg(unix)]
-#[test]
-fn an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts() {
-    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
+/// What the recipe reads of `package`'s L1 cell on `environment` to decide
+/// whether it runs, is skipped, or is rerun, and to name its evidence.
+fn as_the_recipe_reads(plan: &Value, package: &str, environment: &str) -> Value {
+    let cell = plan["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|cell| {
+            cell["package"] == package && cell["gate"] == "L1" && cell["environment"] == environment
+        })
+        .unwrap_or_else(|| panic!("no {package}/{environment}/L1 cell in {plan:#}"));
+    json!({
+        "execution": cell["execution"],
+        "state": cell["state"],
+        "origin": cell["origin"],
+        "outcome": cell["evidence"]["outcome"],
+        "commit": cell["evidence"]["evidence"]["commit"],
+        "build": cell["build"],
+        "test_filter": cell["test_filter"],
+    })
+}
+
+// The real recipe's gate and report contract.
+
+/// Every modeled outcome a hook test stages is what the real recipe stages
+/// for the same gates: the reports, the manifest, the interruption marker,
+/// the exit status, and the plan written back. Both gates of the plan start,
+/// the later one after a failure too, and the planner is asked only for
+/// the projection of the fed plan.
+#[rstest]
+#[case::pass(TestGate::Pass, TestGate::Pass)]
+#[case::complete_failure(TestGate::Fail, TestGate::Pass)]
+#[case::malformed_manifest(TestGate::Pass, TestGate::MalformedManifest)]
+#[case::exit_130(TestGate::Pass, TestGate::Exit130)]
+#[case::recorded_143(TestGate::Pass, TestGate::Recorded143)]
+fn the_real_recipe_stages_the_modeled_outcome_of_a_fed_plan(
+    #[case] alpha: TestGate,
+    #[case] beta: TestGate,
+) {
+    let fixture = Evidence::without_repository();
     fixture.stage_ci_local_harness(
         &biscuit_test_harness::manifest_dir!()
             .parent()
             .unwrap()
             .join("just/ci-local.just"),
     );
-    fixture.planner_plan(&relabel(include_str!(
+    let plan = relabel(include_str!(
         "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
-    )));
-    fixture.recipe_just(TestGate::Pass, TestGate::Pass);
-    fixture.push_refs(&["refs/heads/main:refs/heads/parent"]);
-    fixture.open_pull_requests(&[(12, "parent")]);
+    ));
+    fixture.recipe_just(alpha, beta);
+    fixture.add_stub("python3", fixture.interpreter_stub(&[]));
 
-    let run = fixture.push(Some("strict"), GITHUB_URL, &fixture.creating_feature_line());
-    run.assert_exit(0);
-    assert!(
-        fixture.just_ran("_test alpha"),
-        "{:?}",
-        fixture.just_calls()
+    let recipe = fixture.run_recipe(&plan, &fixture.tools.tool("python3"), &[]);
+
+    assert_eq!(
+        recipe.outcome,
+        fixture.recipe_outcome(&[("alpha", alpha), ("beta", beta)]),
+        "{}",
+        recipe.run
     );
+    assert_eq!(recipe.plan_out.as_deref(), Some(plan.as_str()));
+    for gate in ["_lint alpha", "_test alpha", "_lint beta", "_test beta"] {
+        assert!(fixture.just_ran(gate), "{gate}: {:?}", fixture.just_calls());
+    }
+    recipe.run.assert_says("run    alpha/L1");
+    recipe.run.assert_says("run    beta/L1");
+    if beta == TestGate::MalformedManifest {
+        recipe
+            .run
+            .assert_says("cannot establish run completion from the staged manifest");
+    }
+    fixture.assert_ci_local_never_selected();
+}
 
-    let advanced = fixture.advance_remote("parent", "README.md", "advanced target\n");
-    let head = fixture.follow_up("docs.md", "head documentation");
-    fixture.reset_logs();
-    let run = fixture.push(Some("strict"), GITHUB_URL, &fixture.creating_feature_line());
+/// A cell the fed plan reuses is named and skipped, its lint still runs,
+/// and only the cells that ran are staged.
+#[test]
+fn the_real_recipe_skips_a_cell_its_plan_reuses() {
+    let fixture = Evidence::without_repository();
+    fixture.stage_ci_local_harness(
+        &biscuit_test_harness::manifest_dir!()
+            .parent()
+            .unwrap()
+            .join("just/ci-local.just"),
+    );
+    let commit = "5f36f201bf45384d2889e34be0c22ce91b8fdc6a";
+    let plan = reused(
+        &relabel(include_str!(
+            "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
+        )),
+        "alpha",
+        fixture.environment,
+        commit,
+    );
+    fixture.recipe_just(TestGate::Pass, TestGate::Pass);
+    fixture.add_stub("python3", fixture.interpreter_stub(&[]));
 
-    run.assert_exit(0);
+    let recipe = fixture.run_recipe(&plan, &fixture.tools.tool("python3"), &[]);
+
+    assert_eq!(
+        recipe.outcome,
+        fixture.recipe_outcome(&[("beta", TestGate::Pass)]),
+        "{}",
+        recipe.run
+    );
     assert!(
         !fixture.just_ran("_test alpha"),
         "{:?}",
@@ -227,14 +319,297 @@ fn an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts()
         "{:?}",
         fixture.just_calls()
     );
+    recipe.run.assert_says(&format!(
+        "skip   alpha/L1  (reused: prior-local pass on {})",
+        &commit[..9]
+    ));
+    recipe.run.assert_says("run    beta/L1");
     fixture.assert_ci_local_never_selected();
+}
+
+// The hook's receipt and publication contract, gated by the modeled recipe.
+
+#[rstest]
+#[case::malformed_manifest(TestGate::MalformedManifest)]
+#[case::exit_130(TestGate::Exit130)]
+#[case::recorded_143(TestGate::Recorded143)]
+fn a_recipe_interruption_withholds_earlier_reports(#[case] beta: TestGate) {
+    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
+    fixture.planner_plan(&relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
+    )));
+    let outcome = fixture.recipe_outcome(&[("alpha", TestGate::Pass), ("beta", beta)]);
+    fixture.model_gate(&outcome);
+
+    let run = fixture.push_feature(Some("strict"));
+
+    assert_ne!(run.code, 0, "an interrupted recipe passed:\n{run}");
+    assert!(
+        outcome.reports.contains_key("L1/alpha.xml"),
+        "fixture error: the earlier gate staged no report"
+    );
+    run.assert_says("validation was interrupted");
+    assert_no_validation_note(&fixture);
+}
+
+/// A failing gate through the recipe is recorded as complete evidence that
+/// the next push reruns (see
+/// `a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded`).
+#[test]
+fn a_recipe_gate_failure_records_a_complete_failure() {
+    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
+    fixture.planner_plan(&relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
+    )));
+    let outcome = fixture.recipe_outcome(&[("alpha", TestGate::Fail), ("beta", TestGate::Pass)]);
+    fixture.model_gate(&outcome);
+    let head = fixture.head();
+
+    let run = fixture.push_feature(Some("warn"));
+
+    run.assert_exit(0);
+    let view = receipt_view(&fixture.local_validation(head).expect("the receipt"));
+    assert_eq!(view["base"], json!(fixture.main.to_string()), "{view:#}");
+    assert_eq!(cell_names(&view), ["alpha/L1", "beta/L1"]);
+    assert_eq!(view["cells"][0]["outcome"], json!("fail"), "{view:#}");
+    assert_eq!(
+        view["cells"][0]["completion"],
+        json!("complete"),
+        "{view:#}"
+    );
+    fixture.assert_retained_reports(head, &outcome);
+}
+
+#[test]
+fn a_stacked_pull_request_records_its_target_tip_as_the_receipt_base() {
+    let (fixture, parent, child) = Evidence::stacked(false);
+    fixture.planner_plan(&relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
+    )));
+    let outcome = fixture.recipe_outcome(&[("alpha", TestGate::Pass), ("beta", TestGate::Pass)]);
+    fixture.model_gate(&outcome);
+    fixture.open_pull_requests(&[(12, "parent")]);
+    let merge_base = fixture.git().merge_base(fixture.main, child).unwrap();
+    assert_ne!(
+        merge_base, parent,
+        "fixture error: the merge base with main is the parent tip"
+    );
+
+    let run = fixture.push(
+        Some("strict"),
+        GITHUB_URL,
+        &format!("refs/heads/child {child} refs/heads/child {ZERO}"),
+    );
+
+    run.assert_exit(0);
+    run.assert_says("pull request #12 into parent");
+    let view = receipt_view(
+        &fixture
+            .local_validation(child)
+            .expect("the child's receipt"),
+    );
+    assert_eq!(view["base"], json!(parent.to_string()), "{view:#}");
+    assert_eq!(cell_names(&view), ["alpha/L1", "beta/L1"]);
+    let scope = fixture
+        .scope_receipt(child)
+        .expect("the child's scope receipt");
+    assert_eq!(
+        view["scope_identity"],
+        json!(fixture.plan_identity(&scope)),
+        "{view:#}"
+    );
+    fixture.assert_retained_reports(child, &outcome);
+}
+
+/// The prior evidence the follow-up tests seed through the real helpers is
+/// the evidence a hook push of the same commit records: the same note,
+/// byte for byte, and the same retained reports.
+#[test]
+fn seeded_evidence_is_what_a_hook_push_records() {
+    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
+    fixture.planner_plan(&relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
+    )));
+    let outcome = fixture.recipe_outcome(&[("alpha", TestGate::Pass), ("beta", TestGate::Pass)]);
+    let head = fixture.head();
+    fixture.record_evidence("pull_request", fixture.main, head, &outcome);
+    let seeded = fixture.local_validation(head).expect("the seeded receipt");
+    fixture.assert_retained_reports(head, &outcome);
+    fixture.forget_validation_evidence();
+    fixture.model_gate(&outcome);
+
+    let run = fixture.push_feature(Some("strict"));
+
+    run.assert_exit(0);
+    run.assert_says("Running pre-push validation from the reviewed plan");
+    let pushed = fixture.local_validation(head).expect("the hook's receipt");
+    assert_eq!(seeded, pushed);
+    let view = receipt_view(&pushed);
+    assert_eq!(view["base"], json!(fixture.main.to_string()), "{view:#}");
+    assert_eq!(cell_names(&view), ["alpha/L1", "beta/L1"]);
+    fixture.assert_retained_reports(head, &outcome);
+}
+
+/// A documentation-only follow-up is reviewed against the prior evidence:
+/// the gates are fed a plan that reuses the cell the evidence covers and
+/// reruns the one it cannot vouch for, whose refusal the review shows.
+/// What the recipe then runs is `the_real_recipe_skips_a_cell_its_plan_reuses`;
+/// what is recorded is `a_docs_only_follow_up_records_only_the_cells_that_ran`.
+#[test]
+fn a_docs_only_follow_up_skips_the_cells_prior_evidence_covers() {
+    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
+    fixture.planner_plan(&relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
+    )));
+    let head_a = fixture.head();
+    fixture.record_evidence(
+        "pull_request",
+        fixture.main,
+        head_a,
+        &fixture.recipe_outcome(&[("alpha", TestGate::Pass), ("beta", TestGate::Pass)]),
+    );
+    fixture.follow_up("README.md", "more documentation");
+    fixture.capture_gate();
+
+    let run = fixture.push_feature(Some("strict"));
+
+    run.assert_exit(0);
+    run.assert_says("Running pre-push validation from the reviewed plan");
+    run.assert_says(&format!("gate-inputs-changed: beta/{}/L1", fixture.environment));
+    assert_reuses_alpha_from(&fixture, head_a);
+}
+
+/// The plan the gates were fed reuses alpha's L1 cell from `commit`'s
+/// passing evidence, exactly as `the_real_recipe_skips_a_cell_its_plan_reuses`
+/// feeds the real recipe, and runs beta's.
+#[track_caller]
+fn assert_reuses_alpha_from(fixture: &Evidence, commit: git2::Oid) {
+    let fed = fixture.fed_plan();
+    let environment = fixture.environment;
+    let expected: Value =
+        serde_json::from_str(&reused(&fed.to_string(), "alpha", environment, &commit.to_string()))
+            .unwrap();
+    assert_eq!(
+        as_the_recipe_reads(&fed, "alpha", environment),
+        as_the_recipe_reads(&expected, "alpha", environment),
+        "{fed:#}"
+    );
+    assert_eq!(
+        as_the_recipe_reads(&fed, "beta", environment)["execution"],
+        json!("execute"),
+        "{fed:#}"
+    );
+}
+
+/// The verifier's half of a documentation-only follow-up: it accepts the
+/// prior pass of alpha and refuses beta's, and the follow-up's receipt then
+/// holds only the cell that ran, against main.
+#[test]
+fn a_docs_only_follow_up_records_only_the_cells_that_ran() {
+    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
+    fixture.planner_plan(&relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
+    )));
+    let head_a = fixture.head();
+    fixture.record_evidence(
+        "pull_request",
+        fixture.main,
+        head_a,
+        &fixture.recipe_outcome(&[("alpha", TestGate::Pass), ("beta", TestGate::Pass)]),
+    );
+    let head_b = fixture.follow_up("README.md", "more documentation");
+    let plan_b = fixture.planned("pull_request", fixture.main, head_b);
+
+    let verified = fixture.verify(&plan_b, fixture.main, head_b);
+
+    let alpha: Vec<&Value> = verified
+        .accepted
+        .iter()
+        .filter(|cell| cell["package"] == "alpha")
+        .collect();
+    assert_eq!(alpha.len(), 1, "{verified:#?}");
+    assert_eq!(alpha[0]["outcome"], json!("pass"), "{verified:#?}");
+    assert_eq!(
+        alpha[0]["evidence"]["commit"],
+        json!(head_a.to_string()),
+        "{verified:#?}"
+    );
+    assert!(!verified.accepts("beta"), "{verified:#?}");
+    verified.assert_rejects(&format!("gate-inputs-changed: beta/{}/L1", fixture.environment));
+
+    // The recipe skipped alpha (`the_real_recipe_skips_a_cell_its_plan_reuses`).
+    fixture.record_evidence(
+        "pull_request",
+        fixture.main,
+        head_b,
+        &fixture.recipe_outcome(&[("beta", TestGate::Pass)]),
+    );
+    let view = receipt_view(&fixture.local_validation(head_b).expect("B's receipt"));
+    assert_eq!(view["base"], json!(fixture.main.to_string()), "{view:#}");
+    assert_eq!(cell_names(&view), ["beta/L1"]);
+}
+
+/// A follow-up to a pull request whose target advanced on the remote is
+/// reviewed against the advanced tip, and the prior evidence still covers
+/// alpha. What that push publishes is
+/// `an_advanced_non_main_target_publishes_exact_receipts`.
+#[test]
+fn an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts() {
+    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
+    fixture.planner_plan(&relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
+    )));
+    fixture.push_refs(&["refs/heads/main:refs/heads/parent"]);
+    fixture.open_pull_requests(&[(12, "parent")]);
+    // What a push of the feature into `parent`, then at main's tip, recorded.
+    let head_a = fixture.head();
+    fixture.record_evidence(
+        "pull_request",
+        fixture.main,
+        head_a,
+        &fixture.recipe_outcome(&[("alpha", TestGate::Pass), ("beta", TestGate::Pass)]),
+    );
+    let advanced = fixture.advance_remote("parent", "README.md", "advanced target\n");
+    let head = fixture.follow_up("docs.md", "head documentation");
+    fixture.capture_gate();
+
+    let run = fixture.push(Some("strict"), GITHUB_URL, &fixture.creating_feature_line());
+
+    run.assert_exit(0);
+    run.assert_says("pull request #12 into parent");
+    run.assert_says(&format!(
+        "Running pre-push validation from the reviewed plan of {} (base {})",
+        &head.to_string()[..9],
+        &advanced.to_string()[..9]
+    ));
+    assert_reuses_alpha_from(&fixture, head_a);
+}
+
+/// The receipts a push into an advanced non-main target publishes, locally
+/// and on the remote, bind the advanced tip.
+#[test]
+fn an_advanced_non_main_target_publishes_exact_receipts() {
+    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
+    fixture.planner_plan(&relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-executing.json"
+    )));
+    fixture.push_refs(&["refs/heads/main:refs/heads/parent"]);
+    fixture.open_pull_requests(&[(12, "parent")]);
+    let advanced = fixture.advance_remote("parent", "README.md", "advanced target\n");
+    let head = fixture.head();
+    let outcome = fixture.recipe_outcome(&[("alpha", TestGate::Pass)]);
+    fixture.model_gate(&outcome);
+
+    let run = fixture.push(Some("strict"), GITHUB_URL, &fixture.creating_feature_line());
+
+    run.assert_exit(0);
     let local = receipt_view(
         &fixture
             .local_validation(head)
             .expect("a receipt on the head"),
     );
     assert_eq!(local["base"], json!(advanced.to_string()), "{local:#}");
-    assert_eq!(cell_names(&local), ["beta/L1"]);
+    assert_eq!(cell_names(&local), ["alpha/L1"]);
     let scope = fixture
         .remote_scope_receipt(head)
         .expect("the scope receipt on the remote");
@@ -251,116 +626,56 @@ fn an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts()
         json!(fixture.plan_identity(&scope)),
         "{remote:#}"
     );
+    fixture.assert_retained_reports(head, &outcome);
 }
 
-#[cfg(unix)]
-#[test]
-fn a_docs_only_follow_up_skips_the_cells_prior_evidence_covers() {
-    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
-    fixture.stage_ci_local_harness(
-        &biscuit_test_harness::manifest_dir!()
-            .parent()
-            .unwrap()
-            .join("just/ci-local.just"),
-    );
-    fixture.planner_plan(&relabel(include_str!(
-        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
-    )));
-    fixture.recipe_just(TestGate::Pass, TestGate::Pass);
-    let head_a = fixture.head();
+// The verifier's retry decision, over prior evidence the real helpers
+// recorded.
 
-    let run = fixture.push_feature(Some("strict"));
-
-    run.assert_exit(0);
-    run.assert_says("Running pre-push validation from the reviewed plan");
-    assert!(
-        fixture.just_ran("_test alpha"),
-        "{:?}",
-        fixture.just_calls()
-    );
-    assert!(fixture.just_ran("_test beta"), "{:?}", fixture.just_calls());
-    fixture.assert_ci_local_never_selected();
-    let view = receipt_view(&fixture.local_validation(head_a).expect("A's receipt"));
-    assert_eq!(view["base"], json!(fixture.main.to_string()), "{view:#}");
-    assert_eq!(cell_names(&view), ["alpha/L1", "beta/L1"]);
-
-    let head_b = fixture.follow_up("README.md", "more documentation");
-    fixture.reset_logs();
-    let run = fixture.push_feature(Some("strict"));
-
-    run.assert_exit(0);
-    assert!(
-        !fixture.just_ran("_test alpha"),
-        "{:?}",
-        fixture.just_calls()
-    );
-    assert!(fixture.just_ran("_test beta"), "{:?}", fixture.just_calls());
-    assert!(
-        fixture.just_ran("_lint alpha"),
-        "{:?}",
-        fixture.just_calls()
-    );
-    run.assert_says("skip   alpha/L1");
-    fixture.assert_ci_local_never_selected();
-    let view = receipt_view(&fixture.local_validation(head_b).expect("B's receipt"));
-    assert_eq!(view["base"], json!(fixture.main.to_string()), "{view:#}");
-    assert_eq!(cell_names(&view), ["beta/L1"]);
-}
-
-#[cfg(unix)]
 #[test]
 fn a_follow_up_changing_a_packages_inputs_reruns_its_cell() {
     let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
-    fixture.stage_ci_local_harness(
-        &biscuit_test_harness::manifest_dir!()
-            .parent()
-            .unwrap()
-            .join("just/ci-local.just"),
-    );
     fixture.planner_plan(&relabel(include_str!(
         "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
     )));
-    fixture.recipe_just(TestGate::Pass, TestGate::Pass);
-    fixture.push_feature(Some("strict")).assert_exit(0);
-
-    let head_b = fixture.follow_up("pkg/alpha/src/lib.rs", "changed alpha");
-    fixture.reset_logs();
-    let run = fixture.push_feature(Some("strict"));
-
-    run.assert_exit(0);
-    assert!(
-        fixture.just_ran("_test alpha"),
-        "{:?}",
-        fixture.just_calls()
+    fixture.record_evidence(
+        "pull_request",
+        fixture.main,
+        fixture.head(),
+        &fixture.recipe_outcome(&[("alpha", TestGate::Pass), ("beta", TestGate::Pass)]),
     );
-    run.assert_says(&format!(
+    let head_b = fixture.follow_up("pkg/alpha/src/lib.rs", "changed alpha");
+    let plan_b = fixture.planned("pull_request", fixture.main, head_b);
+
+    let verified = fixture.verify(&plan_b, fixture.main, head_b);
+
+    assert!(
+        !verified.accepts("alpha"),
+        "prior evidence of changed inputs was accepted: {verified:#?}"
+    );
+    verified.assert_rejects(&format!(
         "gate-inputs-changed: alpha/{}/L1",
         fixture.environment
     ));
-    fixture.assert_ci_local_never_selected();
-    let view = receipt_view(&fixture.local_validation(head_b).expect("B's receipt"));
-    assert_eq!(view["base"], json!(fixture.main.to_string()), "{view:#}");
-    assert_eq!(cell_names(&view), ["alpha/L1", "beta/L1"]);
 }
 
-#[cfg(unix)]
+/// A follow-up's verification refuses a cell whose prior evidence is a
+/// complete failure, so the follow-up reruns it; that the rerun's pass then
+/// supersedes the failure is
+/// `a_rerun_cells_newest_pass_supersedes_its_prior_failure`.
 #[test]
 fn a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded() {
     let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
-    fixture.stage_ci_local_harness(
-        &biscuit_test_harness::manifest_dir!()
-            .parent()
-            .unwrap()
-            .join("just/ci-local.just"),
-    );
     fixture.planner_plan(&relabel(include_str!(
         "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
     )));
-    fixture.recipe_just(TestGate::Fail, TestGate::Pass);
     let head_a = fixture.head();
-
-    fixture.push_feature(Some("warn")).assert_exit(0);
-
+    fixture.record_evidence(
+        "pull_request",
+        fixture.main,
+        head_a,
+        &fixture.recipe_outcome(&[("alpha", TestGate::Fail), ("beta", TestGate::Pass)]),
+    );
     let view = receipt_view(&fixture.local_validation(head_a).expect("A's receipt"));
     assert_eq!(view["base"], json!(fixture.main.to_string()), "{view:#}");
     assert_eq!(cell_names(&view), ["alpha/L1", "beta/L1"]);
@@ -370,107 +685,214 @@ fn a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded() {
         json!("complete"),
         "{view:#}"
     );
-
-    fixture.recipe_just(TestGate::Pass, TestGate::Pass);
     let head_b = fixture.follow_up("README.md", "more documentation");
-    fixture.reset_logs();
-    let run = fixture.push_feature(Some("strict"));
+    let plan_b = fixture.planned("pull_request", fixture.main, head_b);
 
-    run.assert_exit(0);
+    let verified = fixture.verify(&plan_b, fixture.main, head_b);
+
     assert!(
-        fixture.just_ran("_test alpha"),
-        "{:?}",
-        fixture.just_calls()
+        !verified.accepts("alpha"),
+        "a failing prior cell was accepted: {verified:#?}"
     );
-    run.assert_says(&format!("failed-cell: alpha/{}/L1", fixture.environment));
-    run.assert_says("run    alpha/L1");
+    verified.assert_rejects(&format!("failed-cell: alpha/{}/L1", fixture.environment));
+}
+
+/// After a follow-up reran a cell whose prior evidence was a failure and it
+/// passed, verifying the follow-up's plan resolves the cell to the newest
+/// evidence: the follow-up's pass.
+#[test]
+fn a_rerun_cells_newest_pass_supersedes_its_prior_failure() {
+    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
+    fixture.planner_plan(&relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
+    )));
+    let head_a = fixture.head();
+    let head_b = fixture.follow_up("README.md", "more documentation");
+    let failed = fixture.recipe_outcome(&[("alpha", TestGate::Fail), ("beta", TestGate::Pass)]);
+    let passed = fixture.recipe_outcome(&[("alpha", TestGate::Pass), ("beta", TestGate::Pass)]);
+    fixture.record_runs(&[
+        ("pull_request", fixture.main, head_a, &failed),
+        ("pull_request", fixture.main, head_b, &passed),
+    ]);
     let view = receipt_view(&fixture.local_validation(head_b).expect("B's receipt"));
     assert_eq!(view["base"], json!(fixture.main.to_string()), "{view:#}");
     assert_eq!(cell_names(&view), ["alpha/L1", "beta/L1"]);
-    // Newest wins: verifying against B's plan resolves alpha/L1 to B's pass.
-    let plan_b = fixture.root().join("plan-b.json");
-    let scope = fixture.scope_receipt(head_b).expect("B's scope receipt");
-    std::fs::write(&plan_b, scope["plan"].to_string()).unwrap();
-    let verified = fixture
-        .python_command()
-        .current_dir(&fixture.repo)
-        .arg("scripts/ci/local_evidence.py")
-        .args(["verify", "--cells", "--plan"])
-        .arg(&plan_b)
-        .args([
-            "--base",
-            &fixture.main.to_string(),
-            "--head",
-            &head_b.to_string(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        verified.status.success(),
-        "{}",
-        String::from_utf8_lossy(&verified.stderr)
+
+    let verified = fixture.verify(
+        &fixture.planned("pull_request", fixture.main, head_b),
+        fixture.main,
+        head_b,
     );
-    let accepted: Value = serde_json::from_slice(&verified.stdout).unwrap();
-    let alpha: Vec<&Value> = accepted
-        .as_array()
-        .unwrap()
+
+    let alpha: Vec<&Value> = verified
+        .accepted
         .iter()
         .filter(|cell| cell["package"] == "alpha")
         .collect();
-    assert_eq!(alpha.len(), 1, "{accepted:#}");
-    assert_eq!(alpha[0]["outcome"], json!("pass"), "{accepted:#}");
+    assert_eq!(alpha.len(), 1, "{verified:#?}");
+    assert_eq!(alpha[0]["outcome"], json!("pass"), "{verified:#?}");
     assert_eq!(
         alpha[0]["evidence"]["commit"],
         json!(head_b.to_string()),
-        "{accepted:#}"
+        "{verified:#?}"
     );
 }
 
-#[cfg(unix)]
+// Interpreter selection reaches the recipe (acceptance criteria 1–2).
+
+/// `python3` is broken, and the interpreter `ci-push` would select instead
+/// (`py -3` on Windows, `python` elsewhere) is handed to the real recipe as
+/// `BISCUIT_CI_PYTHON` and its NUL-delimited prefix file: every helper the
+/// recipe starts runs under it, prefix first, and none goes back to
+/// `python3`.
 #[test]
-fn a_stacked_pull_request_records_its_target_tip_as_the_receipt_base() {
-    let (fixture, parent, child) = Evidence::stacked(false);
+fn a_real_recipe_runs_its_helpers_under_the_selected_fallback_interpreter() {
+    let fixture = Evidence::without_repository();
     fixture.stage_ci_local_harness(
         &biscuit_test_harness::manifest_dir!()
             .parent()
             .unwrap()
             .join("just/ci-local.just"),
     );
+    let plan = relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
+    ));
+    fixture.recipe_just(TestGate::Pass, TestGate::Pass);
+    fixture.add_stub(
+        "python3",
+        json!({ "exit": 9, "stderr": "Python was not found\n" }),
+    );
+    let (fallback, prefix) = fallback_interpreter();
+    fixture.add_stub(fallback, fixture.interpreter_stub(prefix));
+
+    let recipe = fixture.run_recipe(&plan, &fixture.tools.tool(fallback), prefix);
+
+    assert_eq!(
+        recipe.outcome,
+        fixture.recipe_outcome(&[("alpha", TestGate::Pass), ("beta", TestGate::Pass)]),
+        "{}",
+        recipe.run
+    );
+    assert!(fixture.just_ran("_test alpha"), "{:?}", fixture.just_calls());
+    assert!(fixture.just_ran("_test beta"), "{:?}", fixture.just_calls());
+    let invocations = fixture.tools.invocations();
+    assert!(
+        !invocations
+            .iter()
+            .any(|invocation| invocation["tool"] == "python3"),
+        "the recipe went back to python3: {invocations:#?}"
+    );
+    let calls: Vec<Vec<String>> = invocations
+        .iter()
+        .filter(|invocation| invocation["tool"] == fallback)
+        .map(|invocation| serde_json::from_value(invocation["argv"].clone()).unwrap())
+        .collect();
+    for call in &calls {
+        assert_eq!(call[..prefix.len()], *prefix, "{calls:#?}");
+    }
+    let helpers: Vec<String> = calls
+        .iter()
+        .map(|call| {
+            call.iter()
+                .skip(prefix.len())
+                .take(2)
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    for helper in [
+        "scripts/ci/constraints.py directory",
+        "scripts/ci/affected_scope.py --apply-to",
+    ] {
+        assert!(
+            helpers.iter().any(|call| call == helper),
+            "the recipe never ran {helper:?} under {fallback}: {helpers:#?}"
+        );
+    }
+    fixture.assert_ci_local_never_selected();
+}
+
+/// The interpreter `ci-push` selects when `python3` is broken, and the
+/// argument prefix it runs with: `py -3` on Windows, `python` elsewhere.
+fn fallback_interpreter() -> (&'static str, &'static [&'static str]) {
+    if cfg!(windows) {
+        ("py", &["-3"])
+    } else {
+        ("python", &[])
+    }
+}
+
+/// `ci-push` starts the gates as [`Evidence::run_recipe`] starts the real
+/// recipe: `just pre-push` from the checkout, fed the reviewed plan, with
+/// the staging outputs under one directory and named as the direct runs name
+/// them, and with the interpreter it selected (here the fallback, as
+/// `python3` is broken) and that interpreter's prefix, NUL-terminated.
+#[test]
+fn the_gates_are_started_as_the_direct_recipe_runs_start_them() {
+    use repo_deps::ci_push::python::{encode_prefix, PYTHON_VARIABLE};
+    let fixture = Evidence::with_feature("pkg/beta/src/lib.rs", "beta lib");
     fixture.planner_plan(&relabel(include_str!(
         "../../ci/fixtures/pre-push/plans/plan-macos-two-packages.json"
     )));
-    fixture.recipe_just(TestGate::Pass, TestGate::Pass);
-    fixture.open_pull_requests(&[(12, "parent")]);
-    let merge_base = fixture.git().merge_base(fixture.main, child).unwrap();
-    assert_ne!(
-        merge_base, parent,
-        "fixture error: the merge base with main is the parent tip"
+    fixture.add_stub(
+        "python3",
+        json!({ "exit": 9, "stderr": "Python was not found\n" }),
     );
+    // The fallback runs the real Python only when its prefix leads the argv.
+    let (fallback, prefix) = fallback_interpreter();
+    fixture.add_stub(
+        fallback,
+        json!({
+            "dispatch": [{ "args": prefix, "behavior": { "delegate": { "program": fixture.python } } }],
+            "stderr": "fixture fallback: the interpreter prefix is missing\n",
+            "exit": 96,
+        }),
+    );
+    fixture.capture_gate();
+    let head = fixture.head();
 
-    let run = fixture.push(
-        Some("strict"),
-        GITHUB_URL,
-        &format!("refs/heads/child {child} refs/heads/child {ZERO}"),
-    );
+    let run = fixture.push_feature(Some("strict"));
 
     run.assert_exit(0);
-    run.assert_says("pull request #12 into parent");
-    fixture.assert_ci_local_never_selected();
-    let view = receipt_view(
-        &fixture
-            .local_validation(child)
-            .expect("the child's receipt"),
+    let (gate, prefix_file) = fixture.gate_start();
+    assert_eq!(gate["argv"], json!(["pre-push"]), "{gate:#}");
+    assert!(
+        same_path(Path::new(gate["cwd"].as_str().unwrap()), &fixture.repo),
+        "{gate:#}"
     );
-    assert_eq!(view["base"], json!(parent.to_string()), "{view:#}");
-    assert_eq!(cell_names(&view), ["alpha/L1", "beta/L1"]);
-    let scope = fixture
-        .scope_receipt(child)
-        .expect("the child's scope receipt");
-    assert_eq!(
-        view["scope_identity"],
-        json!(fixture.plan_identity(&scope)),
-        "{view:#}"
+    let variable = |name: &str| -> PathBuf {
+        PathBuf::from(
+            gate["env"][name]
+                .as_str()
+                .unwrap_or_else(|| panic!("{name} was not set: {gate:#}")),
+        )
+    };
+    let staging = variable("BISCUIT_CI_REPORTS_OUT").parent().unwrap().to_path_buf();
+    for (name, file) in [
+        ("BISCUIT_CI_REPORTS_OUT", REPORTS_DIRECTORY),
+        ("BISCUIT_CI_PLAN_OUT", GATE_PLAN_FILE),
+        ("BISCUIT_CI_SCOPE_OUT", GATE_SCOPE_FILE),
+    ] {
+        assert_eq!(variable(name), staging.join(file), "{gate:#}");
+    }
+    assert_eq!(fixture.fed_plan()["head"], json!(head.to_string()));
+    assert!(variable("BISCUIT_CI_PLAN_IN").is_absolute(), "{gate:#}");
+    assert!(
+        same_path(&variable(PYTHON_VARIABLE), &fixture.tools.tool(fallback)),
+        "{gate:#}"
     );
+    let expected: Vec<std::ffi::OsString> = prefix.iter().map(Into::into).collect();
+    assert_eq!(prefix_file, encode_prefix(&expected).unwrap());
+    // python3 was asked the version probe only: neither ci-push nor a
+    // helper went back to it.
+    let broken = fixture
+        .tools
+        .invocations()
+        .into_iter()
+        .filter(|invocation| invocation["tool"] == "python3")
+        .count();
+    assert_eq!(broken, 1);
 }
 
 // ---------- gate outcomes and the publication guard (rows 17–20) ----------
@@ -643,6 +1065,8 @@ fn reports_that_cannot_be_retained_publish_no_receipt() {
 
 // ---------- complete failing runs (rows 35–36) ----------
 
+/// The hook's half of this row; CI's rerun is
+/// `ci_reruns_a_cell_whose_published_evidence_is_a_complete_failure`.
 #[test]
 fn a_blocked_strict_failure_publishes_its_note_but_ci_reruns_the_cell() {
     let plan = relabel(include_str!(
@@ -664,9 +1088,30 @@ fn a_blocked_strict_failure_publishes_its_note_but_ci_reruns_the_cell() {
         "the blocked branch reached the remote"
     );
     assert_remote_complete_failure(&fixture, head);
+}
 
-    // The `--no-verify` push of the same tree, then CI's view of it: a fresh
-    // clone with the notes, verifying with the committed helper.
+/// CI's view of the note a blocked strict failure published (see
+/// `a_blocked_strict_failure_publishes_its_note_but_ci_reruns_the_cell`),
+/// after the `--no-verify` push of the same tree: a fresh clone with the
+/// notes, verifying with the committed helper, refuses the failed cell, and
+/// the real overlay leaves it to CI. The note is recorded through the real
+/// helpers ([`Evidence::record_evidence`]).
+#[test]
+fn ci_reruns_a_cell_whose_published_evidence_is_a_complete_failure() {
+    let plan = relabel(include_str!(
+        "../../ci/fixtures/pre-push/plans/plan-macos-executing.json"
+    ));
+    let fixture = Evidence::new();
+    fixture.planner_plan(&plan);
+    let head = fixture.head();
+    fixture.record_evidence(
+        "pull_request",
+        fixture.main,
+        head,
+        &fixture.recipe_outcome(&[("alpha", TestGate::Fail)]),
+    );
+    assert_remote_complete_failure(&fixture, head);
+
     fixture.push_refs(&["refs/heads/feature:refs/heads/feature"]);
     let ci = fixture.root().join("ci");
     let clone = git2::Repository::clone(fixture.origin.to_str().unwrap(), &ci).unwrap();

@@ -28,7 +28,8 @@ use super::{
 /// Where a context's committed tree was read from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeSource {
-    /// The clean checkout is the reviewed revision.
+    /// The checkout was clean at the reviewed revision when the tree was
+    /// chosen.
     Checkout,
     /// A temporary detached worktree of the reviewed revision.
     Temporary,
@@ -77,6 +78,10 @@ pub(super) struct ScopeReceipt {
 pub(super) struct PushReview {
     /// HEAD when the review started.
     pub head: ObjectId,
+    /// The checkout had uncommitted changes when the review started. This
+    /// alone withholds validation; tree selection and plan reuse also
+    /// re-read the current state, because the checkout can change during
+    /// the push.
     pub initial_dirty: bool,
     /// A reviewed branch update pushes HEAD's commit.
     pub pushes_head: bool,
@@ -191,13 +196,16 @@ fn review_update(
         ContextError::Problem(problem) => blocked(problem),
     })?;
 
-    // The checkout serves as the committed tree only when it IS that tree.
+    // The checkout serves as the committed tree only when it IS that tree
+    // now. Python selection and the remote lookups above take time in which
+    // an editor or another checkout can change it, so the push-start
+    // snapshot alone cannot authorize reuse.
     let why_temporary = if trigger != review.head {
         Some(format!("{} is not HEAD", short(trigger)))
     } else if review.initial_dirty {
         Some("the checkout has uncommitted changes".to_owned())
     } else {
-        None
+        checkout_departure(flow, trigger)
     };
     let (root, tree) = match why_temporary {
         None => (flow.session.root().to_path_buf(), TreeSource::Checkout),
@@ -243,6 +251,21 @@ fn review_update(
         }
     }
     result
+}
+
+/// Why the checkout, as it is now, is not the clean committed tree of
+/// `trigger`; `None` when it is. A state that cannot be read is a reason.
+fn checkout_departure(flow: &mut Flow<'_, '_>, trigger: ObjectId) -> Option<String> {
+    match flow.session.head() {
+        Ok(head) if head.commit == trigger => {}
+        Ok(_) => return Some(format!("HEAD moved off {} after the push began", short(trigger))),
+        Err(error) => return Some(format!("the checkout's HEAD cannot be read: {error}")),
+    }
+    match flow.session.is_dirty() {
+        Ok(false) => None,
+        Ok(true) => Some("the checkout has uncommitted changes".to_owned()),
+        Err(error) => Some(format!("the checkout's status cannot be read: {error}")),
+    }
 }
 
 /// The update-level facts one context's review needs.

@@ -683,10 +683,12 @@ fn run_gates(
 
     // The reviewed plan is fed to the gates only when the run it describes is
     // the run this checkout can perform: HEAD's committed tree IS the working
-    // tree, HEAD has not moved, and the selection is the plan's. Otherwise
-    // `ci-local` replans from the working tree for feedback, and the
-    // validation receipt is withheld.
+    // tree, both at the push's start and now (HEAD unmoved, still clean),
+    // and the selection is the plan's. Otherwise `ci-local` replans from the
+    // working tree for feedback, and the validation receipt is withheld. An
+    // unreadable HEAD or status counts as changed.
     let head_now = flow.session.head().map(|head| head.commit).ok();
+    let dirty_now = flow.session.is_dirty().unwrap_or(true);
     let comparison = review.first.as_ref().filter(|first| !first.base.is_null());
     let plan_in = if !selection.is_empty() {
         flow.info(format!(
@@ -699,6 +701,9 @@ fn run_gates(
         None
     } else if head_now != Some(review.head) {
         flow.info("Running pre-push validation for source-changed packages, replanned from the working tree\n(HEAD moved after the review, so the reviewed plan is not this tree's; nothing is published)");
+        None
+    } else if dirty_now {
+        flow.info("Running pre-push validation for source-changed packages, replanned from the working tree\n(the checkout changed after the review, or its status cannot be read, so the reviewed plan is not this tree's; nothing is published)");
         None
     } else if let Some(first) = comparison {
         flow.info(format!(

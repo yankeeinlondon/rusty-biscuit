@@ -37,7 +37,9 @@ impl Fixture {
             .open(fixture.root.join(".git/config"))
             .unwrap();
         config
-            .write_all(b"[user]\n\tname = Fixture\n\temail = fixture@example.com\n")
+            // Persisted, unlike `command`'s `-c`: production code runs Git in
+            // this repository with Git for Windows' system `autocrlf=true`.
+            .write_all(b"[user]\n\tname = Fixture\n\temail = fixture@example.com\n[core]\n\tautocrlf = false\n")
             .unwrap();
         fixture
     }

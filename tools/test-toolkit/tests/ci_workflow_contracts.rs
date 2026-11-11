@@ -5709,7 +5709,7 @@ fn no_guard_consumer_derives_its_own_source_scope() {
         "the lint job must not re-derive the scan scope it was handed"
     );
     let local = read("just/ci-local.just")
-        .split_once("        guard_planned=false\n")
+        .split_once("        if (( run_lint == 1 )) && [[ \"${guard_planned}\" == \"true\" ]]; then\n")
         .map(|(_, rest)| {
             rest.split("\n        if (( run_test")
                 .next()

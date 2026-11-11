@@ -85,6 +85,16 @@ pub(super) enum Call {
     Gates { selection: Vec<String>, variables: HashMap<String, String> },
 }
 
+/// A one-shot change to the checkout, made while a named session call runs:
+/// an editor saving a file or another process checking out a commit.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Transition {
+    Dirty,
+    Head(ObjectId),
+    UnreadableHead,
+    UnreadableStatus,
+}
+
 /// What `gh pr list` answers.
 pub(super) enum Gh {
     Missing,
@@ -147,6 +157,10 @@ pub(super) struct Fake {
     pub(super) environment: Option<&'static str>,
     pub(super) variables: HashMap<String, OsString>,
     pub(super) note_fails: bool,
+    /// `(call, change)`: applied once, during `select-python` or `note`.
+    pub(super) transition: Option<(&'static str, Transition)>,
+    pub(super) head_unreadable: bool,
+    pub(super) status_unreadable: bool,
     cancelled: Cell<Option<CancelSignal>>,
     /// The `--arguments-file` contents each planner run was handed.
     arguments_seen: Vec<Vec<u8>>,
@@ -191,6 +205,9 @@ impl Fake {
             environment: Some("macos-latest"),
             variables,
             note_fails: false,
+            transition: None,
+            head_unreadable: false,
+            status_unreadable: false,
             cancelled: Cell::new(None),
             arguments_seen: Vec::new(),
             counts: HashMap::new(),
@@ -241,6 +258,21 @@ impl Fake {
             .collect()
     }
 
+    fn transition(&mut self, call: &'static str) {
+        match self.transition {
+            Some((name, change)) if name == call => {
+                self.transition = None;
+                match change {
+                    Transition::Dirty => self.dirty = true,
+                    Transition::Head(head) => self.head = head,
+                    Transition::UnreadableHead => self.head_unreadable = true,
+                    Transition::UnreadableStatus => self.status_unreadable = true,
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn step(&mut self, step: &'static str) -> Option<i32> {
         let count = self.counts.entry(step).or_insert(0);
         *count += 1;
@@ -271,6 +303,9 @@ impl PushSession for Fake {
     }
 
     fn head(&mut self) -> Result<HeadIdentity, GitError> {
+        if self.head_unreadable {
+            return Err(GitError::UnbornHead);
+        }
         Ok(HeadIdentity {
             commit: self.head,
             branch: Some("refs/heads/feature".to_owned()),
@@ -278,11 +313,18 @@ impl PushSession for Fake {
     }
 
     fn is_dirty(&mut self) -> Result<bool, GitError> {
+        if self.status_unreadable {
+            return Err(GitError::Read {
+                operation: "status".to_owned(),
+                message: "index locked".to_owned(),
+            });
+        }
         Ok(self.dirty)
     }
 
     fn select_python(&mut self) -> Result<(), PythonSelectionError> {
         self.calls.push(Call::SelectPython);
+        self.transition("select-python");
         if self.python_missing {
             Err(PythonSelectionError::NoInterpreter(Vec::new()))
         } else {
@@ -407,6 +449,7 @@ impl PushSession for Fake {
 
     fn publish_scope_note(&mut self, _receipt: &[u8], head: ObjectId) -> Result<(), String> {
         self.calls.push(Call::Note(head));
+        self.transition("note");
         if self.note_fails {
             Err("the remote refused the notes ref".to_owned())
         } else {
@@ -936,6 +979,30 @@ fn the_clean_checkout_is_planned_in_place() {
     assert!(!fake.calls.iter().any(|call| matches!(call, Call::Materialize(_) | Call::Release)));
 }
 
+/// The checkout changes after the push-start snapshot, while the
+/// interpreter is selected: the committed tree is materialized from the
+/// pushed commit, and the scope of that committed tree still publishes.
+#[rstest]
+#[case::dirtied(Transition::Dirty, "the checkout has uncommitted changes")]
+#[case::head_moved(Transition::Head(id(OTHER)), "HEAD moved off 111111111")]
+#[case::unreadable_head(Transition::UnreadableHead, "HEAD cannot be read")]
+#[case::unreadable_status(Transition::UnreadableStatus, "status cannot be read")]
+fn a_checkout_that_changes_before_tree_selection_is_not_reused(#[case] change: Transition, #[case] why: &str) {
+    let mut fake = Fake::new();
+    fake.transition = Some(("select-python", change));
+    let (outcome, fake) = push(fake, "scope-only", None, &feature(HEAD));
+    assert_eq!(outcome.exit_code, 0, "{:#?}", outcome.diagnostics);
+    assert_eq!(outcome.reviews[0].trigger, id(HEAD));
+    assert_eq!(outcome.reviews[0].tree, TreeSource::Temporary);
+    assert!(fake.calls.contains(&Call::Materialize(id(HEAD))));
+    let planner = &fake.python_args("affected_scope.py --event")[0];
+    assert!(Path::new(&planner[0]).starts_with(fake.root.parent().unwrap().join("tree-1")));
+    assert_eq!(value(planner, "--head"), HEAD);
+    assert_eq!(outcome.scope, ScopePublication::Published { base: id(MAIN_TIP) });
+    assert!(fake.calls.contains(&Call::Note(id(HEAD))));
+    assert!(fake.emitted.iter().any(|line| line.contains(why)), "{:#?}", fake.emitted);
+}
+
 #[test]
 fn a_temporary_tree_is_released_when_its_review_fails() {
     let mut fake = Fake::new();
@@ -1098,6 +1165,29 @@ fn a_refused_scope_recording_still_feeds_the_reviewed_plan_to_the_gates() {
 }
 
 // ----------------------------------------------------------------- gates --
+
+/// The checkout changes after the review, while scope is published: the
+/// gates get no reviewed plan, so they replan, and validation is withheld.
+#[rstest]
+#[case::dirtied(Transition::Dirty, WithholdReason::FinalDirty)]
+#[case::unreadable_status(Transition::UnreadableStatus, WithholdReason::FinalDirty)]
+#[case::head_moved(Transition::Head(id(OTHER)), WithholdReason::HeadChanged)]
+#[case::unreadable_head(Transition::UnreadableHead, WithholdReason::HeadChanged)]
+fn a_checkout_that_changes_before_the_gates_replans_and_publishes_no_validation(
+    #[case] change: Transition,
+    #[case] reason: WithholdReason,
+) {
+    let mut fake = Fake::new();
+    fake.transition = Some(("note", change));
+    let (outcome, fake) = push(fake, "strict", None, &main_push(MAIN_TIP));
+    assert_eq!(outcome.exit_code, 0, "{:#?}", outcome.diagnostics);
+    assert_eq!(outcome.reviews[0].tree, TreeSource::Checkout);
+    assert_eq!(outcome.scope, ScopePublication::Published { base: id(MAIN_TIP) });
+    assert!(!gate_variables(&fake).contains_key("BISCUIT_CI_PLAN_IN"), "the gates replan");
+    assert_eq!(outcome.gates.as_ref().unwrap().plan_in, None);
+    assert_eq!(outcome.validation, Some(Validation::Withheld(reason)));
+    assert!(fake.python_args("local_evidence.py record-cells").is_empty());
+}
 
 fn gate_variables(fake: &Fake) -> HashMap<String, String> {
     match fake.gate_calls().as_slice() {

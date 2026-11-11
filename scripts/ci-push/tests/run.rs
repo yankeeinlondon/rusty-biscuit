@@ -125,13 +125,24 @@ fn a_readable_selection_never_blocks(#[case] selection: Option<&str>) {
     assert_eq!(recorder.discoveries.len(), 1);
 }
 
+/// A selection that is not Unicode: invalid UTF-8 on Unix, an unpaired
+/// surrogate on Windows.
 #[cfg(unix)]
+fn not_unicode() -> OsString {
+    use std::os::unix::ffi::OsStringExt;
+    OsString::from_vec(b"repo-\xffdeps".to_vec())
+}
+
+#[cfg(windows)]
+fn not_unicode() -> OsString {
+    use std::os::windows::ffi::OsStringExt;
+    OsString::from_wide(&[u16::from(b'r'), 0xD800, u16::from(b'd')])
+}
+
 #[test]
 fn an_unreadable_selection_blocks_before_discovery() {
-    use std::os::unix::ffi::OsStringExt;
-
     let mut push = request(Some("strict"), "");
-    push.selection = Some(OsString::from_vec(b"repo-\xffdeps".to_vec()));
+    push.selection = Some(not_unicode());
     let (outcome, recorder) = decide(push);
     assert_eq!(outcome.exit_code, 1);
     assert!(matches!(outcome.diagnostics[..], [Diagnostic::Blocked(BlockReason::InvalidSelection(_))]));

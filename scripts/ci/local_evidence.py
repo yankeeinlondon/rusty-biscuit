@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import re
 import subprocess
@@ -83,8 +84,60 @@ def git_optional(*args: str) -> str | None:
         return None
 
 
+#: Revisions this process resolved through [`prefetch_revisions`], keyed by
+#: the directory Git ran in. Only names whose answer can never change are kept
+#: (a full object ID, alone or peeled to its tree), so an entry is exactly what
+#: `git rev-parse --verify` would print for it again.
+_RESOLVED: dict[tuple[str, str], str] = {}
+_IMMUTABLE_NAME = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})(?:\^\{tree\})?")
+_OBJECT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def _directory(repo: Path | str | None) -> str:
+    return os.path.abspath(repo) if repo is not None else os.getcwd()
+
+
+def prefetch_revisions(*names: str, repo: Path | str | None = None) -> dict[str, str | None]:
+    """What each of `names` resolves to, from one `git cat-file --batch-check`.
+
+    A Git process costs tens of milliseconds on native Windows, and a helper
+    otherwise starts one per revision it resolves. The answer maps each name
+    to its object ID, or to `None` when it names no object (an absent notes
+    ref, say); it is empty when Git cannot be asked, which callers read as
+    "ask again the ordinary way". Immutable names that resolved are remembered
+    for [`revision`]; a name that did not resolve is not, so its later
+    `revision` call fails (or, for a well-formed object ID Git has not got,
+    succeeds) exactly as `git rev-parse --verify` decides.
+    """
+    unique = list(dict.fromkeys(names))
+    try:
+        lines = subprocess.run(
+            ["git", "cat-file", "--batch-check=%(objectname)"],
+            input="".join(f"{name}\n" for name in unique),
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=20,
+        ).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if len(lines) != len(unique):
+        return {}
+    directory = _directory(repo)
+    resolved: dict[str, str | None] = {}
+    for name, line in zip(unique, lines):
+        found = line if _OBJECT_ID.fullmatch(line) else None
+        resolved[name] = found
+        if found is not None and _IMMUTABLE_NAME.fullmatch(name):
+            _RESOLVED[(directory, name)] = found
+    return resolved
+
+
 def revision(ref: str) -> str:
-    value = git("rev-parse", "--verify", ref)
+    value = _RESOLVED.get((_directory(None), ref))
+    if value is None:
+        value = git("rev-parse", "--verify", ref)
     if not re.fullmatch(r"[0-9a-f]{40}", value):
         raise ValueError(f"not a full Git object ID: {value}")
     return value
@@ -189,6 +242,11 @@ def just_gate_inputs(gate: str, ref: str) -> list[str]:
     return entries
 
 
+#: Paths per `git ls-tree` in [`gate_input_identity`]: few enough that the
+#: command line stays far below Windows' 32 KiB limit.
+LS_TREE_BATCH = 64
+
+
 def gate_input_identity(
     paths: list[str] | tuple[str, ...], ref: str, gate: str | None = None
 ) -> str:
@@ -209,11 +267,20 @@ def gate_input_identity(
     after = gate_input_identity(["claudine/lib"], "HEAD", "L1")
     ```
     """
+    wanted = sorted({path for path in paths if path})
     entries: list[str] = []
-    for path in sorted({path for path in paths if path}):
-        listing = git_optional("ls-tree", "-r", "--full-tree", ref, "--", path)
-        if listing:
-            entries.extend(line for line in listing.splitlines() if line.strip())
+    # One listing per batch of paths: Git lists the union of its pathspecs,
+    # which is the union the identity takes. A batch Git refuses is listed
+    # again path by path, so one unlistable path still drops only itself.
+    for start in range(0, len(wanted), LS_TREE_BATCH):
+        batch = wanted[start : start + LS_TREE_BATCH]
+        listing = git_optional("ls-tree", "-r", "--full-tree", ref, "--", *batch)
+        listings = [listing] if listing is not None else [
+            git_optional("ls-tree", "-r", "--full-tree", ref, "--", path) for path in batch
+        ]
+        for listed in listings:
+            if listed:
+                entries.extend(line for line in listed.splitlines() if line.strip())
     ordered = sorted(set(entries))
     if gate is not None:
         ordered.extend(just_gate_inputs(gate, ref))
@@ -257,7 +324,9 @@ ZERO_REVISION = "0" * 40
 ANCESTOR_NOTE_LIMIT = 500
 
 
-def candidate_commits(base: str, head: str) -> list[str]:
+def candidate_commits(
+    base: str, head: str, absent: frozenset[str] = frozenset()
+) -> list[str]:
     """Commits a note may be attached to, newest first.
 
     The outgoing head, everything it added over `base`, and `base` itself: the
@@ -268,10 +337,11 @@ def candidate_commits(base: str, head: str) -> list[str]:
     An all-zero `base` is a bootstrap: there is no boundary to diff against, so
     the candidates are the annotated commits reachable from `head`. That search
     asks Git about each annotated commit rather than walking every commit, and
-    keeps the newest [`ANCESTOR_NOTE_LIMIT`].
+    keeps the newest [`ANCESTOR_NOTE_LIMIT`]. `absent` names environments
+    whose notes ref is known not to exist, so their (empty) list is not asked.
     """
     if base == ZERO_REVISION:
-        return _annotated_ancestors(head)
+        return _annotated_ancestors(head, absent)
     listing = git_optional("rev-list", f"{base}..{head}")
     commits = listing.splitlines() if listing else []
     if head not in commits:
@@ -281,9 +351,11 @@ def candidate_commits(base: str, head: str) -> list[str]:
     return commits
 
 
-def _annotated_ancestors(head: str) -> list[str]:
+def _annotated_ancestors(head: str, absent: frozenset[str] = frozenset()) -> list[str]:
     noted: set[str] = set()
     for environment in ENVIRONMENTS:
+        if environment in absent:
+            continue
         listing = git_optional("notes", "--ref", f"{NOTES_PREFIX}/{environment}", "list")
         for line in (listing or "").splitlines():
             fields = line.split()
@@ -495,6 +567,12 @@ def _resolve(
     `blocked` maps each cell its qualifying evidence keeps scheduled to why.
     """
     rejections: list[str] = []
+    note_refs = {environment: f"{NOTES_PREFIX}/{environment}" for environment in ENVIRONMENTS}
+    resolved = prefetch_revisions(head, f"{head}^{{tree}}", *note_refs.values())
+    # A ref that does not exist lists no notes; `git notes list` is not asked.
+    absent = frozenset(
+        environment for environment, ref in note_refs.items() if ref in resolved and resolved[ref] is None
+    )
     try:
         head_sha = revision(head)
         boundary = (
@@ -507,11 +585,13 @@ def _resolve(
     wanted = {
         (cell["package"], cell["environment"], cell["gate"]) for cell in plan["cells"]
     }
-    commits = candidate_commits(boundary, head_sha)
+    commits = candidate_commits(boundary, head_sha, absent=absent)
     order = {commit: index for index, commit in enumerate(commits)}
 
     candidates: list[_Candidate] = []
     for environment in ENVIRONMENTS:
+        if environment in absent:
+            continue
         for note_commit, note_text in candidate_notes(environment, commits):
             candidates.extend(
                 _read_note(
@@ -1057,6 +1137,7 @@ def record_scope(plan_path: str, scope_path: str, base: str, head: str) -> str:
     document would not validate. The comparison base may be an advanced PR
     target; verification still requires this exact base, head, and tree.
     """
+    prefetch_revisions(head, base, f"{head}^{{tree}}")
     head_sha = revision(head)
     base_sha = revision(base)
     plan = load_plan(plan_path)
@@ -1337,6 +1418,8 @@ def record_cells(
     the assembled document would not validate — publishing an invalid receipt
     is worse than publishing none, because CI would reject it silently later.
     """
+    # The receipt resolves these three; one Git process answers them all.
+    prefetch_revisions(head, base, f"{head}^{{tree}}")
     head_sha = revision(head)
     plan = load_plan(plan_path)
     problems = schema.validate_resolved_plan(plan)

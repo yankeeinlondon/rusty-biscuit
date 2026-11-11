@@ -665,8 +665,8 @@ else:
 "#;
 
 /// Through `launch`: an auto-mode push of a branch no CI run follows is
-/// reviewed and runs no gate; a strict push of `main` runs the gates.
-fn the_real_ci_push_reviews_auto_and_strict_pushes(launch: Launch, repository: &HookRepository) {
+/// reviewed, runs no gate, and goes through.
+fn an_auto_push_is_reviewed_without_gates(launch: Launch, repository: &HookRepository) {
     let second = commit_change(repository.main(), "second");
     let topic = git2::Repository::open(repository.main())
         .unwrap()
@@ -676,19 +676,21 @@ fn the_real_ci_push_reviews_auto_and_strict_pushes(launch: Launch, repository: &
         .unwrap();
     let tools = forwarding_cargo();
     let path = repository.host_path(&[tools.bin()]);
-    let gates = |tools: &Fixture| {
-        tools
-            .invocations()
-            .iter()
-            .filter(|call| call["tool"] == "just")
-            .count()
-    };
 
     let auto = repository.push(launch, repository.main(), &path, &["origin", "topic"], &[]);
+
     assert_pushed(&auto);
     assert!(stderr(&auto).contains("No gate runs"), "{}", stderr(&auto));
-    assert_eq!(gates(&tools), 0);
+    assert_eq!(gate_runs(&tools), 0);
     assert_eq!(repository.remote_tip("refs/heads/topic"), Some(topic));
+}
+
+/// Through `launch`: a strict push of `main` runs the gates and goes
+/// through.
+fn a_strict_push_runs_the_gates(launch: Launch, repository: &HookRepository) {
+    let second = commit_change(repository.main(), "second");
+    let tools = forwarding_cargo();
+    let path = repository.host_path(&[tools.bin()]);
 
     let strict = repository.push(
         launch,
@@ -697,18 +699,27 @@ fn the_real_ci_push_reviews_auto_and_strict_pushes(launch: Launch, repository: &
         &["origin", "main"],
         &[("RUSTY_BISCUIT_PRE_PUSH", "strict")],
     );
+
     assert_pushed(&strict);
     assert!(
         stderr(&strict).contains("Pre-push validation passed."),
         "{}",
         stderr(&strict)
     );
-    assert_eq!(gates(&tools), 1);
+    assert_eq!(gate_runs(&tools), 1);
     assert_eq!(repository.remote_tip("refs/heads/main"), Some(second));
 }
 
+fn gate_runs(tools: &Fixture) -> usize {
+    tools
+        .invocations()
+        .iter()
+        .filter(|call| call["tool"] == "just")
+        .count()
+}
+
 #[test]
-fn the_real_ci_push_reviews_an_auto_push_without_gates_and_a_strict_push_with_them() {
+fn the_real_ci_push_reviews_an_auto_push_without_gates() {
     let repository = HookRepository::new(
         include_str!("../../../.githooks/pre-push-dispatcher"),
         &[
@@ -721,12 +732,29 @@ fn the_real_ci_push_reviews_an_auto_push_without_gates_and_a_strict_push_with_th
             ),
         ],
     );
-    the_real_ci_push_reviews_auto_and_strict_pushes(Launch::Direct, &repository);
+    an_auto_push_is_reviewed_without_gates(Launch::Direct, &repository);
+}
+
+#[test]
+fn the_real_ci_push_runs_the_gates_of_a_strict_push() {
+    let repository = HookRepository::new(
+        include_str!("../../../.githooks/pre-push-dispatcher"),
+        &[
+            (HOOK, include_str!("../../../.githooks/pre-push")),
+            ("scripts/ci/affected_scope.py", AFFECTED_SCOPE),
+            ("scripts/ci/local_evidence.py", LOCAL_EVIDENCE),
+            (
+                "scripts/ci/plan.json",
+                include_str!("../../ci/fixtures/pre-push/plans/plan-macos-executing.json"),
+            ),
+        ],
+    );
+    a_strict_push_runs_the_gates(Launch::Direct, &repository);
 }
 
 #[cfg(windows)]
 #[test]
-fn windows_git_bash_pushes_through_the_launcher_to_the_real_ci_push() {
+fn windows_git_bash_auto_push_reaches_the_real_ci_push_through_the_launcher() {
     let repository = HookRepository::new(
         include_str!("../../../.githooks/pre-push-dispatcher"),
         &[
@@ -739,12 +767,12 @@ fn windows_git_bash_pushes_through_the_launcher_to_the_real_ci_push() {
             ),
         ],
     );
-    the_real_ci_push_reviews_auto_and_strict_pushes(Launch::GitBash, &repository);
+    an_auto_push_is_reviewed_without_gates(Launch::GitBash, &repository);
 }
 
 #[cfg(windows)]
 #[test]
-fn windows_powershell_pushes_through_the_launcher_to_the_real_ci_push() {
+fn windows_git_bash_strict_push_reaches_the_real_ci_push_through_the_launcher() {
     let repository = HookRepository::new(
         include_str!("../../../.githooks/pre-push-dispatcher"),
         &[
@@ -757,5 +785,41 @@ fn windows_powershell_pushes_through_the_launcher_to_the_real_ci_push() {
             ),
         ],
     );
-    the_real_ci_push_reviews_auto_and_strict_pushes(Launch::PowerShell, &repository);
+    a_strict_push_runs_the_gates(Launch::GitBash, &repository);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_powershell_auto_push_reaches_the_real_ci_push_through_the_launcher() {
+    let repository = HookRepository::new(
+        include_str!("../../../.githooks/pre-push-dispatcher"),
+        &[
+            (HOOK, include_str!("../../../.githooks/pre-push")),
+            ("scripts/ci/affected_scope.py", AFFECTED_SCOPE),
+            ("scripts/ci/local_evidence.py", LOCAL_EVIDENCE),
+            (
+                "scripts/ci/plan.json",
+                include_str!("../../ci/fixtures/pre-push/plans/plan-macos-executing.json"),
+            ),
+        ],
+    );
+    an_auto_push_is_reviewed_without_gates(Launch::PowerShell, &repository);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_powershell_strict_push_reaches_the_real_ci_push_through_the_launcher() {
+    let repository = HookRepository::new(
+        include_str!("../../../.githooks/pre-push-dispatcher"),
+        &[
+            (HOOK, include_str!("../../../.githooks/pre-push")),
+            ("scripts/ci/affected_scope.py", AFFECTED_SCOPE),
+            ("scripts/ci/local_evidence.py", LOCAL_EVIDENCE),
+            (
+                "scripts/ci/plan.json",
+                include_str!("../../ci/fixtures/pre-push/plans/plan-macos-executing.json"),
+            ),
+        ],
+    );
+    a_strict_push_runs_the_gates(Launch::PowerShell, &repository);
 }

@@ -34,7 +34,6 @@ ROOT = Path(__file__).resolve().parents[2]
 RECIPE = ROOT / "just" / "ci-local.just"
 DEVOPS = ROOT / "just" / "devops.just"
 CONSTRAINTS = ROOT / "scripts" / "ci" / "constraints.py"
-PRE_PUSH = ROOT / ".githooks" / "pre-push"
 JUST = shutil.which("just")
 
 #: The only job that runs this suite. `preflight` does not, so the tools below
@@ -88,13 +87,6 @@ def clean_policy_environment() -> dict[str, str]:
     ):
         environment.pop(key, None)
     return environment
-
-
-class PrePushEvidenceContractTests(unittest.TestCase):
-    def test_a_same_head_retry_preserves_reports_and_merges_the_prior_receipt(self) -> None:
-        hook = PRE_PUSH.read_text(encoding="utf-8")
-        self.assertNotIn('rm -rf "$REPORT_DIR"', hook)
-        self.assertIn('--prior-receipt "$PRIOR_RECEIPT_FILE"', hook)
 
 
 def gate_loop_package(name: str, **overrides: object) -> dict:

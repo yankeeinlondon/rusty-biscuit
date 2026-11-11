@@ -368,10 +368,23 @@ ci-local *args="":
         packages="$(jq -r '.packages[]' "${scope_file}")"
     fi
 
-    count="$(sed '/^$/d' <<< "${packages}" | wc -l | tr -d ' ')"
-    full_scope="$(jq -r '.full_scope' "${scope_file}")"
-    change_class="$(jq -r '.change_class' "${scope_file}")"
-    full_gates="$(jq -rc '.full_scope_gates | join(",")' "${scope_file}")"
+    # Counted and read without a process per fact: each one is a fork and a
+    # program start, which costs tens of milliseconds under Git Bash on
+    # native Windows.
+    count=0
+    while IFS= read -r listed; do
+        if [[ -n "${listed}" ]]; then
+            count=$(( count + 1 ))
+        fi
+    done <<< "${packages}"
+    scope_facts="$(jq -r '.full_scope, .change_class, (.full_scope_gates | join(","))' "${scope_file}")"
+    scope_fact=()
+    while IFS= read -r line; do
+        scope_fact+=("${line}")
+    done <<< "${scope_facts}"
+    full_scope="${scope_fact[0]:-}"
+    change_class="${scope_fact[1]:-}"
+    full_gates="${scope_fact[2]:-}"
     if [[ -n "${scope_out}" ]]; then
         cp "${scope_file}" "${scope_out}"
     fi
@@ -594,25 +607,55 @@ ci-local *args="":
     if [[ -n "${plan_in}" ]]; then
         # A narrowed test-input cell runs through its own step below, never as
         # the package's whole tier.
-        running_cells="$(jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | select((.test_filter // "") == "") | select(.execution == "execute" or (.execution == "reuse" and .evidence.outcome == "fail")) | "\(.package)/\(.gate)"' "${plan_file}")"
+        # One `jq` reads both: each cell's listing line (`P `), preceded by
+        # `R ` and the cell's name when it runs here.
+        cell_lines="$(jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | (select((.test_filter // "") == "") | select(.execution == "execute" or (.execution == "reuse" and .evidence.outcome == "fail")) | "R \(.package)/\(.gate)"), "P " + (if .execution == "execute" then "  run    \(.package)/\(.gate)" elif .execution == "reuse" and .evidence.outcome == "fail" then "  rerun  \(.package)/\(.gate)  (prior evidence is a failure; a fresh result supersedes it)" elif .execution == "reuse" then "  skip   \(.package)/\(.gate)  (reused: \(.origin) \(.evidence.outcome // "") on \((.evidence.evidence.commit // .evidence.commit // "this tree")[0:9]))" else "  skip   \(.package)/\(.gate)  (\(.state))" end)' "${plan_file}")"
         echo "Cells for ${local_environment} from the supplied plan:"
-        jq -r --arg e "${local_environment}" '.cells[] | select(.environment == $e and (.gate == "L1" or .gate == "L2")) | if .execution == "execute" then "  run    \(.package)/\(.gate)" elif .execution == "reuse" and .evidence.outcome == "fail" then "  rerun  \(.package)/\(.gate)  (prior evidence is a failure; a fresh result supersedes it)" elif .execution == "reuse" then "  skip   \(.package)/\(.gate)  (reused: \(.origin) \(.evidence.outcome // "") on \((.evidence.evidence.commit // .evidence.commit // "this tree")[0:9]))" else "  skip   \(.package)/\(.gate)  (\(.state))" end' "${plan_file}"
+        while IFS= read -r line; do
+            case "${line}" in
+                "R "*) running_cells+="${line#R }"$'\n' ;;
+                "P "*) printf '%s\n' "${line#P }" ;;
+            esac
+        done <<< "${cell_lines}"
         echo "------------------------------------------------"
     fi
+    # An exact line of `running_cells`, matched without starting a `grep`.
     cell_runs_here() {
         [[ -z "${plan_in}" ]] && return 0
-        grep -qxF -- "$1/$2" <<< "${running_cells}"
+        [[ $'\n'"${running_cells}" == *$'\n'"$1/$2"$'\n'* ]]
     }
 
     while IFS= read -r package; do
         [[ -n "${package}" ]] || continue
-        # The plan's package record; empty for a package the plan does not
-        # carry, which then runs no gate.
-        record="$(jq -c --arg p "${package}" '.packages[] | select(.package == $p)' "${plan_file}")"
-        test_args="$(jq -r '.test_args // ""' <<< "${record}")"
-        # The plan spells each test tier as its own gate; this loop runs them
-        # under one `test` gate, with L2 selected separately below.
-        gates="$(jq -r '[.gates[] | if . == "lint" or . == "check" then . else "test" end] | unique | join(" ")' <<< "${record}")"
+        # Every fact the gates below read from the plan, one per line, in one
+        # `jq` (each is explained where it is used). Nothing in this loop
+        # rewrites the plan, so reading them before the first gate runs reads
+        # what each gate would have read. An empty plan prints nothing, and
+        # every fact is then empty.
+        #
+        # The plan's package record (compact JSON) is empty for a package the
+        # plan does not carry, which then runs no gate. The plan spells each
+        # test tier as its own gate; this loop runs them under one `test`
+        # gate, with L2 selected separately below.
+        package_facts="$(jq -r --arg p "${package}" '
+            (first(.packages[] | select(.package == $p)) // null) as $record
+            | ($record | if . == null then "" else tojson end),
+              ($record | if . == null then "" else .test_args // "" end),
+              ($record | if . == null then "" else [.gates[] | if . == "lint" or . == "check" then . else "test" end] | unique | join(" ") end),
+              ([.cells[] | select(.package == $p and .gate == "lint") | .companions_only // false] | any),
+              ([.cells[]? | select(.package == $p and .gate == "lint") | (.companions // [])[] | select(.name == "archive-path-guard")] | length > 0),
+              ([.cells[]? | select(.package == $p and .gate == "L1" and .execution == "execute") | .test_filter // empty] | first // "")
+        ' "${plan_file}")"
+        package_fact=()
+        while IFS= read -r line; do
+            package_fact+=("${line}")
+        done <<< "${package_facts}"
+        record="${package_fact[0]:-}"
+        test_args="${package_fact[1]:-}"
+        gates="${package_fact[2]:-}"
+        companions_only="${package_fact[3]:-}"
+        guard_planned="${package_fact[4]:-false}"
+        narrow_filter="${package_fact[5]:-}"
         # A package reached only through the check gate. Unreachable today (see
         # the recipe header): every gating package owns a lint cell, so `check`
         # is never a package's sole gate.
@@ -630,7 +673,6 @@ ci-local *args="":
         # selected, not for the package, so its producer skips clippy — see
         # `_package-ci.yml`'s lint job. Linting here anyway would run work CI
         # will not run and report a gate that does not exist.
-        companions_only="$(jq -r --arg p "${package}" '[.cells[] | select(.package == $p and .gate == "lint") | .companions_only // false] | any' "${plan_file}")"
         if (( run_lint == 1 )) && [[ " ${gates} " == *" lint "* ]] && [[ "${companions_only}" != "true" ]]; then
             if just _lint "${package}"; then
                 passed+=("lint ${package}")
@@ -652,10 +694,6 @@ ci-local *args="":
         # lint cell is already `reusable=False` in the plan, so nothing here can
         # be reused for the ubuntu-latest execution — which is what the message
         # below states outright on a non-Linux host.
-        guard_planned=false
-        if [[ -s "${plan_file}" ]]; then
-            guard_planned="$(jq -r --arg p "${package}" '[.cells[]? | select(.package == $p and .gate == "lint") | (.companions // [])[] | select(.name == "archive-path-guard")] | length > 0' "${plan_file}")"
-        fi
         if (( run_lint == 1 )) && [[ "${guard_planned}" == "true" ]]; then
             guard_note=""
             if [[ "${local_environment}" != "ubuntu-latest" ]]; then
@@ -690,10 +728,6 @@ ci-local *args="":
         # with the others: `record-cells` records it WITH its filter, and a
         # published exact-tree receipt then satisfies the planned cell instead
         # of CI running it. It never stands in for this host's whole tier.
-        narrow_filter=""
-        if [[ -s "${plan_file}" ]]; then
-            narrow_filter="$(jq -r --arg p "${package}" '[.cells[]? | select(.package == $p and .gate == "L1" and .execution == "execute") | .test_filter // empty] | first // ""' "${plan_file}")"
-        fi
         if (( run_test == 1 )) && [[ -n "${narrow_filter}" ]]; then
             narrow_note=" — narrowed to the tests that read the changed file(s)"
             # The filter can name a `slow_` test only where the package keeps

@@ -2395,7 +2395,10 @@ fn produce_shared_deps(dir: &Path) -> SharedDeps {
         .arg("--sidecars")
         .arg(empty_sidecars(dir))
         .arg("--json")
-        .env("CI_BUILD_BIN", &binary)
+        // `produce-owner.sh` runs this as its command word, and Bash looks a
+        // word with no `/` up on PATH: `C:\…\ci-build.exe` is "command not
+        // found" under Git Bash, while `C:/…/ci-build.exe` runs.
+        .env("CI_BUILD_BIN", binary.to_string_lossy().replace('\\', "/"))
         .env("RUNNER_TEMP", dir)
         .output()
         .expect("running the hosted coordinator");
