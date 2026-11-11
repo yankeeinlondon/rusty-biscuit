@@ -42,9 +42,11 @@
       ],
       "vars": {
         // `api/schemas/service-config.schema.json`, as JSON text. Allows this
-        // repository (by its stable GitHub IDs) and the demo workflow on main;
-        // anything not listed is denied.
-        "SERVICE_CONFIG": "{\"api_version\":\"v1\",\"repositories\":[{\"repository_id\":\"1131837348\",\"owner_id\":\"980757\",\"slug\":\"yankeeinlondon/rusty-biscuit\"}],\"oidc\":{\"issuer\":\"https://token.actions.githubusercontent.com\",\"audience\":\"rusty-biscuit-evidence-store\",\"clock_tolerance_seconds\":60,\"trusted_workflows\":[{\"repository_id\":\"1131837348\",\"workflow\":\".github/workflows/evidence-store-demo.yml\",\"ref\":\"refs/heads/main\",\"event_name\":\"workflow_dispatch\",\"roles\":[\"producer\",\"reader\"]}]},\"quotas\":{\"rate_mutations_per_minute\":60,\"rate_reads_per_minute\":300,\"operator_rate_mutations_per_minute\":30,\"capacity\":{\"alert_ratio\":0.7,\"refuse_ratio\":0.8,\"r2_live_plus_staging_bytes\":8589934592,\"r2_class_a_per_month\":800000,\"r2_class_b_per_month\":8000000,\"d1_database_bytes\":500000000,\"d1_rows_read_per_day\":5000000,\"d1_rows_written_per_day\":100000,\"worker_requests_per_day\":100000}}}"
+        // repository and the demo workflow on main, plus an empty private
+        // repository that only gives `just test-real` somewhere to write, so
+        // acceptance data never enters this repository's history. Repositories
+        // are keyed by stable GitHub IDs; anything not listed is denied.
+        "SERVICE_CONFIG": "{\"api_version\":\"v1\",\"repositories\":[{\"repository_id\":\"1131837348\",\"owner_id\":\"980757\",\"slug\":\"yankeeinlondon/rusty-biscuit\"},{\"repository_id\":\"1454439808\",\"owner_id\":\"980757\",\"slug\":\"yankeeinlondon/evidence-store-acceptance\"}],\"oidc\":{\"issuer\":\"https://token.actions.githubusercontent.com\",\"audience\":\"rusty-biscuit-evidence-store\",\"clock_tolerance_seconds\":60,\"trusted_workflows\":[{\"repository_id\":\"1131837348\",\"workflow\":\".github/workflows/evidence-store-demo.yml\",\"ref\":\"refs/heads/main\",\"event_name\":\"workflow_dispatch\",\"roles\":[\"producer\",\"reader\"]}]},\"quotas\":{\"rate_mutations_per_minute\":60,\"rate_reads_per_minute\":300,\"operator_rate_mutations_per_minute\":30,\"capacity\":{\"alert_ratio\":0.7,\"refuse_ratio\":0.8,\"r2_live_plus_staging_bytes\":8589934592,\"r2_class_a_per_month\":800000,\"r2_class_b_per_month\":8000000,\"d1_database_bytes\":500000000,\"d1_rows_read_per_day\":5000000,\"d1_rows_written_per_day\":100000,\"worker_requests_per_day\":100000}}}"
       }
     },
     "restore-test": {

@@ -41,8 +41,8 @@
       "sha256": "38342b6ca3e45d5062e5441609506e70bc9742ea93e2d43620e151b29b3854af"
     }
   ],
-  "worker_version_id": "4b5498bc-12de-4262-bfef-98c868b15d2b",
-  "endpoint": "https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md",
+  "worker_version_id": "9b7233f0-87d1-4e54-ad54-46bbb83a4151",
+  "endpoint": "https://evidence-store-development.inocan.workers.dev",
   "wrangler_version": "4.160.1",
-  "deployed_at": "2026-11-11T19:45:59.642Z"
+  "deployed_at": "2026-11-11T20:14:57.870Z"
 }
