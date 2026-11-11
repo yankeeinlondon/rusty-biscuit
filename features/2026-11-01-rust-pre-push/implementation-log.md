@@ -304,8 +304,8 @@ result.
 
 | # | Bash case (`run_test` description) | Original function | Assigned Rust test | Result |
 | - | --- | --- | --- | --- |
-| 1 | real recipe interruption withholds earlier evidence | `test_a_real_recipe_interruption_withholds_earlier_reports` | `ci-push` integration `parity::a_real_recipe_interruption_withholds_earlier_reports` (Unix only) | pass |
-| 2 | advanced non-main target reuses and publishes exact receipts | `test_an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts` | `ci-push` integration `parity::an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts` (Unix only) | pass |
+| 1 | real recipe interruption withholds earlier evidence | `test_a_real_recipe_interruption_withholds_earlier_reports` | `ci-push` integration `parity::a_recipe_interruption_withholds_earlier_reports` (3 cases) and `parity::the_real_recipe_stages_the_modeled_outcome_of_a_fed_plan` (cases 3–5, real recipe) | pass |
+| 2 | advanced non-main target reuses and publishes exact receipts | `test_an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts` | `ci-push` integration `parity::an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts`, `parity::an_advanced_non_main_target_publishes_exact_receipts`, and `parity::the_real_recipe_skips_a_cell_its_plan_reuses` | pass |
 | 3 | scope-only runs no gate but resolves scope | `test_scope_only_runs_no_gate_but_still_resolves_scope` | `ci_push::tests::parity::scope_only_runs_no_gate_but_still_resolves_scope` | pass |
 | 4 | off is a deprecated alias of scope-only | `test_off_mode_is_a_deprecated_alias_of_scope_only` | `ci_push::tests::parity::off_mode_is_a_deprecated_alias_of_scope_only` | pass |
 | 5 | invalid mode exits 1 with helpful message | `test_invalid_mode_exits_one` | `ci_push::tests::run::an_invalid_mode_blocks_before_discovery` (3 cases) | pass |
@@ -372,10 +372,10 @@ result.
 | 66 | a target updated in the same push is reviewed at its incoming revision | `test_a_target_updated_in_the_same_push_is_reviewed_at_its_incoming_revision` | `ci_push::tests::parity::a_target_updated_in_the_same_push_is_reviewed_at_its_incoming_revision` (2 orders) | pass |
 | 67 | a simultaneous push with nothing prohibited passes in either order | `test_a_simultaneous_push_with_no_prohibited_work_passes_in_either_order` | `ci_push::tests::parity::a_simultaneous_push_with_no_prohibited_work_passes_in_either_order` (2 orders) | pass |
 | 68 | a pull request into a branch this push deletes is refused | `test_a_pull_request_into_a_branch_this_push_deletes_is_refused` | `ci_push::tests::parity::a_pull_request_into_a_branch_this_push_deletes_is_refused` (2 orders) | pass |
-| 69 | a docs-only follow-up skips the cells prior evidence covers | `test_a_docs_only_follow_up_skips_the_cells_prior_evidence_covers` | `ci-push` integration `parity::a_docs_only_follow_up_skips_the_cells_prior_evidence_covers` (Unix only) | pass |
-| 70 | a follow-up changing a package's inputs reruns its cell | `test_a_follow_up_changing_a_packages_inputs_reruns_its_cell` | `ci-push` integration `parity::a_follow_up_changing_a_packages_inputs_reruns_its_cell` (Unix only) | pass |
-| 71 | a cell whose prior evidence is a failure is rerun, superseded | `test_a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded` | `ci-push` integration `parity::a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded` (Unix only) | pass |
-| 72 | a stacked pull request records its target tip as the base | `test_a_stacked_pull_request_records_its_target_tip_as_the_receipt_base` | `ci-push` integration `parity::a_stacked_pull_request_records_its_target_tip_as_the_receipt_base` (Unix only) | pass |
+| 69 | a docs-only follow-up skips the cells prior evidence covers | `test_a_docs_only_follow_up_skips_the_cells_prior_evidence_covers` | `ci-push` integration `parity::a_docs_only_follow_up_skips_the_cells_prior_evidence_covers`, `parity::a_docs_only_follow_up_records_only_the_cells_that_ran`, `parity::the_real_recipe_skips_a_cell_its_plan_reuses`, and `parity::seeded_evidence_is_what_a_hook_push_records` | pass |
+| 70 | a follow-up changing a package's inputs reruns its cell | `test_a_follow_up_changing_a_packages_inputs_reruns_its_cell` | `ci-push` integration `parity::a_follow_up_changing_a_packages_inputs_reruns_its_cell` and `parity::the_real_recipe_stages_the_modeled_outcome_of_a_fed_plan::case_1_pass` | pass |
+| 71 | a cell whose prior evidence is a failure is rerun, superseded | `test_a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded` | `ci-push` integration `parity::a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded` and `parity::a_rerun_cells_newest_pass_supersedes_its_prior_failure` | pass |
+| 72 | a stacked pull request records its target tip as the base | `test_a_stacked_pull_request_records_its_target_tip_as_the_receipt_base` | `ci-push` integration `parity::a_stacked_pull_request_records_its_target_tip_as_the_receipt_base` | pass |
 | D1 | dispatcher selects each linked worktree's hook (`.githooks/tests/test-pre-push-dispatcher.sh`, one script-level contract) | _(whole script)_ | `ci-push` integration `dispatcher::the_dispatcher_runs_each_linked_worktrees_own_hook` | pass |
 
 ## Spec Departures
@@ -961,8 +961,8 @@ the orchestrator afterwards, with no subagent running.
   Checkout paths contain a space and `ü`. Mutation checks: dropping `cd
   "$top"` fails the subdirectory test; dropping `"$@"` from the dispatcher
   fails D1.
-- Native Windows: `launcher::windows_git_bash_pushes_through_the_launcher_to_the_real_ci_push`
-  and `windows_powershell_pushes_through_the_launcher_to_the_real_ci_push`
+- Native Windows: `launcher::windows_{git_bash,powershell}_{auto,strict}_push_reaches_the_real_ci_push_through_the_launcher`
+  (split into one push per test in review iteration 4)
   (`#[cfg(windows)]`, auto and strict through Git Bash's `bash.exe -c` and
   `powershell.exe -NoProfile -NonInteractive -Command`; a missing shell panics).
 
