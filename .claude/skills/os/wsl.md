@@ -102,7 +102,7 @@ job's own name is static. Which step went red:
 - **"List this cell's expected tests"**: runs each archived binary, so it
   fails for the gate's reasons (missing native library, sidecar, baked path),
   earlier.
-- **"Certify this cell's completeness"** with tests green:
+- **"Verify all expected results reported"** with tests green:
   `scripts/ci/completion.py` refused the cell; stderr names each
   `completion-*` reason. Usually `completion-test-missing`, which a skip
   approval cannot excuse; only an observed `<skipped/>` can be approved.

@@ -1,4 +1,4 @@
-name: wsl-ci
+name: WSL2 tests
 
 # The `wsl2-ubuntu` environment: one Cargo package's canonical L1 suite, run
 # inside a WSL2 Ubuntu guest hosted by a `windows-latest` runner.
@@ -85,7 +85,7 @@ jobs:
   # Checks tab as raw text (AC10). The package and gate come from the caller's
   # own label, which carries the whole dispatch row (ruling R1).
   wsl:
-    name: test (wsl2-ubuntu)
+    name: Run guest tests
     runs-on: windows-latest
     timeout-minutes: 60
     env:
@@ -554,7 +554,7 @@ jobs:
       # Gate command: a failed suite fails this producer visibly. The status
       # and report steps below still run when the job was not cancelled, so
       # the area rollup can render the cell-level diagnosis.
-      - name: L1 tests from the archive
+      - name: Run Level 1 tests from the archive
         id: l1
         shell: wsl-bash {0}
         env:
@@ -687,7 +687,7 @@ jobs:
             "$workspace/wsl-junit/" 2>/dev/null || true
           # Staging must never change the tier's outcome.
           exit 0
-      - name: Upload wsl2-ubuntu L1 JUnit
+      - name: Upload WSL2 Level 1 test results
         if: ${{ !cancelled() && steps.cell.outputs.junit_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
@@ -697,7 +697,7 @@ jobs:
       # DIAGNOSTIC ONLY, and deliberately `continue-on-error`: if the guest is
       # dead this step cannot run, and that failure is itself the finding — it
       # must not be allowed to overwrite the tier's real outcome.
-      - name: Guest post-mortem
+      - name: Collect guest diagnostics
         id: guest_postmortem
         if: ${{ !cancelled() && steps.l1.outcome == 'failure' }}
         continue-on-error: true
@@ -715,7 +715,7 @@ jobs:
             echo "--- dmesg tail ---"
             dmesg -T 2>&1 | tail -120
           } 2>&1 | tee "$workspace/wsl-diag/guest-postmortem.txt"
-      - name: Host post-mortem
+      - name: Collect host diagnostics
         if: ${{ !cancelled() && steps.l1.outcome == 'failure' }}
         continue-on-error: true
         shell: pwsh
@@ -889,7 +889,7 @@ jobs:
       # and the Windows host cannot read them. `completion.py` is stdlib Python
       # precisely so it can run where there is no compiler. The record crosses
       # the 9p mount once, as a file, for the upload below.
-      - name: Certify this cell's completeness
+      - name: Verify all expected results reported
         id: completion
         shell: wsl-bash {0}
         run: |

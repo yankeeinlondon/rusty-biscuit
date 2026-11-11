@@ -77,14 +77,17 @@ ROW_GATES = frozenset({"L1", "L2", "browser", "check", "lint"})
 # label>`, and it builds a matrix job's own label from EVERY value in its row.
 # Both label shapes therefore reach this parser (ruling R1):
 #
-#   area-ci (claudine) / package-ci / test (claudine-cli, L1, macos-latest, macos-latest)
-#   area-ci (claudine) / package-ci / wsl2 (playa-cli, L1, wsl2-ubuntu, windows-latest) / test (wsl2-ubuntu)
+#   area-ci (claudine) / Run package work / test (claudine-cli, L1, macos-latest, macos-latest)
+#   area-ci (playa) / Run package work / wsl2 (playa-cli, L1, wsl2-ubuntu, windows-latest) / Run guest tests
+#   area-ci (claudine) / package-ci / test (claudine-cli, L1, macos-latest, macos-latest)  <- historical
+#   area-ci (playa) / package-ci / wsl2 (playa-cli, L1, wsl2-ubuntu, windows-latest) / test (wsl2-ubuntu)  <- historical
 #   area-ci (claudine) / claudine-cli / test (ubuntu-latest)                      <- pre-row
 #   area-ci (claudine) / claudine-cli / wsl2 / test (wsl2-ubuntu)                 <- pre-row
 #
-# Both are parsed, and deliberately: reverting R1 must be a label-format change
-# rather than a silent attribution loss, and a retry decision is routinely
-# taken over a run created before the current layout.
+# Every shape is parsed, and deliberately: reverting R1 must be a label-format
+# change rather than a silent attribution loss, and a retry decision is
+# routinely taken over a run created before the current layout, so the
+# historical and pre-row names stay recognized.
 #
 # Parsed from the TAIL, never from a fixed segment count. A four-token
 # parenthetical carries the whole cell; a three-token one carries only the
@@ -118,17 +121,25 @@ def parse_build_job_name(name: str) -> str | None:
 WSL_DELEGATION_SEGMENT = "wsl2"
 WSL_DELEGATION_ROW = re.compile(r"^wsl2 \((?P<detail>[^()]+)\)$")
 
+# The guest job's static name in `_wsl-ci.yml`. It is prose, carrying neither
+# package nor gate, so the cell comes only from the delegating row it sits in.
+WSL_GUEST_SEGMENT = "Run guest tests"
+
 # Jobs that only fold or summarize the run rather than produce evidence. Their
 # failure follows from producers and must not veto a retry. The legacy `rollup`
 # spelling remains recognized because runs created before the coverage-audit
 # change could fail it for a lost producer. A new `coverage-audit` failure is
 # not ignored: its enforcement runs only after every producer succeeded, so it
 # represents an independent completeness or exception-policy failure.
-# `infrastructure summary (advisory)` is the pre-`ci-reporting` spelling, kept
-# for the same reason as the legacy rollup one: a retry decision may be taken
-# over a run created before the rename.
+# The audit is labelled `Check required results` today and `coverage-audit` in
+# historical runs; neither spelling is listed here.
+# `Report CI results (advisory)` is the current advisory label;
+# `ci-reporting (advisory)` and the older `infrastructure summary (advisory)`
+# are kept for the same reason as the legacy rollup one: a retry decision may
+# be taken over a run created before a rename.
 NON_PRODUCER_JOBS = {
     "ci-gate",
+    "Report CI results (advisory)",
     "ci-reporting (advisory)",
     "infrastructure summary (advisory)",
 }
@@ -169,7 +180,13 @@ def parse_job_name(name: str) -> dict[str, str | None] | None:
     segments = [segment.strip() for segment in name.split(" / ")]
     if len(segments) < 2:
         return None
-    gate = GATE_SEGMENT.match(segments.pop())
+    last = segments.pop()
+    if last == WSL_GUEST_SEGMENT:
+        # Only the immediately enclosing row identifies the guest cell; a bare
+        # `wsl2` or malformed row leaves nothing to infer it from.
+        delegation = WSL_DELEGATION_ROW.match(segments[-1])
+        return row_cell(delegation["detail"]) if delegation else None
+    gate = GATE_SEGMENT.match(last)
     if gate is None:
         return None
     # A row-driven label carries the whole cell in its own parenthetical, so

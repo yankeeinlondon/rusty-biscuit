@@ -485,8 +485,9 @@ uploaded and runs `scripts/ci/publish_gaps.py`, which creates one check run
 per accepted-gap cell on the pull request head (`POST
 /repos/{owner}/{repo}/check-runs`; `github.sha` on a `pull_request` event is
 the merge commit, and a check there never reaches the PR's checks list). The
-check's name identifies the cell (`accepted gap: <area> / <package> / <gate>
-(<environment>)`); its title and summary carry the `ACCEPTED GAP` marker with
+check's name identifies the cell in plain words (`ACCEPTED GAP: <package>:
+<action> on <environment>`, for example `ACCEPTED GAP: alpha-cli: run Level 2
+tests on Windows`); its title and summary carry the `ACCEPTED GAP` marker with
 the environment, package, gate, capability, owner, expiry, and reason; its text
 carries the change/revoke instructions and the `closes` work; `details_url`
 links the policy entry's line at the tested head. The conclusion is `neutral`
@@ -1084,13 +1085,15 @@ output). It refuses the whole plan rather than truncating it.
 
 A called workflow's jobs render as `<caller job name> / <called job name>`, and
 GitHub builds a matrix job's label from every value in its row in key order, so
-a producer reads `area-ci (playa) / package-ci / test (playa-cli, L1,
+a producer reads `area-ci (playa) / Run package work / test (playa-cli, L1,
 macos-latest, macos-latest)`: area first, then the whole cell with its runner.
 A WSL2 row rides on the delegating job, `… / wsl2 (playa, L1, wsl2-ubuntu,
-windows-latest) / test (wsl2-ubuntu)`, because the delegated job's name is
+windows-latest) / Run guest tests`, because the delegated job's name is
 static. No display name is parsed for identity, which still comes from each
 artifact's `manifest.jsonl` and `status.json`; `runner_loss.py` parses the
-label only to attribute a lost runner to its cell.
+label only to attribute a lost runner to its cell, and `reuse_validation.py`
+finds each area's audit job (`Check required results`, historically
+`coverage-audit`) by its label.
 
 **Area is a grouping; package is the identity.** Nothing is re-keyed by area.
 The one place an area name appears in a stored name is the per-area result
@@ -1102,13 +1105,16 @@ rejects `/` in an artifact name.
 and `area_rows`, derived from its executing cells. Grouping in the planner
 rather than in workflow `jq` is what gives the shape test coverage.
 
-**Skippable jobs carry no `name:`.** GitHub never evaluates the matrix context
-for a job it skips, so a declared `name:` containing `${{ matrix.… }}` reaches
-the Checks tab as raw expression text — 63 such labels in run 34638047631. A
-job that can be skipped as a whole therefore omits `name:` and lets GitHub fall
-back to the job id, which is static when the job is skipped and gains the
-row's values when it runs — which is how `lint`'s environment stays visible
-too.
+**No job name contains an expression.** GitHub never evaluates the matrix
+context for a job it skips, so a declared `name:` containing `${{ matrix.… }}`
+reaches the Checks tab as raw expression text — 63 such labels in run
+34638047631. Jobs that own no result cell carry a literal descriptive name
+(`Verify build prerequisites`, `Run package work`, `Check required results`).
+The cell-carrying matrix jobs (`area-ci`, `build`, and `_package-ci.yml`'s
+`check`, `test`, `lint`, `wsl2`) omit `name:` and let GitHub fall back to the
+job id, which is static when the job is skipped and gains the row's values when
+it runs — which is how `lint`'s environment stays visible too. See
+`docs/topics/ci-cd.md`, "Reading job and check names", for the full name map.
 
 ## Each area audits its planned coverage
 
@@ -1498,7 +1504,7 @@ three times:
    every ordinary lint cell runs it exactly as before. A skipped Clippy records
    no `duration_s`, which the status step already spells as an absent
    measurement rather than a `0`.
-2. the **Companion suites (lint)** step, which receives
+2. the **Run companion lint suites** step, which receives
    `BISCUIT_ARCHIVE_GUARD_PLAN` pointing at the plan the job already
    downloaded to resolve its cell. It is an **absolute** path — neither the recipe
    (`cd tools/test-toolkit && …`) nor nextest's test binary runs in the

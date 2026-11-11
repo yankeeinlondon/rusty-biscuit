@@ -1,4 +1,4 @@
-name: package-ci
+name: Package checks
 
 # One package AREA's execution workflow: it expands the dispatch rows the
 # planner derived for that area, one hosted job per executing cell.
@@ -143,8 +143,9 @@ jobs:
   # label degrades to the static, human-readable job id instead (AC10). The
   # area half of the identity comes from the caller: a called workflow's jobs
   # render as `<caller job name> / <called job name>`, so this reads
-  # `area-ci (sniff) / package-ci / check (sniff, check, windows-latest,
-  # windows-latest)`.
+  # `area-ci (sniff) / Run package work / check (sniff, check, windows-latest,
+  # windows-latest)`. A literal `name:` would drop the row, which
+  # `runner_loss.py` reads to attribute a lost runner to its cell.
   #
   # The guard is a SCALAR comparison of the input, read before matrix
   # expansion: an area with no check rows resolves this job immediately instead
@@ -233,7 +234,7 @@ jobs:
           set -euo pipefail
           just _ci_build_counter "check ${{ matrix.environment }}"
       # Gate command. Its outcome is both the producer and cell outcome.
-      - name: cargo check (declared kinds no test gate compiles)
+      - name: Check compilation of declared targets
         id: check
         env:
           # COMMAND-SCOPED, exactly as each test tier binds it. `check` is its
@@ -353,7 +354,7 @@ jobs:
       # `completion.py` certifies it on the gate's own outcome and the cell's
       # binding instead. Required, and after the status upload: the record is
       # this cell's proof, and a green status without one is an audit failure.
-      - name: Certify this cell's completeness
+      - name: Verify all expected results reported
         id: completion
         shell: bash
         run: |
@@ -766,7 +767,7 @@ jobs:
       # Gate command. Its outcome is both the producer and cell outcome. The
       # recipe comes from the cell contract, so the gate-to-recipe mapping
       # lives in one place rather than in three near-identical jobs.
-      - name: Tests
+      - name: Run planned tests
         id: gate
         shell: bash
         env:
@@ -912,7 +913,7 @@ jobs:
       # cell's environment at planning time and put the result on the cell. It
       # records one outcome, one count, and one command duration PER SUITE, so
       # one suite's success can never stand in for a suite that never ran.
-      - name: Companion suites
+      - name: Run companion test suites
         id: companion
         if: ${{ !cancelled() && steps.cell.outputs.companion_suites != '[]' }}
         shell: bash
@@ -1059,7 +1060,7 @@ jobs:
       # may excuse, and writes the completion record only when every check
       # holds. It runs after the diagnostic uploads so a refusal still leaves
       # the JUnit and status artifacts behind to read.
-      - name: Certify this cell's completeness
+      - name: Verify all expected results reported
         id: completion
         shell: bash
         run: |
@@ -1296,7 +1297,7 @@ jobs:
       # default — still runs it exactly as before, and a skipped clippy leaves
       # NO measurement, which the status step below reads as absent rather
       # than as a pass.
-      - name: Lint
+      - name: Lint source
         id: clippy
         if: ${{ steps.cell.outputs.companions_only != 'true' }}
         env:
@@ -1383,7 +1384,7 @@ jobs:
       # declare a `lint_recipe` in the registry, which is why a package whose
       # companions are test-only leaves this step with nothing to run instead
       # of a lint cell expecting evidence nobody produces.
-      - name: Companion suites (lint)
+      - name: Run companion lint suites
         id: companion
         if: ${{ !cancelled() && steps.cell.outputs.companion_suites != '[]' }}
         shell: bash
@@ -1509,7 +1510,7 @@ jobs:
       # A lint cell drives no nextest, so it publishes no expected listing and
       # `completion.py` certifies it on the gate's own outcome, its companions,
       # and the cell's binding.
-      - name: Certify this cell's completeness
+      - name: Verify all expected results reported
         id: completion
         shell: bash
         run: |

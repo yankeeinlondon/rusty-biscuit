@@ -1459,7 +1459,7 @@ fn latest_stable_advisory_is_separate_and_non_required() {
 fn release_automation_follows_successful_ci() {
     let release = workflow("release-plz.yml");
     assert!(
-        release.contains("workflow_run:") && release.contains(r#"workflows: ["ci"]"#),
+        release.contains("workflow_run:") && release.contains(r#"workflows: ["Continuous integration"]"#),
         "release-plz must be triggered by the ci workflow, not race it"
     );
     assert!(
@@ -2002,7 +2002,7 @@ fn release_triggers_are_ci_completion_a_closed_pull_request_and_dispatch() {
         triggers,
         [
             "  workflow_run:",
-            r#"    workflows: ["ci"]"#,
+            r#"    workflows: ["Continuous integration"]"#,
             "    types:",
             "      - completed",
             "    branches:",
@@ -2965,7 +2965,7 @@ fn a_failed_wsl_guest_leaves_evidence_of_which_backing_store_ran_out() {
         .find("- name: Census the Windows host before extraction")
         .expect("_wsl-ci.yml must measure host headroom before extraction");
     let extraction = wsl
-        .find("- name: L1 tests from the archive")
+        .find("- name: Run Level 1 tests from the archive")
         .expect("_wsl-ci.yml must define the L1 test step");
     assert!(
         host_census < extraction,
@@ -2992,7 +2992,7 @@ fn a_failed_wsl_guest_leaves_evidence_of_which_backing_store_ran_out() {
         executable.contains(r#""$workspace/wsl-diag/guest-resources.log""#),
         "the resource sampler must write across the 9p mount, not onto guest ext4"
     );
-    for step in ["Guest post-mortem", "Host post-mortem"] {
+    for step in ["Collect guest diagnostics", "Collect host diagnostics"] {
         let block = wsl
             .split(&format!("- name: {step}"))
             .nth(1)
@@ -3127,7 +3127,7 @@ fn a_declared_toolchain_requirement_is_provisioned_once_before_the_suite_runs() 
             .unwrap_or_else(|| panic!("the test job must define the `{name}` step"))
     };
     assert!(
-        index("Set up the pinned Rust toolchain") < index("Tests"),
+        index("Set up the pinned Rust toolchain") < index("Run planned tests"),
         "the toolchain must be provisioned before the suite starts, not repaired after"
     );
     assert!(
@@ -3347,14 +3347,14 @@ fn every_producer_job_emits_an_explicit_status_artifact() {
 /// gate command is a test, lint, or compile command whose failure must fail the
 /// producer while its status artifact retains the cell-level diagnosis.
 const GATE_STEPS: [(&str, &str, &str, &str); 8] = [
-    ("_package-ci.yml", "  check:", "check", "cargo check (declared kinds no test gate compiles)"),
+    ("_package-ci.yml", "  check:", "check", "Check compilation of declared targets"),
     ("_package-ci.yml", "  check:", "dependents", "Compile unchanged dependents"),
-    ("_package-ci.yml", "  test:", "gate", "Tests"),
-    ("_package-ci.yml", "  test:", "companion", "Companion suites"),
-    ("_package-ci.yml", "  lint:", "clippy", "Lint"),
+    ("_package-ci.yml", "  test:", "gate", "Run planned tests"),
+    ("_package-ci.yml", "  test:", "companion", "Run companion test suites"),
+    ("_package-ci.yml", "  lint:", "clippy", "Lint source"),
     ("_package-ci.yml", "  lint:", "zed", "Verify the Zed extension package"),
-    ("_package-ci.yml", "  lint:", "companion", "Companion suites (lint)"),
-    ("_wsl-ci.yml", "  wsl:", "l1", "L1 tests from the archive"),
+    ("_package-ci.yml", "  lint:", "companion", "Run companion lint suites"),
+    ("_wsl-ci.yml", "  wsl:", "l1", "Run Level 1 tests from the archive"),
 ];
 
 /// The steps of a job block, each as its own text (comments between steps
@@ -3537,8 +3537,8 @@ fn only_recovery_and_diagnostic_steps_ignore_errors() {
             "Download this cell's build status",
             "Provision the WSL2 guest",
             "Census the Windows host before extraction",
-            "Guest post-mortem",
-            "Host post-mortem",
+            "Collect guest diagnostics",
+            "Collect host diagnostics",
             "Record this cell's observation",
         ],
         "_wsl-ci.yml: `wsl` may ignore only the build-status download, the first \
@@ -5578,7 +5578,7 @@ fn a_guard_only_selection_runs_the_guard_and_nothing_else() {
     let lint = job_block("_package-ci.yml", "  lint:");
     assert!(
         lint.contains(
-            "      - name: Lint\n        id: clippy\n        if: ${{ steps.cell.outputs.companions_only != 'true' }}\n"
+            "      - name: Lint source\n        id: clippy\n        if: ${{ steps.cell.outputs.companions_only != 'true' }}\n"
         ),
         "the clippy step must be skipped on a companions-only cell, and only there"
     );
@@ -6151,18 +6151,13 @@ fn every_skippable_job_has_a_static_human_readable_identity() {
 // ubuntu-latest, ubuntu-latest)`), which `scripts/ci/runner_loss.py` reads to
 // attribute a lost runner. A static name would hide those values; an
 // expression name renders raw when the job is skipped.
-//
-// Each row also records the name before the rename (`before`), so the
-// contract is anchored to what the workflows actually declare while the
-// rename is in progress. Once applied, only `after` is accepted.
 
-/// One job: identifier, name before the rename, name after it.
-type JobNaming = (&'static str, Option<&'static str>, Option<&'static str>);
+/// One job: identifier and its declared display name.
+type JobNaming = (&'static str, Option<&'static str>);
 
-/// One workflow: file, title before, title after, and every job in file order.
+/// One workflow: file, title, and every job in file order.
 struct WorkflowNaming {
     file: &'static str,
-    title_before: &'static str,
     title: &'static str,
     jobs: &'static [JobNaming],
 }
@@ -6170,47 +6165,43 @@ struct WorkflowNaming {
 const NAMING_CONTRACT: [WorkflowNaming; 4] = [
     WorkflowNaming {
         file: "ci.yml",
-        title_before: "ci",
         title: "Continuous integration",
         jobs: &[
-            ("validation", Some("Check reusable PR validation"), Some("Check prior pull request validation")),
-            ("scope", Some("Determine affected scope"), Some("Choose required work")),
-            ("preflight", None, Some("Verify build prerequisites")),
-            ("build", None, None),
-            ("area-ci", None, None),
-            ("area-drift", Some("area-drift (planner areas match sniff)"), Some("Verify package area mapping")),
-            ("ci-gate", Some("ci-gate"), Some("ci-gate")),
-            ("certify-nightly", None, Some("Publish nightly coverage evidence")),
-            ("publish-observations", None, Some("Publish test observations")),
-            ("ci-reporting", Some("ci-reporting (advisory)"), Some("Report CI results (advisory)")),
+            ("validation", Some("Check prior pull request validation")),
+            ("scope", Some("Choose required work")),
+            ("preflight", Some("Verify build prerequisites")),
+            ("build", None),
+            ("area-ci", None),
+            ("area-drift", Some("Verify package area mapping")),
+            ("ci-gate", Some("ci-gate")),
+            ("certify-nightly", Some("Publish nightly coverage evidence")),
+            ("publish-observations", Some("Publish test observations")),
+            ("ci-reporting", Some("Report CI results (advisory)")),
         ],
     },
     WorkflowNaming {
         file: "_area-ci.yml",
-        title_before: "area-ci",
         title: "Package area checks",
         jobs: &[
-            ("package-ci", None, Some("Run package work")),
-            ("accepted-gaps", None, Some("Publish accepted capability gaps")),
-            ("coverage-audit", None, Some("Check required results")),
+            ("package-ci", Some("Run package work")),
+            ("accepted-gaps", Some("Publish accepted capability gaps")),
+            ("coverage-audit", Some("Check required results")),
         ],
     },
     WorkflowNaming {
         file: "_package-ci.yml",
-        title_before: "package-ci",
         title: "Package checks",
         jobs: &[
-            ("check", None, None),
-            ("test", None, None),
-            ("lint", None, None),
-            ("wsl2", None, None),
+            ("check", None),
+            ("test", None),
+            ("lint", None),
+            ("wsl2", None),
         ],
     },
     WorkflowNaming {
         file: "_wsl-ci.yml",
-        title_before: "wsl-ci",
         title: "WSL2 tests",
-        jobs: &[("wsl", Some("test (wsl2-ubuntu)"), Some("Run guest tests"))],
+        jobs: &[("wsl", Some("Run guest tests"))],
     },
 ];
 
@@ -6249,8 +6240,8 @@ fn step_names(source: &str) -> Vec<String> {
 }
 
 /// The naming contract covers every job of the four workflows, in file order,
-/// and each declared name is the contract's (or, until the rename lands, the
-/// recorded previous one). Jobs whose contract name is `None` carry no `name:`.
+/// and each declared name is the contract's. Jobs whose contract name is
+/// `None` carry no `name:`.
 #[test]
 fn reader_facing_jobs_follow_the_naming_contract() {
     let files: Vec<&str> = NAMING_CONTRACT.iter().map(|workflow| workflow.file).collect();
@@ -6258,22 +6249,16 @@ fn reader_facing_jobs_follow_the_naming_contract() {
     for contract in &NAMING_CONTRACT {
         let source = workflow(contract.file);
         let title = workflow_title(&source);
-        assert!(
-            title == contract.title || title == contract.title_before,
-            "{}: title {title:?} is neither {:?} nor the recorded previous {:?}",
-            contract.file,
-            contract.title,
-            contract.title_before
-        );
+        assert_eq!(title, contract.title, "{}: workflow title", contract.file);
         let blocks = jobs(&source);
         let ids: Vec<String> = blocks.iter().map(|block| job_id(block)).collect();
-        let expected: Vec<&str> = contract.jobs.iter().map(|(id, _, _)| *id).collect();
+        let expected: Vec<&str> = contract.jobs.iter().map(|(id, _)| *id).collect();
         assert_eq!(ids, expected, "{}: job identifiers must not change", contract.file);
-        for (block, (id, before, after)) in blocks.iter().zip(contract.jobs) {
-            let declared = job_name(block);
-            assert!(
-                declared.as_deref() == *after || declared.as_deref() == *before,
-                "{}: job `{id}` is named {declared:?}; the contract names it {after:?}",
+        for (block, (id, name)) in blocks.iter().zip(contract.jobs) {
+            assert_eq!(
+                job_name(block).as_deref(),
+                *name,
+                "{}: job `{id}` must carry the contract's name",
                 contract.file
             );
         }
@@ -6287,7 +6272,7 @@ fn reader_facing_jobs_follow_the_naming_contract() {
 fn the_naming_contract_uses_only_literal_descriptive_names() {
     for contract in &NAMING_CONTRACT {
         let names = std::iter::once(contract.title)
-            .chain(contract.jobs.iter().filter_map(|(_, _, after)| *after));
+            .chain(contract.jobs.iter().filter_map(|(_, name)| *name));
         for name in names {
             let suffix_free = !name.contains(['(', ',']) || name.ends_with(" (advisory)");
             assert!(
@@ -6348,9 +6333,66 @@ fn delegation_area_and_build_jobs_keep_their_automatic_labels() {
     assert!(build.contains("build: ${{ fromJSON(needs.scope.outputs.build_producers) }}"));
 }
 
-/// Each step rename names a step that exists: exactly one of the old and the
-/// new name is declared in every workflow the row lists, never both. The
-/// dependent-compilation step keeps its name verbatim.
+/// The complete names a reader sees, composed the way GitHub renders a called
+/// workflow's job: `<caller label> / <called label>`, where a job with no
+/// `name:` is labelled by its id plus, when it expands, every value of its
+/// row. These are projections from the workflow text, not observed run
+/// records; `scripts/ci/test_runner_loss.py` parses the same strings.
+#[test]
+fn projected_full_names_compose_from_the_declared_names() {
+    let declared = |file: &str, job: &str| {
+        job_name(&job_block(file, &format!("  {job}:")))
+            .unwrap_or_else(|| panic!("{file}: `{job}` declares a static name"))
+    };
+    let package_work = declared("_area-ci.yml", "package-ci");
+    let audit = declared("_area-ci.yml", "coverage-audit");
+    let guest = declared("_wsl-ci.yml", "wsl");
+    let automatic = |id: &str, row: [&str; 4]| format!("{id} ({})", row.join(", "));
+
+    let expanded = [
+        format!(
+            "area-ci (research) / {package_work} / {}",
+            automatic("test", ["research", "L1", "ubuntu-latest", "ubuntu-latest"])
+        ),
+        format!(
+            "area-ci (research) / {package_work} / {}",
+            automatic("test", ["research", "L2", "ubuntu-latest", "ubuntu-latest"])
+        ),
+        format!(
+            "area-ci (schematic) / {package_work} / {} / {guest}",
+            automatic("wsl2", ["schematic-gen", "L1", "wsl2-ubuntu", "windows-latest"])
+        ),
+        format!("area-ci (claudine/rendezvous) / {audit}"),
+    ];
+    assert_eq!(
+        expanded,
+        [
+            "area-ci (research) / Run package work / test (research, L1, ubuntu-latest, ubuntu-latest)",
+            "area-ci (research) / Run package work / test (research, L2, ubuntu-latest, ubuntu-latest)",
+            "area-ci (schematic) / Run package work / wsl2 (schematic-gen, L1, wsl2-ubuntu, windows-latest) / Run guest tests",
+            "area-ci (claudine/rendezvous) / Check required results",
+        ]
+    );
+    assert_ne!(expanded[0], expanded[1], "two levels of one package stay distinguishable");
+
+    // A skipped job never has its contexts evaluated, so it shows its literal
+    // name or its bare id: an area with nothing selected, a producer job with
+    // an empty row set, and a delegation that never ran.
+    let skipped = [
+        "area-ci".to_owned(),
+        format!("area-ci (research) / {package_work}"),
+        format!("area-ci (research) / {package_work} / test"),
+        format!("area-ci (schematic) / {package_work} / wsl2"),
+    ];
+    for name in &skipped {
+        assert!(!name.contains("${{"), "a skipped name must not show an expression: {name:?}");
+    }
+}
+
+/// Each step rename has landed: every workflow the row lists declares the new
+/// name and no longer declares the old one. A name shared by several jobs of
+/// one workflow (the completeness certification) appears at most once per
+/// job. The dependent-compilation step keeps its name verbatim.
 #[test]
 fn step_renames_name_real_steps() {
     for (files, old, new) in STEP_RENAMES {
@@ -6359,10 +6401,14 @@ fn step_renames_name_real_steps() {
             let old_count = names.iter().filter(|name| *name == old).count();
             let new_count = names.iter().filter(|name| *name == new).count();
             assert!(
-                (old_count == 0) != (new_count == 0),
-                "{file}: step {old:?} -> {new:?} must name an existing step under \
-                 exactly one of its names (old {old_count}, new {new_count})"
+                old_count == 0 && new_count >= 1,
+                "{file}: step {old:?} must be renamed to {new:?} \
+                 (old {old_count}, new {new_count})"
             );
+            for block in jobs(&workflow(file)) {
+                let in_job = step_names(&block).iter().filter(|name| *name == new).count();
+                assert!(in_job <= 1, "{file}: `{}` declares {new:?} {in_job} times", job_id(&block));
+            }
         }
     }
     let package_steps = step_names(&workflow("_package-ci.yml"));
@@ -6448,7 +6494,7 @@ fn every_selected_area_owns_an_always_coverage_audit() {
         "the area coverage audit must apply its own baseline and fail closed"
     );
     let audit_steps = steps(&rollup);
-    let enforcement = step_named(&audit_steps, "Enforce coverage completeness and exceptions")
+    let enforcement = step_named(&audit_steps, "Verify required results and policy exceptions")
         .expect("the coverage audit must have one explicit enforcement step");
     assert!(
         enforcement.contains(
@@ -6700,9 +6746,12 @@ fn every_downstream_consumer_reads_the_same_ci_run_conclusion() {
             source.contains("workflow_run:"),
             "{file}: must key on a `ci` run, not race it"
         );
+        // `workflow_run` matches a workflow by its TITLE, so renaming
+        // `ci.yml`'s `name:` without these triggers silently stops them.
+        let title = workflow_title(&workflow("ci.yml"));
         assert!(
-            source.contains("workflows: [ci]") || source.contains(r#"workflows: ["ci"]"#),
-            "{file}: must watch the `ci` workflow by name"
+            source.contains(&format!(r#"workflows: ["{title}"]"#)),
+            "{file}: must watch the `ci.yml` workflow by its title {title:?}"
         );
         assert!(
             source.contains("github.event.workflow_run.conclusion"),
@@ -6759,7 +6808,7 @@ fn a_coverage_blocked_area_still_publishes_its_result_slice() {
         .find("name: Upload this area's result slice")
         .expect("the area coverage audit must upload its result slice");
     let judge = rollup
-        .find("name: Enforce coverage completeness and exceptions")
+        .find("name: Verify required results and policy exceptions")
         .expect("the area coverage audit must enforce its policy");
     assert!(
         upload < judge,
@@ -6921,9 +6970,11 @@ fn the_gap_publisher_is_the_only_job_holding_checks_write() {
         publisher.contains("name: ci-resolved-plan"),
         "the publisher reads the plan the scope job already uploaded"
     );
+    let label = job_name(&job_block("_area-ci.yml", "  accepted-gaps:"))
+        .expect("the publisher declares a static name");
     assert!(
-        job_name(&job_block("_area-ci.yml", "  accepted-gaps:")).is_none(),
-        "the publisher is skippable and must keep its static `accepted-gaps` label (AC10)"
+        !label.contains("${{"),
+        "the publisher is skippable, so its name must be a literal (AC10): {label:?}"
     );
     for scope in ["actions:", "pull-requests:", "contents: write"] {
         assert!(
@@ -7690,7 +7741,7 @@ fn an_archive_consumer_verifies_first_and_never_reaches_a_compiler() {
         "{header}: listing runs the archived binaries, so it follows verification too"
     );
     assert!(
-        index("Verify this cell's build") < index("- name: Tests"),
+        index("Verify this cell's build") < index("- name: Run planned tests"),
         "{header}: verification must precede the tier, not follow it"
     );
 
@@ -7803,7 +7854,7 @@ fn an_archive_consumer_checks_its_build_status_before_downloading() {
         let mut after_check = vec![
             "Download this cell's build",
             "List this cell's expected tests",
-            "Certify this cell's completeness",
+            "Verify all expected results reported",
         ];
         if file == "_wsl-ci.yml" {
             // Resolved on the Windows host before the guest exists, so a
@@ -7818,10 +7869,10 @@ fn an_archive_consumer_checks_its_build_status_before_downloading() {
                 "Install just and cargo-nextest in the guest",
                 "Install native prerequisites in the guest",
                 "Verify the build in the guest",
-                "L1 tests from the archive",
+                "Run Level 1 tests from the archive",
             ]);
         } else {
-            after_check.extend(["Verify this cell's build", "Tests"]);
+            after_check.extend(["Verify this cell's build", "Run planned tests"]);
         }
         for name in after_check {
             let step = executable_lines(&all[position(name)]);
@@ -8416,7 +8467,7 @@ fn the_l2_consumer_still_provisions_and_proves_its_runtime_backend() {
 fn the_certify_step_reads_backend_proofs_from_the_same_stage_tree() {
     let native = job_block("_package-ci.yml", "  test:");
     let native_steps = steps(&native);
-    let certify = step_named(&native_steps, "Certify this cell's completeness")
+    let certify = step_named(&native_steps, "Verify all expected results reported")
         .expect("the native test job certifies its cell");
     for flag in [
         r#"--expected-manifest "target/nextest/ci-reports/expected-${{ matrix.gate }}.json""#,
@@ -8431,7 +8482,7 @@ fn the_certify_step_reads_backend_proofs_from_the_same_stage_tree() {
 
     let wsl = workflow("_wsl-ci.yml");
     let wsl_steps = steps(&wsl);
-    let certify = step_named(&wsl_steps, "Certify this cell's completeness")
+    let certify = step_named(&wsl_steps, "Verify all expected results reported")
         .expect("the guest certifies its cell");
     for flag in [
         r#"--artifacts "$stage""#,
@@ -9150,7 +9201,7 @@ fn completion_upload_steps() -> Vec<(String, String, String, String)> {
             else {
                 continue;
             };
-            let validation = step_named(&job_steps, "Certify this cell's completeness")
+            let validation = step_named(&job_steps, "Verify all expected results reported")
                 .expect("a completion record is uploaded only where one was validated");
             found.push((
                 file.to_owned(),
@@ -9428,7 +9479,7 @@ fn every_producer_uploads_a_completion_artifact() {
             let block = job_block(file, &format!("  {job_id}:"));
             let job_steps = steps(&block);
             let junit = step_named(&job_steps, "Upload JUnit")
-                .or_else(|| step_named(&job_steps, "Upload wsl2-ubuntu L1 JUnit"));
+                .or_else(|| step_named(&job_steps, "Upload WSL2 Level 1 test results"));
             let status = step_named(&job_steps, "Upload producer status")
                 .expect("every producer uploads its status");
             assert!(
@@ -10075,7 +10126,7 @@ fn uploads_named_by_the_cell_contract_skip_when_it_failed_to_resolve() {
         ("_package-ci.yml", "  lint:", "Upload producer status", "always()", "status_artifact"),
         ("_wsl-ci.yml", "  wsl:", "Upload producer status", "always()", "status_artifact"),
         ("_package-ci.yml", "  test:", "Upload JUnit", "!cancelled()", "junit_artifact"),
-        ("_wsl-ci.yml", "  wsl:", "Upload wsl2-ubuntu L1 JUnit", "!cancelled()", "junit_artifact"),
+        ("_wsl-ci.yml", "  wsl:", "Upload WSL2 Level 1 test results", "!cancelled()", "junit_artifact"),
         ("_wsl-ci.yml", "  wsl:", "Upload this cell's observation", "!cancelled()", "package"),
     ];
     let mut problems = Vec::new();

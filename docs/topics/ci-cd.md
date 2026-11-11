@@ -552,13 +552,8 @@ staging tree. The planner refuses, whole and before dispatch, a
 row set over 256 jobs, an area's rows over 16 KB, or all rows together over 512 KiB. These
 changes are part of current plan schema 7; see [schema versions](../cicd/schema-versions.md).
 
-A called workflow's jobs render as `<caller job name> / <called job name>`, and a matrix job's
-label carries every row value in key order, so a producer reads
-`area-ci (playa) / package-ci / test (playa-cli, L1, macos-latest, macos-latest)`: area first,
-then the whole cell. No display name is parsed for *identity* — that comes from each artifact's
-`manifest.jsonl` and `status.json` — but the composite label **is** parsed by
-`scripts/ci/runner_loss.py` to attribute a dead runner's cell, so renaming a producer job or
-reordering a row is a contract change.
+Each job's displayed name, and which parts of it come from the row, is described under
+[reading job and check names](#reading-job-and-check-names).
 
 A source-changed package receives lint, L1 across its environments, and its declared higher tiers.
 Compile-check is no longer blanket: the planner reads each package's declared Cargo targets from
@@ -612,10 +607,179 @@ receives are the plan's *executing* set. A reused cell is published straight
 into its area's summary, where the grid's "Reused results" table names the receipt's evidence ref,
 counts, duration, and host — no setup, build, archive, or test step runs for it.
 
-Skippable jobs carry **no `name:`**. GitHub never evaluates the matrix context for a job it skips,
-so a declared `name:` containing `${{ matrix.… }}` reaches the Checks tab as raw expression text
-(63 such labels in run 34638047631). Omitting `name:` makes the label the job id when skipped and
-`job-id (matrix values)` when it runs — which is also how `lint`'s environment stays visible.
+### Reading job and check names
+
+This section explains how to read a name on a pull request's Checks tab or in a run's job list:
+what each part means, which parts are fixed by stored data, and what a skipped or neutral entry
+does and does not prove. The names are for people. No job identifier, artifact, or stored result
+is keyed on a displayed name.
+
+#### Workflow titles
+
+| File | Title shown in the Actions tab |
+|---|---|
+| `ci.yml` | `Continuous integration` |
+| `_area-ci.yml` | `Package area checks` |
+| `_package-ci.yml` | `Package checks` |
+| `_wsl-ci.yml` | `WSL2 tests` |
+
+**The `ci.yml` title is load-bearing.** A `workflow_run` trigger (a workflow that starts when
+another one finishes) names the workflow it waits for by its *title*, not its file. Both
+`release-plz.yml` and `ci-infra-retry.yml` wait for `Continuous integration`. Renaming the title
+without changing those two triggers would silently stop release preparation and the lost-runner
+retry; nothing would turn red. The `ci_workflow_contracts` suite compares each trigger with
+`ci.yml`'s actual title, so that mistake fails a test instead.
+
+#### Infrastructure jobs
+
+Jobs that own no result cell carry a fixed, descriptive name. The identifier in the left column
+is what `needs:`, the plan, and the scripts use; the name is only what you see.
+
+| Job identifier | Displayed name | What it does |
+|---|---|---|
+| `validation` | `Check prior pull request validation` | decides whether a passing pull-request run already proved this tree |
+| `scope` | `Choose required work` | computes the one resolved plan |
+| `preflight` | `Verify build prerequisites` | checks toolchains and tools per selected OS; runs no tests |
+| `build` | automatic: `build (<producer>)` | prepares test archives (see below) |
+| `area-ci` | automatic: `area-ci (<area directory>)` | one entry per selected package area |
+| `area-drift` | `Verify package area mapping` | the planner's areas match `sniff` |
+| `ci-gate` | `ci-gate` | the required merge check |
+| `certify-nightly` | `Publish nightly coverage evidence` | records a successful nightly's certification |
+| `publish-observations` | `Publish test observations` | publishes finished cells' proof |
+| `ci-reporting` | `Report CI results (advisory)` | the run report; never blocks |
+| `_area-ci.yml` `package-ci` | `Run package work` | calls `_package-ci.yml` for the area |
+| `_area-ci.yml` `accepted-gaps` | `Publish accepted capability gaps` | posts neutral gap checks |
+| `_area-ci.yml` `coverage-audit` | `Check required results` | the area's coverage audit |
+| `_wsl-ci.yml` `wsl` | `Run guest tests` | runs a WSL2 cell inside the guest |
+
+`ci-gate` keeps its identifier as its name because the `protect-your-bacon` ruleset requires a
+check with exactly that name.
+
+**`build (<producer>)` prepares archives; it does not run tests.** The suffix is the build owner's
+runner, not an execution environment. The `ubuntu-latest` owner's Linux archive is consumed by
+both the Linux cell and the WSL2 guest, so `build (ubuntu-latest)` appears in a run that only
+executes WSL2 tests. The name stays automatic because `runner_loss.py` reads it to attribute a
+lost build runner.
+
+#### Package jobs: the automatic suffix
+
+A job in a called workflow renders as `<caller job name> / <called job name>`, and a matrix job
+with no declared name renders as `<job id> (<row values in key order>)`. A package job is three
+levels deep (four for WSL2), and every row carries `package, gate, environment, runner`:
+
+```text
+area-ci (research) / Run package work / test (research, L1, ubuntu-latest, ubuntu-latest)
+└─ area ─────────┘   └─ caller ─────┘   └─ job (package, gate, environment, runner) ────┘
+```
+
+The package matrix jobs (`check`, `test`, `lint`, and `wsl2` in `_package-ci.yml`), together with
+`ci.yml`'s `area-ci` and `build`, deliberately declare **no `name:`**:
+
+- a literal `name:` replaces the automatic suffix, which would hide the cell the job runs;
+- a `name:` built from `${{ matrix.… }}` is shown as raw expression text whenever the job is
+  skipped, because GitHub never evaluates the matrix for a skipped job (63 such labels appeared
+  in run 34638047631).
+
+So the suffix keeps the stored values rather than plain words, and the runner appears twice for
+native cells (`ubuntu-latest, ubuntu-latest`). Read the values with these tables:
+
+| Gate value | Meaning |
+|---|---|
+| `L1` | Level 1 tests: in-process, or hermetic subprocess and filesystem tests |
+| `L2` | Level 2 tests: tests that need a real terminal or pseudo-terminal |
+| `browser` | tests that drive a headless browser |
+| `lint` | Clippy and the package's lint suites |
+| `check` | compilation of declared example and bench targets, and of unchanged dependents |
+
+| Environment value | Meaning |
+|---|---|
+| `ubuntu-latest` | Linux |
+| `macos-latest` | macOS |
+| `windows-latest` | native Windows |
+| `wsl2-ubuntu` | WSL2 (Windows Subsystem for Linux 2), an Ubuntu guest on a Windows runner |
+
+A WSL2 cell's identity rides on the delegating `wsl2 (…)` segment, whose runner is the Windows
+host, and the guest job's own name is the static `Run guest tests`. A nested area keeps its whole
+repository-relative directory in the prefix.
+
+The examples below are **projected** from the declared names and GitHub's rendering rules; they
+have not yet been read from a run. The contract test
+`projected_full_names_compose_from_the_declared_names` builds the same strings from the
+workflows, and `test_runner_loss.py` parses them back to their cells.
+
+```text
+area-ci (research) / Run package work / test (research, L1, ubuntu-latest, ubuntu-latest)
+area-ci (research) / Run package work / test (research, L2, ubuntu-latest, ubuntu-latest)
+area-ci (schematic) / Run package work / wsl2 (schematic-gen, L1, wsl2-ubuntu, windows-latest) / Run guest tests
+area-ci (claudine/rendezvous) / Check required results
+area-ci (claudine/rendezvous) / Publish accepted capability gaps
+```
+
+For comparison, a name **observed** in nightly run 42491863852 before these names were introduced:
+`area-ci (schematic) / package-ci / wsl2 (schematic-gen, L1, wsl2-ubuntu, windows-latest) / test (wsl2-ubuntu)`.
+
+#### Accepted-gap checks
+
+Each governed, unexpired gap is posted as one `neutral` check named in plain words:
+
+```text
+ACCEPTED GAP: <package>: <action> on <environment>
+ACCEPTED GAP: darkmatter: run Level 2 tests on macOS
+```
+
+The action is `run Level 1 tests`, `run Level 2 tests`, `run browser tests`, `lint source`, or
+`check compilation`; the environment is `Linux`, `macOS`, `Windows`, or `WSL2`.
+`scripts/ci/publish_gaps.py` refuses an unknown gate or environment before it posts anything. The
+area is in the check's summary, not its name.
+
+#### What a skipped or neutral entry means
+
+A skipped job proves nothing by itself; it only says GitHub did not run it. What decides a cell is
+the plan and the area's `Check required results` audit. A skipped name never contains `${{`: it is
+either a literal name or a bare job identifier.
+
+| You see | Example | Why | Blocks? |
+|---|---|---|---|
+| skipped caller, no package jobs | `area-ci (tools) / Run package work` | the area has no executing cells: nothing selected, or every cell reused or a gap | no; the audit still judges the area |
+| skipped bare job | `area-ci (research) / Run package work / test` | no row of that kind for the area | no |
+| cell under "Reused results" in the area summary | the receipt's evidence ref, counts, duration, host | qualifying passing evidence already covers the cell | no |
+| skipped `wsl2` on a pull request | `area-ci (biscuit-file) / Run package work / wsl2` | the event does not schedule WSL2; it is not a required cell for this run | no |
+| neutral check | `ACCEPTED GAP: darkmatter: run browser tests on macOS` | governed, unexpired capability gap | no |
+| failed, missing, or cancelled required work | a red producer, or the audit reporting `MISSING` or `completion-unproven` | the cell was required and is not proven | yes, through `ci-gate` |
+
+```mermaid
+flowchart LR
+    Scope[Choose required work] --> Cell{each required cell}
+    Scope -.->|environment not scheduled<br/>for this event| Deferred[deferred:<br/>not a required cell]
+    Cell -->|qualifying evidence| Reuse[reused,<br/>linked in summary]
+    Cell -->|governed gap| Gap[neutral<br/>ACCEPTED GAP check]
+    Cell -->|otherwise| Run[Run package work]
+    Reuse --> Audit[Check required results]
+    Gap --> Audit
+    Run --> Audit
+    Run -->|failed or cancelled| Gate
+    Audit -->|missing or unproven| Gate[ci-gate blocks]
+    Audit -->|all proven| Pass[ci-gate passes]
+```
+
+#### The only code that reads names
+
+Displayed names are not an identity API. Identity comes from each artifact's `manifest.jsonl` and
+`status.json`. Two readers are grandfathered, and no new one may be added:
+
+- `scripts/ci/runner_loss.py` attributes a lost runner to its cell. It reads the row
+  parenthetical `<job> (<package>, <gate>, <environment>, <runner>)` from the last segment. When
+  the last segment is `Run guest tests`, it takes the cell only from the enclosing
+  `wsl2 (…)` segment and gives up if that segment is missing or malformed. It still accepts the
+  older `package-ci`, `test (wsl2-ubuntu)`, and pre-row names, and reads `build (<producer>)`
+  for archive owners.
+- `scripts/ci/reuse_validation.py` finds each area's audit job by its name, accepting both
+  `Check required results` and the historical `coverage-audit`, so nightly reuse and
+  certification still read runs from before the rename.
+
+Renaming a producer job, the guest job, or the audit job, or reordering a row's fields, therefore
+changes what these readers parse; `test_runner_loss.py` derives its fixtures from the shipped
+workflows, so such a change fails its suite.
 
 ### How the planner reads the workspace
 
@@ -683,7 +847,7 @@ match Cargo's resolve.
 (`rustup show`) and the prebuilt helper, exactly as before. Only the registry is no longer needed.
 
 **Checking the graph against Cargo.** Small all-local workspaces in
-`scripts/ci/test_affected_scope.py` run in the Ubuntu `Companion suites` step: each is compared
+`scripts/ci/test_affected_scope.py` run in the Ubuntu `Run companion test suites` step: each is compared
 with Cargo's full resolve using `--offline`, an empty temporary `CARGO_HOME`, and no compile.
 The real workspace is not compared on every push; that is a local check, run when member
 manifests, features, or the toolchain change:

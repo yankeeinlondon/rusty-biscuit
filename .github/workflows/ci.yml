@@ -1,4 +1,4 @@
-name: ci
+name: Continuous integration
 
 # Dependency-aware CI for pull requests, pushes to main, and a nightly full
 # run. Each environment names the events that schedule it in
@@ -84,7 +84,7 @@ env:
 
 jobs:
   validation:
-    name: Check reusable PR validation
+    name: Check prior pull request validation
     runs-on: ubuntu-latest
     # A PR merged before its own CI finished is waited for (up to 90 min, the
     # long end of a pull request's duration) rather than re-run in full.
@@ -109,7 +109,7 @@ jobs:
         run: python3 scripts/ci/reuse_validation.py check --wait-minutes 90
 
   scope:
-    name: Determine affected scope
+    name: Choose required work
     needs: validation
     # Always, including on a reused PR validation: that reuse proves the
     # environments the pull request event schedules, and the push event may
@@ -567,12 +567,13 @@ jobs:
   # the implicit `success()` provided before the guard existed — a skipped
   # `scope` publishes an empty string, not `[]`, and `fromJSON('')` raises.
   #
-  # No `name:`. GitHub labels a matrix job it EXPANDS from the matrix values
-  # (`preflight (ubuntu-latest)`) but never evaluates the matrix context for a
-  # job it SKIPS, so a declared `name:` carrying `${{ matrix.os }}` reaches the
-  # Checks tab as raw expression text. The default label degrades to the static,
-  # human-readable job id instead (AC10).
+  # A LITERAL `name:`. GitHub never evaluates the matrix context for a job it
+  # SKIPS, so a declared `name:` carrying `${{ matrix.os }}` would reach the
+  # Checks tab as raw expression text (AC10). GitHub may still append the
+  # matrix values to the literal when it expands the job; this job owns no
+  # result cell, so nothing reads its label.
   preflight:
+    name: Verify build prerequisites
     needs: scope
     if: >-
       needs.scope.result == 'success' &&
@@ -866,10 +867,10 @@ jobs:
   # for the tested half of the run (AC2). The area's packages, their gates, and
   # its own rollup all live inside `_area-ci.yml` and render underneath it.
   #
-  # No `name:`, for the reason `preflight` has none: this job carries `needs:`
-  # and can therefore be skipped as a whole, and a skipped matrix job never has
-  # its matrix context evaluated. The default label is `area-ci` when skipped
-  # and `area-ci (claudine)` when it runs.
+  # No `name:`: this job carries `needs:` and can therefore be skipped as a
+  # whole, and a skipped matrix job never has its matrix context evaluated. A
+  # literal name would hide the area, so the automatic label stays: `area-ci`
+  # when skipped and `area-ci (claudine)` when it runs.
   #
   # `has_packages` is the scalar guard, read before matrix expansion for the
   # reason `preflight_os` is: a run that schedules no area resolves this job
@@ -944,7 +945,7 @@ jobs:
   # of the equivalence. `ci-gate` folds `skipped` as a pass, so every other
   # pull request pays nothing and is blocked by nothing.
   area-drift:
-    name: area-drift (planner areas match sniff)
+    name: Verify package area mapping
     needs: [scope, preflight]
     if: >-
       !cancelled() &&
@@ -1086,10 +1087,11 @@ jobs:
   # with zero new cells. It is deliberately NOT in `ci-gate`'s `needs` (the
   # gate stays a policy-free fold); a failure here fails the run instead, so
   # a nightly that could not certify is not mistaken for a baseline either.
-  # No `name:`: a skipped matrix job is never labelled from its matrix.
+  # A literal `name:`: a skipped matrix job is never labelled from its matrix.
   # `actions: read` is for the audit-job count; nothing here writes checks or
   # contents, which stay with the accepted-gaps publisher.
   certify-nightly:
+    name: Publish nightly coverage evidence
     needs: [scope, ci-gate]
     if: >-
       always() &&
@@ -1172,8 +1174,9 @@ jobs:
   # `refs/notes/*`. If they do not, the push is refused, the step fails red
   # with "hosted observations are local to this runner; remote reuse
   # unavailable", and the artifacts stay the only record.
-  # No `name:`: a skipped job is never labelled from its matrix.
+  # A literal `name:`: a skipped job is never labelled from its matrix.
   publish-observations:
+    name: Publish test observations
     needs: [scope, area-ci]
     if: >-
       always() &&
@@ -1256,7 +1259,7 @@ jobs:
   # cell in its own area's coverage audit. On reuse every one of those is
   # skipped, which is why this job also runs then.
   ci-reporting:
-    name: ci-reporting (advisory)
+    name: Report CI results (advisory)
     needs:
       - validation
       - scope

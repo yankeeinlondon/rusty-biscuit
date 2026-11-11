@@ -25,7 +25,7 @@ name: Release-plz
 # calculation can be exercised from a branch before its definition is merged.
 on:
   workflow_run:
-    workflows: ["ci"]
+    workflows: ["Continuous integration"]
     types:
       - completed
     branches:

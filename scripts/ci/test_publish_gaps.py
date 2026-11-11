@@ -125,13 +125,13 @@ class PayloadTests(unittest.TestCase):
         names = [run["name"] for run in build(FIXTURE)]
         self.assertEqual(
             [
-                "accepted gap: pkg / alpha-cli / L2 (windows-latest)",
-                "accepted gap: pkg / alpha-gen / L2 (wsl2-ubuntu)",
+                "ACCEPTED GAP: alpha-cli: run Level 2 tests on Windows",
+                "ACCEPTED GAP: alpha-gen: run Level 2 tests on WSL2",
             ],
             names,
         )
         self.assertEqual(
-            ["accepted gap: other / beta / L2 (windows-latest)"],
+            ["ACCEPTED GAP: beta: run Level 2 tests on Windows"],
             [run["name"] for run in build(FIXTURE, area="other")],
         )
         self.assertEqual([], build(FIXTURE, area="unselected"))
@@ -208,6 +208,138 @@ class PayloadTests(unittest.TestCase):
         self.assertIsNone(publish_gaps.policy_line(POLICY_SOURCE, "macos-latest", "tmux"))
 
 
+#: Every payload field except `name` for the `alpha-cli` / `windows-latest`
+#: cell of `FIXTURE`, captured from the publisher as it stood before the check
+#: name changed shape. The rename must leave all of this untouched.
+PRE_RENAME_ALPHA_CLI = {
+    "head_sha": HEAD,
+    "status": "completed",
+    "conclusion": "neutral",
+    "details_url": f"{SERVER}/{REPO}/blob/{HEAD}/.github/ci/environments.json#L13",
+    "output": {
+        "title": "ACCEPTED GAP: alpha-cli L2 on windows-latest",
+        "summary": (
+            "**ACCEPTED GAP** — no test ran for this cell, by governed policy.\n"
+            "\n"
+            "| field | value |\n"
+            "|---|---|\n"
+            "| area | `pkg` |\n"
+            "| package | `alpha-cli` |\n"
+            "| gate / tier | `L2` |\n"
+            "| environment | `windows-latest` |\n"
+            "| capability | `tmux` |\n"
+            "| accepted by | @yankeeinlondon |\n"
+            "| expires | 2027-01-31 |\n"
+            "\n"
+            "no L2 terminal backend is provisionable on Windows"
+        ),
+        "text": (
+            "## Policy entry\n"
+            "\n"
+            "`environments.windows-latest.capabilities.tmux` in "
+            f"[`.github/ci/environments.json`]({SERVER}/{REPO}/blob/{HEAD}/.github/ci/environments.json#L13), "
+            "accepted by @yankeeinlondon until 2027-01-31.\n"
+            "\n"
+            "## Changing or revoking this acceptance\n"
+            "\n"
+            "Edit that entry to change its `owner`, `expiry`, `reason`, or `closes`. "
+            "Remove the entry, or set `available: true` once the environment can host the "
+            "tier, to revoke it. An absent, incomplete, or expired entry is a blocking "
+            "`POLICY GAP`, not an accepted one: the area's coverage audit fails until the "
+            "coverage exists or the acceptance is renewed.\n"
+            "\n"
+            "## Coverage that closes this gap\n"
+            "\n"
+            f"[`features/_unscheduled/windows-l2-ci-leg`]({SERVER}/{REPO}/tree/{HEAD}/features/_unscheduled/windows-l2-ci-leg) "
+            "is the tracked work that ends this gap. When it lands, the environment hosts "
+            "the tier and the policy entry goes.\n"
+            "\n"
+            "## What this check means\n"
+            "\n"
+            "Presentation only. The `ACCEPTED GAP` state was decided by the planner from "
+            "`.github/ci/environments.json` before any job ran and is carried in the "
+            "resolved plan and this area's result slice. A `neutral` conclusion is neither "
+            "a pass nor a test failure and never alters the run's conclusion; the area's "
+            "`coverage-audit` job owns completeness and exception policy for `pkg`."
+        ),
+    },
+}
+
+#: The expected action phrase per gate and wording per environment.
+GATE_ROWS = {
+    "L1": "run Level 1 tests",
+    "L2": "run Level 2 tests",
+    "browser": "run browser tests",
+    "lint": "lint source",
+    "check": "check compilation",
+}
+ENVIRONMENT_ROWS = {
+    "ubuntu-latest": "Linux",
+    "macos-latest": "macOS",
+    "windows-latest": "Windows",
+    "wsl2-ubuntu": "WSL2",
+}
+
+
+class CheckNameTests(unittest.TestCase):
+    """`ACCEPTED GAP: <package>: <action> on <environment>`, observed through `payloads`."""
+
+    def name_for(self, package: str = "alpha-cli", environment: str = "windows-latest", gate: str = "L2") -> str:
+        (run,) = build(plan(cell(package, "pkg", environment, gate=gate)))
+        return run["name"]
+
+    def test_the_tables_cover_exactly_the_known_gates_and_environments(self) -> None:
+        self.assertEqual(
+            {"L1", "L2", "browser", "lint", "check"}, set(publish_gaps.GATE_ACTIONS)
+        )
+        self.assertEqual(
+            {"ubuntu-latest", "macos-latest", "windows-latest", "wsl2-ubuntu"},
+            set(publish_gaps.ENVIRONMENT_NAMES),
+        )
+        self.assertEqual(set(GATE_ROWS), set(publish_gaps.GATE_ACTIONS))
+        self.assertEqual(set(ENVIRONMENT_ROWS), set(publish_gaps.ENVIRONMENT_NAMES))
+
+    def test_each_gate_names_its_action(self) -> None:
+        for gate, action in GATE_ROWS.items():
+            with self.subTest(gate=gate, action=action):
+                self.assertEqual(
+                    f"ACCEPTED GAP: alpha-cli: {action} on Windows",
+                    self.name_for(gate=gate),
+                )
+
+    def test_each_environment_names_its_wording(self) -> None:
+        for environment, wording in ENVIRONMENT_ROWS.items():
+            with self.subTest(environment=environment, wording=wording):
+                self.assertEqual(
+                    f"ACCEPTED GAP: alpha-cli: run Level 2 tests on {wording}",
+                    self.name_for(environment=environment),
+                )
+
+    def test_the_documented_example(self) -> None:
+        self.assertEqual("ACCEPTED GAP: alpha-cli: run Level 2 tests on Windows", self.name_for())
+
+    def test_the_area_stays_in_the_output_not_the_name(self) -> None:
+        (run,) = build(plan(cell("alpha-cli", "pkg", "windows-latest")))
+        self.assertNotIn("pkg", run["name"].replace("alpha-cli", ""))
+        self.assertIn("| area | `pkg` |", run["output"]["summary"])
+        self.assertIn("exception policy for `pkg`", run["output"]["text"])
+
+    def test_every_field_but_the_name_matches_the_pre_rename_payload(self) -> None:
+        run = dict(build(FIXTURE)[0])
+        self.assertEqual("ACCEPTED GAP: alpha-cli: run Level 2 tests on Windows", run.pop("name"))
+        self.assertEqual(PRE_RENAME_ALPHA_CLI, run)
+
+    def test_a_name_at_the_limit_publishes_and_one_over_is_refused(self) -> None:
+        overhead = len(self.name_for(package="x")) - 1
+        fits = "p" * (publish_gaps.NAME_LIMIT - overhead)
+        self.assertEqual(publish_gaps.NAME_LIMIT, len(self.name_for(package=fits)))
+        too_long = fits + "p"
+        with self.assertRaises(publish_gaps.Refusal) as caught:
+            self.name_for(package=too_long)
+        self.assertIn(f"{too_long}/windows-latest/L2", str(caught.exception))
+        self.assertIn(f"over {publish_gaps.NAME_LIMIT} characters", str(caught.exception))
+
+
 class RefusalTests(unittest.TestCase):
     """A `neutral` check for a cell the rollup will block on is a lie; refuse it."""
 
@@ -248,6 +380,29 @@ class RefusalTests(unittest.TestCase):
         )
         with self.assertRaises(publish_gaps.Refusal):
             build(document)
+
+    def test_an_unknown_gate_refuses_the_whole_batch(self) -> None:
+        # Control: the unedited cell publishes.
+        self.assertEqual(1, len(build(plan(cell("alpha", "pkg", "windows-latest")))))
+        document = plan(
+            cell("alpha", "pkg", "windows-latest"),
+            cell("alpha", "pkg", "windows-latest", gate="L9"),
+        )
+        with self.assertRaises(publish_gaps.Refusal) as caught:
+            build(document)
+        self.assertIn("alpha/windows-latest/L9", str(caught.exception))
+        self.assertIn("'L9'", str(caught.exception))
+
+    def test_an_unknown_environment_refuses_the_whole_batch(self) -> None:
+        self.assertEqual(1, len(build(plan(cell("alpha", "pkg", "windows-latest")))))
+        document = plan(
+            cell("alpha", "pkg", "windows-latest"),
+            cell("alpha", "pkg", "freebsd-latest"),
+        )
+        with self.assertRaises(publish_gaps.Refusal) as caught:
+            build(document)
+        self.assertIn("alpha/freebsd-latest/L2", str(caught.exception))
+        self.assertIn("'freebsd-latest'", str(caught.exception))
 
 
 class CommandFixture(unittest.TestCase):
@@ -376,9 +531,31 @@ class GhInvocationTests(CommandFixture):
         result = self.run_publisher(env=self.environment(GH_STUB_EXIT="1"))
         self.assertEqual(1, result.returncode)
         self.assertIn("gh api POST repos/yankeeinlondon/rusty-biscuit/check-runs failed", result.stderr)
-        self.assertIn("accepted gap: pkg / alpha-cli / L2 (windows-latest)", result.stderr)
+        self.assertIn("ACCEPTED GAP: alpha-cli: run Level 2 tests on Windows", result.stderr)
         # The first failure stops the loop; the second cell is never attempted.
         self.assertEqual(1, len(self.calls()))
+
+    def test_an_unknown_gate_or_environment_posts_nothing(self) -> None:
+        # Control: the unedited fixture posts through the same stub.
+        control = self.run_publisher(env=self.environment())
+        self.assertEqual(0, control.returncode, control.stderr)
+        self.assertEqual(2, len(self.calls()))
+        self.log.unlink()
+        for bad, fragment in (
+            (cell("alpha", "pkg", "windows-latest", gate="L9"), "alpha/windows-latest/L9 has unknown gate 'L9'"),
+            (cell("alpha", "pkg", "freebsd-latest"), "alpha/freebsd-latest/L2 has unknown environment 'freebsd-latest'"),
+        ):
+            with self.subTest(fragment=fragment):
+                # The good cell comes first: the refusal must still stop it.
+                self.plan_path.write_text(
+                    json.dumps(plan(cell("alpha", "pkg", "windows-latest"), bad)),
+                    encoding="utf-8",
+                )
+                result = self.run_publisher(env=self.environment())
+                self.assertEqual(2, result.returncode)
+                self.assertIn("refusing to publish a neutral check", result.stderr)
+                self.assertIn(fragment, result.stderr)
+                self.assertFalse(self.log.exists())
 
     def test_a_dry_run_never_reaches_gh(self) -> None:
         result = self.run_publisher("--dry-run", env=self.environment())

@@ -29,7 +29,8 @@ run that schedules nothing resolves both to `skipped` right after `scope`
 instead of depending on GitHub's empty-matrix handling. Neither may declare a
 `name:` containing a matrix expression — GitHub never evaluates the matrix
 context for a job it skips, so such a label reaches the Checks tab as raw
-expression text.
+expression text. `preflight` carries the literal `Verify build prerequisites`;
+`area-ci` carries none, so its `area-ci (<area>)` prefix stays automatic.
 
 ## Affected scope
 
@@ -516,14 +517,15 @@ no reader-facing workflow declares an environment-list input any more.
 
 Two consequences worth knowing. **Job labels carry the whole cell**: GitHub
 builds a matrix job's label from every value in its row, in key order, so a
-producer reads `area-ci (playa) / package-ci / test (playa-cli, L1,
+producer reads `area-ci (playa) / Run package work / test (playa-cli, L1,
 macos-latest, macos-latest)`. The order `package, gate, environment, runner`
 is the label contract (ruling R1 of `2026-09-19-direct-cell-execution`, which
 accepted the duplicated runner token rather than keep a second runner-lookup
 document aligned with the rows): reordering the row, or dropping `runner`, is a
 label-format change for `runner_loss.py`, which parses both that four-token
 form and the older three-token one. A WSL2 row rides on the delegating
-`wsl2 (…)` segment, because `_wsl-ci.yml`'s own job name is static. And **no test job waits on another** (ruling R3): the
+`wsl2 (…)` segment, because `_wsl-ci.yml`'s own job name is the static
+`Run guest tests`. And **no test job waits on another** (ruling R3): the
 `needs: test` staging that used to order L2 and browser behind L1 is gone,
 because a red L1 must never erase a required tier's evidence. Each area's `coverage-audit` job runs `if: always()` behind
 its producers, renders the result slice, and narrows runner-loss attribution to
@@ -547,17 +549,33 @@ this right; nothing turns red when it breaks, so it is pinned by a fixture.
 
 Two rules the presentation depends on, both cheap to break:
 
-- A job that can be skipped as a whole carries **no `name:`**. GitHub does not
-  evaluate the matrix context for a skipped job, so a `name:` holding
-  `${{ matrix.… }}` reaches the Checks tab as raw expression text. Omitting it
-  makes the label the job id when skipped and `job-id (matrix values)` when it
-  runs. The package half of the identity comes from the caller, because a
+- No job `name:` may contain an expression. GitHub does not evaluate the
+  matrix context for a skipped job, so a `name:` holding `${{ matrix.… }}`
+  reaches the Checks tab as raw expression text. Two kinds of job follow from
+  that. **Infrastructure jobs** that own no result cell carry a literal,
+  descriptive name (`Choose required work`, `Run package work`,
+  `Check required results`, `Run guest tests`, …; the full map is in
+  `docs/topics/ci-cd.md`, "Reading job and check names"). **Cell-carrying matrix
+  jobs** — `ci.yml`'s `area-ci` and `build`, and `_package-ci.yml`'s `check`,
+  `test`, `lint`, `wsl2` — carry **no `name:`**, because a literal name would
+  replace the automatic suffix that shows the cell. Their label is the job id
+  when skipped and `job-id (matrix values)` when it runs, so the suffix keeps
+  the stored wording (`L1`, `wsl2-ubuntu`) and repeats the runner for native
+  cells; a display-only `label` matrix field was rejected because it would
+  change the row schema. The package half of the identity comes from the caller, because a
   called workflow's jobs render as `<caller job name> / <called job name>`.
-  That composite label is a **parsed contract**, not just presentation:
-  `runner_loss.py` reads the row parenthetical
-  `<job> (<package>, <gate>, <environment>, <runner>)` from the tail (for
-  WSL2, from the delegating `wsl2 (…)` segment) to attribute a dead runner's
-  cell, and still accepts the pre-row `<package> / <gate> (<env>)` form. Phase 6's renaming broke all six
+  That composite label is a **parsed contract**, not just presentation, for
+  exactly two grandfathered readers; add no third. `runner_loss.py` reads the
+  row parenthetical `<job> (<package>, <gate>, <environment>, <runner>)` from
+  the tail (for a `Run guest tests` leaf, only from the immediately enclosing
+  `wsl2 (…)` segment, else `None`) to attribute a dead runner's cell, and still
+  accepts the pre-row `<package> / <gate> (<env>)` form and the old
+  `package-ci` / `test (wsl2-ubuntu)` spellings. `reuse_validation.py`'s
+  `AUDIT_JOB` finds each area's audit as `coverage-audit` or
+  `Check required results`, so nightly reuse still reads older runs.
+  `ci.yml`'s title (`Continuous integration`) is a third coupling: the
+  `workflow_run` triggers in `release-plz.yml` and `ci-infra-retry.yml` match
+  it by title, and a contract test pins them together. Phase 6's renaming broke all six
   producer labels at once and nothing turned red, because every fixture spelled
   the names by hand. `test_runner_loss.py` now derives them from the shipped
   workflows instead, and runs in `just ci-local`'s self-test loop.
@@ -945,8 +963,8 @@ area count × artifact count before adding it.
 
 **CI runs no separate job for its own tooling.** Those suites are scheduled by
 `SUITE_REGISTRY` in `scripts/ci/affected_scope.py` and executed by
-`scripts/ci/companion_suites.py` from the `Companion suites` step of
-`_package-ci.yml`'s `test` job (and `Companion suites (lint)` in `lint`, for a
+`scripts/ci/companion_suites.py` from the `Run companion test suites` step of
+`_package-ci.yml`'s `test` job (and `Run companion lint suites` in `lint`, for a
 suite declaring a `lint_recipe`). A registered suite must also be named in its
 owner's `companion-suites` manifest list, or `validate_suite_registry` refuses
 the plan — registration alone schedules nothing.
@@ -1044,7 +1062,7 @@ Three rules when adding a Python suite to the registry:
   nothing about coverage. The declaration is **per job, never a blanket fail
   under `CI`**: `preflight` runs on up to three operating systems and
   provisions neither `sniff` nor `jq`, so a global rule would turn macOS and
-  Windows red on every push. Today `_package-ci.yml`'s `Companion suites` step
+  Windows red on every push. Today `_package-ci.yml`'s `Run companion test suites` step
   declares `BISCUIT_REQUIRE_CARGO`/`JUST`/`JQ`/`BASH`, and `area-drift`
   declares `SNIFF`.
   `ci_workflow_contracts::every_tool_guard_declaration_is_set_by_the_job_that_enforces_it`

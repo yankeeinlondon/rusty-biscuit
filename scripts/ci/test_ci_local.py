@@ -3162,17 +3162,22 @@ class EmptyMatrixGuardTests(unittest.TestCase):
         cls.blocks = {job: workflow_job_block(WORKFLOW, job) for job in cls.MATRIX_JOBS}
 
     def test_neither_matrix_job_is_labelled_with_a_matrix_expression(self) -> None:
-        # NOT pending: both jobs already omit `name:`, and the comments above
-        # them explain why. Pinned so adding the scalar guard cannot come with
-        # a display name that reaches the Checks tab as raw expression text.
+        # Pinned so adding the scalar guard cannot come with a display name
+        # that reaches the Checks tab as raw expression text. `preflight`
+        # owns no result cell, so a literal name is safe; `area-ci` keeps its
+        # automatic `area-ci (<directory>)` label, which a literal would hide.
+        expected = {"preflight": "Verify build prerequisites", "area-ci": None}
+        self.assertEqual(set(expected), set(self.blocks))
         for job, block in self.blocks.items():
             with self.subTest(job=job):
                 name = job_key(block, "name")
-                self.assertIsNone(
+                self.assertEqual(
+                    expected[job],
                     name,
-                    f"{job} is skippable as a whole, so a declared name would "
-                    f"render unevaluated; got {name!r}",
+                    f"{job} is skippable as a whole, so it may carry only a "
+                    f"literal name or none; got {name!r}",
                 )
+                self.assertNotIn("${{", name or "")
 
     def test_both_matrix_jobs_carry_a_scalar_guard(self) -> None:
         for job, block in self.blocks.items():
