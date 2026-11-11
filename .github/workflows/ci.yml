@@ -569,9 +569,11 @@ jobs:
   #
   # A LITERAL `name:`. GitHub never evaluates the matrix context for a job it
   # SKIPS, so a declared `name:` carrying `${{ matrix.os }}` would reach the
-  # Checks tab as raw expression text (AC10). GitHub may still append the
-  # matrix values to the literal when it expands the job; this job owns no
-  # result cell, so nothing reads its label.
+  # Checks tab as raw expression text (AC10). GitHub still appends the matrix
+  # value to the literal when it expands the job, so a leg reads `Verify build
+  # prerequisites (ubuntu-latest)` (the static-name shape display check run
+  # 42963148323 observed); this job owns no result cell, so nothing reads its
+  # label.
   preflight:
     name: Verify build prerequisites
     needs: scope
@@ -868,9 +870,12 @@ jobs:
   # its own rollup all live inside `_area-ci.yml` and render underneath it.
   #
   # No `name:`: this job carries `needs:` and can therefore be skipped as a
-  # whole, and a skipped matrix job never has its matrix context evaluated. A
-  # literal name would hide the area, so the automatic label stays: `area-ci`
-  # when skipped and `area-ci (claudine)` when it runs.
+  # whole, and a skipped matrix job never has its matrix context evaluated, so
+  # a name built from `${{ matrix.area }}` would show raw. A literal name would
+  # not hide the area (GitHub appends it when the job expands: `<name>
+  # (claudine)`); the automatic label stays because the naming contract and
+  # every recorded run, document, and fixture spell the area's entry `area-ci
+  # (claudine)` when it runs and `area-ci` when skipped.
   #
   # `has_packages` is the scalar guard, read before matrix expansion for the
   # reason `preflight_os` is: a run that schedules no area resolves this job
@@ -1088,6 +1093,8 @@ jobs:
   # gate stays a policy-free fold); a failure here fails the run instead, so
   # a nightly that could not certify is not mistaken for a baseline either.
   # A literal `name:`: a skipped matrix job is never labelled from its matrix.
+  # An expanded leg still gets its value appended: `Publish nightly coverage
+  # evidence (wsl2-ubuntu)`.
   # `actions: read` is for the audit-job count; nothing here writes checks or
   # contents, which stay with the accepted-gaps publisher.
   certify-nightly:

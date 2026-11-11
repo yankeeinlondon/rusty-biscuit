@@ -52,7 +52,8 @@ flowchart TD
 A few GitHub terms used throughout:
 
 - **`workflow_run` trigger.** One workflow can start when another finishes. **Create Release PR**
-  starts each time the `ci` workflow completes. It acts only when that `ci` run was a successful
+  starts each time the **Continuous integration** workflow (`ci.yml`, called `ci` below) completes.
+  It acts only when that `ci` run was a successful
   run for a push to `main`; for anything else it records a notice and does nothing. GitHub runs a
   `workflow_run` job from the copy of the workflow file on `main`, not from the commit being
   judged, so edits to that job take effect only once merged.
@@ -212,7 +213,7 @@ release's tags and GitHub Releases have been verified.
 
 ### What if no release proposal appears?
 
-Open **Actions → Release-plz**, select the run that followed the successful `ci` run on `main`, and
+Open **Actions → Release-plz**, select the run that followed the successful **Continuous integration** run on `main`, and
 inspect **Create Release PR**:
 
 - **A notice `main advanced from … to …`.** `main` moved on after `ci` validated that commit. The

@@ -1476,6 +1476,23 @@ fn release_automation_follows_successful_ci() {
     );
 }
 
+/// `workflow_run` reports the triggering workflow by its title, and
+/// `release_path.py select prepare` compares that title again. Renaming
+/// `ci.yml` without moving both silently stops every release proposal.
+#[test]
+fn release_preparation_accepts_the_ci_workflow_title() {
+    let title = workflow_title(&workflow("ci.yml"));
+    let module = read("scripts/ci/release_path.py");
+    assert!(
+        module.contains(&format!(r#"CI_WORKFLOW_TITLE = "{title}""#)),
+        "release_path.py must select runs of the workflow titled {title:?}"
+    );
+    assert!(
+        workflow("release-plz.yml").contains(&format!(r#"workflows: ["{title}"]"#)),
+        "release-plz.yml must trigger on the workflow titled {title:?}"
+    );
+}
+
 /// release-plz resolves the branch it is releasing through
 /// `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}`. A checkout
 /// pinned to a bare SHA detaches HEAD, that expression answers `fatal: HEAD
@@ -6149,8 +6166,12 @@ fn every_skippable_job_has_a_static_human_readable_identity() {
 // convention fixes them. `None` means the job keeps NO `name:`: GitHub then
 // renders the job id plus the row's four values (`test (research, L1,
 // ubuntu-latest, ubuntu-latest)`), which `scripts/ci/runner_loss.py` reads to
-// attribute a lost runner. A static name would hide those values; an
-// expression name renders raw when the job is skipped.
+// attribute a lost runner. A static name keeps those values (GitHub appends
+// them: `Run tests (research, L1, …)`) but replaces the job id the reader
+// matches; an expression name renders raw when the job is skipped. A
+// `Some(..)` on a matrix job (`preflight`, `certify-nightly`) therefore
+// renders with its matrix value appended when it runs, and as the bare name
+// when skipped (display check run 42963148323).
 
 /// One job: identifier and its declared display name.
 type JobNaming = (&'static str, Option<&'static str>);
@@ -6336,8 +6357,10 @@ fn delegation_area_and_build_jobs_keep_their_automatic_labels() {
 /// The complete names a reader sees, composed the way GitHub renders a called
 /// workflow's job: `<caller label> / <called label>`, where a job with no
 /// `name:` is labelled by its id plus, when it expands, every value of its
-/// row. These are projections from the workflow text, not observed run
-/// records; `scripts/ci/test_runner_loss.py` parses the same strings.
+/// row. These strings are composed from the workflow text, not read from a
+/// production run; display check run 42963148323 observed exactly these
+/// shapes for unnamed and statically named jobs at the same nesting depth.
+/// `scripts/ci/test_runner_loss.py` parses the same strings.
 #[test]
 fn projected_full_names_compose_from_the_declared_names() {
     let declared = |file: &str, job: &str| {

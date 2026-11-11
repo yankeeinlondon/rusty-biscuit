@@ -639,12 +639,12 @@ is what `needs:`, the plan, and the scripts use; the name is only what you see.
 |---|---|---|
 | `validation` | `Check prior pull request validation` | decides whether a passing pull-request run already proved this tree |
 | `scope` | `Choose required work` | computes the one resolved plan |
-| `preflight` | `Verify build prerequisites` | checks toolchains and tools per selected OS; runs no tests |
+| `preflight` | `Verify build prerequisites (<runner>)` | checks toolchains and tools per selected OS; runs no tests |
 | `build` | automatic: `build (<producer>)` | prepares test archives (see below) |
 | `area-ci` | automatic: `area-ci (<area directory>)` | one entry per selected package area |
 | `area-drift` | `Verify package area mapping` | the planner's areas match `sniff` |
 | `ci-gate` | `ci-gate` | the required merge check |
-| `certify-nightly` | `Publish nightly coverage evidence` | records a successful nightly's certification |
+| `certify-nightly` | `Publish nightly coverage evidence (<environment>)` | records a successful nightly's certification |
 | `publish-observations` | `Publish test observations` | publishes finished cells' proof |
 | `ci-reporting` | `Report CI results (advisory)` | the run report; never blocks |
 | `_area-ci.yml` `package-ci` | `Run package work` | calls `_package-ci.yml` for the area |
@@ -655,6 +655,11 @@ is what `needs:`, the plan, and the scripts use; the name is only what you see.
 `ci-gate` keeps its identifier as its name because the `protect-your-bacon` ruleset requires a
 check with exactly that name.
 
+`preflight` and `certify-nightly` run once per runner or environment (a *matrix* job). A fixed
+name does not stop GitHub from adding the matrix value in parentheses, so a leg that runs reads
+`Verify build prerequisites (ubuntu-latest)`. When the whole job is skipped, it shows only the
+fixed name.
+
 **`build (<producer>)` prepares archives; it does not run tests.** The suffix is the build owner's
 runner, not an execution environment. The `ubuntu-latest` owner's Linux archive is consumed by
 both the Linux cell and the WSL2 guest, so `build (ubuntu-latest)` appears in a run that only
@@ -663,9 +668,11 @@ lost build runner.
 
 #### Package jobs: the automatic suffix
 
-A job in a called workflow renders as `<caller job name> / <called job name>`, and a matrix job
-with no declared name renders as `<job id> (<row values in key order>)`. A package job is three
-levels deep (four for WSL2), and every row carries `package, gate, environment, runner`:
+A job in a called workflow renders as `<caller job name> / <called job name>`. A matrix job that
+runs gets its row's values appended in key order: `<job id> (<values>)` with no declared name, and
+`<declared name> (<values>)` with a fixed one. A skipped job shows only its declared name, or its
+job id when it has none. A package job is three levels deep (four for WSL2), and every row carries
+`package, gate, environment, runner`:
 
 ```text
 area-ci (research) / Run package work / test (research, L1, ubuntu-latest, ubuntu-latest)
@@ -675,13 +682,36 @@ area-ci (research) / Run package work / test (research, L1, ubuntu-latest, ubunt
 The package matrix jobs (`check`, `test`, `lint`, and `wsl2` in `_package-ci.yml`), together with
 `ci.yml`'s `area-ci` and `build`, deliberately declare **no `name:`**:
 
-- a literal `name:` replaces the automatic suffix, which would hide the cell the job runs;
+- a fixed `name:` keeps the suffix but replaces the job id (`test`, `check`, `lint`, `wsl2`,
+  `build`) that `runner_loss.py` reads to tell which kind of job lost its runner. `area-ci` has
+  no such reader; it keeps no name so the area's entry stays `area-ci (<area directory>)`, the
+  spelling every earlier run used (a fixed name would still show the area, as
+  `<name> (<area directory>)`);
 - a `name:` built from `${{ matrix.… }}` is shown as raw expression text whenever the job is
   skipped, because GitHub never evaluates the matrix for a skipped job (63 such labels appeared
   in run 34638047631).
 
 So the suffix keeps the stored values rather than plain words, and the runner appears twice for
-native cells (`ubuntu-latest, ubuntu-latest`). Read the values with these tables:
+native cells (`ubuntu-latest, ubuntu-latest`).
+
+**Why there is no plain-words label in the suffix.** A natural fix would be one more row value,
+such as `schematic-gen: run Level 1 tests on WSL2`, placed first so it leads the parentheses.
+GitHub cuts every segment of a job name (each part between ` / `) at 100 characters, keeping 97
+and adding `...`. A label repeats the package name, so a segment passes that limit and loses its
+runner, and sometimes part of its environment. GitHub showed these two, cut exactly like this,
+in a small test workflow run (42963148323):
+
+```text
+test (rendezvous-core: run Level 1 tests on Linux, rendezvous-core, L1, ubuntu-latest, ubuntu-lat...
+Run WSL2 tests (schematic-gen: run Level 1 tests on WSL2, schematic-gen, L1, wsl2-ubuntu, windows...
+```
+
+In that run a 13-character package name was already cut under a fixed job name, and a
+15-character one under the plain `test` id; package names in this repository run up to 27
+characters. Without the label the longest possible segment is 75
+characters (`test (unfolded-integration-helper, browser, windows-latest, windows-latest)`), so every
+value stays visible. This is a GitHub limit, not a setting the workflows can change; the rows therefore
+carry only the four identity values. Read the values with these tables:
 
 | Gate value | Meaning |
 |---|---|
@@ -702,10 +732,13 @@ A WSL2 cell's identity rides on the delegating `wsl2 (…)` segment, whose runne
 host, and the guest job's own name is the static `Run guest tests`. A nested area keeps its whole
 repository-relative directory in the prefix.
 
-The examples below are **projected** from the declared names and GitHub's rendering rules; they
-have not yet been read from a run. The contract test
-`projected_full_names_compose_from_the_declared_names` builds the same strings from the
-workflows, and `test_runner_loss.py` parses them back to their cells.
+The examples below are composed from the declared names; no production run has shown these exact
+names yet. A small check workflow with the same nesting (run 42963148323) showed GitHub rendering
+the same shapes, for example
+`area-ci (claudine/rendezvous) / Run package work / test-auto-nolabel (rendezvous-core, L1, ubuntu-latest, ubuntu-latest)`
+for an unnamed matrix job in a nested area, and `… / wsl2 (…) / Run guest tests` for a WSL2-style
+delegation. The contract test `projected_full_names_compose_from_the_declared_names` builds
+the same strings from the workflows, and `test_runner_loss.py` parses them back to their cells.
 
 ```text
 area-ci (research) / Run package work / test (research, L1, ubuntu-latest, ubuntu-latest)

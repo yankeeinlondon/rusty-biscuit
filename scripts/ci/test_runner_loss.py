@@ -487,21 +487,45 @@ def row_set_input(block: str) -> str | None:
     return matched.group(1) if matched else None
 
 
-def job_label(job_id: str, block: str, row: dict[str, str]) -> str:
-    """The label GitHub gives a job, derived from what the file declares.
+def matrix_keys(block: str) -> list[str] | None:
+    """A job's `strategy.matrix` keys in declared order; `None` without a matrix."""
+    lines = block.splitlines()
+    if "      matrix:" not in lines:
+        return None
+    keys: list[str] = []
+    for line in lines[lines.index("      matrix:") + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith("        "):
+            break
+        key = re.match(r"^        ([A-Za-z0-9_-]+):", line)
+        if key:
+            keys.append(key.group(1))
+    return keys
 
-    A declared `name:` wins. Otherwise the id, plus — for a matrix job — every
-    value of the expanded row, in the order the planner emitted them. That
-    ordering is the contract: GitHub renders a matrix job's label from the
-    row's values, which is why `runner` is in the row at all (ruling R1).
+
+def job_label(job_id: str, block: str, row: dict[str, str]) -> str:
+    """The label GitHub gives an EXPANDED job, derived from what the file declares.
+
+    The base is the declared `name:`, or the id when there is none. A matrix
+    job then gets its values appended in parentheses whether or not it is
+    named: display check run 42963148323 rendered a static `name: Run tests`
+    as `Run tests (claudine-cli, L1, ubuntu-latest, ubuntu-latest)`. An
+    `include:` row contributes every value in the order the planner emitted
+    them, which is why `runner` is in the row at all (ruling R1); a keyed
+    matrix contributes `row[key]` per declared key. A name that itself reads
+    the matrix gets no suffix (GitHub's documented rule, not observed there).
+    A skipped job is not modelled: it shows the bare base.
     """
     declared = declared_name(block)
-    if declared:
+    if declared and "${{" in declared:
         return resolve(declared, row["package"], row["environment"])
-    if row_set_input(block) is None:
-        return job_id
-    values = ", ".join(row[field] for field in ("package", "gate", "environment", "runner"))
-    return f"{job_id} ({values})"
+    base = declared or job_id
+    keys = matrix_keys(block)
+    if keys is None:
+        return base
+    fields = ("package", "gate", "environment", "runner") if row_set_input(block) else keys
+    return f"{base} ({', '.join(row[field] for field in fields)})"
 
 
 def uploads_cell_status(block: str) -> bool:
@@ -715,6 +739,53 @@ class JobNameCorpusTests(unittest.TestCase):
         label = job_label("ci-reporting", report, self.row("L1", "ubuntu-latest"))
         self.assertIn("continue-on-error: true", report)
         self.assertTrue(is_non_producer(label), label)
+
+    def test_the_model_reproduces_the_observed_static_named_matrix_label(self) -> None:
+        # Verbatim from display check run 42963148323: a literal `name:` does
+        # not suppress the matrix suffix.
+        block = (
+            "    name: Run tests\n"
+            "    strategy:\n"
+            "      fail-fast: false\n"
+            "      matrix:\n"
+            "        include: ${{ fromJSON(inputs.test-rows) }}\n"
+        )
+        row = {
+            "package": "claudine-cli",
+            "gate": "L1",
+            "environment": "ubuntu-latest",
+            "runner": "ubuntu-latest",
+        }
+        self.assertEqual(
+            "Run tests (claudine-cli, L1, ubuntu-latest, ubuntu-latest)",
+            job_label("test-static", block, row),
+        )
+
+    def test_static_named_matrix_jobs_render_a_suffix_and_stay_unclassified(self) -> None:
+        # The shipped literal-named matrix jobs. Neither owns a cell nor judges
+        # the run, so their true labels classify exactly as the automatic
+        # `preflight (windows-latest)` did, expanded or skipped.
+        ci = jobs_in("ci.yml")
+        expected = {
+            "preflight": ({"os": "windows-latest"}, "Verify build prerequisites (windows-latest)"),
+            "certify-nightly": (
+                {"environment": "wsl2-ubuntu"},
+                "Publish nightly coverage evidence (wsl2-ubuntu)",
+            ),
+        }
+        named_matrix = {
+            job
+            for job, block in ci.items()
+            if declared_name(block) and matrix_keys(block) is not None
+        }
+        self.assertEqual(set(expected), named_matrix)
+        for job, (row, label) in expected.items():
+            with self.subTest(job=job):
+                self.assertEqual(label, job_label(job, ci[job], row))
+                for name in (label, declared_name(ci[job])):
+                    self.assertIsNone(parse_job_name(name), name)
+                    self.assertIsNone(parse_build_job_name(name), name)
+                    self.assertFalse(is_non_producer(name), name)
 
     def test_the_pre_rename_advisory_spelling_stays_recognized(self) -> None:
         # A retry decision may be taken over a run created before `summary`

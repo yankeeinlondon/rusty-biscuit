@@ -63,6 +63,11 @@ for leaked in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT",
 CANONICAL = rp.CANONICAL_REPOSITORY
 BOT = "rusty-biscuit-release[bot]"
 SHIPPED_CONFIG = (ROOT / "release-plz.toml").read_text(encoding="utf-8")
+# The shipped `ci.yml` title, read rather than restated, so a rename that the
+# selector does not follow fails the positive preparation case.
+CI_TITLE = next(line.removeprefix("name:").strip()
+                for line in (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8").splitlines()
+                if line.startswith("name:"))
 CASES: list = []
 
 
@@ -86,7 +91,7 @@ def workflow_run_event(**overrides) -> dict:
     event = {
         "action": "completed",
         "workflow_run": {
-            "name": "ci",
+            "name": CI_TITLE,
             "status": "completed",
             "conclusion": "success",
             "event": "push",
@@ -143,6 +148,10 @@ def preparation_selects_only_a_successful_ci_push_run_on_main():
         ({"status": "in_progress"}, "not completed"),
         ({"head_branch": "feature"}, "feature"),
         ({"name": "nightly"}, "nightly"),
+        ({"name": "Release automation"}, "Release automation"),
+        # The pre-rename title: `release-plz.yml` on `main` no longer triggers
+        # on it, so a run carrying it cannot be a current CI run.
+        ({"name": "ci"}, "'ci'"),
     ]:
         selection = rp.select_preparation("workflow_run", CANONICAL, workflow_run_event(**overrides))
         assert not selection.selected and reason in selection.reason, (overrides, selection)

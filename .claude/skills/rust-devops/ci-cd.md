@@ -557,12 +557,19 @@ Two rules the presentation depends on, both cheap to break:
   `Check required results`, `Run guest tests`, …; the full map is in
   `docs/topics/ci-cd.md`, "Reading job and check names"). **Cell-carrying matrix
   jobs** — `ci.yml`'s `area-ci` and `build`, and `_package-ci.yml`'s `check`,
-  `test`, `lint`, `wsl2` — carry **no `name:`**, because a literal name would
-  replace the automatic suffix that shows the cell. Their label is the job id
-  when skipped and `job-id (matrix values)` when it runs, so the suffix keeps
-  the stored wording (`L1`, `wsl2-ubuntu`) and repeats the runner for native
-  cells; a display-only `label` matrix field was rejected because it would
-  change the row schema. The package half of the identity comes from the caller, because a
+  `test`, `lint`, `wsl2` — carry **no `name:`**. A literal name does NOT drop
+  the suffix (GitHub renders `<name> (matrix values)` for an expanded matrix
+  job, so `preflight` reads `Verify build prerequisites (<os>)`); it replaces
+  the job id (`test`, `check`, `lint`, `wsl2`, `build`) that `runner_loss.py`
+  matches, and `area-ci` keeps the `area-ci (<dir>)` spelling every recorded
+  run uses. Their label is the job id when skipped and `job-id (matrix
+  values)` when it runs, so the suffix keeps the stored wording (`L1`,
+  `wsl2-ubuntu`) and repeats the runner for native cells. A display-only
+  `label` row value was rejected because GitHub cuts each name segment at 100
+  characters (97 + `...`): a leading label pushes the runner, sometimes part
+  of the environment, past the cut for package names of about 13-15
+  characters and up (display check run 42963148323). The package half of the
+  identity comes from the caller, because a
   called workflow's jobs render as `<caller job name> / <called job name>`.
   That composite label is a **parsed contract**, not just presentation, for
   exactly two grandfathered readers; add no third. `runner_loss.py` reads the

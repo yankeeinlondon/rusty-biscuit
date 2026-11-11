@@ -2928,11 +2928,10 @@ class NativeProvisioningTests(unittest.TestCase):
         already resolved for its producer's runner label by the planner — not a
         runner-keyed map to index into.
         """
-        step = next(
-            step
-            for step in job_run_steps(ROOT / ".github/workflows/ci.yml", "build")
-            if step.name == "Install native prerequisites"
-        )
+        # One named step, not `job_run_steps`: the build job's diagnostic steps
+        # use `run: >-`, which the whole-job reader refuses. The name occurs
+        # once in ci.yml, inside `build`.
+        script = step_script(ROOT / ".github/workflows/ci.yml", "Install native prerequisites")
         with tempfile.TemporaryDirectory(prefix="ci-native-owner-") as temporary:
             output = Path(temporary) / "arguments"
             environment = os.environ.copy()
@@ -2941,7 +2940,7 @@ class NativeProvisioningTests(unittest.TestCase):
                 [
                     shutil.which("bash"),
                     "-c",
-                    'just() { printf "%s\\n" "$@" >> "$NATIVE_OUTPUT"; }\n' + step.script,
+                    'just() { printf "%s\\n" "$@" >> "$NATIVE_OUTPUT"; }\n' + script,
                 ],
                 cwd=temporary,
                 env=environment,
@@ -3164,8 +3163,11 @@ class EmptyMatrixGuardTests(unittest.TestCase):
     def test_neither_matrix_job_is_labelled_with_a_matrix_expression(self) -> None:
         # Pinned so adding the scalar guard cannot come with a display name
         # that reaches the Checks tab as raw expression text. `preflight`
-        # owns no result cell, so a literal name is safe; `area-ci` keeps its
-        # automatic `area-ci (<directory>)` label, which a literal would hide.
+        # owns no result cell, so a literal name is safe (GitHub still appends
+        # the `os` value when the job expands); `area-ci` keeps its automatic
+        # `area-ci (<directory>)` label, the spelling the naming contract and
+        # every recorded run use. A literal there would read `<name>
+        # (<directory>)`, not hide the area.
         expected = {"preflight": "Verify build prerequisites", "area-ci": None}
         self.assertEqual(set(expected), set(self.blocks))
         for job, block in self.blocks.items():

@@ -144,8 +144,13 @@ jobs:
   # area half of the identity comes from the caller: a called workflow's jobs
   # render as `<caller job name> / <called job name>`, so this reads
   # `area-ci (sniff) / Run package work / check (sniff, check, windows-latest,
-  # windows-latest)`. A literal `name:` would drop the row, which
-  # `runner_loss.py` reads to attribute a lost runner to its cell.
+  # windows-latest)`, the row `runner_loss.py` reads to attribute a lost runner
+  # to its cell. A literal `name:` would keep the row (GitHub appends it:
+  # `Run tests (sniff, check, …)`) but replace the job id that
+  # `runner_loss.py::GATE_SEGMENT` matches. A display-only label leading the
+  # row is not used either: GitHub cuts each name segment at 100 characters,
+  # and a label pushes the runner, sometimes part of the environment, past it
+  # (display check run 42963148323).
   #
   # The guard is a SCALAR comparison of the input, read before matrix
   # expansion: an area with no check rows resolves this job immediately instead

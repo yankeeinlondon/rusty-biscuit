@@ -250,6 +250,11 @@ def render_summary(report: dict[str, Any]) -> str:
 CANONICAL_REPOSITORY = "yankeeinlondon/rusty-biscuit"
 RELEASE_BRANCH = "main"
 RELEASE_LABEL = "release"
+# The `name:` of `.github/workflows/ci.yml`, which is what a `workflow_run`
+# event reports as `workflow_run.name`. It must equal the title
+# `release-plz.yml` triggers on; `release_preparation_accepts_the_ci_workflow_title`
+# in `ci_workflow_contracts.rs` fails when either drifts.
+CI_WORKFLOW_TITLE = "Continuous integration"
 PR_BRANCH_PREFIX = "release-plz-"
 TAG_TEMPLATE = "{{ package }}-v{{ version }}"
 # The temporary first-release allowlist `release-plz.toml` declares. A
@@ -572,8 +577,9 @@ def _skip(reason: str) -> Selection:
 
 
 def select_preparation(event_name: str, repository: str, event: dict[str, Any]) -> Selection:
-    """Whether this event is a completed, successful `ci` push run on `main` in
-    the canonical repository. Every other supported shape is a no-op."""
+    """Whether this event is a completed, successful push run on `main` of the
+    workflow titled `CI_WORKFLOW_TITLE` in the canonical repository. Every
+    other supported shape is a no-op."""
     if event_name != "workflow_run":
         return _skip(f"event {event_name!r} does not prepare releases")
     if repository != CANONICAL_REPOSITORY:
@@ -584,8 +590,8 @@ def select_preparation(event_name: str, repository: str, event: dict[str, Any]) 
     if conclusion != "success":
         return _skip(f"the ci run concluded {conclusion!r}")
     name = req_str(event, "workflow_run.name")
-    if name != "ci":
-        return _skip(f"workflow {name!r} is not ci")
+    if name != CI_WORKFLOW_TITLE:
+        return _skip(f"workflow {name!r} is not {CI_WORKFLOW_TITLE!r}")
     trigger = req_str(event, "workflow_run.event")
     if trigger != "push":
         return _skip(f"the ci run was triggered by {trigger!r}, not push")
