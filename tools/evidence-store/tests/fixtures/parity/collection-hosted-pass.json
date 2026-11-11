@@ -1,0 +1,57 @@
+{
+  "environment": "ubuntu-latest",
+  "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "observations": [
+    {
+      "base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "cell": {
+        "backends": [],
+        "completion": "complete",
+        "counts": {
+          "errored": 0,
+          "failed": 0,
+          "passed": 3,
+          "skipped": 0,
+          "total": 3
+        },
+        "duration_s": 7,
+        "exit_code": 0,
+        "gate": "L1",
+        "gate_input_identity": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "outcome": "pass",
+        "package": "alpha",
+        "report": "L1/alpha.xml"
+      },
+      "completion": "complete",
+      "observation_id": "f79b799723774b88f25cc10e3f49c4a5d02411be61cb7cbbbc45694aead16b21",
+      "producer": {
+        "attempt": 1,
+        "host": {
+          "kernel": "Linux 6.8.0-1017-azure",
+          "label": "ubuntu-latest",
+          "os": "Linux"
+        },
+        "kind": "hosted",
+        "run_id": "100",
+        "workflow": ".github/workflows/ci.yml"
+      },
+      "proof": {
+        "completion_record_digest": "341b1fa54edf1f9b4fc499d3a613605cd5b6844e063e95df9d85056ab7d9a1d8",
+        "expected_listing_digest": "69c27bb5a3a24431a0195cd008298c1c46e6eddc13f79bd567eeb39898067d50",
+        "nextest_version": "0.9.99",
+        "target": "x86_64-unknown-linux-gnu"
+      },
+      "reports": [
+        {
+          "bytes": 242,
+          "path": "L1/alpha.xml",
+          "sha256": "f550adabc167cddb7a09a36966ce4204e1a6d90a164e42a600a4909dc378ae33",
+          "store": "artifact"
+        }
+      ],
+      "scope_identity": "ec6fcb6d328eeea17e5dbdc7a80c3ee58da05e231c1e9cb3a5157b46841d52e8"
+    }
+  ],
+  "schema_version": 3,
+  "tree": "cccccccccccccccccccccccccccccccccccccccc"
+}

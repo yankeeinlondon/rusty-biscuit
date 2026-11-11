@@ -1,0 +1,1867 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: Evidence store API
+  version: v1
+  description: |
+    Private HTTP API of the evidence store: a Cloudflare Worker that records test
+    observations in D1 and keeps their report and proof bytes in a private R2
+    bucket. The API version (`v1`) is part of every path and is versioned
+    independently of the evidence formats and the database migrations. A request
+    under any other version prefix answers 400 `unsupported_api_version`.
+
+    Repository-scoped routes live under `/v1/repos/{repository_id}`, where
+    `repository_id` is the stable numeric GitHub repository ID. Operator routes
+    live under `/v1/operator`. Unknown repositories and missing IDs answer 404
+    `not_found`; an empty successful result is never used to report a failed lookup.
+
+    Every non-2xx response carries the shared `ErrorBody`. Error bodies and
+    operational logs never contain credentials, token values, or report bytes.
+
+    Request fields that are optional are omitted, never sent as `null`; an explicit
+    `null` for an optional field is `invalid_input`. Response fields are omitted
+    when absent, except where a schema explicitly allows `null`.
+
+    Every list response carries `has_more` and `next_cursor`; `next_cursor` is
+    `null` exactly when `has_more` is false. Cursors are opaque, HMAC-signed, bind
+    the repository, the query, the store generation, the retention epoch, and the
+    snapshot bounds, and expire after `cursor_expiry_hours`. An altered or
+    mismatched cursor answers 400 `invalid_cursor`; an expired one answers 409
+    `cursor_expired` and the caller starts again from a fresh snapshot.
+
+    Evaluation publication is disabled: `POST /evaluations` answers 403
+    `evaluation_publication_disabled` to every caller.
+servers:
+  - url: /
+security:
+  - hostToken: []
+  - githubOidc: []
+x-limits:
+  request_json_bytes: 1048576
+  observation_canonical_bytes: 131072
+  collection_observations: 256
+  reachable_heads: 256
+  page_default_records: 100
+  page_max_records: 256
+  page_max_encoded_bytes: 1048576
+  upload_part_bytes: 1048576
+  upload_object_max_bytes: 67108864
+  upload_expiry_hours: 24
+  staging_cleanup_hours: 48
+  cursor_expiry_hours: 24
+  change_tombstone_days: 30
+  location_attestation_hours: 24
+  retention_grace_days: 14
+  credential_expiry_days: 90
+  credential_rotation_day: 60
+  credential_overlap_max_days: 7
+  oidc_clock_tolerance_seconds: 60
+  rate_mutations_per_minute: 60
+  rate_reads_per_minute: 300
+  operator_rate_mutations_per_minute: 30
+tags:
+  - name: evidence
+    description: Ingest and read observations and collections.
+  - name: transfer
+    description: Upload and fetch report and proof bytes.
+  - name: locations
+    description: Report-location history and change feeds.
+  - name: retention
+    description: Verifier-driven pruning.
+  - name: evaluations
+    description: Disabled evaluation publication.
+  - name: operator
+    description: Repository registration, credentials, and audit.
+
+paths:
+  /v1/repos/{repository_id}/collections:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+    post:
+      operationId: ingestCollection
+      tags: [evidence]
+      summary: Ingest one version-3 collection atomically
+      description: |
+        Validates the complete collection (shape, canonical identities, collection
+        context, retry graph, and every bound) before any write, then inserts it in
+        one D1 batch. Either every observation is recorded or none is. An identical
+        delivery is an idempotent success that changes neither the original
+        publisher nor its timestamp and does not advance the evidence revision. An
+        existing ID with different canonical bytes or collection context answers 409
+        `identity_conflict`. An empty collection succeeds with empty ID lists and no
+        revision change. The actual publisher is taken from the authenticated
+        identity, never from the submitted `producer` fields.
+      x-roles: [producer]
+      security:
+        - hostToken: []
+        - githubOidc: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Submission"
+      responses:
+        "200":
+          description: Collection recorded (or already present in full).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/collections/{collection_id}:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+      - name: collection_id
+        in: path
+        required: true
+        description: SHA-256 of the canonical version-3 collection bytes.
+        schema:
+          $ref: "#/components/schemas/Sha256"
+    get:
+      operationId: exportCollection
+      tags: [evidence]
+      summary: Export the exact submitted collection in bounded member pages
+      description: |
+        Returns the collection context and its member observations in
+        `observation_id` order, one bounded page at a time. The client
+        reconstructs `{schema_version, environment, head, tree, observations}` from
+        every page and canonicalizes it; the SHA-256 of those bytes equals
+        `collection_id`. Membership is the submitted collection, not the union of a
+        commit's observations. When any member has been pruned the export answers
+        410 `collection_pruned` rather than a partial collection.
+      x-roles: [reader, verifier, retention-verifier]
+      security:
+        - hostToken: []
+        - githubOidc: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: One page of the collection's members.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionExportPage"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/observations/{observation_id}:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+      - name: observation_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/ObservationId"
+    get:
+      operationId: getObservation
+      tags: [evidence]
+      summary: Fetch one observation, its retry successors, and its latest locations
+      x-roles: [reader, verifier, retention-verifier]
+      security:
+        - hostToken: []
+        - githubOidc: []
+      responses:
+        "200":
+          description: The observation as recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObservationDetail"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/history/query:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+    post:
+      operationId: queryHistory
+      tags: [evidence]
+      summary: Page a cell's candidate history over caller-supplied reachable heads
+      description: |
+        Returns every observation of `package`/`gate` on any of `reachable_heads`,
+        in every environment, including failures and incomplete attempts. The
+        service does not verify ancestry: the caller supplies the reachable heads.
+        An empty `reachable_heads` list is a successful empty result. Continue with
+        the same query plus `cursor`; a cursor issued for a different query or
+        repository answers 400 `invalid_cursor`.
+      x-roles: [reader, verifier, retention-verifier]
+      security:
+        - hostToken: []
+        - githubOidc: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HistoryQuery"
+      responses:
+        "200":
+          description: One page of candidate history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryPage"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/snapshot:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+    get:
+      operationId: getSnapshot
+      tags: [evidence]
+      summary: Capture the repository's revision and watermarks in one primary read
+      x-roles: [reader, verifier, retention-verifier]
+      security:
+        - hostToken: []
+        - githubOidc: []
+      responses:
+        "200":
+          description: The current snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Snapshot"
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/locations:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+    post:
+      operationId: appendLocation
+      tags: [locations]
+      summary: Append a report-location event (verifier only)
+      description: |
+        Records that a typed location of one referenced report or proof was
+        verified, found unavailable, or withdrawn. Events are keyed by repository
+        and the caller-supplied `event_id`; equality ignores server timestamps. An
+        identical replay answers 200 with the original record; a different payload
+        under the same `event_id` answers 409 `identity_conflict`. A `verified`
+        attestation lasts `location_attestation_hours`. The newest event for a
+        location wins before expiry is considered, so an expired or withdrawn
+        location never falls back to an older verification. A location event never
+        certifies test coverage.
+      x-roles: [verifier]
+      security:
+        - hostToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocationEventRequest"
+      responses:
+        "200":
+          description: Identical replay of an existing event.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationEvent"
+        "201":
+          description: Event recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationEvent"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/changes/query:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+    post:
+      operationId: queryChanges
+      tags: [locations]
+      summary: Page one durable change stream bounded by a snapshot
+      description: |
+        Pages committed events of one stream, `observations` or `locations`, in
+        sequence order up to the snapshot's watermark for that stream. The streams
+        have separate sequences and separate cursors. Pruning and withdrawal leave
+        tombstones (IDs, sequence, and context only) for `change_tombstone_days`;
+        an `after_sequence` older than that horizon answers 409 `cursor_expired`.
+        A consumer persists `last_sequence` only after processing a page, tolerates
+        replay, and resumes later with `after_sequence`.
+      x-roles: [reader, verifier, retention-verifier]
+      security:
+        - hostToken: []
+        - githubOidc: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangesQuery"
+      responses:
+        "200":
+          description: One page of change events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangesPage"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/uploads:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+    post:
+      operationId: createUpload
+      tags: [transfer]
+      summary: Open a resumable upload bound to one observation reference
+      description: |
+        Allocates an upload bound to the repository, observation, reference kind,
+        and reference digest, with the byte length fixed now (existing proofs carry
+        no size). The reference must exist in the stored observation: a report by
+        its `path` and `sha256`, an expected listing by
+        `proof.expected_listing_digest`, a completion record by
+        `proof.completion_record_digest`. Repeating the same request while the upload
+        is open or finalized answers 200 with the same upload. Unfinalized uploads
+        expire after `upload_expiry_hours`; staging bytes are removed after
+        `staging_cleanup_hours`. An interrupted or invalid upload never changes the
+        observation.
+      x-roles: [producer, verifier]
+      security:
+        - hostToken: []
+        - githubOidc: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadRequest"
+      responses:
+        "200":
+          description: The existing upload for this reference.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+        "201":
+          description: Upload opened.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Upload"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/uploads/{upload_id}/parts/{index}:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+      - $ref: "#/components/parameters/UploadId"
+      - name: index
+        in: path
+        required: true
+        description: |
+          Zero-based part index. Parts are sequential: `index` must equal the
+          upload's `parts_received`, or name an already-received part (a replay,
+          which is byte-checked).
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 63
+    put:
+      operationId: putUploadPart
+      tags: [transfer]
+      summary: Upload one sequential part of at most 1 MiB
+      description: |
+        Every part except the last is exactly `upload_part_bytes`; the last carries
+        the remainder. Replaying a received index with identical bytes answers 200;
+        different bytes answer 409 `identity_conflict`. An index beyond
+        `parts_received` answers 400 `invalid_input`.
+      x-roles: [producer, verifier]
+      security:
+        - hostToken: []
+        - githubOidc: []
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              contentMediaType: application/octet-stream
+              maxLength: 1048576
+      responses:
+        "200":
+          description: Part stored (or identical replay).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadPartResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/uploads/{upload_id}/finalize:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+      - $ref: "#/components/parameters/UploadId"
+    post:
+      operationId: finalizeUpload
+      tags: [transfer]
+      summary: Verify the staged bytes and publish a verified object location (verifier only)
+      description: |
+        Completes the staged object, stream-verifies its full length and SHA-256
+        against the reference, then appends a `verified` `object` location event.
+        Finalization asserts byte integrity only, never test coverage. It is
+        idempotent across R2 and D1 failures: repeating it returns the same result.
+        Bytes that do not match answer 400 `invalid_input`, mark the upload
+        `rejected`, and leave the observation untouched.
+      x-roles: [verifier]
+      security:
+        - hostToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinalizeRequest"
+      responses:
+        "200":
+          description: Upload finalized (or already finalized).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinalizeResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/objects/{observation_id}/{reference_kind}/{reference_digest}:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+      - name: observation_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/ObservationId"
+      - name: reference_kind
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/ReferenceKind"
+      - name: reference_digest
+        in: path
+        required: true
+        description: The reference's digest, percent-encoded as a path segment.
+        schema:
+          $ref: "#/components/schemas/ReferenceDigest"
+    get:
+      operationId: fetchObject
+      tags: [transfer]
+      summary: Fetch finalized, currently available bytes of one reference
+      description: |
+        Streams the bytes of a finalized object whose newest `object` location
+        event is a current verification. A withdrawn, expired, unfinalized, or
+        unknown object answers 404 `not_found`.
+      x-roles: [reader, verifier, retention-verifier]
+      security:
+        - hostToken: []
+        - githubOidc: []
+      responses:
+        "200":
+          description: The object bytes.
+          headers:
+            Content-Length:
+              required: true
+              schema:
+                type: integer
+                minimum: 0
+            X-Content-SHA256:
+              required: true
+              description: Lowercase hex SHA-256 of the body.
+              schema:
+                $ref: "#/components/schemas/Sha256"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                contentMediaType: application/octet-stream
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/retention/certificates:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+    post:
+      operationId: submitRetentionCertificate
+      tags: [retention]
+      summary: Submit a retention certificate (retention-verifier only)
+      description: |
+        A certificate names an exact current snapshot, every candidate ID of each
+        cell, the IDs to retain, the supersession edges with their ancestry or
+        retry evidence, the verifier policy identity, and the release pins. The
+        service checks candidate-set equality, same-cell edges, valid retry chains,
+        nonempty protected maximal sets, generation, retention epoch and revision,
+        release pins, and the `retention_grace_days` grace measured from the first
+        certified supersession. It never infers supersession from arrival time or
+        producer assertions. A non-current snapshot answers 409 `stale_snapshot` (or
+        `snapshot_pruned`). An accepted certificate yields a persisted job that
+        withdraws locations, deletes objects, then deletes rows. An empty prune set
+        is an idempotent no-op job. Replaying the same `certificate_id` with
+        identical content answers 200; different content answers 409
+        `identity_conflict`.
+      x-roles: [retention-verifier]
+      security:
+        - hostToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetentionCertificate"
+      responses:
+        "200":
+          description: Identical replay of an accepted certificate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionJob"
+        "202":
+          description: Certificate accepted; its job is scheduled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionJob"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/retention/jobs/{job_id}:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/ServerId"
+    get:
+      operationId: getRetentionJob
+      tags: [retention]
+      summary: Read a retention job's state
+      x-roles: [retention-verifier, operator]
+      security:
+        - hostToken: []
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionJob"
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/repos/{repository_id}/evaluations:
+    parameters:
+      - $ref: "#/components/parameters/RepositoryId"
+    post:
+      operationId: publishEvaluation
+      tags: [evaluations]
+      summary: Disabled — always answers 403 evaluation_publication_disabled
+      description: |
+        Evaluation publication is disabled until a trusted verifier and its policy
+        exist. Every authenticated caller, whatever its roles, receives 403
+        `evaluation_publication_disabled`; the body is not read. No role may call
+        this operation, so `x-roles` is empty.
+      x-roles: []
+      security:
+        - hostToken: []
+        - githubOidc: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvaluationRequest"
+      responses:
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403":
+          description: Always `evaluation_publication_disabled`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/operator/repositories:
+    post:
+      operationId: registerRepository
+      tags: [operator]
+      summary: Register a repository by its stable GitHub IDs, or record a rename
+      description: |
+        The operator CLI obtains `repository_id` and `owner_id` from the
+        authenticated GitHub repository API; a slug alone is never trusted.
+        Registering an existing ID with the same owner and slug answers 200; a new
+        slug records a rename and answers 200; a different `owner_id` answers 409
+        `identity_conflict`.
+      x-roles: [operator]
+      security:
+        - hostToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RepositoryRegistration"
+      responses:
+        "200":
+          description: Already registered (or renamed).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Repository"
+        "201":
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Repository"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/operator/credentials:
+    post:
+      operationId: issueCredential
+      tags: [operator]
+      summary: Issue a host credential scoped to repositories and roles
+      description: |
+        Creates a 256-bit random bearer token with a public credential ID. The
+        service stores only the SHA-256 digest of the secret. The response carries
+        the full token exactly once, in `secret`; it is never retrievable again,
+        never logged, and never appears in audit records or error bodies. The
+        operator CLI writes it to a mode-restricted output file and never prints it
+        to stdout or passes it through argv. Credentials expire after at most
+        `credential_expiry_days`; rotate at `credential_rotation_day`. Naming
+        `replaces` shortens the replaced credential's expiry to at most
+        `credential_overlap_max_days` from now. An empty `repository_ids` or `roles`
+        list yields a credential that is denied everything. Operator credentials are
+        never issued here; they come only from the Wrangler bootstrap.
+      x-roles: [operator]
+      security:
+        - hostToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialRequest"
+      responses:
+        "201":
+          description: Credential issued; `secret` is shown only in this response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedCredential"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/operator/credentials/{credential_id}/revoke:
+    parameters:
+      - name: credential_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/CredentialId"
+    post:
+      operationId: revokeCredential
+      tags: [operator]
+      summary: Revoke a credential immediately
+      description: |
+        Revocation is checked against the primary database on every request, so it
+        takes effect on the next request. Past evidence is not rewritten. Revoking
+        an already revoked credential answers 200 with the original revocation.
+      x-roles: [operator]
+      security:
+        - hostToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeRequest"
+      responses:
+        "200":
+          description: Credential revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Credential"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/operator/audit/query:
+    post:
+      operationId: listAudit
+      tags: [operator]
+      summary: Page the audit trail of credential and operator actions
+      description: |
+        Audit records name credential IDs and actions, never token values.
+      x-roles: [operator]
+      security:
+        - hostToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuditQuery"
+      responses:
+        "200":
+          description: One page of audit records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditPage"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+components:
+  securitySchemes:
+    hostToken:
+      type: http
+      scheme: bearer
+      bearerFormat: ebt_<credential_id>.<secret>
+      description: |
+        Opaque host credential, sent as `Authorization: Bearer ebt_<credential_id>.<secret>`.
+        `credential_id` is public; `secret` is 256 random bits, base64url without
+        padding. The service stores only the SHA-256 digest of the secret and checks
+        expiry and revocation against the primary database on every request.
+        Operator credentials use the same format and are issued only by bootstrap.
+    githubOidc:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        GitHub Actions OIDC token, sent as `Authorization: Bearer <jwt>`. Verified
+        with issuer `https://token.actions.githubusercontent.com`, audience
+        `rusty-biscuit-evidence-store`, a 60-second clock tolerance, the numeric
+        `repository_id` and `repository_owner_id`, and a registered
+        workflow/ref/event tuple. Fork and pull-request contexts are refused.
+        Grants at most `producer` and `reader`.
+
+  parameters:
+    RepositoryId:
+      name: repository_id
+      in: path
+      required: true
+      description: Stable numeric GitHub repository ID, in decimal.
+      schema:
+        $ref: "#/components/schemas/RepositoryId"
+    UploadId:
+      name: upload_id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ServerId"
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous page's `next_cursor`.
+      schema:
+        $ref: "#/components/schemas/Cursor"
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/PageSize"
+
+  headers:
+    RetryAfter:
+      description: Seconds to wait before retrying; mirrors `error.retry_after_ms`.
+      schema:
+        type: integer
+        minimum: 0
+
+  responses:
+    BadRequest:
+      description: "`invalid_input`, `invalid_cursor`, or `unsupported_api_version`."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    Unauthenticated:
+      description: "`unauthenticated`: missing, malformed, expired, or revoked credential."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    Forbidden:
+      description: "`denied`: the credential lacks a role or repository grant for this operation."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    NotFound:
+      description: "`not_found`: unknown repository or ID."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    Conflict:
+      description: "`identity_conflict`, `stale_snapshot`, `snapshot_pruned`, or `cursor_expired`."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    Gone:
+      description: "`collection_pruned`: a member of the collection has been pruned."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    PayloadTooLarge:
+      description: "`size_limit` (a bound in `x-limits` exceeded) or `unpageable_record`."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    TooManyRequests:
+      description: "`rate_limited` or `quota_exhausted`. Retryable."
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    Unavailable:
+      description: "`unavailable`: a platform failure. Retryable; never reported as empty success."
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+
+  schemas:
+    # ---- Errors and paging ------------------------------------------------
+    ErrorCode:
+      type: string
+      enum:
+        - invalid_input
+        - invalid_cursor
+        - unsupported_api_version
+        - unauthenticated
+        - denied
+        - evaluation_publication_disabled
+        - not_found
+        - identity_conflict
+        - stale_snapshot
+        - snapshot_pruned
+        - cursor_expired
+        - collection_pruned
+        - size_limit
+        - unpageable_record
+        - rate_limited
+        - quota_exhausted
+        - unavailable
+    ErrorBody:
+      type: object
+      additionalProperties: false
+      required: [error, request_id]
+      description: The body of every non-2xx response. Never carries credentials or report bytes.
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, location, retryable, retry_after_ms]
+          properties:
+            code:
+              $ref: "#/components/schemas/ErrorCode"
+            message:
+              type: string
+            location:
+              type: [string, "null"]
+              description: JSON pointer into the request, or null when the error is not located in it.
+            retryable:
+              type: boolean
+            retry_after_ms:
+              type: [integer, "null"]
+              minimum: 0
+        request_id:
+          type: string
+          minLength: 1
+    Cursor:
+      type: string
+      minLength: 1
+      maxLength: 2048
+      description: Opaque, HMAC-signed, expires after `cursor_expiry_hours`.
+    NextCursor:
+      type: [string, "null"]
+      minLength: 1
+      description: Null exactly when `has_more` is false.
+    PageSize:
+      type: integer
+      minimum: 1
+      maximum: 256
+      default: 100
+      description: |
+        Maximum records in the page; a missing page size means 100. A page may hold
+        fewer records to stay within `page_max_encoded_bytes`.
+
+    # ---- Identifiers ------------------------------------------------------
+    RepositoryId:
+      type: string
+      pattern: "^[1-9][0-9]{0,19}$"
+    Sha256:
+      type: string
+      pattern: "^[0-9a-f]{64}$"
+    GitObjectId:
+      type: string
+      pattern: "^[0-9a-f]{40}$"
+    HexIdentity:
+      type: string
+      pattern: "^[0-9a-f]{8,64}$"
+    ObservationId:
+      type: string
+      pattern: "^[0-9a-f]{8,64}$"
+      description: Must equal the SHA-256 identity of the observation's other fields.
+    ServerId:
+      type: string
+      pattern: "^[0-9a-f]{32}$"
+      description: Server-generated 128-bit random identifier (upload and job IDs).
+    CredentialId:
+      type: string
+      pattern: "^[0-9a-f]{32}$"
+      description: Public 128-bit credential identifier.
+    Uuid:
+      type: string
+      format: uuid
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    TimestampMs:
+      type: integer
+      minimum: 0
+      description: Milliseconds since the Unix epoch.
+    Role:
+      type: string
+      enum: [reader, producer, verifier, retention-verifier, operator]
+    GrantableRole:
+      type: string
+      enum: [reader, producer, verifier, retention-verifier]
+    ReferenceKind:
+      type: string
+      enum: [report, expected-listing, completion-record]
+    ReferenceDigest:
+      type: string
+      minLength: 1
+      maxLength: 256
+      description: |
+        A report's `sha256`, or the proof's `expected_listing_digest` /
+        `completion_record_digest` verbatim. Proof digests are not narrowed to hex.
+    Environment:
+      type: string
+      enum: [ubuntu-latest, windows-latest, macos-latest, wsl2-ubuntu]
+    Gate:
+      type: string
+      enum: [lint, check, L1, L2, browser]
+
+    # ---- Evidence documents (structural mirror of scripts/ci/schema.py) ----
+    Counts:
+      type: object
+      additionalProperties: false
+      required: [total, passed, failed, skipped, errored]
+      properties:
+        total: { type: integer, minimum: 0 }
+        passed: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        skipped: { type: integer, minimum: 0 }
+        errored: { type: integer, minimum: 0 }
+    ReceiptBuild:
+      type: object
+      additionalProperties: false
+      required: [key, digest]
+      properties:
+        key: { $ref: "#/components/schemas/HexIdentity" }
+        digest: { $ref: "#/components/schemas/HexIdentity" }
+    ReceiptCell:
+      type: object
+      additionalProperties: false
+      required:
+        [package, gate, outcome, exit_code, completion, counts, duration_s, gate_input_identity, backends, report]
+      properties:
+        package: { type: string, minLength: 1 }
+        gate: { $ref: "#/components/schemas/Gate" }
+        outcome: { type: string, enum: [pass, fail] }
+        exit_code: { type: integer }
+        completion: { type: string, enum: [complete, interrupted, partial] }
+        counts: { $ref: "#/components/schemas/Counts" }
+        duration_s: { type: number, minimum: 0 }
+        gate_input_identity: { $ref: "#/components/schemas/HexIdentity" }
+        backends: { type: array, items: { type: string } }
+        report: { type: string }
+        failed_tests:
+          type: array
+          maxItems: 20
+          items: { type: string }
+        failure_detail_truncated:
+          description: Any JSON value; read for truthiness, as `schema.py` does.
+        build: { $ref: "#/components/schemas/ReceiptBuild" }
+        test_filter:
+          type: string
+          minLength: 1
+          description: Only on an L1 cell.
+    ObservationHost:
+      type: object
+      additionalProperties: false
+      required: [os, kernel]
+      properties:
+        os: { type: string, minLength: 1 }
+        kernel: { type: string, minLength: 1 }
+        label: { type: string }
+        report_dir:
+          type: string
+          description: Interpreted only on the submitting host; never by the Worker.
+    ObservationProducer:
+      type: object
+      additionalProperties: false
+      required: [kind, host]
+      description: Claimed provenance. Never a source of permissions.
+      properties:
+        kind: { type: string, enum: [hook, rig, hosted, seed] }
+        host: { $ref: "#/components/schemas/ObservationHost" }
+        workflow: { type: string }
+        run_id: { type: string }
+        attempt: { type: integer, minimum: 1 }
+        seed_id: { type: string }
+    ObservationProof:
+      type: object
+      additionalProperties: false
+      required: [nextest_version, target, expected_listing_digest]
+      properties:
+        nextest_version: { type: string, minLength: 1 }
+        target: { type: string, minLength: 1 }
+        expected_listing_digest: { type: string, minLength: 1 }
+        completion_record_digest: { type: string, minLength: 1 }
+    ObservationReport:
+      type: object
+      additionalProperties: false
+      required: [path, sha256, bytes, store]
+      properties:
+        path:
+          type: string
+          minLength: 1
+          description: Provenance only; never resolved by the Worker.
+        sha256: { $ref: "#/components/schemas/Sha256" }
+        bytes: { type: integer, minimum: 0 }
+        store: { type: string, enum: [host-dir, artifact] }
+    Observation:
+      type: object
+      additionalProperties: false
+      required: [observation_id, producer, base, scope_identity, completion, cell, reports]
+      description: |
+        A version-3 observation. This schema is structural; the executable port of
+        `scripts/ci/schema.py::validate_observation` is authoritative (identity
+        equality, proof rules per producer kind, count consistency, integer versus
+        float tokens).
+      properties:
+        observation_id: { $ref: "#/components/schemas/ObservationId" }
+        retry_of: { $ref: "#/components/schemas/ObservationId" }
+        producer: { $ref: "#/components/schemas/ObservationProducer" }
+        base: { $ref: "#/components/schemas/GitObjectId" }
+        scope_identity: { $ref: "#/components/schemas/HexIdentity" }
+        completion: { type: string, enum: [complete, interrupted, partial] }
+        cell: { $ref: "#/components/schemas/ReceiptCell" }
+        proof: { $ref: "#/components/schemas/ObservationProof" }
+        reports:
+          type: array
+          items: { $ref: "#/components/schemas/ObservationReport" }
+        features:
+          type: string
+          description: Present but empty is distinct from absent.
+    Collection:
+      type: object
+      additionalProperties: false
+      required: [schema_version, environment, head, tree, observations]
+      properties:
+        schema_version: { const: 3 }
+        environment: { $ref: "#/components/schemas/Environment" }
+        head: { $ref: "#/components/schemas/GitObjectId" }
+        tree: { $ref: "#/components/schemas/GitObjectId" }
+        observations:
+          type: array
+          maxItems: 256
+          description: Sorted by `observation_id`, unique. May be empty.
+          items: { $ref: "#/components/schemas/Observation" }
+    Submission:
+      type: object
+      additionalProperties: false
+      required: [source_version, collection]
+      description: |
+        A version-3 collection plus the evidence generation it was adapted from. A
+        version-2 receipt is converted on the submitting host; the Worker never
+        receives a raw receipt. `source_version` is provenance, never identity.
+      properties:
+        source_version: { type: integer, enum: [2, 3] }
+        collection: { $ref: "#/components/schemas/Collection" }
+    IngestResult:
+      type: object
+      additionalProperties: false
+      required: [collection_id, accepted, already_present, evidence_revision]
+      properties:
+        collection_id: { $ref: "#/components/schemas/Sha256" }
+        accepted:
+          type: array
+          items: { $ref: "#/components/schemas/ObservationId" }
+        already_present:
+          type: array
+          items: { $ref: "#/components/schemas/ObservationId" }
+        evidence_revision: { type: integer, minimum: 0 }
+
+    # ---- Identities -------------------------------------------------------
+    Principal:
+      description: The authenticated identity that performed an action.
+      oneOf:
+        - $ref: "#/components/schemas/CredentialPrincipal"
+        - $ref: "#/components/schemas/OidcPrincipal"
+      discriminator:
+        propertyName: kind
+        mapping:
+          credential: "#/components/schemas/CredentialPrincipal"
+          github-oidc: "#/components/schemas/OidcPrincipal"
+    CredentialPrincipal:
+      type: object
+      additionalProperties: false
+      required: [kind, credential_id]
+      properties:
+        kind: { const: credential }
+        credential_id: { $ref: "#/components/schemas/CredentialId" }
+    OidcPrincipal:
+      type: object
+      additionalProperties: false
+      required: [kind, repository_id, workflow, ref, event_name, run_id, run_attempt]
+      properties:
+        kind: { const: github-oidc }
+        repository_id: { $ref: "#/components/schemas/RepositoryId" }
+        workflow:
+          type: string
+          description: Workflow file path pinned from the `workflow_ref` claim.
+        ref: { type: string }
+        event_name: { type: string }
+        run_id: { type: string }
+        run_attempt: { type: integer, minimum: 1 }
+
+    # ---- Reads ------------------------------------------------------------
+    Snapshot:
+      type: object
+      additionalProperties: false
+      required:
+        [repository_id, generation, retention_epoch, evidence_revision, observation_event_watermark, location_event_watermark]
+      description: |
+        One primary-database read. `generation` changes on restore and
+        `retention_epoch` on pruning; a read pinned to an older value answers 409
+        `stale_snapshot` or `snapshot_pruned`.
+      properties:
+        repository_id: { $ref: "#/components/schemas/RepositoryId" }
+        generation: { type: string, minLength: 1 }
+        retention_epoch: { type: integer, minimum: 0 }
+        evidence_revision: { type: integer, minimum: 0 }
+        observation_event_watermark: { type: integer, minimum: 0 }
+        location_event_watermark: { type: integer, minimum: 0 }
+    Acceptance:
+      type: object
+      additionalProperties: false
+      required: [source_version, accepted_at_ms, accepted_by, collection_id]
+      description: The first accepted publication; replays never change it.
+      properties:
+        source_version: { type: integer, enum: [2, 3] }
+        accepted_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+        accepted_by: { $ref: "#/components/schemas/Principal" }
+        collection_id: { $ref: "#/components/schemas/Sha256" }
+    ObservationRecord:
+      type: object
+      additionalProperties: false
+      required: [sequence, environment, head, tree, observation, acceptance]
+      properties:
+        sequence:
+          type: integer
+          minimum: 1
+          description: Position in the observation event stream.
+        environment: { $ref: "#/components/schemas/Environment" }
+        head: { $ref: "#/components/schemas/GitObjectId" }
+        tree: { $ref: "#/components/schemas/GitObjectId" }
+        observation: { $ref: "#/components/schemas/Observation" }
+        acceptance: { $ref: "#/components/schemas/Acceptance" }
+    ObservationDetail:
+      type: object
+      additionalProperties: false
+      required: [record, retried_by, locations]
+      properties:
+        record: { $ref: "#/components/schemas/ObservationRecord" }
+        retried_by:
+          type: array
+          description: IDs of observations whose `retry_of` names this one.
+          items: { $ref: "#/components/schemas/ObservationId" }
+        locations:
+          type: array
+          description: The newest event of every location of every reference, whether usable or not.
+          items: { $ref: "#/components/schemas/LocationEvent" }
+    CollectionExportPage:
+      type: object
+      additionalProperties: false
+      required:
+        [collection_id, schema_version, environment, head, tree, member_count, acceptance, items, has_more, next_cursor]
+      properties:
+        collection_id: { $ref: "#/components/schemas/Sha256" }
+        schema_version: { const: 3 }
+        environment: { $ref: "#/components/schemas/Environment" }
+        head: { $ref: "#/components/schemas/GitObjectId" }
+        tree: { $ref: "#/components/schemas/GitObjectId" }
+        member_count: { type: integer, minimum: 0, maximum: 256 }
+        acceptance:
+          type: object
+          additionalProperties: false
+          required: [source_version, accepted_at_ms, accepted_by]
+          properties:
+            source_version: { type: integer, enum: [2, 3] }
+            accepted_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+            accepted_by: { $ref: "#/components/schemas/Principal" }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Observation" }
+        has_more: { type: boolean }
+        next_cursor: { $ref: "#/components/schemas/NextCursor" }
+    HistoryQuery:
+      type: object
+      additionalProperties: false
+      required: [package, gate, reachable_heads]
+      properties:
+        package: { type: string, minLength: 1 }
+        gate: { $ref: "#/components/schemas/Gate" }
+        reachable_heads:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          description: Heads the caller computed as reachable, including the candidate head. Empty yields an empty result.
+          items: { $ref: "#/components/schemas/GitObjectId" }
+        page_size: { $ref: "#/components/schemas/PageSize" }
+        cursor: { $ref: "#/components/schemas/Cursor" }
+        snapshot:
+          $ref: "#/components/schemas/Snapshot"
+          description: Pin the first page to a snapshot from `GET /snapshot`; when omitted the service captures one. Not allowed with `cursor`.
+    HistoryPage:
+      type: object
+      additionalProperties: false
+      required: [snapshot, items, has_more, next_cursor]
+      properties:
+        snapshot: { $ref: "#/components/schemas/Snapshot" }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ObservationRecord" }
+        has_more: { type: boolean }
+        next_cursor: { $ref: "#/components/schemas/NextCursor" }
+
+    # ---- Locations and change feeds --------------------------------------
+    Locator:
+      description: A typed retrieval location. The Worker never resolves an arbitrary URL or path.
+      oneOf:
+        - $ref: "#/components/schemas/HostDirLocator"
+        - $ref: "#/components/schemas/ArtifactLocator"
+        - $ref: "#/components/schemas/ObjectLocator"
+      discriminator:
+        propertyName: kind
+        mapping:
+          host-dir: "#/components/schemas/HostDirLocator"
+          artifact: "#/components/schemas/ArtifactLocator"
+          object: "#/components/schemas/ObjectLocator"
+    HostDirLocator:
+      type: object
+      additionalProperties: false
+      required: [kind, host, directory]
+      properties:
+        kind: { const: host-dir }
+        host: { type: string, minLength: 1, description: Host label. }
+        directory:
+          type: string
+          minLength: 1
+          description: The directory as the host names it; not remotely downloadable.
+    ArtifactLocator:
+      type: object
+      additionalProperties: false
+      required: [kind, repository_id, run_id, artifact_id, member]
+      properties:
+        kind: { const: artifact }
+        repository_id: { $ref: "#/components/schemas/RepositoryId" }
+        run_id: { type: string, pattern: "^[1-9][0-9]{0,19}$" }
+        artifact_id: { type: string, pattern: "^[1-9][0-9]{0,19}$" }
+        member: { type: string, minLength: 1, description: File path inside the artifact. }
+    ObjectLocator:
+      type: object
+      additionalProperties: false
+      required: [kind, upload_id]
+      properties:
+        kind: { const: object }
+        upload_id: { $ref: "#/components/schemas/ServerId" }
+    LocationEventKind:
+      type: string
+      enum: [verified, unavailable, withdrawn]
+    VerificationMethod:
+      type: string
+      enum: [bytes, foreign-host-provenance]
+    LocationEventRequest:
+      type: object
+      additionalProperties: false
+      required: [event_id, observation_id, reference_kind, reference_digest, path, locator, kind]
+      properties:
+        event_id: { $ref: "#/components/schemas/Uuid" }
+        observation_id: { $ref: "#/components/schemas/ObservationId" }
+        reference_kind: { $ref: "#/components/schemas/ReferenceKind" }
+        reference_digest: { $ref: "#/components/schemas/ReferenceDigest" }
+        path:
+          type: string
+          minLength: 1
+          description: The report's original `path`, or the proof's file name inside `report_dir`.
+        locator: { $ref: "#/components/schemas/Locator" }
+        kind: { $ref: "#/components/schemas/LocationEventKind" }
+        verification_method:
+          $ref: "#/components/schemas/VerificationMethod"
+          description: Required exactly when `kind` is `verified`.
+    LocationEvent:
+      type: object
+      additionalProperties: false
+      required:
+        [event_id, sequence, observation_id, reference_kind, reference_digest, path, location_key, locator, kind, checked_at_ms, checked_by]
+      properties:
+        event_id: { $ref: "#/components/schemas/Uuid" }
+        sequence: { type: integer, minimum: 1 }
+        observation_id: { $ref: "#/components/schemas/ObservationId" }
+        reference_kind: { $ref: "#/components/schemas/ReferenceKind" }
+        reference_digest: { $ref: "#/components/schemas/ReferenceDigest" }
+        path: { type: string, minLength: 1 }
+        location_key:
+          $ref: "#/components/schemas/Sha256"
+          description: SHA-256 of the canonical locator.
+        locator: { $ref: "#/components/schemas/Locator" }
+        kind: { $ref: "#/components/schemas/LocationEventKind" }
+        verification_method: { $ref: "#/components/schemas/VerificationMethod" }
+        checked_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+        valid_until_ms:
+          $ref: "#/components/schemas/TimestampMs"
+          description: Present exactly on `verified` events.
+        checked_by: { $ref: "#/components/schemas/Principal" }
+    ChangesQuery:
+      type: object
+      additionalProperties: false
+      required: [stream]
+      properties:
+        stream: { type: string, enum: [observations, locations] }
+        after_sequence:
+          type: integer
+          minimum: 0
+          description: Resume after this stream position. Missing means the stream origin. Not allowed with `cursor`.
+        page_size: { $ref: "#/components/schemas/PageSize" }
+        cursor: { $ref: "#/components/schemas/Cursor" }
+        snapshot:
+          $ref: "#/components/schemas/Snapshot"
+          description: Pin the first page to a snapshot; when omitted the service captures one. Not allowed with `cursor`.
+    ObservationChange:
+      oneOf:
+        - $ref: "#/components/schemas/ObservationAccepted"
+        - $ref: "#/components/schemas/ObservationPruned"
+      discriminator:
+        propertyName: type
+        mapping:
+          accepted: "#/components/schemas/ObservationAccepted"
+          pruned: "#/components/schemas/ObservationPruned"
+    ObservationAccepted:
+      type: object
+      additionalProperties: false
+      required: [type, sequence, observation_id, environment, package, gate, head, tree, outcome, completion, recorded_at_ms]
+      properties:
+        type: { const: accepted }
+        sequence: { type: integer, minimum: 1 }
+        observation_id: { $ref: "#/components/schemas/ObservationId" }
+        environment: { $ref: "#/components/schemas/Environment" }
+        package: { type: string, minLength: 1 }
+        gate: { $ref: "#/components/schemas/Gate" }
+        head: { $ref: "#/components/schemas/GitObjectId" }
+        tree: { $ref: "#/components/schemas/GitObjectId" }
+        outcome: { type: string, enum: [pass, fail] }
+        completion: { type: string, enum: [complete, interrupted, partial] }
+        recorded_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+    ObservationPruned:
+      type: object
+      additionalProperties: false
+      description: Tombstone. Carries IDs and context only, never the deleted payload.
+      required: [type, sequence, observation_id, environment, package, gate, head, tree, job_id, recorded_at_ms]
+      properties:
+        type: { const: pruned }
+        sequence: { type: integer, minimum: 1 }
+        observation_id: { $ref: "#/components/schemas/ObservationId" }
+        environment: { $ref: "#/components/schemas/Environment" }
+        package: { type: string, minLength: 1 }
+        gate: { $ref: "#/components/schemas/Gate" }
+        head: { $ref: "#/components/schemas/GitObjectId" }
+        tree: { $ref: "#/components/schemas/GitObjectId" }
+        job_id: { $ref: "#/components/schemas/ServerId" }
+        recorded_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+    LocationChange:
+      oneOf:
+        - $ref: "#/components/schemas/LocationEventChange"
+        - $ref: "#/components/schemas/LocationPruned"
+      discriminator:
+        propertyName: type
+        mapping:
+          event: "#/components/schemas/LocationEventChange"
+          pruned: "#/components/schemas/LocationPruned"
+    LocationEventChange:
+      type: object
+      additionalProperties: false
+      required: [type, sequence, event]
+      properties:
+        type: { const: event }
+        sequence: { type: integer, minimum: 1 }
+        event: { $ref: "#/components/schemas/LocationEvent" }
+    LocationPruned:
+      type: object
+      additionalProperties: false
+      description: Tombstone for a location history removed by pruning.
+      required: [type, sequence, observation_id, location_key, job_id, recorded_at_ms]
+      properties:
+        type: { const: pruned }
+        sequence: { type: integer, minimum: 1 }
+        observation_id: { $ref: "#/components/schemas/ObservationId" }
+        location_key: { $ref: "#/components/schemas/Sha256" }
+        job_id: { $ref: "#/components/schemas/ServerId" }
+        recorded_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+    ChangesPage:
+      type: object
+      additionalProperties: false
+      required: [stream, snapshot, last_sequence, items, has_more, next_cursor]
+      properties:
+        stream: { type: string, enum: [observations, locations] }
+        snapshot: { $ref: "#/components/schemas/Snapshot" }
+        last_sequence:
+          type: integer
+          minimum: 0
+          description: Stream position after this page; persist it once the page is processed.
+        items:
+          type: array
+          description: "`ObservationChange` items for `observations`, `LocationChange` items for `locations`."
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/ObservationChange"
+              - $ref: "#/components/schemas/LocationChange"
+        has_more: { type: boolean }
+        next_cursor: { $ref: "#/components/schemas/NextCursor" }
+
+    # ---- Uploads ----------------------------------------------------------
+    UploadRequest:
+      type: object
+      additionalProperties: false
+      required: [observation_id, reference_kind, reference_digest, bytes, path]
+      properties:
+        observation_id: { $ref: "#/components/schemas/ObservationId" }
+        reference_kind: { $ref: "#/components/schemas/ReferenceKind" }
+        reference_digest: { $ref: "#/components/schemas/ReferenceDigest" }
+        bytes:
+          type: integer
+          minimum: 0
+          maximum: 67108864
+          description: Exact object length. Zero only for a referenced empty file; must equal a report's recorded `bytes`.
+        path:
+          type: string
+          minLength: 1
+          description: The original path string, preserved as provenance.
+    UploadState:
+      type: string
+      enum: [open, finalized, rejected, expired]
+    Upload:
+      type: object
+      additionalProperties: false
+      required:
+        [upload_id, observation_id, reference_kind, reference_digest, path, bytes, part_bytes, part_count, parts_received, state, expires_at_ms]
+      properties:
+        upload_id: { $ref: "#/components/schemas/ServerId" }
+        observation_id: { $ref: "#/components/schemas/ObservationId" }
+        reference_kind: { $ref: "#/components/schemas/ReferenceKind" }
+        reference_digest: { $ref: "#/components/schemas/ReferenceDigest" }
+        path: { type: string, minLength: 1 }
+        bytes: { type: integer, minimum: 0, maximum: 67108864 }
+        part_bytes: { const: 1048576 }
+        part_count: { type: integer, minimum: 0, maximum: 64 }
+        parts_received: { type: integer, minimum: 0, maximum: 64 }
+        state: { $ref: "#/components/schemas/UploadState" }
+        expires_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+    UploadPartResult:
+      type: object
+      additionalProperties: false
+      required: [upload_id, index, bytes, parts_received]
+      properties:
+        upload_id: { $ref: "#/components/schemas/ServerId" }
+        index: { type: integer, minimum: 0, maximum: 63 }
+        bytes: { type: integer, minimum: 1, maximum: 1048576 }
+        parts_received: { type: integer, minimum: 1, maximum: 64 }
+    FinalizeRequest:
+      type: object
+      additionalProperties: false
+      description: Empty; finalization is fully determined by the upload.
+      properties: {}
+    FinalizeResult:
+      type: object
+      additionalProperties: false
+      required: [upload, sha256, location]
+      properties:
+        upload: { $ref: "#/components/schemas/Upload" }
+        sha256: { $ref: "#/components/schemas/Sha256" }
+        location: { $ref: "#/components/schemas/LocationEvent" }
+
+    # ---- Retention --------------------------------------------------------
+    VerifierPolicy:
+      type: object
+      additionalProperties: false
+      required: [name, version, digest]
+      properties:
+        name: { type: string, minLength: 1 }
+        version: { type: string, minLength: 1 }
+        digest: { $ref: "#/components/schemas/Sha256" }
+    SupersessionEvidence:
+      oneOf:
+        - $ref: "#/components/schemas/AncestryEvidence"
+        - $ref: "#/components/schemas/RetryEvidence"
+      discriminator:
+        propertyName: kind
+        mapping:
+          strict-ancestry: "#/components/schemas/AncestryEvidence"
+          retry: "#/components/schemas/RetryEvidence"
+    AncestryEvidence:
+      type: object
+      additionalProperties: false
+      required: [kind, ancestor_head, descendant_head]
+      description: The verifier's claim that the superseding head strictly descends from the superseded head.
+      properties:
+        kind: { const: strict-ancestry }
+        ancestor_head: { $ref: "#/components/schemas/GitObjectId" }
+        descendant_head: { $ref: "#/components/schemas/GitObjectId" }
+    RetryEvidence:
+      type: object
+      additionalProperties: false
+      required: [kind, chain]
+      description: A `retry_of` chain from the superseded to the superseding observation; checked against stored links.
+      properties:
+        kind: { const: retry }
+        chain:
+          type: array
+          minItems: 2
+          items: { $ref: "#/components/schemas/ObservationId" }
+    SupersessionEdge:
+      type: object
+      additionalProperties: false
+      required: [superseded_id, superseded_by_id, evidence]
+      properties:
+        superseded_id: { $ref: "#/components/schemas/ObservationId" }
+        superseded_by_id: { $ref: "#/components/schemas/ObservationId" }
+        evidence: { $ref: "#/components/schemas/SupersessionEvidence" }
+    CertifiedCell:
+      type: object
+      additionalProperties: false
+      required: [package, environment, gate, candidate_ids, retained_ids, supersessions]
+      properties:
+        package: { type: string, minLength: 1 }
+        environment: { $ref: "#/components/schemas/Environment" }
+        gate: { $ref: "#/components/schemas/Gate" }
+        candidate_ids:
+          type: array
+          uniqueItems: true
+          description: Every observation of the cell at the snapshot; must equal the stored set exactly.
+          items: { $ref: "#/components/schemas/ObservationId" }
+        retained_ids:
+          type: array
+          uniqueItems: true
+          minItems: 1
+          description: Protected maximal set; nonempty whenever candidates exist.
+          items: { $ref: "#/components/schemas/ObservationId" }
+        supersessions:
+          type: array
+          items: { $ref: "#/components/schemas/SupersessionEdge" }
+    ReleasePin:
+      type: object
+      additionalProperties: false
+      required: [release, observation_ids]
+      properties:
+        release: { type: string, minLength: 1 }
+        observation_ids:
+          type: array
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/ObservationId" }
+    RetentionCertificate:
+      type: object
+      additionalProperties: false
+      required: [certificate_id, snapshot, cells, verifier_policy, release_pins]
+      properties:
+        certificate_id: { $ref: "#/components/schemas/Uuid" }
+        snapshot: { $ref: "#/components/schemas/Snapshot" }
+        cells:
+          type: array
+          items: { $ref: "#/components/schemas/CertifiedCell" }
+        verifier_policy: { $ref: "#/components/schemas/VerifierPolicy" }
+        release_pins:
+          type: array
+          description: Release-cited evidence; pinned observations can never be job members.
+          items: { $ref: "#/components/schemas/ReleasePin" }
+    RetentionJobState:
+      type: string
+      enum: [scheduled, withdrawing, deleting-objects, deleting-rows, completed, invalidated]
+      description: |
+        `scheduled` waits for the grace period and an unchanged revision;
+        `invalidated` means the revision changed before the job started.
+    RetentionJob:
+      type: object
+      additionalProperties: false
+      required: [job_id, certificate_id, state, snapshot, member_count, progress, not_before_ms, created_at_ms, updated_at_ms]
+      properties:
+        job_id: { $ref: "#/components/schemas/ServerId" }
+        certificate_id: { $ref: "#/components/schemas/Uuid" }
+        state: { $ref: "#/components/schemas/RetentionJobState" }
+        snapshot: { $ref: "#/components/schemas/Snapshot" }
+        member_count: { type: integer, minimum: 0 }
+        progress:
+          type: object
+          additionalProperties: false
+          required: [locations_withdrawn, objects_deleted, observations_deleted]
+          properties:
+            locations_withdrawn: { type: integer, minimum: 0 }
+            objects_deleted: { type: integer, minimum: 0 }
+            observations_deleted: { type: integer, minimum: 0 }
+        not_before_ms:
+          $ref: "#/components/schemas/TimestampMs"
+          description: Earliest start, the end of the grace period of the latest-certified member.
+        created_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+        updated_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+
+    # ---- Evaluations ------------------------------------------------------
+    EvaluationRequest:
+      type: object
+      additionalProperties: false
+      description: Reserved. No evaluation format is published; every request is refused before its body is read.
+
+    # ---- Operator ---------------------------------------------------------
+    RepositoryRegistration:
+      type: object
+      additionalProperties: false
+      required: [repository_id, owner_id, slug]
+      properties:
+        repository_id: { $ref: "#/components/schemas/RepositoryId" }
+        owner_id:
+          type: string
+          pattern: "^[1-9][0-9]{0,19}$"
+          description: Stable numeric GitHub owner ID; matched against the OIDC `repository_owner_id` claim.
+        slug:
+          type: string
+          pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          description: Display name `owner/name`; may change, never used as identity.
+    Repository:
+      type: object
+      additionalProperties: false
+      required: [repository_id, owner_id, slug, registered_at_ms, snapshot]
+      properties:
+        repository_id: { $ref: "#/components/schemas/RepositoryId" }
+        owner_id: { type: string, pattern: "^[1-9][0-9]{0,19}$" }
+        slug: { type: string, minLength: 3 }
+        registered_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+        snapshot: { $ref: "#/components/schemas/Snapshot" }
+    CredentialRequest:
+      type: object
+      additionalProperties: false
+      required: [label, repository_ids, roles]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Human-readable host name; not a secret.
+        repository_ids:
+          type: array
+          uniqueItems: true
+          description: Repositories the credential may act on. Empty denies all.
+          items: { $ref: "#/components/schemas/RepositoryId" }
+        roles:
+          type: array
+          uniqueItems: true
+          description: Roles granted on every listed repository. Empty denies all. `operator` is not grantable.
+          items: { $ref: "#/components/schemas/GrantableRole" }
+        expires_in_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+          default: 90
+        replaces:
+          $ref: "#/components/schemas/CredentialId"
+          description: Rotation; the replaced credential then expires within `credential_overlap_max_days`.
+    Credential:
+      type: object
+      additionalProperties: false
+      required: [credential_id, label, repository_ids, roles, issued_at_ms, expires_at_ms, rotate_at_ms]
+      description: A credential's public record. Never contains the secret or its digest.
+      properties:
+        credential_id: { $ref: "#/components/schemas/CredentialId" }
+        label: { type: string, minLength: 1 }
+        repository_ids:
+          type: array
+          items: { $ref: "#/components/schemas/RepositoryId" }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+        issued_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+        expires_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+        rotate_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+        replaces: { $ref: "#/components/schemas/CredentialId" }
+        revoked_at_ms: { $ref: "#/components/schemas/TimestampMs" }
+        revocation_reason: { type: string, minLength: 1 }
+    IssuedCredential:
+      type: object
+      additionalProperties: false
+      required: [credential, secret]
+      properties:
+        credential: { $ref: "#/components/schemas/Credential" }
+        secret:
+          type: string
+          pattern: "^ebt_[0-9a-f]{32}\\.[A-Za-z0-9_-]{43}$"
+          description: |
+            The full bearer token, returned exactly once. Never logged; the CLI writes
+            it to a mode-restricted file and never to stdout.
+    RevokeRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 512 }
+    AuditAction:
+      type: string
+      enum:
+        - repository.register
+        - repository.rename
+        - credential.issue
+        - credential.revoke
+        - credential.denied
+        - retention.certificate
+        - retention.job
+        - operator.bootstrap
+        - restore.generation
+    AuditQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        repository_id: { $ref: "#/components/schemas/RepositoryId" }
+        credential_id: { $ref: "#/components/schemas/CredentialId" }
+        action: { $ref: "#/components/schemas/AuditAction" }
+        since_ms: { $ref: "#/components/schemas/TimestampMs" }
+        until_ms: { $ref: "#/components/schemas/TimestampMs" }
+        page_size: { $ref: "#/components/schemas/PageSize" }
+        cursor: { $ref: "#/components/schemas/Cursor" }
+    AuditRecord:
+      type: object
+      additionalProperties: false
+      required: [sequence, at_ms, action, actor, request_id]
+      properties:
+        sequence: { type: integer, minimum: 1 }
+        at_ms: { $ref: "#/components/schemas/TimestampMs" }
+        action: { $ref: "#/components/schemas/AuditAction" }
+        actor: { $ref: "#/components/schemas/Principal" }
+        repository_id: { $ref: "#/components/schemas/RepositoryId" }
+        target_credential_id: { $ref: "#/components/schemas/CredentialId" }
+        request_id: { type: string, minLength: 1 }
+    AuditPage:
+      type: object
+      additionalProperties: false
+      required: [items, has_more, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AuditRecord" }
+        has_more: { type: boolean }
+        next_cursor: { $ref: "#/components/schemas/NextCursor" }

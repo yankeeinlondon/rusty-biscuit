@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusty-biscuit.invalid/evidence-store/backup-manifest.schema.json",
+  "title": "Evidence store backup manifest",
+  "description": "Describes one daily backup in operator-owned storage outside the live bucket: the D1 export, every referenced R2 object, and pending-upload and job metadata, taken at a quiesced boundary. Contains credential digests only, never recoverable bearer secrets. Uploads pending at the boundary are recorded as pending, not acknowledged.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "backup_id", "created_at_ms", "boundary", "source", "migration", "repositories", "database", "objects", "pending_uploads", "retention_jobs"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format_version": { "const": 1 },
+    "backup_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "created_at_ms": { "type": "integer", "minimum": 0 },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quiesced_at_ms", "resumed_at_ms"],
+      "properties": {
+        "quiesced_at_ms": { "type": "integer", "minimum": 0, "description": "Mutations paused; every acknowledgment before this instant is in the backup." },
+        "resumed_at_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "d1_database_id", "r2_bucket"],
+      "properties": {
+        "environment": { "enum": ["development", "restore-test"] },
+        "d1_database_id": { "type": "string", "minLength": 1 },
+        "r2_bucket": { "type": "string", "minLength": 1 }
+      }
+    },
+    "migration": { "type": "integer", "minimum": 1, "description": "Highest applied migration number." },
+    "repositories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository_id", "generation", "retention_epoch", "evidence_revision", "observation_event_watermark", "location_event_watermark"],
+        "properties": {
+          "repository_id": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
+          "generation": { "type": "string", "minLength": 1 },
+          "retention_epoch": { "type": "integer", "minimum": 0 },
+          "evidence_revision": { "type": "integer", "minimum": 0 },
+          "observation_event_watermark": { "type": "integer", "minimum": 0 },
+          "location_event_watermark": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "database": { "$ref": "#/$defs/file" },
+    "objects": {
+      "description": "Every R2 object referenced by a finalized upload at the boundary.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "sha256", "bytes"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1 },
+          "sha256": { "$ref": "#/$defs/sha256" },
+          "bytes": { "type": "integer", "minimum": 0, "maximum": 67108864 }
+        }
+      }
+    },
+    "pending_uploads": { "$ref": "#/$defs/file" },
+    "retention_jobs": { "$ref": "#/$defs/file" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "file": {
+      "description": "A file inside the backup, relative to the manifest, with its digest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha256", "bytes"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

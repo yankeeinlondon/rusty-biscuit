@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusty-biscuit.invalid/evidence-store/resume-state.schema.json",
+  "title": "Evidence ingestion resume state",
+  "description": "Durable progress of one ingestion, rewritten atomically after every acknowledgment so a lost response or crash resumes without rerunning tests. Holds paths and IDs only; never a token or report bytes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "config_file", "input", "submission", "ingest", "uploads", "updated_at_ms"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format_version": { "const": 1 },
+    "config_file": { "type": "string", "minLength": 1, "description": "Native path of the ingest configuration." },
+    "input": {
+      "description": "The original bundle, retained until every acknowledgment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "submission": {
+      "description": "The adapted collection as submitted, retained beside the state file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "source_version", "collection_id"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "source_version": { "enum": [2, 3] },
+        "collection_id": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "ingest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["pending", "acknowledged"] },
+        "evidence_revision": { "type": "integer", "minimum": 0, "description": "Present once acknowledged." },
+        "accepted": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-f]{8,64}$" } },
+        "already_present": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-f]{8,64}$" } }
+      }
+    },
+    "uploads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["observation_id", "reference_kind", "reference_digest", "path", "file", "bytes", "parts_acknowledged", "state"],
+        "properties": {
+          "observation_id": { "type": "string", "pattern": "^[0-9a-f]{8,64}$" },
+          "reference_kind": { "enum": ["report", "expected-listing", "completion-record"] },
+          "reference_digest": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "path": { "type": "string", "minLength": 1, "description": "Original reference path, as provenance." },
+          "file": { "type": "string", "minLength": 1, "description": "Native local path of the bytes." },
+          "bytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+          "upload_id": { "type": "string", "pattern": "^[0-9a-f]{32}$", "description": "Present once the upload is opened." },
+          "parts_acknowledged": { "type": "integer", "minimum": 0, "maximum": 64 },
+          "state": { "enum": ["pending", "staged", "finalized"], "description": "`staged`: every part acknowledged, awaiting verifier finalization." }
+        }
+      }
+    },
+    "updated_at_ms": { "type": "integer", "minimum": 0 }
+  }
+}

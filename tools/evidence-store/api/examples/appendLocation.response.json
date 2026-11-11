@@ -1,0 +1,22 @@
+{
+  "event_id": "b2e4d6f8-1a3c-4e5f-8a7b-9c0d1e2f3a4b",
+  "sequence": 655,
+  "observation_id": "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b",
+  "reference_kind": "report",
+  "reference_digest": "845e91831319e89c4d656bdb80c278ac09a7230d61e5dfd2e1b1fbb436ac8917",
+  "path": "biscuit-hash-L1.junit.xml",
+  "location_key": "9775e72a53e08b49136e2c8340f5725a1ae1f1636e9d6d1bc52b0e4f9fc8481e",
+  "locator": {
+    "kind": "host-dir",
+    "host": "rig-linux-01",
+    "directory": "~/.rusty-biscuit/reports/run-0001"
+  },
+  "kind": "verified",
+  "verification_method": "bytes",
+  "checked_at_ms": 1794312000000,
+  "valid_until_ms": 1794398400000,
+  "checked_by": {
+    "kind": "credential",
+    "credential_id": "a73782ac11e7dd2654ce3b967b1511f3"
+  }
+}

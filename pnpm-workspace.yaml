@@ -1,3 +1,4 @@
 packages:
   - homelab/server/frontend
   - tools/test-audit
+  - tools/evidence-store

@@ -1,0 +1,56 @@
+set dotenv-load
+set positional-arguments
+
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
+
+# Windows PATH order for recipe shells; see just/shell.just.
+import "../../just/shell.just"
+
+BOLD := '\033[1m'
+RESET := '\033[0m'
+ROOT := justfile_directory() + "/../.."
+
+default:
+    @echo
+    @echo -e "{{ BOLD }}evidence-store{{ RESET }} (private evidence store Worker and its tooling)"
+    @echo "======================================================================================"
+    @echo
+    @just --list | grep -v 'default'
+    @echo
+
+# Install pinned Node dependencies through the root pnpm workspace lockfile.
+install *args="":
+    pnpm --dir "{{ ROOT }}" install --frozen-lockfile {{ args }}
+
+# Type-check the Worker, CLI, spike, and tests (tsc --noEmit).
+typecheck:
+    pnpm --dir "{{ justfile_directory() }}" typecheck
+
+# Run the Node and Workers-runtime vitest projects.
+test *args="":
+    @eval "$(just _test_run_scope)"; pnpm --dir "{{ justfile_directory() }}" exec vitest run {{ args }}
+
+# No integration tier yet: the deployed checks run through `prove-d1`.
+test-l2:
+    @echo "evidence-store: no L2 tests (deployed checks run through 'just prove-d1')"
+
+# Static checks: the TypeScript compiler in strict mode.
+lint:
+    pnpm --dir "{{ justfile_directory() }}" lint
+
+# typecheck → test, for local use.
+check: typecheck test
+
+# Regenerate the frozen Python parity fixtures (`--check` compares instead).
+capture-parity *args="":
+    pnpm --dir "{{ justfile_directory() }}" exec tsx cli/capture-parity.ts {{ args }}
+
+# Read-only capacity inventory from notes, artifacts, and retained reports.
+inventory *args="":
+    pnpm --dir "{{ justfile_directory() }}" exec tsx cli/inventory.ts {{ args }}
+
+# D1 feasibility checkpoint on a disposable database (needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID).
+prove-d1 *args="":
+    pnpm --dir "{{ justfile_directory() }}" exec tsx cli/prove-d1.ts {{ args }}

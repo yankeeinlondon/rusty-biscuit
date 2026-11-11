@@ -1,0 +1,58 @@
+{
+  "source_version": 3,
+  "collection": {
+    "schema_version": 3,
+    "environment": "ubuntu-latest",
+    "head": "9f2e6d33a3717ee826353a404ba4618d1aeeb687",
+    "tree": "dc9c5edb8b2d479e697b4b0b8ab874f32b325138",
+    "observations": [
+      {
+        "producer": {
+          "kind": "rig",
+          "host": {
+            "os": "linux",
+            "kernel": "6.8.0-48-generic",
+            "label": "rig-linux-01",
+            "report_dir": "~/.rusty-biscuit/reports/run-0001"
+          }
+        },
+        "base": "cae662172fd450bb0cd710a769079c05bfc5d8e3",
+        "scope_identity": "5f161c9149882e0e10124bc5dd5c11f0fbe8ec452edd52bcec76b01e9252cb33",
+        "completion": "complete",
+        "cell": {
+          "package": "biscuit-hash",
+          "gate": "L1",
+          "outcome": "pass",
+          "exit_code": 0,
+          "completion": "complete",
+          "counts": {
+            "total": 42,
+            "passed": 42,
+            "failed": 0,
+            "skipped": 0,
+            "errored": 0
+          },
+          "duration_s": 12.5,
+          "gate_input_identity": "4baa7795f4485e2fa7f22b39816a556660007a4471c306941a7c5bf73bec5ec7",
+          "backends": [],
+          "report": "biscuit-hash-L1.junit.xml"
+        },
+        "proof": {
+          "nextest_version": "0.9.104",
+          "target": "x86_64-unknown-linux-gnu",
+          "expected_listing_digest": "cea23dd4b87e8b00d19fb9ccaaef93e97353c7353e2070f3baf05aeb3995dff4",
+          "completion_record_digest": "21606b5837ee49171e56cff2afe21083fb4dfe5c15c79b54695c2dc335181c89"
+        },
+        "reports": [
+          {
+            "path": "biscuit-hash-L1.junit.xml",
+            "sha256": "845e91831319e89c4d656bdb80c278ac09a7230d61e5dfd2e1b1fbb436ac8917",
+            "bytes": 18432,
+            "store": "host-dir"
+          }
+        ],
+        "observation_id": "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b"
+      }
+    ]
+  }
+}

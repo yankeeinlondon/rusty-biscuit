@@ -1,0 +1,4167 @@
+{
+  "cases": [
+    {
+      "canonical": "adapter-hook-v2.canonical",
+      "files": [
+        "adapter-hook-v2.canonical",
+        "adapter-hook-v2.home/ci-evidence/bbbbbbbbb/claudine-L1.xml",
+        "adapter-hook-v2.home/ci-evidence/bbbbbbbbb/darkmatter-L1.xml",
+        "adapter-hook-v2.json"
+      ],
+      "home": "adapter-hook-v2.home",
+      "identity": "ef43e87bbdcaff010e7f5886f92f555cef35dda63ecaf8c0f2b8a38ff98aaa16",
+      "input": "adapter-hook-v2.json",
+      "kind": "receipt-adapter",
+      "name": "adapter-hook-v2",
+      "note": "Three cells: complete pass, complete fail with detail, interrupted (no report read).",
+      "observation_ids": [
+        "64d9483e1d3bff18206695e942aacad05d6cd42ddf29c3c05bd186834416a8d0",
+        "78ab04ef3cf5c25fbf9cdb4e9909c76fbd0f0ff50e8ec69fee5b427dc3515eb9",
+        "ac39b9da873192330b83b216ffa49b3f754e928d5b302bef62bd57ca3b344253"
+      ],
+      "problems": [],
+      "receipt_problems": []
+    },
+    {
+      "canonical": "adapter-hook-v2-bare-home.canonical",
+      "files": [
+        "adapter-hook-v2-bare-home.canonical",
+        "adapter-hook-v2-bare-home.home/nested/claudine L1.xml",
+        "adapter-hook-v2-bare-home.json"
+      ],
+      "home": "adapter-hook-v2-bare-home.home",
+      "identity": "5b99b9dc6bbd038a19982c1751394621a4c569084d064af47a07d00fefadd15c",
+      "input": "adapter-hook-v2-bare-home.json",
+      "kind": "receipt-adapter",
+      "name": "adapter-hook-v2-bare-home",
+      "note": "report_dir is '~' itself; the report path has a subdirectory and a space, and the report is empty.",
+      "observation_ids": [
+        "4136056c81a3a6ae966097a2add427faa086cda17f8d9981fdd45936b5b15043"
+      ],
+      "problems": [],
+      "receipt_problems": []
+    },
+    {
+      "error": "the receipt is invalid: v1-requires-exact-tree: a version-1 receipt carries no per-cell outcome and is reusable only on exact tree identity, pass-only, whole-environment",
+      "files": [
+        "adapter-v1-receipt.json"
+      ],
+      "home": "adapter-v1-receipt.home",
+      "input": "adapter-v1-receipt.json",
+      "kind": "receipt-adapter",
+      "name": "adapter-v1-receipt",
+      "note": "A version-1 receipt has no adapter.",
+      "receipt_problems": [
+        "v1-requires-exact-tree: a version-1 receipt carries no per-cell outcome and is reusable only on exact tree identity, pass-only, whole-environment"
+      ]
+    },
+    {
+      "error": "the receipt is invalid: malformed-receipt: receipt cells must be a non-empty list",
+      "files": [
+        "adapter-v2-empty-cells.json"
+      ],
+      "home": "adapter-v2-empty-cells.home",
+      "input": "adapter-v2-empty-cells.json",
+      "kind": "receipt-adapter",
+      "name": "adapter-v2-empty-cells",
+      "note": "cells: [] is invalid for a v2 receipt.",
+      "receipt_problems": [
+        "malformed-receipt: receipt cells must be a non-empty list"
+      ]
+    },
+    {
+      "error": "the collection would be invalid: conflicting-evidence: observation 12fd73db6d72 appears twice",
+      "files": [
+        "adapter-v2-identical-cells.home/ci-evidence/bbbbbbbbb/claudine-L1.xml",
+        "adapter-v2-identical-cells.json"
+      ],
+      "home": "adapter-v2-identical-cells.home",
+      "input": "adapter-v2-identical-cells.json",
+      "kind": "receipt-adapter",
+      "name": "adapter-v2-identical-cells",
+      "note": "Two identical cells pass validate_receipt but adapt to one id twice; collection_of refuses.",
+      "receipt_problems": []
+    },
+    {
+      "error": "$HOME/ci-evidence/bbbbbbbbb does not retain claudine-L1.xml: [Errno 2] No such file or directory: '$HOME/ci-evidence/bbbbbbbbb/claudine-L1.xml'",
+      "files": [
+        "adapter-v2-missing-report.json"
+      ],
+      "home": "adapter-v2-missing-report.home",
+      "input": "adapter-v2-missing-report.json",
+      "kind": "receipt-adapter",
+      "name": "adapter-v2-missing-report",
+      "note": "A complete cell whose report is not retained: the adapter refuses.",
+      "receipt_problems": []
+    },
+    {
+      "canonical": "collection-empty.canonical",
+      "files": [
+        "collection-empty.json",
+        "collection-empty.canonical"
+      ],
+      "identity": "6e7a30f215c45e621edb03c8ede4bb31a5a7edb2840b0655265973df6ba79b9c",
+      "input": "collection-empty.json",
+      "kind": "collection",
+      "name": "collection-empty",
+      "note": "A real empty observations list is valid zero proof.",
+      "observation_ids": [],
+      "problems": [],
+      "source": "test_schema.collection()"
+    },
+    {
+      "canonical": "collection-features-variants.canonical",
+      "files": [
+        "collection-features-variants.json",
+        "collection-features-variants.canonical"
+      ],
+      "identity": "bf326c0872e6c4dc499eeb2b1146efff377cf82d106fb5aec85e69837d56f000",
+      "input": "collection-features-variants.json",
+      "kind": "collection",
+      "name": "collection-features-variants",
+      "note": "Identical hook observations whose features are absent, empty, and '--features x': three distinct ids.",
+      "observation_ids": [
+        "41465428152a5b6b9d404dc4485b82d4fd0dd6067ed48b319b490ca16364897e",
+        "e46c764cd93f446e9e2c13134f034ee5fef4e1512bcd9d7cc29b481b813eb1d6",
+        "fa677ef710a9973a7801f839ee5df6103e25ef65832b04bf7c2410f8c7948c48"
+      ],
+      "problems": [],
+      "source": "with_identity"
+    },
+    {
+      "canonical": "collection-hosted-fail.canonical",
+      "files": [
+        "collection-hosted-fail.json",
+        "collection-hosted-fail.canonical"
+      ],
+      "identity": "4182cb3257c3c1a0016634fc3b9b3300ba3a41b5011d110202337555e5ace718",
+      "input": "collection-hosted-fail.json",
+      "kind": "collection",
+      "name": "collection-hosted-fail",
+      "note": "A hosted fail observation (artifact report store, workflow/run_id/attempt).",
+      "observation_ids": [
+        "4fac2dabb94138c9355fd54e958856edbba34b66463b11391b53030fc3473490"
+      ],
+      "problems": [],
+      "source": "hosted_observations.build_observation + observation_notes.collection_of"
+    },
+    {
+      "canonical": "collection-hosted-pass.canonical",
+      "files": [
+        "collection-hosted-pass.json",
+        "collection-hosted-pass.canonical"
+      ],
+      "identity": "873db447bb689195a9d9e18aa879ae5e6d9a2ecc04a5a0dd6ba9a050d73207d6",
+      "input": "collection-hosted-pass.json",
+      "kind": "collection",
+      "name": "collection-hosted-pass",
+      "note": "A hosted pass observation (artifact report store, workflow/run_id/attempt).",
+      "observation_ids": [
+        "f79b799723774b88f25cc10e3f49c4a5d02411be61cb7cbbbc45694aead16b21"
+      ],
+      "problems": [],
+      "source": "hosted_observations.build_observation + observation_notes.collection_of"
+    },
+    {
+      "canonical": "collection-incomplete.canonical",
+      "files": [
+        "collection-incomplete.json",
+        "collection-incomplete.canonical"
+      ],
+      "identity": "508920450838d3d9e6fc9bca3d3567713c7ce1fdb63654e14bb50a47f0b175b2",
+      "input": "collection-incomplete.json",
+      "kind": "collection",
+      "name": "collection-incomplete",
+      "note": "An interrupted hook observation with no reports and no failed tests.",
+      "observation_ids": [
+        "52f8c8010a48388d31e462d4a54427e348293e47e6395da988ce92035642e739"
+      ],
+      "problems": [],
+      "source": "with_identity over a test_schema.observation-shaped body"
+    },
+    {
+      "canonical": "collection-retry-chain.canonical",
+      "files": [
+        "collection-retry-chain.json",
+        "collection-retry-chain.canonical"
+      ],
+      "identity": "8c7a64a9b78b060bd8a7369b39e6a47b89fbcf2e4defe6e131d8e4618ed047db",
+      "input": "collection-retry-chain.json",
+      "kind": "collection",
+      "name": "collection-retry-chain",
+      "note": "Three rig observations of one cell linked by retry_of.",
+      "observation_ids": [
+        "a58b291350f87d01605eb141c0909ed1c192910ddb3cdc5c6ee1ce36578c54bf",
+        "c56631ddc341a2409c1125ac264cc01536945fbe1d7fca09d5e5d3cee26aec64",
+        "d967835d04838d5a36055de10d236137eee3e35c89aa8b3502ee2f085711811a"
+      ],
+      "problems": [],
+      "source": "observation_notes.with_retry_of"
+    },
+    {
+      "canonical": "collection-rig.canonical",
+      "files": [
+        "collection-rig.json",
+        "collection-rig.canonical"
+      ],
+      "identity": "ddc0242d04f9f3f72a2e972447fbb7f1abc1e3826d5144970822d92a051972a8",
+      "input": "collection-rig.json",
+      "kind": "collection",
+      "name": "collection-rig",
+      "note": "A passing rig observation with full proof (completion_record_digest) and features.",
+      "observation_ids": [
+        "8189065e2d0fc070df80c37e1ae50899b3121abde7044f2043e537697b9298ba"
+      ],
+      "problems": [],
+      "source": "observation_notes.receipt_observations(kind='rig', proof, features, run_id) + collection_of"
+    },
+    {
+      "canonical": "collection-seed.canonical",
+      "files": [
+        "collection-seed.json",
+        "collection-seed.canonical"
+      ],
+      "identity": "f6c076175c1841f18de8f70cfc792b8852f4383389415ffdea822c67203c4e39",
+      "input": "collection-seed.json",
+      "kind": "collection",
+      "name": "collection-seed",
+      "note": "A passing seed observation carrying seed_id.",
+      "observation_ids": [
+        "f7ecee44694db231f531335661173a0fb212ae173ad849be88ee62daf43d4b75"
+      ],
+      "problems": [],
+      "source": "observation_notes.receipt_observations(kind='seed') with producer.seed_id added, re-identified"
+    },
+    {
+      "canonical": "collection-unicode.canonical",
+      "files": [
+        "collection-unicode.json",
+        "collection-unicode.canonical"
+      ],
+      "identity": "bb99ad5766ac699a6c40fc572b07a61699da2f5043210336fecc8cebcd14c882",
+      "input": "collection-unicode.json",
+      "kind": "collection",
+      "name": "collection-unicode",
+      "note": "Non-ASCII report path, host label and failed test name.",
+      "observation_ids": [
+        "3b28a7bb61605b67f2d53afddcc2fee9e39dfd0d2cabb24763017273988f34cb"
+      ],
+      "problems": [],
+      "source": "with_identity"
+    },
+    {
+      "canonical": "control-characters.canonical",
+      "files": [
+        "control-characters.json",
+        "control-characters.canonical"
+      ],
+      "identity": "f8203521c5d4c83dd9178cce8c1987008ef9dff56e0091a21e6c4e70644bb3b9",
+      "input": "control-characters.json",
+      "kind": "canonical",
+      "name": "control-characters",
+      "note": "Control characters: short escapes for \\b\\f\\n\\r\\t, \\u00XX otherwise; DEL is escaped too."
+    },
+    {
+      "canonical": "float-overflow.canonical",
+      "files": [
+        "float-overflow.json",
+        "float-overflow.canonical"
+      ],
+      "identity": "a4b009c670c8e0b096073ca61368f6727458976feec2e9fab44e42a13d4b92a3",
+      "input": "float-overflow.json",
+      "kind": "canonical",
+      "name": "float-overflow",
+      "note": "1e400 parses to inf; canonical emits the non-JSON token Infinity."
+    },
+    {
+      "canonical": "float-underflow.canonical",
+      "files": [
+        "float-underflow.json",
+        "float-underflow.canonical"
+      ],
+      "identity": "156aab4ec3039cc0783b7ac06616aa5b7dd4b338ee823c5935624d1b0a913903",
+      "input": "float-underflow.json",
+      "kind": "canonical",
+      "name": "float-underflow",
+      "note": "1e-400 underflows to 0.0."
+    },
+    {
+      "canonical": "floats.canonical",
+      "files": [
+        "floats.json",
+        "floats.canonical"
+      ],
+      "identity": "afade0571e1e5af1801480fca06b417f2f12dabe3c1ef9c280793712433b3954",
+      "input": "floats.json",
+      "kind": "canonical",
+      "name": "floats",
+      "note": "Float tokens re-serialize through Python float repr."
+    },
+    {
+      "canonical": "large-integers.canonical",
+      "files": [
+        "large-integers.json",
+        "large-integers.canonical"
+      ],
+      "identity": "14c38e81b9e58d6bfd84634b8e614cec24d2435991855100a13dc0b9800ec4eb",
+      "input": "large-integers.json",
+      "kind": "canonical",
+      "name": "large-integers",
+      "note": "Integers keep every digit: beyond 2^53, beyond 2^64, and negative zero becomes 0."
+    },
+    {
+      "accepts": false,
+      "error": "Expecting value: line 1 column 6 (char 5)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-bare-fraction.txt"
+      ],
+      "input": "loader-bare-fraction.txt",
+      "kind": "loader",
+      "name": "loader-bare-fraction",
+      "note": "Fraction without integer part.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Expecting value: line 1 column 1 (char 0)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-blank.txt"
+      ],
+      "input": "loader-blank.txt",
+      "kind": "loader",
+      "name": "loader-blank",
+      "note": "Empty input.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-bom.txt"
+      ],
+      "input": "loader-bom.txt",
+      "kind": "loader",
+      "name": "loader-bom",
+      "note": "UTF-8 byte order mark before the document.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Expecting ',' delimiter: line 1 column 8 (char 7)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-comment.txt"
+      ],
+      "input": "loader-comment.txt",
+      "kind": "loader",
+      "name": "loader-comment",
+      "note": "A comment.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Extra data: line 1 column 8 (char 7)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-concatenated.txt"
+      ],
+      "input": "loader-concatenated.txt",
+      "kind": "loader",
+      "name": "loader-concatenated",
+      "note": "A second document directly after the first.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Extra data: line 2 column 1 (char 8)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-concatenated-newline.txt"
+      ],
+      "input": "loader-concatenated-newline.txt",
+      "kind": "loader",
+      "name": "loader-concatenated-newline",
+      "note": "A second document on the next line (JSON Lines).",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Expecting ',' delimiter: line 1 column 7 (char 6)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-dangling-point.txt"
+      ],
+      "input": "loader-dangling-point.txt",
+      "kind": "loader",
+      "name": "loader-dangling-point",
+      "note": "Decimal point without digits.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "duplicate key 'a'",
+      "exception": "ValueError",
+      "files": [
+        "loader-duplicate-key.txt"
+      ],
+      "input": "loader-duplicate-key.txt",
+      "kind": "loader",
+      "name": "loader-duplicate-key",
+      "note": "Duplicate key, even with equal values.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "duplicate key 'a'",
+      "exception": "ValueError",
+      "files": [
+        "loader-duplicate-key-nested.txt"
+      ],
+      "input": "loader-duplicate-key-nested.txt",
+      "kind": "loader",
+      "name": "loader-duplicate-key-nested",
+      "note": "Duplicate key inside a nested object.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "'utf-8' codec can't decode byte 0xed in position 6: invalid continuation byte",
+      "exception": "UnicodeDecodeError",
+      "files": [
+        "loader-encoded-surrogate.txt"
+      ],
+      "input": "loader-encoded-surrogate.txt",
+      "kind": "loader",
+      "name": "loader-encoded-surrogate",
+      "note": "UTF-8-encoded surrogate U+D800 (CESU style).",
+      "stage": "decode"
+    },
+    {
+      "accepts": false,
+      "error": "Infinity is not a JSON number",
+      "exception": "ValueError",
+      "files": [
+        "loader-infinity.txt"
+      ],
+      "input": "loader-infinity.txt",
+      "kind": "loader",
+      "name": "loader-infinity",
+      "note": "Infinity constant.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Invalid \\escape: line 1 column 7 (char 6)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-invalid-escape.txt"
+      ],
+      "input": "loader-invalid-escape.txt",
+      "kind": "loader",
+      "name": "loader-invalid-escape",
+      "note": "Unknown escape sequence.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "'utf-8' codec can't decode byte 0xff in position 6: invalid start byte",
+      "exception": "UnicodeDecodeError",
+      "files": [
+        "loader-invalid-utf8.txt"
+      ],
+      "input": "loader-invalid-utf8.txt",
+      "kind": "loader",
+      "name": "loader-invalid-utf8",
+      "note": "A lone 0xFF byte inside a string.",
+      "stage": "decode"
+    },
+    {
+      "accepts": true,
+      "canonical_text": "{\"a\":1}",
+      "files": [
+        "loader-leading-whitespace.json"
+      ],
+      "input": "loader-leading-whitespace.json",
+      "kind": "loader",
+      "name": "loader-leading-whitespace",
+      "note": "Whitespace before the document is accepted."
+    },
+    {
+      "accepts": false,
+      "error": "Expecting ',' delimiter: line 1 column 7 (char 6)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-leading-zero.txt"
+      ],
+      "input": "loader-leading-zero.txt",
+      "kind": "loader",
+      "name": "loader-leading-zero",
+      "note": "Leading zero.",
+      "stage": "parse"
+    },
+    {
+      "accepts": true,
+      "canonical_text": "{\"a\":\"\\ud800\"}",
+      "files": [
+        "loader-lone-surrogate-escape.json"
+      ],
+      "input": "loader-lone-surrogate-escape.json",
+      "kind": "loader",
+      "name": "loader-lone-surrogate-escape",
+      "note": "A lone surrogate escape is accepted."
+    },
+    {
+      "accepts": false,
+      "error": "NaN is not a JSON number",
+      "exception": "ValueError",
+      "files": [
+        "loader-nan.txt"
+      ],
+      "input": "loader-nan.txt",
+      "kind": "loader",
+      "name": "loader-nan",
+      "note": "NaN constant.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "NaN is not a JSON number",
+      "exception": "ValueError",
+      "files": [
+        "loader-nan-nested.txt"
+      ],
+      "input": "loader-nan-nested.txt",
+      "kind": "loader",
+      "name": "loader-nan-nested",
+      "note": "NaN inside an array.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "-Infinity is not a JSON number",
+      "exception": "ValueError",
+      "files": [
+        "loader-negative-infinity.txt"
+      ],
+      "input": "loader-negative-infinity.txt",
+      "kind": "loader",
+      "name": "loader-negative-infinity",
+      "note": "-Infinity constant.",
+      "stage": "parse"
+    },
+    {
+      "accepts": true,
+      "canonical_text": "{\"a\":\"\\u0000\"}",
+      "files": [
+        "loader-nul-escape.json"
+      ],
+      "input": "loader-nul-escape.json",
+      "kind": "loader",
+      "name": "loader-nul-escape",
+      "note": "An escaped NUL is accepted."
+    },
+    {
+      "accepts": false,
+      "error": "'utf-8' codec can't decode byte 0xc0 in position 6: invalid start byte",
+      "exception": "UnicodeDecodeError",
+      "files": [
+        "loader-overlong-utf8.txt"
+      ],
+      "input": "loader-overlong-utf8.txt",
+      "kind": "loader",
+      "name": "loader-overlong-utf8",
+      "note": "Overlong two-byte encoding of '/'.",
+      "stage": "decode"
+    },
+    {
+      "accepts": false,
+      "error": "Expecting value: line 1 column 6 (char 5)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-plus-sign.txt"
+      ],
+      "input": "loader-plus-sign.txt",
+      "kind": "loader",
+      "name": "loader-plus-sign",
+      "note": "Leading plus.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Invalid control character at: line 1 column 7 (char 6)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-raw-control.txt"
+      ],
+      "input": "loader-raw-control.txt",
+      "kind": "loader",
+      "name": "loader-raw-control",
+      "note": "A raw control character inside a string.",
+      "stage": "parse"
+    },
+    {
+      "accepts": true,
+      "canonical_text": "{\"a\":\"\\u007f\"}",
+      "files": [
+        "loader-raw-del.json"
+      ],
+      "input": "loader-raw-del.json",
+      "kind": "loader",
+      "name": "loader-raw-del",
+      "note": "A raw DEL byte inside a string is accepted."
+    },
+    {
+      "accepts": true,
+      "canonical_text": "{\"a\":\"\\u2028\"}",
+      "files": [
+        "loader-raw-line-separator.json"
+      ],
+      "input": "loader-raw-line-separator.json",
+      "kind": "loader",
+      "name": "loader-raw-line-separator",
+      "note": "A raw U+2028 inside a string is accepted."
+    },
+    {
+      "accepts": false,
+      "error": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-single-quotes.txt"
+      ],
+      "input": "loader-single-quotes.txt",
+      "kind": "loader",
+      "name": "loader-single-quotes",
+      "note": "JSON5-style single quotes.",
+      "stage": "parse"
+    },
+    {
+      "accepts": true,
+      "canonical_text": "1",
+      "files": [
+        "loader-top-level-scalar.json"
+      ],
+      "input": "loader-top-level-scalar.json",
+      "kind": "loader",
+      "name": "loader-top-level-scalar",
+      "note": "A scalar top-level document is accepted by the loader."
+    },
+    {
+      "accepts": false,
+      "error": "Expecting property name enclosed in double quotes: line 1 column 8 (char 7)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-trailing-comma.txt"
+      ],
+      "input": "loader-trailing-comma.txt",
+      "kind": "loader",
+      "name": "loader-trailing-comma",
+      "note": "Trailing comma.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Extra data: line 1 column 9 (char 8)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-trailing-garbage.txt"
+      ],
+      "input": "loader-trailing-garbage.txt",
+      "kind": "loader",
+      "name": "loader-trailing-garbage",
+      "note": "Non-whitespace after the document.",
+      "stage": "parse"
+    },
+    {
+      "accepts": true,
+      "canonical_text": "{\"a\":1}",
+      "files": [
+        "loader-trailing-whitespace.json"
+      ],
+      "input": "loader-trailing-whitespace.json",
+      "kind": "loader",
+      "name": "loader-trailing-whitespace",
+      "note": "Whitespace after the document is accepted."
+    },
+    {
+      "accepts": false,
+      "error": "'utf-8' codec can't decode bytes in position 6-7: invalid continuation byte",
+      "exception": "UnicodeDecodeError",
+      "files": [
+        "loader-truncated-utf8.txt"
+      ],
+      "input": "loader-truncated-utf8.txt",
+      "kind": "loader",
+      "name": "loader-truncated-utf8",
+      "note": "Truncated three-byte sequence.",
+      "stage": "decode"
+    },
+    {
+      "accepts": false,
+      "error": "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-unterminated.txt"
+      ],
+      "input": "loader-unterminated.txt",
+      "kind": "loader",
+      "name": "loader-unterminated",
+      "note": "Unterminated object.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Expecting value: line 1 column 6 (char 5)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-uppercase-literal.txt"
+      ],
+      "input": "loader-uppercase-literal.txt",
+      "kind": "loader",
+      "name": "loader-uppercase-literal",
+      "note": "Literals are case sensitive.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Expecting value: line 3 column 1 (char 5)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-whitespace-only.txt"
+      ],
+      "input": "loader-whitespace-only.txt",
+      "kind": "loader",
+      "name": "loader-whitespace-only",
+      "note": "Whitespace-only input.",
+      "stage": "parse"
+    },
+    {
+      "accepts": false,
+      "error": "Expecting value: line 1 column 1 (char 0)",
+      "exception": "JSONDecodeError",
+      "files": [
+        "loader-yaml.txt"
+      ],
+      "input": "loader-yaml.txt",
+      "kind": "loader",
+      "name": "loader-yaml",
+      "note": "YAML is not JSON.",
+      "stage": "parse"
+    },
+    {
+      "canonical": "lone-surrogates.canonical",
+      "files": [
+        "lone-surrogates.json",
+        "lone-surrogates.canonical"
+      ],
+      "identity": "aec2fa6e442d5b9e849e17139ae69fe57f59178c33ae2d1dd32894fb459ec1f7",
+      "input": "lone-surrogates.json",
+      "kind": "canonical",
+      "name": "lone-surrogates",
+      "note": "Lone surrogate escapes survive into the canonical text."
+    },
+    {
+      "canonical": "non-ascii-values.canonical",
+      "files": [
+        "non-ascii-values.json",
+        "non-ascii-values.canonical"
+      ],
+      "identity": "f23ae32d7936fc11d3e416cfe6ed8d223d7a1bda7b9211e4a912a16c36ff0d57",
+      "input": "non-ascii-values.json",
+      "kind": "canonical",
+      "name": "non-ascii-values",
+      "note": "Non-ASCII values are \\u-escaped in lowercase hex; astral characters become surrogate pairs."
+    },
+    {
+      "canonical": "slash-and-quote.canonical",
+      "files": [
+        "slash-and-quote.json",
+        "slash-and-quote.canonical"
+      ],
+      "identity": "e92c347b1456f4ab68bae6c667224ca177444220f0cefe45f9c5419d9e4db76c",
+      "input": "slash-and-quote.json",
+      "kind": "canonical",
+      "name": "slash-and-quote",
+      "note": "Forward slash is not escaped; an escaped slash loses its escape; quote and backslash are escaped."
+    },
+    {
+      "canonical": "structure.canonical",
+      "files": [
+        "structure.json",
+        "structure.canonical"
+      ],
+      "identity": "fd1fbd4d0e5ed711aa8248b9623259450edf0d4d4254813e653de95579d1c966",
+      "input": "structure.json",
+      "kind": "canonical",
+      "name": "structure",
+      "note": "Nested containers, literals, empty objects and arrays, insignificant whitespace."
+    },
+    {
+      "canonical": "top-level-string.canonical",
+      "files": [
+        "top-level-string.json",
+        "top-level-string.canonical"
+      ],
+      "identity": "abc3932c9ec58f042750738c49034e7ee67cf556d6be86832ac3dda38decb703",
+      "input": "top-level-string.json",
+      "kind": "canonical",
+      "name": "top-level-string",
+      "note": "A scalar top-level document canonicalizes too."
+    },
+    {
+      "canonical": "unicode-key-order.canonical",
+      "files": [
+        "unicode-key-order.json",
+        "unicode-key-order.canonical"
+      ],
+      "identity": "4492140bf0953583799c47fc5d49f2695f054d8be12f5cd5d3f8156c3ffc3f4f",
+      "input": "unicode-key-order.json",
+      "kind": "canonical",
+      "name": "unicode-key-order",
+      "note": "Keys sort by code point: U+FB01 before U+1F600, which UTF-16 order reverses."
+    },
+    {
+      "canonical": "unicode-key-order-escaped.canonical",
+      "files": [
+        "unicode-key-order-escaped.json",
+        "unicode-key-order-escaped.canonical"
+      ],
+      "identity": "46468524904b3a4dcee1de34040f2e886cbd5c386e69e2560a64270e5f09d0ec",
+      "input": "unicode-key-order-escaped.json",
+      "kind": "canonical",
+      "name": "unicode-key-order-escaped",
+      "note": "The same keys written as escapes, including a surrogate pair."
+    },
+    {
+      "canonical": "unicode-key-order-surrogates.canonical",
+      "files": [
+        "unicode-key-order-surrogates.json",
+        "unicode-key-order-surrogates.canonical"
+      ],
+      "identity": "056342e715318d496ff3452143816cd56deb27fd3c0f4b0ddaeb291dd5f8b143",
+      "input": "unicode-key-order-surrogates.json",
+      "kind": "canonical",
+      "name": "unicode-key-order-surrogates",
+      "note": "Lone surrogate, U+E000 and U+10000 keys: code point order D800 < E000 < 10000."
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-backends-all-invalid.json"
+      ],
+      "input": "v-backends-all-invalid.json",
+      "kind": "validator",
+      "name": "v-backends-all-invalid",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 backends must be a list of strings"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-backends-int-element.json"
+      ],
+      "input": "v-backends-int-element.json",
+      "kind": "validator",
+      "name": "v-backends-int-element",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 backends must be a list of strings"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-backends-missing.json"
+      ],
+      "input": "v-backends-missing.json",
+      "kind": "validator",
+      "name": "v-backends-missing",
+      "problems": [
+        "malformed-receipt: receipt cell is missing required field 'backends'",
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 backends must be a list of strings"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-backends-null.json"
+      ],
+      "input": "v-backends-null.json",
+      "kind": "validator",
+      "name": "v-backends-null",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 backends must be a list of strings"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-backends-string.json"
+      ],
+      "input": "v-backends-string.json",
+      "kind": "validator",
+      "name": "v-backends-string",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 backends must be a list of strings"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-base-null.json"
+      ],
+      "input": "v-base-null.json",
+      "kind": "validator",
+      "name": "v-base-null",
+      "problems": [
+        "malformed-receipt: observation 56276587cacc base is not a full Git object ID: None"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-base-short.json"
+      ],
+      "input": "v-base-short.json",
+      "kind": "validator",
+      "name": "v-base-short",
+      "problems": [
+        "malformed-receipt: observation c78bb1718b3c base is not a full Git object ID: 'aaaaaaaaaaaa'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-build-key-int-digits.json"
+      ],
+      "input": "v-build-key-int-digits.json",
+      "kind": "validator",
+      "name": "v-build-key-int-digits",
+      "note": "QUIRK: str() coercion lets an integer whose decimal digits match [0-9a-f]{8,64} pass.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-build-key-not-hex.json"
+      ],
+      "input": "v-build-key-not-hex.json",
+      "kind": "validator",
+      "name": "v-build-key-not-hex",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 build key is not a digest"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-build-null.json"
+      ],
+      "input": "v-build-null.json",
+      "kind": "validator",
+      "name": "v-build-null",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 build must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-build-unknown-key.json"
+      ],
+      "input": "v-build-unknown-key.json",
+      "kind": "validator",
+      "name": "v-build-unknown-key",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 build has unknown field 'x'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-build-valid.json"
+      ],
+      "input": "v-build-valid.json",
+      "kind": "validator",
+      "name": "v-build-valid",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-completion-unknown.json"
+      ],
+      "input": "v-cell-completion-unknown.json",
+      "kind": "validator",
+      "name": "v-cell-completion-unknown",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 completion is 'done', expected one of ['complete', 'interrupted', 'partial']"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-empty-object.json"
+      ],
+      "input": "v-cell-empty-object.json",
+      "kind": "validator",
+      "name": "v-cell-empty-object",
+      "problems": [
+        "malformed-receipt: receipt cell is missing required field 'package'",
+        "malformed-receipt: receipt cell is missing required field 'gate'",
+        "malformed-receipt: receipt cell is missing required field 'outcome'",
+        "malformed-receipt: receipt cell is missing required field 'exit_code'",
+        "malformed-receipt: receipt cell is missing required field 'completion'",
+        "malformed-receipt: receipt cell is missing required field 'counts'",
+        "malformed-receipt: receipt cell is missing required field 'duration_s'",
+        "malformed-receipt: receipt cell is missing required field 'gate_input_identity'",
+        "malformed-receipt: receipt cell is missing required field 'backends'",
+        "malformed-receipt: receipt cell is missing required field 'report'",
+        "malformed-receipt: receipt cell names no package and gate"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-cell-gate-input-identity-int-digits.json"
+      ],
+      "input": "v-cell-gate-input-identity-int-digits.json",
+      "kind": "validator",
+      "name": "v-cell-gate-input-identity-int-digits",
+      "note": "QUIRK: str() coercion lets an integer of decimal digits pass.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-gate-input-identity-null.json"
+      ],
+      "input": "v-cell-gate-input-identity-null.json",
+      "kind": "validator",
+      "name": "v-cell-gate-input-identity-null",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 has no gate-input identity"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-gate-int.json"
+      ],
+      "input": "v-cell-gate-int.json",
+      "kind": "validator",
+      "name": "v-cell-gate-int",
+      "problems": [
+        "malformed-receipt: receipt cell names no package and gate"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-gate"
+      ],
+      "files": [
+        "v-cell-gate-unknown.json"
+      ],
+      "input": "v-cell-gate-unknown.json",
+      "kind": "validator",
+      "name": "v-cell-gate-unknown",
+      "problems": [
+        "unknown-gate: receipt cell claudine/macos-latest/L3 gate is 'L3', expected one of ['lint', 'check', 'L1', 'L2', 'browser']"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-missing-package.json"
+      ],
+      "input": "v-cell-missing-package.json",
+      "kind": "validator",
+      "name": "v-cell-missing-package",
+      "problems": [
+        "malformed-receipt: receipt cell is missing required field 'package'",
+        "malformed-receipt: receipt cell names no package and gate"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-null.json"
+      ],
+      "input": "v-cell-null.json",
+      "kind": "validator",
+      "name": "v-cell-null",
+      "problems": [
+        "malformed-receipt: receipt cell must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-outcome-unknown.json"
+      ],
+      "input": "v-cell-outcome-unknown.json",
+      "kind": "validator",
+      "name": "v-cell-outcome-unknown",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 outcome is 'ok', expected one of ['pass', 'fail']"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-package-empty.json"
+      ],
+      "input": "v-cell-package-empty.json",
+      "kind": "validator",
+      "name": "v-cell-package-empty",
+      "problems": [
+        "malformed-receipt: receipt cell names no package and gate"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-package-int.json"
+      ],
+      "input": "v-cell-package-int.json",
+      "kind": "validator",
+      "name": "v-cell-package-int",
+      "problems": [
+        "malformed-receipt: receipt cell names no package and gate"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-report-int.json"
+      ],
+      "input": "v-cell-report-int.json",
+      "kind": "validator",
+      "name": "v-cell-report-int",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 report must be a string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-test-filter-blank.json"
+      ],
+      "input": "v-cell-test-filter-blank.json",
+      "kind": "validator",
+      "name": "v-cell-test-filter-blank",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 carries a test_filter, which only a non-empty L1 narrowing may be"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-cell-test-filter-l1.json"
+      ],
+      "input": "v-cell-test-filter-l1.json",
+      "kind": "validator",
+      "name": "v-cell-test-filter-l1",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-test-filter-l2.json"
+      ],
+      "input": "v-cell-test-filter-l2.json",
+      "kind": "validator",
+      "name": "v-cell-test-filter-l2",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L2 carries a test_filter, which only a non-empty L1 narrowing may be"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-cell-unknown-key.json"
+      ],
+      "input": "v-cell-unknown-key.json",
+      "kind": "validator",
+      "name": "v-cell-unknown-key",
+      "problems": [
+        "malformed-receipt: receipt cell has unknown field 'extra'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-array.json"
+      ],
+      "input": "v-collection-array.json",
+      "kind": "validator",
+      "name": "v-collection-array",
+      "note": "Top-level array.",
+      "problems": [
+        "malformed-receipt: observation collection must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-empty-object.json"
+      ],
+      "input": "v-collection-empty-object.json",
+      "kind": "validator",
+      "name": "v-collection-empty-object",
+      "note": "Empty object: no schema_version, every field missing.",
+      "problems": [
+        "malformed-receipt: observation collection is missing required field 'schema_version'",
+        "malformed-receipt: observation collection is missing required field 'environment'",
+        "malformed-receipt: observation collection is missing required field 'head'",
+        "malformed-receipt: observation collection is missing required field 'tree'",
+        "malformed-receipt: observation collection is missing required field 'observations'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-collection-environment-cell-label.json"
+      ],
+      "input": "v-collection-environment-cell-label.json",
+      "kind": "validator",
+      "name": "v-collection-environment-cell-label",
+      "note": "The collection environment only labels its cells; an observation is not checked against it.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "unknown-environment"
+      ],
+      "files": [
+        "v-collection-environment-int.json"
+      ],
+      "input": "v-collection-environment-int.json",
+      "kind": "validator",
+      "name": "v-collection-environment-int",
+      "problems": [
+        "unknown-environment: collection environment is 1, expected one of ['ubuntu-latest', 'windows-latest', 'macos-latest', 'wsl2-ubuntu']"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-environment"
+      ],
+      "files": [
+        "v-collection-environment-unknown.json"
+      ],
+      "input": "v-collection-environment-unknown.json",
+      "kind": "validator",
+      "name": "v-collection-environment-unknown",
+      "problems": [
+        "unknown-environment: collection environment is 'linux', expected one of ['ubuntu-latest', 'windows-latest', 'macos-latest', 'wsl2-ubuntu']"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-head-short.json"
+      ],
+      "input": "v-collection-head-short.json",
+      "kind": "validator",
+      "name": "v-collection-head-short",
+      "problems": [
+        "malformed-receipt: collection head is not a full Git object ID: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-head-uppercase.json"
+      ],
+      "input": "v-collection-head-uppercase.json",
+      "kind": "validator",
+      "name": "v-collection-head-uppercase",
+      "problems": [
+        "malformed-receipt: collection head is not a full Git object ID: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-missing-environment.json"
+      ],
+      "input": "v-collection-missing-environment.json",
+      "kind": "validator",
+      "name": "v-collection-missing-environment",
+      "problems": [
+        "malformed-receipt: observation collection is missing required field 'environment'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-missing-observations.json"
+      ],
+      "input": "v-collection-missing-observations.json",
+      "kind": "validator",
+      "name": "v-collection-missing-observations",
+      "problems": [
+        "malformed-receipt: observation collection is missing required field 'observations'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-null.json"
+      ],
+      "input": "v-collection-null.json",
+      "kind": "validator",
+      "name": "v-collection-null",
+      "note": "Top-level null.",
+      "problems": [
+        "malformed-receipt: observation collection must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-observation-empty-object.json"
+      ],
+      "input": "v-collection-observation-empty-object.json",
+      "kind": "validator",
+      "name": "v-collection-observation-empty-object",
+      "problems": [
+        "malformed-receipt: observation is missing required field 'observation_id'",
+        "malformed-receipt: observation is missing required field 'producer'",
+        "malformed-receipt: observation is missing required field 'base'",
+        "malformed-receipt: observation is missing required field 'scope_identity'",
+        "malformed-receipt: observation is missing required field 'completion'",
+        "malformed-receipt: observation is missing required field 'cell'",
+        "malformed-receipt: observation is missing required field 'reports'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-observation-null.json"
+      ],
+      "input": "v-collection-observation-null.json",
+      "kind": "validator",
+      "name": "v-collection-observation-null",
+      "problems": [
+        "malformed-receipt: observation must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-observation-scalar.json"
+      ],
+      "input": "v-collection-observation-scalar.json",
+      "kind": "validator",
+      "name": "v-collection-observation-scalar",
+      "problems": [
+        "malformed-receipt: observation must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-observations-all-invalid.json"
+      ],
+      "input": "v-collection-observations-all-invalid.json",
+      "kind": "validator",
+      "name": "v-collection-observations-all-invalid",
+      "problems": [
+        "malformed-receipt: observation must be an object",
+        "malformed-receipt: observation must be an object",
+        "malformed-receipt: observation must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-observations-null.json"
+      ],
+      "input": "v-collection-observations-null.json",
+      "kind": "validator",
+      "name": "v-collection-observations-null",
+      "problems": [
+        "malformed-receipt: collection observations must be a list"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-observations-object.json"
+      ],
+      "input": "v-collection-observations-object.json",
+      "kind": "validator",
+      "name": "v-collection-observations-object",
+      "problems": [
+        "malformed-receipt: collection observations must be a list"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-tree-null.json"
+      ],
+      "input": "v-collection-tree-null.json",
+      "kind": "validator",
+      "name": "v-collection-tree-null",
+      "problems": [
+        "malformed-receipt: collection tree is not a full Git object ID: None"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-collection-unknown-key.json"
+      ],
+      "input": "v-collection-unknown-key.json",
+      "kind": "validator",
+      "name": "v-collection-unknown-key",
+      "problems": [
+        "malformed-receipt: observation collection has unknown field 'extra'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-schema-version"
+      ],
+      "files": [
+        "v-collection-version-2.json"
+      ],
+      "input": "v-collection-version-2.json",
+      "kind": "validator",
+      "name": "v-collection-version-2",
+      "note": "A v2 receipt version is not a collection.",
+      "problems": [
+        "unknown-schema-version: collection is version 2, this tool reads 3"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-schema-version"
+      ],
+      "files": [
+        "v-collection-version-float.json"
+      ],
+      "input": "v-collection-version-float.json",
+      "kind": "validator",
+      "name": "v-collection-version-float",
+      "problems": [
+        "unknown-schema-version: collection is version 3.0, this tool reads 3"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-schema-version"
+      ],
+      "files": [
+        "v-collection-version-null.json"
+      ],
+      "input": "v-collection-version-null.json",
+      "kind": "validator",
+      "name": "v-collection-version-null",
+      "problems": [
+        "unknown-schema-version: collection is version None, this tool reads 3"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-schema-version"
+      ],
+      "files": [
+        "v-collection-version-string.json"
+      ],
+      "input": "v-collection-version-string.json",
+      "kind": "validator",
+      "name": "v-collection-version-string",
+      "problems": [
+        "unknown-schema-version: collection is version '3', this tool reads 3"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-schema-version"
+      ],
+      "files": [
+        "v-collection-version-true.json"
+      ],
+      "input": "v-collection-version-true.json",
+      "kind": "validator",
+      "name": "v-collection-version-true",
+      "problems": [
+        "unknown-schema-version: collection is version True, this tool reads 3"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-complete-fail-no-detail.json"
+      ],
+      "input": "v-complete-fail-no-detail.json",
+      "kind": "validator",
+      "name": "v-complete-fail-no-detail",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 failed but names no failing test; a failure with no detail cannot be acted on"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-complete-fail-truncated.json"
+      ],
+      "input": "v-complete-fail-truncated.json",
+      "kind": "validator",
+      "name": "v-complete-fail-truncated",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-complete-fail-truncated-false.json"
+      ],
+      "input": "v-complete-fail-truncated-false.json",
+      "kind": "validator",
+      "name": "v-complete-fail-truncated-false",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 failed but names no failing test; a failure with no detail cannot be acted on"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-complete-fail-truncated-string.json"
+      ],
+      "input": "v-complete-fail-truncated-string.json",
+      "kind": "validator",
+      "name": "v-complete-fail-truncated-string",
+      "note": "QUIRK: failure_detail_truncated is never type-checked; any truthy value excuses detail.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-completion-null.json"
+      ],
+      "input": "v-completion-null.json",
+      "kind": "validator",
+      "name": "v-completion-null",
+      "problems": [
+        "malformed-receipt: observation cd9d42a34c05 completion is None, expected one of ['complete', 'interrupted', 'partial']"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-completion-unknown.json"
+      ],
+      "input": "v-completion-unknown.json",
+      "kind": "validator",
+      "name": "v-completion-unknown",
+      "problems": [
+        "malformed-receipt: observation 4b59f58d36bb completion is 'done', expected one of ['complete', 'interrupted', 'partial']"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-control-hook.json"
+      ],
+      "input": "v-control-hook.json",
+      "kind": "validator",
+      "name": "v-control-hook",
+      "note": "Unedited authentic observation: valid.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-control-hosted.json"
+      ],
+      "input": "v-control-hosted.json",
+      "kind": "validator",
+      "name": "v-control-hosted",
+      "note": "Unedited authentic observation: valid.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-control-rig.json"
+      ],
+      "input": "v-control-rig.json",
+      "kind": "validator",
+      "name": "v-control-rig",
+      "note": "Unedited authentic observation: valid.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-control-seed.json"
+      ],
+      "input": "v-control-seed.json",
+      "kind": "validator",
+      "name": "v-control-seed",
+      "note": "Unedited authentic observation: valid.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-counts-bool.json"
+      ],
+      "input": "v-counts-bool.json",
+      "kind": "validator",
+      "name": "v-counts-bool",
+      "note": "QUIRK: booleans are Python ints and sum as 1/0.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-counts-empty-object.json"
+      ],
+      "input": "v-counts-empty-object.json",
+      "kind": "validator",
+      "name": "v-counts-empty-object",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts is missing 'total'",
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts is missing 'passed'",
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts is missing 'failed'",
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts is missing 'skipped'",
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts is missing 'errored'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-counts-float.json"
+      ],
+      "input": "v-counts-float.json",
+      "kind": "validator",
+      "name": "v-counts-float",
+      "note": "QUIRK: float counts are never type-checked; the sum still matches.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-counts-list.json"
+      ],
+      "input": "v-counts-list.json",
+      "kind": "validator",
+      "name": "v-counts-list",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-counts-missing-total.json"
+      ],
+      "input": "v-counts-missing-total.json",
+      "kind": "validator",
+      "name": "v-counts-missing-total",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts is missing 'total'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-counts-negative.json"
+      ],
+      "input": "v-counts-negative.json",
+      "kind": "validator",
+      "name": "v-counts-negative",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts.failed must be a non-negative integer"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-counts-null.json"
+      ],
+      "input": "v-counts-null.json",
+      "kind": "validator",
+      "name": "v-counts-null",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": null,
+      "exception": "TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'",
+      "files": [
+        "v-counts-part-null.json"
+      ],
+      "input": "v-counts-part-null.json",
+      "kind": "validator",
+      "name": "v-counts-part-null",
+      "note": "QUIRK: a null part makes Python's sum raise TypeError; the validator crashes.",
+      "problems": null,
+      "target": "collection"
+    },
+    {
+      "codes": null,
+      "exception": "TypeError: unsupported operand type(s) for +: 'int' and 'str'",
+      "files": [
+        "v-counts-part-string.json"
+      ],
+      "input": "v-counts-part-string.json",
+      "kind": "validator",
+      "name": "v-counts-part-string",
+      "note": "QUIRK: a string part makes Python's sum raise TypeError; the validator crashes.",
+      "problems": null,
+      "target": "collection"
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-counts-sum-mismatch.json"
+      ],
+      "input": "v-counts-sum-mismatch.json",
+      "kind": "validator",
+      "name": "v-counts-sum-mismatch",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts.total is 11 but its parts sum to 10"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-counts-total-string.json"
+      ],
+      "input": "v-counts-total-string.json",
+      "kind": "validator",
+      "name": "v-counts-total-string",
+      "note": "A string total compares unequal to the integer sum.",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 counts.total is 10 but its parts sum to 10"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-counts-unknown-key.json"
+      ],
+      "input": "v-counts-unknown-key.json",
+      "kind": "validator",
+      "name": "v-counts-unknown-key",
+      "note": "QUIRK: _counts never rejects unknown keys.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-duration-float.json"
+      ],
+      "input": "v-duration-float.json",
+      "kind": "validator",
+      "name": "v-duration-float",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-duration-negative.json"
+      ],
+      "input": "v-duration-negative.json",
+      "kind": "validator",
+      "name": "v-duration-negative",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 duration_s must be a non-negative number"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-duration-null.json"
+      ],
+      "input": "v-duration-null.json",
+      "kind": "validator",
+      "name": "v-duration-null",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 duration_s must be a non-negative number"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-duration-string.json"
+      ],
+      "input": "v-duration-string.json",
+      "kind": "validator",
+      "name": "v-duration-string",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 duration_s must be a non-negative number"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-duration-true.json"
+      ],
+      "input": "v-duration-true.json",
+      "kind": "validator",
+      "name": "v-duration-true",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 duration_s must be a non-negative number"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-exit-code-float.json"
+      ],
+      "input": "v-exit-code-float.json",
+      "kind": "validator",
+      "name": "v-exit-code-float",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 exit_code must be an integer"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-exit-code-negative.json"
+      ],
+      "input": "v-exit-code-negative.json",
+      "kind": "validator",
+      "name": "v-exit-code-negative",
+      "note": "Any integer exit code is valid.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-exit-code-null.json"
+      ],
+      "input": "v-exit-code-null.json",
+      "kind": "validator",
+      "name": "v-exit-code-null",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 exit_code must be an integer"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-exit-code-true.json"
+      ],
+      "input": "v-exit-code-true.json",
+      "kind": "validator",
+      "name": "v-exit-code-true",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 exit_code must be an integer"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-fail-without-completion-digest.json"
+      ],
+      "input": "v-fail-without-completion-digest.json",
+      "kind": "validator",
+      "name": "v-fail-without-completion-digest",
+      "note": "VALID: only a pass must cite a completion record.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-failed-tests-20.json"
+      ],
+      "input": "v-failed-tests-20.json",
+      "kind": "validator",
+      "name": "v-failed-tests-20",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-failed-tests-21.json"
+      ],
+      "input": "v-failed-tests-21.json",
+      "kind": "validator",
+      "name": "v-failed-tests-21",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 names 21 failed tests, over the 20 the receipt carries; truncate and set failure_detail_truncated"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-failed-tests-empty.json"
+      ],
+      "input": "v-failed-tests-empty.json",
+      "kind": "validator",
+      "name": "v-failed-tests-empty",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-failed-tests-int-element.json"
+      ],
+      "input": "v-failed-tests-int-element.json",
+      "kind": "validator",
+      "name": "v-failed-tests-int-element",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 failed_tests must be a list of strings"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-failed-tests-null.json"
+      ],
+      "input": "v-failed-tests-null.json",
+      "kind": "validator",
+      "name": "v-failed-tests-null",
+      "note": "Present-but-null is not the absent default.",
+      "problems": [
+        "malformed-receipt: receipt cell claudine/macos-latest/L1 failed_tests must be a list of strings"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-features-empty.json"
+      ],
+      "input": "v-features-empty.json",
+      "kind": "validator",
+      "name": "v-features-empty",
+      "note": "Empty features stays a valid string.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-features-list.json"
+      ],
+      "input": "v-features-list.json",
+      "kind": "validator",
+      "name": "v-features-list",
+      "problems": [
+        "malformed-receipt: observation e8d9dab71ebf features must be a string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-features-null.json"
+      ],
+      "input": "v-features-null.json",
+      "kind": "validator",
+      "name": "v-features-null",
+      "problems": [
+        "malformed-receipt: observation 902a8ca8148f features must be a string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-features-value.json"
+      ],
+      "input": "v-features-value.json",
+      "kind": "validator",
+      "name": "v-features-value",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "conflicting-evidence"
+      ],
+      "files": [
+        "v-graph-duplicate-id.json"
+      ],
+      "input": "v-graph-duplicate-id.json",
+      "kind": "validator",
+      "name": "v-graph-duplicate-id",
+      "problems": [
+        "conflicting-evidence: observation 41465428152a appears twice"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-id-mismatch",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-graph-invalid-member-hides-graph.json"
+      ],
+      "input": "v-graph-invalid-member-hides-graph.json",
+      "kind": "validator",
+      "name": "v-graph-invalid-member-hides-graph",
+      "note": "Any observation problem returns before the sort and retry checks.",
+      "problems": [
+        "observation-id-mismatch: observation 41465428152a is not the identity of its own content",
+        "malformed-receipt: observation 41465428152a base is not a full Git object ID: 'x'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-link-invalid"
+      ],
+      "files": [
+        "v-graph-retry-absent.json"
+      ],
+      "input": "v-graph-retry-absent.json",
+      "kind": "validator",
+      "name": "v-graph-retry-absent",
+      "problems": [
+        "observation-link-invalid: observation e59dec57a725 retries ffffffffffff, which is absent"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-link-invalid"
+      ],
+      "files": [
+        "v-graph-retry-across-cells.json"
+      ],
+      "input": "v-graph-retry-across-cells.json",
+      "kind": "validator",
+      "name": "v-graph-retry-across-cells",
+      "problems": [
+        "observation-link-invalid: observation 5821f42bd0d6 retries an observation of another cell"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-link-invalid"
+      ],
+      "files": [
+        "v-graph-retry-across-test-filter.json"
+      ],
+      "input": "v-graph-retry-across-test-filter.json",
+      "kind": "validator",
+      "name": "v-graph-retry-across-test-filter",
+      "note": "A test_filter is part of the cell key.",
+      "problems": [
+        "observation-link-invalid: observation 47a4db7ad1d4 retries an observation of another cell"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-id-mismatch",
+        "observation-id-mismatch"
+      ],
+      "files": [
+        "v-graph-retry-cycle.json"
+      ],
+      "input": "v-graph-retry-cycle.json",
+      "kind": "validator",
+      "name": "v-graph-retry-cycle",
+      "note": "Unconstructible as a valid cycle: the id check fires before the graph check.",
+      "problems": [
+        "observation-id-mismatch: observation 3f1047b84387 is not the identity of its own content",
+        "observation-id-mismatch: observation 41465428152a is not the identity of its own content"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-graph-retry-same-cell.json"
+      ],
+      "input": "v-graph-retry-same-cell.json",
+      "kind": "validator",
+      "name": "v-graph-retry-same-cell",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "observation-id-mismatch",
+        "observation-link-invalid"
+      ],
+      "files": [
+        "v-graph-retry-self.json"
+      ],
+      "input": "v-graph-retry-self.json",
+      "kind": "validator",
+      "name": "v-graph-retry-self",
+      "problems": [
+        "observation-id-mismatch: observation 41465428152a is not the identity of its own content",
+        "observation-link-invalid: observation 41465428152a retries itself"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-graph-unsorted.json"
+      ],
+      "input": "v-graph-unsorted.json",
+      "kind": "validator",
+      "name": "v-graph-unsorted",
+      "problems": [
+        "malformed-receipt: collection observations are not sorted by id"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hook-with-proof.json"
+      ],
+      "input": "v-hook-with-proof.json",
+      "kind": "validator",
+      "name": "v-hook-with-proof",
+      "problems": [
+        "malformed-receipt: observation 52d75ac38336 is a hook observation, which proves through its report counts and carries no proof"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-hook-with-run-id.json"
+      ],
+      "input": "v-hook-with-run-id.json",
+      "kind": "validator",
+      "name": "v-hook-with-run-id",
+      "note": "Optional producer fields are allowed on any kind.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-host-empty-object.json"
+      ],
+      "input": "v-host-empty-object.json",
+      "kind": "validator",
+      "name": "v-host-empty-object",
+      "problems": [
+        "malformed-receipt: observation c65cc82b2747 producer host is missing required field 'os'",
+        "malformed-receipt: observation c65cc82b2747 producer host is missing required field 'kernel'",
+        "malformed-receipt: observation c65cc82b2747 host os must be a string",
+        "malformed-receipt: observation c65cc82b2747 host kernel must be a string",
+        "malformed-receipt: observation c65cc82b2747 cites a host-dir report and its host names no report_dir"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-host-kernel-int.json"
+      ],
+      "input": "v-host-kernel-int.json",
+      "kind": "validator",
+      "name": "v-host-kernel-int",
+      "problems": [
+        "malformed-receipt: observation 50c32075d1ad host kernel must be a string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-host-label-int.json"
+      ],
+      "input": "v-host-label-int.json",
+      "kind": "validator",
+      "name": "v-host-label-int",
+      "problems": [
+        "malformed-receipt: observation c3dd2fd18cf9 host label must be a string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-host-null.json"
+      ],
+      "input": "v-host-null.json",
+      "kind": "validator",
+      "name": "v-host-null",
+      "problems": [
+        "malformed-receipt: observation 94bc08e08acf producer host must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-host-os-empty.json"
+      ],
+      "input": "v-host-os-empty.json",
+      "kind": "validator",
+      "name": "v-host-os-empty",
+      "problems": [
+        "malformed-receipt: observation d87743f70e01 host os must be a string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-host-report-dir-absent.json"
+      ],
+      "input": "v-host-report-dir-absent.json",
+      "kind": "validator",
+      "name": "v-host-report-dir-absent",
+      "problems": [
+        "malformed-receipt: observation 60c2ea2df630 cites a host-dir report and its host names no report_dir"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-host-report-dir-empty.json"
+      ],
+      "input": "v-host-report-dir-empty.json",
+      "kind": "validator",
+      "name": "v-host-report-dir-empty",
+      "note": "host-dir report with an empty report_dir.",
+      "problems": [
+        "malformed-receipt: observation 175c417fc123 cites a host-dir report and its host names no report_dir"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-host-report-dir-int.json"
+      ],
+      "input": "v-host-report-dir-int.json",
+      "kind": "validator",
+      "name": "v-host-report-dir-int",
+      "problems": [
+        "malformed-receipt: observation 7a9188c85bef host report_dir must be a string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-host-unknown-key.json"
+      ],
+      "input": "v-host-unknown-key.json",
+      "kind": "validator",
+      "name": "v-host-unknown-key",
+      "problems": [
+        "malformed-receipt: observation 7aeca55b3671 producer host has unknown field 'extra'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-hosted-artifact-no-report-dir.json"
+      ],
+      "input": "v-hosted-artifact-no-report-dir.json",
+      "kind": "validator",
+      "name": "v-hosted-artifact-no-report-dir",
+      "note": "An artifact report needs no report_dir.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hosted-attempt-float.json"
+      ],
+      "input": "v-hosted-attempt-float.json",
+      "kind": "validator",
+      "name": "v-hosted-attempt-float",
+      "problems": [
+        "malformed-receipt: observation fbb91283989c producer attempt must be a positive integer"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hosted-attempt-negative.json"
+      ],
+      "input": "v-hosted-attempt-negative.json",
+      "kind": "validator",
+      "name": "v-hosted-attempt-negative",
+      "problems": [
+        "malformed-receipt: observation de6e083018a1 producer attempt must be a positive integer"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hosted-attempt-string.json"
+      ],
+      "input": "v-hosted-attempt-string.json",
+      "kind": "validator",
+      "name": "v-hosted-attempt-string",
+      "problems": [
+        "malformed-receipt: observation d2a13089e91a producer attempt must be a positive integer"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hosted-attempt-true.json"
+      ],
+      "input": "v-hosted-attempt-true.json",
+      "kind": "validator",
+      "name": "v-hosted-attempt-true",
+      "problems": [
+        "malformed-receipt: observation e16bb4b27121 producer attempt must be a positive integer"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hosted-attempt-zero.json"
+      ],
+      "input": "v-hosted-attempt-zero.json",
+      "kind": "validator",
+      "name": "v-hosted-attempt-zero",
+      "problems": [
+        "malformed-receipt: observation cfe82dba30ad producer attempt must be a positive integer"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hosted-missing-attempt.json"
+      ],
+      "input": "v-hosted-missing-attempt.json",
+      "kind": "validator",
+      "name": "v-hosted-missing-attempt",
+      "problems": [
+        "malformed-receipt: observation 32a6f92acc23 producer hosted needs 'attempt'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hosted-missing-run-id.json"
+      ],
+      "input": "v-hosted-missing-run-id.json",
+      "kind": "validator",
+      "name": "v-hosted-missing-run-id",
+      "problems": [
+        "malformed-receipt: observation 3dfbaad9520c producer hosted needs 'run_id'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hosted-missing-workflow.json"
+      ],
+      "input": "v-hosted-missing-workflow.json",
+      "kind": "validator",
+      "name": "v-hosted-missing-workflow",
+      "problems": [
+        "malformed-receipt: observation 898a17c991e0 producer hosted needs 'workflow'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hosted-run-id-int.json"
+      ],
+      "input": "v-hosted-run-id-int.json",
+      "kind": "validator",
+      "name": "v-hosted-run-id-int",
+      "problems": [
+        "malformed-receipt: observation ffa9882542dc producer run_id must be a string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-proof-missing"
+      ],
+      "files": [
+        "v-hosted-without-proof.json"
+      ],
+      "input": "v-hosted-without-proof.json",
+      "kind": "validator",
+      "name": "v-hosted-without-proof",
+      "problems": [
+        "observation-proof-missing: observation b52a56026853 is a 'hosted' observation and names no proof"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-hosted-workflow-int.json"
+      ],
+      "input": "v-hosted-workflow-int.json",
+      "kind": "validator",
+      "name": "v-hosted-workflow-int",
+      "problems": [
+        "malformed-receipt: observation 8c19e6450570 producer workflow must be a string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-interrupted-fail-no-detail.json"
+      ],
+      "input": "v-interrupted-fail-no-detail.json",
+      "kind": "validator",
+      "name": "v-interrupted-fail-no-detail",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-observation-id-int.json"
+      ],
+      "input": "v-observation-id-int.json",
+      "kind": "validator",
+      "name": "v-observation-id-int",
+      "problems": [
+        "malformed-receipt: observation 12345678 has no hex observation_id"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-id-mismatch"
+      ],
+      "files": [
+        "v-observation-id-mismatch.json"
+      ],
+      "input": "v-observation-id-mismatch.json",
+      "kind": "validator",
+      "name": "v-observation-id-mismatch",
+      "problems": [
+        "observation-id-mismatch: observation 41465428152a is not the identity of its own content"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-observation-id-not-hex.json"
+      ],
+      "input": "v-observation-id-not-hex.json",
+      "kind": "validator",
+      "name": "v-observation-id-not-hex",
+      "problems": [
+        "malformed-receipt: observation zzzzzzzzzzzz has no hex observation_id"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-observation-id-uppercase.json"
+      ],
+      "input": "v-observation-id-uppercase.json",
+      "kind": "validator",
+      "name": "v-observation-id-uppercase",
+      "problems": [
+        "malformed-receipt: observation ABABABABABAB has no hex observation_id"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-observation-missing-base.json"
+      ],
+      "input": "v-observation-missing-base.json",
+      "kind": "validator",
+      "name": "v-observation-missing-base",
+      "problems": [
+        "malformed-receipt: observation is missing required field 'base'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-observation-missing-id.json"
+      ],
+      "input": "v-observation-missing-id.json",
+      "kind": "validator",
+      "name": "v-observation-missing-id",
+      "problems": [
+        "malformed-receipt: observation is missing required field 'observation_id'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-observation-unknown-key.json"
+      ],
+      "input": "v-observation-unknown-key.json",
+      "kind": "validator",
+      "name": "v-observation-unknown-key",
+      "problems": [
+        "malformed-receipt: observation has unknown field 'extra'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-partial-no-reports.json"
+      ],
+      "input": "v-partial-no-reports.json",
+      "kind": "validator",
+      "name": "v-partial-no-reports",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "observation-proof-missing"
+      ],
+      "files": [
+        "v-pass-without-completion-digest.json"
+      ],
+      "input": "v-pass-without-completion-digest.json",
+      "kind": "validator",
+      "name": "v-pass-without-completion-digest",
+      "problems": [
+        "observation-proof-missing: observation 7218a1a09388 passed and its proof cites no completion record"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "observation-proof-missing"
+      ],
+      "files": [
+        "v-producer-empty-object.json"
+      ],
+      "input": "v-producer-empty-object.json",
+      "kind": "validator",
+      "name": "v-producer-empty-object",
+      "problems": [
+        "malformed-receipt: observation 75ba24ea4a00 producer is missing required field 'kind'",
+        "malformed-receipt: observation 75ba24ea4a00 producer is missing required field 'host'",
+        "malformed-receipt: observation 75ba24ea4a00 producer kind is None, expected one of ['hook', 'rig', 'hosted', 'seed']",
+        "malformed-receipt: observation 75ba24ea4a00 producer host must be an object",
+        "observation-proof-missing: observation 75ba24ea4a00 is a None observation and names no proof"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "observation-proof-missing"
+      ],
+      "files": [
+        "v-producer-kind-null.json"
+      ],
+      "input": "v-producer-kind-null.json",
+      "kind": "validator",
+      "name": "v-producer-kind-null",
+      "problems": [
+        "malformed-receipt: observation 95aea615332f producer kind is None, expected one of ['hook', 'rig', 'hosted', 'seed']",
+        "observation-proof-missing: observation 95aea615332f is a None observation and names no proof"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "observation-proof-missing"
+      ],
+      "files": [
+        "v-producer-kind-unknown.json"
+      ],
+      "input": "v-producer-kind-unknown.json",
+      "kind": "validator",
+      "name": "v-producer-kind-unknown",
+      "problems": [
+        "malformed-receipt: observation bd198aa5de60 producer kind is 'robot', expected one of ['hook', 'rig', 'hosted', 'seed']",
+        "observation-proof-missing: observation bd198aa5de60 is a 'robot' observation and names no proof"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "observation-proof-missing"
+      ],
+      "files": [
+        "v-producer-null.json"
+      ],
+      "input": "v-producer-null.json",
+      "kind": "validator",
+      "name": "v-producer-null",
+      "problems": [
+        "malformed-receipt: observation 8dda76f515e5 producer must be an object",
+        "observation-proof-missing: observation 8dda76f515e5 is a None observation and names no proof"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "observation-proof-missing"
+      ],
+      "files": [
+        "v-producer-string.json"
+      ],
+      "input": "v-producer-string.json",
+      "kind": "validator",
+      "name": "v-producer-string",
+      "problems": [
+        "malformed-receipt: observation 5ca358652736 producer must be an object",
+        "observation-proof-missing: observation 5ca358652736 is a None observation and names no proof"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-producer-unknown-key.json"
+      ],
+      "input": "v-producer-unknown-key.json",
+      "kind": "validator",
+      "name": "v-producer-unknown-key",
+      "problems": [
+        "malformed-receipt: observation 883a8adf39a7 producer has unknown field 'extra'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-proof-digest-empty.json"
+      ],
+      "input": "v-proof-digest-empty.json",
+      "kind": "validator",
+      "name": "v-proof-digest-empty",
+      "problems": [
+        "malformed-receipt: observation 841633451d8f proof expected_listing_digest must be a non-empty string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-proof-digest-not-hex.json"
+      ],
+      "input": "v-proof-digest-not-hex.json",
+      "kind": "validator",
+      "name": "v-proof-digest-not-hex",
+      "note": "VALID: proof digests are any nonempty string.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "observation-proof-missing"
+      ],
+      "files": [
+        "v-proof-empty-object.json"
+      ],
+      "input": "v-proof-empty-object.json",
+      "kind": "validator",
+      "name": "v-proof-empty-object",
+      "problems": [
+        "malformed-receipt: observation da53d22b4d64 proof is missing required field 'nextest_version'",
+        "malformed-receipt: observation da53d22b4d64 proof is missing required field 'target'",
+        "malformed-receipt: observation da53d22b4d64 proof is missing required field 'expected_listing_digest'",
+        "observation-proof-missing: observation da53d22b4d64 passed and its proof cites no completion record"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-proof-missing-target.json"
+      ],
+      "input": "v-proof-missing-target.json",
+      "kind": "validator",
+      "name": "v-proof-missing-target",
+      "problems": [
+        "malformed-receipt: observation 9b95cf1dec74 proof is missing required field 'target'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-proof-null.json"
+      ],
+      "input": "v-proof-null.json",
+      "kind": "validator",
+      "name": "v-proof-null",
+      "problems": [
+        "malformed-receipt: observation 36896e0283c1 proof must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-proof-target-int.json"
+      ],
+      "input": "v-proof-target-int.json",
+      "kind": "validator",
+      "name": "v-proof-target-int",
+      "problems": [
+        "malformed-receipt: observation 60685210212e proof target must be a non-empty string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-proof-unknown-key.json"
+      ],
+      "input": "v-proof-unknown-key.json",
+      "kind": "validator",
+      "name": "v-proof-unknown-key",
+      "problems": [
+        "malformed-receipt: observation eff5c31b89f3 proof has unknown field 'extra'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-cell-null.json"
+      ],
+      "input": "v-receipt-cell-null.json",
+      "kind": "validator",
+      "name": "v-receipt-cell-null",
+      "problems": [
+        "malformed-receipt: receipt cell must be an object"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-cells-all-invalid.json"
+      ],
+      "input": "v-receipt-cells-all-invalid.json",
+      "kind": "validator",
+      "name": "v-receipt-cells-all-invalid",
+      "problems": [
+        "malformed-receipt: receipt cell must be an object",
+        "malformed-receipt: receipt cell must be an object"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "conflicting-evidence"
+      ],
+      "files": [
+        "v-receipt-cells-conflicting.json"
+      ],
+      "input": "v-receipt-cells-conflicting.json",
+      "kind": "validator",
+      "name": "v-receipt-cells-conflicting",
+      "problems": [
+        "conflicting-evidence: receipt cell claudine/macos-latest/L1 appears twice with different results"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-cells-empty.json"
+      ],
+      "input": "v-receipt-cells-empty.json",
+      "kind": "validator",
+      "name": "v-receipt-cells-empty",
+      "problems": [
+        "malformed-receipt: receipt cells must be a non-empty list"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-receipt-cells-identical.json"
+      ],
+      "input": "v-receipt-cells-identical.json",
+      "kind": "validator",
+      "name": "v-receipt-cells-identical",
+      "note": "VALID: identical duplicate cells are not a conflict.",
+      "problems": [],
+      "target": "receipt",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-cells-null.json"
+      ],
+      "input": "v-receipt-cells-null.json",
+      "kind": "validator",
+      "name": "v-receipt-cells-null",
+      "problems": [
+        "malformed-receipt: receipt cells must be a non-empty list"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-completion-unknown.json"
+      ],
+      "input": "v-receipt-completion-unknown.json",
+      "kind": "validator",
+      "name": "v-receipt-completion-unknown",
+      "problems": [
+        "malformed-receipt: receipt completion is 'done', expected one of ['complete', 'interrupted', 'partial']"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-receipt-control.json"
+      ],
+      "input": "v-receipt-control.json",
+      "kind": "validator",
+      "name": "v-receipt-control",
+      "note": "Unedited authentic receipt: valid.",
+      "problems": [],
+      "target": "receipt",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-empty-object.json"
+      ],
+      "input": "v-receipt-empty-object.json",
+      "kind": "validator",
+      "name": "v-receipt-empty-object",
+      "problems": [
+        "malformed-receipt: receipt is missing required field 'schema_version'",
+        "malformed-receipt: receipt is missing required field 'environment'",
+        "malformed-receipt: receipt is missing required field 'base'",
+        "malformed-receipt: receipt is missing required field 'head'",
+        "malformed-receipt: receipt is missing required field 'tree'",
+        "malformed-receipt: receipt is missing required field 'scope_identity'",
+        "malformed-receipt: receipt is missing required field 'completion'",
+        "malformed-receipt: receipt is missing required field 'host'",
+        "malformed-receipt: receipt is missing required field 'cells'"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-environment"
+      ],
+      "files": [
+        "v-receipt-environment-unknown.json"
+      ],
+      "input": "v-receipt-environment-unknown.json",
+      "kind": "validator",
+      "name": "v-receipt-environment-unknown",
+      "problems": [
+        "unknown-environment: receipt environment is 'linux', expected one of ['ubuntu-latest', 'windows-latest', 'macos-latest', 'wsl2-ubuntu']"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-host-missing-report-dir.json"
+      ],
+      "input": "v-receipt-host-missing-report-dir.json",
+      "kind": "validator",
+      "name": "v-receipt-host-missing-report-dir",
+      "problems": [
+        "malformed-receipt: receipt host is missing required field 'report_dir'"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-host-null.json"
+      ],
+      "input": "v-receipt-host-null.json",
+      "kind": "validator",
+      "name": "v-receipt-host-null",
+      "problems": [
+        "malformed-receipt: receipt host must be an object"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-receipt-host-os-int.json"
+      ],
+      "input": "v-receipt-host-os-int.json",
+      "kind": "validator",
+      "name": "v-receipt-host-os-int",
+      "note": "QUIRK: receipt host fields are key-checked only, never type-checked.",
+      "problems": [],
+      "target": "receipt",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-host-unknown-key.json"
+      ],
+      "input": "v-receipt-host-unknown-key.json",
+      "kind": "validator",
+      "name": "v-receipt-host-unknown-key",
+      "note": "A receipt host has no label field, unlike an observation host.",
+      "problems": [
+        "malformed-receipt: receipt host has unknown field 'label'"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-missing-version.json"
+      ],
+      "input": "v-receipt-missing-version.json",
+      "kind": "validator",
+      "name": "v-receipt-missing-version",
+      "problems": [
+        "malformed-receipt: receipt is missing required field 'schema_version'"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-null.json"
+      ],
+      "input": "v-receipt-null.json",
+      "kind": "validator",
+      "name": "v-receipt-null",
+      "problems": [
+        "malformed-receipt: receipt must be an object"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-receipt-scope-identity-int-digits.json"
+      ],
+      "input": "v-receipt-scope-identity-int-digits.json",
+      "kind": "validator",
+      "name": "v-receipt-scope-identity-int-digits",
+      "note": "QUIRK: str() coercion lets an integer of decimal digits pass.",
+      "problems": [],
+      "target": "receipt",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-tree-short.json"
+      ],
+      "input": "v-receipt-tree-short.json",
+      "kind": "validator",
+      "name": "v-receipt-tree-short",
+      "problems": [
+        "malformed-receipt: receipt tree is not a full Git object ID: 'ccccccc'"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-receipt-unknown-key.json"
+      ],
+      "input": "v-receipt-unknown-key.json",
+      "kind": "validator",
+      "name": "v-receipt-unknown-key",
+      "problems": [
+        "malformed-receipt: receipt has unknown field 'extra'"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "v1-requires-exact-tree"
+      ],
+      "files": [
+        "v-receipt-v1.json"
+      ],
+      "input": "v-receipt-v1.json",
+      "kind": "validator",
+      "name": "v-receipt-v1",
+      "problems": [
+        "v1-requires-exact-tree: a version-1 receipt carries no per-cell outcome and is reusable only on exact tree identity, pass-only, whole-environment"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-schema-version"
+      ],
+      "files": [
+        "v-receipt-version-3.json"
+      ],
+      "input": "v-receipt-version-3.json",
+      "kind": "validator",
+      "name": "v-receipt-version-3",
+      "problems": [
+        "unknown-schema-version: receipt is version 3, this tool reads 2 and 1"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-schema-version"
+      ],
+      "files": [
+        "v-receipt-version-float.json"
+      ],
+      "input": "v-receipt-version-float.json",
+      "kind": "validator",
+      "name": "v-receipt-version-float",
+      "problems": [
+        "unknown-schema-version: receipt is version 2.0, this tool reads 2 and 1"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "unknown-schema-version"
+      ],
+      "files": [
+        "v-receipt-version-true.json"
+      ],
+      "input": "v-receipt-version-true.json",
+      "kind": "validator",
+      "name": "v-receipt-version-true",
+      "problems": [
+        "unknown-schema-version: receipt is version True, this tool reads 2 and 1"
+      ],
+      "target": "receipt",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-report-bytes-float.json"
+      ],
+      "input": "v-report-bytes-float.json",
+      "kind": "validator",
+      "name": "v-report-bytes-float",
+      "problems": [
+        "malformed-receipt: observation 7f09f0913059 report bytes must be a count"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-report-bytes-negative.json"
+      ],
+      "input": "v-report-bytes-negative.json",
+      "kind": "validator",
+      "name": "v-report-bytes-negative",
+      "problems": [
+        "malformed-receipt: observation 04853490f7f8 report bytes must be a count"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-report-bytes-string.json"
+      ],
+      "input": "v-report-bytes-string.json",
+      "kind": "validator",
+      "name": "v-report-bytes-string",
+      "problems": [
+        "malformed-receipt: observation dbbbad6122a9 report bytes must be a count"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-report-bytes-true.json"
+      ],
+      "input": "v-report-bytes-true.json",
+      "kind": "validator",
+      "name": "v-report-bytes-true",
+      "problems": [
+        "malformed-receipt: observation 91042abb20f4 report bytes must be a count"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-report-bytes-zero.json"
+      ],
+      "input": "v-report-bytes-zero.json",
+      "kind": "validator",
+      "name": "v-report-bytes-zero",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "observation-report-unavailable"
+      ],
+      "files": [
+        "v-report-empty-object.json"
+      ],
+      "input": "v-report-empty-object.json",
+      "kind": "validator",
+      "name": "v-report-empty-object",
+      "problems": [
+        "malformed-receipt: observation 202437929bf5 report is missing required field 'path'",
+        "malformed-receipt: observation 202437929bf5 report is missing required field 'sha256'",
+        "malformed-receipt: observation 202437929bf5 report is missing required field 'bytes'",
+        "malformed-receipt: observation 202437929bf5 report is missing required field 'store'",
+        "malformed-receipt: observation 202437929bf5 report path must be a string",
+        "malformed-receipt: observation 202437929bf5 report sha256 is not a digest",
+        "malformed-receipt: observation 202437929bf5 report bytes must be a count",
+        "malformed-receipt: observation 202437929bf5 report store is None, expected one of ['host-dir', 'artifact']",
+        "observation-report-unavailable: observation 202437929bf5 is complete and names report 'claudine-L1.xml', which none of its references cite"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "observation-report-unavailable"
+      ],
+      "files": [
+        "v-report-null.json"
+      ],
+      "input": "v-report-null.json",
+      "kind": "validator",
+      "name": "v-report-null",
+      "problems": [
+        "malformed-receipt: observation fe9a2fc1eea3 report must be an object",
+        "observation-report-unavailable: observation fe9a2fc1eea3 is complete and names report 'claudine-L1.xml', which none of its references cite"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "observation-report-unavailable"
+      ],
+      "files": [
+        "v-report-path-empty.json"
+      ],
+      "input": "v-report-path-empty.json",
+      "kind": "validator",
+      "name": "v-report-path-empty",
+      "problems": [
+        "malformed-receipt: observation 7c172944de8f report path must be a string",
+        "observation-report-unavailable: observation 7c172944de8f is complete and names report 'claudine-L1.xml', which none of its references cite"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "observation-report-unavailable"
+      ],
+      "files": [
+        "v-report-path-int.json"
+      ],
+      "input": "v-report-path-int.json",
+      "kind": "validator",
+      "name": "v-report-path-int",
+      "problems": [
+        "malformed-receipt: observation be5513a0893c report path must be a string",
+        "observation-report-unavailable: observation be5513a0893c is complete and names report 'claudine-L1.xml', which none of its references cite"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-report-sha256-not-hex.json"
+      ],
+      "input": "v-report-sha256-not-hex.json",
+      "kind": "validator",
+      "name": "v-report-sha256-not-hex",
+      "problems": [
+        "malformed-receipt: observation e9dfc3d725ff report sha256 is not a digest"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-report-sha256-short.json"
+      ],
+      "input": "v-report-sha256-short.json",
+      "kind": "validator",
+      "name": "v-report-sha256-short",
+      "problems": [
+        "malformed-receipt: observation 1bbcc49f2837 report sha256 is not a digest"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-report-sha256-uppercase.json"
+      ],
+      "input": "v-report-sha256-uppercase.json",
+      "kind": "validator",
+      "name": "v-report-sha256-uppercase",
+      "problems": [
+        "malformed-receipt: observation 8504aaa70d9f report sha256 is not a digest"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-report-store-null.json"
+      ],
+      "input": "v-report-store-null.json",
+      "kind": "validator",
+      "name": "v-report-store-null",
+      "problems": [
+        "malformed-receipt: observation 96f572061ed3 report store is None, expected one of ['host-dir', 'artifact']"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-report-store-unknown.json"
+      ],
+      "input": "v-report-store-unknown.json",
+      "kind": "validator",
+      "name": "v-report-store-unknown",
+      "problems": [
+        "malformed-receipt: observation cf2800e93c6e report store is 'r2', expected one of ['host-dir', 'artifact']"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-report-unknown-key.json"
+      ],
+      "input": "v-report-unknown-key.json",
+      "kind": "validator",
+      "name": "v-report-unknown-key",
+      "problems": [
+        "malformed-receipt: observation 530e931800be report has unknown field 'extra'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt",
+        "malformed-receipt",
+        "malformed-receipt",
+        "observation-report-unavailable"
+      ],
+      "files": [
+        "v-reports-all-invalid.json"
+      ],
+      "input": "v-reports-all-invalid.json",
+      "kind": "validator",
+      "name": "v-reports-all-invalid",
+      "problems": [
+        "malformed-receipt: observation cfed75bd4a58 report must be an object",
+        "malformed-receipt: observation cfed75bd4a58 report must be an object",
+        "malformed-receipt: observation cfed75bd4a58 report must be an object",
+        "observation-report-unavailable: observation cfed75bd4a58 is complete and names report 'claudine-L1.xml', which none of its references cite"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-report-unavailable"
+      ],
+      "files": [
+        "v-reports-empty-complete.json"
+      ],
+      "input": "v-reports-empty-complete.json",
+      "kind": "validator",
+      "name": "v-reports-empty-complete",
+      "note": "A complete cell whose report no reference cites.",
+      "problems": [
+        "observation-report-unavailable: observation 480631517112 is complete and names report 'claudine-L1.xml', which none of its references cite"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-reports-mixed.json"
+      ],
+      "input": "v-reports-mixed.json",
+      "kind": "validator",
+      "name": "v-reports-mixed",
+      "problems": [
+        "malformed-receipt: observation 757a9be55e7b report must be an object"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-reports-null.json"
+      ],
+      "input": "v-reports-null.json",
+      "kind": "validator",
+      "name": "v-reports-null",
+      "problems": [
+        "malformed-receipt: observation b0f6bfe6814f reports must be a list"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-reports-string.json"
+      ],
+      "input": "v-reports-string.json",
+      "kind": "validator",
+      "name": "v-reports-string",
+      "problems": [
+        "malformed-receipt: observation ff046d25aa73 reports must be a list"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-link-invalid"
+      ],
+      "files": [
+        "v-retry-of-int.json"
+      ],
+      "input": "v-retry-of-int.json",
+      "kind": "validator",
+      "name": "v-retry-of-int",
+      "problems": [
+        "observation-link-invalid: observation da7aeb920c4e retry_of must be an observation id"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-link-invalid"
+      ],
+      "files": [
+        "v-retry-of-not-hex.json"
+      ],
+      "input": "v-retry-of-not-hex.json",
+      "kind": "validator",
+      "name": "v-retry-of-not-hex",
+      "problems": [
+        "observation-link-invalid: observation 1c96e8377ab4 retry_of must be an observation id"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-link-invalid"
+      ],
+      "files": [
+        "v-retry-of-null.json"
+      ],
+      "input": "v-retry-of-null.json",
+      "kind": "validator",
+      "name": "v-retry-of-null",
+      "problems": [
+        "observation-link-invalid: observation bb12c20cb26d retry_of must be an observation id"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-rig-fail-without-proof.json"
+      ],
+      "input": "v-rig-fail-without-proof.json",
+      "kind": "validator",
+      "name": "v-rig-fail-without-proof",
+      "note": "VALID: a failing rig observation needs no proof.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "observation-proof-missing"
+      ],
+      "files": [
+        "v-rig-without-proof.json"
+      ],
+      "input": "v-rig-without-proof.json",
+      "kind": "validator",
+      "name": "v-rig-without-proof",
+      "problems": [
+        "observation-proof-missing: observation bf3e16c3d9ea is a 'rig' observation and names no proof"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-scope-identity-float.json"
+      ],
+      "input": "v-scope-identity-float.json",
+      "kind": "validator",
+      "name": "v-scope-identity-float",
+      "problems": [
+        "malformed-receipt: observation 5f3eca62c445 scope_identity is not a hex identity"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-scope-identity-int-digits.json"
+      ],
+      "input": "v-scope-identity-int-digits.json",
+      "kind": "validator",
+      "name": "v-scope-identity-int-digits",
+      "note": "QUIRK: str(12345678) matches [0-9a-f]{8,64}, so an integer passes.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-scope-identity-null.json"
+      ],
+      "input": "v-scope-identity-null.json",
+      "kind": "validator",
+      "name": "v-scope-identity-null",
+      "problems": [
+        "malformed-receipt: observation 1e6bd91eb511 scope_identity is not a hex identity"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-scope-identity-short.json"
+      ],
+      "input": "v-scope-identity-short.json",
+      "kind": "validator",
+      "name": "v-scope-identity-short",
+      "problems": [
+        "malformed-receipt: observation e8ed8ae98915 scope_identity is not a hex identity"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-scope-identity-true.json"
+      ],
+      "input": "v-scope-identity-true.json",
+      "kind": "validator",
+      "name": "v-scope-identity-true",
+      "problems": [
+        "malformed-receipt: observation 56d60580e3ef scope_identity is not a hex identity"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-scope-identity-uppercase.json"
+      ],
+      "input": "v-scope-identity-uppercase.json",
+      "kind": "validator",
+      "name": "v-scope-identity-uppercase",
+      "problems": [
+        "malformed-receipt: observation e7c20f529bd0 scope_identity is not a hex identity"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-seed-missing-seed-id.json"
+      ],
+      "input": "v-seed-missing-seed-id.json",
+      "kind": "validator",
+      "name": "v-seed-missing-seed-id",
+      "problems": [
+        "malformed-receipt: observation fdbc17be20cb producer seed needs 'seed_id'"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "malformed-receipt"
+      ],
+      "files": [
+        "v-seed-seed-id-int.json"
+      ],
+      "input": "v-seed-seed-id-int.json",
+      "kind": "validator",
+      "name": "v-seed-seed-id-int",
+      "problems": [
+        "malformed-receipt: observation 5c46c9c00db9 producer seed_id must be a string"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [
+        "observation-proof-missing"
+      ],
+      "files": [
+        "v-seed-without-proof.json"
+      ],
+      "input": "v-seed-without-proof.json",
+      "kind": "validator",
+      "name": "v-seed-without-proof",
+      "problems": [
+        "observation-proof-missing: observation a1f71b1b1dc4 is a 'seed' observation and names no proof"
+      ],
+      "target": "collection",
+      "valid": false
+    },
+    {
+      "codes": [],
+      "files": [
+        "v-truncated-on-pass.json"
+      ],
+      "input": "v-truncated-on-pass.json",
+      "kind": "validator",
+      "name": "v-truncated-on-pass",
+      "note": "QUIRK: failure_detail_truncated of any type is accepted on a pass.",
+      "problems": [],
+      "target": "collection",
+      "valid": true
+    }
+  ],
+  "generator": "tools/evidence-store/cli/capture-parity.ts",
+  "loader_decode": "bytes.decode('utf-8') (strict, no BOM stripping), then schema.loads_strict",
+  "manifest_version": 1,
+  "sources": [
+    "scripts/ci/schema.py",
+    "scripts/ci/observation_notes.py",
+    "scripts/ci/hosted_observations.py",
+    "scripts/ci/test_hosted_observations.py"
+  ]
+}
