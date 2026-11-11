@@ -41,6 +41,33 @@ pub enum Work {
     RecursiveTargetTranslate,
     /// A mapping entry key compared while locating a problem's position.
     PositionKeyComparison,
+    /// A shipped artifact's bytes decoded ([`crate::shipped::accept`]).
+    ArtifactDecode,
+    /// A shipped artifact accepted: its entries replace runtime preparation.
+    ArtifactAccept,
+    /// A fresh, uncached preparation of the library's shipped sources for
+    /// artifact generation ([`crate::shipped::FreshLower::prepare`]).
+    ArtifactGeneration,
+    /// A shipped source prepared from its text at run time: the envelope
+    /// definitions after their artifact was refused, or a shipped partial's
+    /// named types parsed without an accepted prepared table.
+    ShippedRuntimePreparation,
+    /// An artifact refused because none was supplied.
+    ArtifactFallbackMissing,
+    /// An artifact refused as malformed.
+    ArtifactFallbackMalformed,
+    /// An artifact refused for its wire version.
+    ArtifactFallbackWireVersion,
+    /// An artifact refused for its owner's preparation revision.
+    ArtifactFallbackRevision,
+    /// An artifact refused because a source text changed.
+    ArtifactFallbackSource,
+    /// An artifact refused because a lower artifact changed or was refused.
+    ArtifactFallbackDependency,
+    /// An artifact refused because preparation configuration changed.
+    ArtifactFallbackConfiguration,
+    /// An artifact refused for an unusable payload record or another owner.
+    ArtifactFallbackRecord,
 }
 
 impl Work {
@@ -54,6 +81,18 @@ impl Work {
         Work::AlternativeMatcherPrepare,
         Work::RecursiveTargetTranslate,
         Work::PositionKeyComparison,
+        Work::ArtifactDecode,
+        Work::ArtifactAccept,
+        Work::ArtifactGeneration,
+        Work::ShippedRuntimePreparation,
+        Work::ArtifactFallbackMissing,
+        Work::ArtifactFallbackMalformed,
+        Work::ArtifactFallbackWireVersion,
+        Work::ArtifactFallbackRevision,
+        Work::ArtifactFallbackSource,
+        Work::ArtifactFallbackDependency,
+        Work::ArtifactFallbackConfiguration,
+        Work::ArtifactFallbackRecord,
     ];
 }
 

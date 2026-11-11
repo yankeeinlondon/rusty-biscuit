@@ -28,7 +28,8 @@ use super::{
 ///
 /// Callers compare and hash keys; they never parse one, and a key never
 /// appears in generated JSON (see [`Definition::json_key`]).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DefKey {
     /// The namespace whose named types declare the definition.
     pub namespace: DefNamespace,
@@ -112,7 +113,8 @@ impl DefNamespace {
 
 /// One stored named type: a member of a reference cycle, or a shared
 /// acyclic type.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Definition {
     /// The reusable value shape, expanded. Nested uses of stored definitions
     /// are [`TypeExpr::Ref`]; presence markers and annotations were moved to
@@ -152,6 +154,12 @@ pub struct DefinitionTable {
 }
 
 impl DefinitionTable {
+    /// A table from decoded entries and their `$defs`-key index (a shipped
+    /// record; see `crate::shipped::wire_support`).
+    pub(crate) fn from_parts(entries: IndexMap<DefKey, Definition>, by_json_key: BTreeMap<String, DefKey>) -> Self {
+        Self { entries, by_json_key }
+    }
+
     /// Whether the table holds no definition (nothing recurses or is shared).
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

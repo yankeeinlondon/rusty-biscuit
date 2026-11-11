@@ -13126,6 +13126,7 @@ dependencies = [
  "renderable",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "serde_yaml_ng",
  "serial_test",
  "sniff",

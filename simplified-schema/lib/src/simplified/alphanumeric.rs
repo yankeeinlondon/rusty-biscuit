@@ -12,7 +12,8 @@ use std::fmt;
 
 /// One `alphanumeric` type option. Declaration order is the canonical
 /// (table) order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum AlphanumericOption {
     /// Also allows `-`.
     AllowDashes,

@@ -44,6 +44,8 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib", optional = true }
 # Schema-content hashes (validator cache keys, example artifacts).
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["json"] }
 indexmap = { version = "2", features = ["serde"] }
+# JSON pointers for typed decoding errors in shipped artifacts.
+serde_path_to_error = "0.1"
 serde_yaml_ng = "0.10"
 # JSON Schema validation, with Darkmatter's default-features choice.
 jsonschema = { version = "0.55", default-features = false }

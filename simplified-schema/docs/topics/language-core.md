@@ -120,7 +120,9 @@ A host may reserve a namespace for documents compiled into its binary.
 Darkmatter supplies `darkmatter:` over its shipped catalog, so
 `stack@darkmatter:lifecycle` names `stack` in its `lifecycle` partial and no
 file is read. With `ShippedSources::NONE` that spelling is an ordinary file
-reference.
+reference. A host whose shipped artifact holds those partials' parsed named
+types attaches it with `ShippedSources::with_prepared`, so they are not parsed
+again (see [Shipped artifacts](./shipped-artifacts.md)).
 
 ```rust
 use simplified_schema::embedded::{EmbeddedDocument, ShippedSources};

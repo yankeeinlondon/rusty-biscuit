@@ -451,11 +451,14 @@ written. Each line is one structural rule:
 | `$schema` and `types` are never an explicit `null` | `non-null`, or `required` |
 | a `yaml-schema`'s `$schema` declares a required, non-null `kind` of one or more literal choices | `property(kind, type-definition(forms(literal, enum); declared-required))` |
 
-The definitions are parsed once, without admission, the first time any
-envelope is admitted. That they satisfy themselves (`yaml-schema.yaml`
-against itself, `schema.yaml` against `yaml-schema.yaml`) is checked by the
-library's tests, not at run time. They are compiled into a private validator
-cache, never the process-wide one that `simplified_schema::reset_process_caches()`
+The definitions' lowered form is loaded from the library's
+[shipped artifact](../shipped-artifacts.md) the first time any envelope is
+admitted. When that artifact is refused, they are parsed and lowered from
+their text without admission instead, with the same result. That they satisfy
+themselves (`yaml-schema.yaml` against itself, `schema.yaml` against
+`yaml-schema.yaml`) is checked whenever the artifact is generated, not at run
+time. Their validators compile on first use into a private validator cache,
+never the process-wide one that `simplified_schema::reset_process_caches()`
 clears, so a reset does not discard them.
 
 #### Soft Conversion, Never for Declarations

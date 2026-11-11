@@ -20,10 +20,14 @@
 //!
 //! ## Bootstrap
 //!
-//! The two definitions are themselves `kind: yaml-schema` documents. They are
-//! parsed and lowered once, without admission, the first time any envelope is
-//! admitted; nothing consults them before they exist. That the definitions
-//! satisfy themselves is checked by the library's tests, not at run time.
+//! The two definitions are themselves `kind: yaml-schema` documents. Their
+//! lowered form is loaded from the library's shipped artifact
+//! ([`crate::shipped::registry`]) the first time any envelope is admitted.
+//! When that artifact is refused, or when an artifact is generated, they are
+//! parsed and lowered from their text without admission
+//! ([`EnvelopeDefinitions::prepare_uncached`]); nothing consults them before
+//! they exist. Generation then checks that each definition satisfies its own
+//! contract. Their validators compile on first use either way.
 //!
 //! ## Side-effect freedom
 //!
@@ -32,6 +36,8 @@
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
+
+use crate::shipped::PreparationMode;
 
 use serde_json::Value;
 
@@ -155,11 +161,25 @@ impl EnvelopeAdmission {
 ///
 /// [`SchemaError::SchemaDocument`] when `text` is not valid YAML.
 pub fn admit_envelope_text(text: &str, path: impl AsRef<Path>) -> Result<Option<EnvelopeAdmission>, SchemaError> {
+    admit_envelope_text_with_mode(text, path, PreparationMode::Runtime)
+}
+
+/// [`admit_envelope_text`] against the definitions `mode` prepares with:
+/// the process's loaded definitions, or a generation's freshly prepared ones.
+///
+/// ## Errors
+///
+/// As [`admit_envelope_text`].
+pub fn admit_envelope_text_with_mode(
+    text: &str,
+    path: impl AsRef<Path>,
+    mode: PreparationMode<'_>,
+) -> Result<Option<EnvelopeAdmission>, SchemaError> {
     let path = path.as_ref();
     let Some(recognized) = recognize_standalone(text).map_err(|message| document_error(path, message))? else {
         return Ok(None);
     };
-    admit_recognized(&recognized, text, path).map(Some)
+    admit_recognized_with_mode(&recognized, text, path, mode).map(Some)
 }
 
 /// Judges an already recognized envelope against its definition.
@@ -168,13 +188,31 @@ pub(crate) fn admit_recognized(
     source: &str,
     path: &Path,
 ) -> Result<EnvelopeAdmission, SchemaError> {
-    let definitions = definitions().as_ref().map_err(|message| document_error(path, message.clone()))?;
-    let (prepared, definition) = match recognized.envelope {
-        StandaloneSchemaEnvelope::YamlSchema => (&definitions.yaml_schema, YAML_SCHEMA_DEFINITION_PATH),
-        StandaloneSchemaEnvelope::Tagged | StandaloneSchemaEnvelope::Pure => {
-            (&definitions.schema, SCHEMA_DEFINITION_PATH)
-        }
-    };
+    admit_recognized_with_mode(recognized, source, path, PreparationMode::Runtime)
+}
+
+/// [`admit_recognized`] against the definitions `mode` prepares with.
+pub(crate) fn admit_recognized_with_mode(
+    recognized: &RecognizedStandalone,
+    source: &str,
+    path: &Path,
+    mode: PreparationMode<'_>,
+) -> Result<EnvelopeAdmission, SchemaError> {
+    let definitions = crate::shipped::registry::envelopes(mode).map_err(|message| document_error(path, message))?;
+    admit_with(definitions, recognized, source, path)
+}
+
+/// Judges `recognized` against `definitions`.
+fn admit_with(
+    definitions: &EnvelopeDefinitions,
+    recognized: &RecognizedStandalone,
+    source: &str,
+    path: &Path,
+) -> Result<EnvelopeAdmission, SchemaError> {
+    let (lowered, definition) = definitions.for_envelope(recognized.envelope);
+    let prepared = lowered
+        .prepared()
+        .map_err(|error| document_error(path, format!("`{definition}` could not be prepared: {error}")))?;
     let mut document = document_json(recognized, path).map_err(|error| slot_key_error(source, path).unwrap_or(error))?;
     let informal = recognized.envelope == StandaloneSchemaEnvelope::Pure;
     if informal && let Value::Object(map) = &mut document {
@@ -219,25 +257,124 @@ fn slot_key_error(source: &str, path: &Path) -> Option<SchemaError> {
     })
 }
 
-/// The two compiled definitions, prepared once.
-struct Definitions {
-    schema: Prepared,
-    yaml_schema: Prepared,
+/// The two compiled envelope definitions, lowered. Each compiles its
+/// validator on first admission.
+pub struct EnvelopeDefinitions {
+    schema: LoweredDefinition,
+    yaml_schema: LoweredDefinition,
 }
 
-fn definitions() -> &'static Result<Definitions, String> {
-    static DEFINITIONS: OnceLock<Result<Definitions, String>> = OnceLock::new();
-    DEFINITIONS.get_or_init(|| {
-        Ok(Definitions {
-            schema: prepare_definition(SCHEMA_DEFINITION_PATH).map_err(|error| error.to_string())?,
-            yaml_schema: prepare_definition(YAML_SCHEMA_DEFINITION_PATH).map_err(|error| error.to_string())?,
-        })
-    })
+impl std::fmt::Debug for EnvelopeDefinitions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("EnvelopeDefinitions")
+    }
 }
 
-/// Parses and lowers one compiled definition without admission (it cannot be
-/// admitted against itself before it exists) and compiles it for validation.
-fn prepare_definition(path: &'static str) -> Result<Prepared, SchemaError> {
+/// One definition's lowered JSON Schema and its lazily compiled validators.
+struct LoweredDefinition {
+    json_schema: Arc<Value>,
+    prepared: OnceLock<Result<Prepared, String>>,
+}
+
+impl LoweredDefinition {
+    fn new(json_schema: Arc<Value>) -> Self {
+        Self { json_schema, prepared: OnceLock::new() }
+    }
+
+    /// The definition compiled for validation through a private cache: the
+    /// definitions live for the process, so they must not occupy, or be
+    /// counted in, the cache a host resets and bounds.
+    fn prepared(&self) -> Result<&Prepared, &str> {
+        self.prepared
+            .get_or_init(|| {
+                let private = crate::validate::ValidatorCache::new();
+                Prepared::compiled_through(
+                    Arc::clone(&self.json_schema),
+                    None,
+                    crate::schema::content_context(),
+                    &private,
+                )
+                .map(Prepared::without_file_checks)
+                .map_err(|error| error.to_string())
+            })
+            .as_ref()
+            .map_err(String::as_str)
+    }
+}
+
+impl EnvelopeDefinitions {
+    /// Definitions whose lowered schemas were already prepared (an accepted
+    /// artifact's records).
+    pub(crate) fn from_lowered(schema: Arc<Value>, yaml_schema: Arc<Value>) -> Self {
+        Self { schema: LoweredDefinition::new(schema), yaml_schema: LoweredDefinition::new(yaml_schema) }
+    }
+
+    /// Parses and lowers both compiled definitions from their text, without
+    /// admission (neither can be admitted before both exist) and without
+    /// consulting the library's artifact or registry.
+    ///
+    /// ## Errors
+    ///
+    /// The parser's or lowering's error for a definition that does not
+    /// prepare.
+    pub(crate) fn prepare_uncached() -> Result<Self, SchemaError> {
+        Ok(Self::from_lowered(
+            Arc::new(lower_definition(SCHEMA_DEFINITION_PATH)?),
+            Arc::new(lower_definition(YAML_SCHEMA_DEFINITION_PATH)?),
+        ))
+    }
+
+    /// [`admit_envelope_text`] against these definitions.
+    ///
+    /// ## Errors
+    ///
+    /// As [`admit_envelope_text`].
+    pub fn admit(&self, text: &str, path: impl AsRef<Path>) -> Result<Option<EnvelopeAdmission>, SchemaError> {
+        let path = path.as_ref();
+        let Some(recognized) = recognize_standalone(text).map_err(|message| document_error(path, message))? else {
+            return Ok(None);
+        };
+        admit_with(self, &recognized, text, path).map(Some)
+    }
+
+    /// The lowered `schema.yaml` and `yaml-schema.yaml`.
+    pub(crate) fn json_schemas(&self) -> (&Value, &Value) {
+        (&self.schema.json_schema, &self.yaml_schema.json_schema)
+    }
+
+    fn for_envelope(&self, envelope: StandaloneSchemaEnvelope) -> (&LoweredDefinition, &'static str) {
+        match envelope {
+            StandaloneSchemaEnvelope::YamlSchema => (&self.yaml_schema, YAML_SCHEMA_DEFINITION_PATH),
+            StandaloneSchemaEnvelope::Tagged | StandaloneSchemaEnvelope::Pure => (&self.schema, SCHEMA_DEFINITION_PATH),
+        }
+    }
+
+    /// The generation check: each compiled definition is an envelope its
+    /// own definitions admit.
+    ///
+    /// ## Errors
+    ///
+    /// The first definition's admission error.
+    pub(crate) fn check_contracts(&self) -> Result<(), SchemaError> {
+        for document in ENVELOPE_DEFINITIONS {
+            let path = Path::new(document.path);
+            let recognized = recognize_standalone(document.text)
+                .map_err(|message| document_error(path, message))?
+                .ok_or_else(|| document_error(path, "not a standalone schema document"))?;
+            let admission = admit_with(self, &recognized, document.text, path)?;
+            if !admission.is_admitted() {
+                return Err(admission.to_error(path, document.text));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Parses and lowers one compiled definition without admission. Its imports
+/// would be admitted against definitions that do not exist yet, so it is
+/// lowered against an empty document table: a definition that imports
+/// fails here.
+fn lower_definition(path: &'static str) -> Result<Value, SchemaError> {
     let text = crate::embedded::find(ENVELOPE_DEFINITIONS, path)
         .map(|document| document.text)
         .ok_or_else(|| document_error(Path::new(path), "not a compiled envelope definition"))?;
@@ -246,17 +383,9 @@ fn prepare_definition(path: &'static str) -> Result<Prepared, SchemaError> {
     let SchemaDeclaration::Schema(schema) = document.declaration else {
         return Err(document_error(Path::new(path), "an envelope definition cannot be a whole-file reference"));
     };
-    let resolved = crate::resolve::lower_embedded_definition(
-        schema,
-        document.local_types.as_ref(),
-        path,
-        ENVELOPE_DEFINITIONS,
-        ShippedSources::NONE,
-    )?;
-    let private = crate::validate::ValidatorCache::new();
-    let prepared =
-        Prepared::compiled_through(Arc::new(resolved.json_schema), None, crate::schema::content_context(), &private)?;
-    Ok(prepared.without_file_checks())
+    let resolved =
+        crate::resolve::lower_embedded_definition(schema, document.local_types.as_ref(), path, &[], ShippedSources::NONE)?;
+    Ok(resolved.json_schema)
 }
 
 fn envelope_label(envelope: StandaloneSchemaEnvelope) -> &'static str {

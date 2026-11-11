@@ -11,6 +11,10 @@
 //! names the type `Name` in the shipped partial `<partials>/<stem>.yaml`,
 //! wherever it is written. The resolver knows no namespace of its own; with
 //! [`ShippedSources::NONE`] such a reference is an ordinary file reference.
+//! A host whose shipped artifact holds those partials' parsed named types
+//! attaches it with [`ShippedSources::with_prepared`].
+
+use crate::shipped::PreparedSourcesDescriptor;
 
 /// One embedded schema document.
 #[derive(Debug, Clone, Copy)]
@@ -31,11 +35,12 @@ pub struct ShippedSources {
     namespace: &'static str,
     partials: &'static str,
     documents: &'static [EmbeddedDocument<'static>],
+    prepared: Option<&'static PreparedSourcesDescriptor>,
 }
 
 impl ShippedSources {
     /// No reserved namespace and no shipped documents.
-    pub const NONE: Self = Self { namespace: "", partials: "", documents: &[] };
+    pub const NONE: Self = Self { namespace: "", partials: "", documents: &[], prepared: None };
 
     /// The reserved `namespace` prefix (`darkmatter:`), the virtual
     /// directory its stems name partials in (`darkmatter/schemas/partials`),
@@ -46,7 +51,22 @@ impl ShippedSources {
         partials: &'static str,
         documents: &'static [EmbeddedDocument<'static>],
     ) -> Self {
-        Self { namespace, partials, documents }
+        Self { namespace, partials, documents, prepared: None }
+    }
+
+    /// These sources with the host's prepared named-type tables attached.
+    /// The resolver asks `descriptor` for a partial's table before parsing
+    /// its text, and uses it only when [`Self::documents`] are exactly the
+    /// documents the tables were prepared from; [`Self::new`] alone parses.
+    #[must_use]
+    pub const fn with_prepared(self, descriptor: &'static PreparedSourcesDescriptor) -> Self {
+        Self { prepared: Some(descriptor), ..self }
+    }
+
+    /// The attached prepared-table descriptor, if any.
+    #[must_use]
+    pub const fn prepared(&self) -> Option<&'static PreparedSourcesDescriptor> {
+        self.prepared
     }
 
     /// The shipped documents.

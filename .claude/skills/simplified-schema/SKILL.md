@@ -128,6 +128,17 @@ Referenced `$schema` file classification (`classify_yaml_schema_text`,
 ownership line with Darkmatter's `KindRegistry` are in
 [schema-documents.md](schema-documents.md).
 
+## Shipped artifacts
+
+`schemas/*.yaml` are served from the checked-in `lib/generated/shipped.json`
+(`shipped::registry`; a refused artifact silently falls back to the text).
+`simplified_schema::shipped` is the mechanism Darkmatter and Claudine share
+(`accept`, `generate`, `check_fresh`, `PreparationMode::Uncached`, the
+`*_with_mode` entry points, `ShippedSources::with_prepared`). After editing
+shipped YAML or its preparation code, run `just shipped-schemas` (bump
+`PREPARATION_REVISION` for code-only changes); see
+[shipped-artifacts.md](../../../simplified-schema/docs/topics/shipped-artifacts.md).
+
 ## Paths, features, and guards
 
 `PropertyPath`/`SetterValue` rules, the `file`/`terminal`/`work-counters`

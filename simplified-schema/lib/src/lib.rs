@@ -63,6 +63,7 @@ pub mod resolve;
 pub mod schema;
 pub mod scope;
 pub mod setter_value;
+pub mod shipped;
 pub mod simplified;
 pub mod slots;
 pub mod span;
@@ -130,7 +131,7 @@ pub use simplified::{
     locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, mapping_separator,
     parse_property_definition, parse_property_definition_with_source, parse_schema_declaration,
     parse_type_definition_value,
-    parse_schema_declaration_with_source, parse_selected_standalone_schema_document, parse_standalone_schema_document,
+    parse_schema_declaration_with_source, parse_selected_standalone_schema_document, parse_standalone_schema_document, parse_standalone_schema_document_with_mode,
     parse_yaml_schema,
     suggestions_for_def, suggestions_for_path, to_json_schema, to_json_schema_with_definitions,
 };
