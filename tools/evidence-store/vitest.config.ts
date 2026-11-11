@@ -28,7 +28,7 @@ const TEST_SERVICE_CONFIG = {
   },
 };
 
-// Three projects: `node` runs tooling (CLI, fixtures, API documents) under
+// Three projects (plus the opt-in `real` below): `node` runs tooling (CLI, fixtures, API documents) under
 // Node; `workers` runs the D1 feasibility spike inside workerd through
 // Miniflare; `service` runs the evidence-store Worker and its `src/db` layer
 // inside workerd against a local D1 built from `migrations/`. Local D1 is
@@ -95,6 +95,22 @@ export default defineConfig({
           setupFiles: ["./tests/service/apply-migrations.ts"],
         },
       },
+      // `real` sends the acceptance cases to a deployed Worker (`just
+      // test-real`). It exists only when asked for, so `vitest run` never
+      // contacts a deployment.
+      ...(process.env["EVIDENCE_STORE_REAL"] === "1"
+        ? [
+            {
+              test: {
+                name: "real",
+                include: ["tests/real/**/*.test.ts"],
+                environment: "node",
+                testTimeout: 600_000,
+                hookTimeout: 60_000,
+              },
+            },
+          ]
+        : []),
     ],
   },
 });

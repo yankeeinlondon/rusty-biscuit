@@ -189,6 +189,14 @@ cross-check-test:
 ci-seed *args:
     @python3 scripts/ci/seed.py {{ args }}
 
+# Usage: just evidence-store <recipe> [args]   e.g. just evidence-store test-real
+# `[no-cd]` keeps the caller's directory for the recipes that resolve relative
+# paths there (`evidence-ingest`, `evidence-resume`, `evidence-finalize`).
+# run a recipe of the evidence-store service (local only; no CI cell runs it)
+[no-cd]
+evidence-store *args:
+    @just --justfile "{{ justfile_directory() }}/tools/evidence-store/justfile" "$@"
+
 # run Level 1 tests for the pre-push hook (ci-push's library and integration tests)
 test-pre-push-hook:
     @just _test repo-deps --lib ci_push::

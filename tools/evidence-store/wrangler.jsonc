@@ -1,6 +1,7 @@
 // Evidence-store Worker. Deploy only through an explicit environment
 // (`--env development` or `--env restore-test`); the top level declares no
-// bindings so an environment-less deploy has nothing to write to.
+// bindings and no workers.dev address, so an environment-less deploy has
+// nothing to write to and is unreachable.
 // Every `database_id` below is a placeholder, set at deployment.
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
@@ -12,6 +13,8 @@
   "env": {
     "development": {
       "name": "evidence-store-development",
+      // Reachable at its workers.dev address; every route still requires authentication.
+      "workers_dev": true,
       // Daily staging cleanup, retention jobs, tombstone expiry, and capacity checks (src/daily.ts).
       "triggers": { "crons": ["17 3 * * *"] },
       "d1_databases": [
@@ -46,6 +49,8 @@
     },
     "restore-test": {
       "name": "evidence-store-restore-test",
+      // Reachable at its workers.dev address; every route still requires authentication.
+      "workers_dev": true,
       // Daily staging cleanup, retention jobs, tombstone expiry, and capacity checks (src/daily.ts).
       "triggers": { "crons": ["17 3 * * *"] },
       "d1_databases": [
