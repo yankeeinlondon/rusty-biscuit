@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 6
 created: 2026-11-08
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -40,6 +40,84 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1: []
 packages:
 - '@rusty-biscuit/evidence-store'
+source_files_during_phase_2:
+- tools/evidence-store/vitest.config.ts
+- tools/evidence-store/wrangler.jsonc
+- tools/evidence-store/migrations/0001_evidence.sql
+- tools/evidence-store/migrations/0002_retention.sql
+- tools/evidence-store/migrations/0003_credentials.sql
+- tools/evidence-store/migrations/0004_uploads.sql
+- tools/evidence-store/migrations/0005_evaluations.sql
+- tools/evidence-store/src/auth.ts
+- tools/evidence-store/src/cursor.ts
+- tools/evidence-store/src/http.ts
+- tools/evidence-store/src/ingestion.ts
+- tools/evidence-store/src/worker.ts
+- tools/evidence-store/src/db/ingest.ts
+- tools/evidence-store/src/db/repositories.ts
+- tools/evidence-store/src/contracts/adapter.ts
+- tools/evidence-store/src/contracts/canonical.ts
+- tools/evidence-store/src/contracts/index.ts
+- tools/evidence-store/src/contracts/json.ts
+- tools/evidence-store/src/contracts/loader.ts
+- tools/evidence-store/src/contracts/node-report-reader.ts
+- tools/evidence-store/src/contracts/parse.ts
+- tools/evidence-store/src/contracts/validate.ts
+- tools/evidence-store/tests/node/contracts-parity.test.ts
+- tools/evidence-store/tests/node/contracts-robustness.test.ts
+- tools/evidence-store/tests/service/apply-migrations.ts
+- tools/evidence-store/tests/service/db-ingest.test.ts
+- tools/evidence-store/tests/service/db-migrations.test.ts
+- tools/evidence-store/tests/service/env.d.ts
+- tools/evidence-store/tests/service/helpers.ts
+- tools/evidence-store/tests/service/ingestion.test.ts
+docs_updated_during_phase_2:
+- tools/evidence-store/README.md
+- tools/evidence-store/docs/contract-inventory.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+- tools/evidence-store/src/env.ts
+- tools/evidence-store/src/requests.ts
+- tools/evidence-store/src/http.ts
+- tools/evidence-store/src/worker.ts
+- tools/evidence-store/src/auth.ts
+- tools/evidence-store/src/config.ts
+- tools/evidence-store/src/tokens.ts
+- tools/evidence-store/src/credential-request.ts
+- tools/evidence-store/src/operator.ts
+- tools/evidence-store/src/reads.ts
+- tools/evidence-store/src/locations.ts
+- tools/evidence-store/src/cursor.ts
+- tools/evidence-store/src/ingestion.ts
+- tools/evidence-store/src/db/audit.ts
+- tools/evidence-store/src/db/reads.ts
+- tools/evidence-store/src/db/ingest.ts
+- tools/evidence-store/cli/operator.ts
+- tools/evidence-store/migrations/0003_credentials.sql
+- tools/evidence-store/migrations/0006_feed_horizons.sql
+- tools/evidence-store/wrangler.jsonc
+- tools/evidence-store/vitest.config.ts
+- tools/evidence-store/justfile
+- tools/evidence-store/tests/service/env.d.ts
+- tools/evidence-store/tests/service/helpers.ts
+- tools/evidence-store/tests/service/auth.test.ts
+- tools/evidence-store/tests/service/operator.test.ts
+- tools/evidence-store/tests/service/reads.test.ts
+- tools/evidence-store/tests/service/changes.test.ts
+- tools/evidence-store/tests/service/locations.test.ts
+- tools/evidence-store/tests/service/db-migrations.test.ts
+- tools/evidence-store/tests/service/ingestion.test.ts
+- tools/evidence-store/tests/node/requests.test.ts
+- tools/evidence-store/tests/node/service-config.test.ts
+- tools/evidence-store/tests/node/operator-cli.test.ts
+- tools/evidence-store/tests/node/credential-request.test.ts
+docs_updated_during_phase_3:
+- tools/evidence-store/README.md
+- tools/evidence-store/api/README.md
+- tools/evidence-store/docs/contract-inventory.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Evidence store implementation plan
@@ -115,16 +193,16 @@ Checkpoint: both feasibility tasks pass before service deployment work. Wave 2 t
 
 ### Wave 3 — Independent implementations
 
-- [ ] **Port contracts**
+- [x] **Port contracts**
   - Implement strict loader, Python-compatible canonicalizer, v3 validators, and v2 client adapter from Phase 1 inventory. Preserve code-authoritative legacy acceptance and IDs; do not normalize historical paths. Expose `parseCollection`, `parseReceipt`, `adaptReceipt`, and canonical identity functions for in-process tests.
   - Public results carry JSON-pointer locations and stable codes. Complete parity/robustness checks, including no publication on malformed adapter input.
-- [ ] **Build migrations**
+- [x] **Build migrations**
   - Translate the model into numbered migrations, adding collection manifests/membership, credential grants/audit, upload state, event identities/streams, generation, quota reservations, retention certificates/jobs/locks, and release pins. Add indexes for cell/head/retry/history/expiry queries and guarded deletion; evaluations exist but have no public writer.
   - Implement the batch repository abstraction and conflict trigger, preserving first-publisher metadata and revision behavior. Empty/idempotent deliveries emit no evidence change events. Freeze migrations after a deployment has applied them; subsequent changes use new numbers.
 
 ### Wave 4 — Storage integration
 
-- [ ] **Integrate ingestion**
+- [x] **Integrate ingestion**
   - Connect authenticated contract-ready handlers to one atomic batch; validate the complete supplied graph before writes and enforce context conflicts inside the batch. Return accepted/already-present IDs plus collection ID and revision. Handle lost responses safely.
   - Validate collection export membership against pruning: an export missing pruned members returns 410 `collection_pruned`, never a falsely exact partial collection.
   - Run focused local Workers-pool tests for duplicate races, mixed conflicts, rollback, empty collections, unknown repositories, and preserved publishers. Repeat only the final implementation's D1 correctness cases in Phase 6; do not repeat the feasibility spike.
@@ -133,10 +211,10 @@ Checkpoint: both feasibility tasks pass before service deployment work. Wave 2 t
 
 ### Wave 5 — Separate service surfaces
 
-- [ ] **Enforce identities**
+- [x] **Enforce identities**
   - Implement host token lifecycle, operator bootstrap/registration commands, exact GitHub OIDC allowlist, role middleware, request IDs, redacted errors, and audit trail. Derive grants exclusively from authenticated identity.
   - Test expiry, revocation, rotation overlap, cross-repository denial, forged provenance, every role/operation pair, wrong issuer/audience/ref/workflow/owner, and fork identities using signed test JWTs and a local JWKS fixture. Do not contact GitHub in unit tests.
-- [ ] **Implement reads**
+- [x] **Implement reads**
   - Implement observation lookup, exact collection export pages, candidate history including failures/incomplete attempts, primary snapshots, HMAC cursors, latest-location queries, and independent durable changes streams.
   - Exercise page-size and encoded-byte limits, query/repository cursor swaps, ongoing concurrent writes, withdrawal replay, empty successful history versus lookup failure, generation changes, and pruned-member tombstones. Finite pages must terminate at their captured bounds.
 
