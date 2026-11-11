@@ -51,10 +51,26 @@ capture-parity *args="":
 inventory *args="":
     pnpm --dir "{{ justfile_directory() }}" exec tsx cli/inventory.ts {{ args }}
 
-# Operator commands: bootstrap, register, issue, revoke (tokens only via owner-only files).
+# Operator commands: bootstrap, register, issue, revoke, backup, verify-backup, restore, recover-jobs, maintenance (tokens only via owner-only files; absolute paths).
 operator *args="":
     pnpm --dir "{{ justfile_directory() }}" exec tsx cli/operator.ts {{ args }}
 
 # D1 feasibility checkpoint on a disposable database (needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID).
 prove-d1 *args="":
     pnpm --dir "{{ justfile_directory() }}" exec tsx cli/prove-d1.ts {{ args }}
+
+# Submit a collection or v2 receipt and stage its files: INPUT --endpoint URL --repo ID --token-file PATH --state PATH [--proof-dir PATH].
+# Runs in the caller's directory so relative paths resolve there; "$@" keeps paths with spaces whole.
+[no-cd]
+evidence-ingest *args:
+    node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/ingest.ts" ingest "$@"
+
+# Continue an interrupted ingestion from its resume state: STATE.
+[no-cd]
+evidence-resume *args:
+    node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/ingest.ts" resume "$@"
+
+# Finalize every staged upload with a verifier credential: STATE --token-file PATH.
+[no-cd]
+evidence-finalize *args:
+    node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/ingest.ts" finalize "$@"

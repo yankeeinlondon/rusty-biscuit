@@ -358,11 +358,21 @@ paths:
         no size). The reference must exist in the stored observation: a report by
         its `path` and `sha256`, an expected listing by
         `proof.expected_listing_digest`, a completion record by
-        `proof.completion_record_digest`. Repeating the same request while the upload
-        is open or finalized answers 200 with the same upload. Unfinalized uploads
-        expire after `upload_expiry_hours`; staging bytes are removed after
-        `staging_cleanup_hours`. An interrupted or invalid upload never changes the
-        observation.
+        `proof.completion_record_digest`. Repeating the same request (same
+        observation, reference, and path) while the upload is open or finalized
+        answers 200 with the same upload; a different `bytes` answers 409
+        `identity_conflict` at `/bytes`. A rejected or expired upload is not reused,
+        so the same request then opens a new one. `bytes` above
+        `upload_object_max_bytes` answers 413 `size_limit` at `/bytes`; the
+        observation stays recorded. Opening an upload first reserves its declared
+        `bytes` of live R2 storage and `part_count + 1` R2 write operations for the
+        current month; when that would pass `refuse_ratio` of an allowance (after
+        the account's measured outside usage) it answers 429 `quota_exhausted` with
+        a `Retry-After`, records nothing, and removes no existing evidence.
+        Finalization commits the reservation; rejection, expiry, and pruning release
+        the storage. Unfinalized uploads expire after `upload_expiry_hours`; the
+        daily run removes their staging bytes after `staging_cleanup_hours`. An
+        interrupted or invalid upload never changes the observation.
       x-roles: [producer, verifier]
       security:
         - hostToken: []
@@ -417,8 +427,11 @@ paths:
       description: |
         Every part except the last is exactly `upload_part_bytes`; the last carries
         the remainder. Replaying a received index with identical bytes answers 200;
-        different bytes answer 409 `identity_conflict`. An index beyond
-        `parts_received` answers 400 `invalid_input`.
+        different bytes answer 409 `identity_conflict` and change nothing. An index
+        beyond `parts_received` answers 400 `invalid_input`. Each part is staged as
+        its own private object keyed by its SHA-256 (R2 multipart upload is not
+        used: it requires parts of at least 5 MiB). An upload past its expiry is
+        marked `expired` and answers 404 `not_found`; a rejected upload answers 400.
       x-roles: [producer, verifier]
       security:
         - hostToken: []
@@ -456,12 +469,22 @@ paths:
       tags: [transfer]
       summary: Verify the staged bytes and publish a verified object location (verifier only)
       description: |
-        Completes the staged object, stream-verifies its full length and SHA-256
-        against the reference, then appends a `verified` `object` location event.
+        Streams the staged parts in order into the final private object while
+        verifying its full length and SHA-256 against the reference. An expected
+        listing or completion record is also loaded with the strict JSON loader
+        and structurally checked against the observation's cell (package, gate,
+        environment, head, target, and for a hosted producer its run and attempt);
+        plan selection and coverage are never evaluated. Only then does one
+        database batch mark the upload `finalized` and append a `verified` `object`
+        location event whose `event_id` is derived from the upload ID.
         Finalization asserts byte integrity only, never test coverage. It is
-        idempotent across R2 and D1 failures: repeating it returns the same result.
-        Bytes that do not match answer 400 `invalid_input`, mark the upload
-        `rejected`, and leave the observation untouched.
+        idempotent across R2 and D1 failures: repeating it returns the same result
+        and never appends a second event. Bytes or a proof that do not match answer
+        400 `invalid_input` (with a null `location` and a message that never quotes
+        the uploaded bytes), delete the final object, mark the upload `rejected`,
+        and leave the observation untouched; finalizing a rejected upload again
+        answers the same 400. Missing parts answer 400; an expired upload answers
+        404.
       x-roles: [verifier]
       security:
         - hostToken: []
@@ -511,8 +534,12 @@ paths:
       summary: Fetch finalized, currently available bytes of one reference
       description: |
         Streams the bytes of a finalized object whose newest `object` location
-        event is a current verification. A withdrawn, expired, unfinalized, or
-        unknown object answers 404 `not_found`.
+        event is `verified`. The event's `valid_until_ms` is not applied to object
+        locations: the bytes are held in the service's own bucket and were verified
+        when the upload was finalized. A newer `withdrawn` or `unavailable` event,
+        an unfinalized upload, or an unknown object answers 404 `not_found`; a
+        retrieval already streaming when a withdrawal lands completes. Bytes the
+        database records but the bucket has lost answer 503 `unavailable`.
       x-roles: [reader, verifier, retention-verifier]
       security:
         - hostToken: []
@@ -553,17 +580,38 @@ paths:
       description: |
         A certificate names an exact current snapshot, every candidate ID of each
         cell, the IDs to retain, the supersession edges with their ancestry or
-        retry evidence, the verifier policy identity, and the release pins. The
-        service checks candidate-set equality, same-cell edges, valid retry chains,
-        nonempty protected maximal sets, generation, retention epoch and revision,
-        release pins, and the `retention_grace_days` grace measured from the first
-        certified supersession. It never infers supersession from arrival time or
-        producer assertions. A non-current snapshot answers 409 `stale_snapshot` (or
-        `snapshot_pruned`). An accepted certificate yields a persisted job that
-        withdraws locations, deletes objects, then deletes rows. An empty prune set
-        is an idempotent no-op job. Replaying the same `certificate_id` with
-        identical content answers 200; different content answers 409
-        `identity_conflict`.
+        retry evidence, the verifier policy identity, and the release pins. Every
+        check runs before anything is written:
+
+        - the snapshot must equal the repository's current one: another generation
+          or a changed revision or watermark answers 409 `stale_snapshot`, an older
+          `retention_epoch` 409 `snapshot_pruned`, and a value ahead of the store 400;
+        - `candidate_ids` must equal the cell's stored observations exactly; a
+          missing or extra ID answers 409 `stale_snapshot` (the verifier's view is
+          partial or names data the store does not hold);
+        - `retained_ids` is a nonempty subset of the candidates; every candidate
+          that is not retained must be the `superseded_id` of an edge, so an
+          unsuperseded (maximal) observation is always retained (400 otherwise);
+        - an edge joins two candidates of the same cell, never itself, and the
+          edges are acyclic; `strict-ancestry` evidence must name the two stored
+          heads, which must differ (ancestry itself is the verifier's claim);
+          `retry` evidence must follow the stored `retry_of` links from the
+          superseded to the superseding observation (400 otherwise);
+        - release pins name stored observations, are stored idempotently, and a
+          pinned observation can never be pruned (400).
+
+        Supersession is never inferred from arrival time or producer assertions.
+        An accepted certificate yields a persisted job (202) whose `not_before_ms`
+        is `retention_grace_days` after the latest of the times its pruned
+        observations were first certified as superseded by any certificate. A job
+        whose grace has already ended starts at acceptance (state `withdrawing`);
+        otherwise it is `scheduled`. The job withdraws locations, deletes objects,
+        then deletes rows; a scheduled job is invalidated if the repository's
+        revision changes before it starts. An empty prune set is a
+        job that is `completed` at once. Replaying the same `certificate_id` with
+        identical content (after canonicalization) answers 200 with the same job;
+        different content answers 409 `identity_conflict`. A storage failure
+        answers 503 with nothing written.
       x-roles: [retention-verifier]
       security:
         - hostToken: []
@@ -581,7 +629,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/RetentionJob"
         "202":
-          description: Certificate accepted; its job is scheduled.
+          description: Certificate accepted; its job is scheduled, started, or (empty prune set) completed.
           content:
             application/json:
               schema:
@@ -607,6 +655,9 @@ paths:
       operationId: getRetentionJob
       tags: [retention]
       summary: Read a retention job's state
+      description: |
+        Operator credentials hold no repository grants but may read any job. A job
+        of another repository answers 404.
       x-roles: [retention-verifier, operator]
       security:
         - hostToken: []
@@ -753,6 +804,9 @@ paths:
         Revocation is checked against the primary database on every request, so it
         takes effect on the next request. Past evidence is not rewritten. Revoking
         an already revoked credential answers 200 with the original revocation.
+        Revocation keeps working while the store is quiesced for maintenance:
+        stopping a leaked credential outranks the backup boundary, and a
+        restore re-applies revocations made inside a backup's quiesced window.
       x-roles: [operator]
       security:
         - hostToken: []
@@ -804,6 +858,110 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/operator/maintenance:
+    get:
+      operationId: getMaintenance
+      tags: [operator]
+      summary: Read the maintenance mode and every repository's counters
+      description: |
+        Works while the store is quiesced. The repository list is not paged: it
+        holds one entry per registered repository.
+      x-roles: [operator]
+      security:
+        - hostToken: []
+      responses:
+        "200":
+          description: The current maintenance record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenanceRecord"
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    post:
+      operationId: setMaintenance
+      tags: [operator]
+      summary: Quiesce mutations for a backup boundary, or reopen the store
+      description: |
+        `quiesced` persists maintenance mode. From then on every mutation route
+        answers 503 `unavailable` (retryable, `retry_after_ms` 60000) before it
+        starts, and the database refuses any write that was already past that
+        check, so a write is either acknowledged before the quiesce or never.
+        Reads, the audit trail, credential revocation, and this route keep
+        working, and refusals are still audited. The answer's `repositories`
+        are read after the quiesce committed: they are the backup boundary,
+        and every write acknowledged before it is in a backup taken while
+        quiesced.
+
+        Quiescing an already quiesced store for the same `boundary_id` (or
+        with neither naming one) answers the current record with `changed`
+        false; for a different boundary it answers 409 `identity_conflict`.
+        `open` with a `boundary_id` reopens only the quiesce for that boundary
+        (409 otherwise), so a backup never reopens someone else's maintenance;
+        `open` without one reopens any quiesce, and reopening an open store
+        changes nothing. A change is audited (`maintenance.quiesce`,
+        `maintenance.resume`) in the same batch.
+      x-roles: [operator]
+      security:
+        - hostToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MaintenanceRequest"
+      responses:
+        "200":
+          description: The maintenance record after the request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenanceRecord"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /v1/operator/jobs/recover:
+    post:
+      operationId: recoverJobs
+      tags: [operator]
+      summary: Finish interrupted retention jobs, release stale locks, expire stale uploads
+      description: |
+        Expires open uploads past their expiry, advances every unfinished
+        retention job by bounded, idempotent batches (the same runner as the
+        daily run), and releases cell locks still held by a completed or
+        invalidated job. Rerunning after a crash finishes what is left. The run
+        is audited as `retention.recover`. Refused with 503 while quiesced.
+        The body is an empty object, or empty.
+      x-roles: [operator]
+      security:
+        - hostToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: What the run did.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoverJobsReport"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
         "503": { $ref: "#/components/responses/Unavailable" }
 
@@ -919,7 +1077,11 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorBody"
     Unavailable:
-      description: "`unavailable`: a platform failure. Retryable; never reported as empty success."
+      description: |
+        `unavailable`: a platform failure, a store quiesced for maintenance, or a
+        write into a `{package, environment, gate}` cell whose evidence a retention
+        job is deleting (nothing was recorded; the lock is released when the job's
+        bounded batches finish). Retryable; never reported as empty success.
       headers:
         Retry-After:
           $ref: "#/components/headers/RetryAfter"
@@ -1697,7 +1859,8 @@ components:
       type: string
       enum: [scheduled, withdrawing, deleting-objects, deleting-rows, completed, invalidated]
       description: |
-        `scheduled` waits for the grace period and an unchanged revision;
+        `scheduled` waits for the grace period and an unchanged revision (a job
+        whose grace already ended at acceptance starts in `withdrawing`);
         `invalidated` means the revision changed before the job started.
     RetentionJob:
       type: object
@@ -1830,8 +1993,11 @@ components:
         - credential.denied
         - retention.certificate
         - retention.job
+        - retention.recover
         - operator.bootstrap
         - restore.generation
+        - maintenance.quiesce
+        - maintenance.resume
     AuditQuery:
       type: object
       additionalProperties: false
@@ -1865,3 +2031,65 @@ components:
           items: { $ref: "#/components/schemas/AuditRecord" }
         has_more: { type: boolean }
         next_cursor: { $ref: "#/components/schemas/NextCursor" }
+    MaintenanceRequest:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [open, quiesced] }
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: Recorded with the quiesce (default `operator maintenance`) and in the audit detail.
+        boundary_id:
+          $ref: "#/components/schemas/ServerId"
+          description: The backup boundary this quiesce serves; the backup command uses its backup ID.
+    MaintenanceState:
+      type: object
+      additionalProperties: false
+      required: [mode, reason, since_ms, boundary_id]
+      properties:
+        mode: { type: string, enum: [open, quiesced] }
+        reason: { type: [string, "null"] }
+        since_ms:
+          type: [integer, "null"]
+          minimum: 0
+          description: When mutations were paused; null while open.
+        boundary_id:
+          oneOf:
+            - $ref: "#/components/schemas/ServerId"
+            - type: "null"
+    MaintenanceRecord:
+      type: object
+      additionalProperties: false
+      required: [maintenance, changed, repositories]
+      properties:
+        maintenance: { $ref: "#/components/schemas/MaintenanceState" }
+        changed:
+          type: boolean
+          description: True when this request changed the mode; always false for the read.
+        repositories:
+          type: array
+          description: Every registered repository's counters, read after the request committed.
+          items: { $ref: "#/components/schemas/Snapshot" }
+    RecoverJobStep:
+      type: object
+      additionalProperties: false
+      required: [job_id, repository_id, from_state, to_state]
+      properties:
+        job_id: { $ref: "#/components/schemas/ServerId" }
+        repository_id: { $ref: "#/components/schemas/RepositoryId" }
+        from_state: { $ref: "#/components/schemas/RetentionJobState" }
+        to_state: { $ref: "#/components/schemas/RetentionJobState" }
+    RecoverJobsReport:
+      type: object
+      additionalProperties: false
+      required: [steps, released_locks, expired_uploads]
+      properties:
+        steps:
+          type: array
+          description: Every job state change this run made, in order.
+          items: { $ref: "#/components/schemas/RecoverJobStep" }
+        released_locks: { type: integer, minimum: 0 }
+        expired_uploads: { type: integer, minimum: 0 }

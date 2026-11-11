@@ -35,6 +35,8 @@ describe("migrations", () => {
       "0004_uploads.sql",
       "0005_evaluations.sql",
       "0006_feed_horizons.sql",
+      "0007_maintenance.sql",
+      "0008_retention_state.sql",
     ]);
     const tables = await db()
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -58,9 +60,11 @@ describe("migrations", () => {
         "audit_log",
         "uploads",
         "upload_parts",
+        "service_state",
         "quota_reservations",
         "capacity_baseline",
         "evaluations",
+        "retention_supersessions",
       ]),
     );
   });

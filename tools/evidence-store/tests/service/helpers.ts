@@ -5,7 +5,7 @@ import { env } from "cloudflare:workers";
 import { expect } from "vitest";
 import type { Principal } from "../../src/auth.ts";
 import type { Role } from "../../src/contracts/api.ts";
-import { canonical, loadStrict, type JsonObject } from "../../src/contracts/index.ts";
+import { canonical, jsonNumber, loadStrict, observationIdentity, type JsonNumber, type JsonObject } from "../../src/contracts/index.ts";
 import { ingestCollectionBatch, type IngestCollectionInput, type IngestObservation } from "../../src/db/ingest.ts";
 import { insertRepository } from "../../src/db/repositories.ts";
 import { createWorker, type Env } from "../../src/worker.ts";
@@ -137,9 +137,10 @@ export async function retentionJob(
         `INSERT INTO retention_certificates(repository_id, certificate_id, certificate_json,
            certificate_sha256, generation, retention_epoch, evidence_revision,
            verifier_policy_digest, submitted_by, submitted_request_id, submitted_at_ms)
-         VALUES (?1, ?2, '{}', ?3, 'g', 0, 0, ?3, 'retention-verifier:test', 'req', 1)`,
+         VALUES (?1, ?2, '{}', ?3, 'g', 0, 0, ?3, ?4, 'req', 1)`,
       )
-      .bind(repositoryId, certificateId, hex(64)),
+      // Publisher JSON, as the service stores it: the job runner parses it as the job's audit actor.
+      .bind(repositoryId, certificateId, hex(64), credentialPublisher("ffff")),
     d
       .prepare(
         `INSERT INTO retention_jobs(job_id, repository_id, certificate_id, state, generation,
@@ -192,8 +193,9 @@ export interface Harness {
 
 /**
  * A Worker whose authenticator resolves the `x-test-principal` header to one
- * of: `reader`, `producer`, `verifier`, `verifier-b`, each granted its role
- * on every repository in `repositories`.
+ * of: `reader`, `producer`, `verifier`, `verifier-b`, `retention-verifier`,
+ * each granted its role on every repository in `repositories`, or
+ * `operator`, an operator credential with no repository grants.
  */
 export function harness(repositories: readonly string[]): Harness {
   const principals: Record<string, Principal> = {
@@ -201,6 +203,8 @@ export function harness(repositories: readonly string[]): Harness {
     producer: principal("aaaa", repositories, ["producer"]),
     verifier: principal("dddd", repositories, ["verifier"]),
     "verifier-b": principal("eeee", repositories, ["verifier"]),
+    "retention-verifier": principal("ffff", repositories, ["retention-verifier"]),
+    operator: { ...principal("9999", [], []), operator: true },
   };
   const request = ((path: string, init: RequestInit & { as?: string } = {}) =>
     worker.fetch!(
@@ -295,6 +299,34 @@ export async function ingestRig(request: Harness, repositoryId: string): Promise
   };
 }
 
+/**
+ * Ingests `fixtureText`'s first observation after `edit` changes it (the
+ * observation ID is recomputed), alone in its collection, as the producer.
+ */
+export async function ingestEdited(
+  request: Harness,
+  repositoryId: string,
+  fixtureText: string,
+  edit: (observation: JsonObject) => void,
+): Promise<IngestedFixture> {
+  const loaded = loadStrict(new TextEncoder().encode(fixtureText));
+  if (!loaded.ok) throw new Error("fixture does not load");
+  const fixture = loaded.value as JsonObject;
+  const observation = (fixture["observations"] as JsonObject[])[0]!;
+  edit(observation);
+  observation["observation_id"] = observationIdentity(observation);
+  fixture["observations"] = [observation];
+  const response = await postJson(request, `/v1/repos/${repositoryId}/collections`, `{"source_version":3,"collection":${canonical(fixture)}}`, "producer");
+  if (response.status !== 200) throw new Error(`edited fixture ingestion answered ${response.status}: ${await response.text()}`);
+  const { collection_id: collectionId } = (await response.json()) as { collection_id: string };
+  return {
+    collectionId,
+    observation,
+    observationId: observation["observation_id"] as string,
+    report: (observation["reports"] as JsonObject[])[0]!,
+  };
+}
+
 /** A valid `LocationEventRequest` for `fixture`'s first report at a host directory. */
 export function reportEvent(fixture: IngestedFixture, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const kind = (overrides["kind"] as string | undefined) ?? "verified";
@@ -309,4 +341,100 @@ export function reportEvent(fixture: IngestedFixture, overrides: Record<string, 
     ...(kind === "verified" ? { verification_method: "bytes" } : {}),
     ...overrides,
   };
+}
+
+// ---- Transfer helpers shared by the upload and fetch tests ----
+
+export const PART = 1024 * 1024;
+
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** `length` deterministic bytes; `seed` makes two payloads of one length differ. */
+export function payload(length: number, seed = 1): Uint8Array {
+  const bytes = new Uint8Array(length);
+  for (let index = 0; index < length; index += 1) bytes[index] = (index * 31 + seed) & 255;
+  return bytes;
+}
+
+/** Ingests the rig fixture with its first report rewritten to describe `content`. */
+export async function ingestReport(request: Harness, repositoryId: string, content: Uint8Array): Promise<IngestedFixture> {
+  const digest = await sha256Hex(content);
+  return ingestEdited(request, repositoryId, rigFixture, (observation) => {
+    const report = (observation["reports"] as JsonObject[])[0]!;
+    report["sha256"] = digest;
+    report["bytes"] = jsonNumber(String(content.byteLength));
+  });
+}
+
+/** Ingests the rig fixture with its proof digests rewritten to cite `expected` and `completion`. */
+export async function ingestProof(
+  request: Harness,
+  repositoryId: string,
+  documents: { expected: Uint8Array; completion: Uint8Array },
+  fixtureText: string = rigFixture,
+): Promise<IngestedFixture> {
+  const expected = await sha256Hex(documents.expected);
+  const completion = await sha256Hex(documents.completion);
+  return ingestEdited(request, repositoryId, fixtureText, (observation) => {
+    const proof = observation["proof"] as JsonObject;
+    proof["expected_listing_digest"] = expected;
+    proof["completion_record_digest"] = completion;
+  });
+}
+
+/** A valid `UploadRequest` for `fixture`'s first report. */
+export function reportUpload(fixture: IngestedFixture, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    observation_id: fixture.observationId,
+    reference_kind: "report",
+    reference_digest: fixture.report["sha256"],
+    bytes: Number((fixture.report["bytes"] as JsonNumber).lexeme),
+    path: fixture.report["path"],
+    ...overrides,
+  };
+}
+
+export function putPart(request: Harness, repositoryId: string, uploadId: string, index: number, bytes: Uint8Array, as = "producer"): Promise<Response> {
+  return request(`/v1/repos/${repositoryId}/uploads/${uploadId}/parts/${index}`, { method: "PUT", body: bytes, as });
+}
+
+export function finalize(request: Harness, repositoryId: string, uploadId: string, as = "verifier"): Promise<Response> {
+  return request(`/v1/repos/${repositoryId}/uploads/${uploadId}/finalize`, { method: "POST", as });
+}
+
+/** Opens an upload for `body` and sends every part of `content`; returns the upload ID. */
+export async function stage(request: Harness, repositoryId: string, body: Record<string, unknown>, content: Uint8Array): Promise<string> {
+  const created = await postJson(request, `/v1/repos/${repositoryId}/uploads`, body, "producer");
+  if (created.status !== 201) throw new Error(`createUpload answered ${created.status}: ${await created.text()}`);
+  const { upload_id: uploadId } = (await created.json()) as { upload_id: string };
+  for (let index = 0; index * PART < content.byteLength; index += 1) {
+    const response = await putPart(request, repositoryId, uploadId, index, content.slice(index * PART, (index + 1) * PART));
+    if (response.status !== 200) throw new Error(`part ${index} answered ${response.status}`);
+  }
+  return uploadId;
+}
+
+/** Keys of every R2 object under `prefix`. */
+export async function r2Keys(prefix: string): Promise<string[]> {
+  const listed = await env.EVIDENCE_BUCKET.list({ prefix });
+  return listed.objects.map((object) => object.key).sort();
+}
+
+export async function uploadRow(uploadId: string): Promise<{ state: string; staging_key: string; sha256: string | null } | null> {
+  return db().prepare("SELECT state, staging_key, sha256 FROM uploads WHERE upload_id = ?1").bind(uploadId).first();
+}
+
+/** Location rows and stream events of a repository, plus its revision. */
+export async function locationState(repositoryId: string): Promise<{ revision: number; locations: number; events: number; watermark: number }> {
+  return (await db()
+    .prepare(
+      `SELECT evidence_revision AS revision, location_event_watermark AS watermark,
+              (SELECT COUNT(*) FROM report_locations WHERE repository_id = ?1) AS locations,
+              (SELECT COUNT(*) FROM location_events WHERE repository_id = ?1) AS events
+       FROM repositories WHERE repository_id = ?1`,
+    )
+    .bind(repositoryId)
+    .first())!;
 }

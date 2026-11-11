@@ -12,6 +12,8 @@
   "env": {
     "development": {
       "name": "evidence-store-development",
+      // Daily staging cleanup, retention jobs, tombstone expiry, and capacity checks (src/daily.ts).
+      "triggers": { "crons": ["17 3 * * *"] },
       "d1_databases": [
         {
           "binding": "EVIDENCE_DB",
@@ -44,6 +46,8 @@
     },
     "restore-test": {
       "name": "evidence-store-restore-test",
+      // Daily staging cleanup, retention jobs, tombstone expiry, and capacity checks (src/daily.ts).
+      "triggers": { "crons": ["17 3 * * *"] },
       "d1_databases": [
         {
           "binding": "EVIDENCE_DB",

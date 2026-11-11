@@ -70,7 +70,8 @@ CREATE TABLE audit_log (
     action TEXT NOT NULL CHECK (action IN (
         'repository.register', 'repository.rename', 'credential.issue',
         'credential.revoke', 'credential.denied', 'retention.certificate',
-        'retention.job', 'operator.bootstrap', 'restore.generation'
+        'retention.job', 'retention.recover', 'operator.bootstrap',
+        'restore.generation', 'maintenance.quiesce', 'maintenance.resume'
     )),
     -- The authenticated principal as `publisherKey` JSON (the API's
     -- `Principal`), e.g. `{"kind":"credential","credential_id":"<id>"}`.

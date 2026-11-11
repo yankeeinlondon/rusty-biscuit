@@ -8,6 +8,9 @@
 //! operator revoke    --endpoint URL --token-file PATH --credential ID --reason TEXT
 //! ```
 //!
+//! The recovery commands (`backup`, `verify-backup`, `restore`,
+//! `recover-jobs`, `maintenance`) live in `recovery.ts` and share this IO.
+//!
 //! Tokens travel only through owner-only files: a token is never printed,
 //! never placed in argv, and never quoted in an error. `bootstrap` writes the
 //! operator credential's digest to D1 through the package's pinned Wrangler
@@ -26,6 +29,7 @@ import { credentialRequestBody, parseCredentialGrant } from "../src/credential-r
 import { ApiError } from "../src/http.ts";
 import { FORMATS } from "../src/requests.ts";
 import { mintToken, secretDigest } from "../src/tokens.ts";
+import type { RecoveryCommand, RecoveryIo } from "./recovery.ts";
 
 export const BOOTSTRAP_ENVIRONMENT = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"] as const;
 export const WRANGLER_ENVIRONMENTS = ["development", "restore-test"] as const;
@@ -45,7 +49,8 @@ export interface SpawnResult {
 export interface OperatorIo {
   readonly env: NodeJS.ProcessEnv;
   readonly fetch: typeof fetch;
-  readonly spawn: (command: string, args: readonly string[]) => SpawnResult;
+  /** `input`, when given, is piped to the child's stdin (how secrets reach Wrangler). */
+  readonly spawn: (command: string, args: readonly string[], options?: { readonly input?: string }) => SpawnResult;
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
   readonly platform: NodeJS.Platform;
@@ -56,10 +61,12 @@ export function defaultIo(): OperatorIo {
   return {
     env: process.env,
     fetch: globalThis.fetch,
-    spawn: (command, args) => {
+    spawn: (command, args, options) => {
       const result = spawnSync(command, [...args], {
         cwd: PACKAGE_ROOT,
         encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        ...(options?.input === undefined ? {} : { input: options.input }),
         env: { ...process.env, CI: "true", WRANGLER_SEND_METRICS: "false" },
         timeout: 300_000,
       });
@@ -289,7 +296,7 @@ interface ErrorEnvelope {
 }
 
 /** POSTs `body` to the operator API and answers the parsed success body. */
-async function operatorPost(io: OperatorIo, endpoint: string, token: string, path: string, body: string): Promise<{ status: number; body: unknown }> {
+export async function operatorPost(io: OperatorIo, endpoint: string, token: string, path: string, body: string): Promise<{ status: number; body: unknown }> {
   const url = `${endpoint.replace(/\/+$/, "")}${path}`;
   let response: Response;
   try {
@@ -426,7 +433,15 @@ const USAGE = `usage:
   operator register  --endpoint URL --token-file PATH --slug owner/name
   operator issue     --endpoint URL --token-file PATH --grant FILE
   operator revoke    --endpoint URL --token-file PATH --credential ID --reason TEXT
+  operator backup        --endpoint URL --token-file PATH --env ENV --destination DIR [--config PATH]
+  operator verify-backup --backup DIR/<backup_id>
+  operator restore       --backup DIR/<backup_id> --source-env ENV --dest-env ENV --dest-token-file PATH
+                         [--dest-endpoint URL --replay STATE ...] [--report PATH] [--label L] [--config PATH]
+  operator recover-jobs  --endpoint URL --token-file PATH
+  operator maintenance   --endpoint URL --token-file PATH --mode open|quiesced [--reason TEXT] [--boundary-id ID]
 `;
+
+const RECOVERY_COMMANDS: readonly string[] = ["backup", "verify-backup", "restore", "recover-jobs", "maintenance"] satisfies RecoveryCommand[];
 
 function required(values: Record<string, string | undefined>, names: readonly string[]): void {
   const absent = names.filter((name) => values[name] === undefined);
@@ -448,9 +463,15 @@ function options(argv: readonly string[], names: readonly string[]): Record<stri
 }
 
 /** Runs one command; answers the exit code and reports failures on `io.stderr`. */
-export async function run(argv: readonly string[], io: OperatorIo = defaultIo()): Promise<number> {
+export async function run(argv: readonly string[], io: RecoveryIo = defaultIo()): Promise<number> {
   const [command, ...rest] = argv;
   try {
+    if (command !== undefined && RECOVERY_COMMANDS.includes(command)) {
+      // Loaded on demand: `recovery.ts` imports this module (and `ingest.ts`, which does too).
+      const { runRecovery } = await import("./recovery.ts");
+      await runRecovery(command as RecoveryCommand, rest, io);
+      return 0;
+    }
     switch (command) {
       case "bootstrap": {
         const v = options(rest, ["env", "label", "token-file", "expires-in-days"]);
@@ -494,5 +515,9 @@ export async function run(argv: readonly string[], io: OperatorIo = defaultIo())
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.exitCode = await run(process.argv.slice(2));
+  // Not a top-level await: `run` imports `recovery.ts`, which imports this
+  // module, and that import would wait forever on this module's evaluation.
+  void run(process.argv.slice(2)).then((code) => {
+    process.exitCode = code;
+  });
 }

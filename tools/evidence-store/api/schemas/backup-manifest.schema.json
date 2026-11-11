@@ -2,44 +2,64 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://rusty-biscuit.invalid/evidence-store/backup-manifest.schema.json",
   "title": "Evidence store backup manifest",
-  "description": "Describes one daily backup in operator-owned storage outside the live bucket: the D1 export, every referenced R2 object, and pending-upload and job metadata, taken at a quiesced boundary. Contains credential digests only, never recoverable bearer secrets. Uploads pending at the boundary are recorded as pending, not acknowledged.",
+  "description": "`manifest.json` of one backup directory `<destination>/<backup_id>/`, written last and atomically by `operator backup`; a directory without it is incomplete. Describes the D1 export taken while the store was quiesced (the boundary), every object referenced by a finalized upload (copied and digest-checked against `uploads.sha256`, with objects that could not be copied listed as missing), and the pending-upload, retention-job, counter, credential-digest, and grant metadata read from that export. Holds credential digests only, never bearer secrets. Uploads open at the boundary are pending, never acknowledged. Read strictly by `src/backup-manifest.ts`: unknown fields, explicit nulls, duplicate keys, and trailing content are refused; every list is required and may be empty.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format_version", "backup_id", "created_at_ms", "boundary", "source", "migration", "repositories", "database", "objects", "pending_uploads", "retention_jobs"],
+  "required": [
+    "format_version",
+    "backup_id",
+    "created_at_ms",
+    "boundary",
+    "source",
+    "migration",
+    "repositories",
+    "database",
+    "objects",
+    "missing_objects",
+    "pending_uploads",
+    "retention_jobs",
+    "credentials",
+    "grants",
+    "window_revocations"
+  ],
   "properties": {
     "$schema": { "type": "string" },
     "format_version": { "const": 1 },
-    "backup_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "backup_id": { "$ref": "#/$defs/serverId", "description": "Also the backup directory's name." },
     "created_at_ms": { "type": "integer", "minimum": 0 },
     "boundary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["quiesced_at_ms", "resumed_at_ms"],
+      "required": ["boundary_id", "quiesced_at_ms", "resumed_at_ms"],
       "properties": {
-        "quiesced_at_ms": { "type": "integer", "minimum": 0, "description": "Mutations paused; every acknowledgment before this instant is in the backup." },
-        "resumed_at_ms": { "type": "integer", "minimum": 0 }
+        "boundary_id": { "$ref": "#/$defs/serverId", "description": "Equal to `backup_id`: the boundary the quiesce served." },
+        "quiesced_at_ms": { "type": "integer", "minimum": 0, "description": "Mutations paused; every write acknowledged before this instant is in the export, none after it." },
+        "resumed_at_ms": { "type": "integer", "minimum": 0, "description": "Mutations reopened; not before `quiesced_at_ms`." }
       }
     },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["environment", "d1_database_id", "r2_bucket"],
+      "required": ["environment", "d1_database_name", "d1_database_id", "r2_bucket"],
+      "description": "The live resources backed up, from `wrangler.jsonc`. A restore refuses a destination sharing any of them.",
       "properties": {
         "environment": { "enum": ["development", "restore-test"] },
-        "d1_database_id": { "type": "string", "minLength": 1 },
-        "r2_bucket": { "type": "string", "minLength": 1 }
+        "d1_database_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "d1_database_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "r2_bucket": { "type": "string", "minLength": 1, "maxLength": 256 }
       }
     },
-    "migration": { "type": "integer", "minimum": 1, "description": "Highest applied migration number." },
+    "migration": { "type": "integer", "minimum": 1, "maximum": 9999, "description": "Highest migration number recorded in the export's `d1_migrations` table." },
     "repositories": {
       "type": "array",
+      "description": "Every repository's counters in the export; equal to those the quiesce answered.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["repository_id", "generation", "retention_epoch", "evidence_revision", "observation_event_watermark", "location_event_watermark"],
         "properties": {
-          "repository_id": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
-          "generation": { "type": "string", "minLength": 1 },
+          "repository_id": { "$ref": "#/$defs/repositoryId" },
+          "generation": { "type": "string", "minLength": 1, "maxLength": 256 },
           "retention_epoch": { "type": "integer", "minimum": 0 },
           "evidence_revision": { "type": "integer", "minimum": 0 },
           "observation_event_watermark": { "type": "integer", "minimum": 0 },
@@ -47,33 +67,136 @@
         }
       }
     },
-    "database": { "$ref": "#/$defs/file" },
+    "database": { "$ref": "#/$defs/file", "description": "The `wrangler d1 export` SQL." },
     "objects": {
-      "description": "Every R2 object referenced by a finalized upload at the boundary.",
+      "description": "Every R2 object referenced by a finalized upload whose bytes were copied intact. Keys come from the exported `uploads` rows, never from a bucket listing.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["key", "sha256", "bytes"],
+        "required": ["upload_id", "repository_id", "key", "file", "sha256", "bytes"],
         "properties": {
-          "key": { "type": "string", "minLength": 1 },
-          "sha256": { "$ref": "#/$defs/sha256" },
+          "upload_id": { "$ref": "#/$defs/serverId" },
+          "repository_id": { "$ref": "#/$defs/repositoryId" },
+          "key": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "file": { "$ref": "#/$defs/relativeFile" },
+          "sha256": { "$ref": "#/$defs/sha256", "description": "Equal to the upload's verified `uploads.sha256`." },
           "bytes": { "type": "integer", "minimum": 0, "maximum": 67108864 }
         }
       }
     },
-    "pending_uploads": { "$ref": "#/$defs/file" },
-    "retention_jobs": { "$ref": "#/$defs/file" }
+    "missing_objects": {
+      "description": "Finalized uploads whose object was absent from, or corrupt in, the live bucket at backup time. A restore appends an `unavailable` location event for each, so no restored row advertises bytes the backup lacks.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["upload_id", "repository_id", "key", "sha256", "bytes", "reason"],
+        "properties": {
+          "upload_id": { "$ref": "#/$defs/serverId" },
+          "repository_id": { "$ref": "#/$defs/repositoryId" },
+          "key": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "$ref": "#/$defs/sha256" },
+          "bytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+          "reason": { "enum": ["absent", "digest-mismatch"] }
+        }
+      }
+    },
+    "pending_uploads": {
+      "description": "Uploads still open at the boundary: pending, never acknowledged. Their staged parts are not copied; a restore marks them expired.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["upload_id", "repository_id", "observation_id", "reference_kind", "bytes", "created_at_ms", "expires_at_ms"],
+        "properties": {
+          "upload_id": { "$ref": "#/$defs/serverId" },
+          "repository_id": { "$ref": "#/$defs/repositoryId" },
+          "observation_id": { "type": "string", "pattern": "^[0-9a-f]{8,64}$" },
+          "reference_kind": { "enum": ["report", "expected-listing", "completion-record"] },
+          "bytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+          "created_at_ms": { "type": "integer", "minimum": 0 },
+          "expires_at_ms": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "retention_jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["job_id", "repository_id", "state", "generation", "retention_epoch", "evidence_revision", "updated_at_ms"],
+        "properties": {
+          "job_id": { "$ref": "#/$defs/serverId" },
+          "repository_id": { "$ref": "#/$defs/repositoryId" },
+          "state": { "enum": ["scheduled", "withdrawing", "deleting-objects", "deleting-rows", "completed", "invalidated"] },
+          "generation": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "retention_epoch": { "type": "integer", "minimum": 0 },
+          "evidence_revision": { "type": "integer", "minimum": 0 },
+          "updated_at_ms": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "credentials": {
+      "description": "Every credential's public ID, kind, secret digest, and lifetime. The database holds no bearer secret, so none can be backed up.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["credential_id", "kind", "secret_sha256", "expires_at_ms"],
+        "properties": {
+          "credential_id": { "$ref": "#/$defs/serverId" },
+          "kind": { "enum": ["host", "operator"] },
+          "secret_sha256": { "$ref": "#/$defs/sha256" },
+          "expires_at_ms": { "type": "integer", "minimum": 0 },
+          "revoked_at_ms": { "type": "integer", "minimum": 0, "description": "Present exactly when revoked at the boundary." }
+        }
+      }
+    },
+    "grants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["credential_id", "repository_id", "role"],
+        "properties": {
+          "credential_id": { "$ref": "#/$defs/serverId" },
+          "repository_id": { "$ref": "#/$defs/repositoryId" },
+          "role": { "enum": ["reader", "producer", "verifier", "retention-verifier"] }
+        }
+      }
+    },
+    "window_revocations": {
+      "description": "`credential.revoke` audit records from the quiesced window (revocation is allowed while quiesced); a restore re-applies them.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["credential_id", "at_ms"],
+        "properties": {
+          "credential_id": { "$ref": "#/$defs/serverId" },
+          "at_ms": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
   },
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "serverId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "repositoryId": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
+    "relativeFile": {
+      "description": "A path inside the backup directory, `/`-separated; no segment starts with a dot, so it cannot escape.",
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"
+    },
     "file": {
       "description": "A file inside the backup, relative to the manifest, with its digest.",
       "type": "object",
       "additionalProperties": false,
       "required": ["file", "sha256", "bytes"],
       "properties": {
-        "file": { "type": "string", "minLength": 1 },
+        "file": { "$ref": "#/$defs/relativeFile" },
         "sha256": { "$ref": "#/$defs/sha256" },
         "bytes": { "type": "integer", "minimum": 0 }
       }

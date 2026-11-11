@@ -1,0 +1,98 @@
+{
+  "$schema": "../../../../../api/schemas/backup-manifest.schema.json",
+  "format_version": 1,
+  "backup_id": "0123456789abcdef0123456789abcdef",
+  "created_at_ms": 1790000100000,
+  "boundary": {
+    "boundary_id": "0123456789abcdef0123456789abcdef",
+    "quiesced_at_ms": 1790000000000,
+    "resumed_at_ms": 1790000050000
+  },
+  "source": {
+    "environment": "development",
+    "d1_database_name": "evidence-store-development",
+    "d1_database_id": "11111111-1111-1111-1111-111111111111",
+    "r2_bucket": "evidence-store-development"
+  },
+  "migration": 7,
+  "repositories": [
+    {
+      "repository_id": "873451209",
+      "generation": "11111111111111111111111111111111",
+      "retention_epoch": 0,
+      "evidence_revision": 4,
+      "observation_event_watermark": 3,
+      "location_event_watermark": 1
+    }
+  ],
+  "database": {
+    "file": "database.sql",
+    "sha256": "acfdb637c981f36bf070b2640da6f36f3d45c4edf9c0044978747f3ebdf8cdc5",
+    "bytes": 173
+  },
+  "objects": [
+    {
+      "upload_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "repository_id": "873451209",
+      "key": "objects/873451209/obs/report/digest/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "file": "objects/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "sha256": "84f14b575260138a7d97968f06dcdba1081eb4e648bf9c974d48e84ae09c9570",
+      "bytes": 28
+    }
+  ],
+  "missing_objects": [
+    {
+      "upload_id": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+      "repository_id": "873451209",
+      "key": "objects/873451209/obs/report/digest/a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": 12,
+      "reason": "absent"
+    }
+  ],
+  "pending_uploads": [
+    {
+      "upload_id": "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
+      "repository_id": "873451209",
+      "observation_id": "0123abcd",
+      "reference_kind": "report",
+      "bytes": 10,
+      "created_at_ms": 1789999000000,
+      "expires_at_ms": 1790085400000
+    }
+  ],
+  "retention_jobs": [
+    {
+      "job_id": "99999999999999999999999999999999",
+      "repository_id": "873451209",
+      "state": "scheduled",
+      "generation": "11111111111111111111111111111111",
+      "retention_epoch": 0,
+      "evidence_revision": 0,
+      "updated_at_ms": 1789999000000
+    }
+  ],
+  "credentials": [
+    {
+      "credential_id": "00000000000000000000000000000001",
+      "kind": "operator",
+      "secret_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "expires_at_ms": 1797000000000
+    },
+    {
+      "credential_id": "dddddddddddddddddddddddddddddddd",
+      "kind": "host",
+      "secret_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "expires_at_ms": 1797000000000,
+      "revoked_at_ms": 1789000000000
+    }
+  ],
+  "grants": [
+    {
+      "credential_id": "dddddddddddddddddddddddddddddddd",
+      "repository_id": "873451209",
+      "role": "reader"
+    }
+  ],
+  "window_revocations": []
+}

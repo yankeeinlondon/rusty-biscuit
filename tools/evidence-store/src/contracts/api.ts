@@ -62,6 +62,9 @@ export const OPERATIONS = {
   issueCredential: { method: "POST", path: "/operator/credentials", roles: ["operator"] },
   revokeCredential: { method: "POST", path: "/operator/credentials/{credential_id}/revoke", roles: ["operator"] },
   listAudit: { method: "POST", path: "/operator/audit/query", roles: ["operator"] },
+  setMaintenance: { method: "POST", path: "/operator/maintenance", roles: ["operator"] },
+  getMaintenance: { method: "GET", path: "/operator/maintenance", roles: ["operator"] },
+  recoverJobs: { method: "POST", path: "/operator/jobs/recover", roles: ["operator"] },
 } as const satisfies Record<string, { method: string; path: string; roles: readonly Role[] }>;
 export type OperationId = keyof typeof OPERATIONS;
 

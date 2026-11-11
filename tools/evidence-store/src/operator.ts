@@ -282,8 +282,11 @@ const AUDIT_ACTIONS = [
   "credential.denied",
   "retention.certificate",
   "retention.job",
+  "retention.recover",
   "operator.bootstrap",
   "restore.generation",
+  "maintenance.quiesce",
+  "maintenance.resume",
 ] as const;
 
 /** Audit cursors reuse `CursorState`; these fixed values stand in for a repository snapshot. */

@@ -7,9 +7,12 @@
 //! the `report_locations_identity_guard` trigger (migration 0001) refuses a
 //! different event under a used ID, and the `report_locations_appended`
 //! trigger advances the evidence revision and appends the stream event.
+//!
+//! `checkReference` and `locationInsert` are shared with upload finalization
+//! (`src/uploads.ts`), which appends the only `verified` `object` events.
 
 import { publisherKey } from "./auth.ts";
-import { LIMITS, LOCATION_EVENT_KINDS, LOCATOR_KINDS, REFERENCE_KINDS, type LocatorKind } from "./contracts/api.ts";
+import { LIMITS, LOCATION_EVENT_KINDS, LOCATOR_KINDS, REFERENCE_KINDS, type LocationEventKind, type LocatorKind, type ReferenceKind } from "./contracts/api.ts";
 import { canonical, identity } from "./contracts/canonical.ts";
 import { PROOF_COMPLETION_FILE, PROOF_EXPECTED_FILE } from "./contracts/evidence.ts";
 import { isJsonObject, memberOf as member, type JsonObject } from "./contracts/json.ts";
@@ -109,8 +112,23 @@ function readLocationRequest(bytes: Uint8Array, repositoryId: string): LocationR
 
 const encoder = new TextEncoder();
 
+/** The reference an upload or location event names inside one stored observation. */
+export interface ReferenceRequest {
+  readonly observation_id: string;
+  readonly reference_kind: ReferenceKind;
+  readonly reference_digest: string;
+  readonly path: string;
+}
+
+export interface CheckedReference {
+  /** The stored observation, loaded. */
+  readonly observation: JsonObject;
+  /** For a report reference, the report entry with this digest and path; otherwise null. */
+  readonly report: JsonObject | null;
+}
+
 /** Refuses a reference the stored observation does not carry, located at the field that disagrees. */
-function checkReference(payload: string, request: LocationRequest): void {
+export function checkReference(payload: string, request: ReferenceRequest): CheckedReference {
   const loaded = loadStrict(encoder.encode(payload));
   if (!loaded.ok || !isJsonObject(loaded.value)) throw new Error("stored observation payload is not a JSON object");
   const observation = loaded.value;
@@ -122,8 +140,9 @@ function checkReference(payload: string, request: LocationRequest): void {
     const reports = member(observation, "reports") as JsonObject[];
     const sameDigest = reports.filter((report) => member(report, "sha256") === request.reference_digest);
     if (sameDigest.length === 0) throw mismatch("reference_digest");
-    if (!sameDigest.some((report) => member(report, "path") === request.path)) throw mismatch("path");
-    return;
+    const report = sameDigest.find((candidate) => member(candidate, "path") === request.path);
+    if (report === undefined) throw mismatch("path");
+    return { observation, report };
   }
   const proof = member(observation, "proof");
   const digestKey = request.reference_kind === "expected-listing" ? "expected_listing_digest" : "completion_record_digest";
@@ -132,19 +151,61 @@ function checkReference(payload: string, request: LocationRequest): void {
   const template = request.reference_kind === "expected-listing" ? PROOF_EXPECTED_FILE : PROOF_COMPLETION_FILE;
   const file = template.replace("{package}", member(cell, "package") as string).replace("{gate}", member(cell, "gate") as string);
   if (request.path !== file) throw mismatch("path");
+  return { observation, report: null };
 }
 
-// RETURNING yields a row only for a new insert, which is how a first insert
-// (201) is told from an identical replay (200).
-const INSERT_LOCATION = `
-INSERT INTO report_locations(
-    repository_id, event_id, observation_id, reference_kind, reference_digest,
-    report_path, location_key, location_kind, locator_json, state,
-    verification_method, checked_at_ms, valid_until_ms, checked_by
-)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-ON CONFLICT(repository_id, event_id) DO NOTHING
-RETURNING seq`;
+/** One `report_locations` row as written; `checked_by` is the authenticated verifier's `publisherKey`. */
+export interface LocationInsert extends ReferenceRequest {
+  readonly event_id: string;
+  readonly locator: Readonly<Record<string, string>>;
+  readonly kind: LocationEventKind;
+  readonly verification_method: string | null;
+  readonly checked_at_ms: number;
+  readonly valid_until_ms: number | null;
+  readonly checked_by: string;
+}
+
+/**
+ * The insert of one location event, a no-op for an event ID already used
+ * with the same payload. `RETURNING` yields a row only for a new insert,
+ * which is how a first insert (201) is told from an identical replay (200).
+ * With `finalizedUploadId`, the row is inserted only while that upload is
+ * `finalized`, so a finalization batch whose state update matched nothing
+ * cannot publish a verification.
+ */
+export function locationInsert(db: D1Database, repositoryId: string, row: LocationInsert, finalizedUploadId?: string): D1PreparedStatement {
+  // An upsert over INSERT … SELECT needs a WHERE clause, or SQLite parses
+  // ON CONFLICT as a join constraint.
+  const guard = finalizedUploadId === undefined ? "WHERE 1" : "WHERE EXISTS (SELECT 1 FROM uploads WHERE upload_id = ?15 AND state = 'finalized')";
+  const locatorJson = canonical(row.locator);
+  const statement = db.prepare(
+    `INSERT INTO report_locations(
+         repository_id, event_id, observation_id, reference_kind, reference_digest,
+         report_path, location_key, location_kind, locator_json, state,
+         verification_method, checked_at_ms, valid_until_ms, checked_by
+     )
+     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14 ${guard}
+     ON CONFLICT(repository_id, event_id) DO NOTHING
+     RETURNING seq`,
+  );
+  const values = [
+    repositoryId,
+    row.event_id,
+    row.observation_id,
+    row.reference_kind,
+    row.reference_digest,
+    row.path,
+    identity(locatorJson),
+    row.locator["kind"],
+    locatorJson,
+    row.kind,
+    row.verification_method,
+    row.checked_at_ms,
+    row.valid_until_ms,
+    row.checked_by,
+  ];
+  return finalizedUploadId === undefined ? statement.bind(...values) : statement.bind(...values, finalizedUploadId);
+}
 
 export async function appendLocation(context: RequestContext, repositoryId: string, bytes: Uint8Array): Promise<Response> {
   const request = readLocationRequest(bytes, repositoryId);
@@ -161,30 +222,16 @@ export async function appendLocation(context: RequestContext, repositoryId: stri
     throw new ApiError("not_found", `upload ${uploadId} does not hold this reference`, "/locator/upload_id");
   }
 
-  const locatorJson = canonical(request.locator);
   const validUntil = request.kind === "verified" ? context.nowMs + LIMITS.location_attestation_hours * 3_600_000 : null;
   let inserted: boolean;
   try {
-    const result = await context.db
-      .prepare(INSERT_LOCATION)
-      .bind(
-        repositoryId,
-        request.event_id,
-        request.observation_id,
-        request.reference_kind,
-        request.reference_digest,
-        request.path,
-        identity(locatorJson),
-        request.locator["kind"],
-        locatorJson,
-        request.kind,
-        request.verification_method,
-        context.nowMs,
-        validUntil,
-        publisherKey(context.principal.publisher),
-      )
-      .all();
-    inserted = result.results.length > 0;
+    const statement = locationInsert(context.db, repositoryId, {
+      ...request,
+      checked_at_ms: context.nowMs,
+      valid_until_ms: validUntil,
+      checked_by: publisherKey(context.principal.publisher),
+    });
+    inserted = (await statement.all()).results.length > 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("identity_conflict")) {

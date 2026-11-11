@@ -13,7 +13,13 @@ export type AuditAction =
   | "credential.issue"
   | "credential.revoke"
   | "credential.denied"
-  | "operator.bootstrap";
+  | "retention.certificate"
+  | "retention.job"
+  | "retention.recover"
+  | "operator.bootstrap"
+  | "restore.generation"
+  | "maintenance.quiesce"
+  | "maintenance.resume";
 
 export interface AuditEntry {
   readonly action: AuditAction;

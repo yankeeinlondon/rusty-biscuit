@@ -29,8 +29,6 @@ CREATE TABLE uploads (
     part_count INTEGER NOT NULL CHECK (part_count = (bytes + 1048575) / 1048576),
     state TEXT NOT NULL CHECK (state IN ('open', 'finalized', 'rejected', 'expired')),
     staging_key TEXT NOT NULL UNIQUE,
-    -- R2 multipart upload ID; absent for a zero-length object.
-    r2_upload_id TEXT,
     -- Whole-object SHA-256, set when finalization verifies the bytes.
     sha256 TEXT CHECK (sha256 IS NULL OR length(sha256) = 64),
     created_by TEXT NOT NULL,

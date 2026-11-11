@@ -414,6 +414,108 @@ Empty collections are deliberate values, never "unrestricted":
 - empty `repository_ids` or `roles` on a credential, and an empty
   configuration `repositories` or `trusted_workflows` list, deny everything.
 
+## Uploaded proof documents
+
+When a verifier finalizes an expected-listing or completion-record upload,
+the service loads the bytes with the same strict loader and runs the checks
+in `src/contracts/proofs.ts`. These are ports of the *structural* part of
+the Python checks only:
+
+| Python | Ported | Not ported |
+|---|---|---|
+| `schema.validate_completion_record` | all of it: version before field set, required and unknown fields, `run`/`package` nonempty strings, `attempt` a positive integer (never a bool or float), `environment`/`gate` vocabularies, `head` SHA, `complete: true`, `reports` a string list | nothing |
+| `hosted_observations._completion_record` | binding of `package`, `environment`, `gate`, and `head` to the observation; `run` and `attempt` only for a hosted producer that records them; a nonempty `nextest_version` | nothing else exists |
+| `completion.manifest_problems` | object, `schema_version`, required and unknown fields, `environment`, `tier` (against the cell's gate), `target` (against `proof.target`), nonempty `nextest_version`, and the cell package's listing fields | `selection_problems` and `declared_problems`, which need the resolved plan |
+| `local_evidence._proof_problem` | the SHA-256 against the proof digest and the `{package}-{gate}` file names | the host-directory lookup, which only the submitting host can do |
+
+A proof that fails these checks is rejected (400 `invalid_input`, upload
+`rejected`, observation untouched). A proof that passes is stored for byte
+integrity only: finalization never claims test coverage, and no
+plan-dependent check runs in the service. Problem messages name fields and
+the observation's own values, never content from the uploaded document.
+Their tests are in `tests/node/proofs.test.ts` (each field shape once per
+validator) and `tests/service/uploads.test.ts` (wiring).
+
+## Ingestion CLI inputs
+
+`cli/ingest.ts` reads its flags, the token file, the input bundle, the
+`--proof-dir` files, and on resume its own state file. The bundle and the
+state file go through the shared strict loader; state fields are checked
+with located errors (`tests/node/ingest.test.ts` walks absent, null, wrong
+type, wrong element, and empty once, plus the loader's document shapes).
+Every one of these is read before the first network request. The only
+defaults: an absent `--proof-dir` means no uploads, and a not-yet-acknowledged
+state reports zero accepted observations in its summary.
+
+## Retention certificates
+
+`src/retention.ts` reads a certificate (at most `request_json_bytes`) through
+the shared strict loader and the `src/requests.ts` field readers. No field is
+optional: explicit `null`, unknown keys, and wrong types are 400 at the
+field's JSON pointer, and arrays are never filtered.
+
+- `certificate_id` (UUID), `snapshot` (all six `Snapshot` fields as integer
+  tokens; `repository_id` must be the path's), `cells` (`[]` is valid),
+  `verifier_policy` (`name`, `version` nonempty; `digest` SHA-256 hex), and
+  `release_pins` (`[]` is valid).
+- Each cell: `package` (nonempty), `environment` and `gate` (enums),
+  `candidate_ids` (unique observation IDs; empty only when the store holds
+  none for the cell), `retained_ids` (unique, at least one), `supersessions`
+  (`[]` is valid).
+- Each edge: `superseded_id`, `superseded_by_id`, and `evidence`, either
+  `{kind:"strict-ancestry", ancestor_head, descendant_head}` (40-hex heads) or
+  `{kind:"retry", chain}` (at least two unique IDs); each kind's keys are
+  closed.
+- Each pin: `release` (nonempty, unique within the certificate) and
+  `observation_ids` (unique; `[]` is valid).
+
+Intentional defaults: a certified cell with no stored observations is an
+empty stored set; a missing capacity baseline counts as zero outside usage,
+and a reservation sum with no rows counts as zero; an empty prune set makes a
+job that is `completed` at once with `not_before_ms` equal to the submission
+time; the job runner's batch budget defaults to 400 batches per run.
+`tests/service/retention.test.ts` walks absent, null, wrong type, and empty
+once through the shared readers, then one invalid shape per other field, plus
+one strict-loader wiring case (duplicate key) and the size bound.
+
+## Backup manifest and recovery commands
+
+The backup manifest (`api/schemas/backup-manifest.schema.json`) is read only
+by `src/backup-manifest.ts`, through the shared strict loader and the
+`src/requests.ts` readers. It is `format_version` 1 and holds:
+
+- `backup_id` (32 hex, also the backup directory's name), `created_at_ms`,
+  `boundary` (`boundary_id` equal to `backup_id`, `quiesced_at_ms`,
+  `resumed_at_ms` not before it), `source` (`environment`,
+  `d1_database_name`, `d1_database_id`, `r2_bucket`), `migration` (1–9999),
+  and `database` (`file`, `sha256`, `bytes`);
+- the required lists `repositories`, `objects`, `missing_objects` (reason
+  `absent` or `digest-mismatch`), `pending_uploads`, `retention_jobs`,
+  `credentials` (digests only; `revoked_at_ms` present exactly when revoked),
+  `grants`, and `window_revocations`. Every list may be empty and is never
+  filtered: one bad element refuses the manifest.
+
+Unknown keys, explicit nulls, duplicate keys, and trailing content are
+refused at their JSON pointer (exit 2). File paths must be relative segments
+that do not start with a dot. `tests/node/recovery.test.ts` walks the field
+shapes once (29 cases) plus the loader wiring; `tests/node/recovery-cli.test.ts`
+spawns one control and two malformed manifests.
+
+The recovery commands take only flags; `restore --replay` may repeat and
+requires `--dest-endpoint`, and `--dest-token-file` and `--report` must not
+already exist. Intentional defaults:
+
+- maintenance: an absent `reason` records `"operator maintenance"`; an absent
+  `boundary_id` means "no boundary", and two such quiesces are the same one;
+  `recover-jobs` accepts an empty body or `{}`;
+- `--config` defaults to the package's `wrangler.jsonc`; `restore --label`
+  defaults to `restored-operator`, with the standard 90-day expiry;
+- objects already missing at backup time are reported, not verification
+  failures; rotation keeps seven backups and skips invalid directories with a
+  warning;
+- replay drops uploads whose local file no longer matches its digest and
+  counts them in `uploads_not_replayed`.
+
 ## Not captured, and why
 
 - **An absolute `report_dir` in an adapter case.** Every frozen adapter case uses

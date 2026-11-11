@@ -2,16 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://rusty-biscuit.invalid/evidence-store/ingest-config.schema.json",
   "title": "Evidence ingestion configuration",
-  "description": "Read by the ingestion CLI before any network request. Every path is a literal native path on the submitting host, never a historic report-reference string from an observation. The token file holds the bearer token; its contents are never logged.",
+  "description": "The ingestion configuration, checked in full before any network request. Every path is a literal native path on the submitting host, never a historic report-reference string from an observation. The token file holds the bearer token; its contents are never logged. The ingestion CLI (`cli/ingest.ts`) takes these values as flags (`--endpoint`, `--repo`, `--token-file`, `--state`) and builds `proofs` from `--proof-dir`: each report path, and each proof's `{package}-{gate}.expected.json` and `.completion.json`, resolved inside that directory.",
   "type": "object",
   "additionalProperties": false,
   "required": ["endpoint", "repository_id", "token_file", "state_path", "proofs"],
   "properties": {
     "$schema": { "type": "string" },
     "endpoint": {
-      "description": "Service origin, without the `/v1` prefix.",
+      "description": "Service origin, without the `/v1` prefix: `https://host[:port]`, or `http://` only for a loopback host (`127.0.0.1`, `localhost`, `[::1]`) such as a local `wrangler dev`. No path, query, or credentials.",
       "type": "string",
-      "pattern": "^https://[^/?#]+/?$"
+      "pattern": "^(https://[^/?#@\\s]+|http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]{1,5})?)/?$"
     },
     "repository_id": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
     "token_file": { "type": "string", "minLength": 1, "description": "Owner-only file holding the bearer token." },
