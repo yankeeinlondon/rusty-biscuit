@@ -301,7 +301,8 @@ Now your task is to:
    insufficient. Run `just test` and `just lint` in each affected package area
    after the final change, plus the verification tiers required by the behavior.
    Account for unrelated failures explicitly; never claim checks passed when
-   they did not. Continue with remaining findings after a blocked repair.
+   they did not. A slow test counts as a failure (see "A Slow Test Is a
+   Failing Test"). Continue with remaining findings after a blocked repair.
 
 4. Write the closing log entries to the log file ({{log}}):
 
@@ -349,3 +350,5 @@ complete, ready for review" only for a complete cycle.
 ::file "../_os.md"
 
 ::file "../_test-tiers.md"
+
+::file "../_slow-tests-fail.md"

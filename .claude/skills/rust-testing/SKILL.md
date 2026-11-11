@@ -62,7 +62,9 @@ the wrong thing.
     across agents, each runs only its slice's tests and the full suite runs
     once, after merging. → [verification-scope.md](verification-scope.md)
 11. **An L1 test over 5 s is a failing test.** It passes on a development host
-    and times out on a 2-core CI runner. Make it fast; a `slow_` prefix or a
+    and times out on a 2-core CI runner. On a host under load the allowance is
+    10 s: a test between 5 and 10 s in a loaded run must be re-measured alone
+    before it counts, and one at 10 s or longer fails regardless. Make it fast; a `slow_` prefix or a
     nextest `slow-timeout` override is not a fix. → [test-speed.md](test-speed.md)
 12. **A green run on your host proves nothing about text the host supplies.**
     Pull requests run only Linux and macOS, so an assertion on spawned output

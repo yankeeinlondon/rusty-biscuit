@@ -235,7 +235,7 @@ pre-existing failure.
 You are done when:
 
 - all functionality defined in phase {{phase}} has been implemented
-- all tests are passing (using `just test` in the {{ctx.current_package_area}} package area)
+- all tests are passing (using `just test` in the {{ctx.current_package_area}} package area), and none is slow (see "A Slow Test Is a Failing Test")
 - all tests meet the design requirements for testing (stated above)
 - all lints are passing (using `just lint` in the {{ctx.current_package_area}} package area)
 - all GFM tasks/todos in the plan have been completed (and have been marked as complete)
@@ -369,5 +369,7 @@ complete until they are saved to disk.
 ::file "../_finish-before-exit.md"
 
 ::file "../_test-scope.md"
+
+::file "../_slow-tests-fail.md"
 
 ::file "../_os.md"

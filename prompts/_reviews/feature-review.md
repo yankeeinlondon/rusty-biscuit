@@ -417,6 +417,8 @@ test is at the wrong level under "Findings" with severity at least "high".
 
 ::file "../_test-tiers.md"
 
+::file "../_slow-tests-fail.md"
+
 ## Closure
 
 ### Review Frontmatter

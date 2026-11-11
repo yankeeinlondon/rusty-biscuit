@@ -8,6 +8,7 @@
             - a poorly constructed test that will not adequately test what it intends to
             - a test that will become unstable over time (e.g., using source code in the repo to test versus creating a static fixture to run the test on, etc.)
             - testing gaps for functionality derived from new or changed code from the specification
+            - any slow test (over 5 s, or 10 s or longer in a run on a loaded host) in the implementer's recorded runs or your own: each is a finding, and an implementation record that reports such a run as passing is wrong (see "A Slow Test Is a Failing Test")
                 - Note: you do not need to validate tests which were external to the changes imposed by the spec; anything glaring you notice there is still a finding
     - things that should NOT contribute to **readiness** include:
         - Evidence/Proof of cross-os results (this will be done as part of CI/CD)
