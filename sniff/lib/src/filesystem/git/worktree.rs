@@ -197,7 +197,11 @@ pub(crate) fn list_worktrees_from_gix(
         .map_err(|e| SniffError::git("worktrees", e))?;
 
     for proxy in proxies {
-        let name = proxy.id().to_str_lossy().into_owned();
+        let name = proxy
+            .id()
+            .map_err(|e| SniffError::git("worktree_id", e))?
+            .to_str_lossy()
+            .into_owned();
         let path = proxy
             .base()
             .map_err(|e| SniffError::git("worktree_base", e))?;

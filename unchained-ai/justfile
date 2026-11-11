@@ -126,12 +126,14 @@ lint *args="":
     @just _lint unchained-ai-contract {{ args }}
     @just _lint unchained-ai-cli {{ args }}
     @just _lint unchained-ai-gen {{ args }}
+    @just _lint model_id {{ args }}
 
 # lint and fix with AI if problems found
 lint-fix *args="":
     @just _lint unchained-ai {{ args }} || just _lint_fix unchained-ai
     @just _lint unchained-ai-cli {{ args }} || just _lint_fix unchained-ai-cli
     @just _lint unchained-ai-gen {{ args }} || just _lint_fix unchained-ai-gen
+    @just _lint model_id {{ args }} || just _lint_fix model_id
 
 install *args="":
     @just build --release

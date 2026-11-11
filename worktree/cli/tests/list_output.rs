@@ -65,10 +65,11 @@ impl Home {
     }
 }
 
-/// `wt` reads repository metadata in-process with gix, which on Windows ran
-/// `git --exec-path` (through Git for Windows' launcher, with a hidden
-/// console) once per process to find the system configuration, unless
-/// `EXEPATH` names the installation. `wt` names it, so no run asks.
+/// `wt` reads repository metadata in-process with gix, which on Windows runs
+/// `git --exec-path` or `git config --show-origin` (through Git for Windows'
+/// launcher, with a hidden console) once per process to find the system
+/// configuration, unless `EXEPATH` names the installation. `wt` names it, so
+/// no run asks.
 #[cfg(windows)]
 #[test]
 fn a_listing_never_asks_git_for_its_exec_path() {
@@ -103,7 +104,8 @@ fn git_installation() -> (PathBuf, PathBuf) {
 }
 
 /// Runs `wt list` with `first_on_path` ahead of the inherited `PATH` (when
-/// given) and asserts no Git process it started was `git --exec-path`.
+/// given) and asserts no Git process it started was gix-path asking where
+/// the installation is.
 #[cfg(windows)]
 fn assert_a_listing_never_asks_git_for_its_exec_path(first_on_path: Option<&Path>) {
     let repo = tempfile::tempdir().expect("repo dir");
@@ -131,7 +133,10 @@ fn assert_a_listing_never_asks_git_for_its_exec_path(first_on_path: Option<&Path
         .map(|entry| fs::read_to_string(entry.expect("entry").path()).expect("trace file"))
         .collect();
     assert!(!started.is_empty(), "the listing ran git, and each git process wrote a trace");
-    let asked = started.iter().filter(|trace| trace.contains("\"--exec-path\"")).count();
+    let asked = started
+        .iter()
+        .filter(|trace| trace.contains("\"--exec-path\"") || trace.contains("\"--show-origin\""))
+        .count();
     assert_eq!(asked, 0, "{started:#?}");
 }
 

@@ -86,28 +86,24 @@ as one run by `C:\Program Files\Git\ucrt64\bin\git.exe` from that shell.
 ## The installation hint for in-process reads
 
 `wt` reads most repository metadata in-process with `gix`. To find Git's
-system configuration, gix-path runs `git --exec-path` with a hidden console,
-once per process (three process creations through the launcher), unless
+system configuration, gix-path runs `git config -lz --show-origin` (and, for
+its system prefix, `git --exec-path`) with a hidden console, once per process
+(three process creations each through the launcher), unless
 `EXEPATH` names the installation, as Git Bash does. `wt`'s `main` therefore
 sets `EXEPATH` to `<top>` for either entry, when neither `EXEPATH` nor
 `GIT_EXEC_PATH` is already set, and removes it again from every process it
 starts, so a child sees what it would have inherited.
 
-Known limitation: the gix-path release `wt` uses (0.12, through gix 0.84)
-reads `EXEPATH` only for the `mingw64`, `clangarm64`, and `mingw32` prefixes.
-On a `ucrt64` installation (Git for Windows 2.56 and later on x86_64) the hint
-is set but ignored:
-
-- the first in-process read still runs `git --exec-path`, so the process
-  creations the hint exists to save remain;
-- gix reports the installation's top directory, not `<top>\ucrt64`, as its
-  system prefix.
-
-Results are unaffected: Git 2.56 keeps its system configuration in
-`<top>\etc\gitconfig`, which is the file gix reads from that prefix. The
-Windows tests that pin the hint (`named_installation`, and the `list_output`
-exec-path tests) fail on a `ucrt64` installation until gix-path 0.14, which
-needs gix 0.89 or later.
+gix-path recognizes `EXEPATH` for all four prefixes in the table above. It
+looks for exactly one `<prefix>` directory under `EXEPATH`; with none, or
+with more than one (a leftover `mingw64\` beside a new `ucrt64\`), it ignores
+the hint and asks Git. `wt` makes the same check before naming the
+installation, so it names one only when gix will use it. With the hint, gix
+takes `<top>\<prefix>` as the system prefix and `<top>\etc\gitconfig` as the
+system configuration, the same file Git reports, without starting a process.
+For example, with PortableGit 2.56 at `D:\git` and `D:\git\cmd` first on
+`PATH`, `wt` sets `EXEPATH=D:\git` and gix reports `D:\git\ucrt64`, the
+prefix `git --exec-path` implies (`D:/git/ucrt64/libexec/git-core`).
 
 ## Checking it on Windows
 

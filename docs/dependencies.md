@@ -7,6 +7,14 @@
 
 ## Recent Dependency Notes
 
+- `unchained-ai/model_id` drops its `trybuild` dev-dependency (2026-11-10):
+  its compile-pass cases are now modules of an ordinary integration test and
+  its compile-fail cases run the derive's expansion in-process, so no test
+  starts a nested Cargo build. It adds `biscuit-test-harness` (workspace path)
+  for `manifest_dir!` and enables `proc-macro2`'s `span-locations` as a
+  dev-dependency feature, so a diagnostic's line and column can be compared
+  with its `.stderr` file. `trybuild` stays in the lockfile through
+  `schematic`; no package is added.
 - `biscuit-file/lib` adds optional `csv` 1.3 and `csv-core` 0.1.13
   (2026-11-07) behind its off-by-default `delimited` feature (in `full`), for
   the strict CSV/TSV reader `biscuit_file::delimited`. `csv` decodes the
@@ -432,7 +440,7 @@
   and uses `biscuit-file` (no default features, `file-reference` only) for
   `canonicalize_simplified` and for `home_dir()`, the environment-first home
   lookup behind `~/.worktree.json` and the setup candidates. Both crates pin
-  `gix = "=0.84.0"`, so the feature builds no second `gix`.
+  `gix = "=0.90.0"`, so the feature builds no second `gix`.
   It uses `fs4` 0.13 (already in the workspace graph through `playa`) for the
   nonblocking lock on `<repo hash>.prs.lock`, which lets only one background
   refresh of the PR store make a request; the PR store binds its answer to a
@@ -461,7 +469,7 @@
   as `worktree/cli` already builds it) to show a process's start time in local
   time in `wt remove`'s warnings (`remove::facts`). Sniff reports the time as a
   `chrono` UTC value; no crate was added to the lockfile.
-- `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
+- `worktree/lib` uses `gix` (pinned `=0.90.0`, the version `sniff` builds, with
   `sha1`, `revision`, and `parallel`, all of which `sniff` already enables) to
   read repository metadata in-process: `origin`'s URL, the default branch,
   branch-name validity, `core.sshCommand`, ref targets, every branch tip, and
@@ -1185,7 +1193,7 @@ This is a Rust workspace with the following modules:
 
 ### Git
 
-- [gix](https://github.com/GitoxideLabs/gitoxide) _v0.84.0_ [📄](https://docs.rs/gix)
+- [gix](https://github.com/GitoxideLabs/gitoxide) _v0.90.0_ [📄](https://docs.rs/gix)
 
     _Pure-Rust Git repository inspection library (status, diff, history, refs, remotes, config, worktrees)._
 

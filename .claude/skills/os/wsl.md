@@ -79,13 +79,11 @@ ssh -o BatchMode=yes "$BUILD_WSL" 'bash -lc "
   built test binary with `cargo` and `rustc` stripped from `PATH`.
 - **`cross-check --os wsl` is not toolchain-free.** The rig's guest builds
   the archive itself, so its consumer still has `~/.cargo/bin` on `PATH`. A
-  `requires-toolchain` suite (`model_id`'s trybuild `ui`) passes there, while
-  CI's guest, which has no `cargo`, plans it as the `cargo_toolchain`
+  `requires-toolchain` suite (`test-toolkit`, `repo-deps`) passes there,
+  while CI's guest, which has no `cargo`, plans it as the `cargo_toolchain`
   accepted gap. That pass is not evidence for the gap. To see what the guest
   sees, run the manual archive sequence above with
-  `env PATH=<dir holding only cargo-nextest>:/usr/bin:/bin`: `ui` then fails
-  at its prerequisite assertion ("the trybuild UI tests need `cargo` on
-  PATH").
+  `env PATH=<dir holding only cargo-nextest>:/usr/bin:/bin`.
 - Give every manual run its own empty `--extract-to` directory. Reusing a
   directory from the previous run once made a passing suite report a failure
   and exit 96 (2026-11-09; the same run in a fresh directory passed).

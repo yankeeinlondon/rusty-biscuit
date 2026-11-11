@@ -6143,6 +6143,236 @@ fn every_skippable_job_has_a_static_human_readable_identity() {
     );
 }
 
+// --- legible names: the frozen naming contract --------------------------------
+//
+// The reader-facing names of the four workflows, as the legible-CI-names
+// convention fixes them. `None` means the job keeps NO `name:`: GitHub then
+// renders the job id plus the row's four values (`test (research, L1,
+// ubuntu-latest, ubuntu-latest)`), which `scripts/ci/runner_loss.py` reads to
+// attribute a lost runner. A static name would hide those values; an
+// expression name renders raw when the job is skipped.
+//
+// Each row also records the name before the rename (`before`), so the
+// contract is anchored to what the workflows actually declare while the
+// rename is in progress. Once applied, only `after` is accepted.
+
+/// One job: identifier, name before the rename, name after it.
+type JobNaming = (&'static str, Option<&'static str>, Option<&'static str>);
+
+/// One workflow: file, title before, title after, and every job in file order.
+struct WorkflowNaming {
+    file: &'static str,
+    title_before: &'static str,
+    title: &'static str,
+    jobs: &'static [JobNaming],
+}
+
+const NAMING_CONTRACT: [WorkflowNaming; 4] = [
+    WorkflowNaming {
+        file: "ci.yml",
+        title_before: "ci",
+        title: "Continuous integration",
+        jobs: &[
+            ("validation", Some("Check reusable PR validation"), Some("Check prior pull request validation")),
+            ("scope", Some("Determine affected scope"), Some("Choose required work")),
+            ("preflight", None, Some("Verify build prerequisites")),
+            ("build", None, None),
+            ("area-ci", None, None),
+            ("area-drift", Some("area-drift (planner areas match sniff)"), Some("Verify package area mapping")),
+            ("ci-gate", Some("ci-gate"), Some("ci-gate")),
+            ("certify-nightly", None, Some("Publish nightly coverage evidence")),
+            ("publish-observations", None, Some("Publish test observations")),
+            ("ci-reporting", Some("ci-reporting (advisory)"), Some("Report CI results (advisory)")),
+        ],
+    },
+    WorkflowNaming {
+        file: "_area-ci.yml",
+        title_before: "area-ci",
+        title: "Package area checks",
+        jobs: &[
+            ("package-ci", None, Some("Run package work")),
+            ("accepted-gaps", None, Some("Publish accepted capability gaps")),
+            ("coverage-audit", None, Some("Check required results")),
+        ],
+    },
+    WorkflowNaming {
+        file: "_package-ci.yml",
+        title_before: "package-ci",
+        title: "Package checks",
+        jobs: &[
+            ("check", None, None),
+            ("test", None, None),
+            ("lint", None, None),
+            ("wsl2", None, None),
+        ],
+    },
+    WorkflowNaming {
+        file: "_wsl-ci.yml",
+        title_before: "wsl-ci",
+        title: "WSL2 tests",
+        jobs: &[("wsl", Some("test (wsl2-ubuntu)"), Some("Run guest tests"))],
+    },
+];
+
+/// Step display names that the convention replaces: the workflows each old
+/// name appears in, the old name, and its replacement.
+const STEP_RENAMES: [(&[&str], &str, &str); 11] = [
+    (&["_package-ci.yml"], "cargo check (declared kinds no test gate compiles)", "Check compilation of declared targets"),
+    (&["_package-ci.yml"], "Tests", "Run planned tests"),
+    (&["_package-ci.yml"], "Companion suites", "Run companion test suites"),
+    (&["_package-ci.yml"], "Lint", "Lint source"),
+    (&["_package-ci.yml"], "Companion suites (lint)", "Run companion lint suites"),
+    (&["_package-ci.yml", "_wsl-ci.yml"], "Certify this cell's completeness", "Verify all expected results reported"),
+    (&["_wsl-ci.yml"], "L1 tests from the archive", "Run Level 1 tests from the archive"),
+    (&["_wsl-ci.yml"], "Upload wsl2-ubuntu L1 JUnit", "Upload WSL2 Level 1 test results"),
+    (&["_wsl-ci.yml"], "Guest post-mortem", "Collect guest diagnostics"),
+    (&["_wsl-ci.yml"], "Host post-mortem", "Collect host diagnostics"),
+    (&["_area-ci.yml"], "Enforce coverage completeness and exceptions", "Verify required results and policy exceptions"),
+];
+
+/// A workflow's top-level `name:`.
+fn workflow_title(source: &str) -> String {
+    source
+        .lines()
+        .find_map(|line| line.strip_prefix("name:"))
+        .map(|title| title.trim().to_owned())
+        .expect("every reader-facing workflow declares a title")
+}
+
+/// Every step display name a workflow declares, in file order.
+fn step_names(source: &str) -> Vec<String> {
+    source
+        .lines()
+        .filter_map(|line| line.strip_prefix("      - name: "))
+        .map(|name| name.trim().to_owned())
+        .collect()
+}
+
+/// The naming contract covers every job of the four workflows, in file order,
+/// and each declared name is the contract's (or, until the rename lands, the
+/// recorded previous one). Jobs whose contract name is `None` carry no `name:`.
+#[test]
+fn reader_facing_jobs_follow_the_naming_contract() {
+    let files: Vec<&str> = NAMING_CONTRACT.iter().map(|workflow| workflow.file).collect();
+    assert_eq!(files, READER_FACING_WORKFLOWS, "the contract covers exactly the reader-facing workflows");
+    for contract in &NAMING_CONTRACT {
+        let source = workflow(contract.file);
+        let title = workflow_title(&source);
+        assert!(
+            title == contract.title || title == contract.title_before,
+            "{}: title {title:?} is neither {:?} nor the recorded previous {:?}",
+            contract.file,
+            contract.title,
+            contract.title_before
+        );
+        let blocks = jobs(&source);
+        let ids: Vec<String> = blocks.iter().map(|block| job_id(block)).collect();
+        let expected: Vec<&str> = contract.jobs.iter().map(|(id, _, _)| *id).collect();
+        assert_eq!(ids, expected, "{}: job identifiers must not change", contract.file);
+        for (block, (id, before, after)) in blocks.iter().zip(contract.jobs) {
+            let declared = job_name(block);
+            assert!(
+                declared.as_deref() == *after || declared.as_deref() == *before,
+                "{}: job `{id}` is named {declared:?}; the contract names it {after:?}",
+                contract.file
+            );
+        }
+    }
+}
+
+/// Every name the contract introduces is a literal a skipped job can show:
+/// no expression, no empty or punctuation-only label, and never a row value
+/// that would make a static name masquerade as a cell identity.
+#[test]
+fn the_naming_contract_uses_only_literal_descriptive_names() {
+    for contract in &NAMING_CONTRACT {
+        let names = std::iter::once(contract.title)
+            .chain(contract.jobs.iter().filter_map(|(_, _, after)| *after));
+        for name in names {
+            let suffix_free = !name.contains(['(', ',']) || name.ends_with(" (advisory)");
+            assert!(
+                !name.contains("${{") && suffix_free,
+                "{}: {name:?} must be a literal without a matrix-style suffix",
+                contract.file
+            );
+            assert!(
+                name.trim() == name && name.chars().filter(char::is_ascii_alphabetic).count() >= 4,
+                "{}: {name:?} names nothing a reader can act on",
+                contract.file
+            );
+        }
+    }
+    for (_, old, new) in STEP_RENAMES {
+        assert!(
+            !new.contains("${{") && new != old && new.trim() == new,
+            "step rename {old:?} -> {new:?} must be a different literal"
+        );
+    }
+}
+
+/// The required check and the advisory report keep their contracts across the
+/// rename: `ci-gate` is still the exact required context, and the report still
+/// says it is advisory.
+#[test]
+fn the_rename_keeps_the_required_context_and_the_advisory_report() {
+    let gate = job_block("ci.yml", "  ci-gate:");
+    assert_eq!(
+        job_name(&gate).as_deref(),
+        Some("ci-gate"),
+        "ci-gate is the required context `protect-your-bacon` names; its \
+         displayed name must stay exactly `ci-gate`"
+    );
+    let report = job_block("ci.yml", "  ci-reporting:");
+    let name = job_name(&report).expect("the report declares a static name");
+    assert!(name.ends_with("(advisory)"), "the report must stay visibly advisory: {name:?}");
+}
+
+/// The WSL2 delegation, `ci.yml`'s area fan-out, and its build owners keep
+/// GitHub's automatic matrix labels, as `check`, `test`, and `lint` do (see
+/// `lint_and_check_labels_identify_their_environment`). `runner_loss.py`
+/// recovers a lost WSL2 cell from `wsl2 (<package>, <gate>, <environment>,
+/// <runner>)` and a lost build owner from `build (<owner>)`.
+#[test]
+fn delegation_area_and_build_jobs_keep_their_automatic_labels() {
+    let wsl2 = job_block("_package-ci.yml", "  wsl2:");
+    assert!(job_name(&wsl2).is_none(), "wsl2 must keep its automatic label");
+    assert!(
+        wsl2.contains("include: ${{ fromJSON(inputs.wsl-rows) }}"),
+        "wsl2 must expand its row set, so its automatic label carries the row's values"
+    );
+    let area = job_block("ci.yml", "  area-ci:");
+    assert!(job_name(&area).is_none(), "area-ci must keep `area-ci (<directory>)` as its label");
+    assert!(area.contains("area: ${{ fromJSON(needs.scope.outputs.scheduled_areas) }}"));
+    let build = job_block("ci.yml", "  build:");
+    assert!(job_name(&build).is_none(), "build must keep `build (<owner>)`, which runner_loss.py reads");
+    assert!(build.contains("build: ${{ fromJSON(needs.scope.outputs.build_producers) }}"));
+}
+
+/// Each step rename names a step that exists: exactly one of the old and the
+/// new name is declared in every workflow the row lists, never both. The
+/// dependent-compilation step keeps its name verbatim.
+#[test]
+fn step_renames_name_real_steps() {
+    for (files, old, new) in STEP_RENAMES {
+        for file in files {
+            let names = step_names(&workflow(file));
+            let old_count = names.iter().filter(|name| *name == old).count();
+            let new_count = names.iter().filter(|name| *name == new).count();
+            assert!(
+                (old_count == 0) != (new_count == 0),
+                "{file}: step {old:?} -> {new:?} must name an existing step under \
+                 exactly one of its names (old {old_count}, new {new_count})"
+            );
+        }
+    }
+    let package_steps = step_names(&workflow("_package-ci.yml"));
+    assert_eq!(
+        package_steps.iter().filter(|name| *name == "Compile unchanged dependents").count(),
+        1,
+        "`Compile unchanged dependents` keeps its name"
+    );
+}
+
 /// AC10: every producer label identifies its cell — package, gate, and
 /// environment — without a `name:` GitHub would render raw on a whole-job skip.
 ///
@@ -8122,22 +8352,16 @@ fn no_test_tier_carries_a_compile_in_place_path() {
         // The one Cargo invocation a tier may still make, and only under the
         // opt-in measurement dispatch: a consumer's compiler-work count must be
         // ZERO, which is the cleanest proof the cutover worked, and the tool
-        // that counts it has to exist to say so. The other exception compiles
-        // nothing: a toolchain-gated step may `cargo fetch --locked` the
-        // registry sources a suite's own nested, offline Cargo builds need.
-        for step in steps(&job) {
-            let toolchain_gated = step.contains("steps.cell.outputs.requires_toolchain == 'true'");
-            for line in executable_lines(&step).lines() {
-                let line = line.trim();
-                if !line.contains("cargo ") {
-                    continue;
-                }
-                let gated_fetch = toolchain_gated && line.starts_with("cargo fetch --locked ");
-                assert!(
-                    line.contains("just _ci_build_counter") || line.contains("cargo-nextest") || gated_fetch,
-                    "{header}: `{line}` is a compiler invocation in an archive consumer"
-                );
+        // that counts it has to exist to say so.
+        for line in executable_lines(&job).lines() {
+            let line = line.trim();
+            if !line.contains("cargo ") {
+                continue;
             }
+            assert!(
+                line.contains("just _ci_build_counter") || line.contains("cargo-nextest"),
+                "{header}: `{line}` is a compiler invocation in an archive consumer"
+            );
         }
     }
 }

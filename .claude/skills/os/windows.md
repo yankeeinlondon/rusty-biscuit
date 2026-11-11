@@ -146,12 +146,14 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   (the real binary) first on `PATH` instead of `<top>\cmd`; reproduce a
   failure of that shape on a rig by prepending `<top>\mingw64\bin` to a
   process-scoped `PATH`. `worktree::git::command()` treats that as a direct
-  entry and runs it with the inherited environment. gix-path 0.12 (gix 0.84)
-  reads `EXEPATH` only for `clangarm64`/`mingw64`/`mingw32`, so on `ucrt64`
-  it still runs `git --exec-path` and reports `<top>` as the system prefix
-  (0.14, gix 0.89+, adds `ucrt64`). gix 0.90 replaced its typed error enums
-  (`gix::discover::Error`) with `gix_error::Error`, so that upgrade is an API
-  migration across every gix consumer, not a version bump.
+  entry and runs it with the inherited environment. gix-path before 0.14
+  (gix before 0.89) read `EXEPATH` only for `clangarm64`/`mingw64`/`mingw32`,
+  so on `ucrt64` it ran `git --exec-path` and reported `<top>` as the system
+  prefix; the workspace's gix 0.90 (gix-path 0.14) reads all four. A gix
+  upgrade is an API migration across every gix consumer, not a version bump:
+  0.90 replaced the typed error enums with `gix::Error` (match a "not found"
+  outcome with `downcast_any_ref::<gix::discover::upwards::Error>()` or
+  `try_find_reference`, not on variants).
 - **A rig receipt does not prove the hosted Git layout.** `build-win` runs
   Git 2.55 (`mingw64`); the hosted image runs 2.56 (`ucrt64`). A passing
   `cross-check --os windows` observation is keyed on package, environment,
@@ -166,14 +168,23 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   process. `<dir>\cmd` and `<dir>\ucrt64\bin` then work as the launcher and
   direct entries.
 - **The first `gix` open in a process starts three processes** unless
-  `EXEPATH` is set: gix-path runs `git --exec-path` through the launcher to
-  find the system config (launcher, real `git.exe`, `conhost.exe`; cached per
-  process). Git Bash sets `EXEPATH`; SSH, PowerShell, and CI shells do not, so
+  `EXEPATH` names an installation with exactly one prefix directory: gix-path
+  runs `git config -lz --show-origin` (and `git --exec-path` for its system
+  prefix) through the launcher to find the system config (launcher, real
+  `git.exe`, `conhost.exe`; cached per process). Its `--exec-path` fallback
+  now derives the same prefix as the hint, so a test that the hint is used
+  must assert that no such process started, not compare prefixes. Git Bash sets `EXEPATH`; SSH, PowerShell, and CI shells do not, so
   `wt` sets it to the installation's `<top>` in `main`. In a short-lived
   process that opens no other repository, "read it in-process" turns one
   `rev-parse` into three. Diagnose with `GIT_TRACE2_EVENT=<dir>` (one file per
   git process, with `cmd_ancestry`; a parent that wrote no trace is the
   launcher).
+- **`Start-Process -Wait` hangs after a Cargo build finishes.** PowerShell 7
+  waits for every process in the started process's job, and the MSVC linker
+  leaves `vctip.exe` (its telemetry helper) running there for many minutes
+  after `cargo` exits. A rig script that runs `cargo nextest` through
+  `Start-Process -Wait` reports nothing until then. Use `-PassThru` without
+  `-Wait` and call `$p.WaitForExit()`, which waits for that process alone.
 - **Defender is about a quarter of a parallel test run's CPU on
   `build-win-native`** (`MsMpEng` 120–145 of ~575 CPU-s; Search, `System`,
   and `svchost` another 80–90). Roughly 5 ms per process start, 2–5 ms per

@@ -100,8 +100,8 @@ facts and traps, not user docs.
   `worktree::git::TEST_LIST_THROUGH_GIT_VAR`, or the read it waits for
   never becomes a process (`cli/tests/remove_recovery.rs`).
 - **On Windows the first `gix` open in a process costs three process
-  creations** (gix-path's `git --exec-path` through the launcher, with a
-  hidden console) unless `EXEPATH` is set. `wt`'s `main` sets it
+  creations** (gix-path's `git config --show-origin` or `git --exec-path`
+  through the launcher, with a hidden console) unless `EXEPATH` is set. `wt`'s `main` sets it
   (`git::name_installation_for_gix`) and strips it from children. A test
   helper that swaps one git process for an in-process read in a test
   process that opens no repository otherwise trades one process for three.

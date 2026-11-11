@@ -13,16 +13,12 @@ quote = "1.0"
 proc-macro2 = "1.0"
 
 [dev-dependencies]
-trybuild = "1.0"
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+# Line and column on fallback spans, so the compile-fail unit tests can
+# compare a diagnostic's location with its `.stderr` file.
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
 
 # Opt-out of benchmarking: proc-macro crate; compile-time only.
 [package.metadata.benchmarks]
 required = false
 reason = "Proc-macro crate; compile-time only, no runtime hot paths."
-
-# The trybuild UI test compiles its cases with nested `cargo` builds, so it
-# needs a live toolchain and the registry sources of the workspace lockfile,
-# not merely a compiled archive. Environments without a toolchain render a
-# governed ACCEPTED GAP instead of a red cell.
-[package.metadata.ci.tests]
-requires-toolchain = true

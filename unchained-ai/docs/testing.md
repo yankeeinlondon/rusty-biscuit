@@ -1,66 +1,104 @@
 # Testing the `model_id` derive macro
 
-`model_id` is a procedural macro: it runs inside the compiler. Its behavior
-can only be observed by compiling code that uses it, so its UI test
-(`model_id/tests/ui.rs`) uses [trybuild](https://docs.rs/trybuild) to compile
-small example crates:
+`model_id` is a procedural macro: it runs inside the compiler. Its tests prove
+two things, and neither starts a Cargo build of its own:
 
-- every file in `model_id/tests/pass/` must compile;
-- every file in `model_id/tests/fail/` must fail to compile, with the
-  compiler output stored beside it in a `.stderr` file.
+- every file in `model_id/tests/pass/` compiles and the code the derive
+  generates behaves as expected;
+- every file in `model_id/tests/fail/` is rejected by the derive with exactly
+  the diagnostic stored beside it in a `.stderr` file.
 
-Run it like any other L1 test:
+Run them like any other L1 test:
 
 ```sh
 cd unchained-ai
-just test ui
+just test model_id
 ```
 
-## What the test needs from the host
+## Compile-pass cases
 
-Unlike most tests in this repository, the UI test starts real `cargo` builds
-of its own. Two things must be true before it runs:
+Each `tests/pass/*.rs` file is a module of the `tests/derive.rs` integration
+test, listed in its `compile_pass_cases!` invocation. Building that test
+binary compiles every case through the real compiler and the real derive;
+each case's `#[test] fn compiles_and_behaves` then checks the generated API:
 
-1. **`cargo` is on `PATH`.** Without it the test fails with
-   "the trybuild UI tests need `cargo` on PATH". It never passes without
-   compiling anything.
-2. **The registry sources are already downloaded.** trybuild always runs its
-   nested builds with `cargo --offline`, so every crate in the workspace
-   lockfile that the examples depend on (`syn`, `quote`, `proc-macro2`, …) must
-   already be in the Cargo home. On a development machine an ordinary
-   `cargo build` has done this. On a fresh machine, fetch them first:
+```rust
+// tests/pass/no_bespoke.rs
+#[derive(ModelId, Debug, Clone, PartialEq, Eq)]
+pub enum StrictProvider { ModelA, ModelB }
 
-   ```sh
-   cargo fetch --locked --manifest-path unchained-ai/model_id/Cargo.toml
-   ```
+#[test]
+fn compiles_and_behaves() {
+    assert_eq!(StrictProvider::ModelA.model_id(), "modela");
+    assert!("unknown".parse::<StrictProvider>().is_err());
+}
+```
 
-   A missing crate shows up as
-   `error: no matching package named `proc-macro2` found … offline mode`.
+A case that stops compiling fails the build of the test binary, so it can
+never be reported as a pass.
+
+To add a case, create `tests/pass/<name>.rs` with one
+`#[test] fn compiles_and_behaves()` and add `<name>` to `compile_pass_cases!`.
+`every_compile_pass_fixture_is_compiled` fails while a file in `tests/pass/`
+is missing from that list.
+
+## Compile-fail cases
+
+The derive's whole expansion is the private function `expand` in
+`model_id/src/lib.rs`; the `#[proc_macro_derive]` entry point only parses its
+input, calls it, and turns an error into `compile_error!`. A unit test per
+`tests/fail/*.rs` file parses the file, runs `expand` on the item that derives
+`ModelId`, and renders the error the way rustc prints it: the message, the
+`file:line:column` of its span, the source line, and a caret under the span.
+The rendering must equal the `.stderr` file:
+
+```text
+error: ModelId can only be derived for enums
+ --> tests/fail/not_enum.rs:4:12
+  |
+4 | pub struct NotAnEnum {
+  |            ^^^^^^^^^
+```
+
+The span's line and column come from `proc-macro2`'s `span-locations`
+feature, which the crate enables for its tests only. The renderer handles
+spans on one line; a case whose error spans several lines fails with a message
+saying so.
+
+To add a case, create `tests/fail/<name>.rs` and `tests/fail/<name>.stderr`,
+add a `#[test] fn <name>()` beside the others in `src/lib.rs`, and add
+`<name>` to `COMPILE_FAIL_CASES`.
+`every_compile_fail_fixture_has_a_test_and_an_expected_diagnostic` fails while
+a `.rs` file has no `.stderr` file or no entry in that list.
 
 ```mermaid
 flowchart LR
-    fetch["cargo fetch --locked<br/>(network)"] --> home[(Cargo home)]
-    home --> ui["ui test<br/>(offline)"]
-    ui --> pass["tests/pass/*.rs<br/>must compile"]
-    ui --> fail["tests/fail/*.rs<br/>must fail with the stored .stderr"]
+    subgraph build["Building the tests (the compiler)"]
+        pass["tests/pass/*.rs<br/>modules of tests/derive.rs"]
+    end
+    subgraph run["Running the tests (no Cargo, no rustc)"]
+        behaves["compiles_and_behaves<br/>per pass case"]
+        fail["tests/fail/*.rs"] --> expand["expand()"] --> render["rendered diagnostic"]
+        render --> compare{"equals .stderr?"}
+    end
+    pass --> behaves
 ```
 
-## In CI
+## What the tests need from the host
 
-The package declares this in its manifest:
+Nothing beyond the test binaries. No test runs `cargo` or `rustc`, downloads
+crates, or reads the Cargo home, so the suite runs from a prebuilt test
+archive on every CI environment, including the WSL2 guest that has no Rust
+toolchain. The package declares no `requires-toolchain` policy.
 
-```toml
-[package.metadata.ci.tests]
-requires-toolchain = true
-```
+## What the in-process diagnostic check does not cover
 
-That has two effects:
-
-- **Hosted Linux, macOS, and Windows cells** install the pinned toolchain,
-  run `cargo fetch --locked` for this package, and then run the tests with
-  `CARGO_NET_OFFLINE=true`. The test binary itself comes from the prebuilt
-  archive; only the examples are compiled on the runner.
-- **The WSL2 cell** runs prebuilt archives in a guest that deliberately has no
-  Rust toolchain, so it cannot run this test. The plan reports that cell as a
-  governed *accepted gap* for the `cargo_toolchain` capability, never as a
-  pass.
+The compile-fail tests assert the derive's own output: which input it
+rejects, the message, and the exact tokens the error points at. They do not
+run rustc, so two steps that belong to `syn` and the compiler are not
+exercised for these cases: `syn::Error::into_compile_error`, which turns the
+error into a `compile_error!` invocation, and rustc's rendering of that
+invocation. The entry point's call to `into_compile_error` is a single line.
+When you change how errors are reported, compare a case's real compiler
+output with its `.stderr` file once by hand, for example by compiling the
+fixture in a scratch crate that depends on `model_id`.

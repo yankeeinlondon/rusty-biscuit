@@ -275,7 +275,7 @@ pub(crate) fn get_branch_info_from_snapshot(
     Ok(branches)
 }
 
-fn configured_upstream(config: &gix::config::File<'_>, branch: &str) -> Option<String> {
+fn configured_upstream(config: &gix::config::File, branch: &str) -> Option<String> {
     let remote = config
         .string(format!("branch.{branch}.remote").as_str())
         .map(|value| value.to_string())?;
@@ -315,8 +315,9 @@ fn is_ancestor(
     ancestor: gix::ObjectId,
     descendant: gix::ObjectId,
 ) -> crate::Result<bool> {
+    // No merge base (unrelated histories) means `ancestor` is unreachable.
     repo.merge_base(ancestor, descendant)
-        .map(|base| base.detach() == ancestor)
+        .map(|base| base.is_some_and(|base| base.detach() == ancestor))
         .map_err(|e| SniffError::git("merge_base", e))
 }
 
@@ -336,7 +337,7 @@ pub(crate) fn get_git_config(repo: &gix::Repository) -> GitConfig {
 /// production platform config file.
 fn get_git_config_with_extra(
     repo: &gix::Repository,
-    extra: Option<gix::config::File<'static>>,
+    extra: Option<gix::config::File>,
 ) -> GitConfig {
     let snapshot = repo.config_snapshot();
 
@@ -352,8 +353,7 @@ fn get_git_config_with_extra(
         snapshot.boolean(key).or_else(|| {
             extra
                 .as_ref()
-                .and_then(|f| f.boolean(key))
-                .and_then(Result::ok)
+                .and_then(|f| f.boolean(key).ok().flatten())
         })
     };
 
@@ -375,8 +375,8 @@ fn get_git_config_with_extra(
 
 /// Parse the platform-specific system gitconfig that gix's standard search does
 /// not include, for use as a lowest-precedence fallback.
-fn extra_system_config() -> Option<gix::config::File<'static>> {
-    static CACHE: std::sync::OnceLock<Option<gix::config::File<'static>>> =
+fn extra_system_config() -> Option<gix::config::File> {
+    static CACHE: std::sync::OnceLock<Option<gix::config::File>> =
         std::sync::OnceLock::new();
     CACHE
         .get_or_init(|| extra_system_config_at(platform_extra_system_config_path()))
@@ -400,7 +400,7 @@ fn platform_extra_system_config_path() -> Option<&'static std::path::Path> {
     None
 }
 
-fn extra_system_config_at(path: Option<&std::path::Path>) -> Option<gix::config::File<'static>> {
+fn extra_system_config_at(path: Option<&std::path::Path>) -> Option<gix::config::File> {
     let path = path?;
     if !path.exists() {
         return None;
@@ -962,7 +962,11 @@ pub(crate) fn get_worktrees_from_snapshot(
     // structurally corrupt linked checkout is not reported as healthy.
     let mut worktree_metadata = Vec::new();
     for proxy in proxies {
-        let name = proxy.id().to_str_lossy().into_owned();
+        let name = proxy
+            .id()
+            .map_err(|e| SniffError::git("worktree_id", e))?
+            .to_str_lossy()
+            .into_owned();
         let path = proxy
             .base()
             .map_err(|e| SniffError::git("worktree_base", e))?;
@@ -1900,6 +1904,20 @@ mod tests {
             result.is_err(),
             "corrupt object must cause revwalk to return an error, not 0"
         );
+    }
+
+    /// Unrelated histories have no merge base, so neither tip is merged into
+    /// the other, as `git merge-base --is-ancestor` reports.
+    #[test]
+    fn unrelated_histories_are_not_ancestors() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let one = commit_detached(&repo, "a.txt", "a\n", "one", &[]);
+        let other = commit_detached(&repo, "b.txt", "b\n", "other", &[]);
+
+        let gix_repo = gix::open(dir.path()).unwrap();
+
+        assert!(!is_ancestor(&gix_repo, to_gix(one), to_gix(other)).unwrap());
     }
 
     #[test]

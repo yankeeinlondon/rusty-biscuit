@@ -46,6 +46,14 @@ use syn::{Data, DeriveInput, Fields, LitStr, parse_macro_input};
 #[proc_macro_derive(ModelId, attributes(model_id, model_id_metadata))]
 pub fn derive_model_id(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
+    expand(input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// The derive's whole expansion, kept outside the `proc_macro` boundary so
+/// unit tests can assert its compile errors (message and span) in-process.
+fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let enum_ident = input.ident.clone();
 
     // Parse optional metadata lookup configuration from #[model_id_metadata(...)]
@@ -54,9 +62,10 @@ pub fn derive_model_id(input: TokenStream) -> TokenStream {
     let data_enum = match input.data {
         Data::Enum(e) => e,
         _ => {
-            return syn::Error::new_spanned(enum_ident, "ModelId can only be derived for enums")
-                .to_compile_error()
-                .into();
+            return Err(syn::Error::new_spanned(
+                enum_ident,
+                "ModelId can only be derived for enums",
+            ));
         }
     };
 
@@ -72,10 +81,7 @@ pub fn derive_model_id(input: TokenStream) -> TokenStream {
         let mut override_id: Option<String> = None;
         for attr in &v.attrs {
             if attr.path().is_ident("model_id") {
-                let lit: LitStr = match attr.parse_args() {
-                    Ok(l) => l,
-                    Err(e) => return e.to_compile_error().into(),
-                };
+                let lit: LitStr = attr.parse_args()?;
                 override_id = Some(lit.value());
             }
         }
@@ -196,7 +202,7 @@ pub fn derive_model_id(input: TokenStream) -> TokenStream {
         }
     };
 
-    expanded.into()
+    Ok(expanded)
 }
 
 /// Normalize provider name to lowercase with hyphens.
@@ -299,6 +305,7 @@ fn parse_metadata_config(input: &DeriveInput) -> Option<MetadataConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quote::ToTokens;
 
     #[test]
     fn test_normalize_provider_decodes_hyphen_encoded_namespaces() {
@@ -306,5 +313,112 @@ mod tests {
         assert_eq!(normalize_provider("Z__Ai"), "z-ai");
         assert_eq!(normalize_provider("Meta__Llama"), "meta-llama");
         assert_eq!(normalize_provider("Openai"), "openai");
+    }
+
+    // Each `tests/fail/*.rs` case runs the derive's expansion in-process and
+    // renders its error the way rustc prints a single-line diagnostic, then
+    // compares that with the case's `.stderr` file. Nothing here starts Cargo,
+    // so a cold archive consumer pays no nested dependency build.
+    const COMPILE_FAIL_CASES: &[&str] = &["bad_attribute", "not_enum"];
+
+    #[test]
+    fn bad_attribute() {
+        assert_diagnostic(
+            "tests/fail/bad_attribute.rs",
+            include_str!("../tests/fail/bad_attribute.rs"),
+            include_str!("../tests/fail/bad_attribute.stderr"),
+        );
+    }
+
+    #[test]
+    fn not_enum() {
+        assert_diagnostic(
+            "tests/fail/not_enum.rs",
+            include_str!("../tests/fail/not_enum.rs"),
+            include_str!("../tests/fail/not_enum.stderr"),
+        );
+    }
+
+    #[test]
+    fn every_compile_fail_fixture_has_a_test_and_an_expected_diagnostic() {
+        let dir = biscuit_test_harness::manifest_dir!().join("tests/fail");
+        let mut cases = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("tests/fail is readable") {
+            let path = entry.expect("a tests/fail entry").path();
+            if path.extension().is_some_and(|extension| extension == "rs") {
+                assert!(
+                    path.with_extension("stderr").is_file(),
+                    "{} has no expected `.stderr` diagnostic",
+                    path.display()
+                );
+                let stem = path.file_stem().expect("a fixture file name");
+                cases.push(stem.to_string_lossy().into_owned());
+            }
+        }
+        cases.sort();
+        assert_eq!(
+            cases, COMPILE_FAIL_CASES,
+            "every tests/fail fixture needs its own #[test] in src/lib.rs and an entry in COMPILE_FAIL_CASES"
+        );
+    }
+
+    /// Expands the fixture's `#[derive(ModelId)]` item and asserts the
+    /// rendered error equals `expected` (a trybuild-style `.stderr`).
+    fn assert_diagnostic(path: &str, source: &str, expected: &str) {
+        let file = syn::parse_file(source).expect("the fixture is valid Rust syntax");
+        let item = file
+            .items
+            .iter()
+            .find(|item| {
+                let attrs = match item {
+                    syn::Item::Enum(item) => &item.attrs,
+                    syn::Item::Struct(item) => &item.attrs,
+                    syn::Item::Union(item) => &item.attrs,
+                    _ => return false,
+                };
+                attrs.iter().any(|attr| {
+                    attr.path().is_ident("derive")
+                        && attr.meta.to_token_stream().to_string().contains("ModelId")
+                })
+            })
+            .expect("the fixture derives ModelId");
+        let input: DeriveInput =
+            syn::parse2(item.to_token_stream()).expect("the derive input parses");
+        let error = expand(input).expect_err("the fixture must fail to expand");
+        let rendered = render(path, source, error);
+        assert_eq!(
+            rendered.trim_end(),
+            expected.replace("\r\n", "\n").trim_end(),
+            "{path}: the derive's diagnostic differs from its .stderr file"
+        );
+    }
+
+    /// Renders each error as rustc prints a single-line-span diagnostic.
+    fn render(path: &str, source: &str, error: syn::Error) -> String {
+        error
+            .into_iter()
+            .map(|error| {
+                let span = error.span();
+                let (start, end) = (span.start(), span.end());
+                assert_eq!(
+                    start.line, end.line,
+                    "{path}: only single-line spans are rendered; extend `render` for this case"
+                );
+                let text = source
+                    .lines()
+                    .nth(start.line - 1)
+                    .expect("the span's line is in the fixture");
+                let gutter = " ".repeat(start.line.to_string().len());
+                format!(
+                    "error: {message}\n{gutter}--> {path}:{line}:{column}\n{gutter} |\n{line} | {text}\n{gutter} | {indent}{carets}",
+                    message = error,
+                    line = start.line,
+                    column = start.column + 1,
+                    indent = " ".repeat(start.column),
+                    carets = "^".repeat(end.column - start.column),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
     }
 }

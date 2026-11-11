@@ -67,7 +67,8 @@ static SET_EXEPATH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// Git Bash (which sets `EXEPATH` itself). Both routes name the same
 /// `<top>\<prefix>`, since Git derives its exec path from that binary's
 /// location unless `GIT_EXEC_PATH` overrides it. gix-path reads `EXEPATH`
-/// only for the prefixes it knows; for any other it still asks Git.
+/// for every prefix [`command`] recognizes, and asks Git when `<top>` holds
+/// more than one, which [`command`] rejects too.
 ///
 /// Neither entry sets `EXEPATH`, so [`command`] and
 /// [`forget_installation_hint`] keep it from the processes `wt` starts.
@@ -447,8 +448,8 @@ mod tests {
         }
 
         /// What `wt`'s `main` does: gix then takes the system prefix from
-        /// `EXEPATH`, and it is the one `git --exec-path` implies, while Git
-        /// children never see the variable.
+        /// `EXEPATH` without starting Git, and it is the one `git
+        /// --exec-path` implies, while Git children never see the variable.
         #[test]
         fn named_installation() {
             if role().is_none() {
@@ -457,11 +458,21 @@ mod tests {
             // SAFETY: this child process runs this one test on one thread.
             unsafe { name_installation_for_gix() };
             assert!(std::env::var_os("EXEPATH").is_some());
+            // gix-path's fallbacks (`git --exec-path`, `git config
+            // --show-origin`) derive the same prefix, so only an empty trace
+            // directory shows that gix took it from the hint.
+            let traces = tempfile::tempdir().unwrap();
+            // SAFETY: as above.
+            unsafe { std::env::set_var("GIT_TRACE2_EVENT", traces.path()) };
+            let named = gix::path::env::system_prefix().expect("a system prefix");
+            let _ = gix::path::env::installation_config();
+            // SAFETY: as above.
+            unsafe { std::env::remove_var("GIT_TRACE2_EVENT") };
+            assert_eq!(fs::read_dir(traces.path()).unwrap().count(), 0, "gix started Git to find the installation");
             let exec_path = command().arg("--exec-path").output().expect("git runs");
             let exec_path = String::from_utf8(exec_path.stdout).unwrap();
             // `<prefix>/libexec/git-core`, as gix-path derives the prefix from it.
             let reported = Path::new(exec_path.trim()).ancestors().nth(2).expect("a prefix").to_path_buf();
-            let named = gix::path::env::system_prefix().expect("a system prefix");
             assert!(
                 crate::remove::admin_entry::same_location(named, &reported),
                 "{} vs {}",

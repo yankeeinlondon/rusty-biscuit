@@ -460,19 +460,6 @@ jobs:
       - name: Set up the pinned Rust toolchain
         if: ${{ steps.cell.outputs.requires_toolchain == 'true' }}
         run: rustup show
-      # model_id's trybuild UI test compiles its cases with nested Cargo
-      # builds, and trybuild always passes `--offline`, so the registry
-      # sources of the workspace lockfile must already be in this Cargo home.
-      # A precompiled archive carries none of them. Fetching is the one
-      # networked step; the suite then runs offline, so a crate missing here
-      # fails the test instead of downloading during it.
-      - name: Fetch the registry sources for nested Cargo builds
-        if: ${{ matrix.package == 'model_id' && steps.cell.outputs.requires_toolchain == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo fetch --locked --manifest-path unchained-ai/model_id/Cargo.toml
-          echo "CARGO_NET_OFFLINE=true" >>"$GITHUB_ENV"
       - name: Install native prerequisites
         shell: bash
         env:

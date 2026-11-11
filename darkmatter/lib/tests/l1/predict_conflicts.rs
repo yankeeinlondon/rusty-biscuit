@@ -251,7 +251,7 @@ fn conflict_paths_preserve_sniff_ordering_and_merge_direction() {
     let ours_into_theirs =
         evaluate_at(directional.path(), "predict_conflicts(\"main\")").unwrap();
     assert_eq!(theirs_into_ours, json!(["node~MERGE_HEAD"]));
-    assert_eq!(ours_into_theirs, json!(["node"]));
+    assert_eq!(ours_into_theirs, json!(["node~HEAD"]));
     assert_ne!(theirs_into_ours, ours_into_theirs);
 }
 
