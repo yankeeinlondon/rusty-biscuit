@@ -231,9 +231,13 @@ This cycle runs non-interactively, so never stop to ask. When a repair needs a
 decision the spec does not settle, such as two reasonable fixes with different
 user-visible results, make it: choose the option that best fits the spec, the
 area's `docs/`, and existing behavior, and implement it with tests. Record the
-decision, the alternatives, and why in the ledger row, add a one-line summary
-to the review's `human_review_items`, and set its `human_review` to `true`, so
-the author can confirm or reverse it afterward. When the spec pre-authorizes
+decision, the alternatives, and why in the ledger row. Only when the decision
+passes the readiness rules' **worth the author's time** test (it is hard to
+reverse, departs from a decision, changes scope, touches safety or trust, or
+you genuinely doubt it) also add a one-line summary to the review's
+`human_review_items` and set its `human_review` to `true`, keeping that list at
+3 items or fewer; a choice you would simply recommend keeping stays in the
+ledger only. When the spec pre-authorizes
 bounded implementer autonomy and the choice meets its conditions, also amend
 the spec as that decision directs.
 

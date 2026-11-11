@@ -136,8 +136,11 @@ red test to get green; report it.
 
 Update `{{spec_dir}}/spec.md` frontmatter: `implemented: true`,
 `implemented_by: "{{ctx.agent}}/{{ctx.model}}"`, `status: "implemented, ready for review"`,
-and `human_review_items` when a design decision was taken without a ruling (write each item
-as a `|-` block so it reads well; explain it without repo jargon).
+and `human_review_items` only for a design decision taken without a ruling that is hard to
+reverse, departs from a recorded decision, changes scope, touches safety or trust, or that you
+genuinely doubt; at most 3 items, and none for a choice you would simply recommend keeping or
+that is cheap to change later (write each item as a `|-` block so it reads well; explain it
+without repo jargon).
 
 Report to the caller, in this order: what was added (names and shapes), what was ruled, what
 was left open, which docs were corrected for drift, the exact test and lint results, and

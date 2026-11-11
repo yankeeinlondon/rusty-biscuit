@@ -301,6 +301,12 @@ the artifact, keep going, and let the review pick it up.
     - what you decided and what the plan or spec said
     - the alternatives and their trade-offs
     - what would need redoing if the reviewer picks another option
+- do not add an item for something a repository rule already decides
+  (verification scope, which test recipe ran, leaving cross-OS evidence to CI,
+  not reformatting unrelated code, omitting tests of unchanged packages) or
+  for the phase in which work landed; describe those in the log's narrative.
+  Every item is something a reviewer must judge, so list only choices a
+  reasonable author might reverse
 - if later work depends on a decision a human might reverse, build it on your
   decision anyway; redoing it after review costs less than a stalled run
 - the only reason to stop is that the phase **cannot be completed at all**

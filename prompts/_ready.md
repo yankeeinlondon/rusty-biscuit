@@ -20,7 +20,14 @@
     - write each entry as `<ID> (<priority>): <title>`, for example `R2-F3 (medium): absent cap reads as zero`; no details
     - the repair step reads this list: it fixes high findings first, then medium and low ones, and the cycle continues until the list is empty, so a finding missing from it is a finding nobody repairs
 - set `human_review` to a boolean value to indicate whether the author should look at something **after** the review/fix cycle ends
-    - this list never stops the cycle and never blocks a finding: it is where decisions the agents made on their own are reported so the author can confirm or reverse them later
+    - this list never stops the cycle and never blocks a finding, but every item interrupts the author, so it is **not** a log of the decisions the agents made; those belong in the review body
+    - an item belongs in `human_review_items` only when it passes the **worth the author's time** test: it is a decision the agents made on their own that **either** meets one of the conditions under "Stopping for a human" (hard to reverse, contradicts a decision, changes scope, safety or trust, no safe default, human-only verification) but was settled with a recommendation, **or** you genuinely doubt and would not simply recommend keeping
+    - these never pass the test:
+        - a decision you recommend keeping, or anything whose answer would be "keep it" or "go with your recommendation"
+        - something a repository rule already decides, such as leaving cross-OS evidence to CI, not reformatting unrelated code, the choice of test recipe or verification scope, or omitting tests of unchanged packages
+        - a choice that is cheap to change later, such as internal structure, a private helper or macro, test layout, or the phase in which work landed
+        - a factual error in the implementation log or implementation record; correct it instead (see "Correcting the implementation record")
+    - write at most **3** items, ranked by the cost of the author reversing them; when no item passes the test, set `human_review` to `false` and omit `human_review_items`, even when the review body lists many informational decisions
     - a decision that must be made **before** a finding can be repaired goes in `human_in_the_loop` instead, and only when it meets the "Stopping for a human" test
     - when you've set `human_review` to `true` you must also set the `human_review_items` as a list of things you want the human to review:
         - set `has_blocked_findings` to `true` when any finding waits on a `human_in_the_loop` item, and `blocked` to `true` when every finding does; a finding is never blocked by a `human_review_items` entry
