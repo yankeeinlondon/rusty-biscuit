@@ -1,10 +1,38 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
-// Two projects: `node` runs tooling (CLI, fixtures, API documents) under
-// Node, `workers` runs Worker code inside workerd through Miniflare, with a
-// local D1 binding. Local D1 is SQLite: it proves code paths, never the
-// deployed-D1 feasibility checkpoint.
+const TEST_SERVICE_CONFIG = {
+  api_version: "v1",
+  repositories: [],
+  oidc: {
+    issuer: "https://token.actions.githubusercontent.com",
+    audience: "rusty-biscuit-evidence-store",
+    clock_tolerance_seconds: 60,
+    trusted_workflows: [],
+  },
+  quotas: {
+    rate_mutations_per_minute: 60,
+    rate_reads_per_minute: 300,
+    operator_rate_mutations_per_minute: 30,
+    capacity: {
+      alert_ratio: 0.7,
+      refuse_ratio: 0.8,
+      r2_live_plus_staging_bytes: 8589934592,
+      r2_class_a_per_month: 800000,
+      r2_class_b_per_month: 8000000,
+      d1_database_bytes: 500000000,
+      d1_rows_read_per_day: 5000000,
+      d1_rows_written_per_day: 100000,
+      worker_requests_per_day: 100000,
+    },
+  },
+};
+
+// Three projects: `node` runs tooling (CLI, fixtures, API documents) under
+// Node; `workers` runs the D1 feasibility spike inside workerd through
+// Miniflare; `service` runs the evidence-store Worker and its `src/db` layer
+// inside workerd against a local D1 built from `migrations/`. Local D1 is
+// SQLite: it proves code paths, never the deployed-D1 feasibility checkpoint.
 export default defineConfig({
   test: {
     testTimeout: 30_000,
@@ -34,6 +62,37 @@ export default defineConfig({
         test: {
           name: "workers",
           include: ["tests/workers/**/*.test.ts"],
+        },
+      },
+      {
+        plugins: [
+          cloudflareTest(async () => ({
+            main: "./src/worker.ts",
+            miniflare: {
+              compatibilityDate: "2026-11-01",
+              compatibilityFlags: ["nodejs_compat"],
+              d1Databases: ["EVIDENCE_DB"],
+              r2Buckets: ["EVIDENCE_BUCKET"],
+              // Generous limits: rate refusal is tested with an injected limiter.
+              ratelimits: {
+                READ_LIMITER: { namespace_id: "1001", simple: { limit: 100_000, period: 60 } },
+                MUTATION_LIMITER: { namespace_id: "1002", simple: { limit: 100_000, period: 60 } },
+                OPERATOR_LIMITER: { namespace_id: "1003", simple: { limit: 100_000, period: 60 } },
+              },
+              bindings: {
+                CURSOR_HMAC_KEY: "local-test-cursor-key",
+                // A valid configuration with empty allowlists: it denies every
+                // repository and OIDC token. Tests that need grants pass their own.
+                SERVICE_CONFIG: JSON.stringify(TEST_SERVICE_CONFIG),
+                TEST_MIGRATIONS: await readD1Migrations("./migrations"),
+              },
+            },
+          })),
+        ],
+        test: {
+          name: "service",
+          include: ["tests/service/**/*.test.ts"],
+          setupFiles: ["./tests/service/apply-migrations.ts"],
         },
       },
     ],

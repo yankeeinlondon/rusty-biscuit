@@ -15,7 +15,8 @@ This page is the map between the two. Use it to:
   can compare against it;
 - see which legacy shapes the Python accepts on purpose, so the port does not
   "fix" them;
-- see which robustness cases still have to be written against the port.
+- find the robustness case that exercises each shape against the port, and the
+  few places where the port departs from the Python on purpose.
 
 Line numbers refer to `scripts/ci/schema.py` unless another file is named. They
 drift as the file changes; the function name is the stable reference.
@@ -123,12 +124,20 @@ not at parity:
 
 Each table lists the field, whether it is required, the shapes the Python
 accepts, the governing check, its shared validator group, the frozen cases that
-cover it, and the robustness cases the port still needs. "Controls" means the
-`v-control-*`, `v-receipt-control`, and `collection-*` cases, which all pass.
+cover it, and the extra robustness shapes the port is tested with. "Controls"
+means the `v-control-*`, `v-receipt-control`, and `collection-*` cases, which all
+pass.
+
+Every frozen case runs through the port in `tests/node/contracts-parity.test.ts`
+(one test per manifest entry, plus a guard that the count per kind matches the
+manifest). Every shape in the "Port robustness" column is a test in
+`tests/node/contracts-robustness.test.ts`, which edits a frozen control once
+and asserts the problem code and its JSON-pointer location through
+`parseCollection`, `parseReceipt`, or `adaptReceipt`.
 
 ### Collection (`COLLECTION_FIELDS`, `validate_collection` 2970)
 
-| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port still needs |
+| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port robustness |
 |---|---|---|---|---|---|---|
 | (document) | | object | `_keys` 2979/2985 | Strict object | `v-collection-array`, `-null`, `-empty-object`, `-unknown-key` | string and number documents |
 | `schema_version` | yes | integer `3` only | `is_version` 2980 | Strict object | `v-collection-version-float`, `-true`, `-string`, `-null`, `-2` | large integer `3` spelled `3e0` (float, rejected) |
@@ -139,7 +148,7 @@ cover it, and the robustness cases the port still needs. "Controls" means the
 
 ### Observation (`OBSERVATION_FIELDS`, `validate_observation` 2818)
 
-| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port still needs |
+| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port robustness |
 |---|---|---|---|---|---|---|
 | (document) | | object, no unknown keys | `_keys` 2824 | Strict object | `v-observation-unknown-key`, `-missing-base`, `-missing-id` | |
 | `observation_id` | yes | string matching `[0-9a-f]{8,64}` and equal to `observation_identity` | 2828, 2832 | String/identity, Graph | `v-observation-id-not-hex`, `-uppercase`, `-int`, `-mismatch` | 7 and 65 characters |
@@ -155,7 +164,7 @@ cover it, and the robustness cases the port still needs. "Controls" means the
 
 ### Producer (`OBSERVATION_PRODUCER_FIELDS`, 2853-2888)
 
-| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port still needs |
+| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port robustness |
 |---|---|---|---|---|---|---|
 | (object) | yes | object | `_keys` 2854 | Strict object | `v-producer-null`, `-string`, `-empty-object`, `-unknown-key` | |
 | `kind` | yes | `hook`, `rig`, `hosted`, `seed` | `_member` 2860 | String/enum | `v-producer-kind-unknown`, `-null`, controls for each kind | |
@@ -167,7 +176,7 @@ cover it, and the robustness cases the port still needs. "Controls" means the
 
 ### Observation host (`OBSERVATION_HOST_FIELDS`, 2863-2870)
 
-| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port still needs |
+| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port robustness |
 |---|---|---|---|---|---|---|
 | (object) | yes | object | `_keys` 2863 | Strict object | `v-host-null`, `-empty-object`, `-unknown-key` | |
 | `os`, `kernel` | yes | nonempty string | 2865 | String | `v-host-os-empty`, `v-host-kernel-int` | null |
@@ -176,7 +185,7 @@ cover it, and the robustness cases the port still needs. "Controls" means the
 
 ### Proof (`OBSERVATION_PROOF_FIELDS`, 2890-2917)
 
-| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port still needs |
+| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port robustness |
 |---|---|---|---|---|---|---|
 | (object) | see Observation | object | `_keys` 2904 | Strict object | `v-proof-null`, `-empty-object`, `-unknown-key`, `v-hook-with-proof`, `v-rig-without-proof`, `v-hosted-without-proof`, `v-seed-without-proof`, `v-rig-fail-without-proof` (valid) | |
 | `nextest_version`, `target`, `expected_listing_digest` | yes | nonempty string, **any** characters | 2906 | String | `v-proof-target-int`, `-missing-target`, `-digest-empty`, `v-proof-digest-not-hex` (valid) | |
@@ -184,7 +193,7 @@ cover it, and the robustness cases the port still needs. "Controls" means the
 
 ### Report (`OBSERVATION_REPORT_FIELDS`, 2928-2967)
 
-| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port still needs |
+| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port robustness |
 |---|---|---|---|---|---|---|
 | (object) | | object | `_keys` 2929 | Strict object | `v-report-null`, `-empty-object`, `-unknown-key` | |
 | `path` | yes | nonempty string, never interpreted | 2932 | String | `v-report-path-empty`, `-int`, `collection-unicode` | |
@@ -195,7 +204,7 @@ cover it, and the robustness cases the port still needs. "Controls" means the
 
 ### Receipt (`RECEIPT_FIELDS`, `validate_receipt` 2670)
 
-| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port still needs |
+| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port robustness |
 |---|---|---|---|---|---|---|
 | (document) | | object | `_keys` 2679/2692 | Strict object | `v-receipt-null`, `-empty-object`, `-unknown-key` | |
 | `schema_version` | yes | integer `2`; integer `1` reports `v1-requires-exact-tree` | `is_version` 2680-2690 | Strict object | `v-receipt-v1`, `-version-float`, `-version-true`, `-version-3`, `-missing-version`, `adapter-v1-receipt` | |
@@ -211,7 +220,7 @@ cover it, and the robustness cases the port still needs. "Controls" means the
 Shared by a receipt's `cells` and an observation's `cell`. Most cases go
 through an observation; the receipt cases above prove the receipt wiring.
 
-| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port still needs |
+| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port robustness |
 |---|---|---|---|---|---|---|
 | (object) | | object | `_keys` 2734 | Strict object | `v-cell-null`, `-empty-object`, `-unknown-key` | |
 | `package` | yes | nonempty string | 2736-2741 | String | `v-cell-missing-package`, `-package-empty`, `-package-int` | |
@@ -232,14 +241,14 @@ through an observation; the receipt cases above prove the receipt wiring.
 
 ### Counts (`COUNT_FIELDS`, `_counts` 3150)
 
-| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port still needs |
+| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port robustness |
 |---|---|---|---|---|---|---|
 | (object) | yes | object; unknown keys **accepted** | 3151 | Numeric | `v-counts-null`, `-list`, `-empty-object`, `-unknown-key` (valid) | |
 | `total`, `passed`, `failed`, `skipped`, `errored` | yes | present; an `int` (including `bool`) must be >= 0; `total` must equal the sum of the four parts | 3153-3170 | Numeric | `v-counts-missing-total`, `-negative`, `-sum-mismatch`, `-float` (valid), `-bool` (valid), `-total-string`, `-part-string` (crash), `-part-null` (crash) | |
 
 ### Build (`RECEIPT_BUILD_FIELDS`, 2772-2780)
 
-| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port still needs |
+| Field | Req | Accepted shapes | Check | Group | Frozen cases | Port robustness |
 |---|---|---|---|---|---|---|
 | (object) | | object with exactly `key`, `digest` | `_keys` 2774 | Strict object | `v-build-null`, `-valid`, `-unknown-key` | |
 | `key`, `digest` | yes | `str(value)` matches `[0-9a-f]{8,64}` | 2776 | String/identity | `v-build-key-not-hex`, `-key-int-digits` (valid) | digest missing |
@@ -264,7 +273,7 @@ identity of the whole canonical collection.
 | Integer tokens keep every digit; `-0` becomes `0` | `18446744073709551617` | same | `large-integers` |
 | Float tokens are re-printed with Python `repr(float)`: shortest round-trip digits, `.0` on integral values, exponent form below `1e-4` or from `1e16`, exponent written `e+XX`/`e-XX` with at least two digits | `1e5`, `1.5e-7`, `1e16` | `100000.0`, `1.5e-07`, `1e+16` | `floats` |
 | Float precision is IEEE double | `9007199254740993.0` | `9007199254740992.0` | `floats` |
-| Overflowing floats become infinities and are written as non-JSON tokens | `1e400` | `Infinity` | `float-overflow` |
+| Overflowing floats become infinities and are written as non-JSON tokens (the port's loader refuses them; see Departures) | `1e400` | `Infinity` | `float-overflow` |
 | Underflowing floats become zero, keeping the sign | `-1e-400` | `-0.0` | `float-underflow` |
 
 ## Strict loader
@@ -292,7 +301,8 @@ never `utf-8-sig`), so invalid UTF-8 is a decode error before parsing.
 defaults is the hook adapter, and `collection_of` (190) wraps its output:
 
 1. The receipt must pass `validate_receipt`; otherwise the adapter raises with
-   the first problem (`adapter-v2-empty-cells`, `adapter-v1-receipt`).
+   the first problem (`adapter-v2-empty-cells`, `adapter-v1-receipt`). The
+   port lists every problem instead (see Departures).
 2. `report_dir` is expanded with `Path.expanduser` on the submitting host. Only
    cells whose own `completion` is `complete` have their report read and
    digested; other cells get `reports: []` and their report file is never
@@ -334,7 +344,6 @@ the Python accepts.
 | `failure_detail_truncated` is never type-checked; any truthy value excuses missing detail, and it is accepted on a pass | 2790-2804 | `v-complete-fail-truncated-string`, `v-truncated-on-pass` |
 | `counts` accepts unknown keys, floats, and booleans (booleans are integers and sum as 1/0) | 3150-3170 | `v-counts-unknown-key`, `v-counts-float`, `v-counts-bool` |
 | A string `counts.total` is reported as a sum mismatch whose message prints both values the same way (`total is 10 but its parts sum to 10`) | 3165 | `v-counts-total-string` |
-| A non-numeric, non-missing count part (string, null) makes the Python validator **raise `TypeError`** instead of reporting a problem. A port cannot crash; it must report a problem, and this is the one place where parity is by decision, not by copy | 3164 | `v-counts-part-string`, `v-counts-part-null` |
 | Receipt `host` values are never type-checked (only its keys) | 2706 | `v-receipt-host-os-int` |
 | Any integer `exit_code` is valid, including negative ones | 2759 | `v-exit-code-negative` |
 | A collection's `environment` only labels messages; observations and cells are not checked against it | 2997 | `v-collection-environment-cell-label` |
@@ -342,8 +351,68 @@ the Python accepts.
 | A `test_filter` is part of a cell's identity for retry purposes | `_cell_key` 3036 | `v-graph-retry-across-test-filter` |
 | A retry cycle cannot be built from valid content ids (each id would have to hash the other); the id check fires first, but the cycle check must still exist | 3026-3032 | `v-graph-retry-cycle` |
 | A self-retry is reported only when `retry_of` is otherwise well formed | 2836-2842 | `v-graph-retry-self` |
-| `1e400` is accepted by the loader and canonicalizes to `Infinity` (not JSON) | `loads_strict`, `canonical` | `float-overflow` |
 | Problem messages embed Python `repr` text (`'linux'`, `None`, `True`, `3.0`, lists as `['a', 'b']`) and the first 12 characters of `str(observation_id)` | `_member`, `_sha`, labels | all `validator` cases |
+
+## Departures from the Python
+
+The port answers where the Python crashes, and refuses one value the Python
+accepts. Each departure is asserted by name in the tests.
+
+| Python behavior | Port behavior | Why | Test |
+|---|---|---|---|
+| `1e400` (any float lexeme beyond the double range) loads as `inf` and canonicalizes to `Infinity` | `loadStrict` refuses it as `nonfinite-number`, located at the number | Nonfinite values are rejected; `Infinity` is not JSON. Underflow (`-1e-400`) still loads and canonicalizes to `-0.0` | `float-overflow` parity case; loader shapes |
+| A string, null, list, or object count part makes `_counts` raise `TypeError` | One `malformed-receipt` problem per non-numeric part: `{label} counts.{part} must be a number`, located at that part; the sum is skipped | A validator must answer, not crash | `v-counts-part-string`, `v-counts-part-null`; list part |
+| An integer count part beyond the double range summed with a float part raises `OverflowError` | `malformed-receipt` problem located at the part being added | Same | int too large to add to a float |
+| A list or object `package` or `gate` in a receipt cell makes the duplicate-cell check raise (unhashable key) | The cell's own problems are reported; that cell is left out of the conflict check | Same; the cell is already rejected | (by construction) |
+| A list or object producer `kind` makes the required-field lookup raise | The `kind` problem is reported and no hosted/seed fields are required | Same | (by construction) |
+| A non-string receipt `host.report_dir` makes the adapter's `Path()` raise `TypeError` | `adaptReceipt` reports `malformed-receipt` at `/host/report_dir` | Same | non-string report_dir |
+| The adapter raises with only the first receipt problem, or the first unreadable report | `adaptReceipt` lists every receipt problem, or every unreadable report (code `report-unavailable`, at `/cells/{i}/report`), and produces nothing | All problems are located | malformed receipt; unreadable reports |
+| `Path.expanduser` resolves `~user` from the password database | The Node reader reports `~user` as unreadable rather than guessing | No portable lookup | another user's home |
+| `json.loads` accepts nesting up to about 10,000 levels | `loadStrict` refuses nesting deeper than 1,000 (`syntax`) | Bounded recursion cannot overflow the stack | nesting past `MAX_DEPTH` |
+
+An integer of more than 4300 digits is refused as `syntax`; this is parity, not
+a departure, because Python 3.12's integer-conversion limit makes `json.loads`
+raise there too.
+
+Collection problems found while adapting (two identical cells, a receipt host
+whose `os` is not a string) keep the Python message and are located on the
+receipt: a cell field at `/cells/{i}/...`, a host field at `/host/...`, and
+anything else about an observation at `/cells/{i}`.
+
+## Service requests and configuration
+
+The evidence contract above covers what producers submit. The service also
+reads its own request bodies (queries, location events, operator requests),
+the service configuration (`SERVICE_CONFIG`), and the operator CLI's grant
+file. They all go through the same strict loader, so duplicate keys, trailing
+content, a BOM, blank input, nonfinite numbers, and invalid UTF-8 are refused
+the same way. Field shapes are decided once, in `src/requests.ts`
+(`tests/node/requests.test.ts` walks every shape), the configuration loader in
+`src/config.ts` (`tests/node/service-config.test.ts`), and the credential
+request validator in `src/credential-request.ts`, shared by
+`POST /v1/operator/credentials` and the grant file
+(`tests/node/credential-request.test.ts`).
+
+Every invalid shape is a 400 `invalid_input` (or, for configuration, a 503 to
+every request) located at the field's JSON pointer. An explicit `null` for an
+optional field is refused, never read as absent. Arrays are never filtered:
+one invalid element refuses the request. These are the only defaults:
+
+| Field | Absent means |
+|---|---|
+| `page_size` (history, changes, audit, export) | 100 |
+| `after_sequence` (changes) | the stream origin (0); refused with 409 `cursor_expired` once the stream's replay horizon is above 0 |
+| `snapshot` (history, changes) | the service captures the current snapshot |
+| `verification_method` (location event) | nothing; it is required exactly when `kind` is `verified` |
+| `expires_in_days` (credential request, grant file) | 90 |
+| `replaces` (credential request) | no rotation |
+| audit query filters | no filter |
+
+Empty collections are deliberate values, never "unrestricted":
+
+- an empty `reachable_heads` is a successful empty history;
+- empty `repository_ids` or `roles` on a credential, and an empty
+  configuration `repositories` or `trusted_workflows` list, deny everything.
 
 ## Not captured, and why
 
@@ -355,8 +424,11 @@ the Python accepts.
 - **An absolute or `..` report path.** `Path(report_dir) / cell.report` lets an
   absolute `report` replace the directory entirely, and `..` walks out of it;
   the Python reads whatever that names. The fixtures do not exercise this
-  because it reads outside the temporary home. The port must decide, and
-  record, whether to preserve it.
+  because it reads outside the temporary home. **The port preserves it**: the
+  Node reader joins without normalizing or confining the path, because a
+  historic receipt's paths name what its host actually retained. The robustness
+  tests cover an absolute `report_dir`, an absolute report path, and a `..`
+  report path against a temporary directory, asserting shape only.
 - **Windows home expansion.** The capture sets both `HOME` and `USERPROFILE`, but
   was run on macOS; Python on Windows expands `~` from `USERPROFILE` only.
 - **Platform-specific error text.** `adapter-v2-missing-report` records the

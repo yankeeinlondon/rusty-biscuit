@@ -114,19 +114,19 @@ backoff capped at 30 seconds, honoring a longer `Retry-After` up to 60 seconds.
 | `invalid_cursor` | 400 | no | A cursor was altered or belongs to another query or repository. |
 | `unsupported_api_version` | 400 | no | The path names an API version other than `v1`. |
 | `unauthenticated` | 401 | no | The bearer token is missing, malformed, expired, or revoked, or the OIDC token fails verification. |
-| `denied` | 403 | no | The credential lacks the role or repository for this operation. |
+| `denied` | 403 | no | The credential lacks the role or repository for this operation, the repository is not in the service configuration's allowlist, or a verified OIDC token comes from an untrusted workflow, ref, event, owner, or pull-request context. |
 | `evaluation_publication_disabled` | 403 | no | Any call to `POST /evaluations`. |
 | `not_found` | 404 | no | Unknown repository or ID, or an object that is not currently available. |
 | `identity_conflict` | 409 | no | An existing ID (observation, location event, upload part, certificate, repository owner) is resubmitted with different content. |
 | `stale_snapshot` | 409 | no | A supplied snapshot belongs to an older store generation or is no longer current for a certificate. |
 | `snapshot_pruned` | 409 | no | Pruning has happened since the snapshot was captured. |
-| `cursor_expired` | 409 | no | The cursor is older than 24 hours, or a change-feed position is older than the 30-day tombstone window. Start from a fresh snapshot. |
+| `cursor_expired` | 409 | no | The cursor is older than 24 hours, or a change-feed `after_sequence` lies before the stream's replay horizon (tombstones older than 30 days have been expired). Start from a fresh snapshot. |
 | `collection_pruned` | 410 | no | A collection export would be missing pruned members. |
 | `size_limit` | 413 | no | A bound in the limits table is exceeded. |
 | `unpageable_record` | 413 | no | One record alone exceeds the page's byte bound. |
 | `rate_limited` | 429 | yes | Per-credential request rate exceeded. |
 | `quota_exhausted` | 429 | yes | The request would push a free-tier allowance past its 80% refusal threshold. |
-| `unavailable` | 503 | yes | A platform failure; never reported as an empty success. |
+| `unavailable` | 503 | yes | A platform failure, a missing or invalid service configuration, or GitHub's OIDC signing keys could not be fetched; never reported as an empty success. |
 
 ## Credentials
 
@@ -148,6 +148,27 @@ Hosts (laptops and test rigs) authenticate with a bearer token sent as
   takes effect immediately. Revoking never rewrites past evidence.
 - Operator credentials are created only by the Wrangler bootstrap and are never
   issued through the API.
+- A grant on a repository that is not in the service configuration's
+  `repositories` allowlist is inert: the request is denied.
+
+The operator commands run from `tools/evidence-store` (use absolute paths,
+because the recipe runs from that directory):
+
+```sh
+# Once per environment: mint the operator token into a new owner-only file and
+# insert its digest through Wrangler (needs CLOUDFLARE_API_TOKEN and
+# CLOUDFLARE_ACCOUNT_ID; never logs in interactively).
+just operator bootstrap --env development --label ken-laptop --token-file /abs/operator.token
+
+# Register a repository by the stable IDs GitHub reports for it (needs GITHUB_TOKEN or GH_TOKEN).
+just operator register --endpoint https://… --token-file /abs/operator.token --slug owner/name
+
+# Issue a host credential from a grant file (schemas/credential-grant.schema.json);
+# the token is written to the grant's secret_file and never printed.
+just operator issue --endpoint https://… --token-file /abs/operator.token --grant /abs/rig-linux-01.grant.json
+
+just operator revoke --endpoint https://… --token-file /abs/operator.token --credential <id> --reason "decommissioned"
+```
 
 ## GitHub Actions (OIDC)
 
@@ -164,7 +185,9 @@ accepts it only when all of these hold:
   `trusted_workflows`; the workflow path is taken from the `workflow_ref` claim.
 
 Fork and pull-request contexts are always refused, and an empty allowlist
-denies every token. The only initial entry is
+denies every token. A token that fails signature, issuer, audience, or
+time checks answers 401 `unauthenticated`; a valid token whose context is not
+trusted answers 403 `denied`. The only initial entry is
 `.github/workflows/evidence-store-demo.yml` on `refs/heads/main` for
 `workflow_dispatch`, granting producer and reader. OIDC identities never
 receive verifier, retention-verifier, or operator.

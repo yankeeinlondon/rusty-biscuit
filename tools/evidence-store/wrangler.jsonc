@@ -1,0 +1,76 @@
+// Evidence-store Worker. Deploy only through an explicit environment
+// (`--env development` or `--env restore-test`); the top level declares no
+// bindings so an environment-less deploy has nothing to write to.
+// Every `database_id` below is a placeholder, set at deployment.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "evidence-store",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "env": {
+    "development": {
+      "name": "evidence-store-development",
+      "d1_databases": [
+        {
+          "binding": "EVIDENCE_DB",
+          "database_name": "evidence-store-development",
+          // Placeholder: set at deployment.
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations"
+        }
+      ],
+      // R2 buckets are private unless public access is enabled on the bucket;
+      // this service never enables it.
+      "r2_buckets": [
+        {
+          "binding": "EVIDENCE_BUCKET",
+          "bucket_name": "evidence-store-development"
+        }
+      ],
+      // Per-principal request rates (Cloudflare rate-limiting bindings).
+      "ratelimits": [
+        { "name": "READ_LIMITER", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } },
+        { "name": "MUTATION_LIMITER", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } },
+        { "name": "OPERATOR_LIMITER", "namespace_id": "1003", "simple": { "limit": 30, "period": 60 } }
+      ],
+      "vars": {
+        // `api/schemas/service-config.schema.json`, as JSON text. The empty
+        // allowlists deny every repository and OIDC token until the
+        // deployment registers the real repository and workflow.
+        "SERVICE_CONFIG": "{\"api_version\":\"v1\",\"repositories\":[],\"oidc\":{\"issuer\":\"https://token.actions.githubusercontent.com\",\"audience\":\"rusty-biscuit-evidence-store\",\"clock_tolerance_seconds\":60,\"trusted_workflows\":[]},\"quotas\":{\"rate_mutations_per_minute\":60,\"rate_reads_per_minute\":300,\"operator_rate_mutations_per_minute\":30,\"capacity\":{\"alert_ratio\":0.7,\"refuse_ratio\":0.8,\"r2_live_plus_staging_bytes\":8589934592,\"r2_class_a_per_month\":800000,\"r2_class_b_per_month\":8000000,\"d1_database_bytes\":500000000,\"d1_rows_read_per_day\":5000000,\"d1_rows_written_per_day\":100000,\"worker_requests_per_day\":100000}}}"
+      }
+    },
+    "restore-test": {
+      "name": "evidence-store-restore-test",
+      "d1_databases": [
+        {
+          "binding": "EVIDENCE_DB",
+          "database_name": "evidence-store-restore-test",
+          // Placeholder: set at deployment.
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "EVIDENCE_BUCKET",
+          "bucket_name": "evidence-store-restore-test"
+        }
+      ],
+      // Per-principal request rates (Cloudflare rate-limiting bindings).
+      "ratelimits": [
+        { "name": "READ_LIMITER", "namespace_id": "2001", "simple": { "limit": 300, "period": 60 } },
+        { "name": "MUTATION_LIMITER", "namespace_id": "2002", "simple": { "limit": 60, "period": 60 } },
+        { "name": "OPERATOR_LIMITER", "namespace_id": "2003", "simple": { "limit": 30, "period": 60 } }
+      ],
+      "vars": {
+        // `api/schemas/service-config.schema.json`, as JSON text. The empty
+        // allowlists deny every repository and OIDC token until the
+        // deployment registers the real repository and workflow.
+        "SERVICE_CONFIG": "{\"api_version\":\"v1\",\"repositories\":[],\"oidc\":{\"issuer\":\"https://token.actions.githubusercontent.com\",\"audience\":\"rusty-biscuit-evidence-store\",\"clock_tolerance_seconds\":60,\"trusted_workflows\":[]},\"quotas\":{\"rate_mutations_per_minute\":60,\"rate_reads_per_minute\":300,\"operator_rate_mutations_per_minute\":30,\"capacity\":{\"alert_ratio\":0.7,\"refuse_ratio\":0.8,\"r2_live_plus_staging_bytes\":8589934592,\"r2_class_a_per_month\":800000,\"r2_class_b_per_month\":8000000,\"d1_database_bytes\":500000000,\"d1_rows_read_per_day\":5000000,\"d1_rows_written_per_day\":100000,\"worker_requests_per_day\":100000}}}"
+      }
+    }
+  }
+}
