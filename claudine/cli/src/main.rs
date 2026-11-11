@@ -84,10 +84,77 @@ async fn ensure_config_exists() -> Result<()> {
     }
 }
 
+/// The clap command model shared by normal parsing and composition help.
+///
+/// Returned unbuilt: [`root_help_request`] adds `ignore_errors`, a global
+/// setting clap propagates to subcommands only while building, so a caller
+/// that renders from the model calls `Command::build` itself.
+fn build_cli_command(is_wrapper: bool) -> clap::Command {
+    use clap::CommandFactory;
+
+    let mut cmd = <Cli as CommandFactory>::command();
+    inject_subcommand_help_flag(&mut cmd);
+
+    if is_wrapper {
+        for name in argv::WRAPPER_SUBCOMMANDS {
+            if let Some(sub) = cmd.find_subcommand_mut(*name) {
+                let muted = std::mem::replace(sub, clap::Command::new("__placeholder__"));
+                let _ = std::mem::replace(sub, muted.ignore_errors(true));
+            }
+        }
+    }
+    cmd
+}
+
+/// The built clap command for composition subcommand `command_name`.
+///
+/// The root is built first so the child carries the inherited global options
+/// and the parent-qualified usage line (`claudine compose …`).
+fn composition_help_command(command_name: &str, plain: bool) -> clap::Command {
+    let mut root = build_cli_command(false);
+    root.build();
+    let child = root
+        .find_subcommand_mut(command_name)
+        .unwrap_or_else(|| unreachable!("`{command_name}` is a composition subcommand"));
+    let child = std::mem::replace(child, clap::Command::new("__placeholder__"));
+    if plain {
+        child.color(clap::ColorChoice::Never)
+    } else {
+        child
+    }
+}
+
+/// Print `command_name`'s compact clap help to stdout. No argument is parsed,
+/// so nothing about the user's invocation can fail here.
+fn print_composition_help(command_name: &str, plain: bool) -> std::io::Result<()> {
+    composition_help_command(command_name, plain).print_help()?;
+    println!();
+    Ok(())
+}
+
+/// Answer a help request [`argv::select_composition_help`] selected, then
+/// exit 0 before any composition bootstrap.
+///
+/// `plain` comes from an exact `--plain` before the first literal `--`, on
+/// either side of the command.
+fn answer_selected_help(destination: argv::HelpDestination, raw: &[OsString]) -> Result<()> {
+    let stop = argv::first_dash_dash_index(raw).unwrap_or(raw.len());
+    let plain = raw[..stop].iter().any(|token| token.to_str() == Some("--plain"));
+    match destination {
+        argv::HelpDestination::Root => {
+            log::set_plain(plain);
+            commands::help::run()
+        }
+        argv::HelpDestination::Composition(command) => {
+            Ok(print_composition_help(command, plain)?)
+        }
+    }
+}
+
 /// CLI parsing over an already-normalized argv.
 ///
-/// Both wrapper and non-wrapper paths go through a manually constructed
-/// `clap::Command` so we can:
+/// Both wrapper and non-wrapper paths go through [`build_cli_command`] so we
+/// can:
 ///
 /// - Inject `--help`/`-h` (an `ArgAction::Help`) on every non-wrapper
 ///   subcommand, nested ones included. The root `Cli` sets
@@ -119,21 +186,10 @@ async fn ensure_config_exists() -> Result<()> {
 ///   drop into an `unwrap()` panic.
 fn parse_cli_from(argv: &[OsString]) -> Cli {
     use clap::error::ErrorKind;
-    use clap::{CommandFactory, FromArgMatches, Parser};
+    use clap::{FromArgMatches, Parser};
 
     let is_wrapper = argv::find_subcommand(argv, argv::WRAPPER_SUBCOMMANDS).is_some();
-
-    let mut cmd = <Cli as CommandFactory>::command();
-    inject_subcommand_help_flag(&mut cmd);
-
-    if is_wrapper {
-        for name in argv::WRAPPER_SUBCOMMANDS {
-            if let Some(sub) = cmd.find_subcommand_mut(*name) {
-                let muted = std::mem::replace(sub, clap::Command::new("__placeholder__"));
-                let _ = std::mem::replace(sub, muted.ignore_errors(true));
-            }
-        }
-    }
+    let cmd = build_cli_command(is_wrapper);
 
     match cmd.clone().try_get_matches_from(argv.iter().cloned()) {
         Ok(matches) => Cli::from_arg_matches(&matches)
@@ -156,11 +212,12 @@ fn parse_cli_from(argv: &[OsString]) -> Cli {
 ///
 /// The root `help` is a plain Boolean so the grouped help screen can render
 /// it, which means clap only reports it after validating the selected
-/// subcommand. Rule 4 hoists a composition `--help` to the root, so
-/// `claudine compose --help` (no file) would otherwise fail on the missing
-/// required file before help could display. A root help request outranks every
-/// subcommand validation error; the global presentation options are kept so
-/// `--plain` and `--debug` still apply to the help screen.
+/// subcommand, so `claudine --help mcp alias` would otherwise fail on the
+/// missing required argument before help could display. A root help request
+/// outranks every subcommand validation error; the global presentation
+/// options are kept so `--plain` and `--debug` still apply to the help screen.
+/// Composition help never reaches this point: [`run`] answers it from the
+/// original argv first.
 fn root_help_request(cmd: clap::Command, argv: &[OsString]) -> Option<Cli> {
     let matches = cmd
         .ignore_errors(true)
@@ -311,6 +368,17 @@ fn run() -> Result<std::convert::Infallible> {
     completion::maybe_complete();
 
     let raw_argv: Vec<OsString> = std::env::args_os().collect();
+
+    // Composition help is selected from the original argv, before
+    // normalization moves the token and before the ownership partition can
+    // reject an incomplete invocation. It reads no input and exits here.
+    if let Some(destination) =
+        argv::select_composition_help(&raw_argv, argv::completion_mode_active())
+    {
+        answer_selected_help(destination, &raw_argv)?;
+        shutdown::exit_before_runtime(0);
+    }
+
     let perf_bootstrap = perf::scan_perf_bootstrap(&raw_argv);
 
     let arg_parse_start = std::time::Instant::now();
@@ -530,5 +598,43 @@ mod tests {
         let mut cmd = <super::Cli as CommandFactory>::command();
         super::inject_subcommand_help_flag(&mut cmd);
         cmd.debug_assert();
+    }
+}
+
+#[cfg(test)]
+mod composition_help {
+    use super::{argv::COMPOSITION_SUBCOMMANDS, build_cli_command, composition_help_command};
+
+    fn rendered(command: &str) -> String {
+        composition_help_command(command, true)
+            .render_help()
+            .to_string()
+    }
+
+    #[test]
+    fn shared_model_builds_without_definition_failures() {
+        // `debug_assert` builds the tree and panics on duplicate arguments,
+        // groups naming missing arguments, or conflicting short flags.
+        build_cli_command(false).debug_assert();
+        build_cli_command(true).debug_assert();
+    }
+
+    #[test]
+    fn each_command_renders_its_own_parent_qualified_screen() {
+        for command in COMPOSITION_SUBCOMMANDS {
+            let help = rendered(command);
+            assert!(
+                help.contains(&format!("Usage: claudine {command} [OPTIONS] <ARG>...")),
+                "{command}: {help}"
+            );
+            for option in ["--help", "--plain", "--verbose", "--debug", "--provider", "--set"] {
+                assert!(help.contains(option), "{command} lacks {option}: {help}");
+            }
+            assert!(
+                help.contains(&format!("claudine {command} ")) && help.contains("-- --help"),
+                "{command} lacks its forwarding example: {help}"
+            );
+            assert!(!help.contains("Composition:"), "{command}: {help}");
+        }
     }
 }

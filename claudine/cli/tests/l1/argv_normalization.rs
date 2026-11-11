@@ -27,27 +27,18 @@ fn write_fixture(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
 // Headline integration cases (spec: "Testing → Integration tests")
 // ──────────────────────────────────────────────────────────────────────
 
-/// Rule 4 + Rule 3 headline: `compose <file> --<provider-bool> key=val --help`
-/// must render the compose-tier help screen, not a clap error.
+/// Headline regression: `compose <file> --<provider-bool> key=val --help`
+/// renders the compose command's own help screen, not a clap error.
 ///
-/// Before this feature, clap emitted the misleading
-/// `tip: to pass '--help' as a value, use '-- --help'` diagnostic because
-/// the greedy positional collector swallowed `--help`. The first fix
-/// landed only Rule 1 and Rule 3 — that suppressed the clap tip but
-/// surfaced a new "expected at most one file reference" Claudine error
-/// because `--` buried `--help` in the trailing raw-value bucket, which
-/// the downstream positional parser then misclassified as a second file
-/// reference. Rule 4 closes the loop by hoisting `--help` to position 1,
-/// so the root `cli.help` handler fires and the grouped help screen
-/// renders.
+/// clap once emitted the misleading `tip: to pass '--help' as a value, use
+/// '-- --help'` diagnostic because the greedy positional collector swallowed
+/// `--help`, and a later fix surfaced an "expected at most one file
+/// reference" error instead. The executable now selects composition help from
+/// the original argv, before normalization and the ownership partition, so:
 ///
-/// The assertion suite covers three user-visible guarantees:
-///
-/// 1. the process exits successfully;
-/// 2. Claudine's own help content appears (the command group heading
-///    and the `compose` entry are both visible);
-/// 3. neither the original clap tip nor the secondary Claudine error
-///    leak into the output.
+/// 1. the process exits successfully with nothing on stderr;
+/// 2. stdout is the `compose` usage screen, not the grouped root overview;
+/// 3. neither the clap tip nor the second-file-reference error appears.
 #[test]
 fn headline_compose_with_interleaved_flag_renders_help() {
     let cli = CliProcessFixture::named("argv-normalization");
@@ -76,10 +67,14 @@ fn headline_compose_with_interleaved_flag_renders_help() {
         "expected Claudine's help output to include the `compose` \
          command description; got: {plain}"
     );
+    assert!(stderr.is_empty(), "help must leave stderr empty; got: {stderr}");
     assert!(
-        plain.contains("Composition"),
-        "expected Claudine's help output to include the `Composition` \
-         command group heading; got: {plain}"
+        plain.contains("Usage: claudine compose") && plain.contains("--dry-run"),
+        "expected the compose command's own usage and options; got: {plain}"
+    );
+    assert!(
+        !plain.contains("Composition:"),
+        "compose help must not be the grouped root overview; got: {plain}"
     );
     assert!(
         !plain.contains("tip: to pass '--help' as a value"),
@@ -93,14 +88,13 @@ fn headline_compose_with_interleaved_flag_renders_help() {
     );
     assert!(
         !plain.contains("expected at most one file reference"),
-        "Rule 4 must hoist `--help` off the trailing raw-value bucket \
-         so the downstream positional parser never misclassifies it \
-         as a second file reference; got: {plain}"
+        "a help request must never reach the positional parser, which \
+         would misclassify `--help` as a second file reference; got: {plain}"
     );
 }
 
-/// Rule 4 simpler form: `compose <file> --help` (no interleaved
-/// setters) must also render the help screen.
+/// Simpler form: `compose <file> --help` (no interleaved setters) renders
+/// the compose command's own help screen.
 #[test]
 fn headline_compose_with_trailing_help_renders_help() {
     let cli = CliProcessFixture::named("argv-normalization");
@@ -119,8 +113,8 @@ fn headline_compose_with_trailing_help_renders_help() {
     let plain = strip_ansi(&combined);
 
     assert!(
-        plain.contains("Compose a Markdown document"),
-        "trailing `--help` on compose must render Claudine help; \
+        plain.contains("Usage: claudine compose"),
+        "trailing `--help` on compose must render the compose help screen; \
          got: {plain}"
     );
 }

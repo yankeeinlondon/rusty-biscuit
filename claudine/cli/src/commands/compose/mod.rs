@@ -41,6 +41,23 @@ mod setters;
 pub(crate) use setters::{json_type_name, merge_set_overrides, parse_composition_positionals};
 pub(crate) use loop_run::{TriggerWarningDrain, emit_trigger_warnings};
 
+/// The help footer shared by the composition commands: one command-specific
+/// example of the positional syntax and the `--` forwarding boundary.
+macro_rules! composition_help_footer {
+    ($command:literal, $file:literal) => {
+        concat!(
+            "Example:\n  claudine ",
+            $command,
+            " ",
+            $file,
+            " name=Ken -- --help\n\n",
+            "Everything after `--` is forwarded to the provider unchanged, so this example asks\n",
+            "the provider for its own help. Provider-native options are not listed above."
+        )
+    };
+}
+pub(crate) use composition_help_footer;
+
 /// Shared flags for composition commands.
 ///
 /// ## Notes
@@ -89,18 +106,23 @@ pub struct SharedComposeArgs {
     #[arg(long = "qwen", group = "compose_provider")]
     pub qwen: bool,
 
+    /// Use Kilo.
+    #[arg(long, group = "compose_provider")]
+    pub kilo: bool,
+
+    /// Use Pi.
+    #[arg(long, group = "compose_provider")]
+    pub pi: bool,
+
+    /// Use Antigravity.
+    #[arg(long, group = "compose_provider")]
+    pub antigravity: bool,
+
     /// Exclude providers from automatic selection (repeatable).
     #[arg(long = "exclude", value_name = "PROVIDER", value_parser = provider_value_parser())]
     pub exclude: Vec<Provider>,
 
-    /// Enable provider-specific YOLO/auto-approval mode.
-    ///
-    /// `CLAUDINE_YOLO=true` (or `=1`, `=yes`, `=on`) in the environment
-    /// is equivalent to passing `--yolo` on the command line; both
-    /// activate the same single intent signal that drives the provider's
-    /// native bypass flag. The legacy short `YOLO` env var is no longer
-    /// honored here — the reporter previously read it independently,
-    /// producing diverging signals between launch behavior and reporting.
+    /// Enable the provider's auto-approval (YOLO) mode.
     #[arg(short = 'y', long, env = "CLAUDINE_YOLO")]
     pub yolo: bool,
 
@@ -171,18 +193,20 @@ pub struct SharedComposeArgs {
     #[arg(long)]
     pub repo: bool,
 
-    /// Show the composed result without requiring or launching the provider executable.
+    /// Show the composed result without launching a provider; composition
+    /// `$( … )` shell expansions still run.
     ///
     /// A sequence previews each loop body once and runs no lifecycle event,
     /// `prep` target, `shell:` task, or `side_effect:` task: each task is
-    /// reported as `rendered (dry-run): would run …`. Composition's `$( … )`
-    /// expansions still run, so their side effects still happen.
+    /// reported as `rendered (dry-run): would run …`. The provider executable
+    /// need not be installed.
     #[arg(long)]
     pub dry_run: bool,
 
-    /// With `--dry-run`, run each `shell:` task once during the preview.
+    /// Run each `shell:` task for real once during the preview; requires
+    /// `--dry-run`.
     ///
-    /// This mutates: the commands run for real (a `git add` stages). It never
+    /// The commands have real effects (a `git add` stages). It never
     /// launches a provider, runs no `side_effect:` task, and turns no loop or
     /// lifecycle event back on.
     #[arg(long, requires = "dry_run")]
@@ -642,11 +666,13 @@ impl CompositionKind {
 /// Positional tokens are one file reference plus optional `key=value` setters
 /// in any order. Inline setters override `--set` on overlapping keys.
 #[derive(Debug, Clone, Args)]
+#[command(after_help = composition_help_footer!("compose", "prompt.md"))]
 pub struct ComposeArgs {
     #[command(flatten)]
     pub shared: SharedComposeArgs,
 
-    /// File reference and/or `key=value` setters.
+    /// One required file reference, then optional `key=value` setters
+    /// (overriding `--set`) and arguments for the provider.
     #[arg(value_name = "ARG", num_args = 1.., required = true)]
     pub args: Vec<String>,
 }
@@ -656,11 +682,13 @@ pub struct ComposeArgs {
 /// Positional tokens are one file reference plus optional `key=value` setters
 /// in any order. Inline setters override `--set` on overlapping keys.
 #[derive(Debug, Clone, Args)]
+#[command(after_help = composition_help_footer!("inline-compose", "prompt.md"))]
 pub struct InlineComposeArgs {
     #[command(flatten)]
     pub shared: SharedComposeArgs,
 
-    /// File reference and/or `key=value` setters.
+    /// One required file reference, then optional `key=value` setters
+    /// (overriding `--set`) and arguments for the provider.
     #[arg(value_name = "ARG", num_args = 1.., required = true)]
     pub args: Vec<String>,
 }

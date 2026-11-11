@@ -1,29 +1,92 @@
-//! Rule 4: `--help` / `-h` hoisting for composition subcommands.
+//! Rule 4: `--help` / `-h` hoisting for composition subcommands, and the
+//! executable's earlier composition help selection.
 //!
-//! Hoists a trailing `--help` or `-h` token to argv position 1 so the root
-//! help handler fires instead of being trapped inside clap's greedy
-//! positional collector.
+//! [`select_composition_help`] reads the original argv and decides which help
+//! screen a request names, before normalization or the ownership partition can
+//! lose the token's position or reject the invocation. The executable answers
+//! a selected request there and never reaches the hoist.
+//!
+//! [`hoist_composition_help`] is the retained normalization rewrite: it moves a
+//! trailing `--help` or `-h` to argv position 1 so a normalized argv never
+//! traps the token inside clap's greedy positional collector. The completion
+//! engine reuses normalization, so the rewrite stays a syntactic contract.
 
 use std::ffi::OsString;
 
-use crate::argv::{COMPOSITION_SUBCOMMANDS, find_subcommand, first_dash_dash_index};
+use crate::argv::{
+    COMPOSITION_SUBCOMMANDS, find_subcommand, first_dash_dash_index, is_global_flag_with_value,
+};
+
+/// Which help screen an argv requests, decided by [`select_composition_help`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HelpDestination {
+    /// The grouped root overview: help was requested before the command.
+    Root,
+    /// The named composition command's own clap help screen.
+    Composition(&'static str),
+}
+
+/// Select the help screen a composition invocation requests, from the
+/// original argv.
+///
+/// The command is recognized the way [`find_subcommand`] recognizes it (root
+/// options and the value of `--debug` are skipped, the first command-shaped
+/// token decides, and nothing after the first literal `--` counts). The first
+/// exact standalone `-h`/`--help` before that `--` decides the destination:
+/// before the command it is [`HelpDestination::Root`], after it the command's
+/// own screen. An exact root `-V`/`--version` before the command, or before
+/// any help token, leaves the argv to the ordinary parser.
+///
+/// Tokens are compared exactly and never interpreted, so an incomplete or
+/// invalid option beside the help token cannot prevent help, while
+/// `name=--help`, `--help=…`, and `-hh` are not help requests.
+///
+/// Returns `None` when completion is active, when no composition command is
+/// recognized, or when no help token precedes the `--` boundary.
+pub(crate) fn select_composition_help(
+    raw: &[OsString],
+    completion_active: bool,
+) -> Option<HelpDestination> {
+    if completion_active {
+        return None;
+    }
+    let (command_index, command) = find_subcommand(raw, COMPOSITION_SUBCOMMANDS)?;
+    let stop = first_dash_dash_index(raw).unwrap_or(raw.len());
+    let mut cursor = 1;
+    while cursor < stop {
+        let Some(token) = raw[cursor].to_str() else {
+            cursor += 1;
+            continue;
+        };
+        let before_command = cursor < command_index;
+        if before_command && is_global_flag_with_value(token) {
+            // Mirror `find_subcommand`: the next token is this option's value.
+            cursor += 2;
+            continue;
+        }
+        if token == "-h" || token == "--help" {
+            return Some(if before_command {
+                HelpDestination::Root
+            } else {
+                HelpDestination::Composition(command)
+            });
+        }
+        if before_command && (token == "-V" || token == "--version") {
+            return None;
+        }
+        cursor += 1;
+    }
+    None
+}
 
 /// Apply Rule 4: hoist `-h`/`--help` on composition subcommands to argv
-/// position 1 so the root [`Cli::help`] handler fires.
+/// position 1.
 ///
-/// `args.rs` sets `disable_help_flag = true` on the root `Cli` and declares
-/// a non-global `help: bool`, which means composition subcommands never
-/// inherit a working `--help` handler. Without this rule, a user typing
-/// `claudine compose file.md --gemini name=Ken --help` lands in clap's
-/// greedy positional collector and sees the misleading "unexpected
-/// argument" tip.
-///
-/// Hoisting `--help` / `-h` to position 1 converts the same argv into a
-/// root-help invocation, which `main.rs` catches and forwards to
-/// [`crate::commands::help::run`] before any subcommand runs. The rest of
-/// the argv need not satisfy the subcommand: `parse_cli_from` answers a root
-/// help request even when clap reports a missing required argument, so
-/// `claudine compose --help` needs no file.
+/// The executable selects composition help earlier, from the original argv
+/// ([`select_composition_help`]), so its normalized argv never carries a help
+/// token before the `--` boundary. This rewrite remains the normalization
+/// contract for other callers, notably the completion engine's ownership
+/// classification: a trailing help token must not be read as a positional.
 ///
 /// No-ops when:
 ///
@@ -72,6 +135,53 @@ mod tests {
 
     fn argv(tokens: &[&str]) -> Vec<OsString> {
         tokens.iter().map(OsString::from).collect()
+    }
+
+    use super::{HelpDestination, select_composition_help};
+
+    fn select(tokens: &[&str]) -> Option<HelpDestination> {
+        select_composition_help(&argv(tokens), false)
+    }
+
+    #[test]
+    fn selection_follows_the_destination_table() {
+        let compose = Some(HelpDestination::Composition("compose"));
+        assert_eq!(select(&["claudine"]), None);
+        assert_eq!(select(&["claudine", "--help"]), None);
+        assert_eq!(select(&["claudine", "--help", "compose", "x.md"]), Some(HelpDestination::Root));
+        assert_eq!(select(&["claudine", "compose", "--help"]), compose);
+        assert_eq!(select(&["claudine", "compose", "x.md", "-h"]), compose);
+        assert_eq!(
+            select(&["claudine", "--plain", "inline-compose", "x.md", "--help"]),
+            Some(HelpDestination::Composition("inline-compose"))
+        );
+        assert_eq!(
+            select(&["claudine", "sequence", "--help", "--", "--help"]),
+            Some(HelpDestination::Composition("sequence"))
+        );
+        assert_eq!(select(&["claudine", "compose", "x.md", "--", "--help"]), None);
+    }
+
+    #[test]
+    fn selection_ignores_invalid_arguments_but_not_embedded_text() {
+        let compose = Some(HelpDestination::Composition("compose"));
+        assert_eq!(select(&["claudine", "compose", "--provider", "--help"]), compose);
+        assert_eq!(select(&["claudine", "compose", "--set", "{broken", "-h"]), compose);
+        assert_eq!(select(&["claudine", "compose", "x.md", "name=--help"]), None);
+        assert_eq!(select(&["claudine", "compose", "x.md", "--help=yes", "-hh"]), None);
+    }
+
+    #[test]
+    fn selection_defers_to_completion_version_and_other_commands() {
+        let input = argv(&["claudine", "compose", "--help"]);
+        assert_eq!(select_composition_help(&input, true), None);
+        assert_eq!(select(&["claudine", "--version", "compose", "-h"]), None);
+        assert_eq!(select(&["claudine", "mcp", "compose", "--help"]), None);
+        assert_eq!(select(&["claudine", "__complete", "compose", "--help"]), None);
+        assert_eq!(
+            select(&["claudine", "--debug", "trace", "sequence", "-h"]),
+            Some(HelpDestination::Composition("sequence"))
+        );
     }
 
     #[test]
