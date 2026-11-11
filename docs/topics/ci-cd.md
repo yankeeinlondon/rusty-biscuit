@@ -44,13 +44,15 @@ completes. A tag-only or deletion-only push exits without running gates. `just p
 packages. On a clean checkout the gates run FROM the reviewed plan described next (`just ci-local
 --plan-in`, handed over as `BISCUIT_CI_PLAN_IN`): the planner never selects twice, an L1/L2 cell
 that qualifying prior passing evidence already covers is skipped, a cell whose newest prior
-evidence is a failure is rerun, and lint runs as always; a dirty checkout or an
-`RUSTY_BISCUIT_PRE_PUSH_AREAS` override replans from the working tree for wider feedback and
+evidence is a failure is rerun, and lint runs as always; a checkout that is dirty when the push
+starts or just before the gates (or whose HEAD or status cannot then be read), or an
+`RUSTY_BISCUIT_PRE_PUSH_AREAS` override, replans from the working tree for wider feedback and
 publishes no validation outcomes. Committed scope receipts remain independent of that validation.
 A docs-only push gates nothing unless a test reads a changed document, in which
 case it runs that test alone ([test inputs](../cicd/test-inputs.md)). Before any gate, the hook reviews every branch update
 the push carries, in order — each revision's COMMITTED tree (its own planner, manifests, and
-policy, in a temporary worktree unless it is the clean checkout), never the working tree — applies
+policy, in a temporary worktree unless the checkout, re-read just before the tree is chosen, is
+clean at that revision), never the working tree — applies
 published evidence to it, prints it, and refuses on a recorded execution constraint scoped to that
 update's remote branch (either name when the refspec renames) and remote only when a cell in the
 prohibited environment would still execute; reused or absent cells satisfy it.

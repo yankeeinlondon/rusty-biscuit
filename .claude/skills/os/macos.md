@@ -81,6 +81,27 @@ process-crash durability, call `libc::fsync` under
 `worktree/lib/src/remove/recovery/storage.rs`). Never call std's flush in a
 per-batch loop on macOS without measuring it.
 
+## A binary's first run after any Cargo command costs ~0.6 s
+
+Every `cargo build`/`cargo nextest run`, even one that compiles nothing,
+re-creates each uplifted `target/debug/<bin>` as a new file (`stat -f %i`
+shows a new inode). Debug binaries are ad-hoc linker-signed, and macOS checks
+a new file's code signature on its first exec: about 0.6 s for the 49 MB
+`ci-push` (11,968 page hashes), then 0.01 s per run. The time is spent
+before `main`, so in-process timing never sees it, and `sample` shows it as
+`_dyld_start`.
+
+- A test run alone pays it inside its first spawn of that binary, so a
+  single-test timing reads ~0.6 s high. Run the binary once first (`<bin>
+  --help`), or compare the same test's later spawns.
+- In a full run, the tests that spawn the binary first pay it together.
+- It is not fixture state: a fresh `TMPDIR` or `HOME` does not trigger it.
+
+Measured 2026-11-11. On this host `/usr/bin/git` is also Xcode's `xcrun`
+launcher: about 12 ms a call against 5 ms for
+`/Library/Developer/CommandLineTools/usr/bin/git`, which a fixture that
+takes `git` from `PATH` pays on every call.
+
 ## Process groups
 
 - **One `kill(-pgid, SIGKILL)` can miss a child that is being forked.** XNU

@@ -79,6 +79,27 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
     `just ci-local` started by hand has no such probe and fails with
     `FileNotFoundError`. Put the real Python directory (it has `python3.exe`)
     first on `PATH`, or hand an interpreter over with `BISCUIT_CI_PYTHON`.
+  - A Cygwin program run by a Git Bash (MSYS) recipe mixes two POSIX
+    runtimes. On `build-win-native` the `ci-push` parity tests ran the real
+    `ci-local` recipe under Git's `usr\bin\bash.exe` with `jq` found first
+    in `C:\cygwin64\bin`; alone every test passed, but with about 80 tests in
+    parallel `jq --binary -r …` died with exit 139 and empty output (found
+    with `SHELLOPTS=xtrace` in the child's environment, which turns on Bash's
+    trace without editing the recipe). A fixture that looks tools up on
+    `PATH` skips any directory holding `cygwin1.dll`
+    (`scripts/ci-push/integration/evidence_fixture.rs`).
+  - Each `x="$(jq …)"` in a Git Bash recipe is an MSYS fork plus a program
+    start, about 50 ms on `build-win-native`. Read several facts from one
+    document in one `jq` and split its lines in Bash: folding the `ci-local`
+    gate loop's six per-package reads and three scope reads (and a
+    `sed | wc | tr` count) into two calls made a real-recipe push about
+    0.6 s faster there (A/B, 6.45–6.78 s → 5.83–6.20 s).
+- **Git for Windows' system config sets `core.autocrlf=true`.** A test
+  fixture that passes `-c core.autocrlf=false` only on its own `git` calls
+  still gets CRLF files from production code that runs Git in the fixture
+  repository (a `git worktree add` checkout read back as `"first\r\n"`).
+  Write `core.autocrlf = false` into the fixture's `.git/config`; the real
+  repository is covered by `.gitattributes` (`eol=lf`).
 - **Bash scripts lose data on Windows three ways:**
   - Native `jq.exe -r` ends lines with CRLF, so a value read back keeps a
     `\r` and matches nothing (for example a PR base of `main\r`). Use
@@ -89,6 +110,12 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
     the script to a file and run `bash <file>`.
   - Interpolating `{{ args }}` into a bash recipe eats a path's backslashes.
     Pass paths with forward slashes (`Path.as_posix()`).
+- **Bash runs a command word as a path only when it contains `/`**; any
+  other word is looked up on `PATH`. So `"$CI_BUILD_BIN" produce` with
+  `CI_BUILD_BIN=C:\…\ci-build.exe` fails under Git Bash with `line 34:
+  C:\…\ci-build.exe: command not found`, though the file exists. Hand a
+  script an executable as `C:/…/ci-build.exe` (`replace('\\', "/")`); a
+  native path is fine as an argument, which Bash only opens.
 - **`cmd /C` cannot start a command with `@1>&2`**; it runs a command named
   `1`. Write `@(1>&2 echo x)`, which also avoids the trailing space that
   `echo x 1>&2` leaves.
@@ -194,6 +221,56 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   The hosted `windows-latest` image disables real-time monitoring, so this
   host is slower than CI per process. Never change the host's Defender
   settings; cut processes and fresh files.
+- **A freshly copied executable costs about 0.3 s on its first run** on
+  `build-win-native` (Defender scans it; later runs take about 10 ms). A hard
+  link to a file that has already run costs about 20 ms. A test fixture that
+  installs one stub `.exe` under several names should hard-link them to one
+  file rather than copy each (`scripts/ci-push/integration/fixture.rs`
+  `link_or_copy`: 0.35–0.75 s per `ci-push` parity test). A nextest archive
+  run extracts its binaries under `%TEMP%`, the fixtures' own volume, so the
+  link can be to the extracted binary itself. The first launch of a freshly
+  extracted large binary (28 MB `ci-push.exe`) took about 0.55 s once per run.
+- **A Python helper process costs far more than its interpreter start.**
+  Measured on `build-win` (Python 3.13): `python -c pass` about 21 ms, about
+  45 ms when a Git Bash recipe starts it. With `PYTHONDONTWRITEBYTECODE=1` and
+  no `__pycache__` beside the source (a fresh fixture or temporary worktree),
+  every start recompiles what it imports: `scripts/ci/schema.py` alone is
+  31 ms, and the 6,000-line planner about 0.15 s. A script run as a file
+  (`python x.py`, `runpy.run_path`) is never cached; `runpy.run_module` reads
+  and writes bytecode beside the module. `platform.system()` and
+  `platform.release()` run a WMI query (about 50–100 ms) on their first call in
+  each process. So a pipeline of helper processes costs about 0.15–0.25 s per
+  helper there before any `git` child; count helper processes, not lines of
+  Python. Profile with a `sitecustomize.py` on `PYTHONPATH` that wraps
+  `subprocess.run` and `atexit`-logs `sys.argv` (and, optionally, `cProfile`),
+  and Bash with `SHELLOPTS=xtrace PS4='+${EPOCHREALTIME} '` in the child's
+  environment; both reach every descendant without editing the code.
+- **`PYTHONDONTWRITEBYTECODE=1` stops writing bytecode, not reading it.**
+  Importing `local_evidence` and `observation_notes` took about 130 ms
+  uncached and 76 ms with a valid `__pycache__` beside them. A fixture that
+  compiles its committed helpers once (`compileall`, in the interpreter start
+  it already makes; `__pycache__/` is ignored there) saves every later
+  helper start that recompile, even though `ci-push` sets the variable.
+- **Budget an L1 test by what one push costs under the full suite.** In the
+  `repo-deps` owning-suite run on `build-win` (12 logical CPUs, 900+ tests
+  beside Cargo-building `ci-build` tests), a `ci-push` parity push with a stub
+  gate cost about 3.0 s when it published nothing and 3.8 s when it published
+  a receipt; the real `ci-local` recipe run directly about 2.6–3.3 s; and
+  seeding prior evidence through the real helpers in one interpreter about
+  0.8 s. A push through `ci-push` and the real recipe together therefore
+  cannot fit 5 s there; ask each question at its own boundary (recipe run
+  directly, hook with a modeled gate, verifier over seeded evidence) and pin
+  the boundaries to each other.
+- **Batch `git` reads in a Python helper.** One
+  `git cat-file --batch-check=%(objectname)` answers every
+  `rev-parse --verify` a helper makes and whether a ref exists (an absent
+  notes ref needs no `git notes list`), and `git ls-tree` takes several
+  pathspecs and lists their union. In the `ci-push` parity fixtures that took
+  a push from 24 helper `git` children to 13. A fixture's `PATH` that names
+  Git's `<prefix>\bin` (and the `usr\bin` the launcher would add, for the
+  local transport's `sh`) instead of `<top>\cmd` made each of those about
+  20 ms instead of 30 ms (`scripts/ci-push/integration/evidence_fixture.rs`
+  `fixture_git`).
 - **Fresh files are slow to write and slower to read back.** A ~400-file
   libgit2 fixture took 1.9 s as loose objects, and `Index::add_all` over the
   fresh tree 1.2 s (7 ms on macOS). For a `git2` fixture, add a mempack

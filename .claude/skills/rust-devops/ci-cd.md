@@ -394,9 +394,14 @@ changing it:
 - **Review blocks in every mode.** Only an ordinary gate failure passes in
   `warn`; an interruption, a constraint refusal (exit 1), and a review failure
   (exit 2) never do.
-- Seven end-to-end parity tests are `#[cfg(unix)]` (they run the Bash
-  `ci-local.just` or send Unix signals); the two native Windows launch paths
-  (Git Bash, PowerShell) are `launcher::windows_*`.
+- The end-to-end parity tests are portable except those that send Unix
+  signals; the native Windows launch paths (Git Bash, PowerShell) are
+  `launcher::windows_*`, one push per test. A push through `ci-push` and the
+  real `ci-local.just` together is too slow for an L1 test on native
+  Windows, so the real recipe runs directly as `ci-push` starts it
+  (`parity::the_real_recipe_*`), the hook tests use a gate that stages
+  what the recipe stages, and prior evidence is seeded through the real
+  helpers; tests pin each substitution to the real thing.
 
 Parallel test workers default to `max(1, logical_cores - 2)` locally. CI uses
 all logical cores on runners with four or fewer, otherwise `logical_cores - 2`.
