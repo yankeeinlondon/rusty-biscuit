@@ -286,9 +286,12 @@ repeated identical request as the same request.
 An observation names its files by path and SHA-256 but carries no bytes.
 Ingestion with a **producer** credential only _stages_ those bytes: they are
 stored privately and cannot be fetched yet. A **verifier** then _finalizes_
-each upload, which checks the length and digest (and, for expected-test
-listings and completion records, that their package, gate, environment, head,
-and target match the observation) before the file becomes fetchable:
+each upload, which checks the length and digest before the file becomes
+fetchable. An expected-test listing must also name the observation's package,
+gate, environment, and target. A completion record must name its package,
+gate, and environment; one from a GitHub Actions run must also name its
+commit, run, and attempt. A seed or rig run proves each cell on a commit of
+its own with the same tree, so its record's commit is not compared:
 
 ```sh
 just evidence-finalize ./ingest-0001.json --token-file ~/.config/evidence-store/verifier.token
@@ -431,10 +434,17 @@ destination whose environment, database, or bucket equals the source's, and a
 destination database that is not empty. Use `restore-test`, provisioned with
 `just evidence-store provision --env restore-test` (see
 [One-time provisioning](#one-time-provisioning)), which gives it its own
-database and bucket. Do not run `just evidence-store deploy --env restore-test`
-into that database before
-restoring: deploying applies migrations, and a database with migrations
-applied is not empty.
+database and bucket. Its Worker needs the code but not the migrations, so
+deploy it with the raw Wrangler command, which applies none:
+
+```sh
+just evidence-store wrangler deploy --env restore-test
+```
+
+Do not run `just evidence-store deploy --env restore-test` before restoring:
+that recipe applies migrations, and a database with migrations applied is not
+empty, so the restore refuses it. The restored database carries the source's
+migration history, so later `deploy` runs apply only newer migrations.
 
 ```sh
 just operator restore --backup /abs/evidence-backups/<backup_id> \
