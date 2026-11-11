@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 5
 created: 2026-11-08
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -34,6 +34,55 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
 - scripts/ci/fixtures/pre-push/README.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- scripts/Cargo.toml
+- scripts/lib.rs
+- scripts/ci-plan.rs
+- scripts/ci-plan-render.rs
+- scripts/ci-plan-tests.rs
+- scripts/ci-change-inventory.rs
+- scripts/ci-push-test-tool.rs
+- scripts/ci-push/mod.rs
+- scripts/ci-push/documents.rs
+- scripts/ci-push/json.rs
+- scripts/ci-push/constraints.rs
+- scripts/ci-push/git.rs
+- scripts/ci-push/worktree.rs
+- scripts/ci-push/process.rs
+- scripts/ci-push/python.rs
+- scripts/ci-push/tests/mod.rs
+- scripts/ci-push/tests/constraints.rs
+- scripts/ci-push/tests/git.rs
+- scripts/ci-push/tests/worktree.rs
+- scripts/ci-push/tests/process.rs
+- scripts/ci-push/tests/python.rs
+- scripts/ci-push/integration/main.rs
+- scripts/ci-push/integration/fixture.rs
+- scripts/ci-push/integration/process.rs
+- scripts/ci-push/integration/python.rs
+- scripts/ci/constraints.py
+- scripts/ci/test_constraints.py
+- scripts/ci/fixtures/pre-push/constraints/parity.json
+docs_updated_during_phase_2:
+- scripts/ci/fixtures/pre-push/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+- scripts/ci-push.rs
+- scripts/ci-push/mod.rs
+- scripts/ci-push/review.rs
+- scripts/ci-push/evidence.rs
+- scripts/ci-push/host.rs
+- scripts/ci-push/tests/mod.rs
+- scripts/ci-push/tests/run.rs
+- scripts/ci-push/tests/orchestration.rs
+- scripts/ci-push/integration/main.rs
+- scripts/ci-push/integration/push.rs
+- just/ci-local.just
+- scripts/ci/test_ci_local.py
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
 - repo-deps
 ---
@@ -130,18 +179,18 @@ Validation checkpoint: `cargo check --color=never -p repo-deps --no-default-feat
 
 ### Wave 2
 
-- [ ] **Manage processes**
+- [x] **Manage processes**
   - Own `scripts/ci-push/process.rs` and `python.rs`: implement supervised native commands, Python probes, signals/Job Objects, bounded probe capture, null stdin, sanitized child environment, and cleanup ownership.
   - Add a compiled `ci-push-test-tool` fixture executable that dispatches by executable name or explicit scenario argument. It supplies gh/just/python/cargo stubs, argv/environment/stdin recording, child/grandchild readiness, failures, and staged reports. Copy the native executable with `.exe` on Windows rather than creating shell scripts or symlinks.
   - Every wait has a deadline and readiness condition. No fixed sleeps or inherited undrained pipes. Fixture-only launch failures must not leak to real tools on PATH.
-- [ ] **Adapt repositories**
+- [x] **Adapt repositories**
   - Own `scripts/ci-push/git.rs` and `worktree.rs`: sniff discovery, gix reads/diffs, explicit remote transport boundary, git2 runtime worktree and scope-note writes, cleanup guards.
   - Verify renames, copies, deletion/type changes, spaces, Unicode, newline filenames on Unix, detached/linked checkouts, current versus advertised remote tips, missing objects, and ancestor checks. Use CLI parity solely as a test oracle; no test contacts user remotes.
   - Release all repository handles before removal on Windows. Cleanup reports only invocation-owned paths and refs.
-- [ ] **Validate constraints**
+- [x] **Validate constraints**
   - Own `scripts/ci-push/constraints.rs`, `scripts/ci/constraints.py`, `scripts/ci/test_constraints.py`, and shared constraint parity cases. Implement matching and both readers' malformed-input correction from the rules and matrix.
   - Keep the Python command surface used by ci-local/planner. Use an explicit date and fixture root in parity tests; errors name the offending JSON path/field.
-- [ ] **Share presentation**
+- [x] **Share presentation**
   - Own `scripts/ci-plan-render.rs`, the minimal `scripts/ci-plan.rs` extraction, and ci-plan regression tests. Expose the shared renderer and preserve current CLI results.
   - Correct stale feature-tier commentary in the touched module: the current ci-plan module says local-tools although its manifest selects build-tools. Do not change rendering behavior or unrelated comments.
 
@@ -151,22 +200,22 @@ Validation checkpoint: run each task's focused Rust tests once and the Python co
 
 ### Wave 3
 
-- [ ] **Review contexts**
+- [x] **Review contexts**
   - Own `scripts/ci-push/review.rs`: resolve every branch/context from the complete update list, materialize committed trees, generate argument files, run planner→verify→apply→render→constraints in order, and capture the first HEAD context independently from receipt success.
   - Keep a complete review ledger; expose it in tests to prove update/context ordering, skipped updates, multi-base reviews, renamed branch constraint identities, and no publication/gates after any review failure.
   - Review every context before proceeding to publication. Python and adapter failures include revision, base, command, and actionable diagnostics.
-- [ ] **Bridge interpreter**
+- [x] **Bridge interpreter**
   - Own `just/ci-local.just` and its Python companion tests. Replace the identified Python calls with the selected interpreter argv array, retaining standalone defaults.
   - Add a regression with broken python3 and selected fallback that enters the real ci-local recipe using a reviewed plan, and a dirty/override case that enters replanning. Assert helper probes/logs contain the selected interpreter and no restarted python3.
   - Preserve all scope/evidence rules and command arguments. Use native path environment values and separate argv; the NUL-prefix reader must not evaluate shell text and must reject a truncated nonempty record.
 
 ### Wave 4
 
-- [ ] **Run gates**
+- [x] **Run gates**
   - Wire the coordinator in `scripts/ci-push/mod.rs` to the completed review and process modules. Resolve auto from the full reviewed ledger; scope-only/off run no gates, strict/warn invoke `just pre-push` with split selectors.
   - Set `BISCUIT_CI_SCOPE_OUT`, `BISCUIT_CI_PLAN_OUT`, `BISCUIT_CI_REPORTS_OUT`, and clean/unmodified nonzero HEAD context `BISCUIT_CI_PLAN_IN` exactly once. Dirty/override/no-HEAD-context feedback replans locally.
   - Add before/after HEAD and cleanliness checks and all receipt-withholding reasons; ordinary gate failure retains its status, warn maps only ordinary failure to zero, and cancellation never reaches the success path.
-- [ ] **Publish evidence**
+- [x] **Publish evidence**
   - Follow gate wiring sequentially, owning `scripts/ci-push/evidence.rs` and coordinator publication integration. Publish eligible scope only after successful full review; record validation only after retaining completed reports.
   - Preserve scope/validation note refs, retry unions, and Python publication status meanings (including status 4 for local evidence retained but unpublished). Inject copy/record/push failures and assert durable reports survive.
   - Keep staging directories after retention failure and print their paths. Never publish validation for changed HEAD, initial/final dirtiness, interrupted/incomplete execution, overrides, or gates unrelated to outgoing HEAD.
