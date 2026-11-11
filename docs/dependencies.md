@@ -7,6 +7,23 @@
 
 ## Recent Dependency Notes
 
+- `repo-deps` (`scripts/`) adds a `ci-push` binary and a library target
+  (2026-11-10). Its `local-tools` feature gains optional `gix` (pinned
+  `=0.90.0` with sniff's read features, without `merge`), `git2` 0.20 with
+  default features off, `chrono` 0.4, `dirs` 6, `tempfile` 3, Unix `libc`
+  0.2, and Windows `windows-sys` 0.61 (`Win32_Foundation`, `Win32_Security`,
+  `Win32_System_Console`, `Win32_System_JobObjects`,
+  `Win32_System_Threading`). gix does the repository reads; git2 covers only
+  the writes gix 0.90 has no API for (a detached linked worktree for a
+  committed-tree review, a scope note). `libc` and `windows-sys` let
+  `ci-push` own its children's process tree and signals. It carries the
+  `libgit2-sys >=0.18.3, <0.18.6` ceiling that sniff and tree-hugger carry,
+  because sniff's `hyperpolyglot` links `pcre2-sys` and a newer bundled
+  libgit2 collides with it at MSVC link time. Dev-dependencies add
+  `biscuit-test-harness` and `test-toolkit` (workspace paths). Every crate
+  was already in the lockfile, so no package is added; the
+  `--no-default-features` `ci-rollup` build and the `build-tools` binaries
+  link none of them.
 - `unchained-ai/model_id` drops its `trybuild` dev-dependency (2026-11-10):
   its compile-pass cases are now modules of an ordinary integration test and
   its compile-fail cases run the derive's expansion in-process, so no test
@@ -272,7 +289,9 @@
   enroll it in release-plz or the maintenance audit. Its bins are split across
   three feature levels: `build-tools` carries `biscuit-hash`,
   `biscuit-terminal`, `object`, and `find-msvc-tools`; the default `local-tools`
-  includes `build-tools` and adds `cargo_metadata`, `ctrlc`, and `sniff`; and
+  includes `build-tools` and adds `cargo_metadata`, `ctrlc`, and `sniff`, plus
+  `ci-push`'s `gix`, `git2`, `chrono`, `dirs`, `tempfile`, `libc`, and
+  `windows-sys`; and
   the always-runs merge-gate build stays
   `cargo build -p repo-deps --no-default-features --bin ci-rollup`, which links
   none of them.
