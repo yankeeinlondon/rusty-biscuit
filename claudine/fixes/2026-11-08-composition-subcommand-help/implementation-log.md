@@ -102,12 +102,12 @@ decisions_for_review:
         literal strings, which would drift independently.
     - |-
         Phase 2 tests place `--perf` after the composition command when proving that help
-        ignores it. `--perf` is declared on the composition commands, not on the root, so
-        `claudine --perf compose -h` fails as a root-level argument error (exit 2). This was
-        already the case before this fix, and the plan did not say where the switch goes. The
-        alternative is to make the help selector skip `--perf` before the command (or declare
-        it on the root). That widens the change into argument ownership, which the
-        specification keeps unchanged. Redoing it means one selector rule plus one test.
+        ignores it. An earlier note here claimed `claudine --perf compose -h` fails as a
+        root-level argument error (exit 2); that was wrong. The command recognizer skips
+        flag-shaped root tokens, so the help selector still finds `compose`, and the command
+        prints compose help with exit 0 and empty stderr (corrected after review 1, confirmed
+        by a direct run). No code change was needed; the tests simply exercise the
+        after-command placement.
     - |-
         Phase 3: the plan asked for the two skill topic pages
         (`.claude/skills/claudine/topics/cli-pre-parsing.md` and `argv-normalization.md`)
@@ -236,7 +236,7 @@ Three tasks ran in parallel (separate subagents, each owning separate files and 
 - One subprocess bypass test each: `help_bypasses_{unknown_provider,missing_provider_value,malformed_setter_json,dry_run_shell_without_dry_run,conflicting_interactive_switches,unknown_switch_before_file}`.
 - Root overview with invalid composition arguments, bare invocation, `mcp`/`actions` clap help, and wrapper help. Stdout and stderr are asserted separately.
 - Plain mode before and after the command, and for root help. Color is forced with `CLICOLOR_FORCE=1` and `FORCE_COLOR=1`, with `NO_COLOR` removed on the child only. Forced-color controls prove escapes appear without `--plain`.
-- `help_ignores_{quiet,silent,perf}`: the switch comes after the command, because `--perf` is a composition option. Before the command it is a root-level clap error, exit 2, which is unchanged existing behavior.
+- `help_ignores_{quiet,silent,perf}`: the switch comes after the command. Placed before the command, `claudine --perf compose -h` also prints compose help with exit 0 and empty stderr (checked by hand after review 1; an earlier version of this log wrongly recorded exit 2).
 - Feature-gated `inline_compose_{long,short}_help_on_real_document_has_no_effects` use the fake Goose provider, `PROVIDER_MARKER`, an `append_line` initialize action, and no seeded config. They assert no launch, no lifecycle log, unchanged input bytes, no config, and no audio spool. The agent checked by hand that the same document without `--help` does launch and write the log.
 - Feature-gated `help_after_separator_is_forwarded_to_provider` runs `compose prompt.md --claude -- --help` for real against `claudine-fake-completion`. The recorded argv has exactly one `--help` and no `--`, and stdout is the provider's answer, not a help screen.
 - `removed_fail_fast_is_absent_from_sequence_help` now requires the sequence usage and shared options first, then empty stderr.

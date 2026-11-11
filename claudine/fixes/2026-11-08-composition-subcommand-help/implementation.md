@@ -43,8 +43,11 @@ Recorded in detail in the implementation log's `decisions_for_review`:
    `root_help_request` fallback's `ignore_errors` propagation).
 2. A root `-V`/`--version` before the command and before any help token leaves
    the argv to the ordinary parser; a help token that comes first wins.
-3. `--perf` is a composition option, so `claudine --perf compose -h` remains a
-   root clap error (exit 2, unchanged); tests place `--perf` after the command.
+3. Tests place `--perf` after the command. Placed before it,
+   `claudine --perf compose -h` also prints compose help (exit 0, empty
+   stderr), because the command recognizer skips flag-shaped root tokens. An
+   earlier version of this record wrongly said it exits 2; corrected after
+   review 1.
 4. The help footer comes from one `composition_help_footer!` macro rather than
    three literal strings.
 
