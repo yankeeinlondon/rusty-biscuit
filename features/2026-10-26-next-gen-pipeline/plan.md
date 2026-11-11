@@ -2,9 +2,44 @@
 kind: plan
 total_phases: 6
 created: 2026-11-08
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1:
+- pnpm-workspace.yaml
+- pnpm-lock.yaml
+- tools/evidence-store/package.json
+- tools/evidence-store/tsconfig.json
+- tools/evidence-store/vitest.config.ts
+- tools/evidence-store/justfile
+- tools/evidence-store/src/contracts/api.ts
+- tools/evidence-store/src/contracts/evidence.ts
+- tools/evidence-store/src/contracts/index.ts
+- tools/evidence-store/src/contracts/json.ts
+- tools/evidence-store/cli/capture-parity.ts
+- tools/evidence-store/cli/inventory.ts
+- tools/evidence-store/cli/prove-d1.ts
+- tools/evidence-store/spike/d1-guard/schema.sql
+- tools/evidence-store/spike/d1-guard/worker.ts
+- tools/evidence-store/spike/d1-guard/scenarios.ts
+- tools/evidence-store/api/openapi.yaml
+- tools/evidence-store/api/schemas/
+- tools/evidence-store/api/examples/
+- tools/evidence-store/tests/node/api-contract.test.ts
+- tools/evidence-store/tests/node/inventory.test.ts
+- tools/evidence-store/tests/node/parity-fixtures.test.ts
+- tools/evidence-store/tests/node/prove-d1.test.ts
+- tools/evidence-store/tests/workers/d1-spike.test.ts
+- tools/evidence-store/tests/workers/env.d.ts
+- tools/evidence-store/tests/fixtures/parity/
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+- tools/evidence-store/README.md
+- tools/evidence-store/api/README.md
+- tools/evidence-store/docs/contract-inventory.md
+skills_files_updated_during_phase_1: []
+packages:
+- '@rusty-biscuit/evidence-store'
 ---
 
 # Evidence store implementation plan
@@ -57,10 +92,10 @@ All phases execute unattended in order. Waves are numbered globally; tasks in th
 
 ### Wave 1 — Contract foundation
 
-- [ ] **Define API**
+- [x] **Define API**
   - Write OpenAPI 3.1, strict JSON configuration schemas, example requests/responses, role matrix, limits, and error codes under `tools/evidence-store/api/`. Include operator registration/credential routes, upload/reference unions, retention certificates, and disabled evaluation publication (403 `evaluation_publication_disabled` for every role).
   - Create package/lockfile/justfile foundation and `src/contracts/` exported interfaces. This task owns shared package setup; remaining waves consume its interfaces.
-- [ ] **Trace parity**
+- [x] **Trace parity**
   - Capture frozen real-shape fixtures and canonical expected bytes/IDs from existing `schema.py`, `observation_notes.receipt_observations`, `hosted_observations.build_observation`, and existing schema/observation test fixtures. Include hook, rig, seed, hosted pass/fail, incomplete, retries, Unicode, and v2 adapter controls.
   - Add a contract inventory linking every field and shared validator to robustness cases below. Read the current working tree; do not overwrite unrelated existing changes.
 
