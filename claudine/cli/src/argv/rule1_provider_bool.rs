@@ -8,8 +8,7 @@ use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 /// Returns the [`Provider`] that a boolean flag token selects, if any.
 ///
 /// The boolean flag surface is derived from [`Provider::cli_aliases`]: the
-/// first alias of each provider (`claude`, `codex`, `gemini`, `goose`,
-/// `kimi`, `opencode`, `qwen`) is the user-facing flag name, and
+/// first alias of each provider is the user-facing flag name, and
 /// the normalizer rewrites `--<first-alias>` to `--provider <as_slug()>`.
 /// Keeping the mapping derived means a new provider added with a matching
 /// clap boolean flag declaration in `SharedComposeArgs` automatically

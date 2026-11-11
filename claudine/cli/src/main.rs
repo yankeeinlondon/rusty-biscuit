@@ -603,6 +603,13 @@ mod tests {
 
 #[cfg(test)]
 mod composition_help {
+    use std::collections::BTreeSet;
+    use std::ffi::OsString;
+
+    use clap::ArgAction;
+    use clap::error::ErrorKind;
+    use claudine::provider::PROVIDERS_DISPLAY_ORDER;
+
     use super::{argv::COMPOSITION_SUBCOMMANDS, build_cli_command, composition_help_command};
 
     fn rendered(command: &str) -> String {
@@ -635,6 +642,234 @@ mod composition_help {
                 "{command} lacks its forwarding example: {help}"
             );
             assert!(!help.contains("Composition:"), "{command}: {help}");
+        }
+    }
+
+    fn os_argv(tokens: &[&str]) -> Vec<OsString> {
+        tokens.iter().map(OsString::from).collect()
+    }
+
+    /// The `--<first alias>` switch of every provider, derived the way
+    /// `argv::provider_for_boolean_flag` derives the accepted shortcuts.
+    fn catalog_shortcuts() -> BTreeSet<String> {
+        PROVIDERS_DISPLAY_ORDER
+            .iter()
+            .map(|provider| {
+                let alias = provider.cli_aliases().first().unwrap_or_else(|| {
+                    panic!("{} has no catalog alias", provider.as_slug())
+                });
+                format!("--{alias}")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_catalog_shortcut_is_a_visible_option_of_every_command() {
+        let expected = catalog_shortcuts();
+        assert_eq!(expected.len(), PROVIDERS_DISPLAY_ORDER.len());
+        for command in COMPOSITION_SUBCOMMANDS {
+            let child = composition_help_command(command, true);
+            let group = child
+                .get_groups()
+                .find(|group| group.get_id() == "compose_provider")
+                .unwrap_or_else(|| panic!("{command} lacks the provider group"));
+            let declared: BTreeSet<String> = group
+                .get_args()
+                .filter(|id| *id != "provider")
+                .map(|id| {
+                    let arg = child
+                        .get_arguments()
+                        .find(|arg| arg.get_id() == id)
+                        .unwrap_or_else(|| panic!("{command}: group names missing `{id}`"));
+                    assert!(!arg.is_hide_set(), "{command}: `{id}` is hidden");
+                    assert!(
+                        matches!(arg.get_action(), ArgAction::SetTrue),
+                        "{command}: `{id}` is not a Boolean switch"
+                    );
+                    format!("--{}", arg.get_long().unwrap_or_default())
+                })
+                .collect();
+            assert_eq!(declared, expected, "{command}: shortcut switches drifted from the catalog");
+            let help = rendered(command);
+            for shortcut in &expected {
+                assert!(help.contains(&format!("{shortcut} ")), "{command} omits {shortcut}: {help}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_visible_option_is_described_and_skipped_fields_are_absent() {
+        const SKIPPED: [&str; 4] =
+            ["set_records", "caller_arguments", "provider_tail", "provider_tail_notices"];
+        for command in COMPOSITION_SUBCOMMANDS {
+            let child = composition_help_command(command, true);
+            for arg in child.get_arguments().filter(|arg| !arg.is_hide_set()) {
+                let help = arg.get_help().map(ToString::to_string).unwrap_or_default();
+                assert!(!help.trim().is_empty(), "{command}: `{}` has no help", arg.get_id());
+            }
+            let ids: Vec<&str> = child.get_arguments().map(|arg| arg.get_id().as_str()).collect();
+            let rendered = rendered(command);
+            for skipped in SKIPPED {
+                assert!(!ids.contains(&skipped), "{command} declares skipped `{skipped}`");
+                let spelled = skipped.replace('_', "-");
+                assert!(!rendered.contains(&spelled), "{command} renders `{spelled}`: {rendered}");
+            }
+            for (id, alias) in [
+                ("operation", "op"),
+                ("append_system_prompt", "asp"),
+                ("replace_system_prompt", "rsp"),
+            ] {
+                let arg = child
+                    .get_arguments()
+                    .find(|arg| arg.get_id() == id)
+                    .unwrap_or_else(|| panic!("{command} lacks `{id}`"));
+                assert_eq!(arg.get_visible_aliases(), Some(vec![alias]), "{command} `{id}`");
+                // Clap may wrap `[aliases: --op]` across lines; the alias and
+                // its closing bracket stay together.
+                assert!(rendered.contains(&format!("--{alias}]")), "{command} hides --{alias}: {rendered}");
+            }
+        }
+    }
+
+    #[test]
+    fn enumerated_values_stay_canonical() {
+        let canonical: Vec<String> =
+            PROVIDERS_DISPLAY_ORDER.iter().map(|provider| provider.as_slug().to_string()).collect();
+        for command in COMPOSITION_SUBCOMMANDS {
+            let child = composition_help_command(command, true);
+            let values_of = |id: &str| -> Vec<String> {
+                child
+                    .get_arguments()
+                    .find(|arg| arg.get_id() == id)
+                    .unwrap_or_else(|| panic!("{command} lacks `{id}`"))
+                    .get_possible_values()
+                    .iter()
+                    .filter(|value| !value.is_hide_set())
+                    .map(|value| value.get_name().to_string())
+                    .collect()
+            };
+            assert_eq!(values_of("provider"), canonical, "{command} --provider values");
+            assert_eq!(values_of("exclude"), canonical, "{command} --exclude values");
+            assert_eq!(values_of("on_rate_limit"), ["pause", "abort", "continue"], "{command}");
+        }
+    }
+
+    #[test]
+    fn both_help_spellings_select_the_one_compact_renderer() {
+        for command in COMPOSITION_SUBCOMMANDS {
+            let child = composition_help_command(command, true);
+            let help = child
+                .get_arguments()
+                .find(|arg| arg.get_id() == "help")
+                .unwrap_or_else(|| panic!("{command} lacks its help option"));
+            assert_eq!(help.get_short(), Some('h'), "{command}");
+            assert_eq!(help.get_long(), Some("help"), "{command}");
+            assert!(matches!(help.get_action(), ArgAction::Help), "{command}");
+
+            // Both spellings reach the same destination, so the printer's
+            // single `render_help` call answers both; it is stable across
+            // builds and is the compact screen, never a long manual.
+            let short = super::argv::select_composition_help(&os_argv(&["claudine", command, "-h"]), false);
+            let long = super::argv::select_composition_help(&os_argv(&["claudine", command, "--help"]), false);
+            assert_eq!(short, long, "{command}");
+            assert_eq!(rendered(command), rendered(command), "{command}");
+            let compact = rendered(command);
+            let long_manual = composition_help_command(command, true).render_long_help().to_string();
+            assert!(
+                long_manual.contains("The commands have real effects"),
+                "{command}: the long-help paragraph this check relies on moved: {long_manual}"
+            );
+            assert!(compact.contains("--dry-run-shell"), "{command}: {compact}");
+            assert!(
+                !compact.contains("The commands have real effects"),
+                "{command} renders the long help paragraph: {compact}"
+            );
+        }
+    }
+
+    #[test]
+    fn user_text_carries_no_history_or_internal_paths() {
+        for command in COMPOSITION_SUBCOMMANDS {
+            let mut child = composition_help_command(command, true);
+            for text in [child.render_help().to_string(), child.render_long_help().to_string()] {
+                let lower = text.to_lowercase();
+                for word in ["deprecated", "migration", "migrate", "previously", "retired", "legacy"] {
+                    assert!(!lower.contains(word), "{command} help mentions `{word}`: {text}");
+                }
+                for fragment in ["::", "crate::", ".rs"] {
+                    assert!(!text.contains(fragment), "{command} help shows `{fragment}`: {text}");
+                }
+            }
+        }
+    }
+
+    /// Run the ordinary pre-parse pipeline (normalize, partition) and the
+    /// shared clap model on `tokens`, with no help token present.
+    fn parse_without_help(tokens: &[&str]) -> Result<clap::ArgMatches, String> {
+        let normalized = super::argv::normalize(os_argv(tokens));
+        let (claudine_argv, _) =
+            super::argv::partition_composition_tail(normalized).map_err(|err| format!("partition: {err}"))?;
+        build_cli_command(false)
+            .try_get_matches_from(claudine_argv)
+            .map_err(|err| format!("clap {:?}: {err}", err.kind()))
+    }
+
+    #[test]
+    fn invalid_invocations_without_help_still_fail_validation() {
+        for command in COMPOSITION_SUBCOMMANDS {
+            let cases: [(&[&str], ErrorKind); 5] = [
+                (&["claudine", command, "x.md", "--provider", "nope"], ErrorKind::InvalidValue),
+                (&["claudine", command, "x.md", "--provider"], ErrorKind::InvalidValue),
+                (&["claudine", command, "x.md", "--dry-run-shell"], ErrorKind::MissingRequiredArgument),
+                (&["claudine", command, "x.md", "-i", "--no-interactive"], ErrorKind::ArgumentConflict),
+                (&["claudine", command, "x.md", "--quiet", "--silent"], ErrorKind::ArgumentConflict),
+            ];
+            for (tokens, kind) in cases {
+                let normalized = super::argv::normalize(os_argv(tokens));
+                let (claudine_argv, _) = super::argv::partition_composition_tail(normalized)
+                    .unwrap_or_else(|err| panic!("{tokens:?} failed partition: {err}"));
+                let err = build_cli_command(false)
+                    .try_get_matches_from(claudine_argv)
+                    .expect_err(&format!("{tokens:?} parsed"));
+                assert_eq!(err.kind(), kind, "{tokens:?}: {err}");
+            }
+            // The controls are valid once the defect is removed.
+            assert!(parse_without_help(&["claudine", command, "x.md", "--provider", "claude"]).is_ok());
+            assert!(parse_without_help(&["claudine", command, "x.md", "--dry-run", "--dry-run-shell"]).is_ok());
+
+            // `PartitionError` is private to `argv`; its derived `Debug` names
+            // the variant and both fields.
+            let switch_first = super::argv::partition_composition_tail(os_argv(&["claudine", command, "--bogus", "x.md"]))
+                .expect_err(&format!("{command}: a switch before the file was accepted"));
+            assert_eq!(
+                format!("{switch_first:?}"),
+                format!("SwitchBeforeFile {{ subcommand: {command:?}, switch: \"--bogus\" }}"),
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_setter_json_still_fails_without_help() {
+        let err = super::commands::compose::merge_set_overrides(
+            Some("{broken"),
+            Default::default(),
+            Vec::new(),
+        )
+        .expect_err("malformed --set JSON was accepted");
+        assert!(!err.to_string().is_empty());
+        assert!(
+            super::commands::compose::merge_set_overrides(Some(r#"{"a":"--help"}"#), Default::default(), Vec::new())
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn ordinary_version_parsing_is_untouched() {
+        for tokens in [&["claudine", "--version"][..], &["claudine", "-V"], &["claudine", "-V", "compose", "-h"]] {
+            let err = build_cli_command(false)
+                .try_get_matches_from(os_argv(tokens))
+                .expect_err(&format!("{tokens:?} parsed"));
+            assert_eq!(err.kind(), ErrorKind::DisplayVersion, "{tokens:?}");
         }
     }
 }

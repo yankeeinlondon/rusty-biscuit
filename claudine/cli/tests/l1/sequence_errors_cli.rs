@@ -701,7 +701,14 @@ removed_fail_fast!(criterion_2_fail_fast_malformed_is_still_a_removed_grammar_er
 fn removed_fail_fast_is_absent_from_sequence_help() {
     let workspace = CliProcessFixture::named("removed-fail-fast-help");
     let output = workspace.command().args(["sequence", "--help"]).assert().success().get_output().clone();
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("--fail-fast"));
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    // Absence is meaningful only on the sequence screen itself.
+    assert!(stdout.contains("Usage: claudine sequence"), "expected sequence usage; got: {stdout}");
+    for option in ["--provider", "--set", "--dry-run"] {
+        assert!(stdout.contains(option), "sequence help must list `{option}`; got: {stdout}");
+    }
+    assert!(!stdout.contains("--fail-fast"), "`--fail-fast` was removed; got: {stdout}");
+    assert!(output.stderr.is_empty(), "help must leave stderr empty; got: {}", String::from_utf8_lossy(&output.stderr));
 }
 
 macro_rules! sequence_rename_error {

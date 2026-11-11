@@ -3,9 +3,13 @@
 //! These tests drive the compiled `claudine` binary so we exercise the
 //! actual path from `std::env::args_os()` through `argv::normalize` into
 //! clap. Unit coverage for the rewrite rules lives alongside the
-//! implementation in `claudine/cli/src/argv.rs`; this suite proves that
+//! implementation in `claudine/cli/src/argv/`; this suite proves that
 //! the normalization shows up at the binary entrypoint and does not
 //! disturb unaffected commands.
+//!
+//! It also proves the executable's composition help selection, which runs on
+//! the original argv before normalization: command-specific screens, the
+//! validation they bypass, plain mode, and forwarding of `--help` after `--`.
 //!
 //! Feature: `2026-04-17-cli-pre-processing`.
 
@@ -23,74 +27,153 @@ fn write_fixture(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     path
 }
 
+/// One help invocation's channels, ANSI-stripped and kept apart so each
+/// assertion names the channel it is about.
+struct HelpRun {
+    stdout: String,
+    stderr: String,
+}
+
+impl HelpRun {
+    fn from_output(output: &std::process::Output) -> Self {
+        Self {
+            stdout: strip_ansi(&String::from_utf8_lossy(&output.stdout)),
+            stderr: strip_ansi(&String::from_utf8_lossy(&output.stderr)),
+        }
+    }
+}
+
+/// Run `args` with the fixture's default command and require exit 0.
+fn run_help(cli: &CliProcessFixture, args: &[&str]) -> HelpRun {
+    run_help_with(cli.command(), args)
+}
+
+fn run_help_with(mut command: assert_cmd::Command, args: &[&str]) -> HelpRun {
+    let output = command.args(args).output().unwrap();
+    let help = HelpRun::from_output(&output);
+    assert!(
+        output.status.success(),
+        "`claudine {}` must exit 0; status {:?}\nstdout: {}\nstderr: {}",
+        args.join(" "),
+        output.status.code(),
+        help.stdout,
+        help.stderr
+    );
+    help
+}
+
+/// Collapse every whitespace run to one space: clap wraps help to the
+/// terminal width, so a phrase may break at a host-dependent point.
+fn flatten(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The contract of a selected composition help screen: `command`'s own
+/// compact clap help on stdout, nothing on stderr, never the root overview.
+fn assert_composition_help(command: &str, help: &HelpRun) {
+    assert!(help.stderr.is_empty(), "help must leave stderr empty; got: {}", help.stderr);
+    assert!(!help.stdout.trim().is_empty(), "help must print to stdout");
+    let flat = flatten(&help.stdout);
+    let usage = format!("Usage: claudine {command} [OPTIONS] <ARG>...");
+    assert!(flat.contains(&usage), "expected `{usage}`; got: {}", help.stdout);
+
+    let file = if command == "sequence" { "sequence.md" } else { "prompt.md" };
+    let example = format!("claudine {command} {file} name=Ken -- --help");
+    for explanation in [
+        "One required file reference, then optional `key=value` setters (overriding `--set`) and arguments for the provider",
+        example.as_str(),
+        "Everything after `--` is forwarded to the provider unchanged",
+        "Provider-native options are not listed above.",
+    ] {
+        assert!(
+            flat.contains(explanation),
+            "`{command}` help must explain `{explanation}`; got: {}",
+            help.stdout
+        );
+    }
+
+    let tokens: Vec<&str> = flat.split(' ').collect();
+    for option in [
+        "--help",
+        "--provider",
+        "--set",
+        "--dry-run",
+        "--dry-run-shell",
+        "--max-iterations",
+        "--on-rate-limit",
+    ] {
+        assert!(
+            tokens.contains(&option),
+            "`{command}` help must list `{option}`; got: {}",
+            help.stdout
+        );
+    }
+    for root_heading in ["Shared Resources:", "Composition:"] {
+        assert!(
+            !help.stdout.contains(root_heading),
+            "`{command}` help must not be the grouped root overview \
+             (found `{root_heading}`); got: {}",
+            help.stdout
+        );
+    }
+}
+
+/// The grouped root overview, as printed by `claudine --help`.
+fn assert_root_overview(help: &HelpRun) {
+    assert!(help.stderr.is_empty(), "root help must leave stderr empty; got: {}", help.stderr);
+    for expected in ["Usage: claudine <command> [options]", "Shared Resources:", "Composition:"] {
+        assert!(
+            help.stdout.contains(expected),
+            "root overview must contain `{expected}`; got: {}",
+            help.stdout
+        );
+    }
+    assert!(
+        !help.stdout.contains("Usage: claudine compose"),
+        "root overview must not be the compose screen; got: {}",
+        help.stdout
+    );
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Headline integration cases (spec: "Testing → Integration tests")
 // ──────────────────────────────────────────────────────────────────────
 
 /// Headline regression: `compose <file> --<provider-bool> key=val --help`
-/// renders the compose command's own help screen, not a clap error.
+/// renders the compose command's own help screen.
 ///
-/// clap once emitted the misleading `tip: to pass '--help' as a value, use
-/// '-- --help'` diagnostic because the greedy positional collector swallowed
-/// `--help`, and a later fix surfaced an "expected at most one file
-/// reference" error instead. The executable now selects composition help from
-/// the original argv, before normalization and the ownership partition, so:
-///
-/// 1. the process exits successfully with nothing on stderr;
-/// 2. stdout is the `compose` usage screen, not the grouped root overview;
-/// 3. neither the clap tip nor the second-file-reference error appears.
+/// Help is selected from the original argv, before normalization and the
+/// ownership partition, so the greedy positional collector never sees
+/// `--help`: no clap value tip, no unexpected-argument error, and no
+/// second-file-reference error, and the screen is `compose`'s usage rather
+/// than the grouped root overview.
 #[test]
 fn headline_compose_with_interleaved_flag_renders_help() {
     let cli = CliProcessFixture::named("argv-normalization");
     let fixture = write_fixture(cli.cwd(), "greet.md");
 
-    let assert = cli
-        .command()
-        .args([
-            "compose",
-            fixture.to_str().unwrap(),
-            "--gemini",
-            "name=Ken",
-            "--help",
-        ])
-        .assert()
-        .success();
+    let help = run_help(
+        &cli,
+        &["compose", fixture.to_str().unwrap(), "--gemini", "name=Ken", "--help"],
+    );
 
-    let output = assert.get_output().clone();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let combined = format!("{stderr}{stdout}");
-    let plain = strip_ansi(&combined);
-
+    assert_composition_help("compose", &help);
     assert!(
-        plain.contains("Compose a Markdown document"),
-        "expected Claudine's help output to include the `compose` \
-         command description; got: {plain}"
+        help.stdout.contains("Compose a Markdown document"),
+        "expected the `compose` command description; got: {}",
+        help.stdout
     );
-    assert!(stderr.is_empty(), "help must leave stderr empty; got: {stderr}");
-    assert!(
-        plain.contains("Usage: claudine compose") && plain.contains("--dry-run"),
-        "expected the compose command's own usage and options; got: {plain}"
-    );
-    assert!(
-        !plain.contains("Composition:"),
-        "compose help must not be the grouped root overview; got: {plain}"
-    );
-    assert!(
-        !plain.contains("tip: to pass '--help' as a value"),
-        "normalizer must suppress the misleading clap help tip; \
-         got: {plain}"
-    );
-    assert!(
-        !plain.contains("unexpected argument '--help'"),
-        "normalizer must keep `--help` from tripping clap's greedy \
-         positional collection; got: {plain}"
-    );
-    assert!(
-        !plain.contains("expected at most one file reference"),
-        "a help request must never reach the positional parser, which \
-         would misclassify `--help` as a second file reference; got: {plain}"
-    );
+    for misleading in [
+        "tip: to pass '--help' as a value",
+        "unexpected argument '--help'",
+        "expected at most one file reference",
+    ] {
+        assert!(
+            !help.stdout.contains(misleading),
+            "compose help must not contain `{misleading}`; got: {}",
+            help.stdout
+        );
+    }
 }
 
 /// Simpler form: `compose <file> --help` (no interleaved setters) renders
@@ -100,23 +183,9 @@ fn headline_compose_with_trailing_help_renders_help() {
     let cli = CliProcessFixture::named("argv-normalization");
     let fixture = write_fixture(cli.cwd(), "simple.md");
 
-    let assert = cli
-        .command()
-        .args(["compose", fixture.to_str().unwrap(), "--help"])
-        .assert()
-        .success();
+    let help = run_help(&cli, &["compose", fixture.to_str().unwrap(), "--help"]);
 
-    let output = assert.get_output().clone();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{stderr}{stdout}");
-    let plain = strip_ansi(&combined);
-
-    assert!(
-        plain.contains("Usage: claudine compose"),
-        "trailing `--help` on compose must render the compose help screen; \
-         got: {plain}"
-    );
+    assert_composition_help("compose", &help);
 }
 
 /// Rule 2 fuzzy match: `--provider cl` should canonicalise to `claude`
@@ -321,6 +390,7 @@ fn passthrough_version_flag_still_prints_version_string() {
         stdout.starts_with("claudine "),
         "expected `claudine <version>` on stdout; got: {stdout}"
     );
+    assert!(output.stderr.is_empty(), "`--version` must leave stderr empty");
 }
 
 /// `claudine --help` (root, no subcommand) must continue to render the
@@ -328,15 +398,10 @@ fn passthrough_version_flag_still_prints_version_string() {
 #[test]
 fn passthrough_root_help_renders_custom_help_screen() {
     let cli = CliProcessFixture::named("argv-passthrough-root-help");
-    let output = cli
-        .command()
-        .arg("--help")
-        .assert()
-        .success()
-        .get_output()
-        .clone();
+    let help = run_help(&cli, &["--help"]);
+    assert_root_overview(&help);
 
-    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stdout = help.stdout;
     assert!(
         stdout.contains("Claudine"),
         "custom help screen should contain the `Claudine` title; \
@@ -373,6 +438,7 @@ fn non_composition_subcommands_accept_help_flag() {
             .clone();
 
         let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+        assert!(output.stderr.is_empty(), "`claudine {sub} --help` must leave stderr empty");
         assert!(
             stdout.contains("Usage:") && stdout.contains("--help"),
             "`claudine {sub} --help` should render clap's per-subcommand \
@@ -409,7 +475,7 @@ fn passthrough_hooks_describe_still_runs() {
 // The pre-clap argv normalizer has a `COMPLETE` env-var guard that makes
 // `normalize_inner` a strict no-op under completion mode. The unit test
 // `normalize_is_noop_when_complete_env_is_set` inside
-// `claudine/cli/src/argv.rs` proves that guard at the function boundary.
+// `claudine/cli/src/argv/` proves that guard at the function boundary.
 //
 // Phase 1.4 adds the complementary binary-level proof: once
 // `completion::maybe_complete()` runs in `main.rs` before argv
@@ -547,5 +613,300 @@ fn non_owned_flag_before_file_errors_with_ordering_guidance() {
     assert!(
         combined.contains("--claud") && combined.contains("before the composition file"),
         "an unowned switch before the file must surface ordering guidance; got: {combined}"
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Composition command help
+//
+// `-h`/`--help` before the first `--` and after a composition command prints
+// that command's compact clap help and exits 0 before normalization, the
+// ownership partition, configuration, or provider launch. A help token before
+// the command prints the grouped root overview instead.
+// ──────────────────────────────────────────────────────────────────────
+
+/// Run `claudine <command> <tail>` and require the composition help contract.
+///
+/// The tail names no file or a file that does not exist, so a passing screen
+/// also proves help reads no input.
+fn assert_help_without_input(command: &str, tail: &[&str]) {
+    let cli = CliProcessFixture::named("composition-help");
+    let mut args = vec![command];
+    args.extend_from_slice(tail);
+    let help = run_help_with(
+        cli.command_builder()
+            // Escape: fake-only PATH. Only the empty fixture `bin` is
+            // searchable, so this screen proves help needs no installed provider.
+            .fake_only_path()
+            .build(),
+        &args,
+    );
+    assert_composition_help(command, &help);
+    assert!(
+        !cli.home().join(".claudine/config.json").exists(),
+        "help must not create user configuration"
+    );
+}
+
+macro_rules! composition_help_cases {
+    ($command:literal: $short:ident, $long:ident, $short_missing:ident, $long_missing:ident) => {
+        #[test]
+        fn $short() {
+            assert_help_without_input($command, &["-h"]);
+        }
+
+        #[test]
+        fn $long() {
+            assert_help_without_input($command, &["--help"]);
+        }
+
+        #[test]
+        fn $short_missing() {
+            assert_help_without_input($command, &["missing.md", "-h"]);
+        }
+
+        #[test]
+        fn $long_missing() {
+            assert_help_without_input($command, &["missing.md", "--help"]);
+        }
+    };
+}
+
+composition_help_cases!("compose":
+    compose_short_help_without_file,
+    compose_long_help_without_file,
+    compose_short_help_with_missing_file,
+    compose_long_help_with_missing_file
+);
+composition_help_cases!("inline-compose":
+    inline_compose_short_help_without_file,
+    inline_compose_long_help_without_file,
+    inline_compose_short_help_with_missing_file,
+    inline_compose_long_help_with_missing_file
+);
+composition_help_cases!("sequence":
+    sequence_short_help_without_file,
+    sequence_long_help_without_file,
+    sequence_short_help_with_missing_file,
+    sequence_long_help_with_missing_file
+);
+
+/// A help request bypasses validation that would reject the same arguments
+/// without it. The matching no-help failures are proved in process by the
+/// `composition_help` and `rule4_help_hoist` unit tests.
+macro_rules! help_bypasses_validation {
+    ($name:ident, $command:literal, [$($arg:literal),+ $(,)?]) => {
+        #[test]
+        fn $name() {
+            let cli = CliProcessFixture::named("composition-help-bypass");
+            let help = run_help(&cli, &[$command, $($arg),+]);
+            assert_composition_help($command, &help);
+        }
+    };
+}
+
+help_bypasses_validation!(help_bypasses_unknown_provider, "compose",
+    ["--provider", "nope", "prompt.md", "-h"]);
+help_bypasses_validation!(help_bypasses_missing_provider_value, "compose",
+    ["--provider", "--help"]);
+help_bypasses_validation!(help_bypasses_malformed_setter_json, "compose",
+    ["--set", "{broken", "prompt.md", "--help"]);
+help_bypasses_validation!(help_bypasses_dry_run_shell_without_dry_run, "inline-compose",
+    ["--dry-run-shell", "prompt.md", "-h"]);
+help_bypasses_validation!(help_bypasses_conflicting_interactive_switches, "sequence",
+    ["-i", "--no-interactive", "sequence.md", "--help"]);
+help_bypasses_validation!(help_bypasses_unknown_switch_before_file, "compose",
+    ["--claud", "prompt.md", "--help"]);
+
+// Output-volume and perf switches do not suppress help, and `--perf` adds
+// no report on stderr.
+help_bypasses_validation!(help_ignores_quiet, "compose", ["--quiet", "prompt.md", "-h"]);
+help_bypasses_validation!(help_ignores_silent, "inline-compose", ["--silent", "--help"]);
+help_bypasses_validation!(help_ignores_perf, "sequence", ["--perf", "sequence.md", "--help"]);
+
+/// A help token before the composition command asks for the root overview,
+/// even when the composition arguments after it are invalid.
+#[test]
+fn root_help_before_composition_command_renders_root_overview() {
+    let cli = CliProcessFixture::named("composition-help-root");
+    let help = run_help(&cli, &["--help", "compose", "--provider", "nope"]);
+    assert_root_overview(&help);
+}
+
+#[test]
+fn bare_invocation_renders_root_overview() {
+    let cli = CliProcessFixture::named("argv-bare");
+    let help = run_help(&cli, &[]);
+    assert_root_overview(&help);
+}
+
+macro_rules! admin_help {
+    ($name:ident, $command:literal) => {
+        #[test]
+        fn $name() {
+            let cli = CliProcessFixture::named("argv-admin-help");
+            let help = run_help(&cli, &[$command, "--help"]);
+            assert!(help.stderr.is_empty(), "stderr: {}", help.stderr);
+            let usage = concat!("Usage: claudine ", $command, " [OPTIONS]");
+            assert!(help.stdout.contains(usage), "expected `{usage}`; got: {}", help.stdout);
+        }
+    };
+}
+
+admin_help!(mcp_help_renders_clap_screen, "mcp");
+admin_help!(actions_help_renders_clap_screen, "actions");
+
+/// Wrapper help stays the wrapper's own screen and launches nothing.
+#[test]
+fn wrapper_help_renders_wrapper_screen() {
+    let cli = CliProcessFixture::named("argv-wrapper-help");
+    let help = run_help(&cli, &["claude", "--help"]);
+    assert!(help.stderr.is_empty(), "stderr: {}", help.stderr);
+    for expected in [
+        "Usage: claudine claude [OPTIONS] [ARGS]...",
+        "Arguments forwarded to the wrapped provider CLI",
+    ] {
+        assert!(help.stdout.contains(expected), "expected `{expected}`; got: {}", help.stdout);
+    }
+}
+
+/// Run `args` with color forced on, returning raw (unstripped) stdout.
+///
+/// clap's renderer honors `CLICOLOR_FORCE`; Claudine's own terminal honors
+/// `FORCE_COLOR`. The fixture's `NO_COLOR=1` is removed on this child only,
+/// since it outranks both.
+fn forced_color_stdout(args: &[&str]) -> String {
+    let cli = CliProcessFixture::named("composition-help-color");
+    let mut command = cli.command();
+    command.env_remove("NO_COLOR").env("CLICOLOR_FORCE", "1").env("FORCE_COLOR", "1");
+    let output = command.args(args).output().unwrap();
+    assert!(output.status.success(), "`claudine {}` must exit 0", args.join(" "));
+    assert!(
+        output.stderr.is_empty(),
+        "help must leave stderr empty; got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+macro_rules! plain_help {
+    ($name:ident, [$($arg:literal),+], $usage:literal) => {
+        #[test]
+        fn $name() {
+            let stdout = forced_color_stdout(&[$($arg),+]);
+            assert!(stdout.contains($usage), "expected `{}`; got: {stdout}", $usage);
+            assert_eq!(stdout, strip_ansi(&stdout), "`--plain` must remove every escape");
+        }
+    };
+}
+
+plain_help!(plain_before_composition_command_disables_color,
+    ["--plain", "compose", "-h"], "Usage: claudine compose");
+plain_help!(plain_after_composition_command_disables_color,
+    ["sequence", "--help", "--plain"], "Usage: claudine sequence");
+plain_help!(plain_root_help_disables_color, ["--plain", "--help"], "Usage: claudine <command>");
+
+/// Controls for the plain cases: with color forced and no `--plain`, both
+/// renderers emit escapes, so the plain assertions above are load-bearing.
+#[test]
+fn forced_color_composition_help_contains_escapes() {
+    let stdout = forced_color_stdout(&["compose", "-h"]);
+    assert!(stdout.contains('\u{1b}'), "forced color must style compose help; got: {stdout}");
+    assert!(strip_ansi(&stdout).contains("Usage: claudine compose"));
+}
+
+#[test]
+fn forced_color_root_help_contains_escapes() {
+    let stdout = forced_color_stdout(&["--help"]);
+    assert!(stdout.contains('\u{1b}'), "forced color must style root help; got: {stdout}");
+}
+
+/// A document that would mutate itself, append a lifecycle log, and launch
+/// `goose` if it ran.
+#[cfg(feature = "test-fixtures")]
+const TRAP_DOC: &str = "---\nagent: goose\nprompt: Say hello.\ninitialize:\n  - append_line: [help-lifecycle.log, ran]\n---\n\nOriginal body.\n";
+
+/// `inline-compose` rewrites its input when it runs, so a help request on a
+/// real, launchable document must leave no trace: no provider launch, no
+/// lifecycle effect, unchanged bytes, no configuration, no audio.
+#[cfg(feature = "test-fixtures")]
+fn assert_inline_help_has_no_effects(help_token: &str) {
+    let cli = CliProcessFixture::named("composition-help-trap");
+    fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-goose"),
+        cli.bin_dir().join(format!("goose{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .expect("the fake provider is built with `test-fixtures`");
+    let marker = cli.cwd().join("provider-launched.txt");
+    let document = cli.cwd().join("doc.md");
+    fs::write(&document, TRAP_DOC).unwrap();
+
+    let mut command = cli.command();
+    command.env("PROVIDER_MARKER", &marker);
+    let help = run_help_with(command, &["inline-compose", "doc.md", help_token]);
+
+    assert_composition_help("inline-compose", &help);
+    assert!(!marker.exists(), "help must not launch the provider");
+    assert!(!cli.cwd().join("help-lifecycle.log").exists(), "help must not run `initialize`");
+    assert_eq!(fs::read_to_string(&document).unwrap(), TRAP_DOC, "help must not touch the input");
+    assert!(
+        !cli.home().join(".claudine/config.json").exists(),
+        "help must not create user configuration"
+    );
+    assert!(!cli.audio_spool().exists(), "help must publish no audio");
+}
+
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn inline_compose_long_help_on_real_document_has_no_effects() {
+    assert_inline_help_has_no_effects("--help");
+}
+
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn inline_compose_short_help_on_real_document_has_no_effects() {
+    assert_inline_help_has_no_effects("-h");
+}
+
+/// After the authored `--`, `--help` belongs to the provider: the composition
+/// executes for real and the provider receives exactly one `--help`, without
+/// the separator.
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn help_after_separator_is_forwarded_to_provider() {
+    let cli = CliProcessFixture::named("composition-help-forward");
+    cli.seed_user_config();
+    fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-completion"),
+        cli.bin_dir().join(format!("claude{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .expect("the fake provider is built with `test-fixtures`");
+    let record = cli.workspace_path().join("provider-record");
+    fs::create_dir(&record).unwrap();
+    let prompt = write_fixture(cli.cwd(), "prompt.md");
+
+    let output = cli
+        .command()
+        .env("FAKE_COMPLETION_PROVIDER", "claude")
+        .env("FAKE_COMPLETION_DIR", &record)
+        .args(["compose", prompt.to_str().unwrap(), "--claude", "--", "--help"])
+        .output()
+        .unwrap();
+    let run = HelpRun::from_output(&output);
+    assert!(output.status.success(), "stdout: {}\nstderr: {}", run.stdout, run.stderr);
+
+    let argv: Vec<String> =
+        serde_json::from_slice(&fs::read(record.join("argv.json")).unwrap()).unwrap();
+    assert_eq!(
+        argv.iter().filter(|arg| *arg == "--help").count(),
+        1,
+        "the provider must receive exactly one `--help`; got: {argv:?}"
+    );
+    assert!(!argv.iter().any(|arg| arg == "--"), "the authored `--` is consumed; got: {argv:?}");
+    assert!(run.stdout.contains("review-answer"), "expected provider output; got: {}", run.stdout);
+    assert!(
+        !run.stdout.contains("Usage: claudine compose"),
+        "a forwarded `--help` must not print composition help; got: {}",
+        run.stdout
     );
 }

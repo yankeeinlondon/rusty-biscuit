@@ -184,6 +184,148 @@ mod tests {
         );
     }
 
+    /// One `(argv, destination)` row per case; argv[0] is the binary name.
+    fn assert_rows(rows: &[(&[&str], Option<HelpDestination>)]) {
+        for (tokens, expected) in rows {
+            assert_eq!(select(tokens), *expected, "argv: {tokens:?}");
+        }
+    }
+
+    /// A token that is not valid UTF-8 on this OS: an invalid byte on Unix,
+    /// an unpaired surrogate on Windows.
+    fn opaque_token() -> OsString {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            OsString::from_vec(vec![0x66, 0x6f, 0xff, 0x6f])
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            OsString::from_wide(&[0x66, 0xD800, 0x6f])
+        }
+    }
+
+    #[test]
+    fn selection_covers_every_destination_for_every_command() {
+        for command in crate::argv::COMPOSITION_SUBCOMMANDS {
+            let own = Some(HelpDestination::Composition(command));
+            let root = Some(HelpDestination::Root);
+            assert_rows(&[
+                (&["claudine", command, "-h"], own),
+                (&["claudine", command, "--help"], own),
+                (&["claudine", command, "x.md", "-h"], own),
+                (&["claudine", command, "x.md", "--help"], own),
+                (&["claudine", command, "--claude", "x.md", "name=Ken", "--help"], own),
+                (&["claudine", "--plain", command, "x.md", "--help"], own),
+                (&["claudine", command, "x.md", "--plain", "-h"], own),
+                (&["claudine", "-h", command, "x.md"], root),
+                (&["claudine", "--help", command], root),
+                (&["claudine", command, "-h", "--", "--help"], own),
+                (&["claudine", command, "x.md", "--", "--help"], None),
+                (&["claudine", command, "x.md", "--", "-h"], None),
+                (&["claudine", command, "x.md"], None),
+            ]);
+        }
+    }
+
+    #[test]
+    fn selection_skips_root_options_and_their_values() {
+        let sequence = Some(HelpDestination::Composition("sequence"));
+        assert_rows(&[
+            (&["claudine", "--debug", "trace", "sequence", "-h"], sequence),
+            (&["claudine", "--debug=trace", "sequence", "-h"], sequence),
+            (&["claudine", "-v", "--plain", "sequence", "x.md", "--help"], sequence),
+            (&["claudine", "--verbose", "--debug", "trace", "--help", "sequence"], Some(HelpDestination::Root)),
+        ]);
+    }
+
+    #[test]
+    fn selection_recognizes_only_the_first_command() {
+        assert_rows(&[
+            (&[], None),
+            (&["claudine"], None),
+            (&["claudine", "-h"], None),
+            (&["claudine", "mcp", "compose", "--help"], None),
+            (&["claudine", "claude", "compose", "--help"], None),
+            (&["claudine", "skills", "sequence", "-h"], None),
+            (&["claudine", "__complete", "inline-compose", "-h"], None),
+            (&["claudine", "--", "compose", "--help"], None),
+        ]);
+    }
+
+    #[test]
+    fn selection_takes_the_first_of_repeated_help_tokens() {
+        let compose = Some(HelpDestination::Composition("compose"));
+        assert_rows(&[
+            (&["claudine", "compose", "-h", "--help", "-h"], compose),
+            (&["claudine", "compose", "--help", "x.md", "-h"], compose),
+            (&["claudine", "--help", "compose", "-h"], Some(HelpDestination::Root)),
+            (&["claudine", "-h", "--help", "compose", "x.md", "--help"], Some(HelpDestination::Root)),
+        ]);
+    }
+
+    #[test]
+    fn selection_treats_embedded_and_malformed_help_text_as_data() {
+        assert_rows(&[
+            (&["claudine", "compose", "x.md", "name=--help"], None),
+            (&["claudine", "compose", "x.md", "name=-h"], None),
+            (&["claudine", "compose", "--set", r#"{"a":"--help"}"#, "x.md"], None),
+            (&["claudine", "compose", r#"--set={"a":"--help"}"#, "x.md"], None),
+            (&["claudine", "compose", "x.md", "--help=yes"], None),
+            (&["claudine", "compose", "x.md", "--help="], None),
+            (&["claudine", "compose", "x.md", "-hh"], None),
+            (&["claudine", "compose", "x.md", "-h=1"], None),
+            (&["claudine", "compose", "x.md", "---help"], None),
+            (&["claudine", "compose", "x.md", "--HELP"], None),
+            (&["claudine", "compose", "x.md", "help"], None),
+        ]);
+    }
+
+    #[test]
+    fn selection_passes_over_opaque_tokens_without_panicking() {
+        let compose = Some(HelpDestination::Composition("compose"));
+        let with_opaque = |before: &[&str], after: &[&str]| {
+            let mut tokens = argv(before);
+            tokens.push(opaque_token());
+            tokens.extend(argv(after));
+            select_composition_help(&tokens, false)
+        };
+        assert_eq!(with_opaque(&["claudine", "compose"], &[]), None);
+        assert_eq!(with_opaque(&["claudine", "compose"], &["--help"]), compose);
+        assert_eq!(with_opaque(&["claudine", "compose", "x.md"], &["-h"]), compose);
+        assert_eq!(with_opaque(&["claudine"], &["compose", "-h"]), compose);
+        assert_eq!(with_opaque(&["claudine", "compose", "x.md", "--"], &["--help"]), None);
+    }
+
+    #[test]
+    fn selection_yields_to_active_completion() {
+        for tokens in [
+            &["claudine", "compose", "--help"][..],
+            &["claudine", "--help", "sequence"],
+            &["claudine", "inline-compose", "x.md", "-h"],
+        ] {
+            let input = argv(tokens);
+            assert!(select_composition_help(&input, false).is_some(), "{tokens:?}");
+            assert_eq!(select_composition_help(&input, true), None, "{tokens:?}");
+        }
+    }
+
+    #[test]
+    fn selection_yields_to_a_root_version_request() {
+        let compose = Some(HelpDestination::Composition("compose"));
+        assert_rows(&[
+            (&["claudine", "--version", "compose", "-h"], None),
+            (&["claudine", "-V", "compose", "--help"], None),
+            (&["claudine", "-V", "sequence", "x.md", "-h"], None),
+            (&["claudine", "--help", "--version", "compose"], Some(HelpDestination::Root)),
+            // After the command a version token is the command's argument,
+            // not a root request.
+            (&["claudine", "compose", "-V", "--help"], compose),
+            (&["claudine", "compose", "x.md", "--version", "-h"], compose),
+        ]);
+    }
+
     #[test]
     fn rule_4_hoists_help_to_position_one_on_composition() {
         let input = argv(&["claudine", "compose", "file.md", "--help"]);

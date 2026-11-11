@@ -100,4 +100,51 @@ mod tests {
         assert!(cmd.find_subcommand("inline-compose").is_some());
         assert!(cmd.find_subcommand("sequence").is_some());
     }
+
+    /// The legacy tree exposes every catalog-derived provider shortcut, the
+    /// same surface Rule 1 of the argv normalizer accepts, on every
+    /// composition child, and carries none of `main.rs`'s injected
+    /// `ArgAction::Help` arguments (the root's `disable_help_flag` reaches
+    /// the children, so the tree has no help argument at all).
+    #[test]
+    fn completion_command_exposes_provider_shortcuts_without_injected_help() {
+        use claudine::provider::PROVIDERS_DISPLAY_ORDER;
+
+        let expected: Vec<&str> = PROVIDERS_DISPLAY_ORDER
+            .iter()
+            .filter_map(|provider| provider.cli_aliases().first().copied())
+            .collect();
+        assert_eq!(expected.len(), PROVIDERS_DISPLAY_ORDER.len());
+        for shortcut in ["kilo", "pi", "antigravity"] {
+            assert!(expected.contains(&shortcut), "{shortcut} not derived: {expected:?}");
+        }
+
+        let mut cmd = completion_command();
+        // clap_complete builds the tree before walking it; check what it sees.
+        cmd.build();
+        for name in ["compose", "inline-compose", "sequence"] {
+            let child = cmd
+                .find_subcommand(name)
+                .unwrap_or_else(|| panic!("`{name}` missing from completion tree"));
+            for shortcut in &expected {
+                assert!(
+                    child.get_arguments().any(|arg| arg.get_long() == Some(*shortcut)),
+                    "`{name}` lacks `--{shortcut}` in the completion tree",
+                );
+            }
+            let help_args: Vec<&str> = child
+                .get_arguments()
+                .filter(|arg| {
+                    matches!(arg.get_action(), clap::ArgAction::Help)
+                        || arg.get_long() == Some("help")
+                        || arg.get_short() == Some('h')
+                })
+                .map(|arg| arg.get_id().as_str())
+                .collect();
+            assert!(
+                help_args.is_empty(),
+                "`{name}` carries help arguments in the completion tree: {help_args:?}",
+            );
+        }
+    }
 }
