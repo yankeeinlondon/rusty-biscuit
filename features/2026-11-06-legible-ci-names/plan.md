@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 3
 created: 2026-11-08
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 source_files_during_phase_1:
@@ -17,6 +17,66 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1: []
 packages:
 - test-toolkit
+- repo-deps
+source_files_during_phase_2:
+- .github/workflows/ci.yml
+- .github/workflows/_area-ci.yml
+- .github/workflows/_package-ci.yml
+- .github/workflows/_wsl-ci.yml
+- .github/workflows/ci-infra-retry.yml
+- .github/workflows/release-plz.yml
+- scripts/ci/runner_loss.py
+- scripts/ci/reuse_validation.py
+- scripts/ci/publish_gaps.py
+- scripts/ci/test_runner_loss.py
+- scripts/ci/test_reuse_validation.py
+- scripts/ci/test_publish_gaps.py
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+- scripts/ci/test_ci_local.py
+docs_updated_during_phase_2:
+- .github/ci/README.md
+- features/2026-11-06-legible-ci-names/plan.md
+- features/2026-11-06-legible-ci-names/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+- docs/topics/ci-cd.md
+- .github/ci/README.md
+- features/2026-11-06-legible-ci-names/implementation.md
+- features/2026-11-06-legible-ci-names/plan.md
+- features/2026-11-06-legible-ci-names/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/rust-devops/ci-cd.md
+- .claude/skills/os/wsl.md
+source_code:
+- .github/workflows/ci.yml
+- .github/workflows/_area-ci.yml
+- .github/workflows/_package-ci.yml
+- .github/workflows/_wsl-ci.yml
+- .github/workflows/ci-infra-retry.yml
+- .github/workflows/release-plz.yml
+- scripts/ci/runner_loss.py
+- scripts/ci/reuse_validation.py
+- scripts/ci/publish_gaps.py
+- scripts/ci/test_runner_loss.py
+- scripts/ci/test_reuse_validation.py
+- scripts/ci/test_publish_gaps.py
+- scripts/ci/test_ci_local.py
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+- features/2026-11-06-legible-ci-names/workflow_structure.py
+documentation:
+- docs/topics/ci-cd.md
+- .github/ci/README.md
+- .claude/skills/rust-devops/ci-cd.md
+- .claude/skills/os/wsl.md
+- features/2026-11-06-legible-ci-names/implementation.md
+- features/2026-11-06-legible-ci-names/implementation-log.md
+- features/2026-11-06-legible-ci-names/plan.md
+- features/2026-11-06-legible-ci-names/workflow-structure-baseline.json
+completed_phase: 3
+implemented: true
 ---
 
 # Legible CI names implementation plan
@@ -89,13 +149,13 @@ Checkpoint: the fallback, all replacement strings, parser behavior, and protecte
 
 ### Wave 2 — Independent implementation slices
 
-- [ ] **Rename workflow surfaces**
+- [x] **Rename workflow surfaces**
   - Apply Rules 3 and 7 in the four scoped workflow files. Keep all unnamed execution matrices unnamed. Update workflow comments describing their complete caller chains and the grandfathered readers.
   - In the same slice, implement Rule 5 in `runner_loss.py` and `reuse_validation.py`, with tests in `test_runner_loss.py` and `test_reuse_validation.py`. The workflow and reader edits are one task because they must agree on exact names.
   - Update `test_runner_loss.py::job_label` and its producer walk only for the new static leaf/caller names; keep its automatic four-value rendering and non-vacuity checks. Prove every status-uploading producer still maps to the status it uploads, with separate native Windows and WSL2 identities.
   - Test the new guest leaf with L1 and L2 delegating rows, malformed/missing rows returning `None`, old native and WSL2 names, old pre-row names, build attribution, all historical advisory names, and renamed coverage audits vetoing retry. Test historical and renamed audits through nightly reuse/certification public helpers, not solely regex matches.
   - Preserve step-classification outcomes for every renamed step through `failure_stage`. Existing archive-first and upload-first precedence remains authoritative.
-- [ ] **Rename gap checks**
+- [x] **Rename gap checks**
   - Implement Rule 6 in `scripts/ci/publish_gaps.py`; update `scripts/ci/test_publish_gaps.py` payload and CLI expectations together.
   - Exercise all five action mappings and four environment mappings through `payloads`/`check_run` results. Retain positive governance fixtures and the existing refusal tests. Add unknown-gate and unknown-environment refusal controls, length-limit coverage for the longer names, and assertions that a refused batch posts nothing.
   - Assert all payload fields other than check `name` remain equal for the same governed fixture. Publishing a gap must still be distinct from executing tests.
@@ -103,7 +163,7 @@ Checkpoint: the fallback, all replacement strings, parser behavior, and protecte
 
 ### Wave 3 — Integrate contracts
 
-- [ ] **Align contract fixtures**
+- [x] **Align contract fixtures**
   - After both Wave 2 tasks, update the Phase 1 contracts and existing step-name assertions in `ci_workflow_contracts.rs`, including `GATE_COMMAND_STEPS`, the WSL archive ordering assertion, and the tests comparing positions of `Tests` and toolchain/build verification. Search all four workflow names and old step strings across `scripts/ci/test_*.py` and `tools/test-toolkit/tests/ci_workflow_contracts.rs` to update executable expectations. Preserve historical parser fixtures intentionally.
   - Add complete projected examples: `area-ci (research) / Run package work / test (research, L1, ubuntu-latest, ubuntu-latest)`; the same package with `L2`; `area-ci (schematic) / Run package work / wsl2 (schematic-gen, L1, wsl2-ubuntu, windows-latest) / Run guest tests`; and `area-ci (claudine/rendezvous) / Check required results`.
   - Cover empty-selection/skipped names as static names or bare automatic identifiers without `${{ ... }}`. Retain `RowAdapterOracleTests` and row-budget assertions unchanged to prove the fallback added no matrix field.
@@ -115,12 +175,12 @@ Checkpoint: focused naming, attribution, audit-discovery, and publisher tests pa
 
 ### Wave 4 — Documentation and final checks
 
-- [ ] **Document visible behavior**
+- [x] **Document visible behavior**
   - Update `docs/topics/ci-cd.md` with the exact naming convention, action/environment table, tier definitions, full examples from Wave 3, and the fallback's unavoidable caller prefixes and stored suffix wording. Explain archive preparation versus WSL2 execution.
   - Explain each skipped state with a compact example: nothing selected, evidence reused with its link, environment not scheduled for this event, neutral governed `ACCEPTED GAP`, and blocking missing/failed/canceled work. Include a small Mermaid flow showing selection → execution/reuse/defer/gap → coverage audit → `ci-gate`, with deferred environments outside required cells and failed/missing required results blocking.
   - Correct the existing runner-loss/name-reader explanation to describe the two grandfathered readers and static guest-leaf lookup. Do not imply display names are a general identity API. Do not link or name a dated feature in the topic page.
   - Update `.claude/skills/rust-devops/ci-cd.md` where its explanation says these jobs have no names: distinguish retained automatic package matrices from newly static infrastructure names. Preserve the prohibition on expression-based skipped names. No README update is required because this changes internal pipeline presentation, not package/CLI behavior.
-- [ ] **Verify preservation**
+- [x] **Verify preservation**
   - Run the focused companion suites from repository root: `python3 scripts/ci/test_runner_loss.py`, `python3 scripts/ci/test_reuse_validation.py`, `python3 scripts/ci/test_publish_gaps.py`, `python3 scripts/ci/test_resolved_plan.py`, `python3 scripts/ci/test_schema.py`, and `python3 scripts/ci/test_ci_local.py`. Run independent commands concurrently; inspect every result.
   - Run the owning L1 suites through `just test repo-deps test-toolkit`. These use nextest; do not substitute `cargo test`. Do not run L2, browser, Windows/WSL2 runtime suites, or a full-workspace CI run merely to validate presentation. The WSL2-shaped name fixtures exercise nesting without launching a guest.
   - Recheck the protected workflow properties and the exact required context `ci-gate`. Search for newly added name readers and matrix expressions in job names. Confirm `schema.ROW_FIELDS`, schema versions, stored artifact names, and all matrices are unchanged.

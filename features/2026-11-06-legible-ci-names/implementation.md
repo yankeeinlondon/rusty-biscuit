@@ -212,3 +212,56 @@ python3 features/2026-11-06-legible-ci-names/workflow_structure.py \
 ```
 
 An empty diff means no protected property changed.
+
+## Phase 3: verification and outcome
+
+### Departure from the preferred design
+
+The spec preferred a display-only `label` matrix field. The fallback was used
+instead: the cell-carrying matrix jobs keep automatic labels, so their suffixes
+show stored values (`L1`, `wsl2-ubuntu`) and repeat the runner. Plain words are
+on the caller (`Run package work`), the infrastructure jobs, the steps, and the
+accepted-gap checks. `docs/topics/ci-cd.md`, "Reading job and check names",
+explains the suffix values to a reader.
+
+### Test outcomes (2026-11-10, macOS host)
+
+| Check | Result |
+| --- | --- |
+| `python3 scripts/ci/test_runner_loss.py` | 72 OK |
+| `python3 scripts/ci/test_reuse_validation.py` | 52 OK |
+| `python3 scripts/ci/test_publish_gaps.py` | 29 OK |
+| `python3 scripts/ci/test_resolved_plan.py` | 103 OK |
+| `python3 scripts/ci/test_schema.py` | 203 OK |
+| `python3 scripts/ci/test_ci_local.py` | 104 run, 1 failure, which predates this feature (below) |
+| `just test repo-deps test-toolkit` | 1045 passed, 5 skipped |
+| `darkmatter` doc-corpus tests that read the edited docs | 2 passed |
+| `workflow_structure.py` diff against the baseline | empty |
+
+The one failure,
+`NativeProvisioningTests.test_the_build_owner_installs_only_its_own_records_closure`,
+comes from six `run: >-` steps in `ci.yml`'s `build` job, added by commit
+`212070aba` (build-storage diagnostics). `scripts/ci/workflow_reading.py`
+refuses folded scalars on purpose. This feature does not touch those steps.
+
+### Preserved execution properties
+
+- The structure diff is empty: commands, `with:` values (including artifact
+  names), identifiers, guards, `needs`, matrices, permissions, runners, and
+  timeouts all match the Phase 1 baseline.
+- No job or step `name:` in the four workflows contains `${{`.
+- `ci-gate` is still the identifier and the displayed name.
+- No commit or uncommitted change of this feature touches
+  `scripts/ci/schema.py` or `.github/ci/schemas/`, so `ROW_FIELDS`, the row
+  field list, and the plan schema version are unchanged by it.
+- The only display-name readers are `runner_loss.py` and
+  `reuse_validation.py::AUDIT_JOB`; no third was added.
+
+### Observed versus projected
+
+Every name under "Observed names" was read from a run before the rename. Every
+name under "Projected names" is still a projection: no run has used the new
+names yet, because the change has not been pushed. The first pull-request run
+after the merge should be read to confirm them, along with the two uncertain
+projections listed there (`preflight`'s suffix and the Checks-tab prefix).
+Phase 3 made no new API reads.
