@@ -27,7 +27,8 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-08
 review_iterations: 0
-implemented: false
+implemented: true
+implemented_by: "claude/opus"
 next_spec: 2026-10-26-next-gen-pipeline
 related:
   - 2026-11-06-rust-evidence-client

@@ -83,6 +83,8 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 packages:
   - repo-deps
+  - test-toolkit
+  - darkmatter
 decisions_for_review:
   - |-
     gix version. The plan says `gix = "=0.84.0"` "following sniff/worktree's manifests"; those manifests now pin `=0.90.0`, so ci-push uses `=0.90.0` (a second gix version would double the build and split types with sniff). Alternative: honor 0.84 literally, at the cost of two gix trees. Redo: one manifest line.
@@ -130,12 +132,161 @@ decisions_for_review:
     An unreadable remote configuration. When Git gives no URL and the remote's URL cannot be read, the identity stays unknown (matching every repository-scoped constraint record, the conservative side) rather than blocking. Redo: one `.ok()` in `host.rs`.
   - |-
     ci-local interpreter bridge (subagent decisions). `BISCUIT_CI_PYTHON_ARGS_FILE` without `BISCUIT_CI_PYTHON` is an error ("set both or neither"), because a prefix such as `-3` belongs to the launcher it was chosen with; `BISCUIT_CI_PYTHON` must be an executable regular file; a truncated final prefix record exits 2. The self-test suite `test_ci_local.py`'s own `tool()` helper launched `python3` and now uses `sys.executable`. Redo: the variable block at the top of the `ci-local` recipe.
+  - |-
+    Four end-to-end parity rows sit close to the 5 s L1 budget. Rows 2, 69, 70, and 71 each prove a receipt round trip that needs two complete hook runs with the real `ci-local` recipe (about 1.6 s per run), and row 71 adds a real `verify`; they take 3.3-4.5 s alone and up to 4.9 s under the full suite on macOS. The plan says not to replace receipt round trips with command-log assertions, so they keep both real runs. Alternatives: seed the first run's receipt directly (faster, but no longer proves that the first run published it), or merge rows 69-71 into one fixture (fewer runs, but loses row-per-test parity). Redo: the first-run setup in those four tests of `integration/parity.rs`.
+  - |-
+    Seven end-to-end parity tests are `#[cfg(unix)]`: rows 1, 2, and 69-72 run the real `ci-local.just`, which is a Bash recipe, and row 19 plus two cancellation cases inject Unix signals. The shell suite they replace ran on Ubuntu only (its retired workflow), so this loses no Windows coverage that existed; Windows cancellation and Windows hook launching are covered by `process::*` and the two `cfg(windows)` launcher tests. Alternative: run the recipe through Git Bash on Windows and inject Ctrl-C with `GenerateConsoleCtrlEvent` (needs a shared console). Redo: remove the cfg gates and add Windows launch paths in `evidence_fixture.rs`.
+  - |-
+    Rows are mapped onto existing tests where those already assert the same outcome; 21 rows point at `orchestration`/`run`/`documents` tests rather than new `parity::` copies, and rows 21, 22, and 26 share one test case. Row 32 (plan fixtures are valid) now validates with ci-push's own resolved-plan reader rather than Python's `schema.validate_resolved_plan`. Row 28's unreadable plan now refuses as a constraint failure (exit 1) instead of the shell's "trigger review failed"; both block and run no gate. Red ANSI output (rows 5, 7, 9) is not asserted, because the library no longer emits it. Alternative: a duplicate `parity::` test per row, and a Python schema call for row 32. Redo: add tests; nothing in production changes.
+  - |-
+    The end-to-end receipts follow the host's CI environment (`macos-latest` here, `ubuntu-latest` on Linux, `wsl2-ubuntu` on WSL, `windows-latest` on Windows): plan fixtures that execute on `macos-latest` have that environment swapped for the host's at fixture build time. This has been run on macOS only. Alternative: pin the environment through a test-only override (none exists in production). Redo: one helper in `evidence_fixture.rs`.
+  - |-
+    The validation-note publication-failure test makes the local notes ref unwritable rather than having the remote refuse the push: a refused push goes through `observation_notes.py`'s randomized retries (2-10 s). The "recorded locally" status-4 mapping stays covered in-process. Alternative: a remote `pre-receive` refusal (about 5 lines; the scope-note case, row 43, already uses one). Redo: that test only.
+  - |-
+    Launcher tests read `.githooks/pre-push` and `.githooks/pre-push-dispatcher` with `include_str!` inside each test, so a change to either file schedules exactly those tests. Every launcher test also embeds the dispatcher, so a dispatcher edit reruns them. The D1 test uses a tiny `#!/bin/sh` recorder as each worktree's hook, since Git runs hooks through `sh` on every OS. The hook fixture lives in `launcher.rs` (`pub(crate)`), and the Python stand-ins duplicate `push.rs`'s. Redo: a mechanical move into `fixture.rs`.
+  - |-
+    Root aliases split the run into two `_test` calls (`--lib ci_push::` and `--test ci-push`), because nextest unions several `-E` filtersets with the tier filter, while a positional name filter intersects with it, and the integration target's test names carry no `ci_push` prefix. Alternative: one call with a binary filterset added to `_test` (a change to the shared recipe). Redo: the two recipes in the root `justfile`.
+  - |-
+    `tools/test-toolkit/tests/ci_workflow_contracts.rs` read the shell hook's source for two contracts (the deletion-aware diff and constraint enforcement). After the cutover they assert that the launcher hands off to `--bin ci-push`, that `scripts/ci-push/git.rs` emits `--deleted`, and that `scripts/ci-push/review.rs` calls `constraints::unsatisfied`. Alternative: delete those halves of the contracts. Redo: two assertion blocks.
+  - |-
+    Native Windows proof was left unproved rather than forced. The plan requires the owning suite, including both native Windows launch paths, to execute on build-win; the rig refused at its 50 GiB free-space floor (46.7 GiB). I ran the repository's own Windows sweep on this checkout's clone only (cap 40 GB), which reported 15.86 GiB cleaned but freed no volume space (block clones of the kache store), and did not lower `BISCUIT_BUILD_MIN_FREE_GIB`, which the os skill reserves for intentional emergencies. Alternatives: lower the floor for one run (proves Windows now, at a small risk of filling the build volume), trim the shared kache store or other checkouts' clones (not this session's property), or let the nightly Windows CI cell prove it after merge. Redo: none in code; only the Windows run and a log entry.
+  - |-
+    The execution-constraint record is documented in `docs/cicd/schema-versions.md` as an "unversioned" row with its own section (field shapes, a malformed-input table, and the correction), because that page is the changelog of CI documents and the plan asked for it there. It names no dated feature, unlike the page's other Source columns. Alternative: a separate `docs/cicd/constraints.md` linked from the table (more room; one more page to keep current). Redo: move the section.
+source_files_during_phase_4:
+  - .githooks/pre-push
+  - ".githooks/tests/test-pre-push.sh (deleted)"
+  - ".githooks/tests/test-pre-push-dispatcher.sh (deleted)"
+  - ".githooks/tests/report-pre-push.py (deleted)"
+  - ".githooks/tests/fixtures/affected_scope_stub.py (deleted)"
+  - ".githooks/tests/fixtures/plan-macos-executing.json (deleted)"
+  - ".githooks/tests/fixtures/plan-macos-two-packages.json (deleted)"
+  - ".githooks/tests/fixtures/plan-wsl-absent.json (deleted)"
+  - ".githooks/tests/fixtures/plan-wsl-executing.json (deleted)"
+  - ".githooks/tests/fixtures/plan-wsl-reused.json (deleted)"
+  - ".github/workflows/pre-push-hook-tests.yml (deleted)"
+  - justfile
+  - scripts/ci-push-test-tool.rs
+  - scripts/ci-push/tests/mod.rs
+  - scripts/ci-push/tests/orchestration.rs
+  - scripts/ci-push/tests/parity.rs
+  - scripts/ci-push/integration/main.rs
+  - scripts/ci-push/integration/fixture.rs
+  - scripts/ci-push/integration/evidence_fixture.rs
+  - scripts/ci-push/integration/parity.rs
+  - scripts/ci-push/integration/launcher.rs
+  - scripts/ci-push/integration/dispatcher.rs
+  - scripts/ci/fixtures/pre-push/affected_scope_stub.py
+  - scripts/ci/constraints.py
+  - scripts/ci/diff_scope.py
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_4:
+  - docs/cicd/schema-versions.md
+  - scripts/ci/fixtures/pre-push/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 message_to_agent: |-
-  Phase 3 wired the whole flow into `ci_push::run`: review (`review.rs`), scope publication and validation (`evidence.rs`), gates (`mod.rs::run_gates`/`finish`), and the production `HostServices`/`HostSession` (`host.rs`). `ci-push.rs` installs the cancellation handlers and emits diagnostics live. `.githooks/pre-push` is still the shell hook: nothing launches `ci-push` yet (Phase 4 cuts over).
-  Where the tests are: decision rows run in-process against the fake session in `scripts/ci-push/tests/orchestration.rs` (45 test functions, 66 cases: ledger order, contexts, gh failures, constraints, trees, gates, withholding, publication). Many parity-table rows map onto those directly; reuse its `Fake` (fields `fail`, `signal_during`, `gates`, `plans`, `gh`, ...) rather than writing another. A real-process end to end is `scripts/ci-push/integration/push.rs`: a git2-built checkout with a bare remote, stand-in `scripts/ci/affected_scope.py`/`local_evidence.py` committed in the fixture tree and run by the real selected Python, and the compiled `just` stub; it is the pattern for hermetic parity tests. `HostSession` resolves python/just/gh/git from the process `PATH`, so tests set `PATH`, `HOME`/`USERPROFILE`, `BISCUIT_CI_CONSTRAINTS_DIR`, and `BISCUIT_CI_EVIDENCE_DIR` on the spawned `ci-push`.
-  The ci-local bridge is done (`BISCUIT_CI_PYTHON` + NUL-delimited `BISCUIT_CI_PYTHON_ARGS_FILE`, tests in `SelectedInterpreterTests` of `scripts/ci/test_ci_local.py`; that suite needs `BISCUIT_REQUIRE_JUST=1 BISCUIT_REQUIRE_JQ=1` to run its real-recipe classes and takes ~5 min in full).
-  No docs changed in Phase 3 (Phase 5 owns them), but `docs/topics/ci-cd.md` must describe the new `BISCUIT_CI_PYTHON*` contract of `just ci-local`.
-  Gates: `just test repo-deps` (821), `just _lint repo-deps`, `cargo nextest run -p test-toolkit --test ci_workflow_contracts` (it reads ci-local.just). See "## Phase 3" for the Windows cross-check result.
+  All five phases are implemented. The one open acceptance item is native Windows: `ci-push` (including the Git Bash and PowerShell launcher tests `launcher::windows_*`) has compiled and linked on build-win in every phase but has never executed there, because the rig's Cargo storage preflight refuses below 50 GiB free (46.6-46.8 GiB in Phases 1-5). Sweeping this checkout's own clone target does not help: the volume is ReFS with kache, so a sweep reports gigabytes cleaned and frees nothing (now in the os skill's build-hosts.md). Freeing about 4 GiB in build-win's kache store, then `just cross-check repo-deps --os windows`, is the remaining proof. macOS, Linux, and WSL2 (archive mode) pass 896/896.
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - docs/topics/ci-cd.md
+  - docs/testing-strategy.md
+  - docs/cicd/schema-versions.md
+  - README.md
+  - ".github/ci/README.md"
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - ".claude/skills/rust-devops/ci-cd.md"
+  - ".claude/skills/os/windows.md"
+  - ".claude/skills/os/SKILL.md"
+  - ".claude/skills/os/macos.md"
+  - ".claude/skills/os/build-hosts.md"
+source_code:
+  - Cargo.lock
+  - scripts/Cargo.toml
+  - scripts/lib.rs
+  - scripts/ci-push.rs
+  - scripts/ci-push/mod.rs
+  - scripts/ci-push/host.rs
+  - scripts/ci-push/json.rs
+  - scripts/ci-push/mode.rs
+  - scripts/ci-push/updates.rs
+  - scripts/ci-push/documents.rs
+  - scripts/ci-push/tests/mod.rs
+  - scripts/ci-push/tests/documents.rs
+  - scripts/ci-push/tests/run.rs
+  - scripts/ci-push/tests/updates.rs
+  - scripts/ci/fixtures/pre-push/constraints/minimal.json
+  - scripts/ci/fixtures/pre-push/constraints/scoped.json
+  - scripts/ci/fixtures/pre-push/plans/plan-macos-executing.json
+  - scripts/ci/fixtures/pre-push/plans/plan-macos-two-packages.json
+  - scripts/ci/fixtures/pre-push/plans/plan-wsl-absent.json
+  - scripts/ci/fixtures/pre-push/plans/plan-wsl-executing.json
+  - scripts/ci/fixtures/pre-push/plans/plan-wsl-reused.json
+  - scripts/ci/fixtures/pre-push/pull-requests/none.json
+  - scripts/ci/fixtures/pre-push/pull-requests/two-open.json
+  - scripts/ci-plan.rs
+  - scripts/ci-plan-render.rs
+  - scripts/ci-plan-tests.rs
+  - scripts/ci-change-inventory.rs
+  - scripts/ci-push-test-tool.rs
+  - scripts/ci-push/constraints.rs
+  - scripts/ci-push/git.rs
+  - scripts/ci-push/worktree.rs
+  - scripts/ci-push/process.rs
+  - scripts/ci-push/python.rs
+  - scripts/ci-push/tests/constraints.rs
+  - scripts/ci-push/tests/git.rs
+  - scripts/ci-push/tests/worktree.rs
+  - scripts/ci-push/tests/process.rs
+  - scripts/ci-push/tests/python.rs
+  - scripts/ci-push/integration/main.rs
+  - scripts/ci-push/integration/fixture.rs
+  - scripts/ci-push/integration/process.rs
+  - scripts/ci-push/integration/python.rs
+  - scripts/ci/constraints.py
+  - scripts/ci/test_constraints.py
+  - scripts/ci/fixtures/pre-push/constraints/parity.json
+  - scripts/ci-push/review.rs
+  - scripts/ci-push/evidence.rs
+  - scripts/ci-push/tests/orchestration.rs
+  - scripts/ci-push/integration/push.rs
+  - just/ci-local.just
+  - scripts/ci/test_ci_local.py
+  - ".githooks/pre-push"
+  - ".githooks/tests/test-pre-push.sh (deleted)"
+  - ".githooks/tests/test-pre-push-dispatcher.sh (deleted)"
+  - ".githooks/tests/report-pre-push.py (deleted)"
+  - ".githooks/tests/fixtures/affected_scope_stub.py (deleted)"
+  - ".githooks/tests/fixtures/plan-macos-executing.json (deleted)"
+  - ".githooks/tests/fixtures/plan-macos-two-packages.json (deleted)"
+  - ".githooks/tests/fixtures/plan-wsl-absent.json (deleted)"
+  - ".githooks/tests/fixtures/plan-wsl-executing.json (deleted)"
+  - ".githooks/tests/fixtures/plan-wsl-reused.json (deleted)"
+  - ".github/workflows/pre-push-hook-tests.yml (deleted)"
+  - justfile
+  - scripts/ci-push/tests/parity.rs
+  - scripts/ci-push/integration/evidence_fixture.rs
+  - scripts/ci-push/integration/parity.rs
+  - scripts/ci-push/integration/launcher.rs
+  - scripts/ci-push/integration/dispatcher.rs
+  - scripts/ci/fixtures/pre-push/affected_scope_stub.py
+  - scripts/ci/diff_scope.py
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+documentation:
+  - docs/dependencies.md
+  - scripts/ci/fixtures/pre-push/README.md
+  - docs/cicd/schema-versions.md
+  - docs/topics/ci-cd.md
+  - docs/testing-strategy.md
+  - README.md
+  - ".github/ci/README.md"
+  - ".claude/skills/rust-devops/ci-cd.md"
+  - ".claude/skills/os/windows.md"
+  - ".claude/skills/os/SKILL.md"
+  - ".claude/skills/os/macos.md"
+  - ".claude/skills/os/build-hosts.md"
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-11-01-rust-pre-push (5 phases)
@@ -153,79 +304,79 @@ result.
 
 | # | Bash case (`run_test` description) | Original function | Assigned Rust test | Result |
 | - | --- | --- | --- | --- |
-| 1 | real recipe interruption withholds earlier evidence | `test_a_real_recipe_interruption_withholds_earlier_reports` | `ci_push::tests::parity::a_real_recipe_interruption_withholds_earlier_reports` | pending |
-| 2 | advanced non-main target reuses and publishes exact receipts | `test_an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts` | `ci_push::tests::parity::an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts` | pending |
-| 3 | scope-only runs no gate but resolves scope | `test_scope_only_runs_no_gate_but_still_resolves_scope` | `ci_push::tests::parity::scope_only_runs_no_gate_but_still_resolves_scope` | pending |
-| 4 | off is a deprecated alias of scope-only | `test_off_mode_is_a_deprecated_alias_of_scope_only` | `ci_push::tests::parity::off_mode_is_a_deprecated_alias_of_scope_only` | pending |
-| 5 | invalid mode exits 1 with helpful message | `test_invalid_mode_exits_one` | `ci_push::tests::parity::invalid_mode_exits_one` | pending |
-| 6 | warn + passing → exit 0 | `test_warn_passing_tests_exits_zero` | `ci_push::tests::parity::warn_passing_tests_exits_zero` | pending |
-| 7 | warn + failing → exit 0 and mentions --no-verify | `test_warn_failing_tests_exits_zero_with_no_verify_hint` | `ci_push::tests::parity::warn_failing_tests_exits_zero_with_no_verify_hint` | pending |
-| 8 | strict + passing → exit 0 | `test_strict_passing_tests_exits_zero` | `ci_push::tests::parity::strict_passing_tests_exits_zero` | pending |
-| 9 | strict + failing → propagate exit and mention --no-verify | `test_strict_failing_tests_exits_nonzero_with_no_verify_hint` | `ci_push::tests::parity::strict_failing_tests_exits_nonzero_with_no_verify_hint` | pending |
-| 10 | unset default runs no gate when no CI run starts | `test_unset_default_runs_no_gate_for_a_push_that_starts_no_run` | `ci_push::tests::parity::unset_default_runs_no_gate_for_a_push_that_starts_no_run` | pending |
-| 11 | explicit auto behaves as the default | `test_explicit_auto_is_the_default` | `ci_push::tests::parity::explicit_auto_is_the_default` | pending |
-| 12 | unset default is strict for a push to main | `test_unset_default_is_strict_for_a_push_to_main` | `ci_push::tests::parity::unset_default_is_strict_for_a_push_to_main` | pending |
-| 13 | unset default is strict with an open pull request | `test_unset_default_is_strict_for_a_branch_with_an_open_pull_request` | `ci_push::tests::parity::unset_default_is_strict_for_a_branch_with_an_open_pull_request` | pending |
-| 14 | default path calls 'just pre-push' with no selection | `test_default_delegates_scope_to_pre_push` | `ci_push::tests::parity::default_delegates_scope_to_pre_push` | pending |
-| 15 | run_hook forwards no selection without an override | `test_run_hook_forwards_no_selection_without_an_override` | `ci_push::tests::parity::run_hook_forwards_no_selection_without_an_override` | pending |
-| 16 | RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim | `test_areas_override_is_passed_through` | `ci_push::tests::parity::areas_override_is_passed_through` | pending |
-| 17 | a failing warn run reaches the publication block | `test_a_failing_warn_run_reaches_the_publication_block` | `ci_push::tests::parity::a_failing_warn_run_reaches_the_publication_block` | pending |
-| 18 | interrupted gate withholds staged evidence | `test_a_gate_exiting_130_never_publishes_staged_evidence` | `ci_push::tests::parity::a_gate_exiting_130_never_publishes_staged_evidence` | pending |
-| 19 | interrupted hook withholds staged evidence | `test_an_interrupted_hook_never_publishes_staged_evidence` | `ci_push::tests::parity::an_interrupted_hook_never_publishes_staged_evidence` | pending |
-| 20 | publication requires a clean, exact, unoverridden tree | `test_publication_requires_a_clean_exact_tree_and_no_override` | `ci_push::tests::parity::publication_requires_a_clean_exact_tree_and_no_override` | pending |
-| 21 | a persisted prohibition blocks the push | `test_prohibition_blocks_the_push` | `ci_push::tests::parity::prohibition_blocks_the_push` | pending |
-| 22 | a prohibition refusal states its reason | `test_prohibition_is_explained` | `ci_push::tests::parity::prohibition_is_explained` | pending |
-| 23 | an expired prohibition does not block | `test_expired_prohibition_does_not_block` | `ci_push::tests::parity::expired_prohibition_does_not_block` | pending |
-| 24 | a reused prohibited cell does not block | `test_a_reused_prohibited_cell_does_not_block` | `ci_push::tests::parity::a_reused_prohibited_cell_does_not_block` | pending |
-| 25 | an absent prohibited environment does not block | `test_an_absent_prohibited_environment_does_not_block` | `ci_push::tests::parity::an_absent_prohibited_environment_does_not_block` | pending |
-| 26 | an executing prohibited cell blocks with its reason | `test_an_executing_prohibited_cell_blocks_with_its_reason` | `ci_push::tests::parity::an_executing_prohibited_cell_blocks_with_its_reason` | pending |
-| 27 | the constraint is decided in scope-only mode too | `test_the_constraint_is_decided_in_scope_only_mode_too` | `ci_push::tests::parity::the_constraint_is_decided_in_scope_only_mode_too` | pending |
-| 28 | an unreadable plan blocks | `test_an_unreadable_plan_blocks` | `ci_push::tests::parity::an_unreadable_plan_blocks` | pending |
-| 29 | a failed plan resolution blocks and publishes no scope | `test_a_failed_plan_resolution_blocks_and_publishes_no_scope` | `ci_push::tests::parity::a_failed_plan_resolution_blocks_and_publishes_no_scope` | pending |
-| 30 | the plan resolution is handed no constraint store | `test_the_plan_resolution_is_handed_no_constraint_store` | `ci_push::tests::parity::the_plan_resolution_is_handed_no_constraint_store` | pending |
-| 31 | a constraint for another branch does not block | `test_a_constraint_for_another_branch_does_not_block` | `ci_push::tests::parity::a_constraint_for_another_branch_does_not_block` | pending |
-| 32 | the plan fixtures are valid resolved plans | `test_the_plan_fixtures_are_valid_resolved_plans` | `ci_push::tests::parity::the_plan_fixtures_are_valid_resolved_plans` | pending |
-| 33 | a published receipt names retained, readable reports | `test_a_published_receipt_names_retained_readable_reports` | `ci_push::tests::parity::a_published_receipt_names_retained_readable_reports` | pending |
-| 34 | reports that cannot be retained publish no receipt | `test_reports_that_cannot_be_retained_publish_no_receipt` | `ci_push::tests::parity::reports_that_cannot_be_retained_publish_no_receipt` | pending |
-| 35 | a blocked strict failure publishes its note; CI reruns it | `test_a_blocked_strict_failure_publishes_its_note_but_ci_reruns_the_cell` | `ci_push::tests::parity::a_blocked_strict_failure_publishes_its_note_but_ci_reruns_the_cell` | pending |
-| 36 | a complete warn failure publishes its note | `test_a_complete_warn_failure_publishes_its_note` | `ci_push::tests::parity::a_complete_warn_failure_publishes_its_note` | pending |
-| 37 | scope-only publishes committed scope for a push to main | `test_scope_only_publishes_committed_scope_for_a_push_to_main` | `ci_push::tests::parity::scope_only_publishes_committed_scope_for_a_push_to_main` | pending |
-| 38 | the published scope receipt binds this plan generation | `test_the_published_scope_receipt_binds_this_plan_generation` | `ci_push::tests::parity::the_published_scope_receipt_binds_this_plan_generation` | pending |
-| 39 | committed scope declares deletions, omits rename sources | `test_the_committed_scope_declares_deletions_and_omits_rename_sources` | `ci_push::tests::parity::the_committed_scope_declares_deletions_and_omits_rename_sources` | pending |
-| 40 | a feature push records the PR base, not its previous tip | `test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip` | `ci_push::tests::parity::a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip` | pending |
-| 41 | a branch-creating push records the remote's main tip, says so | `test_a_branch_creating_push_records_the_remote_main_tip_and_says_so` | `ci_push::tests::parity::a_branch_creating_push_records_the_remote_main_tip_and_says_so` | pending |
-| 42 | a dirty strict run publishes scope but no validation | `test_a_dirty_strict_run_publishes_scope_but_no_validation_receipt` | `ci_push::tests::parity::a_dirty_strict_run_publishes_scope_but_no_validation_receipt` | pending |
-| 43 | a failed scope publication is named; exit code unchanged | `test_a_failed_scope_publication_is_named_and_leaves_the_exit_code_alone` | `ci_push::tests::parity::a_failed_scope_publication_is_named_and_leaves_the_exit_code_alone` | pending |
-| 44 | a committed change masked by an unstaged revert is reviewed | `test_a_committed_change_masked_by_an_unstaged_revert_is_still_reviewed` | `ci_push::tests::parity::a_committed_change_masked_by_an_unstaged_revert_is_still_reviewed` | pending |
-| 45 | an unstaged policy edit never reaches the plan or receipt | `test_an_unstaged_policy_edit_never_reaches_the_committed_plan_or_receipt` | `ci_push::tests::parity::an_unstaged_policy_edit_never_reaches_the_committed_plan_or_receipt` | pending |
-| 46 | a clean checkout is planned in place | `test_a_clean_checkout_is_planned_in_place` | `ci_push::tests::parity::a_clean_checkout_is_planned_in_place` | pending |
-| 47 | a push that does not carry HEAD reviews the pushed revision | `test_a_push_that_does_not_carry_head_reviews_the_pushed_revision` | `ci_push::tests::parity::a_push_that_does_not_carry_head_reviews_the_pushed_revision` | pending |
-| 48 | a deletion-only push triggers nothing and is not reviewed | `test_a_deletion_only_push_triggers_nothing_and_is_not_reviewed` | `ci_push::tests::parity::a_deletion_only_push_triggers_nothing_and_is_not_reviewed` | pending |
-| 49 | a tag-only push in strict mode runs no gate | `test_a_tag_only_push_in_strict_mode_runs_no_gate` | `ci_push::tests::parity::a_tag_only_push_in_strict_mode_runs_no_gate` | pending |
-| 50 | a prohibition on the pushed branch blocks, whatever is checked out | `test_a_prohibition_on_the_pushed_branch_blocks_whatever_is_checked_out` | `ci_push::tests::parity::a_prohibition_on_the_pushed_branch_blocks_whatever_is_checked_out` | pending |
-| 51 | a prohibition on the checked-out branch does not bind another push | `test_a_prohibition_on_the_checked_out_branch_does_not_bind_another_branch_push` | `ci_push::tests::parity::a_prohibition_on_the_checked_out_branch_does_not_bind_another_branch_push` | pending |
-| 52 | every pushed branch is planned with its own path set | `test_every_pushed_branch_is_planned_with_its_own_path_set` | `ci_push::tests::parity::every_pushed_branch_is_planned_with_its_own_path_set` | pending |
-| 53 | ref updates are reviewed in the order Git supplies them | `test_ref_updates_are_reviewed_in_the_order_git_supplies_them` | `ci_push::tests::parity::ref_updates_are_reviewed_in_the_order_git_supplies_them` | pending |
-| 54 | the repository identity is the remote being pushed to | `test_the_repository_identity_is_the_remote_being_pushed_to` | `ci_push::tests::parity::the_repository_identity_is_the_remote_being_pushed_to` | pending |
-| 55 | a renamed refspec binds a record under either branch name | `test_a_renamed_refspec_binds_a_record_under_either_branch_name` | `ci_push::tests::parity::a_renamed_refspec_binds_a_record_under_either_branch_name` | pending |
-| 56 | deletions and tags among branch updates are skipped by name | `test_deletions_and_tags_among_branch_updates_are_skipped_by_name` | `ci_push::tests::parity::deletions_and_tags_among_branch_updates_are_skipped_by_name` | pending |
-| 57 | a stacked pull request is planned against its target's tip | `test_a_stacked_pull_request_is_planned_against_its_target_branch_tip` | `ci_push::tests::parity::a_stacked_pull_request_is_planned_against_its_target_branch_tip` | pending |
-| 58 | a pull request into main from a restoring child selects nothing | `test_a_pull_request_into_main_from_a_restoring_child_selects_nothing` | `ci_push::tests::parity::a_pull_request_into_main_from_a_restoring_child_selects_nothing` | pending |
-| 59 | an advanced target records its exact remote comparison | `test_an_advanced_target_branch_is_read_from_the_remote_and_records_exact_scope` | `ci_push::tests::parity::an_advanced_target_branch_is_read_from_the_remote_and_records_exact_scope` | pending |
-| 60 | no open pull request on GitHub → a provisional plan | `test_a_github_branch_with_no_open_pull_request_gets_a_provisional_plan` | `ci_push::tests::parity::a_github_branch_with_no_open_pull_request_gets_a_provisional_plan` | pending |
-| 61 | a record in the default store binds a fresh session | `test_a_record_in_the_default_store_binds_a_fresh_session` | `ci_push::tests::parity::a_record_in_the_default_store_binds_a_fresh_session` | pending |
-| 62 | two open pull requests from one head are each reviewed | `test_two_open_pull_requests_from_one_head_are_each_reviewed` | `ci_push::tests::parity::two_open_pull_requests_from_one_head_are_each_reviewed` | pending |
-| 63 | a GitHub remote without gh blocks and names it | `test_a_github_remote_without_gh_blocks_and_names_it` | `ci_push::tests::parity::a_github_remote_without_gh_blocks_and_names_it` | pending |
-| 64 | a failing gh blocks and names the failure | `test_a_failing_gh_blocks_and_names_the_failure` | `ci_push::tests::parity::a_failing_gh_blocks_and_names_the_failure` | pending |
-| 65 | a non-GitHub remote never asks gh | `test_a_non_github_remote_never_asks_gh` | `ci_push::tests::parity::a_non_github_remote_never_asks_gh` | pending |
-| 66 | a target updated in the same push is reviewed at its incoming revision | `test_a_target_updated_in_the_same_push_is_reviewed_at_its_incoming_revision` | `ci_push::tests::parity::a_target_updated_in_the_same_push_is_reviewed_at_its_incoming_revision` | pending |
-| 67 | a simultaneous push with nothing prohibited passes in either order | `test_a_simultaneous_push_with_no_prohibited_work_passes_in_either_order` | `ci_push::tests::parity::a_simultaneous_push_with_no_prohibited_work_passes_in_either_order` | pending |
-| 68 | a pull request into a branch this push deletes is refused | `test_a_pull_request_into_a_branch_this_push_deletes_is_refused` | `ci_push::tests::parity::a_pull_request_into_a_branch_this_push_deletes_is_refused` | pending |
-| 69 | a docs-only follow-up skips the cells prior evidence covers | `test_a_docs_only_follow_up_skips_the_cells_prior_evidence_covers` | `ci_push::tests::parity::a_docs_only_follow_up_skips_the_cells_prior_evidence_covers` | pending |
-| 70 | a follow-up changing a package's inputs reruns its cell | `test_a_follow_up_changing_a_packages_inputs_reruns_its_cell` | `ci_push::tests::parity::a_follow_up_changing_a_packages_inputs_reruns_its_cell` | pending |
-| 71 | a cell whose prior evidence is a failure is rerun, superseded | `test_a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded` | `ci_push::tests::parity::a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded` | pending |
-| 72 | a stacked pull request records its target tip as the base | `test_a_stacked_pull_request_records_its_target_tip_as_the_receipt_base` | `ci_push::tests::parity::a_stacked_pull_request_records_its_target_tip_as_the_receipt_base` | pending |
-| D1 | dispatcher selects each linked worktree's hook (`.githooks/tests/test-pre-push-dispatcher.sh`, one script-level contract) | _(whole script)_ | `ci_push::tests::dispatcher::the_dispatcher_runs_each_linked_worktrees_own_hook` | pending |
+| 1 | real recipe interruption withholds earlier evidence | `test_a_real_recipe_interruption_withholds_earlier_reports` | `ci-push` integration `parity::a_real_recipe_interruption_withholds_earlier_reports` (Unix only) | pass |
+| 2 | advanced non-main target reuses and publishes exact receipts | `test_an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts` | `ci-push` integration `parity::an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts` (Unix only) | pass |
+| 3 | scope-only runs no gate but resolves scope | `test_scope_only_runs_no_gate_but_still_resolves_scope` | `ci_push::tests::parity::scope_only_runs_no_gate_but_still_resolves_scope` | pass |
+| 4 | off is a deprecated alias of scope-only | `test_off_mode_is_a_deprecated_alias_of_scope_only` | `ci_push::tests::parity::off_mode_is_a_deprecated_alias_of_scope_only` | pass |
+| 5 | invalid mode exits 1 with helpful message | `test_invalid_mode_exits_one` | `ci_push::tests::run::an_invalid_mode_blocks_before_discovery` (3 cases) | pass |
+| 6 | warn + passing → exit 0 | `test_warn_passing_tests_exits_zero` | `ci_push::tests::parity::warn_passing_tests_exits_zero` | pass |
+| 7 | warn + failing → exit 0 and mentions --no-verify | `test_warn_failing_tests_exits_zero_with_no_verify_hint` | `ci_push::tests::orchestration::warn_lets_an_ordinary_failure_through_and_still_publishes_it` | pass |
+| 8 | strict + passing → exit 0 | `test_strict_passing_tests_exits_zero` | `ci_push::tests::orchestration::a_clean_head_feeds_its_reviewed_plan_to_the_gates_and_publishes_validation` | pass |
+| 9 | strict + failing → propagate exit and mention --no-verify | `test_strict_failing_tests_exits_nonzero_with_no_verify_hint` | `ci_push::tests::orchestration::a_strict_failure_publishes_its_complete_evidence_then_blocks` | pass |
+| 10 | unset default runs no gate when no CI run starts | `test_unset_default_runs_no_gate_for_a_push_that_starts_no_run` | `ci_push::tests::parity::unset_default_runs_no_gate_for_a_push_that_starts_no_run` | pass |
+| 11 | explicit auto behaves as the default | `test_explicit_auto_is_the_default` | `ci_push::tests::parity::explicit_auto_is_the_default` | pass |
+| 12 | unset default is strict for a push to main | `test_unset_default_is_strict_for_a_push_to_main` | `ci_push::tests::parity::unset_default_is_strict_for_a_push_to_main` | pass |
+| 13 | unset default is strict with an open pull request | `test_unset_default_is_strict_for_a_branch_with_an_open_pull_request` | `ci_push::tests::parity::unset_default_is_strict_for_a_branch_with_an_open_pull_request` | pass |
+| 14 | default path calls 'just pre-push' with no selection | `test_default_delegates_scope_to_pre_push` | `ci_push::tests::parity::default_delegates_scope_to_pre_push` | pass |
+| 15 | run_hook forwards no selection without an override | `test_run_hook_forwards_no_selection_without_an_override` | `ci_push::tests::parity::run_hook_forwards_no_selection_without_an_override` | pass |
+| 16 | RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim | `test_areas_override_is_passed_through` | `ci_push::tests::parity::areas_override_is_passed_through` | pass |
+| 17 | a failing warn run reaches the publication block | `test_a_failing_warn_run_reaches_the_publication_block` | `ci-push` integration `parity::a_failing_warn_run_reaches_the_publication_block` | pass |
+| 18 | interrupted gate withholds staged evidence | `test_a_gate_exiting_130_never_publishes_staged_evidence` | `ci-push` integration `parity::a_gate_exiting_130_never_publishes_staged_evidence` | pass |
+| 19 | interrupted hook withholds staged evidence | `test_an_interrupted_hook_never_publishes_staged_evidence` | `ci-push` integration `parity::an_interrupted_hook_never_publishes_staged_evidence` (Unix only) | pass |
+| 20 | publication requires a clean, exact, unoverridden tree | `test_publication_requires_a_clean_exact_tree_and_no_override` | `ci-push` integration `parity::publication_requires_a_clean_exact_tree_and_no_override` | pass |
+| 21 | a persisted prohibition blocks the push | `test_prohibition_blocks_the_push` | `ci_push::tests::orchestration::an_executing_prohibited_cell_blocks_every_mode::case_2_strict` | pass |
+| 22 | a prohibition refusal states its reason | `test_prohibition_is_explained` | `ci_push::tests::orchestration::an_executing_prohibited_cell_blocks_every_mode::case_2_strict` | pass |
+| 23 | an expired prohibition does not block | `test_expired_prohibition_does_not_block` | `ci_push::tests::orchestration::an_expired_prohibition_is_reported_and_does_not_block` | pass |
+| 24 | a reused prohibited cell does not block | `test_a_reused_prohibited_cell_does_not_block` | `ci_push::tests::orchestration::a_reused_or_absent_prohibited_environment_does_not_block::case_1_reused` | pass |
+| 25 | an absent prohibited environment does not block | `test_an_absent_prohibited_environment_does_not_block` | `ci_push::tests::orchestration::a_reused_or_absent_prohibited_environment_does_not_block::case_2_absent` | pass |
+| 26 | an executing prohibited cell blocks with its reason | `test_an_executing_prohibited_cell_blocks_with_its_reason` | `ci_push::tests::orchestration::an_executing_prohibited_cell_blocks_every_mode::case_2_strict` | pass |
+| 27 | the constraint is decided in scope-only mode too | `test_the_constraint_is_decided_in_scope_only_mode_too` | `ci_push::tests::orchestration::an_executing_prohibited_cell_blocks_every_mode::case_4_scope_only` | pass |
+| 28 | an unreadable plan blocks | `test_an_unreadable_plan_blocks` | `ci_push::tests::parity::an_unreadable_plan_blocks` | pass |
+| 29 | a failed plan resolution blocks and publishes no scope | `test_a_failed_plan_resolution_blocks_and_publishes_no_scope` | `ci_push::tests::orchestration::a_helper_failure_blocks_naming_the_revision_and_the_command::case_1_plan` | pass |
+| 30 | the plan resolution is handed no constraint store | `test_the_plan_resolution_is_handed_no_constraint_store` | `ci_push::tests::orchestration::the_planner_gets_the_committed_arguments_file_and_no_constraint_store` | pass |
+| 31 | a constraint for another branch does not block | `test_a_constraint_for_another_branch_does_not_block` | `ci_push::tests::orchestration::a_renamed_refspec_binds_a_record_under_either_branch_name::case_3_another_branch` | pass |
+| 32 | the plan fixtures are valid resolved plans | `test_the_plan_fixtures_are_valid_resolved_plans` | `ci_push::tests::documents::every_plan_fixture_is_a_valid_resolved_plan_that_keeps_unread_fields` | pass |
+| 33 | a published receipt names retained, readable reports | `test_a_published_receipt_names_retained_readable_reports` | `ci-push` integration `parity::a_published_receipt_names_retained_readable_reports` | pass |
+| 34 | reports that cannot be retained publish no receipt | `test_reports_that_cannot_be_retained_publish_no_receipt` | `ci-push` integration `parity::reports_that_cannot_be_retained_publish_no_receipt` | pass |
+| 35 | a blocked strict failure publishes its note; CI reruns it | `test_a_blocked_strict_failure_publishes_its_note_but_ci_reruns_the_cell` | `ci-push` integration `parity::a_blocked_strict_failure_publishes_its_note_but_ci_reruns_the_cell` | pass |
+| 36 | a complete warn failure publishes its note | `test_a_complete_warn_failure_publishes_its_note` | `ci-push` integration `parity::a_complete_warn_failure_publishes_its_note` | pass |
+| 37 | scope-only publishes committed scope for a push to main | `test_scope_only_publishes_committed_scope_for_a_push_to_main` | `ci-push` integration `parity::scope_only_publishes_committed_scope_for_a_push_to_main` | pass |
+| 38 | the published scope receipt binds this plan generation | `test_the_published_scope_receipt_binds_this_plan_generation` | `ci-push` integration `parity::the_published_scope_receipt_binds_this_plan_generation` | pass |
+| 39 | committed scope declares deletions, omits rename sources | `test_the_committed_scope_declares_deletions_and_omits_rename_sources` | `ci-push` integration `parity::the_committed_scope_declares_deletions_and_omits_rename_sources` | pass |
+| 40 | a feature push records the PR base, not its previous tip | `test_a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip` | `ci-push` integration `parity::a_feature_branch_push_records_the_pull_request_base_not_its_previous_tip` | pass |
+| 41 | a branch-creating push records the remote's main tip, says so | `test_a_branch_creating_push_records_the_remote_main_tip_and_says_so` | `ci-push` integration `parity::a_branch_creating_push_records_the_remote_main_tip_and_says_so` | pass |
+| 42 | a dirty strict run publishes scope but no validation | `test_a_dirty_strict_run_publishes_scope_but_no_validation_receipt` | `ci-push` integration `parity::a_dirty_strict_run_publishes_scope_but_no_validation_receipt` | pass |
+| 43 | a failed scope publication is named; exit code unchanged | `test_a_failed_scope_publication_is_named_and_leaves_the_exit_code_alone` | `ci-push` integration `parity::a_failed_scope_publication_is_named_and_leaves_the_exit_code_alone` | pass |
+| 44 | a committed change masked by an unstaged revert is reviewed | `test_a_committed_change_masked_by_an_unstaged_revert_is_still_reviewed` | `ci-push` integration `parity::a_committed_change_masked_by_an_unstaged_revert_is_still_reviewed` | pass |
+| 45 | an unstaged policy edit never reaches the plan or receipt | `test_an_unstaged_policy_edit_never_reaches_the_committed_plan_or_receipt` | `ci-push` integration `parity::an_unstaged_policy_edit_never_reaches_the_committed_plan_or_receipt` | pass |
+| 46 | a clean checkout is planned in place | `test_a_clean_checkout_is_planned_in_place` | `ci-push` integration `parity::a_clean_checkout_is_planned_in_place` | pass |
+| 47 | a push that does not carry HEAD reviews the pushed revision | `test_a_push_that_does_not_carry_head_reviews_the_pushed_revision` | `ci_push::tests::parity::a_push_that_does_not_carry_head_reviews_the_pushed_revision` | pass |
+| 48 | a deletion-only push triggers nothing and is not reviewed | `test_a_deletion_only_push_triggers_nothing_and_is_not_reviewed` | `ci_push::tests::parity::a_deletion_only_push_triggers_nothing_and_is_not_reviewed` | pass |
+| 49 | a tag-only push in strict mode runs no gate | `test_a_tag_only_push_in_strict_mode_runs_no_gate` | `ci_push::tests::parity::a_tag_only_push_in_strict_mode_runs_no_gate` | pass |
+| 50 | a prohibition on the pushed branch blocks, whatever is checked out | `test_a_prohibition_on_the_pushed_branch_blocks_whatever_is_checked_out` | `ci_push::tests::parity::a_prohibition_on_the_pushed_branch_blocks_whatever_is_checked_out` | pass |
+| 51 | a prohibition on the checked-out branch does not bind another push | `test_a_prohibition_on_the_checked_out_branch_does_not_bind_another_branch_push` | `ci_push::tests::parity::a_prohibition_on_the_checked_out_branch_does_not_bind_another_branch_push` | pass |
+| 52 | every pushed branch is planned with its own path set | `test_every_pushed_branch_is_planned_with_its_own_path_set` | `ci_push::tests::parity::every_pushed_branch_is_planned_with_its_own_path_set` | pass |
+| 53 | ref updates are reviewed in the order Git supplies them | `test_ref_updates_are_reviewed_in_the_order_git_supplies_them` | `ci_push::tests::parity::ref_updates_are_reviewed_in_the_order_git_supplies_them` (4 cases) | pass |
+| 54 | the repository identity is the remote being pushed to | `test_the_repository_identity_is_the_remote_being_pushed_to` | `ci_push::tests::orchestration::the_repository_identity_is_the_remote_being_pushed_to` | pass |
+| 55 | a renamed refspec binds a record under either branch name | `test_a_renamed_refspec_binds_a_record_under_either_branch_name` | `ci_push::tests::orchestration::a_renamed_refspec_binds_a_record_under_either_branch_name` | pass |
+| 56 | deletions and tags among branch updates are skipped by name | `test_deletions_and_tags_among_branch_updates_are_skipped_by_name` | `ci_push::tests::parity::deletions_and_tags_among_branch_updates_are_skipped_by_name` | pass |
+| 57 | a stacked pull request is planned against its target's tip | `test_a_stacked_pull_request_is_planned_against_its_target_branch_tip` | `ci-push` integration `parity::a_stacked_pull_request_is_planned_against_its_target_branch_tip` | pass |
+| 58 | a pull request into main from a restoring child selects nothing | `test_a_pull_request_into_main_from_a_restoring_child_selects_nothing` | `ci-push` integration `parity::a_pull_request_into_main_from_a_restoring_child_selects_nothing` | pass |
+| 59 | an advanced target records its exact remote comparison | `test_an_advanced_target_branch_is_read_from_the_remote_and_records_exact_scope` | `ci-push` integration `parity::an_advanced_target_branch_is_read_from_the_remote_and_records_exact_scope` | pass |
+| 60 | no open pull request on GitHub → a provisional plan | `test_a_github_branch_with_no_open_pull_request_gets_a_provisional_plan` | `ci_push::tests::orchestration::a_github_branch_with_no_open_pull_request_gets_a_provisional_plan` | pass |
+| 61 | a record in the default store binds a fresh session | `test_a_record_in_the_default_store_binds_a_fresh_session` | `ci-push` integration `parity::a_record_in_the_default_store_binds_a_fresh_session` | pass |
+| 62 | two open pull requests from one head are each reviewed | `test_two_open_pull_requests_from_one_head_are_each_reviewed` | `ci_push::tests::parity::two_open_pull_requests_from_one_head_are_each_reviewed` | pass |
+| 63 | a GitHub remote without gh blocks and names it | `test_a_github_remote_without_gh_blocks_and_names_it` | `ci_push::tests::orchestration::a_pull_request_lookup_that_fails_blocks_every_mode::case_1_gh_missing` | pass |
+| 64 | a failing gh blocks and names the failure | `test_a_failing_gh_blocks_and_names_the_failure` | `ci_push::tests::orchestration::a_pull_request_lookup_that_fails_blocks_every_mode::case_2_gh_fails` | pass |
+| 65 | a non-GitHub remote never asks gh | `test_a_non_github_remote_never_asks_gh` | `ci_push::tests::orchestration::a_non_github_remote_never_asks_gh_and_gets_a_provisional_plan` | pass |
+| 66 | a target updated in the same push is reviewed at its incoming revision | `test_a_target_updated_in_the_same_push_is_reviewed_at_its_incoming_revision` | `ci_push::tests::parity::a_target_updated_in_the_same_push_is_reviewed_at_its_incoming_revision` (2 orders) | pass |
+| 67 | a simultaneous push with nothing prohibited passes in either order | `test_a_simultaneous_push_with_no_prohibited_work_passes_in_either_order` | `ci_push::tests::parity::a_simultaneous_push_with_no_prohibited_work_passes_in_either_order` (2 orders) | pass |
+| 68 | a pull request into a branch this push deletes is refused | `test_a_pull_request_into_a_branch_this_push_deletes_is_refused` | `ci_push::tests::parity::a_pull_request_into_a_branch_this_push_deletes_is_refused` (2 orders) | pass |
+| 69 | a docs-only follow-up skips the cells prior evidence covers | `test_a_docs_only_follow_up_skips_the_cells_prior_evidence_covers` | `ci-push` integration `parity::a_docs_only_follow_up_skips_the_cells_prior_evidence_covers` (Unix only) | pass |
+| 70 | a follow-up changing a package's inputs reruns its cell | `test_a_follow_up_changing_a_packages_inputs_reruns_its_cell` | `ci-push` integration `parity::a_follow_up_changing_a_packages_inputs_reruns_its_cell` (Unix only) | pass |
+| 71 | a cell whose prior evidence is a failure is rerun, superseded | `test_a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded` | `ci-push` integration `parity::a_cell_whose_prior_evidence_is_a_failure_is_rerun_and_superseded` (Unix only) | pass |
+| 72 | a stacked pull request records its target tip as the base | `test_a_stacked_pull_request_records_its_target_tip_as_the_receipt_base` | `ci-push` integration `parity::a_stacked_pull_request_records_its_target_tip_as_the_receipt_base` (Unix only) | pass |
+| D1 | dispatcher selects each linked worktree's hook (`.githooks/tests/test-pre-push-dispatcher.sh`, one script-level contract) | _(whole script)_ | `ci-push` integration `dispatcher::the_dispatcher_runs_each_linked_worktrees_own_hook` | pass |
 
 ## Spec Departures
 
@@ -736,3 +887,292 @@ on a failed status read; the receipt's cell count is display-only.
   end to end). The emergency override was not used.
 - Formatting: no `cargo fmt` or `rustfmt` was run; the lint recipe's
   check-only formatter passed.
+
+## Phase 4
+
+Wave 5 ran as three concurrent subagents with disjoint file ownership (the
+orchestrator pre-declared every new module and added the test tool's
+`forward` behavior first, so no two agents edited one file): in-process
+decision rows, end-to-end evidence rows, and the launcher/dispatcher
+cutover. Wave 6 (retirement, aliases, contracts) and every gate below ran in
+the orchestrator afterwards, with no subagent running.
+
+### Port parity
+
+- Every row of the Parity Inventory above now names a passing Rust test; no
+  row is `pending`. No production code changed: no parity test exposed a
+  decision that differed from the shell's.
+- In-process rows (44): `scripts/ci-push/tests/parity.rs` (23 new tests) and
+  21 rows mapped onto existing `orchestration`/`run`/`documents` tests, nine of
+  which were extended to assert everything the Bash case asserted (the
+  `--no-verify` hint, the `Remote:`/`Branch identity:` lines, the provisional
+  wording, gates still running for reused/absent cells). The fake in
+  `orchestration.rs` is now `pub(super)` and gained `push_with` (unset mode),
+  `context_plans` (a plan per base/head pair), and `gh_by_branch` (a `gh`
+  answer per head branch).
+- End-to-end rows (28): the `ci-push` integration target's `parity::*` over
+  `evidence_fixture.rs`: the real `ci-push` binary, a real repository and bare
+  remote, the real `scripts/ci/*.py` evidence helpers (copied from the
+  repository) under the real selected Python, the ported stub planner
+  `scripts/ci/fixtures/pre-push/affected_scope_stub.py`, and for rows 1, 2,
+  69-72 the real `just/ci-local.just` run by the real `just`. Receipts are read
+  back as notes from the checkout and the remote and parsed (base, cells,
+  outcome, completion, `scope_identity` via the real `schema.py`, retained
+  report directories).
+- Extra binary-boundary cases (plan list): `parity::empty_input_exits_zero_and_launches_nothing`,
+  `a_malformed_line_is_located_and_launches_nothing`,
+  `a_broken_python3_hands_the_fallback_to_every_helper_and_the_gates`,
+  `with_no_interpreter_one_error_names_every_candidate_and_nothing_runs`,
+  `an_interrupt_during_the_gates_ends_their_tree_and_publishes_nothing`
+  (SIGINT, exit 130, gate and grandchild gone),
+  `a_termination_during_the_review_removes_its_temporary_worktree` (SIGTERM,
+  exit 143), `a_failed_validation_note_publication_keeps_the_durable_reports`;
+  in-process `ci_push::tests::parity::each_update_is_reviewed_against_its_own_pull_requests_base`
+  and `a_crlf_push_is_reviewed_as_its_lf_spelling_is`. Mapped: CRLF at the
+  binary (`push::a_strict_push_to_main_…`, which sends `\r\n`), old/timed-out
+  Python (`python::*`), non-ancestor base
+  (`orchestration::a_refused_scope_recording_still_feeds_the_reviewed_plan_to_the_gates`),
+  post-gate HEAD change (`orchestration::a_run_that_is_not_the_outgoing_trees_withholds_validation::case_1_head_moved`),
+  retention failure (row 34, which also checks the kept staging reports), null
+  stdin on review children (row 58 checks `gh` read an empty stdin).
+- `scripts/ci-push-test-tool.rs` gained `forward` (orchestrator), `dispatch`
+  (behavior by argv prefix), `$VAR` expansion in `write_files`,
+  `append_files`, `signal_parent` (Unix), `delegate`, and
+  `refuse_stdin_containing` (a remote `pre-receive` hook); `fixture.rs` gained
+  `install_tool` and `Fixture::clear_log`.
+
+### Exercise launcher
+
+- `.githooks/pre-push` is now a 25-line POSIX `sh` launcher: `cd "$(git
+  rev-parse --show-toplevel)"`, then `exec cargo run --quiet -p repo-deps
+  --no-default-features --features local-tools --bin ci-push -- "$@"`. Index
+  mode stays 100755. `.githooks/pre-push-dispatcher` is unchanged (its test
+  needed no fix).
+- `dispatcher::the_dispatcher_runs_each_linked_worktrees_own_hook` (D1) and
+  `launcher::*` drive an actual `git push` to a bare remote through the real
+  dispatcher (installed in the shared hooks directory) and the real launcher
+  (both read with `include_str!` inside each test, so the test-input index
+  selects them), with the compiled tool as `cargo`: exact argv and stdin, cwd
+  is the top level when pushing from a subdirectory, a failing cargo refuses
+  the push and leaves the remote unchanged, every push runs cargo again, each
+  linked worktree runs cargo in its own checkout, and (forwarding to the real
+  `ci-push`) a tag push passes, an invalid mode is refused, an auto push of a
+  topic branch runs no gate, and a strict push of `main` runs the gates.
+  Checkout paths contain a space and `ü`. Mutation checks: dropping `cd
+  "$top"` fails the subdirectory test; dropping `"$@"` from the dispatcher
+  fails D1.
+- Native Windows: `launcher::windows_git_bash_pushes_through_the_launcher_to_the_real_ci_push`
+  and `windows_powershell_pushes_through_the_launcher_to_the_real_ci_push`
+  (`#[cfg(windows)]`, auto and strict through Git Bash's `bash.exe -c` and
+  `powershell.exe -NoProfile -NonInteractive -Command`; a missing shell panics).
+
+### Retire shell
+
+- Deleted `.githooks/tests/` (`test-pre-push.sh`,
+  `test-pre-push-dispatcher.sh`, `report-pre-push.py`, the five plan fixtures
+  and `affected_scope_stub.py`, already copied under
+  `scripts/ci/fixtures/pre-push/`) and `.github/workflows/pre-push-hook-tests.yml`.
+- Root aliases: `test-pre-push-hook` runs `just _test repo-deps --lib
+  ci_push::` (314 tests) then `just _test repo-deps --test ci-push` (67);
+  `test-pre-push-dispatcher` runs `just _test repo-deps --test ci-push
+  dispatcher::` (1); `test-githooks` runs both. Each reports a nonzero count.
+- `tools/test-toolkit/tests/ci_workflow_contracts.rs` read the shell hook's
+  source in two contracts; they now assert the hook launches `--bin ci-push`,
+  that `scripts/ci-push/git.rs` declares deletions (`push(b"--deleted")`), and
+  that `scripts/ci-push/review.rs` enforces constraints
+  (`constraints::unsatisfied`). The `.matrix` sweep still reads the launcher.
+- Stale comments fixed: `scripts/ci/diff_scope.py` and
+  `scripts/ci/constraints.py` docstrings described the shell hook; they now
+  name `ci-push`. `docs/cicd/schema-versions.md` named the deleted
+  `.githooks/tests/fixtures`; it now names `scripts/ci/fixtures/pre-push/`.
+- Test-input indexing: `affected_scope.py .githooks/pre-push` schedules one
+  narrowed `repo-deps / ubuntu-latest / L1` cell (the `launcher::` tests) and
+  the three `ci_workflow_contracts` tests above;
+  `.githooks/pre-push-dispatcher` schedules the D1 test plus the `launcher::`
+  tests (which embed the dispatcher). No other cell is added.
+- Left for Phase 5 (docs/skills owner): `docs/topics/ci-cd.md` (lines ~242,
+  ~1428), `docs/testing-strategy.md` (~506), `.claude/skills/rust-devops/ci-cd.md`
+  (~1094), `.claude/skills/os/macos.md` (~299) still describe the retired
+  shell suite.
+
+### Requirement-to-test mapping (Phase 4)
+
+| Requirement | Tests |
+| --- | --- |
+| Every Bash row has a Rust counterpart crossing the same boundary | Parity Inventory table above (73 rows, all `pass`) |
+| Malformed / CRLF / empty input | `parity::a_malformed_line_is_located_and_launches_nothing`, `parity::empty_input_exits_zero_and_launches_nothing` (F3 binary), `ci_push::tests::parity::a_crlf_push_is_reviewed_as_its_lf_spelling_is`, `push::a_strict_push_to_main_…` |
+| Python missing / broken / old / timed out; fallback propagation | `parity::a_broken_python3_hands_the_fallback_to_every_helper_and_the_gates`, `parity::with_no_interpreter_one_error_names_every_candidate_and_nothing_runs`, `python::*` |
+| Multi-update bases, non-ancestor / all-zero bases | `ci_push::tests::parity::each_update_is_reviewed_against_its_own_pull_requests_base`, rows 41, 59, 66-68, `orchestration::a_refused_scope_recording_…`, `orchestration::a_branch_creating_push_of_main_…` |
+| Post-gate HEAD change, cancellation, grandchild cleanup | `orchestration::a_run_that_is_not_the_outgoing_trees_withholds_validation`, `parity::an_interrupt_during_the_gates_ends_their_tree_and_publishes_nothing`, `parity::a_termination_during_the_review_removes_its_temporary_worktree`, row 19 |
+| Report retention and publication failure | rows 33, 34, 43, `parity::a_failed_validation_note_publication_keeps_the_durable_reports` |
+| Launcher argv/stdin/cwd, Cargo failure, freshness, worktree selection, real ci-push | `launcher::*`, `dispatcher::*` |
+| Hook files select their tests | `affected_scope.py` runs recorded above |
+
+Fidelity: F1 in-process for the decision rows; F3 (the real binary, real Git
+transport, real Python helpers, real `just`/`ci-local.just`) for the evidence
+rows, the binary-boundary cases, and the launcher/dispatcher.
+
+### Gates and evidence (macOS host, 2026-11-11)
+
+- Focused: `cargo nextest run -p repo-deps --lib -E 'test(/^ci_push::tests::(parity|orchestration|run)::/)'`
+  117 passed; `cargo nextest run -p repo-deps --test ci-push` 67 passed.
+- `just _lint repo-deps`: pass. `just check-tier-coverage repo-deps`: nothing
+  stranded.
+- `just test repo-deps`: 896 passed (2 slow: the pre-existing `ci-build
+  archive::tests` ones, 5.1 s and 7.6 s), 1 skipped (pre-existing), exit 0.
+- Scope calculator over this phase's files: `packages: ["repo-deps",
+  "test-toolkit", "darkmatter"]`, `change_class: package`. test-toolkit:
+  `cargo nextest run -p test-toolkit --test ci_workflow_contracts` 228 passed,
+  `just _lint test-toolkit` pass. darkmatter: the two narrowed tests that read
+  `docs/cicd/schema-versions.md` (`shipped_schema_corpus::shipped_markdown_inline_schemas_parse_passively`,
+  `…_named_type_references_resolve`) 2 passed. repo-deps' `wsl2-ubuntu` L1 cell
+  is the existing governed accepted gap (no cargo in the guest), so the new
+  rows add no WSL CI cell.
+- `scripts/ci/test_constraints.py` 48 OK (docstring edit).
+- Timing risk: the four two-run real-recipe rows (2, 69, 70, 71) take 3.3-4.5 s
+  alone and up to 4.88 s (row 71) under the full suite; each needs two
+  complete hook runs (~1.6 s each: review, recipe, record/publish) plus, for
+  71, a real `verify`. They are under the 5 s L1 budget here but have little
+  margin on a loaded 2-core runner. See `decisions_for_review`.
+- Formatting: no `cargo fmt`; subagents ran `rustfmt` on their own new files
+  only.
+- Cross-OS: `just cross-check repo-deps --os windows` (build-win), one
+  attempt: the MSVC build compiled and linked every target, including the
+  `ci-push` integration target with the `cfg(windows)` launcher tests, and the
+  archive was produced. Only the known informational `linker_messages` lines
+  appeared. Execution then stopped at the rig's Cargo storage preflight
+  (46.8 GiB free, 50 GiB required), the same capacity condition as Phases 1-3.
+  No test failed, so `os_failing` is not set, but Windows **execution is still
+  unproven** (the launcher's Git Bash and PowerShell tests included). The
+  emergency override was not used.
+
+## Phase 5
+
+Ran in the orchestrator alone (no subagents): the work was documentation plus
+platform runs, and the rigs were driven one at a time.
+
+### Update documentation
+
+- `docs/topics/ci-cd.md`: Layer 1 now says the hook is a launcher for
+  `ci-push`, and a new **How the hook runs** subsection covers the launcher
+  command and Cargo freshness (first push after a `scripts/` change compiles
+  `local-tools`; a failed build refuses the push), a Mermaid flow, Python
+  selection (`python3`, `py -3` on Windows, `python`; 3.10+; 2 s probe; one
+  error naming every candidate) and the `BISCUIT_CI_PYTHON` /
+  `BISCUIT_CI_PYTHON_ARGS_FILE` contract of `just ci-local`, strict update
+  parsing, review in every mode with temporary `ci-push-review-*` worktrees,
+  exit statuses 1 and 2, gates (`just pre-push`), staged and retained reports
+  (and the kept staging path when retention fails), every withholding reason,
+  cancellation (process group / Job Object, 130/143/129, interrupted gates
+  block in `warn`) and its two limits (a force-kill cleans nothing; a session
+  that forbids nested Jobs), and the canonical test commands
+  (`just test-pre-push-hook`, `test-pre-push-dispatcher`, `test-githooks`,
+  `test repo-deps`) plus both native Windows launch tests. The retired
+  `bash .githooks/tests/test-pre-push.sh` instruction and the Pointers entry
+  (`tested by .githooks/tests/`) are replaced.
+- `docs/testing-strategy.md`: `just test-githooks` prints three timing lines
+  (one per `_test` run), the hook is reached through `ci-push`, and review
+  failures, constraint refusals, and interruptions block in every mode.
+- `README.md`: overview sentence (Cargo-built `ci-push`, Python 3.10+) and a
+  link to How the hook runs; no reference content added.
+- `docs/cicd/schema-versions.md`: a **Execution constraint record** row in
+  Current versions (unversioned; owners `constraints.py::validate_record` and
+  `documents.rs::parse_constraint_record`, held equal by `parity.json`) and a
+  section with the field shapes, the malformed-input table (required field
+  absent/`""`/null/non-string; optional null/non-string; other date
+  spellings, impossible days, year `0000`; unknown field, alphabetically first
+  reported; duplicate key, trailing content, non-object) and the unversioned
+  correction (Spec Departure 1). No dated feature is named.
+- `.github/ci/README.md` and `.claude/skills/rust-devops/ci-cd.md`: the
+  diff-boundary paragraphs named `.githooks/pre-push` as a `diff_scope.py`
+  caller; `ci-push` writes the same tail itself (`git.rs`, held byte-equal by
+  `ci_push::tests::git`). The skill's "four coupled files" self-test note is
+  now two files (the Rust fixture reads the list from the recipe); `jq` is no
+  longer a hook requirement.
+- `.claude/skills/rust-devops/ci-cd.md`: a short "the hook is a launcher"
+  block (logic only in Rust, how it is tested, the Python hand-over rule,
+  all-mode review, the `cfg(unix)` parity tests).
+- `.claude/skills/os/windows.md`: new **Pushing from native Windows** section
+  (both entry shells, Python probing and `.exe`-only lookup, Job Object
+  ownership and its nested-Job limit, temporary worktree cleanup); the Cygwin
+  `python3` and `jq --binary` bullets corrected for `ci-push`. `os/SKILL.md`
+  gained a symptom row; `os/macos.md` lost the retired suite's CDPATH command.
+- `docs/dependencies.md`: checked against `git diff main -- scripts/Cargo.toml`;
+  the Phase 1 note already lists every added dependency, so it is unchanged.
+- `git grep` for `test-pre-push.sh`, `githooks/tests`, `pre-push-hook-tests`,
+  `report-pre-push` outside `features/`, `fixes/`, and `reviews/` (dated
+  snapshots) returns nothing.
+
+### Prove platforms
+
+| Environment | Command | Result |
+| --- | --- | --- |
+| macOS (local) | `just test repo-deps` | 896 passed (2 slow: the pre-existing `ci-build archive::tests` pair, 5.1 s and 7.8 s), 1 skipped (pre-existing), exit 0 |
+| macOS (local) | `just _lint repo-deps`; `just check-tier-coverage repo-deps` | pass; 0 stranded |
+| Linux (`build-linux`) | `just cross-check repo-deps --os linux` | archive mode (`d39762c658adc5dd` from `ubuntu-latest`): 896 passed, 1 skipped, none at or above 5 s; slowest parity row 1.7 s |
+| WSL2 (`build-wsl`) | `just cross-check repo-deps --os wsl` | canonical archive mode (`ee42837e7e089dbb` produced on `ubuntu-latest`, consumed as `wsl2-ubuntu`): 896 passed, 1 skipped; all 67 `ci-push` integration and 314 `ci_push::` tests ran; slowest parity row 3.0 s |
+| native Windows (`build-win`) | `just cross-check repo-deps --os windows` | **unproved**: the MSVC archive (`360cf9231450e6e3`) was produced, then the consume step stopped at the Cargo storage preflight (46.7 GiB free of 299.9, 50 required) |
+
+- Rig observations: none was published, as designed: every leg ran the local
+  working tree (Phase 4 and 5 are uncommitted), which no head names
+  (`cross-check: publishing no … observation - the remote tested tree … is
+  not this head's tree`). Reports stayed on the rigs' run directories.
+- Windows space attempt: `just cross-check-refresh --os windows --dry-run`
+  found nothing retirable (three clones, 161 GiB, all used within a day).
+  This checkout's own clone (`B:\coding\bolt--main`) held a 50.6 GiB
+  `x86_64-pc-windows-msvc` target, so I ran the repository's
+  `scripts\windows-cargo-sweep.ps1 -MaxSizeGB 40` on that clone only. It
+  reported "Cleaned 15.86 GiB" and the volume's free space did not change
+  (46.6 GiB): the volume is ReFS with kache, so the target's files are block
+  clones of the store. That fact is now in `os/build-hosts.md`. The store and
+  other checkouts' clones are not mine to trim, and the os skill forbids
+  working around the preflight, so `BISCUIT_BUILD_MIN_FREE_GIB` was not
+  lowered. **Native Windows execution of `ci-push`, including the Git Bash and
+  PowerShell launcher acceptance tests, remains unproved after every phase.**
+  No Windows test failed, so `os_failing` is not set. Someone with authority
+  over `build-win`'s kache store needs to free about 4 GiB, then run
+  `just cross-check repo-deps --os windows` (from PowerShell-descended
+  tooling if a Git Bash `0xC0000005` appears).
+- Independence: `cargo build -p repo-deps --no-default-features --bin
+  ci-rollup` and `cargo build -p repo-deps --no-default-features --features
+  build-tools --bin ci-plan --bin ci-build` both succeed; `cargo tree -p
+  repo-deps --no-default-features` lists only anyhow, quick-xml, serde,
+  serde_json, toml.
+- No new CI cells or schema changes: this phase's files plan only the
+  existing repo-deps cells (with `wsl2-ubuntu` L1 still `omit`, the governed
+  gap), darkmatter's two narrowed `shipped_schema_corpus` tests, and
+  test-toolkit's `ci_workflow_contracts`; no `schema.py` version or
+  `contract.json` changed.
+- Companion suites: none of the Python sources changed this phase, so no
+  Python suite was rerun.
+
+### Requirement-to-test mapping (Phase 5)
+
+Phase 5 changed no behavior; its requirements are documentation and
+platform evidence. The test evidence is the cross-environment runs above
+plus the documentation readers:
+
+| Requirement | Evidence |
+| --- | --- |
+| docs read by tests still parse | darkmatter `shipped_schema_corpus::shipped_markdown_inline_schemas_parse_passively`, `…_named_type_references_resolve`: 2 passed |
+| CI documentation contracts | test-toolkit `cargo nextest run -p test-toolkit --test ci_workflow_contracts`: 228 passed |
+| owning L1 suite on macOS, Linux, WSL2 | table above |
+| owning L1 suite on native Windows | unproved (storage) |
+
+### Final-diff review
+
+- No unsolicited refactor in this phase; edits were confined to docs and
+  skills. No `.pyc` or `__pycache__` in `git status`. No compile-time fixture
+  paths (`env!("CARGO_MANIFEST_DIR")` does not occur under
+  `scripts/ci-push/`; tests use `bin_exe!`/`manifest_dir!`). No fixture
+  process survived the runs (`pgrep -f ci-push-test-tool` empty after
+  `just test repo-deps`). All changes are in the starting worktree and branch.
+
+### Gates (macOS host, 2026-11-11)
+
+- Scope calculator over the whole uncommitted tree:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ["repo-deps", "test-toolkit", "darkmatter"]`,
+  `change_class: package`, so the gates ran (not skipped).
+- `just test repo-deps`, `just _lint repo-deps`, `just check-tier-coverage
+  repo-deps`, the test-toolkit and darkmatter tests: all as above.

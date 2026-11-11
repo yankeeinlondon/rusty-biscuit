@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 5
 created: 2026-11-08
-phase: 4
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -83,8 +83,143 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+- .githooks/pre-push
+- .githooks/tests/test-pre-push.sh (deleted)
+- .githooks/tests/test-pre-push-dispatcher.sh (deleted)
+- .githooks/tests/report-pre-push.py (deleted)
+- .githooks/tests/fixtures/affected_scope_stub.py (deleted)
+- .githooks/tests/fixtures/plan-macos-executing.json (deleted)
+- .githooks/tests/fixtures/plan-macos-two-packages.json (deleted)
+- .githooks/tests/fixtures/plan-wsl-absent.json (deleted)
+- .githooks/tests/fixtures/plan-wsl-executing.json (deleted)
+- .githooks/tests/fixtures/plan-wsl-reused.json (deleted)
+- .github/workflows/pre-push-hook-tests.yml (deleted)
+- justfile
+- scripts/ci-push-test-tool.rs
+- scripts/ci-push/tests/mod.rs
+- scripts/ci-push/tests/orchestration.rs
+- scripts/ci-push/tests/parity.rs
+- scripts/ci-push/integration/main.rs
+- scripts/ci-push/integration/fixture.rs
+- scripts/ci-push/integration/evidence_fixture.rs
+- scripts/ci-push/integration/parity.rs
+- scripts/ci-push/integration/launcher.rs
+- scripts/ci-push/integration/dispatcher.rs
+- scripts/ci/fixtures/pre-push/affected_scope_stub.py
+- scripts/ci/constraints.py
+- scripts/ci/diff_scope.py
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+docs_updated_during_phase_4:
+- docs/cicd/schema-versions.md
+- scripts/ci/fixtures/pre-push/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
 - repo-deps
+- test-toolkit
+- darkmatter
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+- docs/topics/ci-cd.md
+- docs/testing-strategy.md
+- docs/cicd/schema-versions.md
+- README.md
+- .github/ci/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/rust-devops/ci-cd.md
+- .claude/skills/os/windows.md
+- .claude/skills/os/SKILL.md
+- .claude/skills/os/macos.md
+- .claude/skills/os/build-hosts.md
+source_code:
+- Cargo.lock
+- scripts/Cargo.toml
+- scripts/lib.rs
+- scripts/ci-push.rs
+- scripts/ci-push/mod.rs
+- scripts/ci-push/host.rs
+- scripts/ci-push/json.rs
+- scripts/ci-push/mode.rs
+- scripts/ci-push/updates.rs
+- scripts/ci-push/documents.rs
+- scripts/ci-push/tests/mod.rs
+- scripts/ci-push/tests/documents.rs
+- scripts/ci-push/tests/run.rs
+- scripts/ci-push/tests/updates.rs
+- scripts/ci/fixtures/pre-push/constraints/minimal.json
+- scripts/ci/fixtures/pre-push/constraints/scoped.json
+- scripts/ci/fixtures/pre-push/plans/plan-macos-executing.json
+- scripts/ci/fixtures/pre-push/plans/plan-macos-two-packages.json
+- scripts/ci/fixtures/pre-push/plans/plan-wsl-absent.json
+- scripts/ci/fixtures/pre-push/plans/plan-wsl-executing.json
+- scripts/ci/fixtures/pre-push/plans/plan-wsl-reused.json
+- scripts/ci/fixtures/pre-push/pull-requests/none.json
+- scripts/ci/fixtures/pre-push/pull-requests/two-open.json
+- scripts/ci-plan.rs
+- scripts/ci-plan-render.rs
+- scripts/ci-plan-tests.rs
+- scripts/ci-change-inventory.rs
+- scripts/ci-push-test-tool.rs
+- scripts/ci-push/constraints.rs
+- scripts/ci-push/git.rs
+- scripts/ci-push/worktree.rs
+- scripts/ci-push/process.rs
+- scripts/ci-push/python.rs
+- scripts/ci-push/tests/constraints.rs
+- scripts/ci-push/tests/git.rs
+- scripts/ci-push/tests/worktree.rs
+- scripts/ci-push/tests/process.rs
+- scripts/ci-push/tests/python.rs
+- scripts/ci-push/integration/main.rs
+- scripts/ci-push/integration/fixture.rs
+- scripts/ci-push/integration/process.rs
+- scripts/ci-push/integration/python.rs
+- scripts/ci/constraints.py
+- scripts/ci/test_constraints.py
+- scripts/ci/fixtures/pre-push/constraints/parity.json
+- scripts/ci-push/review.rs
+- scripts/ci-push/evidence.rs
+- scripts/ci-push/tests/orchestration.rs
+- scripts/ci-push/integration/push.rs
+- just/ci-local.just
+- scripts/ci/test_ci_local.py
+- .githooks/pre-push
+- .githooks/tests/test-pre-push.sh (deleted)
+- .githooks/tests/test-pre-push-dispatcher.sh (deleted)
+- .githooks/tests/report-pre-push.py (deleted)
+- .githooks/tests/fixtures/affected_scope_stub.py (deleted)
+- .githooks/tests/fixtures/plan-macos-executing.json (deleted)
+- .githooks/tests/fixtures/plan-macos-two-packages.json (deleted)
+- .githooks/tests/fixtures/plan-wsl-absent.json (deleted)
+- .githooks/tests/fixtures/plan-wsl-executing.json (deleted)
+- .githooks/tests/fixtures/plan-wsl-reused.json (deleted)
+- .github/workflows/pre-push-hook-tests.yml (deleted)
+- justfile
+- scripts/ci-push/tests/parity.rs
+- scripts/ci-push/integration/evidence_fixture.rs
+- scripts/ci-push/integration/parity.rs
+- scripts/ci-push/integration/launcher.rs
+- scripts/ci-push/integration/dispatcher.rs
+- scripts/ci/fixtures/pre-push/affected_scope_stub.py
+- scripts/ci/diff_scope.py
+- tools/test-toolkit/tests/ci_workflow_contracts.rs
+documentation:
+- docs/dependencies.md
+- scripts/ci/fixtures/pre-push/README.md
+- docs/cicd/schema-versions.md
+- docs/topics/ci-cd.md
+- docs/testing-strategy.md
+- README.md
+- .github/ci/README.md
+- .claude/skills/rust-devops/ci-cd.md
+- .claude/skills/os/windows.md
+- .claude/skills/os/SKILL.md
+- .claude/skills/os/macos.md
+- .claude/skills/os/build-hosts.md
+completed_phase: 5
+implemented: true
 ---
 
 # Rust Pre-push Implementation Plan
@@ -228,11 +363,11 @@ Validation checkpoint: run focused coordinator tests through canonical L1. Prove
 
 ### Wave 5
 
-- [ ] **Port parity**
+- [x] **Port parity**
   - Complete every log row with a concrete Rust test and preserve assertions crossing the real boundary exercised by the original case. Group fast in-process decision matrices separately from hermetic end-to-end evidence tests; do not replace receipt round trips with command-log assertions.
   - Add malformed/CRLF/empty input, missing/broken/old/timed-out Python candidates, all interpreters missing, helper fallback propagation, complete multi-update base changes, nonancestor/all-zero bases, post-gate HEAD changes, cancellation, grandchild cleanup, report retention, and publication failure cases.
   - Test compiled stubs with PATH built via `join_paths`; isolate HOME/USERPROFILE, evidence and constraint roots, Git identity, default branch, config, gh settings, and remotes per fixture. Null stdin on review children must leave the full Git update list intact.
-- [ ] **Exercise launcher**
+- [x] **Exercise launcher**
   - Own hook/dispatcher integration tests and replace `.githooks/pre-push` with the thin launcher. Retain `.githooks/pre-push-dispatcher` unchanged unless its tests demonstrate a forwarding defect; forwarding fixes remain confined to cwd/argv/stdin/status.
   - Invoke actual Git push against bare fixture remotes with the dispatcher installed. Use the compiled cargo stub to assert exact package/feature/binary/`--` selectors, stdin and remote args, freshness delegation on successive pushes, Cargo failure blocking, and invoking checkout selection across linked worktrees. This avoids nested Cargo builds per L1 test.
   - Native Windows runs the same actual Git fixture through non-interactive Git Bash and PowerShell entry commands. Test a path with spaces and Unicode, fallback Python, auto and strict. Use OS signal injection and process readiness for cancellation, without opening/focusing windows. Assert worktree/admin cleanup and no surviving fixture child/grandchild.
@@ -240,7 +375,7 @@ Validation checkpoint: run focused coordinator tests through canonical L1. Prove
 
 ### Wave 6
 
-- [ ] **Retire shell**
+- [x] **Retire shell**
   - After every parity row has a passing Rust counterpart, delete `.githooks/tests/test-pre-push.sh`, `.githooks/tests/test-pre-push-dispatcher.sh`, `.githooks/tests/report-pre-push.py`, and `.github/workflows/pre-push-hook-tests.yml`.
   - Update root aliases to canonical filtered L1 execution; ensure each alias runs its intended module and reports a nonzero test count. Retain all three alias names for developer use.
   - Test the planner's existing test-input indexing against both hook paths and dispatcher: each selects the relevant repo-deps tests. Use literal runtime repository reads; add no broad infrastructure trigger or duplicate workflow.
@@ -251,11 +386,12 @@ Validation checkpoint: complete all parity log rows, run repo-deps L1 once after
 
 ### Wave 7
 
-- [ ] **Update documentation**
+- [x] **Update documentation**
   - Update `docs/topics/ci-cd.md`, `docs/testing-strategy.md`, and README overview links with the thin launcher, local-tools build, Python requirement/fallback, all-mode review, auto/strict behavior, temporary committed trees, retained reports, cancellation limits, and canonical Rust test commands.
   - Update `.claude/skills/rust-devops/ci-cd.md`, its index where needed, and `.claude/skills/os/windows.md` plus the os index where needed. Remove retired Bash suite/workflow instructions and describe both native Windows launch paths.
   - Document constraint optional-field and invalid-shape rules and the unversioned validation correction in `docs/cicd/schema-versions.md`. Docs must describe behavior without referencing this dated feature. Update `docs/dependencies.md`; README remains an overview.
-- [ ] **Prove platforms**
+- [x] **Prove platforms**
+  - Result (2026-11-11): macOS, Linux (`build-linux`), and WSL2 (`build-wsl`, archive mode) pass 896/896 with 1 pre-existing skip. Native Windows is **unproved acceptance evidence**: `build-win`'s storage preflight (46.7 GiB free, 50 required) stopped the run after the archive was built; see the implementation log.
   - Run `just test repo-deps` and `just _lint repo-deps` on the local host, plus only affected Python companion suites. Never run cargo fmt; make necessary formatting corrections manually and allow the lint recipe's check-only formatter.
   - Run `just cross-check repo-deps --os linux`, `just cross-check repo-deps --os windows`, and `just cross-check repo-deps --os wsl` using the configured BUILD_* destinations; local macOS supplies the fourth environment. Preserve canonical archive mode for WSL2 and do not add feature flags that switch it to native execution. Follow os/build-hosts.md for non-interactive transport.
   - Native Windows acceptance tests must execute both PowerShell and Git Bash cases, not merely compile cfg(windows). Missing supported shells are a failed prerequisite on that native acceptance host, not skipped proof. Record exact commands, environment, test counts, statuses, and retained report locations in the implementation log. Unavailable rigs are reported as unproved acceptance evidence, never marked passing or converted to a human gate; continue all independent checks and report incomplete acceptance in the final result.
@@ -263,6 +399,6 @@ Validation checkpoint: complete all parity log rows, run repo-deps L1 once after
 
 Validation checkpoint: all required platform evidence is passing, log parity mapping is complete, and docs/skills contain no active references to the retired suite/workflow. Verify no-feature ci-rollup and build-tools ci-plan/ci-build still compile independently of ci-push. Verify no new CI environment cells or changed evidence schemas. Review the final diff for unsolicited refactors, generated bytecode, compile-time fixture paths, leaked fixture processes, and changes outside the starting worktree.
 
-- [ ] **Close implementation**
+- [x] **Close implementation**
   - Update the implementation log with completed task results, malformed-constraint and first-context departures, cleanup/diagnostic examples, platform evidence, and any acceptance evidence that could not be produced. Keep durable reports outside temporary review trees.
   - Mark only verified tasks complete. Report implementation complete and ready for review only when all definition-of-done items are proved; otherwise report the exact remaining failures without claiming completion. Leave the feature active for the author's review cycle.
