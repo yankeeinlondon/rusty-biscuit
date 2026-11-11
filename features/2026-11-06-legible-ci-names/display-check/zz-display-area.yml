@@ -1,0 +1,37 @@
+# Disposable display check: mirrors _area-ci.yml's package-ci caller.
+name: Display area
+
+on:
+  workflow_call:
+    inputs:
+      area:
+        type: string
+        required: true
+      rows:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Mirrors _area-ci.yml's guard: skipped for an area with no rows (tools).
+  package-ci:
+    name: Run package work
+    if: fromJSON(inputs.rows).has_rows
+    uses: ./.github/workflows/zz-display-package.yml
+    with:
+      test-rows: ${{ toJSON(fromJSON(inputs.rows).test) }}
+      test-rows-plain: ${{ toJSON(fromJSON(inputs.rows).test_plain) }}
+      wsl-rows: ${{ toJSON(fromJSON(inputs.rows).wsl) }}
+
+  # Runs only for the empty area so the package child's scalar guards skip
+  # every variant and the skipped names can be observed.
+  package-ci-empty:
+    name: Run package work for empty selection
+    if: ${{ !fromJSON(inputs.rows).has_rows }}
+    uses: ./.github/workflows/zz-display-package.yml
+    with:
+      test-rows: ${{ toJSON(fromJSON(inputs.rows).test) }}
+      test-rows-plain: ${{ toJSON(fromJSON(inputs.rows).test_plain) }}
+      wsl-rows: ${{ toJSON(fromJSON(inputs.rows).wsl) }}

@@ -1,38 +1,226 @@
 # Legible CI names: naming evidence and contract
 
 This file is the review artifact for the naming fallback. Phase 1 wrote the
-evidence and the frozen contract. Phase 3 adds test outcomes and corroborated
-names.
+evidence and the frozen contract. Phase 3 adds test outcomes. The R1-F2
+repair adds the display check (run 42963148323) that settles the fallback and
+the rendering pattern of the renamed names.
 
 ## Decision: automatic matrix labels (the approved fallback)
 
 The spec's ruling `static-matrix-identity` permitted a display-only `label`
-matrix field, with a fallback to automatic matrix labels if the label could
-not render legibly without losing identity. The plan chose the fallback
-without a display experiment, for these reasons from the source:
+matrix field, with a fallback to automatic matrix labels "if adding it loses
+identity in any rendered name". The plan first chose the fallback from the
+source alone, on a false premise: it read
+`scripts/ci/test_runner_loss.py::job_label` ("a declared `name:` wins") as
+GitHub's rule and concluded that a static job name would hide the
+`(package, gate, environment, runner)` suffix. Review finding R1-F2 required
+the bounded display check; it ran as run 42963148323 (next section) and
+settled the question by observation:
 
-- `scripts/ci/test_runner_loss.py::job_label` models GitHub's rule: a declared
-  `name:` wins over the automatic matrix values. A static job name would hide
-  the `(package, gate, environment, runner)` suffix that
-  `runner_loss.py::parse_job_name` / `row_cell` read for a lost runner.
+- A static `name:` does **not** hide the suffix. GitHub appends the matrix
+  values to it: `Run tests (claudine-cli, L1, ubuntu-latest, ubuntu-latest)`.
+  The premise was wrong, and `job_label` has been corrected to model this.
+- A `label` placed first does lead the suffix, but GitHub truncates each
+  job-name segment at 100 characters (97 plus `...`). Every labeled segment
+  for `rendezvous-core` (15 characters) lost its runner, and so did the
+  statically named one for `schematic-gen` (13); the WSL2 rows under a static
+  name lost part of the environment too:
+  `test (rendezvous-core: run Level 1 tests on Linux, rendezvous-core, L1, ubuntu-latest, ubuntu-lat...`.
+  34 of the 78 workspace packages are longer than 15 characters (longest
+  `unfolded-integration-helper`, 27). The spec's own example,
+  `Package work (schematic-gen: run Level 1 tests on WSL2, schematic-gen, L1, wsl2-ubuntu, windows-latest)`,
+  is 103 characters.
+
+The fallback condition is therefore established: adding the label loses
+identity (the runner, and sometimes part of the environment) in rendered
+names. The fallback is retained; no `label` field is added. Unlabeled rows
+stay well under the cap: the longest possible segment is
+`test (unfolded-integration-helper, browser, windows-latest, windows-latest)`
+(75 characters, computed, not observed); that package's WSL2 delegation
+would read `wsl2 (unfolded-integration-helper, L1, wsl2-ubuntu, windows-latest)`
+(67).
+
+Two further facts keep the choice, independent of truncation:
+
 - A name built from matrix expressions is prohibited by
   `no_skippable_job_is_labelled_with_an_unresolved_expression` and
   `every_row_expanding_job_carries_a_scalar_guard_and_no_expression_name` in
   `tools/test-toolkit/tests/ci_workflow_contracts.rs`. A skipped job never
   evaluates its matrix, so the raw `${{ … }}` text would be shown.
 - `scripts/ci/affected_scope.py::row_sets` emits exactly four row values
-  (`package, gate, environment, runner`); the observed names below show all
-  four in each automatic suffix. Adding a fifth value would change the row
-  schema (`schema.py::ROW_FIELDS`, `.github/ci/schemas/contract.json`,
-  `test_resolved_plan.py::RowAdapterOracleTests.ROW_KEYS`).
+  (`package, gate, environment, runner`). A fifth value would change the row
+  schema (`schema.py::ROW_FIELDS`, which `validate_resolved_plan` enforces as
+  an exact key set, `.github/ci/schemas/contract.json`,
+  `test_resolved_plan.py::RowAdapterOracleTests.ROW_KEYS`, and
+  `test_affected_scope.py`'s `assertEqual(list(schema.ROW_FIELDS), list(row))`).
 
 So `ci.yml`'s `area-ci` and `build`, and `_package-ci.yml`'s `check`, `test`,
-`lint`, and `wsl2` keep **no `name:`**. Their suffixes keep stored wording
-(`L1`, `wsl2-ubuntu`) and the runner value is repeated
-(`ubuntu-latest, ubuntu-latest`). That is an accepted limitation of the
-fallback. Descriptive names go on the caller, infrastructure jobs, and steps.
+`lint`, and `wsl2` keep **no `name:`**. For the package jobs and `build` a
+static name would keep the suffix but replace the job id that
+`runner_loss.py` matches (`GATE_SEGMENT`, `WSL_DELEGATION_ROW`,
+`BUILD_JOB_SEGMENT`). `area-ci` has no such reader: a static name would
+render `<name> (claudine)`; it stays automatic so the area's entry keeps the
+`area-ci (<directory>)` spelling the frozen contract and every recorded run
+use. The suffixes keep stored wording (`L1`, `wsl2-ubuntu`) and the runner
+value is repeated (`ubuntu-latest, ubuntu-latest`). That is an accepted
+limitation of the fallback. Descriptive names go on the caller,
+infrastructure jobs, and steps.
 
-No disposable workflow was created and no CI run was triggered.
+The chosen templates:
+
+| Job | Expanded | Skipped |
+| --- | --- | --- |
+| package matrix job (`check`, `test`, `lint`) | `area-ci (<area dir>) / Run package work / <job id> (<package>, <gate>, <environment>, <runner>)` | `area-ci (<area dir>) / Run package work / <job id>` |
+| WSL2 delegation | `area-ci (<area dir>) / Run package work / wsl2 (<package>, <gate>, wsl2-ubuntu, <runner>) / Run guest tests` | `area-ci (<area dir>) / Run package work / wsl2` |
+| area with no executing rows | — | `area-ci (<area dir>) / Run package work` |
+| static-named matrix job (`preflight`, `certify-nightly`) | `<name> (<matrix value>)` | `<name>` |
+| accepted gap (check run posted by `publish_gaps.py`) | `ACCEPTED GAP: <package>: <action> on <environment words>` | — |
+
+## Display check (run 42963148323)
+
+A disposable workflow, not production CI, run once to learn how GitHub
+renders the names. No full-scope run was triggered.
+
+| Fact | Value |
+| --- | --- |
+| Run | 42963148323, <https://github.com/yankeeinlondon/rusty-biscuit/actions/runs/42963148323> |
+| Head | `9315984f9b38ce8a646e78fe3fbbe02ace9c4b79`, a signed orphan commit on a scratch ref (`display-check/legible-ci-names`), deleted after the run |
+| Event | `push` to the scratch ref |
+| Workflows | `display-check/zz-display-check.yml`, `zz-display-area.yml`, `zz-display-package.yml`, `zz-display-wsl.yml` (beside this file); every job only echoes |
+| Records | `display-check/jobs.json` (Actions jobs list) and `display-check/check-runs.json` (commit check runs), trimmed to name, status, conclusion |
+| Totals | 33 jobs and 33 check runs; the two name lists are identical |
+
+The nesting mirrors production: `zz-display-check.yml`'s unnamed `area-ci`
+fans out over `["schematic", "claudine", "claudine/rendezvous", "tools"]`
+and calls `zz-display-area.yml`, whose `package-ci` (`Run package work`)
+runs for an area with rows and `package-ci-empty` (`Run package work for
+empty selection`) runs only for the empty `tools` area. Each calls
+`zz-display-package.yml`, which declares six variants, each guarded by a
+scalar input comparison like production:
+
+| Variant | Job id | `name:` | Rows | Shape |
+| --- | --- | --- | --- | --- |
+| V1 | `test` | none | labeled (`label` first) | `test (<label>, <package>, <gate>, <environment>, <runner>)` |
+| V2 | `test-static` | `Run tests` | labeled | `Run tests (<label>, …)` |
+| V3 | `test-static-nolabel` | `Run tests` | unlabeled | `Run tests (<package>, <gate>, <environment>, <runner>)` |
+| V4 | `test-auto-nolabel` | none | unlabeled | `test-auto-nolabel (<package>, …)`, today's production shape |
+| V5 | `wsl2` | none | labeled WSL2, calls `zz-display-wsl.yml` | `wsl2 (<label>, …) / Run guest tests` |
+| V6 | `wsl2-static` | `Run WSL2 tests` | labeled WSL2, calls `zz-display-wsl.yml` | `Run WSL2 tests (<label>, …) / Run guest tests` |
+
+Labels: `<package>: run Level 1 tests on Linux`, `run Level 2 tests on
+Linux`, `run Level 1 tests on WSL2`. Rows: `schematic-gen` L1 native and
+WSL2; `claudine-cli` L1 and L2 native, no WSL2; `rendezvous-core` L1 native
+and WSL2; `tools` none.
+
+### Every observed name, verbatim
+
+Character counts are of the whole name. `[truncated]` marks a segment GitHub
+cut at 100 characters; `[skipped]` marks a job that did not run. All other
+jobs succeeded.
+
+Planner and area level:
+
+```text
+Plan display check
+area-ci (tools) / Run package work                                    [skipped]
+area-ci (claudine) / Run package work for empty selection             [skipped]
+area-ci (claudine/rendezvous) / Run package work for empty selection  [skipped]
+area-ci (schematic) / Run package work for empty selection            [skipped]
+```
+
+V1, no name, labeled:
+
+```text
+area-ci (claudine) / Run package work / test (claudine-cli: run Level 1 tests on Linux, claudine-cli, L1, ubuntu-latest, ubuntu-latest)
+area-ci (claudine) / Run package work / test (claudine-cli: run Level 2 tests on Linux, claudine-cli, L2, ubuntu-latest, ubuntu-latest)
+area-ci (schematic) / Run package work / test (schematic-gen: run Level 1 tests on Linux, schematic-gen, L1, ubuntu-latest, ubuntu-latest)
+area-ci (claudine/rendezvous) / Run package work / test (rendezvous-core: run Level 1 tests on Linux, rendezvous-core, L1, ubuntu-latest, ubuntu-lat...   [truncated]
+area-ci (tools) / Run package work for empty selection / test                                                                                            [skipped]
+```
+
+V2, static name, labeled:
+
+```text
+area-ci (claudine) / Run package work / Run tests (claudine-cli: run Level 1 tests on Linux, claudine-cli, L1, ubuntu-latest, ubuntu-latest)
+area-ci (claudine) / Run package work / Run tests (claudine-cli: run Level 2 tests on Linux, claudine-cli, L2, ubuntu-latest, ubuntu-latest)
+area-ci (schematic) / Run package work / Run tests (schematic-gen: run Level 1 tests on Linux, schematic-gen, L1, ubuntu-latest, ubuntu-la...           [truncated]
+area-ci (claudine/rendezvous) / Run package work / Run tests (rendezvous-core: run Level 1 tests on Linux, rendezvous-core, L1, ubuntu-latest, ubunt...  [truncated]
+area-ci (tools) / Run package work for empty selection / Run tests                                                                                        [skipped]
+```
+
+V3, static name, unlabeled:
+
+```text
+area-ci (claudine) / Run package work / Run tests (claudine-cli, L1, ubuntu-latest, ubuntu-latest)
+area-ci (claudine) / Run package work / Run tests (claudine-cli, L2, ubuntu-latest, ubuntu-latest)
+area-ci (schematic) / Run package work / Run tests (schematic-gen, L1, ubuntu-latest, ubuntu-latest)
+area-ci (claudine/rendezvous) / Run package work / Run tests (rendezvous-core, L1, ubuntu-latest, ubuntu-latest)
+area-ci (tools) / Run package work for empty selection / Run tests    [skipped]
+```
+
+The `tools` area shows `… / Run tests` twice, once for V2 and once for V3;
+the two skipped names are identical and cannot be told apart.
+
+V4, no name, unlabeled (today's production shape):
+
+```text
+area-ci (claudine) / Run package work / test-auto-nolabel (claudine-cli, L1, ubuntu-latest, ubuntu-latest)
+area-ci (claudine) / Run package work / test-auto-nolabel (claudine-cli, L2, ubuntu-latest, ubuntu-latest)
+area-ci (schematic) / Run package work / test-auto-nolabel (schematic-gen, L1, ubuntu-latest, ubuntu-latest)
+area-ci (claudine/rendezvous) / Run package work / test-auto-nolabel (rendezvous-core, L1, ubuntu-latest, ubuntu-latest)
+area-ci (tools) / Run package work for empty selection / test-auto-nolabel    [skipped]
+```
+
+V5, no name, labeled WSL2, nested call:
+
+```text
+area-ci (schematic) / Run package work / wsl2 (schematic-gen: run Level 1 tests on WSL2, schematic-gen, L1, wsl2-ubuntu, windows-latest) / Run guest tests
+area-ci (claudine/rendezvous) / Run package work / wsl2 (rendezvous-core: run Level 1 tests on WSL2, rendezvous-core, L1, wsl2-ubuntu, windows-latest) / Run guest tests
+area-ci (claudine) / Run package work / wsl2                                [skipped]
+area-ci (tools) / Run package work for empty selection / wsl2               [skipped]
+```
+
+V6, static name, labeled WSL2, nested call:
+
+```text
+area-ci (schematic) / Run package work / Run WSL2 tests (schematic-gen: run Level 1 tests on WSL2, schematic-gen, L1, wsl2-ubuntu, windows... / Run guest tests            [truncated]
+area-ci (claudine/rendezvous) / Run package work / Run WSL2 tests (rendezvous-core: run Level 1 tests on WSL2, rendezvous-core, L1, wsl2-ubuntu, win... / Run guest tests  [truncated]
+area-ci (claudine) / Run package work / Run WSL2 tests                      [skipped]
+area-ci (tools) / Run package work for empty selection / Run WSL2 tests     [skipped]
+```
+
+That is 33 names: 1 + 4 + 5 + 5 + 5 + 5 + 4 + 4.
+
+### Answers
+
+- **(a) Does a static `name:` hide the matrix suffix?** No. On an expanded
+  matrix job GitHub appends the values to it (V2, V3, V6):
+  `Run tests (claudine-cli, L1, ubuntu-latest, ubuntu-latest)`.
+- **(b) What does a skipped job show?** Its static name, or its job id when
+  unnamed; never values or a raw expression. A skipped reusable-workflow
+  caller (`uses:`) shows only its own name, with nothing under it
+  (`area-ci (tools) / Run package work`).
+- **(c) Does a `label` lead the suffix?** Yes, when it is the row's first
+  key: values render in row key order (V1, V2, V5, V6).
+- **(d) Is there a length limit?** Yes, per segment: each part between
+  ` / ` is cut at 100 characters (97 plus `...`). Whole names are not cut
+  (the longest observed is 169 characters). Labeled segments exceeded the
+  cap for `rendezvous-core` (15 characters) in every variant and for
+  `schematic-gen` (13) under a static name, losing the runner; V6 also lost
+  part of the environment (`windows...`, `win...`). No unlabeled segment came
+  near it (longest observed 69 characters).
+- **(e) WSL2 nesting** renders `<caller> (<suffix>) / Run guest tests`; the
+  guest job's static name gets no suffix because it is not a matrix job.
+- **(f) Nested area** renders `area-ci (claudine/rendezvous)`; the `/` in the
+  directory is not the ` / ` segment separator.
+- **(g) Two levels of one package** are distinct (`claudine-cli, L1, …` and
+  `claudine-cli, L2, …`) in every variant.
+
+**Pull-request checks list.** No pull request could be opened (`gh` was not
+authenticated for that), so the PR Checks tab was not observed. The commit
+check-runs API, which feeds that tab, returned the same 33 names as the jobs
+list. The PR UI frames each one as `<workflow title> / <check-run name>
+(<event>)`; that framing is GitHub's and adds nothing the names lack.
 
 ## Evidence sources (read-only `gh api`, 2026-11-10)
 
@@ -140,6 +328,16 @@ A dash means "keep automatic naming"; the job keeps no `name:` key.
 | `_package-ci.yml` | `Package checks` | `check`, `test`, `lint`, `wsl2` → — |
 | `_wsl-ci.yml` | `WSL2 tests` | `wsl` → `Run guest tests` |
 
+These are the declared `name:` values. Two of the named jobs are matrix jobs,
+and GitHub appends the matrix value when a leg runs (display check answer
+(a)): `preflight` renders `Verify build prerequisites (<os>)`, for example
+`Verify build prerequisites (ubuntu-latest)`, and `certify-nightly` renders
+`Publish nightly coverage evidence (<environment>)`. Skipped as a whole, each
+shows the bare name. Neither owns a result cell; their true labels classify
+exactly as `preflight (ubuntu-latest)` did (no cell, not a build owner, not a
+judge), which `test_static_named_matrix_jobs_render_a_suffix_and_stay_unclassified`
+in `scripts/ci/test_runner_loss.py` pins.
+
 ### Step renames
 
 | Workflow | Existing step name | Replacement |
@@ -168,10 +366,13 @@ environments `ubuntu-latest` → `Linux`, `macos-latest` → `macOS`,
 `windows-latest` → `Windows`, `wsl2-ubuntu` → `WSL2`. An unknown gate or
 environment is refused before anything is published.
 
-## Projected names (not yet observed)
+## Renamed names: composed, with the rendering pattern observed
 
-These follow from the contract and GitHub's documented rendering. They are
-**projections**, to be corroborated against a run after the change merges.
+These names are composed from the declared names and the templates above. No
+production run has carried them yet, because the change has not been pushed.
+What is no longer a projection is GitHub's rendering pattern: display check
+run 42963148323 observed every job-name shape below at the same nesting depth,
+with only the job id and package differing.
 
 ```text
 area-ci (research) / Run package work / test (research, L1, ubuntu-latest, ubuntu-latest)
@@ -181,19 +382,41 @@ area-ci (claudine/rendezvous) / Check required results
 area-ci (claudine/rendezvous) / Publish accepted capability gaps
 area-ci (tools) / Run package work                 # skipped: empty selection
 area-ci (research) / Run package work / test       # skipped matrix, bare identifier
+Verify build prerequisites (ubuntu-latest)
 ACCEPTED GAP: darkmatter: run Level 2 tests on macOS
 ACCEPTED GAP: darkmatter: run browser tests on macOS
 ```
 
-Two projections are uncertain and do not affect any reader:
+Observed versus inferred, line by line:
 
-- `preflight` is a matrix job over `os`. With the static name it renders
-  either `Verify build prerequisites` or `Verify build prerequisites
-  (ubuntu-latest)`, depending on whether GitHub appends matrix values to a
-  static name. It owns no result cell.
-- Whether the PR Checks tab shows the reusable workflow's caller prefix
-  exactly as the Actions job list does. Both observed sources above agree for
-  today's names.
+- The two `test (…)` lines follow V4 exactly
+  (`area-ci (claudine) / Run package work / test-auto-nolabel (claudine-cli, L1, ubuntu-latest, ubuntu-latest)`
+  and its `L2` sibling): unnamed, unlabeled `include:` rows, one caller level.
+- The `wsl2 (…) / Run guest tests` line follows V5's shape with an
+  unlabeled row. V5 was observed only with labeled rows; that the suffix then
+  starts at `package` is inferred from V3 and V4, which show unlabeled rows
+  rendering their four values in key order.
+- The two area-level lines are static names on non-matrix jobs one level
+  under `area-ci (<dir>)`, the shape of the observed
+  `area-ci (claudine) / Run package work for empty selection`.
+- The two skipped lines follow the observed `area-ci (tools) / Run package
+  work` and `area-ci (tools) / Run package work for empty selection / test`.
+- `Verify build prerequisites (ubuntu-latest)` is inferred from V2 and V3 (a
+  static name on an expanded `include:` matrix gains its values) and from the
+  pre-rename observation `preflight (ubuntu-latest)` for this keyed `os`
+  matrix. No run showed this exact string.
+- The accepted-gap names are check runs created through the Checks API by
+  `scripts/ci/publish_gaps.py`, not job names, so the display check does not
+  cover them. The publisher sets the whole `name`; the longest possible is
+  `ACCEPTED GAP: unfolded-integration-helper: run Level 1 tests on Windows`
+  (71 characters), under both the 100-character job-name segment cut and the
+  255-character limit `publish_gaps.py::NAME_LIMIT` enforces. Whether the
+  Checks API applies the 100-character cut to API-created runs was not
+  observed; at 71 characters it cannot matter today.
+
+The earlier uncertainty about `preflight`'s suffix is settled (it has one).
+The PR Checks tab was not observed directly; the commit check-runs API that
+feeds it returned names identical to the jobs list.
 
 ## Protected structure baseline
 
@@ -218,8 +441,12 @@ An empty diff means no protected property changed.
 ### Departure from the preferred design
 
 The spec preferred a display-only `label` matrix field. The fallback was used
-instead: the cell-carrying matrix jobs keep automatic labels, so their suffixes
-show stored values (`L1`, `wsl2-ubuntu`) and repeat the runner. Plain words are
+instead, and after review finding R1-F2 it rests on observation: display check
+run 42963148323 showed GitHub cutting each name segment at 100 characters, so
+a leading label loses the runner (and sometimes part of the environment) for
+package names of 13 to 15 characters and up. The cell-carrying matrix jobs
+keep automatic labels, so their suffixes show stored values (`L1`,
+`wsl2-ubuntu`) and repeat the runner. Plain words are
 on the caller (`Run package work`), the infrastructure jobs, the steps, and the
 accepted-gap checks. `docs/topics/ci-cd.md`, "Reading job and check names",
 explains the suffix values to a reader.
@@ -259,9 +486,10 @@ refuses folded scalars on purpose. This feature does not touch those steps.
 
 ### Observed versus projected
 
-Every name under "Observed names" was read from a run before the rename. Every
-name under "Projected names" is still a projection: no run has used the new
-names yet, because the change has not been pushed. The first pull-request run
-after the merge should be read to confirm them, along with the two uncertain
-projections listed there (`preflight`'s suffix and the Checks-tab prefix).
-Phase 3 made no new API reads.
+Every name under "Observed names" was read from a production run before the
+rename. Every name under "Display check" was read from run 42963148323. The
+names under "Renamed names" have not appeared in a production run yet, because
+the change has not been pushed; their rendering pattern is observed and each
+line's basis is stated there. Phase 3 itself made no new API reads; the
+display check was run afterwards for R1-F2. The first pull-request run after
+the merge can confirm the exact strings.
