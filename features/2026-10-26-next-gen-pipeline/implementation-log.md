@@ -1771,6 +1771,21 @@ until the hosted ingestion runs (needs the merge to `main`). Phase 1's
 "Measure capacity" now passes (above) and is checked. `implemented` is not
 set.
 
+Hosted demonstration rework (2026-11-12): after the merge, the demo could
+not run as built. It took an artifact holding a collection, but CI retains
+no such artifact; the nightly keeps each hosted cell as an
+`observation-<cell>` envelope with its report in `junit-<cell>` and its
+completion record in `completion-<cell>`. The workflow now takes `run_id` and
+`observation`, downloads those three artifacts, and builds a one-observation
+version-3 collection (original observation ID; the tree read through the
+GitHub API) with the new `cli/hosted-collection.ts`, then ingests it
+unchanged. `demo-hosted` takes `--run-id ID --observation NAME`. Tested by
+`tests/node/hosted-collection.test.ts` on a byte-exact copy of a real nightly
+cell (`queue` L1 on windows-latest, run 43053316051, marked `-text` in
+`.gitattributes`); `just evidence-store test` → 37 files, 927 tests passed.
+The repository variable `EVIDENCE_STORE_ENDPOINT` was also unset; it now
+holds the development endpoint.
+
 Capacity follow-up (2026-11-11): `cli/inventory.ts`,
 `tests/node/inventory.test.ts` (forecast under retention, the never-pruned
 projection staying out of the checks, account-usage offsets, and three

@@ -112,7 +112,7 @@ wrangler *args:
     fi
     exec node "$bin" "$@"
 
-# Dispatch the hosted OIDC ingestion workflow on main: --run-id ID --artifact NAME --collection PATH [--proof-dir PATH] [--repo owner/name] (needs GITHUB_TOKEN or GH_TOKEN).
+# Dispatch the hosted OIDC ingestion workflow on main for one nightly cell: --run-id ID --observation observation-<package>-<gate>-<environment> [--repo owner/name] (needs GITHUB_TOKEN or GH_TOKEN).
 demo-hosted *args:
     node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/dispatch-demo.ts" "$@"
 

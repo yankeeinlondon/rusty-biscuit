@@ -1,14 +1,15 @@
 name: evidence-store-demo
 
-# MANUAL-ONLY. Submits one explicitly named, already retained CI artifact to
-# the evidence store, authenticating with this job's GitHub OIDC token. It is
+# MANUAL-ONLY. Submits one explicitly named, already retained nightly CI cell
+# to the evidence store, authenticating with this job's GitHub OIDC token. It is
 # the only OIDC workflow the service trusts (`oidc.trusted_workflows` in the
 # service configuration names this file on `refs/heads/main`), so it runs
 # from `main` and nothing else may call it.
 #
 # It runs no tests, imports no history, and adds no publication hook: it
-# downloads the named artifact, ingests the named collection, and stages the
-# proof files it references. A producer identity cannot publish staged bytes,
+# downloads the cell's retained observation, junit, and completion artifacts,
+# assembles them into a one-observation collection (keeping the original
+# observation ID), ingests it, and stages the report and proof files it cites. A producer identity cannot publish staged bytes,
 # so the job uploads its resume state (no token) as an artifact, and the
 # operator finalizes from a host with a verifier credential through the
 # service's `evidence-finalize` recipe.
@@ -20,22 +21,13 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: "ID of the workflow run that retained the artifact"
+        description: "ID of the nightly ci.yml run that retained the cell"
         required: true
         type: string
-      artifact:
-        description: "Name of the retained artifact to ingest from"
+      observation:
+        description: "The cell's observation artifact: observation-<package>-<gate>-<environment>"
         required: true
         type: string
-      collection:
-        description: "Path of the collection or v2 receipt inside the artifact"
-        required: true
-        type: string
-      proof_dir:
-        description: "Directory inside the artifact holding the referenced proof files (optional)"
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -62,8 +54,7 @@ jobs:
         env:
           EVIDENCE_STORE_ENDPOINT: ${{ vars.EVIDENCE_STORE_ENDPOINT }}
           RUN_ID: ${{ inputs.run_id }}
-          COLLECTION: ${{ inputs.collection }}
-          PROOF_DIR: ${{ inputs.proof_dir }}
+          OBSERVATION: ${{ inputs.observation }}
         run: |
           set -euo pipefail
           if [ -z "${EVIDENCE_STORE_ENDPOINT}" ]; then
@@ -74,12 +65,10 @@ jobs:
             echo "::error::run_id must be a numeric workflow run ID."
             exit 1
           fi
-          for path in "${COLLECTION}" "${PROOF_DIR}"; do
-            if [[ "${path}" == /* || "/${path}/" == *"/../"* ]]; then
-              echo "::error::collection and proof_dir must be relative paths inside the artifact, without '..'."
-              exit 1
-            fi
-          done
+          if ! [[ "${OBSERVATION}" =~ ^observation-[A-Za-z0-9_.-]+$ ]]; then
+            echo "::error::observation must name an observation-<package>-<gate>-<environment> artifact."
+            exit 1
+          fi
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -102,16 +91,54 @@ jobs:
           set -euo pipefail
           pnpm install --frozen-lockfile --filter @rusty-biscuit/evidence-store...
 
-      - name: Download the retained artifact
+      # The junit and completion artifact names are derived from the
+      # observation's, as `scripts/ci/hosted_observations.py` derives them. A
+      # failing cell has no completion artifact; the assembler requires one
+      # only when the observation's proof cites a completion record.
+      - name: Download the cell's retained artifacts
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ inputs.run_id }}
-          ARTIFACT: ${{ inputs.artifact }}
+          OBSERVATION: ${{ inputs.observation }}
         run: |
           set -euo pipefail
-          gh run download "${RUN_ID}" -n "${ARTIFACT}" -D "${RUNNER_TEMP}/artifact"
+          cell="${OBSERVATION#observation-}"
+          cells="${RUNNER_TEMP}/cell"
+          gh run download "${RUN_ID}" -n "${OBSERVATION}" -D "${cells}/observation"
+          gh run download "${RUN_ID}" -n "junit-${cell}" -D "${cells}/junit"
+          if ! gh run download "${RUN_ID}" -n "completion-${cell}" -D "${cells}/completion"; then
+            echo "::notice::run ${RUN_ID} has no completion-${cell} artifact."
+          fi
+
+      # The envelope carries the head but not its tree, which the collection
+      # needs. The checkout keeps no credentials, so the tree is read through
+      # the API with the job token instead of a `git fetch`.
+      - name: Assemble the collection
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cells="${RUNNER_TEMP}/cell"
+          head="$(jq -r '.head' "${cells}/observation/observation.json")"
+          if ! [[ "${head}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the observation envelope names no commit head."
+            exit 1
+          fi
+          tree="$(gh api "repos/${GH_REPO}/git/commits/${head}" --jq '.tree.sha')"
+          args=(
+            --observation "${cells}/observation"
+            --junit "${cells}/junit"
+            --tree "${tree}"
+            --out "${RUNNER_TEMP}/collection"
+          )
+          if [ -d "${cells}/completion" ]; then
+            args+=(--completion "${cells}/completion")
+          fi
+          node tools/evidence-store/node_modules/tsx/dist/cli.mjs tools/evidence-store/cli/hosted-collection.ts "${args[@]}"
 
       - name: Request the OIDC token
         shell: bash
@@ -134,22 +161,17 @@ jobs:
         env:
           EVIDENCE_STORE_ENDPOINT: ${{ vars.EVIDENCE_STORE_ENDPOINT }}
           REPOSITORY_ID: ${{ github.repository_id }}
-          COLLECTION: ${{ inputs.collection }}
-          PROOF_DIR: ${{ inputs.proof_dir }}
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/ingest"
-          artifact="${RUNNER_TEMP}/artifact"
           args=(
-            "${artifact}/${COLLECTION}"
+            "${RUNNER_TEMP}/collection/collection.json"
             --endpoint "${EVIDENCE_STORE_ENDPOINT}"
             --repo "${REPOSITORY_ID}"
             --token-file "${RUNNER_TEMP}/oidc/token"
             --state "${RUNNER_TEMP}/ingest/state.json"
+            --proof-dir "${RUNNER_TEMP}/collection/files"
           )
-          if [ -n "${PROOF_DIR}" ]; then
-            args+=(--proof-dir "${artifact}/${PROOF_DIR}")
-          fi
           node tools/evidence-store/node_modules/tsx/dist/cli.mjs tools/evidence-store/cli/ingest.ts ingest "${args[@]}"
 
       # The token lives outside the uploaded directory; it is removed anyway so

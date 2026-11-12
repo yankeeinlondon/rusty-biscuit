@@ -2,8 +2,13 @@
 //! the origin repository's `main`.
 //!
 //! ```text
-//! demo-hosted --run-id ID --artifact NAME --collection PATH [--proof-dir PATH] [--repo owner/name]
+//! demo-hosted --run-id ID --observation NAME [--repo owner/name]
 //! ```
+//!
+//! NAME is one nightly cell's `observation-<package>-<gate>-<environment>`
+//! artifact in run ID; the workflow fetches that cell's `junit-` and
+//! `completion-` artifacts beside it and assembles the collection itself
+//! (`hosted-collection.ts`).
 //!
 //! The workflow authenticates to the service with its GitHub OIDC token, and
 //! the service trusts that token only from the workflow committed on `main`.
@@ -30,20 +35,13 @@ export function slugFromRemote(url: string): string | null {
   return GITHUB_REMOTE.exec(url.trim())?.[1] ?? null;
 }
 
-/** A path inside the downloaded artifact: relative, with no `..` segment. */
-function checkArtifactPath(flag: string, value: string): string {
-  const segments = value.split(/[\\/]/);
-  if (value.length === 0 || /^([\\/]|[A-Za-z]:)/.test(value) || segments.includes("..")) {
-    throw new CliError(2, `${flag} must be a relative path inside the artifact, without ".."`);
-  }
-  return value;
-}
+/** The nightly's per-cell observation artifact (`scripts/ci/hosted_observations.py`). */
+const OBSERVATION_ARTIFACT = /^observation-[A-Za-z0-9_.-]+$/;
 
 export interface DemoOptions {
   readonly runId: string;
-  readonly artifact: string;
-  readonly collection: string;
-  readonly proofDir?: string;
+  /** `observation-<package>-<gate>-<environment>`. */
+  readonly observation: string;
   /** `owner/name`; read from `git remote get-url origin` when absent. */
   readonly repo?: string;
 }
@@ -83,13 +81,10 @@ export async function dispatchDemo(options: DemoOptions, io: OperatorIo): Promis
   const token = io.env["GITHUB_TOKEN"] || io.env["GH_TOKEN"];
   if (!token) throw new CliError(2, "demo-hosted dispatches a GitHub workflow; set GITHUB_TOKEN or GH_TOKEN (no interactive login is attempted). Nothing was dispatched.");
   if (!/^[1-9][0-9]*$/.test(options.runId)) throw new CliError(2, "--run-id must be a GitHub Actions run ID");
-  if (options.artifact.length === 0) throw new CliError(2, "--artifact must name the retained artifact");
-  const inputs: Record<string, string> = {
-    run_id: options.runId,
-    artifact: options.artifact,
-    collection: checkArtifactPath("--collection", options.collection),
-  };
-  if (options.proofDir !== undefined) inputs["proof_dir"] = checkArtifactPath("--proof-dir", options.proofDir);
+  if (!OBSERVATION_ARTIFACT.test(options.observation)) {
+    throw new CliError(2, "--observation must name a nightly cell's observation-<package>-<gate>-<environment> artifact");
+  }
+  const inputs: Record<string, string> = { run_id: options.runId, observation: options.observation };
   if (options.repo !== undefined && !SLUG.test(options.repo)) throw new CliError(2, "--repo must be owner/name");
   const slug = options.repo ?? originSlug(io);
 
@@ -126,7 +121,7 @@ export async function dispatchDemo(options: DemoOptions, io: OperatorIo): Promis
   return record;
 }
 
-const USAGE = "usage:\n  demo-hosted --run-id ID --artifact NAME --collection PATH [--proof-dir PATH] [--repo owner/name]\n";
+const USAGE = "usage:\n  demo-hosted --run-id ID --observation NAME [--repo owner/name]\n";
 
 /** Runs the command; answers the exit code and reports failures on `io.stderr`. */
 export async function run(argv: readonly string[], io: OperatorIo = defaultIo()): Promise<number> {
@@ -135,21 +130,19 @@ export async function run(argv: readonly string[], io: OperatorIo = defaultIo())
     try {
       v = parseArgs({
         args: [...argv],
-        options: Object.fromEntries(["run-id", "artifact", "collection", "proof-dir", "repo"].map((name) => [name, { type: "string" as const }])),
+        options: Object.fromEntries(["run-id", "observation", "repo"].map((name) => [name, { type: "string" as const }])),
         strict: true,
         allowPositionals: false,
       }).values as Record<string, string | undefined>;
     } catch (error) {
       throw new CliError(2, (error as Error).message);
     }
-    const absent = ["run-id", "artifact", "collection"].filter((name) => v[name] === undefined);
+    const absent = ["run-id", "observation"].filter((name) => v[name] === undefined);
     if (absent.length > 0) throw new CliError(2, `missing ${absent.map((name) => `--${name}`).join(", ")}`);
     await dispatchDemo(
       {
         runId: v["run-id"]!,
-        artifact: v["artifact"]!,
-        collection: v["collection"]!,
-        ...(v["proof-dir"] === undefined ? {} : { proofDir: v["proof-dir"] }),
+        observation: v["observation"]!,
         ...(v["repo"] === undefined ? {} : { repo: v["repo"] }),
       },
       io,
