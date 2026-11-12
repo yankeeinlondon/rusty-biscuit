@@ -43,6 +43,17 @@ rulings:
       package (binary evidence-client, paired with the evidence-client library)
       as versioned GitHub Release assets for macOS, Linux, and native Windows,
       usable by CI and WSL2. Every package-manager channel stays disabled.
+  - id: evidence-store-retention-before-producers
+    decided_by: Ken Snyder
+    decided_on: 2026-11-11
+    decision: >-
+      Store only the latest passing run per cell until retention exists. The
+      evidence store's R2 capacity is admitted under the spec's retention
+      (each cell's latest pass and unresolved failures, plus 14 days of
+      superseded bytes); kept unpruned, every observation's reports exceed the
+      8 GiB allowance in the first month. Producers therefore must not send
+      evidence to the store automatically until a retention verifier
+      certifies prunes in the deployed service.
 ---
 
 # Move evidence to the store, in Rust
@@ -209,7 +220,11 @@ client, not a second acceptance path.
    conflicts, and nightly blocking evidence. Storage retention improvements are
    tested separately so they cannot disguise a policy difference.
 4. Briefly pause old observation publishers, drain/import their final records,
-   and switch all producers and readers together. Verify migration completion
+   and switch all producers and readers together. Producers may switch only
+   once a retention verifier is certifying prunes in the deployed store (ruling
+   `evidence-store-retention-before-producers`); until then the step-2 import
+   must keep each cell's latest pass and its unresolved failures, not every
+   attempt. Verify migration completion
    before disabling per-environment note reads/writes. Existing notes may remain
    as historical data; do not delete refs as part of cutover.
 5. Remove replaced Python and its production imports only after every caller

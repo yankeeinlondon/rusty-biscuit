@@ -40,6 +40,21 @@ packages:
   - "@rusty-biscuit/evidence-store"
 decisions_for_review:
   - |-
+    Owner ruling (2026-11-11): "store only the latest passing run per cell
+    until retention exists". Implemented as an admission model, not as
+    enforcement: the inventory projects R2 under the spec's retention (each
+    cell's latest pass and unresolved failures, plus 14 days of superseded
+    bytes) and reports the never-pruned projection as information only. The
+    service itself does not limit a cell to its latest pass; nothing sends
+    evidence automatically today, and at 80% it refuses uploads rather than
+    evicting. The constraint that keeps the never-pruned case hypothetical,
+    that producers must not send evidence automatically until a retention
+    verifier certifies prunes, is recorded as ruling
+    `evidence-store-retention-before-producers` on
+    2026-11-06-rust-evidence-client (also in its cutover step 4, which now
+    limits the import to latest passes and unresolved failures) and in
+    docs/cicd/evidence-store.md. D1 stays projected without pruning (28%).
+  - |-
     Phase 1 is reported as FAILED at the Wave 2 feasibility checkpoint. The plan
     requires both "Measure capacity" and "Prove D1" to pass before deployment
     work, and neither could: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are
@@ -1667,12 +1682,31 @@ ID, the GitHub token, the operator token, and `ebt_` prefixes: none appear.
   the advertised limits stand. The account's Workers plan (Free or Paid)
   could not be read with this token, so whether Free's 10 ms CPU limit
   applied is not established.
-- **Measure capacity: FAILED** (`inventory-2026-11-11.json`, exit 1), for
-  the two reasons Phase 1 recorded: the `cloudflare-account-usage` source is
-  still unimplemented, and the 12-month no-pruning forecast puts R2 at
-  71.2 GB, 829% of the 8 GiB allowance (refusal crossed in month 1; p95
-  report 982 KiB). D1 bytes (28%), D1 rows written (6%), and R2 class A
-  (2.6%) stay within limits. Admitting the R2 forecast is an owner decision.
+- **Measure capacity: PASSED** (`inventory-2026-11-11.json`, exit 0,
+  `feasible: true`). The first credentialed run failed for the two reasons
+  Phase 1 recorded: the `cloudflare-account-usage` source was unimplemented,
+  and the 12-month no-pruning forecast put R2 at 71.2 GB, 829% of the 8 GiB
+  allowance. The owner then ruled "store only the latest passing run per
+  cell until retention exists" (see decisions_for_review), and two changes
+  followed in `cli/inventory.ts`:
+  - `measureAccountUsage` reads whole-account usage, read-only, with the
+    scoped token: D1 `file_size` per database, R2 `/usage` per bucket, and
+    the GraphQL analytics for D1 rows written (busiest day in 30) and R2
+    Class A operations (30-day total). It now reports D1 2.85 MB, R2
+    10.8 MB, 12,860 rows written on the busiest day, and 161 Class A
+    operations. The forecast adds these to every month, so the store's own
+    usage is counted twice on purpose.
+  - R2 storage is projected under the spec's retention: twice (211 observed
+    cells + 6 unresolved + 0.2/day growth) plus 14 days of twice the daily
+    volume, at p95 sizes. The never-pruned projection is still reported as
+    `forecast.unpruned_r2`, information only, with the constraint that keeps
+    it hypothetical.
+  - Result (2,974 observations; daily mean 63, max 387): D1 141.3 MB of
+    500 MB (28.3%); D1 rows written 18,933 of 100,000/day (18.9%, of which
+    12,860 is current account usage); R2 3.37 GB of 8 GiB (39.2%); R2
+    Class A 20,214 of 800,000/month (2.5%). No alert or breach month.
+    Never pruned, R2 would reach 70.2 GB (817.5%) in month 12, crossing the
+    refusal line in month 1.
 - **Host ingestion.** An authentic retained `just ci-seed` collection
   (windows-latest, head `758c3985`, 7 observations, original IDs) was
   ingested into `rusty-biscuit` with a temporary producer grant; all 20
@@ -1733,6 +1767,17 @@ Gates after the fixes (macOS): `just evidence-store lint` → exit 0;
 `just evidence-store test` → 36 files, 916 tests passed.
 
 **Phase 6 outcome: still incomplete.** "Demonstrate service" stays unchecked
-until the hosted ingestion runs (needs the merge to `main`), and Phase 1's
-"Measure capacity" fails on the R2 forecast and the unimplemented account
-usage source. `implemented` is not set.
+until the hosted ingestion runs (needs the merge to `main`). Phase 1's
+"Measure capacity" now passes (above) and is checked. `implemented` is not
+set.
+
+Capacity follow-up (2026-11-11): `cli/inventory.ts`,
+`tests/node/inventory.test.ts` (forecast under retention, the never-pruned
+projection staying out of the checks, account-usage offsets, and three
+`measureAccountUsage` cases against a fake Cloudflare: summing, missing
+credentials, a 403 that names the endpoint but never the token),
+`docs/cicd/evidence-store.md` ("Forecast capacity with the inventory", and
+the stale "Nothing is deployed yet" bullet now says only development is
+deployed), and the ruling recorded on `2026-11-06-rust-evidence-client`.
+Gates: `just evidence-store lint` → exit 0; `just evidence-store test` → 36
+files, 922 tests passed.

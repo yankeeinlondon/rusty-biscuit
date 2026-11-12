@@ -415,7 +415,7 @@ All phases execute unattended in order. Waves are numbered globally; tasks in th
 
 ### Wave 2 — Feasibility checkpoint
 
-- [ ] **Measure capacity**
+- [x] **Measure capacity**
   - Add a read-only TypeScript inventory command. Query remote note-ref/blob metadata and recent GitHub artifact metadata with existing unattended authentication; read available local retained report sizes. Sample the latest 30 completed relevant runs and 30 days of observations, reporting missing/expired bytes separately. Use fetched bytes only in scratch storage; do not publish or import historical records.
   - Record observed cell count, metadata/report/proof size percentiles, daily attempts, unresolved-history growth, and 12-month forecasts including the no-production-pruning interval. Use p95 sizes and twice observed daily volume for capacity admission; include account-wide consumption. Missing required data exits nonzero with the exact failing source. Write redacted results to this feature's `implementation-log.md`.
 - [x] **Prove D1**
