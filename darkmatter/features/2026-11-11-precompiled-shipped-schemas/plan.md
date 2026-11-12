@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-11
 total_phases: 5
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -42,6 +42,87 @@ skills_files_updated_during_phase_1:
 - .claude/skills/simplified-schema/SKILL.md
 packages:
 - simplified-schema
+- darkmatter
+- claudine
+- claudine-cli
+- test-toolkit
+source_files_during_phase_2:
+- simplified-schema/lib/src/positions.rs
+- simplified-schema/lib/src/envelope.rs
+- simplified-schema/lib/src/shipped/mod.rs
+- simplified-schema/lib/src/shipped/wire.rs
+- simplified-schema/lib/src/shipped/wire_support.rs
+- simplified-schema/lib/src/work_counters.rs
+- simplified-schema/lib/generated/shipped.json
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/shipped_artifacts.rs
+- simplified-schema/lib/tests/l1/shipped_sections.rs
+- simplified-schema/lib/tests/l1/deferred_positions.rs
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/src/effects/mod.rs
+- darkmatter/lib/src/effects/types.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/schemas/shipped.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/lib/src/markdown/schemas/resolve.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs
+- darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+- darkmatter/lib/src/markdown/schemas/triggers/prepared.rs
+- darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+- darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+- darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/examples/shipped_schemas.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/shipped_artifacts.rs
+- darkmatter/lib/tests/l1/prepared_trigger_bundles.rs
+- darkmatter/lib/tests/l1/deferred_positions.rs
+- darkmatter/justfile
+- justfile
+- .gitattributes
+docs_updated_during_phase_2:
+- simplified-schema/docs/topics/shipped-artifacts.md
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/language/schema-documents.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/simplified-schema/SKILL.md
+source_files_during_phase_3:
+- claudine/lib/src/composition/schema/shipped.rs
+- claudine/lib/src/composition/schema/bundle.rs
+- claudine/lib/src/composition/schema/globals.rs
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/examples/shipped_schemas.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/tests/l1/shipped_artifacts.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/Cargo.toml
+- claudine/justfile
+- claudine/cli/tests/l1/error_guards/transport-allow.toml
+- darkmatter/lib/tests/l1/prepared_trigger_bundles.rs
+- darkmatter/lib/tests/l1/shipped_artifacts.rs
+- scripts/shipped_schemas.py
+- scripts/ci/test_affected_scope.py
+- tools/test-toolkit/tests/shipped_schemas_coordinator_contracts.rs
+- tools/test-toolkit/Cargo.toml
+- justfile
+- .gitattributes
+docs_updated_during_phase_3:
+- claudine/docs/topics/schemas.md
+- simplified-schema/docs/topics/shipped-artifacts.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/SKILL.md
 ---
 
 # Precompiled shipped schemas implementation plan
@@ -136,20 +217,20 @@ Run targeted nextest tests for envelope bootstrap, admitted-envelope parity, art
 
 ### Wave 2
 
-- [ ] **Prepare host records**
+- [x] **Prepare host records**
   - Depends on Phase 1. Own `darkmatter/lib/src/markdown/schemas/shipped.rs`, `embedded.rs`, `catalog.rs`, and host generation records. Implement uncached Darkmatter preparation over Rule 9's inventory and fresh Simplified Schema data.
   - Store shared/inline `fm` forms, lowered JSON/digests, named-type tables, globals, admitted kind seeds, trigger definition, and function/effects records. Include import/source provenance, categories, overloads, examples, and definition order. Match existing catalog fields exactly; derived name indexes rebuild after decode.
   - Provide Darkmatter's public prepared-bundle generation/loading helper for Claudine with an explicit supplied document table and global requirements. It returns a host payload, not a `TriggerRegistry` with captured context.
   - Coordinator adds the Darkmatter example, recipe, generated artifact, and attributes. Validate payloads with the current draft/formats/keywords and call the existing baseline/simple-object/merge/compile checks during uncached generation.
 
-- [ ] **Defer position maps**
+- [x] **Defer position maps**
   - Depends on Phase 1; may run concurrently with host records. Own `simplified-schema/lib/src/positions.rs`, envelope position integration, `darkmatter/.../yaml_documents/load.rs`, and `triggers/envelope.rs`; do not edit Darkmatter registry/catalog files.
   - Implement Rule 11 and the position-construction counter. Keep one exact source snapshot per map, with existing BOM/range/base-line handling. Bind shipped source text from its source identity after loading rather than embedding position trees in JSON.
   - Test public envelope admission, trigger-envelope errors, and whole-YAML validation with valid no-map controls and error locations. Cover explicit map queries after successful admission, clone sharing, concurrent lookups, CRLF, BOM, Unicode byte columns, aliases, and missing/unknown keys. Reuse existing coordinate fixtures unchanged.
 
 ### Wave 3
 
-- [ ] **Route shipped consumers**
+- [x] **Route shipped consumers**
   - Depends on Wave 2. Replace `BASELINE`/`INLINE_BASELINE` in schema `mod.rs`, `GlobalCatalog::darkmatter`'s cache, `shipped_kind_definitions` storage, registry `SHIPPED`/`PREPARED`, expression catalog `CATALOG`, and effects `CATALOG` with registry views. Keep ordinary source/disk/custom accessors working.
   - Route `resolve::shipped_named_types` through the explicit descriptor before its source-only memo. Consolidate shipped entries in the owner registry; retain unregistered/file named-type memos and effects binding registrations.
   - In trigger discovery, consult an accepted prepared-bundle descriptor after filename selection and before ordinary envelope/payload preparation. Prepared data carries reusable conditions and payload, while path predicates stay bound to the registry's context. Keep `EMBEDDED_LOADED` only for ordinary custom bundles.
@@ -164,20 +245,20 @@ Add Darkmatter's `shipped_artifact_is_fresh` and semantic round-trip test. Asser
 
 ### Wave 4
 
-- [ ] **Integrate Claudine registry**
+- [x] **Integrate Claudine registry**
   - Depends on Phase 2. Add `composition/schema/shipped.rs`, its host payload/inventory, and generation example; use Darkmatter's preparation helper with `CLAUDINE_SCHEMA_FILES`, `HOST_CATALOG_TEXT`, and `CLAUDINE_GLOBALS`.
   - Extend `claudine_schema_bundle()` with the prepared descriptor. Replace globals `CATALOG` with a registry view without changing `claudine_globals`, `host_global`, origin labels, or `is_claudine_owned` semantics.
   - Add `claudine/lib/generated/shipped.json`, recipe, attributes, `shipped_artifact_is_fresh`, and round-trip/counter tests. Verify complete preparation bypass across both lower owners during generation.
   - Update `claudine/docs/topics/schemas.md` with regeneration, runtime fallback, and the unchanged disk/bundle selection rules. DMLS continues to consume host globals with its existing workspace invalidation; no stored binding availability is added.
 
-- [ ] **Prove source selection**
+- [x] **Prove source selection**
   - May run concurrently with Claudine integration by owning Darkmatter trigger tests only. Use explicit test descriptors/in-memory data; do not depend on the new Claudine registry while it is being written.
   - Preserve existing disk `claudine.yaml`/`document.yaml` tests without edits. Add one mixed test where a disk trigger is lowered and surviving siblings use accepted entries; assert per-source counters and validation/origin results, not only counts.
   - Add controls for an ignored or invalid same-name file still suppressing an embedded trigger, embedded imports ignoring disk `lifecycle.yaml`, changed custom bundle imports invalidating dependent entries, custom same-name bundles, and differing request path contexts. Retain current bundle-order/case-fold behavior.
 
 ### Wave 5
 
-- [ ] **Wire regeneration scope**
+- [x] **Wire regeneration scope**
   - Depends on Wave 4; coordinator owns root/area recipes, manifests, and test roots. Add the root coordinator from Rule 16 and test generation failure preserves all three files. Successful root regeneration runs twice with byte-identical output.
   - Make each owner's freshness test regenerate its full lower chain in memory. In each freshness test body, explicitly read lower shipped YAML/artifacts and lower preparation source files using `manifest_dir!`/root-bound literals recognized by `docs/cicd/test-inputs.md`. Do not hide reads in a shared helper that broadens the filter to the whole binary.
   - Darkmatter's manifest `source-inputs` lists exact current `.rs` paths under `simplified-schema/lib/src/`; Claudine's lists exact paths under both `simplified-schema/lib/src/` and `darkmatter/lib/src/`. Generate these literal manifest inventories from those two trees, excluding test-only files, and retain existing entries. Freshness test bodies spell the corresponding lower source-tree reads; the planner then maps each exact declared path to that single test. This deliberately conservative code inventory covers all language/admission/lowering behavior without selecting a dependent's full suite. YAML/artifact dependencies are exact literal file reads from the inventories in Rule 9, not broad repository scans.
