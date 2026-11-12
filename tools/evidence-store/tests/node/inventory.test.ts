@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  CLASS_A_ACTIONS,
   forecast,
+  measureAccountUsage,
   percentile,
   percentiles,
   runInventory,
@@ -84,21 +86,51 @@ describe("forecast", () => {
     reports_per_observation: 1,
     proof_p95_bytes: 1000,
     proofs_per_observation: 2,
+    observed_cells: 50,
+    unresolved_cells: 5,
+    unresolved_growth_per_day: 0.1,
   };
+  const r2PerObservation = 10_000 + 2 * 1000;
 
-  it("doubles daily volume and accumulates p95 sizes without pruning", () => {
+  it("doubles daily volume and accumulates D1 at p95 without pruning", () => {
     const result = forecast(base);
     expect(result.admission_daily_observations).toBe(200);
     expect(result.admission_peak_daily_observations).toBe(800);
     const twelve = 1000 + 200 * 30.44 * 12;
     expect(result.months[11]?.d1_bytes).toBe(Math.round(twelve * 2000 * 2));
-    expect(result.months[11]?.r2_bytes).toBe(Math.round(twelve * (10_000 + 2 * 1000)));
+    expect(result.months[11]?.r2_bytes_unpruned).toBe(Math.round(twelve * r2PerObservation));
     const rows = result.checks.find((c) => c.limit === "d1_rows_written_per_day");
     expect(rows?.projected).toBe(800 * (3 + 1) * 2);
     // Every object fits in one part: 1 part + create + complete, for 3 objects.
     const classA = result.checks.find((c) => c.limit === "r2_class_a_per_month");
     expect(classA?.projected).toBe(Math.round(200 * 30.44 * 3 * 3));
     expect(result.checks.every((c) => c.breach_month === null)).toBe(true);
+  });
+
+  it("projects R2 as retained cells plus the grace period's superseded bytes", () => {
+    const result = forecast(base);
+    // Doubled (cells + unresolved + growth) plus 14 days of doubled daily volume.
+    const retained = 2 * (50 + 5 + 0.1 * 30.44 * 12) + 200 * 14;
+    expect(result.months[11]?.r2_bytes).toBe(Math.round(retained * r2PerObservation));
+    const r2 = result.checks.find((c) => c.limit === "r2_live_plus_staging_bytes");
+    expect(r2?.projected).toBe(Math.round(retained * r2PerObservation));
+  });
+
+  it("reports the never-pruned R2 projection without making it a check", () => {
+    // 2 × 50k/day × 12 KB a month passes 8 GB within months; retention stays far below.
+    const result = forecast({ ...base, daily_mean: 50_000, daily_max: 50_000 });
+    expect(result.unpruned_r2.breach_month).not.toBeNull();
+    expect(result.unpruned_r2.constraint).toContain("retention verifier");
+    expect(result.checks.map((c) => c.limit)).not.toContain(result.unpruned_r2.limit);
+  });
+
+  it("adds account usage to every month of the matching projection", () => {
+    const plain = forecast(base);
+    const offset = forecast(base, { r2_live_plus_staging_bytes: 1_000_000, d1_rows_written_per_day: 7 });
+    expect(offset.months[0]!.r2_bytes - plain.months[0]!.r2_bytes).toBe(1_000_000);
+    expect(offset.months[0]!.d1_bytes).toBe(plain.months[0]!.d1_bytes);
+    const rows = (f: typeof plain) => f.checks.find((c) => c.limit === "d1_rows_written_per_day")!.projected;
+    expect(rows(offset) - rows(plain)).toBe(7);
   });
 
   it("reports the first month crossing the refuse ratio", () => {
@@ -194,5 +226,59 @@ describe("walkNotesRef", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("measureAccountUsage", () => {
+  const env = { CLOUDFLARE_API_TOKEN: "cf-secret-token", CLOUDFLARE_ACCOUNT_ID: "acct" };
+
+  function fakeCloudflare(overrides: Record<string, () => Response> = {}) {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+    const impl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      for (const [fragment, respond] of Object.entries(overrides)) if (url.includes(fragment)) return respond();
+      if (url.endsWith("/d1/database?per_page=100")) return json({ success: true, result: [{ file_size: 100 }, { file_size: 23 }] });
+      if (url.endsWith("/r2/buckets")) return json({ success: true, result: { buckets: [{ name: "one" }, { name: "two" }] } });
+      if (url.includes("/r2/buckets/one/usage")) return json({ success: true, result: { payloadSize: "1000", metadataSize: "10" } });
+      if (url.includes("/r2/buckets/two/usage")) return json({ success: true, result: { payloadSize: "5", metadataSize: "0" } });
+      const query = JSON.parse(String(init?.body)).query as string;
+      if (query.includes("d1AnalyticsAdaptiveGroups")) {
+        const group = (date: string, databaseId: string, rowsWritten: number) => ({ sum: { rowsWritten }, dimensions: { date, databaseId } });
+        return json({ data: { viewer: { accounts: [{ d1AnalyticsAdaptiveGroups: [group("2026-11-01", "a", 40), group("2026-11-01", "b", 30), group("2026-11-02", "a", 50)] }] } }, errors: null });
+      }
+      const op = (actionType: string, requests: number) => ({ sum: { requests }, dimensions: { actionType } });
+      return json({ data: { viewer: { accounts: [{ r2OperationsAdaptiveGroups: [op("PutObject", 9), op("UploadPart", 3), op("GetObject", 500)] }] } }, errors: null });
+    }) as typeof fetch;
+    return { impl, calls };
+  }
+
+  it("sums databases and buckets, takes the busiest day's rows, and counts only Class A operations", async () => {
+    const cf = fakeCloudflare();
+    const result = await measureAccountUsage(env, NOW, cf.impl);
+    expect(result).toEqual({ ok: true, value: { d1_bytes: 123, r2_bytes: 1015, d1_rows_written_per_day: 70, r2_class_a_per_month: 12 } });
+    expect(CLASS_A_ACTIONS.has("GetObject")).toBe(false);
+    for (const call of cf.calls) {
+      const headers = call.init?.headers as Record<string, string>;
+      expect(headers["user-agent"]).toBeTruthy();
+      expect(call.url).not.toContain(env.CLOUDFLARE_API_TOKEN);
+    }
+  });
+
+  it("names the missing credentials without calling Cloudflare", async () => {
+    const cf = fakeCloudflare();
+    const result = await measureAccountUsage({ CLOUDFLARE_ACCOUNT_ID: "acct" }, NOW, cf.impl);
+    expect(result).toMatchObject({ ok: false, source: "cloudflare-account-usage" });
+    expect(!result.ok && result.error).toContain("CLOUDFLARE_API_TOKEN unset");
+    expect(cf.calls).toEqual([]);
+  });
+
+  it("fails naming the endpoint and status, never the token", async () => {
+    const cf = fakeCloudflare({ "/r2/buckets": () => new Response(JSON.stringify({ success: false, errors: [{ message: "Authentication error" }] }), { status: 403 }) });
+    const result = await measureAccountUsage(env, NOW, cf.impl);
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toBe("accounts/acct/r2/buckets answered 403: Authentication error");
+    expect(JSON.stringify(result)).not.toContain(env.CLOUDFLARE_API_TOKEN);
   });
 });

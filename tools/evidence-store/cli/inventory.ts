@@ -3,8 +3,10 @@
 //! Measures the existing evidence (remote Git notes, locally retained report and
 //! proof bytes, recent GitHub Actions artifacts) and forecasts 12 months of
 //! free-tier consumption with p95 sizes and twice the observed daily volume,
-//! assuming no production pruning. Missing required data or a projected breach
-//! exits 1; an empty scan is never treated as a volume estimate.
+//! plus whole-account D1/R2 usage read from Cloudflare. D1 is projected without
+//! pruning; R2 under the spec's latest-pass retention, with the never-pruned
+//! projection reported alongside as information. Missing required data or a
+//! projected breach exits 1; an empty scan is never treated as a volume estimate.
 //!
 //! Nothing is written to the repository: notes are fetched into a scratch bare
 //! repository under the OS temp dir, which is deleted on exit.
@@ -41,6 +43,13 @@ export const ASSUMPTIONS = {
   r2_class_a_fixed_ops_per_object: 2,
   /** Breach means crossing CAPACITY.refuse_ratio; crossing alert_ratio is reported but does not fail. */
   breach_ratio: "refuse_ratio",
+  /**
+   * R2 follows the spec's retention: each cell keeps its latest pass and each
+   * unresolved failure, and superseded bytes are held this many days before
+   * pruning. Cells and unresolved failures are multiplied by
+   * `volume_multiplier` for headroom (new packages, environments, and gates).
+   */
+  retention_grace_days: LIMITS.retention_grace_days,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -262,13 +271,22 @@ export interface Measurements {
   reports_per_observation: number;
   proof_p95_bytes: number;
   proofs_per_observation: number;
+  observed_cells: number;
+  unresolved_cells: number;
+  unresolved_growth_per_day: number;
 }
 
 export interface MonthProjection {
   month: number;
   d1_bytes: number;
+  /** Under the spec's retention (see `ASSUMPTIONS.retention_grace_days`). */
   r2_bytes: number;
+  /** If nothing were ever pruned; informational, see `Forecast.unpruned_r2`. */
+  r2_bytes_unpruned: number;
 }
+
+/** Account-wide consumption outside this forecast, added to every month of the matching projection. */
+export type UsageOffsets = Partial<Record<"d1_database_bytes" | "d1_rows_written_per_day" | "r2_live_plus_staging_bytes" | "r2_class_a_per_month", number>>;
 
 export interface LimitCheck {
   limit: string;
@@ -287,7 +305,16 @@ export interface Forecast {
   admission_peak_daily_observations: number;
   months: MonthProjection[];
   checks: LimitCheck[];
+  /**
+   * R2 if every observation's bytes were kept, which happens only if producers
+   * send evidence automatically before the retention verifier prunes. Never a
+   * failure: the constraint it states is what keeps it hypothetical.
+   */
+  unpruned_r2: LimitCheck & { constraint: string };
 }
+
+export const UNPRUNED_CONSTRAINT =
+  "producers must not send evidence to the store automatically until a retention verifier certifies prunes; until then only explicit ingestion writes, and at the refusal ratio the store refuses uploads rather than evicting";
 
 function firstMonth(projected: (month: number) => number, threshold: number): number | null {
   for (let month = 1; month <= FORECAST_MONTHS; month += 1) {
@@ -311,8 +338,12 @@ function check(limit: string, allowance: number, projected: (month: number) => n
   };
 }
 
-/** 12-month projection assuming no pruning: everything accumulates linearly from the existing baseline. */
-export function forecast(m: Measurements): Forecast {
+/**
+ * 12-month projection. D1 accumulates every observation (pruning is not
+ * credited, which overstates it). R2 follows the spec's retention: retained
+ * cells plus the superseded bytes still inside the grace period.
+ */
+export function forecast(m: Measurements, offsets: UsageOffsets = {}): Forecast {
   const daily = m.daily_mean * ASSUMPTIONS.volume_multiplier;
   const peak = m.daily_max * ASSUMPTIONS.volume_multiplier;
   const observationsAt = (month: number): number => m.baseline_observations + daily * DAYS_PER_MONTH * month;
@@ -325,29 +356,48 @@ export function forecast(m: Measurements): Forecast {
   const classAPerObservation =
     m.reports_per_observation * opsPerObject(m.report_p95_bytes) + m.proofs_per_observation * opsPerObject(m.proof_p95_bytes);
 
-  const d1Bytes = (month: number): number => observationsAt(month) * d1BytesPerObservation;
-  const r2Bytes = (month: number): number => observationsAt(month) * r2BytesPerObservation;
+  const offset = (limit: keyof UsageOffsets) => offsets[limit] ?? 0;
+  const d1Bytes = (month: number): number => observationsAt(month) * d1BytesPerObservation + offset("d1_database_bytes");
+  const retainedCells = (month: number): number =>
+    (m.observed_cells + m.unresolved_cells + m.unresolved_growth_per_day * DAYS_PER_MONTH * month) * ASSUMPTIONS.volume_multiplier;
+  const r2Bytes = (month: number): number =>
+    (retainedCells(month) + daily * ASSUMPTIONS.retention_grace_days) * r2BytesPerObservation + offset("r2_live_plus_staging_bytes");
+  const r2Unpruned = (month: number): number => observationsAt(month) * r2BytesPerObservation + offset("r2_live_plus_staging_bytes");
   const months: MonthProjection[] = [];
   for (let month = 1; month <= FORECAST_MONTHS; month += 1) {
-    months.push({ month, d1_bytes: Math.round(d1Bytes(month)), r2_bytes: Math.round(r2Bytes(month)) });
+    months.push({ month, d1_bytes: Math.round(d1Bytes(month)), r2_bytes: Math.round(r2Bytes(month)), r2_bytes_unpruned: Math.round(r2Unpruned(month)) });
   }
   const checks = [
-    check("d1_database_bytes", CAPACITY.d1_database_bytes, d1Bytes, "(baseline + 2×daily_mean×30.44×month) × observation_p95 × d1_overhead_factor"),
+    check("d1_database_bytes", CAPACITY.d1_database_bytes, d1Bytes, "(baseline + 2×daily_mean×30.44×month) × observation_p95 × d1_overhead_factor + account usage"),
     check(
       "d1_rows_written_per_day",
       CAPACITY.d1_rows_written_per_day,
-      () => peak * rowsPerObservation,
-      "2×daily_max × (3 + reports_per_observation) × index_write_factor",
+      () => peak * rowsPerObservation + offset("d1_rows_written_per_day"),
+      "2×daily_max × (3 + reports_per_observation) × index_write_factor + account usage",
     ),
-    check("r2_live_plus_staging_bytes", CAPACITY.r2_live_plus_staging_bytes, r2Bytes, "(baseline + 2×daily_mean×30.44×month) × (report_p95×reports_per_obs + proof_p95×proofs_per_obs)"),
+    check(
+      "r2_live_plus_staging_bytes",
+      CAPACITY.r2_live_plus_staging_bytes,
+      r2Bytes,
+      "(2×(cells + unresolved + unresolved_growth×30.44×month) + 2×daily_mean×grace_days) × (report_p95×reports_per_obs + proof_p95×proofs_per_obs) + account usage",
+    ),
     check(
       "r2_class_a_per_month",
       CAPACITY.r2_class_a_per_month,
-      () => daily * DAYS_PER_MONTH * classAPerObservation,
-      "2×daily_mean×30.44 × Σ objects_per_obs × (ceil(p95/upload_part_bytes) + create + complete)",
+      () => daily * DAYS_PER_MONTH * classAPerObservation + offset("r2_class_a_per_month"),
+      "2×daily_mean×30.44 × Σ objects_per_obs × (ceil(p95/upload_part_bytes) + create + complete) + account usage",
     ),
   ];
-  return { admission_daily_observations: daily, admission_peak_daily_observations: peak, months, checks };
+  const unpruned = {
+    ...check(
+      "r2_live_plus_staging_bytes_unpruned",
+      CAPACITY.r2_live_plus_staging_bytes,
+      r2Unpruned,
+      "(baseline + 2×daily_mean×30.44×month) × (report_p95×reports_per_obs + proof_p95×proofs_per_obs) + account usage",
+    ),
+    constraint: UNPRUNED_CONSTRAINT,
+  };
+  return { admission_daily_observations: daily, admission_peak_daily_observations: peak, months, checks, unpruned_r2: unpruned };
 }
 
 export interface InventoryReport {
@@ -731,18 +781,23 @@ export async function runInventory(options: InventoryOptions, sources: Sources):
       reports_per_observation: round(reportsTotal / timed.length, 4),
       proof_p95_bytes: report.proofs.local_bytes.p95 ?? 0,
       proofs_per_observation: round(proofsTotal / timed.length, 4),
+      observed_cells: report.notes.observed_cells,
+      unresolved_cells: report.history.unresolved_cells_now,
+      unresolved_growth_per_day: report.history.unresolved_growth_per_day,
     };
     report.measurements = measurements;
-    const projected = forecast(measurements);
-    if (account.ok) {
-      const usage: Record<string, number> = {
-        d1_database_bytes: account.value.d1_bytes,
-        d1_rows_written_per_day: account.value.d1_rows_written_per_day,
-        r2_live_plus_staging_bytes: account.value.r2_bytes,
-        r2_class_a_per_month: account.value.r2_class_a_per_month,
-      };
-      for (const c of projected.checks) c.projected += usage[c.limit] ?? 0;
-    }
+    // Offsets enter every month, so other usage moves the breach month too.
+    const projected = forecast(
+      measurements,
+      account.ok
+        ? {
+            d1_database_bytes: account.value.d1_bytes,
+            d1_rows_written_per_day: account.value.d1_rows_written_per_day,
+            r2_live_plus_staging_bytes: account.value.r2_bytes,
+            r2_class_a_per_month: account.value.r2_class_a_per_month,
+          }
+        : {},
+    );
     report.forecast = projected;
     for (const c of projected.checks) {
       if (c.breach_month !== null) {
@@ -784,7 +839,12 @@ export function summarize(report: InventoryReport): string {
         `forecast ${c.limit}: ${c.projected} of ${c.allowance} (${((c.projected / c.allowance) * 100).toFixed(2)}%); alert month ${c.alert_month ?? "none"}, breach month ${c.breach_month ?? "none"}`,
       );
     }
+    const u = report.forecast.unpruned_r2;
+    lines.push(
+      `if never pruned (informational), R2 would reach ${u.projected} (${((u.projected / u.allowance) * 100).toFixed(2)}%), breach month ${u.breach_month ?? "none"}; kept hypothetical by this constraint: ${u.constraint}`,
+    );
   }
+  if (report.account_usage !== null) lines.push(`account usage: ${JSON.stringify(report.account_usage)}`);
   lines.push(`feasible: ${report.feasible}`);
   for (const failure of report.failures) lines.push(`  failure: ${failure}`);
   return lines.join("\n");
@@ -942,16 +1002,90 @@ async function githubSource(repoRoot: string, remote: string, runs: number): Pro
   }
 }
 
-async function accountUsageSource(): Promise<SourceResult<AccountUsage>> {
-  const missing = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"].filter((name) => !process.env[name]);
+/** R2 operations Cloudflare bills as Class A. */
+export const CLASS_A_ACTIONS: ReadonlySet<string> = new Set([
+  "ListBuckets",
+  "PutBucket",
+  "ListObjects",
+  "PutObject",
+  "CopyObject",
+  "CompleteMultipartUpload",
+  "CreateMultipartUpload",
+  "ListMultipartUploads",
+  "UploadPart",
+  "UploadPartCopy",
+  "ListParts",
+  "PutBucketEncryption",
+  "PutBucketCors",
+  "PutBucketLifecycleConfiguration",
+]);
+
+const USAGE_SOURCE = "cloudflare-account-usage";
+const USAGE_WINDOW_DAYS = 30;
+
+/**
+ * Whole-account D1 and R2 consumption, read-only, through the Cloudflare REST
+ * and GraphQL analytics APIs. It includes the evidence store's own usage, so
+ * adding it to the forecast counts that usage twice: a deliberate overstatement.
+ * Rows written per day is the busiest day of the last 30; Class A operations
+ * are the last 30 days' total.
+ */
+export async function measureAccountUsage(
+  env: NodeJS.ProcessEnv,
+  nowSeconds: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<SourceResult<AccountUsage>> {
+  const token = env["CLOUDFLARE_API_TOKEN"];
+  const account = env["CLOUDFLARE_ACCOUNT_ID"];
+  const missing = [token ? null : "CLOUDFLARE_API_TOKEN", account ? null : "CLOUDFLARE_ACCOUNT_ID"].filter((name) => name !== null);
   if (missing.length > 0) {
-    return { ok: false, source: "cloudflare-account-usage", error: `account-wide D1/R2 consumption is unmeasurable: ${missing.join(" and ")} unset` };
+    return { ok: false, source: USAGE_SOURCE, error: `account-wide D1/R2 consumption is unmeasurable: ${missing.join(" and ")} unset` };
   }
-  return {
-    ok: false,
-    source: "cloudflare-account-usage",
-    error: "account-wide D1/R2 consumption measurement is not implemented in this stage; credentials are present but unused",
+  // Cloudflare's edge rejects requests without a user agent.
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json", "user-agent": "evidence-store-inventory" };
+  const call = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+    const response = await fetchImpl(`https://api.cloudflare.com/client/v4/${path}`, { ...init, headers });
+    const body = (await response.json().catch(() => null)) as { success?: boolean; errors?: { message?: string }[] | null; result?: unknown; data?: unknown } | null;
+    const errors = body?.errors ?? [];
+    if (!response.ok || body === null || body.success === false || errors.length > 0) {
+      throw new Error(`${path.split("?")[0]} answered ${response.status}${errors[0]?.message ? `: ${errors[0].message}` : ""}`);
+    }
+    return (body.result ?? body.data) as T;
   };
+  const graphql = <T>(query: string, variables: Record<string, unknown>) =>
+    call<{ viewer: { accounts: T[] } }>("graphql", { method: "POST", body: JSON.stringify({ query, variables }) }).then((data) => data.viewer.accounts[0]);
+  const end = new Date(nowSeconds * 1000);
+  const start = new Date((nowSeconds - USAGE_WINDOW_DAYS * DAY_SECONDS) * 1000);
+  try {
+    const databases = await call<{ file_size?: number }[]>(`accounts/${account}/d1/database?per_page=100`);
+    const d1Bytes = databases.reduce((sum, db) => sum + (db.file_size ?? 0), 0);
+    const buckets = (await call<{ buckets: { name: string }[] }>(`accounts/${account}/r2/buckets`)).buckets;
+    let r2Bytes = 0;
+    for (const bucket of buckets) {
+      const usage = await call<{ payloadSize?: string; metadataSize?: string }>(`accounts/${account}/r2/buckets/${encodeURIComponent(bucket.name)}/usage`);
+      r2Bytes += Number(usage.payloadSize ?? 0) + Number(usage.metadataSize ?? 0);
+    }
+    const d1 = await graphql<{ d1AnalyticsAdaptiveGroups: { sum: { rowsWritten: number }; dimensions: { date: string } }[] }>(
+      `query($account: string!, $start: Date!, $end: Date!) { viewer { accounts(filter: {accountTag: $account}) {
+        d1AnalyticsAdaptiveGroups(limit: 10000, filter: {date_geq: $start, date_leq: $end}) { sum { rowsWritten } dimensions { date databaseId } } } } }`,
+      { account, start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) },
+    );
+    const perDay = new Map<string, number>();
+    for (const group of d1?.d1AnalyticsAdaptiveGroups ?? []) perDay.set(group.dimensions.date, (perDay.get(group.dimensions.date) ?? 0) + group.sum.rowsWritten);
+    const r2 = await graphql<{ r2OperationsAdaptiveGroups: { sum: { requests: number }; dimensions: { actionType: string } }[] }>(
+      `query($account: string!, $start: Time!, $end: Time!) { viewer { accounts(filter: {accountTag: $account}) {
+        r2OperationsAdaptiveGroups(limit: 10000, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests } dimensions { actionType } } } } }`,
+      { account, start: start.toISOString(), end: end.toISOString() },
+    );
+    const classA = (r2?.r2OperationsAdaptiveGroups ?? []).filter((g) => CLASS_A_ACTIONS.has(g.dimensions.actionType)).reduce((sum, g) => sum + g.sum.requests, 0);
+    return {
+      ok: true,
+      value: { r2_bytes: r2Bytes, r2_class_a_per_month: classA, d1_bytes: d1Bytes, d1_rows_written_per_day: Math.max(0, ...perDay.values()) },
+    };
+  } catch (error) {
+    // Messages name the endpoint and status only; the token never appears in them.
+    return { ok: false, source: USAGE_SOURCE, error: (error as Error).message.split("\n")[0] ?? "Cloudflare API failure" };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,7 +1144,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         }
       },
       github: (runs) => githubSource(repoRoot, options.remote, runs),
-      accountUsage: accountUsageSource,
+      accountUsage: () => measureAccountUsage(process.env, Math.floor(Date.now() / 1000)),
       now: () => Math.floor(Date.now() / 1000),
     };
     const report = await runInventory(options, sources);
