@@ -29,7 +29,7 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-11
 needs_rulings: false
 clarified: false
-implemented: false
+implemented: true
 review_iterations: 0
 packages:
     - simplified-schema
@@ -37,6 +37,7 @@ packages:
     - darkmatter-cli
     - claudine
     - claudine-cli
+implemented_by: "claude/opus"
 ---
 
 # Precompiled shipped schemas

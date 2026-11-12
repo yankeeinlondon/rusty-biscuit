@@ -34,6 +34,14 @@ decisions_for_review:
       The root coordinator (`scripts/shipped_schemas.py`) checks each generated output in memory only structurally (JSON, one final line feed, its owner, and the lower owners named as dependencies), because Python has no xxHash to recompute digests; after replacing the files it runs each example's `--check`, which rebuilds over the new files and performs the full acceptance and freshness check. The plan said to validate all outputs in memory before replacing any. A digest-level in-memory check would need a Python xxHash dependency or a new `--check-bytes` mode in each example. Its contract tests live in `test-toolkit` (as the other Python scripts' contracts do) and run the script with a stand-in generator (`--generator`), so no test builds a crate. Changing it means adding that mode to the three examples and a call in the script.
     - |-
       `prepare_payload` in Claudine returns `String` errors like the other two owners' generation APIs, so two `retained` entries were added to `claudine/cli/tests/l1/error_guards/transport-allow.toml` for the typed-error-collapse guard. The alternative is a typed generation error in Claudine, unlike the other owners.
+    - |-
+      A schema made from a single layer (the baseline alone, or one matched trigger alone) is cached under a one-layer layered identity, not under that layer's own canonical digest. So when the same schema is compiled by a caller through the canonical API, the two get separate cache entries, and the schema is compiled twice in a process that does both. The alternative was to reuse the canonical digest for a single layer, which saves that one compilation but removes the role from the key. That is harmless today, since baseline and trigger merges behave the same, but it would not stay safe if the roles ever merged differently. Changing this touches only the two single-layer arms in `site_schema_with_override`.
+    - |-
+      The cross-process stability test re-runs the current test binary with `std::process::Command` in a helper mode (the pattern `transcluded_shell_failure.rs` already uses), instead of going "through the test toolkit" as the plan said. The toolkit has no helper for spawning a process. The encoding is also pinned to fixed values, which already proves stability across processes and platforms. Moving to a toolkit helper later would change only `a_layered_identity_is_stable_across_processes`.
+    - |-
+      The Claudine debug timing target (650 ms) is not met: the final paired sample is 839 ms (Phase 1 binary 1450 ms in the same session, under the same load). The `md` targets (90 / 20 ms) are met at 65 / 19.5 ms. The plan treats the targets as acceptance criteria. A profile shows every shipped-preparation cost the spec listed is gone; what remains is mostly per-document work the spec keeps at run time: compiling the effective validator (about 150 ms debug), resolving the prompt's own schema (about 65 ms), merging layers (about 50 ms), and decoding the prepared bundle section (about 125 ms, both 1.8 MB payloads even though one matches). I tried decoding each trigger document lazily and reverted it, because trigger discovery loads every document's payload up front, so it saved nothing without also making the registry's payload list lazy (a change across discovery, assembly, tracing, and `effective_for`, worth about 60 ms at most). Options: accept the miss as the limit of this design; make the trigger registry's payloads lazy for prepared entries (about 60 ms); or cut validator compile time (cache or simplify the merged schema's validator), which is the largest remaining cost and outside this feature.
+    - |-
+      Two small speedups landed in Phase 5 after profiling, beyond the plan's task list. (1) The expression type layer (`DeclaredTypes`) now projects the merged JSON Schema to its declarations only when an expression first reads one. Before, every composition projected the baseline, about a quarter of a release `md compose`, even for a document with no expressions. Results are unchanged; a new counter and three tests pin it. The alternative was to precompute the baseline's projection into Darkmatter's artifact, which saves the cost for documents that do read declarations too, but adds a record type, a revision bump, and a regeneration. (2) Artifact sections are decoded with plain `serde_json`, and the slower path-tracking decoder runs only to locate a refusal, so a refusal still names the same JSON pointer. Reverting either is a local change: `projection.rs` for (1), `wire::decode_typed` for (2).
 source_files_during_phase_1:
     - simplified-schema/lib/src/shipped/mod.rs
     - simplified-schema/lib/src/shipped/wire.rs
@@ -75,8 +83,6 @@ packages:
     - claudine
     - claudine-cli
     - test-toolkit
-message_to_agent: |-
-    Phase 3 landed Claudine's artifact (`claudine::composition::schema::shipped`, `claudine/lib/generated/shipped.json`), Darkmatter's source-selection tests, and the root coordinator `scripts/shipped_schemas.py` (root `just shipped-schemas` regenerates all three artifacts all-or-nothing; run it after any lower change, since Claudine's header fingerprints Darkmatter's artifact bytes). For Phase 4: (1) any change to Darkmatter's or the library's preparation output (for example new digest/classification fields in records, Rule 13) needs the owning `PREPARATION_REVISION` bumped and the root `just shipped-schemas`, which regenerates Claudine's too; Claudine's prepared trigger payloads are `triggers::prepared::PayloadRecord`, so a new field there changes Claudine's artifact. (2) Timing (load about 35, not quiet): `claudine compose --goose --dry-run prompts/clarify.md` 857 ms debug / 121 ms release (baseline 1416 / 207; target 650 debug). Claudine's bundle section is 3.4 MB and costs about 180 ms debug / 25 ms release to decode on first read, nearly all of it the `claudine.yaml` and `sequence.yaml` payloads; decoding each trigger document lazily (per-document sections in `PreparedTriggerBundle`) is the next saving if Phase 4's hashing work does not reach the target. (3) Claudine's freshness test spells its lower inputs inline; if you add a preparation file Claudine reads, add it there and to `claudine/lib/Cargo.toml` `source-inputs` (the planner test `RealWorkspaceTestInputTests.test_every_declared_source_input_is_read_by_its_declarer` enforces the pairing).
 source_files_during_phase_2:
     - simplified-schema/lib/src/positions.rs
     - simplified-schema/lib/src/envelope.rs
@@ -154,6 +160,183 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_4:
+    - simplified-schema/lib/src/validate.rs
+    - simplified-schema/lib/src/coerce.rs
+    - simplified-schema/lib/src/prepared.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/phase.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/shipped/mod.rs
+    - simplified-schema/lib/src/simplified/convert.rs
+    - simplified-schema/lib/src/work_counters.rs
+    - simplified-schema/lib/tests/l1/schema_identities.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/shipped.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/prepared.rs
+    - darkmatter/lib/src/work_counters.rs
+    - darkmatter/lib/generated/shipped.json
+    - darkmatter/lib/tests/l1/layered_validator_identities.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shipped_artifacts.rs
+    - claudine/lib/src/composition/schema/shipped.rs
+    - claudine/lib/generated/shipped.json
+    - claudine/lib/tests/l1/shipped_artifacts.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - simplified-schema/docs/topics/shipped-artifacts.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/simplified-schema/SKILL.md
+source_files_during_phase_5:
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/compose_prompt_tiers.rs
+    - claudine/cli/tests/l1/entry_point_parity.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/lib/src/invocation_context/document_tests.rs
+    - claudine/lib/src/composition/schema/shipped.rs
+    - simplified-schema/lib/src/shipped/mod.rs
+    - simplified-schema/lib/src/shipped/wire.rs
+    - simplified-schema/lib/src/validate.rs
+    - simplified-schema/lib/src/lib.rs
+    - darkmatter/lib/src/markdown/schemas/shipped.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/work_counters.rs
+    - darkmatter/lib/tests/l1/raw_declaration_projection.rs
+    - darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_5:
+    - simplified-schema/docs/topics/shipped-artifacts.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/schema-discovery.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/schema-validation.md
+    - claudine/docs/topics/schemas.md
+    - claudine/schemas/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/simplified-schema/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/rust-testing/test-speed.md
+source_code:
+    - simplified-schema/lib/src/shipped/mod.rs
+    - simplified-schema/lib/src/shipped/wire.rs
+    - simplified-schema/lib/src/shipped/wire_support.rs
+    - simplified-schema/lib/src/shipped/records.rs
+    - simplified-schema/lib/src/shipped/registry.rs
+    - simplified-schema/lib/src/envelope.rs
+    - simplified-schema/lib/src/embedded.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/work_counters.rs
+    - simplified-schema/lib/src/simplified/types.rs
+    - simplified-schema/lib/src/simplified/source.rs
+    - simplified-schema/lib/src/simplified/definitions.rs
+    - simplified-schema/lib/src/simplified/alphanumeric.rs
+    - simplified-schema/lib/src/simplified/standalone.rs
+    - simplified-schema/lib/src/simplified/mod.rs
+    - simplified-schema/lib/examples/shipped_schemas.rs
+    - simplified-schema/lib/generated/shipped.json
+    - simplified-schema/lib/tests/l1/shipped_artifacts.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/Cargo.toml
+    - simplified-schema/justfile
+    - justfile
+    - .gitattributes
+    - Cargo.lock
+    - simplified-schema/lib/src/positions.rs
+    - simplified-schema/lib/tests/l1/shipped_sections.rs
+    - simplified-schema/lib/tests/l1/deferred_positions.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/work_counters.rs
+    - darkmatter/lib/src/effects/mod.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/schemas/shipped.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/prepared.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+    - darkmatter/lib/examples/shipped_schemas.rs
+    - darkmatter/lib/generated/shipped.json
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shipped_artifacts.rs
+    - darkmatter/lib/tests/l1/prepared_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/deferred_positions.rs
+    - darkmatter/justfile
+    - claudine/lib/src/composition/schema/shipped.rs
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/src/composition/schema/globals.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/examples/shipped_schemas.rs
+    - claudine/lib/generated/shipped.json
+    - claudine/lib/tests/l1/shipped_artifacts.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/Cargo.toml
+    - claudine/justfile
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - scripts/shipped_schemas.py
+    - scripts/ci/test_affected_scope.py
+    - tools/test-toolkit/tests/shipped_schemas_coordinator_contracts.rs
+    - tools/test-toolkit/Cargo.toml
+    - simplified-schema/lib/src/validate.rs
+    - simplified-schema/lib/src/coerce.rs
+    - simplified-schema/lib/src/prepared.rs
+    - simplified-schema/lib/src/phase.rs
+    - simplified-schema/lib/src/simplified/convert.rs
+    - simplified-schema/lib/tests/l1/schema_identities.rs
+    - darkmatter/lib/tests/l1/layered_validator_identities.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/compose_prompt_tiers.rs
+    - claudine/cli/tests/l1/entry_point_parity.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/lib/src/invocation_context/document_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/tests/l1/raw_declaration_projection.rs
+documentation:
+    - simplified-schema/README.md
+    - simplified-schema/docs/dependencies.md
+    - simplified-schema/docs/topics/language-core.md
+    - simplified-schema/docs/topics/language/schema-documents.md
+    - simplified-schema/docs/topics/shipped-artifacts.md
+    - simplified-schema/docs/topics/diagnostics.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/topics/schemas/schema-discovery.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/schema-validation.md
+    - claudine/schemas/README.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-11-11-precompiled-shipped-schemas (5 phases)
@@ -454,3 +637,230 @@ Scope calculator over the working tree (`git status --porcelain --untracked-file
 - The subagents' scoped runs: Claudine schema, bundle, trigger, global, and catalog filters 1326 passed, `claudine-cli` 320 passed, the Claudine guards 176 + 159 passed; Darkmatter trigger and bundle filter 508 passed.
 
 No pre-existing failures were seen. No Windows cross-check was run. The new code adds no path handling: artifacts are compiled in with `include_bytes!` under the repository's LF rule, and the coordinator uses `pathlib` and `os.replace`. Its contract tests resolve `python3` or `python` and pass a `.py` stand-in through `sys.executable`, so they need no shebang execution on Windows. CI runs the coordinator tests (test-toolkit) and Claudine on every environment its schedule selects.
+
+## Phase 4
+
+### Orchestration
+
+I did Waves 6 and 7 directly, without subagents: Wave 7's merge work depended on Wave 6's types, and the "cache isolation" tests were small enough to write alongside it. The gates ran once, serially, after all edits: Darkmatter, then Simplified Schema, then Claudine.
+
+### Typed identities (Wave 6, Rules 12 and 14)
+
+All in `simplified-schema/lib/src/validate.rs`:
+
+- `SchemaIdentity::{Canonical { revision, digest }, Layered { revision, digest }}` and a public `SchemaDigest { identity, judges_files }`, with `SchemaDigest::canonical(&Value)`. That is the one place a schema is serialized and hashed, and it counts `Work::CanonicalSchemaSerialization`, a new counter folded into Darkmatter's snapshot. `judges_files(canonical_text)` is the old string classification, now a shared public helper.
+- `LayeredIdentity` builds a layered identity in order: `layer(LayerRole::{Baseline, Trigger, Document}, digest)`, `derived_from(digest)`, and `phase_projection(phase, Option<projected document digest>)`, then `finish()`. The bytes it hashes are a length-prefixed domain, `LAYERED_IDENTITY_REVISION`, `resolve::MERGE_ALGORITHM_REVISION`, the step count, and then each step: a fixed tag, followed by the identity's variant tag, its revision as a little-endian u32, and its digest as a little-endian u64. A phase step adds `phase::PROJECTION_REVISION` and a phase tag. `judges_files` is the OR of every input.
+- Cache keys are now `CacheKey { identity: SchemaIdentity, anchors: u64 }`. `canonical_hash` became `anchor_hash`, which hashes the base directory, fallback, caller origins, and repository anchors as before. The structural slot uses the same key type. Lookups still compare the full `JudgedIn`, and eviction is unchanged.
+- New entry points: `validator_for_shared_with_digest`, `structural_validator_identified`, `canonical_digest_shared` (memoized per allocation, as before), `CompiledValidators::build_with_digest` (a root union still wraps its arms and finds each one canonically), and `ConversionPlan::for_identity` (the plan cache is keyed by `SchemaIdentity`, so a plan finds the structural validator compiled under the same identity). Canonical APIs are unchanged. `shared_schema_hash` and `for_hashed` stay canonical.
+- `shipped::CanonicalDigestRecord { revision, digest, judges_files }` is the wire form. A record computed under another `CANONICAL_IDENTITY_REVISION` is refused.
+
+### Merge provenance (Wave 7, Rule 13)
+
+- Generated records: Darkmatter's payload member `baseline` is now `BaselineRecord { json_schema, digest }`, and `PayloadRecord` gained `digest`. Both are computed at generation. `ShippedBaseline.digest` comes from the record; the from-sources fallback computes it. `ResolvedPayload.digest` is `Some` only for a prepared payload.
+- `schemas/mod.rs`: `BaselineSchema.digest` is `Some` for the shipped baseline. A caller's baseline gets its digest from `canonical_digest_shared`, once per allocation. `TriggerLayer.digest` is the prepared digest, or the per-allocation canonical one. A template payload is hashed after it resolves. `site_schema_with_override` identifies baseline-only and lone-trigger schemas as one-layer layered identities. `merged_trigger_schema` returns `(Arc<Value>, SchemaDigest)`. Its memo stores the identity, so a repeated document is not hashed again; on a miss the document layer is hashed once, over its fully resolved JSON, imports and template results included. `EffectiveSchema.digest: Option<SchemaDigest>` feeds both `build_with_digest` and the conversion plan.
+- `phase_json_schema(effective, effective_digest, projected_document, phase)` reuses the effective identity when the projection leaves the schema unchanged. When it changes the schema, it derives `derived_from(effective).phase_projection(phase, canonical(projected document))`. When the effective schema has no tracked identity, the result is `None` and takes the canonical route. The memo also matches on the digest.
+- These stay on the canonical route: `EffectiveSchema::for_yaml_document`, `rewrite.rs` (eager-file arms), wrapped root-union arms, `Prepared`, and the standalone APIs.
+- Revisions: Darkmatter `PREPARATION_REVISION` 1 → 2 (record shape). Claudine `PREPARATION_REVISION` 1 → 2: its bundle record embeds `PayloadRecord`, so its record shape changed too. Simplified Schema's artifact is unchanged. I ran root `just shipped-schemas` once; it regenerated Darkmatter's and Claudine's artifacts, and every freshness test passes.
+
+### Drift found and fixed
+
+`darkmatter/docs/topics/schemas/definition.md` ("Validator Cache") said the built-in baseline declares an eager `file` property, so every document compiled the merged baseline per context. That was stale before this phase. The baseline types `style.page.stylesheet` with the lazy reference format, and the generated record says `judges_files: false`. I rewrote the section around the two identity forms, with a table, a flow diagram, and an example. I also rewrote the stale paragraph to describe what does cost one compile per context, a document's own `file(eager)`.
+
+### Tests (requirement → test)
+
+Simplified Schema (`lib/tests/l1/schema_identities.rs`, 12 tests; 10 without `work-counters`; registered in `tests/l1/main.rs`):
+
+| Requirement | Test |
+| --- | --- |
+| Stable ordered encoding (pinned values) | `a_layered_identity_is_pinned_for_fixed_inputs` (`83df5d9770344f89`, projection `e89539b57da19d99`) |
+| Cross-process stability, wiring once | `a_layered_identity_is_stable_across_processes` re-runs the test binary twice in `identity_helper_entrypoint` mode |
+| Role, order, repetition, phase, and projected-document changes | `layer_order_role_and_projection_each_change_the_identity` (pairwise distinct) |
+| Canonical object-key invariance, array-order significance | `a_canonical_digest_ignores_object_key_order_and_keeps_array_order` |
+| File-reference syntax vs eager file / `match()`; layered OR | `only_the_eager_file_format_and_match_judge_files` |
+| Canonical/layered domain separation (same 64-bit digest, different verdicts) | `canonical_and_layered_identities_never_share_a_validator` |
+| Unchanged schema across differing data shares one validator | `documents_with_one_layered_identity_share_its_validator` |
+| Base-directory and caller-origin separation; a file-free schema shared | `a_file_judging_layered_identity_is_keyed_by_document_folder_and_caller_origins` (verdicts under `feature = "file"`) |
+| The canonical route still shares equal schemas across allocations; `shared_schema_hash` stays canonical | `the_canonical_route_shares_equal_schemas_across_allocations` |
+| A known digest serializes nothing; the canonical route serializes once per allocation | `counted::a_known_digest_never_serializes_the_schema` |
+| A conversion plan found by identity reuses that validator | `counted::a_conversion_plan_by_identity_reuses_the_validator_compiled_under_it` |
+
+Darkmatter (`lib/tests/l1/layered_validator_identities.rs`, 13 tests; registered in `tests/l1/main.rs`). Every isolation case runs in one process on the shared cache and asserts verdicts that a wrong validator would flip:
+
+| Requirement | Test |
+| --- | --- |
+| Reordered conflicting layers | `reordered_conflicting_triggers_never_share_a_validator` |
+| Baseline/document role change | `baseline_and_document_roles_are_part_of_the_identity` |
+| Changed disk import, unchanged importer (and restored) | `a_changed_import_changes_the_identity` |
+| Changed resolved template schema | `a_changed_template_result_changes_the_identity` (granted `load_data` slot, data rewritten) |
+| Launch vs completion required/generated | `launch_and_completion_are_distinct_identities` |
+| Passive eager-file projection | `the_passive_eager_file_projection_is_its_own_identity` |
+| Negative controls: document folder, repository context | `a_file_judging_identity_stays_keyed_by_folder_and_repository` |
+| Negative control: fallback directory | `counted::the_fallback_folder_keeps_file_judging_validators_apart` (the fallback never changes a document verdict, so this one asserts compile counts) |
+| Positive sharing across data documents | `counted::documents_with_identical_layers_share_a_validator` |
+| Fresh shipped baseline-only validation: generated digest, zero serialization | `counted::the_shipped_baseline_is_never_serialized_for_its_key` |
+| A dynamic layer is serialized once; a repeated allocation reuses it | `counted::only_the_document_layer_is_serialized_and_only_once` |
+| Canonical fallback exercised | `counted::a_root_union_document_takes_the_canonical_route` |
+| Reset → cold → warm; constants stay loaded | `counted::a_reset_empties_dynamic_caches_and_keeps_shipped_data` |
+
+Load-bearing check (mutations, reverted byte-for-byte afterwards):
+- Replacing the trigger and document digests in `merged_trigger_schema` with a constant failed 6 of the 13 tests, among them the reorder, import, template, folder/repository, and fallback tests.
+- Reusing the unphased identity for a changed phase result failed the launch/completion and passive-projection tests.
+
+Record matrix additions:
+- Darkmatter `shipped_artifacts.rs` cells: baseline JSON not an object (now under `/payload/baseline/json_schema`), a baseline record of the wrong type, a digest of another revision (`UnusableRecord` at `/payload/baseline/digest/revision`), and an absent, null, short, or wrong-typed digest or classification (`MalformedArtifact`). The round-trip test asserts that the recorded baseline digest equals `CanonicalDigestRecord::of` of the lowered schema.
+- Claudine `shipped_artifacts.rs`: `a_payload_digest_of_another_revision_is_refused` and `an_absent_payload_digest_is_malformed`.
+
+Smell sweep over the new decoders (`BaselineRecord`, `PayloadRecord.digest`, `CanonicalDigestRecord`): no `#[serde(default)]` and no `Option` fields; every field is required, and `deny_unknown_fields` applies.
+
+### Gates
+
+- `darkmatter`: `just test` 16425 passed, 10 skipped; "none at or above 5.0s" (load average about 20). `just lint` clean, including the zed-dmls wasm check. `just check-tier-coverage darkmatter`: nothing stranded.
+- `simplified-schema`: `just test` 1977 passed with `work-counters,terminal`, then 1693 passed without default features; none at or above 5.0 s. `just lint` clean after one fix: an unused variable in the no-`file` build of the new test.
+- `claudine`, changed directly through its revision, artifact, and tests: `just test` 11942 passed, 15 skipped, none at or above 5.0 s. Its recipe covers every reverse dependent of `claudine`. `just lint` clean.
+- Shipped-artifact freshness tests pass in all three areas after the single root `just shipped-schemas`.
+
+No pre-existing failures were seen. The change adds no path handling and no `#[cfg]` branch, so no Windows cross-check was run; CI covers the other operating systems. The layered encoding is fixed-width little-endian, and its pinned values are platform-independent by construction.
+- Scope calculator over the working tree (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `change_class: package`, `packages` = claudine, darkmatter, simplified-schema, test-toolkit, claudine-cli, darkmatter-cli. No gate was skipped.
+- `just slow-tests fresh` reports the record as stale only because the plan and this log changed after the runs. It says neither file is inside a directory those tests cover; every recorded run had zero tests at or above 5.0 s.
+
+## Phase 5
+
+### Orchestration
+
+Two foreground subagents ran in parallel for Wave 8: one removed the speed-only schema fixture from Claudine's tests, the other finished the docs and skills (Markdown only). Each verified only its own slice. The coordinator then fixed the drifted doc comments the docs agent listed, regenerated the artifacts, and ran every gate once per area, with nothing else running. The host was not quiet at any point. Other sessions' processes (node, Blender, `kache`) held the load average between 8 and 70, and every timing below records the load it was taken under.
+
+### Restore shipped fixtures (Wave 8, Rule 15)
+
+`CliProcessFixture::seed_inline_metadata_schema(schema, document_library)` wrote the shipped `inline-compose.yaml` as the fixture home's `schemas/claudine.yaml`, with `document.yaml` beside it. That shadowed Claudine's embedded trigger with a smaller schema, purely for speed. Commits `27845edca` and `5ceb22a89` introduced it, and the closed audit `audit-final-cli-speed.md` describes it; that audit was left untouched.
+
+- **Roster: seven calling files**, all in `claudine/cli/tests/l1/`. This corrects the spec's historical example of eight.
+  - `agent_text_is_data.rs`: 4 calls (two in tests, one in `assert_value_refused`, one in `plain_text_with_a_colon_is_still_repaired`)
+  - `compose_prompt_tiers.rs`: 2 calls (`assert_local_root_wins`, `assert_form_resolves`)
+  - `entry_point_parity.rs`: 2 calls in `fixtures()`. `fixtures`, `run_matrix_row`, and `run_candidate_part` lost their `host_schema`/`document_library` parameters, and the row macros no longer `include_str!` the two schemas. The Darkmatter `entry_point_parity/mod.rs` input edge stays.
+  - `inline_completion_lifecycle.rs`, `sequence_magic_reference.rs` (in `staged()`), `sequence_overlay_pty.rs`, `sequence_schema.rs`: 1 call each.
+- The helper is deleted from `claudine/cli/tests/common/mod.rs`.
+- **Equivalent spelling found and removed:** `claudine/lib/src/invocation_context/document_tests.rs` had `Fixture::with_inline_metadata_schema`, the same workaround on the library side. It was added in `85068cc4e`, the same minute as `27845edca`. It and its 4 callers' use of it are gone, and the file is now byte-identical to before that commit. Its tests check how environment maps are routed, not schema behavior.
+- **Retained, because shadowing or a custom schema is what each test checks:**
+  - `claudine/cli/tests/l1/launch_trigger_schemas.rs`: a malformed or loosening disk `claudine.yaml` shadows the shipped one.
+  - `invalid_trigger_warnings.rs`: custom invalid triggers.
+  - `claudine/lib/tests/l1/host_catalog.rs`: writes the full shipped bundle plus `globals.yaml`.
+  - `claudine_trigger_selection_parity.rs`: an empty `schemas/` with the embedded bundle.
+  - `claudine_schemas.rs`: writes the whole shipped bundle under its real names.
+  - The in-memory `include_str!` test subjects: `claudine_schema_parity.rs`, `container_schema_recursion.rs`, `claudine_schemas_embedded.rs`, `claudine_schema_shipped_corpus.rs`, `lifecycle/tests/nested_span.rs`.
+- No assertion changed. All 174 tests in the seven modules passed, plus the 6 `document_tests`; the slowest took 1.97 s.
+
+### Documentation (Wave 8)
+
+- `simplified-schema/docs/topics/shipped-artifacts.md` covers:
+  - a regeneration example, and what to do when the freshness test fails;
+  - the stale-lower error;
+  - a revision-bump table covering the preparation revisions, `MERGE_ALGORITHM_REVISION`, `PROJECTION_REVISION`, and `CANONICAL_IDENTITY_REVISION`;
+  - a Mermaid load/fallback diagram across the three owners;
+  - what a fallback costs.
+
+  Claudine's artifact is no longer marked **planned**.
+- Darkmatter `definition.md`, `schema-discovery.md`, `schema-triggers.md`, and `schema-validation.md`, and `claudine/docs/topics/schemas.md` and `claudine/schemas/README.md`: gap-fills only. No doc advised shadowing for speed. `dmls-schema-support.md` and `claudine/docs/topics/composition.md` had nothing stale.
+- Skills: `simplified-schema`, `darkmatter` (`SKILL.md`, `schema.md`, `expressions.md`), `claudine` (`SKILL.md`, `cli-commands.md`), and `rust-testing/test-speed.md` (new cause 8, with figures only from measurements in this log).
+- Dependency docs: no change was needed. The only new direct dependency, `serde_path_to_error` in Simplified Schema (Phase 1), is already listed.
+
+### Drift found and fixed (comment-only)
+
+These comments still described whole-artifact refusal, a "memo-free" generation, a cache "keyed by canonicalised schema hash", or a baseline record without its digest. The code is correct; the comments were brought in line with it:
+
+- `simplified-schema/lib/src/shipped/mod.rs`: module docs mention per-section refusal under `accept_deferred`; "identity-keyed memo" in the fresh-generation docs and in `PreparationMode::Uncached`
+- `simplified-schema/lib/src/shipped/wire.rs`: "All four refuse"
+- `simplified-schema/lib/src/validate.rs`: `ValidatorCache` keyed by `SchemaIdentity`
+- `simplified-schema/lib/src/lib.rs`: `reset_process_caches` keeps the shipped registry
+- `darkmatter/lib/src/markdown/schemas/shipped.rs`: `baseline` carries its digest
+- the static catalog fallbacks ("artifact or its section was refused"): `catalog.rs`, `compose/expression/catalog/mod.rs`, `effects/types.rs`, `yaml_documents/registry.rs`
+- `claudine/lib/src/composition/schema/shipped.rs`: `prepare_payload`
+
+### Final gates (Wave 9)
+
+Run sequentially and alone, with canonical recipes:
+
+| Area | `just test` | Slow (≥ 5 s) | `just lint` |
+| --- | --- | --- | --- |
+| `simplified-schema` | 1977 + 1693 passed | 0 | clean (incl. `--no-default-features`) |
+| `darkmatter` (lib, cli, dmls, zed) | 16428 passed, 10 skipped | 0 | clean (incl. wasm32-wasip2) |
+| `claudine` | 11942 passed, 15 skipped | 14 during a load spike (load average 31 → 52); each 1.0–2.2 s alone at load 14 | clean |
+
+- **Claudine's slow tests.** The 14 are the six `shipped_artifacts` generation tests, `claudine_schemas::shared_payload_properties_have_identical_types`, three `sequence_schema` tests, two `container_schema_recursion` tests, and `error_guards::production_sources_pass_every_scan_backed_guard`. They took 5.0–7.8 s in the run, all under the 10 s loaded allowance, and were cleared by measuring each alone. They are recorded as load-sensitive. An earlier full Claudine run of this phase (load about 60) had one, the same `shared_payload_properties_have_identical_types` (5.23 s in the run, 2.15 s alone).
+- **Summed JUnit durations.** JUnit files are preserved at `/tmp/pss-final/{darkmatter,claudine}-junit.xml`, with Phase 1's at `/tmp/pss-baseline/`.
+
+  | Area | Phase 1 | Phase 5 |
+  | --- | --- | --- |
+  | Darkmatter | 2813.0 s (16349 tests, max 4.65 s) | 1570.0 s (16429, max 3.44 s) |
+  | Claudine | 4879.0 s (11917, max 4.98 s) | 4257.6 s (11942, max 7.76 s under the load spike) |
+
+  Both are under load, so they show direction only.
+- **Other checks.** All passed or were clean:
+  - `just shipped-schemas` regenerated all three artifacts, and they were already current, both before and after this phase's code changes.
+  - `scripts/ci/test_affected_scope.py::RealWorkspaceTestInputTests`: 10 passed.
+  - `cargo tree -p simplified-schema --no-default-features -e normal` contains no Darkmatter, Claudine, Content Policy, or CLI crate; the only repository crates are `biscuit-file` and `biscuit-hash`.
+  - `cargo check -p simplified-schema -p darkmatter -p claudine --examples`: the three generator examples compile.
+- **Dependents.** `cargo check --all-targets` passed for `biscuit-icon-cli`, `biscuit-speaks-cli`, `biscuit-terminal-cli`, `messenger`, `messenger-cli`, `claudine-contract`, `claudine-gen`, `playa-cli`, `sniff-detection-cli`, and `research`. The 73 tests in `messenger` and `research` that match schema, compose, frontmatter, or darkmatter passed.
+- **Scope calculator.** `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gave `change_class: package` with `packages` = claudine, claudine-cli, darkmatter, simplified-schema, test-toolkit, darkmatter-cli, so no gate was skipped.
+- **Environments.** Only macOS was tested locally. The phase adds no path handling and no `#[cfg]` branch, so no Windows cross-check was run. Existing CI proves byte freshness on Linux, macOS, Windows, and WSL2.
+
+### Performance evidence (Wave 9)
+
+The fixture and commands are exactly Phase 1's: `/tmp/pss-timing/run.sh`, `hyperfine -N --warmup 1 --runs 5`, the same `env -i` environments, and the same staged fixture. Debug and release binaries of `md` and `claudine` were built before measuring (`cargo build [--release] -p darkmatter-cli --bin md`, `-p claudine-cli --bin claudine`) and copied to `/tmp/pss-final/bin3/`. The host never went quiet, so the Phase 1 binaries (`/tmp/pss-baseline/bin/`) were re-run back to back with the final ones. The paired comparison is the evidence; the Phase 1 numbers stay as recorded.
+
+**First sample (end of Wave 8; load about 30):** `md` 111 / 30 ms and Claudine 879 / 131 ms (debug / release). This missed all three targets, so both binaries were profiled with the Time Profiler (`xctrace record --all-processes` over loops of the release and debug commands, with samples aggregated per symbol):
+
+- **`RawDeclarations::from_json_schema`: about 26% of a release `md compose`.** The call precheck built `DeclaredTypes::for_site` for every document. That eagerly projected the merged JSON Schema (the baseline alone is large), even for a document with no expressions.
+  - Fix: `DeclaredTypes` now keeps the `EffectiveSchema` (a `RawSource` wrapper) and calls `raw_declarations()` on the first declaration read.
+  - New counter `Work::RawDeclarationProjection`.
+  - Release `md compose` went from 30.2 to 20.4 ms in a back-to-back `hyperfine` run.
+- **`serde_path_to_error`: about 10 points of Claudine's roughly 15% bundle-section decode.**
+  - Fix: `wire::decode_typed` decodes with plain `serde_json` and repeats the decode under `serde_path_to_error` only to locate a refusal. The decode is deterministic, so the repeat fails at the same place, and refusal pointers are unchanged.
+- **Per-document lazy trigger decode: tried and reverted.** It kept the wire format: a deferred record held each document's outcome as a `RawValue` and decoded it on first `load`. But `TriggerRegistry::append_embedded_bundle` loads every bundle document's payload into the registry's parallel `payloads` vector up front, so laziness at the record level decoded everything anyway. A real gain needs that vector made lazy for prepared entries, which touches discovery, assembly, tracing, and `effective_for`. The profile put the most it could save at about half the bundle decode, roughly 60 ms debug. The change was reverted completely; `prepared.rs`, `triggers/mod.rs`, and Claudine's `shipped.rs` are back to their Phase 4 code.
+
+**Final sample (pair 2; load average 28–34, comparable to Phase 1's 33–41; all runs exited 0):**
+
+| Workload | Build | Phase 1 binary, same session | Final | Target | Met |
+| --- | --- | --- | --- | --- | --- |
+| `md compose` three-line document | debug | 290.5 ms | 65.2 ms | ≤ 90 ms | yes |
+| same | release | 58.3 ms | 19.5 ms | ≤ 20 ms | yes, narrowly (pair 1: 20.3 ms at load 36) |
+| `claudine compose --goose --dry-run prompts/clarify.md` | debug | 1449.6 ms | 839.0 ms | ≤ 650 ms | **no** |
+| same | release | 210.5 ms | 119.0 ms | (recorded only) | — |
+
+Phase 1 medians were 291.2 / 56.9 / 1415.9 / 207.5 ms. Final runs: md debug 65.2, 65.0, 69.6, 65.3, 64.5; md release 19.5, 19.9, 19.1, 19.1, 20.6; Claudine debug 836.7, 840.2, 842.2, 838.4, 839.0; Claudine release 119.0, 118.5, 115.7, 119.9, 119.4.
+
+**Why Claudine misses its debug target.** A debug Time Profiler sample of the Claudine run (about 860 ms per run) breaks down as follows:
+
+| Work | Share of the run | Approximate time |
+| --- | --- | --- |
+| Compiling the effective validator (`CompiledValidators::build_with_digest` → `jsonschema`) | ~17% | ~150 ms |
+| Decoding the prepared bundle section (both 1.8 MB payloads, though one matches) | ~15% | ~125 ms |
+| Resolving and parsing the prompt's own `$schema` | ~7% | ~65 ms |
+| Merging trigger layers | ~6% | ~50 ms |
+| Markdown parsing and composition stages | rest | — |
+
+- Every shipped preparation cost the spec listed is gone, and the deterministic counters prove it (see below).
+- The remaining cost is per-document work the spec keeps at run time, apart from the bundle decode.
+- The measured saving (1450 → 839 ms) is larger than the spec's estimate of about 520 ms of shipped work.
+- The 650 ms figure assumed the spec's quieter 1.2 s starting point. On this loaded host the Phase 1 binary runs at 1.45 s.
+
+This miss is recorded in `decisions_for_review`.
+
+**Deterministic evidence (counters, independent of timing):**
+
+- `layered_validator_identities::counted::the_shipped_baseline_is_never_serialized_for_its_key`: 0 canonical serializations.
+- The Phase 2/3 zero-preparation counters (`ShippedRuntimePreparation`, `BaselineCheck`, `PayloadMergeCheck`, `PayloadCompileCheck` at 0 for accepted artifacts). These sit beside the source, dependency, configuration, revision, and record refusal tests, which are all still green.
+- New: `raw_declaration_projection::a_document_without_expressions_never_projects_the_baseline` (0 projections).
+
+### Tests (requirement → test)
+
+| Requirement | Test |
+| --- | --- |
+| The removed fixture changes no verdict | the seven modules (174 tests) and `invocation_context::document_tests` (6) unchanged and passing on the shipped schemas |
+| Shadowing is still honored where it is the behavior | `launch_trigger_schemas.rs` (retained, passing) |
+| A document with no expressions never projects the merged schema | `raw_declaration_projection::a_document_without_expressions_never_projects_the_baseline`: output rendered, 0 `RawDeclarationProjection` |
+| A declaration read still projects (once) and decides the verdict | `raw_declaration_projection::a_call_on_a_baseline_property_reads_its_projected_type`: `upper(tags)` warns `dm.expression.uncertain_call` with actual type `string[] \| null` (the baseline's `tags`), exactly 1 projection |
+| Undeclared-property detection is unchanged | `raw_declaration_projection::a_misspelled_property_is_still_reported_undeclared`, plus the existing `unknown_identifier_warning`, `design_time_call_check`, and `compose_member_warnings` suites |
+| Plain decode with path-tracked refusal keeps every refusal's pointer and reason | the existing section and record refusal tests: Claudine `shipped_artifacts::{an_absent_payload_digest_is_malformed, a_payload_digest_of_another_revision_is_refused, a_null_catalog_description_is_none_and_an_absent_one_is_malformed, …}`, and the Simplified Schema and Darkmatter `shipped_artifacts` malformed-section tests; all assert pointers that only the path-tracked repeat produces |
+| End to end through the normal invocation path | `md compose` and `claudine compose` of the timing fixture, both exit 0. The CLI on `[{{ descripton }}]` and `[{{ upper(tags) }}]` prints the same warnings from the Phase 4 binary and the final one |
+
+New test file: `darkmatter/lib/tests/l1/raw_declaration_projection.rs`, declared in `tests/l1/main.rs` under `#[cfg(feature = "work-counters")]`, a feature Darkmatter's CI metadata enables. Each test anchors its request in its own temp directory and runs in 0.06–0.09 s.

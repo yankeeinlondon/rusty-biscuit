@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-11
 total_phases: 5
-phase: 4
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -123,6 +123,183 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/claudine/SKILL.md
 - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_4:
+- simplified-schema/lib/src/validate.rs
+- simplified-schema/lib/src/coerce.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/phase.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/shipped/mod.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/work_counters.rs
+- simplified-schema/lib/tests/l1/schema_identities.rs
+- simplified-schema/lib/tests/l1/main.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/shipped.rs
+- darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+- darkmatter/lib/src/markdown/schemas/triggers/prepared.rs
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/tests/l1/layered_validator_identities.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/shipped_artifacts.rs
+- claudine/lib/src/composition/schema/shipped.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/tests/l1/shipped_artifacts.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/topics/schemas/definition.md
+- simplified-schema/docs/topics/shipped-artifacts.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/simplified-schema/SKILL.md
+source_files_during_phase_5:
+- claudine/cli/tests/common/mod.rs
+- claudine/cli/tests/l1/agent_text_is_data.rs
+- claudine/cli/tests/l1/compose_prompt_tiers.rs
+- claudine/cli/tests/l1/entry_point_parity.rs
+- claudine/cli/tests/l1/inline_completion_lifecycle.rs
+- claudine/cli/tests/l1/sequence_magic_reference.rs
+- claudine/cli/tests/l1/sequence_overlay_pty.rs
+- claudine/cli/tests/l1/sequence_schema.rs
+- claudine/lib/src/invocation_context/document_tests.rs
+- claudine/lib/src/composition/schema/shipped.rs
+- simplified-schema/lib/src/shipped/mod.rs
+- simplified-schema/lib/src/shipped/wire.rs
+- simplified-schema/lib/src/validate.rs
+- simplified-schema/lib/src/lib.rs
+- darkmatter/lib/src/markdown/schemas/shipped.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/effects/types.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/tests/l1/raw_declaration_projection.rs
+- darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_5:
+- simplified-schema/docs/topics/shipped-artifacts.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/schema-discovery.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/docs/topics/schemas/schema-validation.md
+- claudine/docs/topics/schemas.md
+- claudine/schemas/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/cli-commands.md
+- .claude/skills/rust-testing/test-speed.md
+source_code:
+- simplified-schema/lib/src/shipped/mod.rs
+- simplified-schema/lib/src/shipped/wire.rs
+- simplified-schema/lib/src/shipped/wire_support.rs
+- simplified-schema/lib/src/shipped/records.rs
+- simplified-schema/lib/src/shipped/registry.rs
+- simplified-schema/lib/src/envelope.rs
+- simplified-schema/lib/src/embedded.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/work_counters.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/definitions.rs
+- simplified-schema/lib/src/simplified/alphanumeric.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/examples/shipped_schemas.rs
+- simplified-schema/lib/generated/shipped.json
+- simplified-schema/lib/tests/l1/shipped_artifacts.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/Cargo.toml
+- simplified-schema/justfile
+- justfile
+- .gitattributes
+- Cargo.lock
+- simplified-schema/lib/src/positions.rs
+- simplified-schema/lib/tests/l1/shipped_sections.rs
+- simplified-schema/lib/tests/l1/deferred_positions.rs
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/src/effects/mod.rs
+- darkmatter/lib/src/effects/types.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/schemas/shipped.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/lib/src/markdown/schemas/resolve.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs
+- darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+- darkmatter/lib/src/markdown/schemas/triggers/prepared.rs
+- darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+- darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+- darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/examples/shipped_schemas.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/shipped_artifacts.rs
+- darkmatter/lib/tests/l1/prepared_trigger_bundles.rs
+- darkmatter/lib/tests/l1/deferred_positions.rs
+- darkmatter/justfile
+- claudine/lib/src/composition/schema/shipped.rs
+- claudine/lib/src/composition/schema/bundle.rs
+- claudine/lib/src/composition/schema/globals.rs
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/examples/shipped_schemas.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/tests/l1/shipped_artifacts.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/Cargo.toml
+- claudine/justfile
+- claudine/cli/tests/l1/error_guards/transport-allow.toml
+- scripts/shipped_schemas.py
+- scripts/ci/test_affected_scope.py
+- tools/test-toolkit/tests/shipped_schemas_coordinator_contracts.rs
+- tools/test-toolkit/Cargo.toml
+- simplified-schema/lib/src/validate.rs
+- simplified-schema/lib/src/coerce.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/phase.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/tests/l1/schema_identities.rs
+- darkmatter/lib/tests/l1/layered_validator_identities.rs
+- claudine/cli/tests/common/mod.rs
+- claudine/cli/tests/l1/agent_text_is_data.rs
+- claudine/cli/tests/l1/compose_prompt_tiers.rs
+- claudine/cli/tests/l1/entry_point_parity.rs
+- claudine/cli/tests/l1/inline_completion_lifecycle.rs
+- claudine/cli/tests/l1/sequence_magic_reference.rs
+- claudine/cli/tests/l1/sequence_overlay_pty.rs
+- claudine/cli/tests/l1/sequence_schema.rs
+- claudine/lib/src/invocation_context/document_tests.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/tests/l1/raw_declaration_projection.rs
+documentation:
+- simplified-schema/README.md
+- simplified-schema/docs/dependencies.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/language/schema-documents.md
+- simplified-schema/docs/topics/shipped-artifacts.md
+- simplified-schema/docs/topics/diagnostics.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- claudine/docs/topics/schemas.md
+- darkmatter/docs/topics/schemas/schema-discovery.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/docs/topics/schemas/schema-validation.md
+- claudine/schemas/README.md
+completed_phase: 5
+implemented: true
 ---
 
 # Precompiled shipped schemas implementation plan
@@ -273,7 +450,7 @@ Run the three freshness tests and targeted nextest schema/bundle/global/launch/c
 
 ### Wave 6
 
-- [ ] **Add typed identities**
+- [x] **Add typed identities**
   - Depends on Phase 3. Own `simplified-schema/lib/src/validate.rs`, `prepared.rs`, and shared identity helpers/records. Implement Rules 12–14; retain the canonical APIs and `content_hash` behavior.
   - Keep the identity enum in map keys through final lookup, with current eviction and full context equality. Route structural/context validators through the same typed key representation.
   - Add public-result tests for canonical/layered domain separation, stable ordered encoding, role/order changes, unchanged schema across differing data, canonical object-key invariance, array-order significance, file-reference syntax versus eager file/match checks, and caller-origin/context separation. Use existing compile counters and validator `Arc` reuse controls.
@@ -281,13 +458,13 @@ Run the three freshness tests and targeted nextest schema/bundle/global/launch/c
 
 ### Wave 7
 
-- [ ] **Carry merge provenance**
+- [x] **Carry merge provenance**
   - Depends on Wave 6. Own Darkmatter `schemas/mod.rs` merge/phase/effective structures and their construction sites. Carry identity/digest from baseline/payload/fully resolved document into merged JSON and `CompiledValidators::build_with_digest`.
   - Derive post-merge phase identities as Rule 13 specifies. Keep provenance optional for arbitrary public JSON input; untracked schema mutation, root-union arm wrapping, and standalone APIs take canonical final-schema hashing.
   - Include overridden/filtered trigger payloads by hashing the actual filtered payload or canonical fallback, not the original full payload's digest. Template resolution hashes the resulting schema. Do not use file mtime, path, frontmatter data, or source-file digest as a substitute for resolved schema content.
   - Regenerate artifacts after changes to generation records/revisions; retain byte freshness and ordering. Update validation/cache API comments and relevant validation topic docs.
 
-- [ ] **Exercise cache isolation**
+- [x] **Exercise cache isolation**
   - May run concurrently with merge integration by owning new tests only. Cover public validation and compile-counter behavior for reordered conflicting layers, baseline/document role changes, changed disk imports with unchanged importer, changed resolved template schemas, launch versus completion required/generated behavior, and passive eager-file projection.
   - Include positive sharing controls for two frontmatter documents using identical schema layers, and negative controls for document base directory, fallback directory, repository context, and caller origins. Assert verdicts that would differ with a wrong validator, not just unequal numeric keys.
   - Assert a fresh shipped baseline-only validation uses its generated digest and performs no canonical serialization of that baseline. Dynamic layers may serialize once; a repeated shared allocation must reuse its digest. Exercise canonical fallback explicitly.
@@ -300,12 +477,12 @@ Run focused nextest validator, phase, template, effective-layering, file-context
 
 ### Wave 8
 
-- [ ] **Restore shipped fixtures**
+- [x] **Restore shipped fixtures**
   - Depends on Phase 4. Remove the exact helper calls and obsolete schema arguments/includes listed in Rule 15; delete `CliProcessFixture::seed_inline_metadata_schema` after its callers are gone. Keep authored schemas, provider stubs, phase assertions, persistence assertions, and intentional disk/custom fixtures.
   - Search all Claudine test setup for copies of `inline-compose.yaml` into `schemas/claudine.yaml` to remove the same speed workaround spelled without the helper. Retain tests whose asserted behavior is disk shadowing/custom definitions. The named helper's complete removal is already settled; this search checks equivalent spellings rather than reopening it.
   - Record the seven-file roster, introduction history, removals, and intentional retained shadowing fixtures in the implementation log. Do not edit closed historical audit reports.
 
-- [ ] **Finish documentation**
+- [x] **Finish documentation**
   - May run concurrently with fixture removal by owning docs/skills only. Finish `simplified-schema/docs/topics/shipped-artifacts.md`; update Darkmatter schema baseline/discovery/trigger/validation and DMLS schema-support pages and `claudine/docs/topics/schemas.md`. Give regeneration, freshness failure, fallback, and revision-bump examples, plus a diagram of the dependency/load flow. Docs do not name this feature directory.
   - Update `.claude/skills/{simplified-schema,darkmatter,claudine}/SKILL.md` and the Darkmatter schema topic with `just shipped-schemas`, owner/revision rules, and shipped YAML regeneration requirements. Update `rust-testing/test-speed.md` only with counter/timing-backed claims; describe remaining effective-validator compilation and stale fallback honestly.
   - Update area dependency docs for changed direct dependencies; the chosen JSON/Serde mechanism requires no new serialization crate. Keep READMEs as concise overviews linking to topic docs.
@@ -313,13 +490,13 @@ Run focused nextest validator, phase, template, effective-layering, file-context
 
 ### Wave 9
 
-- [ ] **Run final gates**
+- [x] **Run final gates**
   - Depends on Wave 8. Coordinator runs `just shipped-schemas`, then `just test` and `just lint` separately in `simplified-schema/`, `darkmatter/`, and `claudine/`. Use canonical nextest recipes; Darkmatter's recipe covers `darkmatter-lsp` and the Zed CLI. Do not run `cargo fmt` or a workspace-wide test suite.
   - Preserve final per-package JUnit files immediately after each run. Run the focused CI planner tests and representative canonical plans from Wave 5. Source-scan, layout, dependency-direction, no-new-I/O, path/context, and language-ownership guards must pass.
   - Inspect the no-default-features dependency graph to confirm no Darkmatter/Claudine/Content Policy/CLI dependency was introduced into Simplified Schema. Compile the generator examples with ordinary checks; no extra CI matrix is added for them beyond the repository's existing target-kind policy.
   - Ordinary existing CI proves byte freshness on macOS/Linux/native Windows/WSL2; report exactly the environments actually tested locally. No new path comparison or platform branch is required by this design.
 
-- [ ] **Record performance evidence**
+- [x] **Record performance evidence**
   - Depends on Run final gates; runs alone on the quiet host. Rebuild debug/release outside measured intervals and repeat exactly Rule 18's fixture commands, five executions each. Record medians and differences against Wave 1, summed JUnit time changes, and all five-second outliers. Keep build and execution time separate.
   - Retain source and dependency refusal tests alongside zero-preparation counters; timings alone cannot establish artifact consumption. Resolve failing correctness gates and performance regressions in the changed paths, then repeat only affected validation and the affected five-run sample. Targets remain acceptance criteria, not warnings to leave for another session.
   - Append final implementation decisions, spec departures, commands, environment/build settings, counters, and results to `implementation-log.md`. Note JSON remains the chosen wire format and the seven-file fixture count corrects the historical spec example.
