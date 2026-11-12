@@ -413,7 +413,11 @@ text; disk shadowing happens before the prepared lookup and is unchanged.
 After editing `claudine/schemas/` (or a lower artifact changes), run the
 root `just shipped-schemas`; `shipped_artifacts::shipped_artifact_is_fresh`
 fails with that command, and a code-only change to preparation bumps
-`shipped::PREPARATION_REVISION`. Action shapes are Darkmatter's: `action.yaml`'s
+`shipped::PREPARATION_REVISION`. Do not shadow `claudine.yaml` with a
+reduced schema (such as a copy of `inline-compose.yaml`) to speed a test up:
+preparation is precompiled, and shadowing only stops the test checking the
+shipped schemas. Shadow only when shadowing or a custom definition is the
+subject. Action shapes are Darkmatter's: `action.yaml`'s
 categories and bundles, the `cancelled-*` types, and `loop`'s loose verbs are
 mappings whose values reference per-verb types `@darkmatter:lifecycle` (a
 reserved reference that resolves from Darkmatter's embedded partials, so the

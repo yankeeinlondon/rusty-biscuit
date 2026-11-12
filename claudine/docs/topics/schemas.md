@@ -1113,7 +1113,8 @@ name the root command when either lower artifact is out of date. If you
 forget, the L1 test `shipped_artifacts::shipped_artifact_is_fresh` fails with
 the same command in its message. A code-only change that alters the prepared
 result also increments `PREPARATION_REVISION` in
-[`schema/shipped.rs`](../../lib/src/composition/schema/shipped.rs).
+[`schema/shipped.rs`](../../lib/src/composition/schema/shipped.rs) (see
+[When to bump the preparation revision](../../../simplified-schema/docs/topics/shipped-artifacts.md#when-to-bump-the-preparation-revision)).
 
 **When the artifact does not fit, nothing breaks.** The artifact is used only
 when its header proves it was generated from exactly the compiled-in texts,
@@ -1128,8 +1129,17 @@ prepared bundle in use, and the other way around.
 only after discovery has chosen a file for each name:
 
 - A same-name file in a disk schema location still wins. It is prepared from
-  disk at run time, while the embedded files it did not replace still come
-  from the artifact.
+  disk at run time, with every check, while the embedded files it did not
+  replace still come from the artifact. For example, a
+  `schemas/claudine.yaml` at a repository's root replaces the built-in
+  `claudine.yaml` trigger for documents in that repository, while the
+  built-in `inline-compose.yaml` and `sequence.yaml` triggers are still
+  served prepared.
+- Shadowing changes which schema a document is checked against; it is not a
+  way to make a command or a test faster. The built-in triggers are already
+  prepared, so a test that replaces `claudine.yaml` with a smaller schema
+  only stops checking what users get. Shadow a trigger only when the
+  shadowing itself, or a custom definition, is what the test is about.
 - A bundle that is not exactly Claudine's (another name, or any file whose
   text differs) is prepared from its own text.
 - `md` and DMLS do not read Claudine's artifact. DMLS still reads the host

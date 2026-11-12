@@ -50,7 +50,7 @@ pub const OWNER: &str = "claudine";
 /// Claudine's preparation revision. Increment it whenever code changes what
 /// the shipped sources prepare to (a record's shape, or how the bundle or the
 /// host catalog is prepared), then run `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 1;
+pub const PREPARATION_REVISION: u32 = 2;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "claudine/lib/generated/shipped.json";
@@ -225,8 +225,9 @@ fn accept_globals(_: &Acceptance<'_>, record: GlobalCatalogRecord) -> Result<Glo
 }
 
 /// Prepares the payload from the compiled sources over the freshly prepared
-/// Simplified Schema data `lower`, consulting no artifact, registry, or memo,
-/// and runs every check discovery and catalog loading run.
+/// Simplified Schema data `lower`, consulting no artifact, registry, or
+/// identity-keyed memo, and runs every check discovery and catalog loading
+/// run.
 ///
 /// ## Errors
 ///

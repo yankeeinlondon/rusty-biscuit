@@ -386,6 +386,35 @@ fn a_bundle_document_outside_the_sources_is_refused() {
     assert_record_refused(bytes, FallbackReason::UnusableRecord, "/payload/bundle/documents/0/name");
 }
 
+/// The index of the first bundle document holding a payload record.
+fn first_payload_index(value: &Value) -> usize {
+    value["payload"]["bundle"]["documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|document| document["outcome"].get("Payload").is_some())
+        .expect("the bundle prepares a payload")
+}
+
+#[test]
+fn a_payload_digest_of_another_revision_is_refused() {
+    let mut index = 0;
+    let bytes = edited(|value| {
+        index = first_payload_index(value);
+        value["payload"]["bundle"]["documents"][index]["outcome"]["Payload"]["digest"]["revision"] = json!(99);
+    });
+    assert_record_refused(bytes, FallbackReason::UnusableRecord, &format!("/payload/bundle/documents/{index}/outcome/Payload/digest/revision"));
+}
+
+#[test]
+fn an_absent_payload_digest_is_malformed() {
+    let bytes = edited(|value| {
+        let index = first_payload_index(value);
+        value["payload"]["bundle"]["documents"][index]["outcome"]["Payload"].as_object_mut().unwrap().shift_remove("digest");
+    });
+    assert_record_refused(bytes, FallbackReason::MalformedArtifact, "/payload/bundle");
+}
+
 #[test]
 fn a_host_catalog_at_another_path_is_refused() {
     let bytes = edited(|value| value["payload"]["globals"]["identity"] = json!("claudine/schemas/other.yaml"));

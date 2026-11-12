@@ -17,6 +17,12 @@ any provider starts.
 events allow which actions, and how a document outside `claudine/` reaches
 them.
 
+The binary also carries the prepared form of the eight bundle files and
+`globals.yaml`, checked in as `claudine/lib/generated/shipped.json`. After
+editing any of them, run `just shipped-schemas` from the repository root
+and commit the regenerated artifacts (see
+[How the built-in copy is prepared](../docs/topics/schemas.md#how-the-built-in-copy-is-prepared)).
+
 | File | Kind | Role |
 | --- | --- | --- |
 | `action.yaml` | library (`kind: schema`) | the four action types (`communicate`, `flow`, `shell`, `expression`), the two dictionary-bundle types (`bundle`, `initialize-bundle`), and the `cancelled` selections, each verb's shape referenced from Darkmatter |
