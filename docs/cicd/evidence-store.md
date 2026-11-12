@@ -29,12 +29,13 @@ Its current status matters more than its features:
   `evaluation_publication_disabled` to every caller, so the service never
   declares that a cell is covered.
 - **Retention is not enabled.** No retention-verifier credential is
-  provisioned, so no real evidence is ever pruned.
-- **Nothing is deployed yet.** The procedures below are complete, but the
-  development environment has not been provisioned. Every endpoint on this
+  provisioned, so no real evidence is ever pruned. Until one is, producers
+  must not send evidence automatically; see
+  [Forecast capacity](#forecast-capacity-with-the-inventory).
+- **Only the development environment is deployed.** Every endpoint on this
   page is a placeholder such as
   `https://evidence-store-development.<your-subdomain>.workers.dev`; substitute
-  the URL of your own deployment.
+  the URL of your own deployment (the `endpoint` in its deploy manifest).
 
 ### Terms used on this page
 
@@ -391,6 +392,47 @@ A refusal never deletes existing evidence, and collections are never refused
 for capacity, so a failure is always recorded; only its files wait. The
 thresholds and allowances are `quotas.capacity` in `SERVICE_CONFIG`. See
 [Storage budget](../../tools/evidence-store/api/README.md#storage-budget).
+
+### Forecast capacity with the inventory
+
+The alerts above react to usage. To see *ahead* whether the free tier holds
+for a year, run the read-only inventory. It reads the existing evidence (the
+remote `refs/notes/ci-local/*` notes, retained report and proof files on this
+host, recent GitHub Actions artifacts) and the whole Cloudflare account's
+current D1 and R2 usage, then projects 12 months:
+
+```sh
+set -a; source ~/.env; set +a   # CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, GH_TOKEN
+just evidence-store inventory --out /abs/inventory.json
+```
+
+It exits 0 with `feasible: true` when every source answered and no projected
+allowance crosses 80%, and 1 otherwise, naming each missing source or breach.
+Each projection uses p95 sizes and twice the observed daily volume, then adds
+the account's current usage (which already includes the store's own, so that
+part is counted twice on purpose).
+
+How each allowance is projected:
+
+| Allowance | Projection |
+| --- | --- |
+| D1 size, rows written | Every observation ever sent, with nothing pruned |
+| R2 operations | Twice the daily volume, every month |
+| R2 storage | Under retention: each cell's latest pass and unresolved failures, plus 14 days of superseded files |
+
+The report also prints the R2 storage **if nothing were ever pruned**, for
+information only. Measured on 2026-11-11 that was about 70 GB, many times
+the 8 GiB allowance in the first month, against about 3.4 GB (39%) under
+retention. The gap comes from large test reports (p95 near 1 MB) multiplied
+by every attempt. So the R2 projection only holds while this rule does:
+
+> **Producers must not send evidence to the store automatically until a
+> retention verifier is certifying prunes.** Until then evidence arrives only
+> through explicit ingestion, and only each cell's latest passing run plus
+> its unresolved failures should be sent.
+
+If the rule is broken, the service still refuses uploads at 80% rather than
+deleting anything, so evidence stops arriving; it is never lost.
 
 ## Retention (not enabled)
 
