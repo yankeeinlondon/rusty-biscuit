@@ -57,4 +57,31 @@ Administration:
 - there is a **global** `--help`/`-h` switch that can be used anywhere in the CLI to get help; for most commands the help you get is specific to where you are in the API:
     - `claudine -h` - broad help overview listing commands, etc.
     - `claudine hooks -h`, `claudine mcp -h`, and the other administrative and shared-resource subcommands print their own help, and each provider wrapper (`claudine codex -h`, etc.) prints wrapper-specific help
-    - `claudine compose -h`, `claudine inline-compose -h`, and `claudine sequence -h` currently print the same broad overview as `claudine -h`; per-command help for these three composition commands is **planned**
+    - `claudine compose -h`, `claudine inline-compose -h`, and `claudine sequence -h` print that command's own compact reference (see [Help for the composition commands](#help-for-the-composition-commands))
+
+### Help for the composition commands
+
+Where you put the help switch decides which screen you get:
+
+| You type | You get |
+| --- | --- |
+| `claudine -h compose prompt.md` | the grouped overview, as for `claudine -h` (help comes before the command) |
+| `claudine compose -h` | the `compose` reference |
+| `claudine compose prompt.md name=Ken --help` | the `compose` reference; `prompt.md` is never opened |
+| `claudine compose prompt.md -- --help` | an ordinary run: the document is composed and the provider launches with `--help` in its arguments |
+
+The command reference shows the usage line (`Usage: claudine compose [OPTIONS] <ARG>...`), what the arguments after the command mean (one file reference, then optional `key=value` setters and arguments for the provider), every Claudine option including the ten provider shortcuts (`--claude` … `--antigravity`), and an example of forwarding to the provider. Provider-native options are not listed; the last row of the table shows how to pass the provider its own help switch.
+
+```sh
+# Help needs no file: neither of these reads, checks, or creates anything.
+claudine compose -h
+claudine sequence missing.md --help
+
+# Disable color on either side of the command.
+claudine --plain inline-compose --help
+claudine inline-compose --help --plain
+```
+
+A help request after the command is answered before any other argument is checked. An unknown provider, a missing option value, malformed `--set` JSON, `--dry-run-shell` without `--dry-run`, or conflicting switches next to `--help` still print the reference and exit 0, with nothing on stderr. Nothing is composed, no configuration is created, no lifecycle action runs, and no provider launches. Only the first literal `--` changes this: everything after it belongs to the provider, so a `--help` there is forwarded instead of answered.
+
+Shell completion is unaffected: completing a command line that contains `--help` lists candidates rather than printing help.

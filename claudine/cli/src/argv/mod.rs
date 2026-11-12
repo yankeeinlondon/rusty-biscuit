@@ -15,8 +15,10 @@
 //! - **Rule 2** — fuzzy `--provider <value>` values are canonicalized to a
 //!   known slug via `Provider::fuzzy_match_cli_name`.
 //! - **Rule 4** — on composition subcommands, hoist a trailing `--help` or
-//!   `-h` token to position 1 so the root help flag fires instead of being
-//!   trapped inside clap's greedy positional collector.
+//!   `-h` token to position 1 so it is never trapped inside clap's greedy
+//!   positional collector. The executable does not rely on this rewrite to
+//!   choose a help screen: [`select_composition_help`] reads the original
+//!   argv first and answers a composition help request before normalization.
 //!
 //! Composition provider-argument forwarding is **not** a normalization rule.
 //! It is a separate ownership partition ([`partition_composition_tail`]) that
@@ -51,7 +53,7 @@ mod rule4_help_hoist;
 pub(crate) use partition::{OwnedFlags, partition_composition_tail};
 pub(crate) use rule1_provider_bool::provider_for_boolean_flag;
 pub(crate) use rule2_canonicalize::is_fuzzy_provider_value;
-pub(crate) use rule4_help_hoist::hoist_composition_help;
+pub(crate) use rule4_help_hoist::{HelpDestination, hoist_composition_help, select_composition_help};
 
 /// Wrapper subcommands that hand off to an external agent CLI.
 pub(crate) const WRAPPER_SUBCOMMANDS: &[&str] = &[
@@ -187,8 +189,9 @@ fn normalize_inner(raw: Vec<OsString>, completion_active: bool) -> Vec<OsString>
         index += 1;
     }
 
-    // Rule 4: hoist a trailing `--help` / `-h` to position 1 so the root help
-    // handler fires instead of being trapped in clap's greedy positional.
+    // Rule 4: hoist a trailing `--help` / `-h` to position 1 so it is not
+    // trapped in clap's greedy positional. The executable selects composition
+    // help from the original argv before this runs.
     //
     // Provider-argument forwarding is handled *after* normalization by
     // [`partition_composition_tail`], which owns the split between Claudine

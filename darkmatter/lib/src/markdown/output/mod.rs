@@ -34,7 +34,7 @@ pub(crate) use ast::parse_mdast;
 pub use html::HtmlOptions;
 pub use string::as_string;
 pub use terminal::{
-    ColorDepth, HyperlinkMode, ImageRenderer, ItalicMode, MermaidMode, TerminalImageMode,
+    ColorDepth, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode,
     TerminalOptions,
 };
 

@@ -92,13 +92,15 @@ companion-suites = ["archive-path-guard", "test-audit-typecheck", "test-audit-vi
 requires-toolchain = true
 # The kache and release contract suites execute these scripts, and the
 # distribution contracts read the scripts `distribute-binaries.yml` runs to
-# check every subcommand it names. Source is otherwise left out of the
-# planner's test-input scan, so without this a script-only change would run
-# none of them; with it, the change adds one narrowed L1 cell naming the tests
-# that spell each path.
+# check every subcommand it names. The shipped-schema coordinator's contracts
+# run `scripts/shipped_schemas.py` the same way. Source is otherwise left out
+# of the planner's test-input scan, so without this a script-only change would
+# run none of them; with it, the change adds one narrowed L1 cell naming the
+# tests that spell each path.
 source-inputs = [
     "scripts/kache-config-merge.py",
     "scripts/kache-host.sh",
+    "scripts/shipped_schemas.py",
     "scripts/ci/release_path.py",
     "scripts/ci/integration_release.py",
     "scripts/ci/distribution.py",

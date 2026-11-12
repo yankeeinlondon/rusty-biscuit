@@ -54,7 +54,7 @@ install *args="":
     @just _build biscuit-terminal "biscuit-terminal Library" --release {{ args }}
     @just _build darkmatter "Darkmatter Library" --release {{ args }}
     @just build --release
-    @just _install "./cli" "Claudine" {{ args }}
+    @just _install "./cli" "Claudine" "" {{ args }}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 
@@ -465,6 +465,15 @@ generate-models:
     just generate-models
     echo
     cd -
+
+# Regenerate this area's shipped artifact, `lib/generated/shipped.json` (the
+# prepared trigger bundle and host catalog); run after editing `schemas/` or
+# the code that prepares them. `--check` instead fails when it is stale. Both
+# first require Simplified Schema's and Darkmatter's artifacts to be current
+# and otherwise name the root `just shipped-schemas`, which regenerates every
+# artifact in order.
+shipped-schemas *args="--write":
+    cargo run --quiet -p claudine --example shipped_schemas -- {{ args }}
 
 # rewrite schemas/globals.lifecycle.json, the host lifecycle artifact DMLS reads
 regen-lifecycle-artifact:

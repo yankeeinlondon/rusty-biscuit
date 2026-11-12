@@ -137,7 +137,7 @@ lint-fix *args="":
 
 install *args="":
     @just build --release
-    @just _install "./cli" "Unchained AI" {{ args }}
+    @just _install "./cli" "Unchained AI" "" {{ args }}
 
 check:
     @echo ""

@@ -91,6 +91,14 @@ const EXIT_ALLOWLIST: &[AllowedExit] = &[
         reason: "`run` returned an error before the runtime existed",
     },
     AllowedExit {
+        file: "main.rs",
+        function: "run",
+        position: "if let Some(destination) = argv::select_composition_help(&raw_argv, argv::completion_mode_active())",
+        form: "exit_before_runtime",
+        reason: "a composition help request was answered from the original argv \
+                 before the runtime existed, so no delivery can have started",
+    },
+    AllowedExit {
         file: "commands/compose/interrupt.rs",
         function: "exit_after_notice",
         position: TAIL,

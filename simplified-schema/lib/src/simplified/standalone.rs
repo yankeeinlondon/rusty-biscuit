@@ -247,7 +247,22 @@ pub fn parse_standalone_schema_document(
     source: &str,
     path: impl AsRef<Path>,
 ) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
-    parse_standalone(source, path.as_ref(), Admission::Required)
+    parse_standalone(source, path.as_ref(), Admission::Required(crate::shipped::PreparationMode::Runtime))
+}
+
+/// [`parse_standalone_schema_document`] admitted against the envelope
+/// definitions `mode` prepares with: the process's loaded definitions, or a
+/// generation's freshly prepared ones.
+///
+/// ## Errors
+///
+/// As [`parse_standalone_schema_document`].
+pub fn parse_standalone_schema_document_with_mode(
+    source: &str,
+    path: impl AsRef<Path>,
+    mode: crate::shipped::PreparationMode<'_>,
+) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
+    parse_standalone(source, path.as_ref(), Admission::Required(mode))
 }
 
 /// [`parse_standalone_schema_document`] for a document whose shape a selected
@@ -290,8 +305,8 @@ pub(crate) fn parse_standalone_unadmitted(source: &str, path: &Path) -> Result<O
 
 #[derive(Clone, Copy)]
 enum Admission<'a> {
-    /// Admitted against the compiled definition.
-    Required,
+    /// Admitted against the compiled definition, as `mode` prepares it.
+    Required(crate::shipped::PreparationMode<'a>),
     /// Already accepted by a selected definition, as this value.
     Selected(&'a serde_json::Value),
     /// Read as written: the bootstrap of the compiled definitions.
@@ -316,8 +331,8 @@ fn parse_standalone(
     // carriers (`$schema`, `types`) are never converted, so reading them from
     // the original is reading the admitted value.
     let metadata = match admission {
-        Admission::Required => {
-            let admitted = crate::envelope::admit_recognized(&recognized, source, path)?;
+        Admission::Required(mode) => {
+            let admitted = crate::envelope::admit_recognized_with_mode(&recognized, source, path, mode)?;
             if !admitted.problems.is_empty() {
                 return Err(rejected_envelope(&recognized, source, path, &admitted));
             }

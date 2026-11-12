@@ -11,6 +11,7 @@ use biscuit_file::FileResolutionContext;
 use serde_json::Value;
 use serde_yaml_ng::Value as YamlValue;
 use simplified_schema::resolve::*;
+use simplified_schema::shipped::PreparationMode;
 use simplified_schema::{SchemaError, SchemaRoot, SchemaShape, StandaloneSchemaDocument, embedded::EmbeddedDocument};
 
 use super::embedded::SHIPPED_SOURCES;
@@ -180,6 +181,17 @@ pub fn prepare_embedded_schema_in(
     simplified_schema::resolve::prepare_embedded_schema_in(path, documents, bundle, SHIPPED_SOURCES)
 }
 
+/// [`simplified_schema::resolve::prepare_embedded_schema_with_mode`] with
+/// Darkmatter's shipped documents.
+pub fn prepare_embedded_schema_with_mode(
+    path: &str,
+    documents: &[EmbeddedDocument<'_>],
+    bundle: &str,
+    mode: simplified_schema::shipped::PreparationMode<'_>,
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    simplified_schema::resolve::prepare_embedded_schema_with_mode(path, documents, bundle, SHIPPED_SOURCES, mode)
+}
+
 /// [`prepare_embedded_schema_in`] with no bundle confinement, for tests.
 #[cfg(test)]
 pub fn prepare_embedded_schema(path: &str, documents: &[EmbeddedDocument<'_>]) -> Result<ResolvedSchema, SchemaError> {
@@ -197,6 +209,18 @@ pub fn prepare_embedded_inline_schema(
     simplified_schema::resolve::prepare_embedded_inline_schema(value, importer, documents, bundle, SHIPPED_SOURCES)
 }
 
+/// [`simplified_schema::resolve::prepare_embedded_inline_schema_with_mode`]
+/// with Darkmatter's shipped documents.
+pub fn prepare_embedded_inline_schema_with_mode(
+    value: &YamlValue,
+    importer: &str,
+    documents: &[EmbeddedDocument<'_>],
+    bundle: &str,
+    mode: simplified_schema::shipped::PreparationMode<'_>,
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    simplified_schema::resolve::prepare_embedded_inline_schema_with_mode(value, importer, documents, bundle, SHIPPED_SOURCES, mode)
+}
+
 /// [`simplified_schema::resolve::prepare_embedded_catalog_declaration`] with
 /// Darkmatter's shipped documents.
 pub fn prepare_embedded_catalog_declaration(
@@ -205,7 +229,26 @@ pub fn prepare_embedded_catalog_declaration(
     documents: &[EmbeddedDocument<'_>],
     sharing: Sharing,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
-    simplified_schema::resolve::prepare_embedded_catalog_declaration(value, importer, documents, sharing, SHIPPED_SOURCES)
+    prepare_embedded_catalog_declaration_with_mode(value, importer, documents, sharing, PreparationMode::Runtime)
+}
+
+/// [`prepare_embedded_catalog_declaration`] in `mode`; shipped-artifact
+/// generation passes [`PreparationMode::Uncached`].
+pub fn prepare_embedded_catalog_declaration_with_mode(
+    value: &YamlValue,
+    importer: &str,
+    documents: &[EmbeddedDocument<'_>],
+    sharing: Sharing,
+    mode: PreparationMode<'_>,
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    simplified_schema::resolve::prepare_embedded_catalog_declaration_with_mode(
+        value,
+        importer,
+        documents,
+        sharing,
+        SHIPPED_SOURCES,
+        mode,
+    )
 }
 
 #[cfg(test)]

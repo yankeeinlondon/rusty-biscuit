@@ -5,11 +5,14 @@ macro_rules! lib_target_tests {
 
 mod args;
 mod commands;
-mod env;
 mod exit;
 mod perf;
 mod shell_integration;
 
+// The library's `env`, not a second copy: its test-only overrides are read
+// solely by debug builds and integration tests, so a private copy here is dead
+// code in a release build.
+use worktree_cli::env;
 use args::{Cli, Commands};
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;

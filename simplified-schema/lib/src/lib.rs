@@ -63,6 +63,7 @@ pub mod resolve;
 pub mod schema;
 pub mod scope;
 pub mod setter_value;
+pub mod shipped;
 pub mod simplified;
 pub mod slots;
 pub mod span;
@@ -130,13 +131,15 @@ pub use simplified::{
     locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, mapping_separator,
     parse_property_definition, parse_property_definition_with_source, parse_schema_declaration,
     parse_type_definition_value,
-    parse_schema_declaration_with_source, parse_selected_standalone_schema_document, parse_standalone_schema_document,
+    parse_schema_declaration_with_source, parse_selected_standalone_schema_document, parse_standalone_schema_document, parse_standalone_schema_document_with_mode,
     parse_yaml_schema,
     suggestions_for_def, suggestions_for_path, to_json_schema, to_json_schema_with_definitions,
 };
 pub use span::{SourceSpan, Spanned, line_col_of_offset, line_of_offset};
 pub use timings::{CompileCache, ValidationStage, ValidationTimings};
-pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
+pub use validate::{
+    CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, LayerRole, LayeredIdentity, PositionMap, SchemaDigest, SchemaIdentity, ValidatorCache,
+};
 pub use validation::{
     CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer, SCHEMA_CONSTRAINT_CODE,
     SCHEMA_INVALID_FILE_REFERENCE_CODE, SCHEMA_KIND_CHECK_CODE, SCHEMA_MISSING_REQUIRED_CODE, SCHEMA_PREPARE_CODE,
@@ -150,7 +153,8 @@ pub use validation::{
 /// Cleared: the shared, conversion, completion-alternative, and
 /// example-target validator caches; the conversion-plan, format-validator,
 /// example-artifact, emitted-pattern, named-type parse, and root-arm caches. A host
-/// clears its own memos beside this call.
+/// clears its own memos beside this call. The shipped artifact registry (the
+/// envelope definitions) is kept.
 #[doc(hidden)]
 pub fn reset_process_caches() {
     validate::SHARED_VALIDATOR_CACHE.clear();

@@ -30,7 +30,8 @@ use super::{
 };
 
 /// One segment in a structural path through a schema declaration.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum SchemaSourcePathSegment {
     /// A literal or pattern mapping property.
     Property(String),
@@ -39,7 +40,7 @@ pub enum SchemaSourcePathSegment {
 }
 
 /// A structural path used to query a [`SchemaSourceMap`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SchemaSourcePath(Vec<SchemaSourcePathSegment>);
 
 impl SchemaSourcePath {
@@ -243,7 +244,8 @@ impl From<LocatedDefinitionFailure> for SchemaError {
 ///
 /// Its authored span is the [`SchemaSpanKind::ImportName`] span at `path`
 /// in `source`'s map, for bare and explicit references alike.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SchemaReferenceSite {
     /// The source that wrote the reference.
     pub source: SchemaSourceId,

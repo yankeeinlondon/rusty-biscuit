@@ -109,7 +109,7 @@ lint-fix:
 # install CLI binary
 install *args="":
     @just build --release
-    @just _install "./cli" "Biscuit Location" {{args}}
+    @just _install "./cli" "Biscuit Location" "" {{args}}
 
 # build and show the docs for the library code
 docs:

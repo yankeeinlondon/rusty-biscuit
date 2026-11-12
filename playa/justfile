@@ -54,7 +54,7 @@ build *args="":
 # Install the CLI
 install *args="":
     @just build --release
-    @just _install "./cli" "Playa CLI" {{args}}
+    @just _install "./cli" "Playa CLI" "" {{args}}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
 

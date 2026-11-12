@@ -3,12 +3,14 @@
 //! A [`PositionMap`] is built at most once per validation source snapshot and
 //! shared by every problem that snapshot reports, including each root-union
 //! arm. Problems are located only after a validation has decided its final
-//! problem list ([`PositionMap::locate_all`]), so a host that builds its map
-//! lazily builds none for a validation that reports nothing. Lookup is passive: it never parses,
-//! evaluates, or resolves anything.
+//! problem list ([`PositionMap::locate_all`]), so a deferred map
+//! ([`PositionMap::deferred`]) builds nothing for a validation that reports
+//! nothing. Lookup is passive: it never evaluates or resolves anything.
 
 use std::collections::HashSet;
+use std::fmt;
 use std::ops::Range;
+use std::sync::{Arc, OnceLock};
 
 use biscuit_file::serde_yaml_ng;
 use indexmap::IndexMap;
@@ -31,9 +33,48 @@ use crate::mapping_orders::MappingOrders;
 /// Otherwise only top-level keys are located, at column 1.
 /// [`PositionMap::new`] is the empty map for source-free validation: its
 /// problems carry no coordinates.
-#[derive(Debug, Clone, Default)]
+///
+/// A map made by [`PositionMap::deferred`] keeps its text and builds its
+/// coordinates on the first query that needs one ([`Self::is_empty`],
+/// [`Self::byte_range`], or [`Self::locate_all`] with at least one problem).
+/// Its clones share the text and that one build, from any thread.
+#[derive(Clone)]
 pub struct PositionMap {
-    source: PositionSource,
+    state: MapState,
+}
+
+#[derive(Clone)]
+enum MapState {
+    Built(PositionSource),
+    Deferred(Arc<DeferredSource>),
+}
+
+/// The exact text of a deferred map, and its coordinates once a query needs
+/// them.
+struct DeferredSource {
+    text: Arc<str>,
+    built: OnceLock<PositionSource>,
+}
+
+impl Default for PositionMap {
+    fn default() -> Self {
+        Self { state: MapState::Built(PositionSource::Empty) }
+    }
+}
+
+/// Never forces a deferred map: an unbuilt one shows only its text length.
+impl fmt::Debug for PositionMap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("PositionMap");
+        match &self.state {
+            MapState::Built(source) => debug.field("source", source),
+            MapState::Deferred(deferred) => match deferred.built.get() {
+                Some(source) => debug.field("source", source),
+                None => debug.field("deferred_text_len", &deferred.text.len()),
+            },
+        };
+        debug.finish()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -100,9 +141,25 @@ impl PositionMap {
         Self::default()
     }
 
+    /// The map [`build_position_map`] would build over `text`, built only
+    /// when a query first needs a coordinate. Coordinates are the same as the
+    /// eager map's: offsets into `text` exactly as given, with no line-ending
+    /// or byte-order-mark normalization.
+    pub fn deferred(text: Arc<str>) -> Self {
+        Self { state: MapState::Deferred(Arc::new(DeferredSource { text, built: OnceLock::new() })) }
+    }
+
+    /// The coordinates, building a deferred map's on first use.
+    fn source(&self) -> &PositionSource {
+        match &self.state {
+            MapState::Built(source) => source,
+            MapState::Deferred(deferred) => deferred.built.get_or_init(|| build_source(&deferred.text)),
+        }
+    }
+
     /// `true` when no position can be reported.
     pub fn is_empty(&self) -> bool {
-        match &self.source {
+        match self.source() {
             PositionSource::Empty => true,
             PositionSource::Located { .. } => false,
             PositionSource::TopLevel(keys) => keys.is_empty(),
@@ -130,49 +187,13 @@ impl PositionMap {
         base_line: u32,
         orders: &MappingOrders,
     ) -> Option<Self> {
-        let mut root = locate_frontmatter_value(&text[yaml.clone()], yaml.start)?;
-        let mut mappings = 0;
-        let mut pointer = String::new();
-        let mut aliases = HashSet::new();
-        if !matches_orders(&mut root, text, orders, &mut pointer, &mut mappings, &mut aliases)
-            || mappings + covered_by_aliases(orders, &aliases) != orders.len()
-        {
-            return None;
-        }
-        Some(Self {
-            source: PositionSource::Located {
-                root,
-                lines: LineIndex::new(&text[..yaml.end], base_line),
-            },
-        })
+        project_source(text, yaml, base_line, orders).map(|source| Self { state: MapState::Built(source) })
     }
 
     /// Locates only the top-level keys of `yaml`, whose first line is
     /// `base_line`.
     pub fn top_level(yaml: &str, base_line: u32) -> Self {
-        let mut keys = IndexMap::new();
-        for (idx, line) in yaml.lines().enumerate() {
-            let Some(first) = line.chars().next() else {
-                continue;
-            };
-            if first.is_whitespace() || first == '#' || first == '-' || first == '.' {
-                continue;
-            }
-            let Some(colon) = mapping_separator(line, false) else {
-                continue;
-            };
-            let raw = line[..colon].trim();
-            let key = raw
-                .trim_start_matches(['"', '\''])
-                .trim_end_matches(['"', '\''])
-                .to_string();
-            if !key.is_empty() {
-                keys.insert(key, (base_line.saturating_add(idx as u32), 1));
-            }
-        }
-        Self {
-            source: PositionSource::TopLevel(keys),
-        }
+        Self { state: MapState::Built(top_level_source(yaml, base_line)) }
     }
 
     /// The `(line, column)` of `target` at the decoded instance pointer
@@ -183,7 +204,7 @@ impl PositionMap {
     /// has no position. A path through a scalar — content decoded from a
     /// block or quoted scalar — stops at that scalar's start.
     pub(super) fn locate(&self, segments: &[String], target: PositionTarget<'_>) -> Option<(u32, u32)> {
-        match &self.source {
+        match self.source() {
             PositionSource::Empty => None,
             PositionSource::TopLevel(keys) => {
                 let key = match (segments.first(), target) {
@@ -218,7 +239,7 @@ impl PositionMap {
     /// alias, or a path below one, it is the `*name` token. `None` when the
     /// map holds no authored tree (empty, or top-level keys only).
     pub fn byte_range(&self, problem: &ValidationProblem) -> Option<Range<usize>> {
-        let PositionSource::Located { root, .. } = &self.source else {
+        let PositionSource::Located { root, .. } = self.source() else {
             return None;
         };
         locate_range_in(root, problem.instance_path.segments(), problem_target(problem))
@@ -227,6 +248,9 @@ impl PositionMap {
     /// Locates every problem of a settled report; does nothing when
     /// `problems` is empty.
     pub fn locate_all(&self, problems: &mut [ValidationProblem]) {
+        if problems.is_empty() {
+            return;
+        }
         for problem in problems {
             self.locate_problem(problem);
         }
@@ -368,14 +392,61 @@ fn with_child(pointer: &mut String, segment: &str, visit: impl FnOnce(&mut Strin
 /// can be trusted; when it cannot (or does not parse), only top-level keys
 /// are located, at column 1. Aliases are projected as leaves located at their
 /// `*name` token. Quoted keys (`"foo"`, `'foo'`) are located by
-/// their decoded key string.
+/// their decoded key string. [`PositionMap::deferred`] builds the same map
+/// when its first coordinate is requested.
 pub fn build_position_map(yaml: &str) -> PositionMap {
+    PositionMap { state: MapState::Built(build_source(yaml)) }
+}
+
+/// The one construction of a map from text, eager or deferred.
+fn build_source(yaml: &str) -> PositionSource {
+    crate::note_work!(PositionMapConstruction);
     serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml)
         .ok()
-        .and_then(|value| {
-            PositionMap::project(yaml, 0..yaml.len(), 1, &MappingOrders::collect(&value))
-        })
-        .unwrap_or_else(|| PositionMap::top_level(yaml, 1))
+        .and_then(|value| project_source(yaml, 0..yaml.len(), 1, &MappingOrders::collect(&value)))
+        .unwrap_or_else(|| top_level_source(yaml, 1))
+}
+
+/// The projection [`PositionMap::project`] makes.
+fn project_source(text: &str, yaml: Range<usize>, base_line: u32, orders: &MappingOrders) -> Option<PositionSource> {
+    let mut root = locate_frontmatter_value(&text[yaml.clone()], yaml.start)?;
+    let mut mappings = 0;
+    let mut pointer = String::new();
+    let mut aliases = HashSet::new();
+    if !matches_orders(&mut root, text, orders, &mut pointer, &mut mappings, &mut aliases)
+        || mappings + covered_by_aliases(orders, &aliases) != orders.len()
+    {
+        return None;
+    }
+    Some(PositionSource::Located {
+        root,
+        lines: LineIndex::new(&text[..yaml.end], base_line),
+    })
+}
+
+/// The top-level keys [`PositionMap::top_level`] locates.
+fn top_level_source(yaml: &str, base_line: u32) -> PositionSource {
+    let mut keys = IndexMap::new();
+    for (idx, line) in yaml.lines().enumerate() {
+        let Some(first) = line.chars().next() else {
+            continue;
+        };
+        if first.is_whitespace() || first == '#' || first == '-' || first == '.' {
+            continue;
+        }
+        let Some(colon) = mapping_separator(line, false) else {
+            continue;
+        };
+        let raw = line[..colon].trim();
+        let key = raw
+            .trim_start_matches(['"', '\''])
+            .trim_end_matches(['"', '\''])
+            .to_string();
+        if !key.is_empty() {
+            keys.insert(key, (base_line.saturating_add(idx as u32), 1));
+        }
+    }
+    PositionSource::TopLevel(keys)
 }
 
 #[cfg(test)]
@@ -391,7 +462,7 @@ mod tests {
     }
 
     fn is_located(map: &PositionMap) -> bool {
-        matches!(map.source, PositionSource::Located { .. })
+        matches!(map.source(), PositionSource::Located { .. })
     }
 
     const ACCEPTANCE_YAML: &str = "start:\n  - then:\n      - say: hello\n      - sya: goodbye\n";
@@ -418,7 +489,7 @@ mod tests {
         let block = biscuit_file::frontmatter::extract_frontmatter_block(document).unwrap().unwrap();
         let orders = MappingOrders::collect(&serde_yaml_ng::from_str(block.yaml).unwrap());
         let map = PositionMap::project(document, block.yaml_span.clone(), 1, &orders).unwrap();
-        let PositionSource::Located { root, lines } = &map.source else {
+        let PositionSource::Located { root, lines } = map.source() else {
             panic!("expected a located map");
         };
         let offset = locate_in(root, &segments("/start/0/then/1"), PositionTarget::Key("sya")).unwrap();
@@ -529,7 +600,7 @@ mod tests {
     }
 
     fn range_text<'a>(map: &PositionMap, yaml: &'a str, pointer: &str) -> &'a str {
-        let PositionSource::Located { root, .. } = &map.source else {
+        let PositionSource::Located { root, .. } = map.source() else {
             panic!("{yaml:?} must be located");
         };
         &yaml[locate_range_in(root, &segments(pointer), PositionTarget::Value).expect("located")]
@@ -552,7 +623,7 @@ mod tests {
         let yaml = "a: 1 # *b\nq: \"*b\"\nblock: |\n  *b\nm:\n  k: v\n";
         let map = build_position_map(yaml);
         assert!(is_located(&map));
-        let PositionSource::Located { root, .. } = &map.source else { unreachable!() };
+        let PositionSource::Located { root, .. } = map.source() else { unreachable!() };
         let mut root = root.clone();
         let orders = MappingOrders::collect(&serde_yaml_ng::from_str(yaml).unwrap());
         let mut aliases = HashSet::new();
@@ -598,7 +669,7 @@ mod tests {
     fn a_list_root_is_projected() {
         let yaml = "- macOS\n- linux\n";
         let map = build_position_map(yaml);
-        let PositionSource::Located { root, .. } = &map.source else {
+        let PositionSource::Located { root, .. } = map.source() else {
             panic!("a list root must be located");
         };
         let range = locate_range_in(root, &segments("/0"), PositionTarget::Value).unwrap();

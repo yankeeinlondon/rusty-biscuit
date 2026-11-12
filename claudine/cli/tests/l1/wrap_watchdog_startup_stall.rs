@@ -82,9 +82,12 @@ const IN_WRAPPER_SLACK_MS: u64 = 300;
 /// and the summary/lifecycle rendering after the child is gone — plus host
 /// contention.
 ///
-/// Observed over the same 9 runs at 149–843 ms; 2 s is roughly 2.4× the worst
-/// local sample, for a cold or heavily loaded CI runner.
-const PROCESS_SLACK_MS: u64 = 2_000;
+/// The in-wrapper bound above is the precise gate. This backstop only has to
+/// catch a run that is never reaped, so it ends at the 10 s a loaded host is
+/// allowed (the rust-testing skill's `test-speed.md`): a 2 s
+/// slack (149–843 ms on a quiet host) failed both stall tests at 4.9–5.4 s on
+/// a heavily loaded macOS host while the child was reaped on time.
+const PROCESS_SLACK_MS: u64 = 10_000 - REAP_DEADLINE_MS;
 
 /// What the fake provider does once the wrapper starts streaming from it.
 ///

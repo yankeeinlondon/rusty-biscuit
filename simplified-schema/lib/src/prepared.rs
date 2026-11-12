@@ -23,7 +23,7 @@ use serde_json::Value;
 
 use crate::coerce::{self, ConversionPlan, NestedTemplates};
 use crate::outcome::{ValidationFailure, ValidationSuccess};
-use crate::validate::{self, FileRefAnchors, SHARED_VALIDATOR_CACHE, ValidatorCache};
+use crate::validate::{self, FileRefAnchors, SHARED_VALIDATOR_CACHE, SchemaDigest, ValidatorCache};
 use crate::{SchemaAdvisory, SchemaError, ValidationProblem, discriminant};
 
 /// A schema's compiled validators.
@@ -59,6 +59,30 @@ impl CompiledValidators {
                 .map(Self::RootUnion),
             None => cache.validator_for_shared(schema, base_dir, context).map(Self::Object),
         }
+    }
+
+    /// [`Self::build`] for a schema whose identity the caller knows (see
+    /// [`ValidatorCache::validator_for_shared_with_digest`]), so an ordinary
+    /// object schema is compiled, or found, without being serialized. A root
+    /// union's arms are wrapped as new schemas no layer describes, so each
+    /// arm is still found by its canonical hash, as [`Self::build`] finds it.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::build`].
+    pub fn build_with_digest(
+        schema: &Arc<Value>,
+        digest: SchemaDigest,
+        cache: &ValidatorCache,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Self, SchemaError> {
+        if wrapped_root_arms(schema).is_some() {
+            return Self::build(schema, cache, base_dir, context);
+        }
+        cache
+            .validator_for_shared_with_digest(schema, digest, base_dir, context)
+            .map(Self::Object)
     }
 
     /// Whether `instance` is accepted unchanged.

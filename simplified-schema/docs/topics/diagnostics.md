@@ -264,6 +264,27 @@ is reported at (the node at its instance path, or the offending key of an
 unknown-key problem), for a caller that underlines text rather than printing
 a line and column. It is `None` when the map holds no authored tree.
 
+A caller that may never need a position can hold the text instead of a built
+map. `PositionMap::deferred(Arc<str>)` keeps the text exactly as given (CRLF
+lines and a byte-order mark included) and builds the same map
+`build_position_map` would on the first request for a coordinate: `is_empty`,
+`byte_range`, or `locate_all` with at least one problem. `locate_all` over an
+empty list builds nothing. Clones share the text and that one build, from any
+thread:
+
+```rust
+use std::sync::Arc;
+use simplified_schema::PositionMap;
+
+let positions = PositionMap::deferred(Arc::from(yaml));
+positions.locate_all(&mut []);           // builds nothing
+positions.locate_all(&mut problems);     // builds once, here
+assert_eq!(problems[0].line, Some(2));
+```
+
+Envelope admission returns a deferred map, so admitting a valid envelope
+builds none.
+
 A YAML alias (`*name`) has no text for the value it expands to, so a problem
 at an alias, or anywhere below one, is reported at the `*name` token. Every
 other node in the document keeps its own position. In

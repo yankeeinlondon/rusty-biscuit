@@ -235,7 +235,7 @@ pre-existing failure.
 You are done when:
 
 - all functionality defined in phase {{phase}} has been implemented
-- all tests are passing (using `just test` in the {{ctx.current_package_area}} package area)
+- all tests are passing (using `just test` in the {{ctx.current_package_area}} package area), and none is slow (see "A Slow Test Is a Failing Test")
 - all tests meet the design requirements for testing (stated above)
 - all lints are passing (using `just lint` in the {{ctx.current_package_area}} package area)
 - all GFM tasks/todos in the plan have been completed (and have been marked as complete)
@@ -301,6 +301,12 @@ the artifact, keep going, and let the review pick it up.
     - what you decided and what the plan or spec said
     - the alternatives and their trade-offs
     - what would need redoing if the reviewer picks another option
+- do not add an item for something a repository rule already decides
+  (verification scope, which test recipe ran, leaving cross-OS evidence to CI,
+  not reformatting unrelated code, omitting tests of unchanged packages) or
+  for the phase in which work landed; describe those in the log's narrative.
+  Every item is something a reviewer must judge, so list only choices a
+  reasonable author might reverse
 - if later work depends on a decision a human might reverse, build it on your
   decision anyway; redoing it after review costs less than a stalled run
 - the only reason to stop is that the phase **cannot be completed at all**
@@ -363,5 +369,7 @@ complete until they are saved to disk.
 ::file "../_finish-before-exit.md"
 
 ::file "../_test-scope.md"
+
+::file "../_slow-tests-fail.md"
 
 ::file "../_os.md"

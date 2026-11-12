@@ -1551,9 +1551,26 @@ pub fn graphics_route() -> GraphicsRoute {
     graphics_route_with(ProbeMode::Auto)
 }
 
+/// [`graphics_route`] for a program that draws on a stream other than stdout
+/// (for example stderr while a shell wrapper captures stdout), given whether
+/// that stream is a terminal.
+///
+/// Prefer this over calling [`resolve_graphics_route`] on
+/// [`RouteInputs::from_process`]: that resolves from the environment alone, so
+/// a terminal known only by its answer to the graphics probe resolves to no
+/// pixels.
+#[must_use]
+pub fn graphics_route_for_output(output_is_tty: bool) -> GraphicsRoute {
+    let inputs = RouteInputs::from_process().with_output_is_tty(output_is_tty);
+    resolve_process_route(inputs, ProbeMode::Auto)
+}
+
 /// [`graphics_route`] with the caller's probing choice.
 pub(crate) fn graphics_route_with(probe_mode: ProbeMode) -> GraphicsRoute {
-    let mut inputs = RouteInputs::from_process();
+    resolve_process_route(RouteInputs::from_process(), probe_mode)
+}
+
+fn resolve_process_route(mut inputs: RouteInputs, probe_mode: ProbeMode) -> GraphicsRoute {
     inputs.probe_mode = probe_mode;
     let route = resolve_graphics_route(&inputs.probed());
     tracing::debug!(

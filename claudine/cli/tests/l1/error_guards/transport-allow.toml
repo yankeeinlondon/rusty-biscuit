@@ -298,3 +298,19 @@ symbol = "QwenSemanticStreamParser::feed_line"
 tag = "retained"
 reason = """
 Provider stdout is external text. The parser keeps the raw line — which is the actual diagnostic — and drops the serde error, which only reports where the JSON stopped. Recovery continues; no error is returned."""
+
+[[allow]]
+shape = "to_string_collapse"
+file = "lib/src/composition/schema/shipped.rs"
+symbol = "prepare_payload"
+tag = "retained"
+reason = """
+Artifact generation for the `shipped_schemas` developer command. The shared shipped-artifact mechanism's generation contract is String-carrying across all three owners (`simplified_schema::shipped::generate`, `FreshLower::prepare`, and Darkmatter's `FreshDarkmatter::prepare`/`prepare_payload` all return `Result<_, String>`), and the message is printed to stderr by the generator and never reaches the error walker, a lifecycle `err`, or a runtime path: a run-time refusal falls back to ordinary preparation instead."""
+
+[[allow]]
+shape = "format_context"
+file = "lib/src/composition/schema/shipped.rs"
+symbol = "prepare_payload"
+tag = "retained"
+reason = """
+The host catalog rebuild check during artifact generation. `GlobalCatalog::from_record` returns a `simplified_schema::shipped::RecordError` (a pointer and message, no typed source), and the shared generation contract is String-carrying across all three owners (see the `to_string_collapse` entry for this symbol). The message is printed by the `shipped_schemas` developer command only."""

@@ -7,6 +7,27 @@ CI runners have 2–4 cores and run the whole package suite in parallel, so a
 test near the limit on a development host times out there. Aim for about
 2.5 s when run alone on a development host.
 
+## Under load: the 10 s allowance
+
+A development host is often busy with other work, and a full package run then
+stretches every test. Nextest still marks anything over 5 s `SLOW` and the
+slow-test log records it, so read a loaded run this way:
+
+| Duration in a loaded run | Verdict |
+| --- | --- |
+| 5 s or less | passes |
+| over 5 s, under 10 s | re-measure alone; it fails only if it is over 5 s there |
+| 10 s or longer | fails, whatever it takes alone |
+
+A host is under load when its load average is well above its core count
+(`uptime`), or when other heavy jobs are visibly running. A test that reaches
+10 s competes so heavily for a shared resource that it will time out on CI.
+
+A test that asserts a wall-clock bound must survive the same load. Bound the
+quantity the code under test controls tightly (for example, the wrapper's own
+measurement of a child's lifetime), and give any whole-process wall-clock
+backstop no less than 10 s, or it fails on a busy host.
+
 These are not fixes, because the test stays slow wherever it runs: a `slow_`
 or other tier prefix, a `slow-timeout` override in `.config/nextest.toml`,
 `#[ignore]` or a `cfg` that skips the slow OS, or removing cases or
@@ -122,3 +143,36 @@ while user CPU stays low is serialization. On macOS, CoreAudio setup behaves
 this way (the `os` skill's `macos.md`). Narrow the request of every test that
 does not assert what the service returns; a live network lookup the test
 never reads is the same case. Sniff's slowest such test went 8.7 s → 2.8 s.
+
+### 8. Shipped schemas prepared from text
+
+Simplified Schema, Darkmatter, and Claudine load their compiled-in schemas
+from checked-in artifacts instead of preparing them per process
+(`simplified-schema/docs/topics/shipped-artifacts.md`). Measured debug
+medians on an M4 Max under load (old and new binaries run side by side):
+`md compose` of a three-line document went 290 → 65 ms, and
+`claudine compose --goose --dry-run` of the frozen clarify prompt
+1450 → 839 ms. Two consequences for tests:
+
+- **Do not shadow a shipped schema to save time.** Copying a reduced schema
+  over a shipped trigger (for example `inline-compose.yaml` as
+  `schemas/claudine.yaml`) used to skip preparing Claudine's large bundle.
+  That preparation is now precompiled. A shadow still avoids compiling the
+  full schema's validator, but that saving has not been measured, and the
+  shadow stops the test checking the schemas users get. Shadow only when
+  shadowing is what the test checks.
+- **A stale artifact is slow, not wrong.** A refused artifact or section
+  falls back to preparing from text with the same verdicts. Claudine's
+  bundle takes about 630 ms to prepare that way in debug, against about
+  180 ms to decode its prepared section. If a schema-heavy suite slows
+  after a shipped YAML edit, run `just shipped-schemas`; the
+  `shipped_artifact_is_fresh` tests fail until you do. Under the
+  `work-counters` feature, `ShippedRuntimePreparation` and the
+  `ArtifactFallback*` counters show a fallback deterministically.
+
+What remains per process is not precompiled: compiling each effective
+schema into a validator (once per layered identity, and per document folder
+when the schema checks files), resolving a document's own `$schema`, and
+merging its layers. In a Time Profiler sample of that Claudine run (debug),
+the validator compile was about 17% of the process (about 150 ms) and
+decoding the prepared bundle section about 15%.

@@ -16,17 +16,27 @@ use crate::markdown::compose::expression::catalog::load_catalog;
 use crate::markdown::compose::expression::{ExpressionFunctionDescriptor, FunctionCatalog, FunctionRegistration};
 
 /// The embedded file's repository path, used in load errors.
-const MUTATIONS_PATH: &str = "darkmatter/schemas/partials/mutations.yaml";
+pub(crate) const MUTATIONS_PATH: &str = "darkmatter/schemas/partials/mutations.yaml";
 
-const MUTATIONS_SOURCE: &str = include_str!("../../../schemas/partials/mutations.yaml");
+pub(crate) const MUTATIONS_SOURCE: &str = include_str!("../../../schemas/partials/mutations.yaml");
 
-/// The typed side-effect catalog, loaded once.
+/// The typed side-effect catalog: the accepted shipped artifact's
+/// ([`crate::markdown::schemas::shipped`]), or, when that artifact or its
+/// section was refused, loaded once from the embedded file.
 ///
 /// ## Panics
 ///
-/// When the embedded `mutations.yaml` does not load; a unit test loads it.
+/// When the artifact was refused and the embedded `mutations.yaml` does not
+/// load; a unit test loads it.
 pub fn effect_function_catalog() -> &'static FunctionCatalog {
+    crate::markdown::schemas::shipped::registry().effect_catalog()
+}
+
+/// [`effect_function_catalog`] loaded from the embedded file, once per
+/// process: the fallback when the shipped artifact was refused.
+pub(crate) fn effect_function_catalog_from_sources() -> &'static FunctionCatalog {
     static CATALOG: LazyLock<FunctionCatalog> = LazyLock::new(|| {
+        crate::note_work!(ShippedRuntimePreparation);
         load_catalog(MUTATIONS_SOURCE, MUTATIONS_PATH, &[])
             .unwrap_or_else(|error| panic!("the embedded side-effect catalog does not load: {error}"))
     });

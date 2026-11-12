@@ -6,6 +6,12 @@ use super::simplified::{
 use super::{SchemaError, resolve};
 use serde_json::{Map, Value};
 
+/// The revision of a phase projection: [`project`], [`merge_with_effective`],
+/// and [`make_passive`] together. A
+/// [`LayeredIdentity`](crate::validate::LayeredIdentity) folds it in;
+/// increment it with any change to what a projection produces.
+pub const PROJECTION_REVISION: u32 = 1;
+
 /// Runtime seam at which a resolved schema instance is validated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchemaPhase {

@@ -21,7 +21,8 @@ use super::alphanumeric::{AlphanumericOption, AlphanumericOptions};
 
 /// A SimplifiedSchema is either a single object shape or a root-level union of
 /// object shapes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum SchemaRoot {
     /// A single object schema body.
     Single(SchemaShape),
@@ -33,7 +34,8 @@ pub enum SchemaRoot {
 
 /// A single object schema body — a map of property names to (possibly union)
 /// property definitions.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SchemaShape {
     /// Declaration-order map of literal property name to definition. `IndexMap`
     /// preserves insertion order so generated JSON Schemas are deterministic
@@ -67,7 +69,8 @@ impl SchemaShape {
 ///
 /// Declaration order is preserved by storing these in a `Vec` on
 /// [`SchemaShape::pattern_keys`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PatternKeyDef {
     /// The parsed pattern-key form.
     pub key: PatternKey,
@@ -78,7 +81,8 @@ pub struct PatternKeyDef {
 /// A pattern / dictionary key form (Feature C). Authored inside a schema
 /// object with `<...>` syntax; kept verbatim until conversion (Phase 3) lowers
 /// each form to JSON Schema `additionalProperties` / `patternProperties`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum PatternKey {
     /// `<string>` — matches any string key. Lowers to `additionalProperties`.
     CatchAll,
@@ -127,7 +131,8 @@ impl PatternKey {
 
 /// One arm of a root-level union. File references are resolved by the
 /// resolution layer before validator construction.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum SchemaArm {
     /// An inline shape declared directly in the YAML.
     Inline(SchemaShape),
@@ -138,7 +143,8 @@ pub enum SchemaArm {
 
 /// A property definition is either a single atom or a property-level union of
 /// atoms.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum PropertyDef {
     /// A single typed atom, e.g. `string(required)`.
     Single(PropertyAtom),
@@ -293,7 +299,8 @@ impl PropertyDef {
 ///
 /// `TypeExpr` is `Clone` but not `Copy` because every variant but
 /// [`TypeExpr::Primitive`] carries owned data.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum TypeExpr {
     /// Built-in primitive type keyword (`string`, `number`, `object`, etc.).
     Primitive(SimplifiedType),
@@ -381,12 +388,14 @@ pub enum Requiredness {
 /// final spread; the parser rejects every other order. An optional position
 /// may be omitted but, when supplied, never accepts `null` unless its type
 /// does: tuple positions get no optional-null wrapper.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TupleType {
     /// The positional elements, in order.
     pub elements: Vec<TupleElement>,
     /// The final spread (`...number[]`): an array-typed atom (`is_array` is
     /// always set) whose items type every position after the elements.
+    #[serde(deserialize_with = "crate::shipped::wire_support::present")]
     pub spread: Option<Box<PropertyAtom>>,
 }
 
@@ -471,7 +480,8 @@ impl TupleType {
 }
 
 /// One positional element of a [`TupleType`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TupleElement {
     /// The element's type; a [`PropertyDef::Union`] for `A | B`.
     pub def: PropertyDef,
@@ -483,7 +493,8 @@ pub struct TupleElement {
 /// `example(./file)` constraints ride on the enclosing [`PropertyAtom`] as
 /// [`Constraint::Category`] and [`Constraint::Example`]; its `-> description`
 /// is the atom's description.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FunctionType {
     /// `parameters(...)`.
     pub parameters: FunctionParameters,
@@ -495,11 +506,13 @@ pub struct FunctionType {
     pub examples: Vec<CallExample>,
     /// `narrows(...)`: what a `true` (or `false`) result proves about one
     /// argument. `None` is meaningful: the function declares no fact.
+    #[serde(deserialize_with = "crate::shipped::wire_support::present")]
     pub narrows: Option<NarrowsClause>,
 }
 
 /// What a predicate's boolean result proves about its original argument.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum NarrowsKind {
     /// `true-implies`: a `true` result proves the argument is the target.
     TrueImplies,
@@ -534,13 +547,15 @@ impl NarrowsKind {
 ///
 /// Equality ignores the spans: they record where the clause was authored,
 /// not what it says.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NarrowsClause {
     /// The narrowed parameter's name.
     pub parameter: String,
     /// Byte span of [`NarrowsClause::parameter`] in the type-expression string.
     pub parameter_span: SourceSpan,
     /// The target type; `None` for a presence-only clause (non-null).
+    #[serde(deserialize_with = "crate::shipped::wire_support::present")]
     pub target: Option<PropertyAtom>,
     /// Byte span of the target, or of the parameter when there is none.
     pub target_span: SourceSpan,
@@ -621,7 +636,8 @@ fn named_reference_in(atom: &PropertyAtom) -> Option<String> {
 }
 
 /// The `parameters(...)` of a [`FunctionType`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum FunctionParameters {
     /// `parameters(void)`: the function takes no arguments.
     Void,
@@ -641,7 +657,8 @@ impl FunctionParameters {
 }
 
 /// One named parameter of a [`FunctionType`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FunctionParameter {
     /// The parameter's name; documentation only, never part of a binding
     /// contract.
@@ -660,7 +677,8 @@ pub struct FunctionParameter {
 ///
 /// Equality ignores the spans: they record where the example was authored,
 /// not what it says.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CallExample {
     /// The authored call, trimmed; it parses as a Darkmatter function-call
     /// expression.
@@ -672,6 +690,7 @@ pub struct CallExample {
     /// Byte span of the authored result in the type-expression string.
     pub expected_span: SourceSpan,
     /// `display-only: REASON`: shown in documentation, never executed.
+    #[serde(deserialize_with = "crate::shipped::wire_support::present")]
     pub display_only: Option<String>,
 }
 
@@ -684,7 +703,8 @@ impl PartialEq for CallExample {
 }
 
 /// What an inline function example expects its call to produce.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum ExampleOutcome {
     /// A literal value, compared structurally.
     Value(serde_json::Value),
@@ -717,7 +737,8 @@ impl TypeExpr {
 }
 
 /// One arm of a property-level union (or the body of a non-union property).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PropertyAtom {
     /// The type expression for this atom (primitive, inline object, or import).
     pub ty: TypeExpr,
@@ -734,6 +755,7 @@ pub struct PropertyAtom {
     pub array_constraints: Vec<Constraint>,
 
     /// Optional human-readable description supplied via `-> {description}`.
+    #[serde(deserialize_with = "crate::shipped::wire_support::present")]
     pub description: Option<String>,
 }
 
@@ -925,7 +947,8 @@ impl PropertyAtom {
 }
 
 /// The full type vocabulary of the SimplifiedSchema grammar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum SimplifiedType {
     /// Any YAML string scalar.
     String,
@@ -1072,7 +1095,8 @@ impl SimplifiedType {
 /// Every constraint variant maps to either a JSON Schema keyword or an
 /// `x-darkmatter-*` extension once converted. See `convert.rs` (Phase 2) for
 /// the mapping.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum Constraint {
     // ── universal ────────────────────────────────────────────────────────
     /// The property must be present.
@@ -1296,7 +1320,8 @@ pub enum Constraint {
 /// source handed to the parser, exactly like [`SuggestionCandidate::span`]:
 /// the type-expression string at first, the whole YAML or Markdown document
 /// once source-aware parsing projects them.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Slot {
     /// The trimmed text between `{{` and `}}`.
     pub expression: String,
@@ -1309,11 +1334,13 @@ pub struct Slot {
     /// imported definition, or a trigger payload. `None` only for a slot of
     /// an inline document `$schema` or of in-memory content, which evaluates
     /// in the request's own context.
+    #[serde(with = "crate::shipped::wire_support::no_host_path")]
     pub origin: Option<std::path::PathBuf>,
 }
 
 /// Which list a [`DynamicList`] stands for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum DynamicKind {
     /// `enum(...)` members.
     Members,
@@ -1322,7 +1349,8 @@ pub enum DynamicKind {
 }
 
 /// One authored element of a [`DynamicList`], in declaration order.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum DynamicElement {
     /// A static enum member.
     Member(String),
@@ -1338,7 +1366,8 @@ pub enum DynamicElement {
 /// type the candidates are interpreted for: `String`, `Number`, or
 /// `Alphanumeric`, and `String` on a named-type reference until resolution
 /// reinterprets them.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DynamicList {
     /// Members or suggestions.
     pub kind: DynamicKind,
@@ -1359,7 +1388,8 @@ impl DynamicList {
 }
 
 /// The constraint a [`Constraint::TemplateConstraint`] slot fills.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum TemplateConstraintKind {
     /// The value of a `literal(...)` type.
     Literal,
@@ -1505,7 +1535,8 @@ pub fn operands_verb(name: &str) -> Option<(&str, OperandForm)> {
 /// string grammar initially records a range into its type-expression string;
 /// source-aware YAML parsing projects it into the complete YAML or Markdown
 /// document without normalizing line endings.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SuggestionCandidate {
     /// Argument text after SimplifiedSchema quote and escape processing.
     pub decoded: String,
@@ -1521,6 +1552,7 @@ pub struct SuggestionCandidate {
     /// Populated when the decoded text uses simple-decimal syntax — even when
     /// the value is not losslessly representable by the supported JSON number
     /// model. `None` for string candidates.
+    #[serde(deserialize_with = "crate::shipped::wire_support::present")]
     pub canonical_decimal: Option<String>,
     /// Exact authored argument byte span, including argument quotes.
     pub span: SourceSpan,

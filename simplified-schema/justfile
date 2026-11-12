@@ -74,6 +74,14 @@ test-minimal *args="":
     echo "--------------------------"
     cargo nextest run -p {{ LIBRARY }} --no-default-features
 
+# Regenerate this area's shipped artifact, `lib/generated/shipped.json` (the
+# prepared envelope definitions); run after editing `schemas/*.yaml` or the
+# code that lowers them. `--check` instead fails when it is stale. It has no
+# lower artifact; the root `just shipped-schemas` also regenerates the
+# artifacts built over this one.
+shipped-schemas *args="--write":
+    cargo run --quiet -p {{ LIBRARY }} --example shipped_schemas -- {{ args }}
+
 # Show this area's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
 slow-tests *args="":
     @just _slow_tests {{ args }}

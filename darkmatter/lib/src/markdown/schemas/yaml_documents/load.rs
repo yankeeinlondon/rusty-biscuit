@@ -31,7 +31,8 @@ pub(crate) struct LoadedYaml {
     pub(crate) value: YamlValue,
     /// The document as the JSON value schemas judge.
     pub(crate) json: Value,
-    /// Node positions of the text after the byte-order mark.
+    /// Node positions of the text after the byte-order mark, built when a
+    /// coordinate is first requested.
     pub(crate) positions: PositionMap,
     /// Bytes skipped before the YAML text: the byte-order mark, or `0`.
     pub(crate) offset: usize,
@@ -68,7 +69,7 @@ pub(crate) fn load_yaml_document(text: &str, path: &Path) -> Result<LoadedYaml, 
         };
         load_error(path, message, span)
     })?;
-    let positions = simplified_schema::positions::build_position_map(body);
+    let positions = PositionMap::deferred(std::sync::Arc::from(body));
     if let Some(pointer) = first_non_string_key(&value, &mut Vec::new()) {
         let span = marks::first_offender_start(body, &value, Offender::NonStringKey)
             .map(|start| start + offset..start + offset);

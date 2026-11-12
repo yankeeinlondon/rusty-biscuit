@@ -33,11 +33,24 @@ use simplified_schema::{DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, S
 pub struct DeclaredTypes<'s> {
     schema: Option<&'s SchemaRoot>,
     trigger_shapes: &'s [Arc<SchemaShape>],
-    raw: Option<&'s RawDeclarations>,
+    /// The schema whose [`RawDeclarations`] are the lowest layer. Kept as
+    /// the schema, not its projection, so a site that reads no declaration
+    /// never projects the merged JSON Schema (the baseline alone is large).
+    raw: Option<RawSource<'s>>,
     definitions: Option<&'s DefinitionTable>,
     frontmatter: Option<&'s Map<String, Value>>,
     host_roots: HostRoots<'s>,
     host_catalog: Option<&'s GlobalCatalog>,
+}
+
+/// The schema a [`DeclaredTypes`] projects on first read.
+#[derive(Clone, Copy)]
+struct RawSource<'s>(&'s EffectiveSchema);
+
+impl std::fmt::Debug for RawSource<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RawSource")
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -217,7 +230,7 @@ impl<'s> DeclaredTypes<'s> {
         };
         Self {
             trigger_shapes: schema.trigger_shapes(),
-            raw: Some(schema.raw_declarations()),
+            raw: Some(RawSource(schema)),
             definitions: Some(schema.layered_definitions()),
             ..Self::new(schema.simplified.as_ref())
         }
@@ -475,6 +488,11 @@ impl<'s> DeclaredTypes<'s> {
         })
     }
 
+    /// The merged JSON Schema's projection, made on first read.
+    fn raw_declarations(&self) -> Option<&'s RawDeclarations> {
+        self.raw.map(|RawSource(schema)| schema.raw_declarations())
+    }
+
     /// The declaration of `key` below the authored schema: the last trigger
     /// shape that declares it, else the merged JSON Schema's projection.
     /// `Some(None)` is a raw declaration whose type is `unknown`.
@@ -482,7 +500,7 @@ impl<'s> DeclaredTypes<'s> {
         if let Some(def) = self.trigger_shapes.iter().rev().find_map(|shape| shape.properties.get(key)) {
             return Some(Some(def));
         }
-        self.raw.and_then(|raw| raw.get(key))
+        self.raw_declarations().and_then(|raw| raw.get(key))
     }
 
     /// The design-time type of every top-level property the projection
@@ -513,7 +531,7 @@ impl<'s> DeclaredTypes<'s> {
         for shape in self.trigger_shapes {
             names.extend(shape.properties.keys().map(String::as_str));
         }
-        if let Some(raw) = self.raw {
+        if let Some(raw) = self.raw_declarations() {
             names.extend(raw.names());
         }
         let mut types = std::collections::BTreeMap::new();

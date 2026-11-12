@@ -422,3 +422,75 @@ fn every_owned_value_option_has_a_test() {
     let declared: Vec<&str> = OWNED_VALUE_OPTIONS.iter().map(|option| option.spellings[0]).collect();
     assert_eq!(declared, COVERED);
 }
+
+/// A help token inside a `__complete` payload is a word being completed, not
+/// a help request: composition help selection never answers it, so the
+/// output is the candidate protocol (one candidate per line), never a usage
+/// screen, and the run writes no user configuration.
+#[test]
+fn a_help_token_in_a_complete_payload_completes_instead_of_printing_help() {
+    let fixture = common::CliProcessFixture::named("complete-ownership-help-payload");
+    for (command, payload) in [
+        ("compose", vec!["compose", "--help"]),
+        ("inline-compose", vec!["inline-compose", "--help", "--cl"]),
+        ("sequence", vec!["sequence", "-h", "--cl"]),
+    ] {
+        let current = payload.len().to_string();
+        let output = fixture
+            .command()
+            .env_remove("COMPLETE")
+            .env_remove("_CLAP_COMPLETE_INDEX")
+            .env_remove("_CLAP_IFS")
+            .args(["__complete", "--current", current.as_str(), "--", "claudine"])
+            .args(&payload)
+            .assert()
+            .success()
+            .get_output()
+            .clone();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let context = format!("{command} {payload:?}: stdout={stdout:?} stderr={stderr:?}");
+        assert!(!stdout.contains("Usage:") && !stderr.contains("Usage:"), "{context}");
+        let candidates: Vec<&str> = stdout.lines().filter(|line| !line.is_empty()).collect();
+        let cursor = payload.last().copied().unwrap_or_default();
+        assert!(
+            candidates.iter().all(|candidate| candidate.starts_with(cursor)),
+            "every candidate continues the cursor word: {context}",
+        );
+        if cursor == "--cl" {
+            assert!(candidates.contains(&"--claude"), "{context}");
+        }
+    }
+    assert!(!fixture.home().join(".claudine").join("config.json").exists());
+}
+
+/// The legacy `COMPLETE=bash` bootstrap answers before composition help
+/// selection, even when argv carries a composition help token: registration
+/// on stdout, nothing on stderr, no help screen, and no configuration
+/// written. The token-free and wrapper forms are proven in
+/// `argv_normalization.rs`.
+#[test]
+fn complete_env_bootstrap_with_composition_help_tokens_registers_without_help() {
+    let fixture = common::CliProcessFixture::named("complete-ownership-bootstrap-help");
+    for args in [
+        vec!["compose", "--help"],
+        vec!["inline-compose", "-h"],
+        vec!["sequence", "prompts/plan.md", "--help"],
+    ] {
+        let output = fixture
+            .command()
+            .env("COMPLETE", "bash")
+            .args(&args)
+            .assert()
+            .success()
+            .get_output()
+            .clone();
+        let stdout = common::strip_ansi(&String::from_utf8_lossy(&output.stdout));
+        let stderr = common::strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        let context = format!("{args:?}: stdout={stdout:?} stderr={stderr:?}");
+        assert!(stdout.contains("claudine"), "registration names the binary: {context}");
+        assert!(stderr.trim().is_empty(), "{context}");
+        assert!(!stdout.contains("Usage:"), "{context}");
+    }
+    assert!(!fixture.home().join(".claudine").join("config.json").exists());
+}

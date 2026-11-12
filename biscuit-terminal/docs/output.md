@@ -370,6 +370,22 @@ The URL printed is the link's authored destination, not a resolved `file://` URL
 The image rule applies whenever an image falls back to text, whatever the OSC 8
 support.
 
+An image draws inline only when the terminal has a graphics route and the
+destination is a relative path to an existing local file of at most 10 MiB.
+The path resolves from the document's directory by the same rules as a `./` or
+bare [file reference](../../biscuit-file/docs/topics/file-references.md), so
+`../` may climb anywhere inside the enclosing repository; outside a repository
+it may not climb above the document's directory. A remote URL, an absolute
+path, a `~`/`@`/`&`/`^`/`vault:` reference, or a path that leaves that tree
+falls back to text.
+
+```text
+repo/
+├── assets/logo.png
+└── package/just.md   ![logo|30](../assets/logo.png)   → draws
+                      ![x](../../elsewhere.png)         → IMAGE[x]
+```
+
 A printed URL is one **unbreakable word**. When it does not fit on the current line
 it moves to a line of its own, and when it is wider than the width it overflows
 rather than being split or hyphenated.

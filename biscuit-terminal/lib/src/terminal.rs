@@ -42,7 +42,7 @@ impl From<UnboundedWidth> for Width {
 }
 
 /// Walk up from `start` looking for a `.git` directory. Returns the repo root if found.
-fn find_git_root(start: &Path) -> Option<PathBuf> {
+pub(crate) fn find_git_root(start: &Path) -> Option<PathBuf> {
     let mut dir = if start.is_absolute() {
         start.to_path_buf()
     } else {

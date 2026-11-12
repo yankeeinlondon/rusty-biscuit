@@ -45,7 +45,7 @@ use serde_json::Value;
 
 use super::json_shape::shape_from_json_schema;
 use super::simplified::{DARKMATTER_DEFERRED_KEYWORD, DARKMATTER_OPERANDS_KEYWORD};
-use super::validate::{self, ValidatorCache, error_top_level_key};
+use super::validate::{self, SchemaIdentity, ValidatorCache, error_top_level_key};
 use super::ValidationProblem;
 use crate::coercion::{
     ActualKind, Additional, BindOptions, Bound, ConversionError, Defer, ExpectedType, FailureReason, ObjectShape,
@@ -61,7 +61,7 @@ static CONVERSION_VALIDATOR_CACHE: LazyLock<ValidatorCache> = LazyLock::new(Vali
 /// How many conversion plans the plan cache holds before it starts over.
 const PLAN_CACHE_CAPACITY: usize = 64;
 
-static PLAN_CACHE: LazyLock<Mutex<HashMap<u64, Arc<ConversionPlan>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static PLAN_CACHE: LazyLock<Mutex<HashMap<SchemaIdentity, Arc<ConversionPlan>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Empties this module's process-wide caches (see
 /// [`super::reset_process_caches_for_bench`]).
@@ -71,12 +71,14 @@ pub(crate) fn reset_process_caches() {
 }
 
 /// What conversion derives from one schema: its translated shape, that shape
-/// with nothing required, and its structural validator. A schema's content
-/// is hashed once to find its plan; a host that keeps a schema's plan (such
-/// as Darkmatter's `EffectiveSchema`) keeps its plan, so repeated validations of large schemas never hash them again.
+/// with nothing required, and its structural validator. A plan is found by
+/// the schema's identity: its content hash, or a host's known identity
+/// ([`Self::for_identity`]). A host that keeps a schema's plan (such as
+/// Darkmatter's `EffectiveSchema`) keeps its plan, so repeated validations of
+/// large schemas never hash them again.
 pub struct ConversionPlan {
-    /// The schema's content hash, the key of its structural validator.
-    key: u64,
+    /// The schema's identity, the key of its structural validator.
+    identity: SchemaIdentity,
     shape: OnceLock<Shape>,
     relaxed: OnceLock<Shape>,
     validator: OnceLock<Option<Arc<Validator>>>,
@@ -92,14 +94,21 @@ impl ConversionPlan {
         Self::for_hashed(validate::schema_content_hash(schema))
     }
 
-    /// [`Self::for_schema`] for a schema whose content hash `key` is known.
-    /// Each part is derived on first use, from the same schema.
+    /// [`Self::for_schema`] for a schema whose canonical content hash `key`
+    /// is known. Each part is derived on first use, from the same schema.
     pub fn for_hashed(key: u64) -> Arc<Self> {
-        if let Some(plan) = PLAN_CACHE.lock().expect("plan cache poisoned").get(&key) {
+        Self::for_identity(SchemaIdentity::canonical(key))
+    }
+
+    /// [`Self::for_schema`] for a schema whose identity is known, such as
+    /// the [`LayeredIdentity`](validate::LayeredIdentity) a host compiled
+    /// its validators under, which then also finds its structural validator.
+    pub fn for_identity(identity: SchemaIdentity) -> Arc<Self> {
+        if let Some(plan) = PLAN_CACHE.lock().expect("plan cache poisoned").get(&identity) {
             return plan.clone();
         }
         let plan = Arc::new(Self {
-            key,
+            identity,
             shape: OnceLock::new(),
             relaxed: OnceLock::new(),
             validator: OnceLock::new(),
@@ -110,7 +119,7 @@ impl ConversionPlan {
         if cache.len() >= PLAN_CACHE_CAPACITY {
             cache.clear();
         }
-        cache.insert(key, plan.clone());
+        cache.insert(identity, plan.clone());
         plan
     }
 
@@ -142,8 +151,8 @@ impl ConversionPlan {
         self.validator
             .get_or_init(|| {
                 validate::SHARED_VALIDATOR_CACHE
-                    .cached_structural(self.key)
-                    .or_else(|| CONVERSION_VALIDATOR_CACHE.structural_validator_hashed(schema, self.key).ok())
+                    .cached_structural(self.identity)
+                    .or_else(|| CONVERSION_VALIDATOR_CACHE.structural_validator_identified(schema, self.identity).ok())
             })
             .as_deref()
     }

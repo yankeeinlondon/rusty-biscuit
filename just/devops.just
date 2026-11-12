@@ -343,9 +343,16 @@ _build package pkg_name *args="": _storage_preflight
     echo -e "✅ {{ bold }}{{ green }}{{ pkg_name }}{{ reset }} {{ italic }}built successfully!{{ reset }}"
     echo
 
+# `binary` is a display label only; callers without one pass "" so that the
+# first of their `args` (e.g. `--force`) is not taken as the label.
 _install path pkg_name binary="" *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+
+    if [[ "{{ binary }}" == -* ]]; then
+        echo "_install: '{{ binary }}' landed in the binary label slot; pass \"\" before the cargo args" >&2
+        exit 2
+    fi
 
     echo
     if [[ -z "{{ binary }}" ]]; then

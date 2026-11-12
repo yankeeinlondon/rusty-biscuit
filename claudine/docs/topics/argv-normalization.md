@@ -22,7 +22,10 @@ the single pre-clap entry point.
 
 ```mermaid
 flowchart LR
-    A["std::env::args_os"] --> B["argv::normalize"]
+    A["std::env::args_os"] --> CI["completion intercept<br/><i>COMPLETE=&lt;shell&gt; exits here</i>"]
+    CI --> H{"composition help selected?<br/><i>original argv</i>"}
+    H -- "yes" --> HE["help screen, exit 0"]
+    H -- "no" --> B["argv::normalize"]
     subgraph B["argv::normalize"]
         direction TB
         R1["Rule 1: provider boolean rewrite<br/><i>composition subcommands only</i>"]
@@ -46,10 +49,12 @@ flowchart LR
 > partition** (see [Provider-argument partition](#provider-argument-partition)),
 > not by a normalization rule.
 
-`main.rs` collects argv once, passes it to `argv::normalize`, then to
-`argv::partition_composition_tail`, and reuses the resulting Claudine argv for
-the `--plain` pre-scan and every parse pass. Library code never sees argv and
-therefore never normalizes.
+`main.rs` collects argv once. A composition help request is selected from that
+original argv and answered before normalization (see
+[Rule 4](#rule-4----help---h-hoisting)); every other argv goes to
+`argv::normalize`, then to `argv::partition_composition_tail`, and the
+resulting Claudine argv serves the `--plain` pre-scan and every parse pass.
+Library code never sees argv and therefore never normalizes.
 
 ## Rewrite rules
 
@@ -128,30 +133,50 @@ Edge cases intentionally left untouched:
 
 ### Rule 4 — `--help` / `-h` hoisting
 
-The root `Cli` declares its own non-global `help: bool` with
-`disable_help_flag = true`, which means composition subcommands never
-inherit a functional `--help` handler. Without intervention, typing
-`claudine compose file.md --help` collapses into clap's greedy positional
-collector and surfaces one of two confusing errors:
+Composition help has two parts: a selector that the executable runs on the
+original argv, and the hoist rewrite this rule names, which normalization
+keeps for its other callers.
+
+**What the user sees.** Help after the command prints that command's own
+compact clap screen; help before the command prints the grouped overview;
+help after the first literal `--` is the provider's:
+
+```sh
+claudine compose -h                                # Usage: claudine compose [OPTIONS] <ARG>...
+claudine compose file.md --gemini name=Ken --help  # the same compose screen
+claudine --help compose file.md                    # the grouped root overview
+claudine compose file.md -- --help                 # forwarded to the provider
+```
+
+**Selection comes first.** `argv::select_composition_help` runs in `main.rs`
+right after the completion intercept, before `argv::normalize`. It recognizes
+the command like the other rules (`find_subcommand`) and takes the first exact
+`-h` or `--help` before the first literal `--`. It does not validate anything
+else, which is why help still appears beside a missing file, an unknown
+provider, a missing option value, malformed setter JSON, or conflicting
+switches: those would otherwise fail in the ownership partition or in clap
+before any help handler ran. Before this selection existed,
+`claudine compose file.md --gemini name=Ken --help` failed with:
 
 ```text
 error: unexpected argument '--help' found
   tip: to pass '--help' as a value, use '-- --help'
 ```
 
-Rule 4 defuses that by scanning the argv between the composition
-subcommand and the first literal `--` for an exact `--help` or `-h`
-token and hoisting it to argv position 1, before the subcommand. The
-resulting argv short-circuits into Claudine's custom help handler (via
-`cli.help == true` in `main.rs`) regardless of what else appears on the
-command line — including when the rest does not satisfy the subcommand. A
-root help request is answered before clap's required-argument check, so
-`claudine compose --help` shows help and exits 0 without a file, exactly as
-`claudine compose missing.md --help` does without opening `missing.md`. The
-same holds for `claudine --help <command>` on any command with required
-arguments, such as `claudine --help completions`.
+The selector returns nothing (the ordinary path runs) when completion is
+active, when a root `-V`/`--version` comes before the command and before any
+help token, or when the only help token follows `--`. Tokens are matched
+exactly: `name=--help`, `--help=x`, and `-hh` are not help.
 
-**Before**
+**The hoist is a normalization contract.** `argv::normalize` still scans the
+argv between a composition subcommand and the first literal `--` for an exact
+`--help` or `-h` and hoists it to argv position 1, so a normalized argv never
+traps the token in clap's greedy positional collector or hands it to the
+ownership partition as an agent-tail token. The executable never reaches this
+step with a help request; the rewrite matters to other callers of
+`argv::normalize`, such as completion ownership.
+
+**Before normalization**
 
 ```sh
 claudine compose file.md --help
@@ -167,13 +192,10 @@ claudine --help compose file.md --provider gemini name=Ken
 claudine -h compose
 ```
 
-Rule 4 hoists `--help` out of the composition argv before the ownership
-partition runs, so the partition never treats `--help` as an agent-tail token.
-It is gated to composition subcommands only. Wrapper subcommands
+The hoist is gated to composition subcommands only. Wrapper subcommands
 (`claudine claude --help`) show Claudine's own wrapper help, and
-non-composition subcommands already have working `--help` support. To
-send `--help` to the provider, put it after `--`
-(`claudine claude -- --help`).
+non-composition subcommands have clap's own `--help`. To send `--help` to a
+provider, put it after `--` (`claudine claude -- --help`).
 
 Rule 4 does not fire when:
 
@@ -612,7 +634,9 @@ catalog for shapes the research does not contain).
 
 Integration tests live in
 [`claudine/cli/tests/l1/argv_normalization.rs`](../../cli/tests/l1/argv_normalization.rs)
-and drive the compiled `claudine` binary through the headline cases plus
+and drive the compiled `claudine` binary through the headline cases, the
+composition help screens (with and without a file, beside invalid options,
+plain mode, and the no-effects check), plus
 the key pass-through cases (`--version`, root `--help`, `hooks --describe`)
 and the provider-forwarding cases (non-owned flag after/before the file).
 [`provider_tail_launch.rs`](../../cli/tests/l1/provider_tail_launch.rs)

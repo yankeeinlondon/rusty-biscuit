@@ -9361,6 +9361,66 @@ class RealWorkspaceTestInputTests(unittest.TestCase):
                 for binary in binaries:
                     self.assertIn(f"(binary_id(test-toolkit::{binary}))", test_filter)
 
+    def narrowed_filter(self, changed: str, package: str) -> str:
+        plan = self.plan(changed)
+        cells = [
+            cell for cell in plan["cells"]
+            if cell["package"] == package and cell.get("test_filter")
+        ]
+        self.assertEqual(1, len(cells), f"{changed} scheduled no narrowed {package} cell")
+        self.assertEqual(("ubuntu-latest", "L1"), (cells[0]["environment"], cells[0]["gate"]))
+        return cells[0]["test_filter"]
+
+    def test_shipped_schema_inputs_select_each_downstream_freshness_test(self) -> None:
+        # Each shipped artifact is prepared over the ones below it
+        # (simplified-schema -> darkmatter -> claudine), so a lower source,
+        # preparation file, or artifact must run the higher owners'
+        # `shipped_artifact_is_fresh`; the owner itself is selected normally,
+        # because the text or artifact is compiled into it.
+        freshness = "test(=shipped_artifacts::shipped_artifact_is_fresh)"
+        cases = {
+            "simplified-schema/schemas/schema.yaml": ("darkmatter", "claudine"),
+            "simplified-schema/lib/src/resolve.rs": ("darkmatter", "claudine"),
+            # The canonical digests both higher artifacts store, which leave
+            # Simplified Schema's own artifact unchanged.
+            "simplified-schema/lib/src/validate.rs": ("darkmatter", "claudine"),
+            # Recorded only in Darkmatter's artifact (its kind definitions);
+            # Claudine follows when that artifact is regenerated.
+            "simplified-schema/lib/src/claims.rs": ("darkmatter",),
+            # Another package's hashing: every artifact's digests.
+            "biscuit-hash/lib/src/xx.rs": ("simplified-schema", "darkmatter", "claudine"),
+            "simplified-schema/lib/generated/shipped.json": ("darkmatter", "claudine"),
+            "content-policy/schemas/content-policy.yaml": ("darkmatter", "claudine"),
+            "darkmatter/schemas/partials/function-examples/as_tsv.yaml": ("claudine",),
+            "darkmatter/lib/src/markdown/schemas/catalog.rs": ("claudine",),
+            "darkmatter/lib/src/markdown/schemas/triggers/grammar.rs": ("claudine",),
+            "darkmatter/lib/generated/shipped.json": ("claudine",),
+        }
+        for changed, downstream in cases.items():
+            for package in downstream:
+                with self.subTest(changed=changed, package=package):
+                    self.assertTrue((ROOT / changed).is_file(), f"{changed} is no longer tracked")
+                    test_filter = self.narrowed_filter(changed, package)
+                    self.assertIn(f"binary_id({package}::l1)", test_filter)
+                    self.assertIn(freshness, test_filter)
+        for artifact, owner in (
+            ("simplified-schema/lib/generated/shipped.json", "simplified-schema"),
+            ("darkmatter/lib/generated/shipped.json", "darkmatter"),
+        ):
+            with self.subTest(artifact=artifact):
+                plan = self.plan(artifact)
+                self.assertIn(owner, [selected["package"] for selected in plan["packages"]])
+                self.assertTrue(
+                    any(cell["package"] == owner and not cell.get("test_filter") for cell in plan["cells"]),
+                    f"{artifact} does not select {owner}'s full suite",
+                )
+
+    def test_the_shipped_schema_coordinator_selects_its_contracts(self) -> None:
+        self.assertIn(
+            "binary_id(test-toolkit::shipped_schemas_coordinator_contracts)",
+            self.narrowed_toolkit_filter("scripts/shipped_schemas.py"),
+        )
+
     def test_a_justfile_change_selects_the_kache_recipe_text_contracts(self) -> None:
         self.assertIn(
             "(binary_id(test-toolkit::kache_recipe_contracts))",

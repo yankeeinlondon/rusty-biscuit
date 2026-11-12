@@ -37,15 +37,6 @@ const EXCEPTIONS: &[Exception] = &[
         1,
         "both the write target and its boundary go through this function; only the containment verdict and the lexical path leave",
     ),
-    Exception {
-        rule: Rule::Canonicalize,
-        kind: Kind::Invariant,
-        path: "darkmatter/lib/src/markdown/output/terminal.rs",
-        item: "ImageRenderer::render_image",
-        operation: ".canonicalize()",
-        count: 2,
-        reason: "traversal check: the image and its base are canonicalized alike and only the verdict (and a tracing warning) leaves",
-    },
 ];
 
 #[test]

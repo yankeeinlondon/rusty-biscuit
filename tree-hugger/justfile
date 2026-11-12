@@ -99,7 +99,7 @@ lint-fix:
 # install latest release version of CLI
 install *args="":
     @just build --release
-    @just _install "./cli" "Tree Hugger" {{args}}
+    @just _install "./cli" "Tree Hugger" "" {{args}}
 
 # build and show the docs for the library code
 docs:
