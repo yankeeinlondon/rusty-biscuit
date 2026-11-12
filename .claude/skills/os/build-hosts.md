@@ -267,6 +267,13 @@ Disk-space crises are handled by the `storage-strategy` skill. What
   and pushed it under the 50 GiB build floor). Scratch checkouts outside
   `CODING_DIR` are not covered: delete your own scratch targets, on Windows
   and inside the WSL guest, before you report.
+- **Sweeping a clone's target on `build-win` can free nothing.** The volume
+  is ReFS and builds go through kache, so `target\` files are block clones of
+  the kache store. On 2026-11-11 `windows-cargo-sweep.ps1 -MaxSizeGB 40` on
+  `bolt--main` reported "Cleaned 15.86 GiB" and the volume's free space did
+  not change (46.6 GiB, still under the floor). Judge a sweep by
+  `Get-PSDrive B` before and after, not by its own report; the space is held
+  by the store, which is the `storage-strategy` skill's to trim.
 - **A full volume looks like a different bug.** On Windows it can show up as
   `scp … Failure`, `unable to write file`, `Could not reset index file`, or
   `os error 112`. The WSL guest's VHDX lives on the large volume, so SSH to

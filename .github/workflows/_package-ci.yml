@@ -1,4 +1,4 @@
-name: package-ci
+name: Package checks
 
 # One package AREA's execution workflow: it expands the dispatch rows the
 # planner derived for that area, one hosted job per executing cell.
@@ -143,8 +143,14 @@ jobs:
   # label degrades to the static, human-readable job id instead (AC10). The
   # area half of the identity comes from the caller: a called workflow's jobs
   # render as `<caller job name> / <called job name>`, so this reads
-  # `area-ci (sniff) / package-ci / check (sniff, check, windows-latest,
-  # windows-latest)`.
+  # `area-ci (sniff) / Run package work / check (sniff, check, windows-latest,
+  # windows-latest)`, the row `runner_loss.py` reads to attribute a lost runner
+  # to its cell. A literal `name:` would keep the row (GitHub appends it:
+  # `Run tests (sniff, check, …)`) but replace the job id that
+  # `runner_loss.py::GATE_SEGMENT` matches. A display-only label leading the
+  # row is not used either: GitHub cuts each name segment at 100 characters,
+  # and a label pushes the runner, sometimes part of the environment, past it
+  # (display check run 42963148323).
   #
   # The guard is a SCALAR comparison of the input, read before matrix
   # expansion: an area with no check rows resolves this job immediately instead
@@ -233,7 +239,7 @@ jobs:
           set -euo pipefail
           just _ci_build_counter "check ${{ matrix.environment }}"
       # Gate command. Its outcome is both the producer and cell outcome.
-      - name: cargo check (declared kinds no test gate compiles)
+      - name: Check compilation of declared targets
         id: check
         env:
           # COMMAND-SCOPED, exactly as each test tier binds it. `check` is its
@@ -340,8 +346,11 @@ jobs:
             '{package: $package, job: $job, environment: $environment, result: $result, dependents: $dependents}
              + (if $detail == "" then {} else {detail: $detail} end)' \
             >"$RUNNER_TEMP/status/status.json"
+      # Named by the cell contract, so skipped when it never resolved: an empty
+      # name would add a second, misleading error, and the failed resolution
+      # step already blocks the gate.
       - name: Upload producer status
-        if: ${{ always() }}
+        if: ${{ always() && steps.cell.outputs.status_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cell.outputs.status_artifact }}
@@ -350,7 +359,7 @@ jobs:
       # `completion.py` certifies it on the gate's own outcome and the cell's
       # binding instead. Required, and after the status upload: the record is
       # this cell's proof, and a green status without one is an audit failure.
-      - name: Certify this cell's completeness
+      - name: Verify all expected results reported
         id: completion
         shell: bash
         run: |
@@ -628,6 +637,31 @@ jobs:
           pnpm install --frozen-lockfile
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
+      # The owner's per-record outcome, before its archive is touched. This
+      # download alone may fail: an absent status is a finding the check below
+      # reports as `producer outcome unknown`, not a broken download.
+      - name: Download this cell's build status
+        id: build_status_download
+        if: ${{ steps.cell.outputs.consumes_archive == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: build-status-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.build_producer }}-${{ steps.cell.outputs.build_key }}
+          path: ${{ runner.temp }}/build-status
+      # Only a valid `success` status for exactly this record lets the archive
+      # download run; a failed, cancelled, absent, or malformed status fails
+      # here, so no archive is fetched and no test starts.
+      - name: Check this cell's build status
+        id: build_status
+        if: ${{ steps.cell.outputs.consumes_archive == 'true' }}
+        shell: bash
+        run: |
+          python3 scripts/ci/build_status.py \
+            --status "$RUNNER_TEMP/build-status/build-status.json" \
+            --package '${{ steps.cell.outputs.package }}' \
+            --key '${{ steps.cell.outputs.build_key }}' \
+            --producer '${{ steps.cell.outputs.build_producer }}' \
+            --artifact '${{ steps.cell.outputs.build_artifact }}'
       # Transfer clock. An artifact download is an action, not a command, so
       # its cost can only be observed between two steps; the verifier closes the
       # window and reports `download_seconds`. Transfer is reported apart from
@@ -738,7 +772,7 @@ jobs:
       # Gate command. Its outcome is both the producer and cell outcome. The
       # recipe comes from the cell contract, so the gate-to-recipe mapping
       # lives in one place rather than in three near-identical jobs.
-      - name: Tests
+      - name: Run planned tests
         id: gate
         shell: bash
         env:
@@ -884,7 +918,7 @@ jobs:
       # cell's environment at planning time and put the result on the cell. It
       # records one outcome, one count, and one command duration PER SUITE, so
       # one suite's success can never stand in for a suite that never ran.
-      - name: Companion suites
+      - name: Run companion test suites
         id: companion
         if: ${{ !cancelled() && steps.cell.outputs.companion_suites != '[]' }}
         shell: bash
@@ -928,7 +962,7 @@ jobs:
       # its {package, environment, gate} identity. It also carries this cell's
       # `expected-<gate>.json`, which is what `completion.py` compares against.
       - name: Upload JUnit
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.cell.outputs.junit_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cell.outputs.junit_artifact }}
@@ -1014,8 +1048,11 @@ jobs:
                 else {build: {key: $key, producer: $producer, digest: $digest}} end)
              + (if $timings == {} then {} else {timings: $timings} end)' \
             >"$RUNNER_TEMP/status/status.json"
+      # Named by the cell contract, so skipped when it never resolved: an empty
+      # name would add a second, misleading error, and the failed resolution
+      # step already blocks the gate.
       - name: Upload producer status
-        if: ${{ always() }}
+        if: ${{ always() && steps.cell.outputs.status_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cell.outputs.status_artifact }}
@@ -1028,7 +1065,7 @@ jobs:
       # may excuse, and writes the completion record only when every check
       # holds. It runs after the diagnostic uploads so a refusal still leaves
       # the JUnit and status artifacts behind to read.
-      - name: Certify this cell's completeness
+      - name: Verify all expected results reported
         id: completion
         shell: bash
         run: |
@@ -1265,7 +1302,7 @@ jobs:
       # default — still runs it exactly as before, and a skipped clippy leaves
       # NO measurement, which the status step below reads as absent rather
       # than as a pass.
-      - name: Lint
+      - name: Lint source
         id: clippy
         if: ${{ steps.cell.outputs.companions_only != 'true' }}
         env:
@@ -1352,7 +1389,7 @@ jobs:
       # declare a `lint_recipe` in the registry, which is why a package whose
       # companions are test-only leaves this step with nothing to run instead
       # of a lint cell expecting evidence nobody produces.
-      - name: Companion suites (lint)
+      - name: Run companion lint suites
         id: companion
         if: ${{ !cancelled() && steps.cell.outputs.companion_suites != '[]' }}
         shell: bash
@@ -1466,8 +1503,11 @@ jobs:
              + (if $duration == "" then {} else {duration_s: ($duration | tonumber)} end)
              + (if ($companions | length) == 0 then {} else {companions: $companions} end)' \
             >"$RUNNER_TEMP/status/status.json"
+      # Named by the cell contract, so skipped when it never resolved: an empty
+      # name would add a second, misleading error, and the failed resolution
+      # step already blocks the gate.
       - name: Upload producer status
-        if: ${{ always() }}
+        if: ${{ always() && steps.cell.outputs.status_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cell.outputs.status_artifact }}
@@ -1475,7 +1515,7 @@ jobs:
       # A lint cell drives no nextest, so it publishes no expected listing and
       # `completion.py` certifies it on the gate's own outcome, its companions,
       # and the cell's binding.
-      - name: Certify this cell's completeness
+      - name: Verify all expected results reported
         id: completion
         shell: bash
         run: |

@@ -1,0 +1,24 @@
+{
+  "assets": "/tmp/phase4-assets",
+  "verified": [
+    {
+      "name": "biscuit-hash-cli-aarch64-apple-darwin.tar.xz",
+      "sha256": "44bf4b3fc4f9ef0cc689e4a6d13704c8a3bf819c82d1437ae0c22abbb2b6f0cb",
+      "sources": [
+        "sha256.sum",
+        "biscuit-hash-cli-aarch64-apple-darwin.tar.xz.sha256"
+      ]
+    },
+    {
+      "name": "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz",
+      "sha256": "17a55aba61c14fac9cde1f23f5e76eb4bcc767e590456ecdfb0a18c635a8d4d4",
+      "sources": [
+        "sha256.sum",
+        "biscuit-hash-cli-aarch64-unknown-linux-gnu.tar.xz.sha256"
+      ]
+    }
+  ],
+  "uncovered": [
+    "biscuit-hash-cli-installer.sh"
+  ]
+}

@@ -74,20 +74,48 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   `C:\Program Files\Git\usr\bin` and the real Python directory.
   - From Git Bash, the Cygwin `python3` shim (`/c/cygwin64/bin/python3`)
     fails outright: it `exec`s `/cygdrive/c/.../python.exe`, a path only
-    Cygwin resolves. The pre-push hook then blocks every push with "the
-    planner could not resolve the committed scope" even though Python is
-    installed. Put the real Python directory (it has `python3.exe`) first on
-    `PATH`; `py -3` also works.
+    Cygwin resolves. The pre-push hook's `ci-push` runs each candidate's
+    version probe, so a failing shim is skipped for `py -3` or `python`; a
+    `just ci-local` started by hand has no such probe and fails with
+    `FileNotFoundError`. Put the real Python directory (it has `python3.exe`)
+    first on `PATH`, or hand an interpreter over with `BISCUIT_CI_PYTHON`.
+  - A Cygwin program run by a Git Bash (MSYS) recipe mixes two POSIX
+    runtimes. On `build-win-native` the `ci-push` parity tests ran the real
+    `ci-local` recipe under Git's `usr\bin\bash.exe` with `jq` found first
+    in `C:\cygwin64\bin`; alone every test passed, but with about 80 tests in
+    parallel `jq --binary -r …` died with exit 139 and empty output (found
+    with `SHELLOPTS=xtrace` in the child's environment, which turns on Bash's
+    trace without editing the recipe). A fixture that looks tools up on
+    `PATH` skips any directory holding `cygwin1.dll`
+    (`scripts/ci-push/integration/evidence_fixture.rs`).
+  - Each `x="$(jq …)"` in a Git Bash recipe is an MSYS fork plus a program
+    start, about 50 ms on `build-win-native`. Read several facts from one
+    document in one `jq` and split its lines in Bash: folding the `ci-local`
+    gate loop's six per-package reads and three scope reads (and a
+    `sed | wc | tr` count) into two calls made a real-recipe push about
+    0.6 s faster there (A/B, 6.45–6.78 s → 5.83–6.20 s).
+- **Git for Windows' system config sets `core.autocrlf=true`.** A test
+  fixture that passes `-c core.autocrlf=false` only on its own `git` calls
+  still gets CRLF files from production code that runs Git in the fixture
+  repository (a `git worktree add` checkout read back as `"first\r\n"`).
+  Write `core.autocrlf = false` into the fixture's `.git/config`; the real
+  repository is covered by `.gitattributes` (`eol=lf`).
 - **Bash scripts lose data on Windows three ways:**
   - Native `jq.exe -r` ends lines with CRLF, so a value read back keeps a
     `\r` and matches nothing (for example a PR base of `main\r`). Use
-    `jq --binary`; `just ci-local` and the pre-push hook do when
-    `OS=Windows_NT`. Cygwin's `jq` writes LF and hides this.
+    `jq --binary`; `just ci-local` does when `OS=Windows_NT` (the pre-push
+    hook's `ci-push` reads JSON in Rust and runs no `jq`). Cygwin's `jq` writes LF and hides this.
   - `subprocess.run([bash, "-c", script])` lets MSYS/Cygwin bash re-split the
     script at nested quotes and run only the first fragment, exiting 0. Write
     the script to a file and run `bash <file>`.
   - Interpolating `{{ args }}` into a bash recipe eats a path's backslashes.
     Pass paths with forward slashes (`Path.as_posix()`).
+- **Bash runs a command word as a path only when it contains `/`**; any
+  other word is looked up on `PATH`. So `"$CI_BUILD_BIN" produce` with
+  `CI_BUILD_BIN=C:\…\ci-build.exe` fails under Git Bash with `line 34:
+  C:\…\ci-build.exe: command not found`, though the file exists. Hand a
+  script an executable as `C:/…/ci-build.exe` (`replace('\\', "/")`); a
+  native path is fine as an argument, which Bash only opens.
 - **`cmd /C` cannot start a command with `@1>&2`**; it runs a command named
   `1`. Write `@(1>&2 echo x)`, which also avoids the trailing space that
   `echo x 1>&2` leaves.
@@ -140,15 +168,51 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   process, and falls back to plain `git` for other layouts or a
   `<top>\etc\git-bash.config`. `where.exe git` lists both; the first is the
   launcher.
+- **Git for Windows 2.56 moved x86_64 from `mingw64` to `ucrt64`** (the
+  hosted `windows-latest` image has it; `MSYSTEM=UCRT64`). Code that
+  hardcodes `mingw64` misses it. Some hosts also put `<top>\<prefix>\bin`
+  (the real binary) first on `PATH` instead of `<top>\cmd`; reproduce a
+  failure of that shape on a rig by prepending `<top>\mingw64\bin` to a
+  process-scoped `PATH`. `worktree::git::command()` treats that as a direct
+  entry and runs it with the inherited environment. gix-path before 0.14
+  (gix before 0.89) read `EXEPATH` only for `clangarm64`/`mingw64`/`mingw32`,
+  so on `ucrt64` it ran `git --exec-path` and reported `<top>` as the system
+  prefix; the workspace's gix 0.90 (gix-path 0.14) reads all four. A gix
+  upgrade is an API migration across every gix consumer, not a version bump:
+  0.90 replaced the typed error enums with `gix::Error` (match a "not found"
+  outcome with `downcast_any_ref::<gix::discover::upwards::Error>()` or
+  `try_find_reference`, not on variants).
+- **A rig receipt does not prove the hosted Git layout.** `build-win` runs
+  Git 2.55 (`mingw64`); the hosted image runs 2.56 (`ucrt64`). A passing
+  `cross-check --os windows` observation is keyed on package, environment,
+  and inputs, not on the Git layout, so the nightly reuses it for
+  `windows-latest` and skips a hosted run that would fail on `ucrt64`. Test
+  layout-dependent Git behavior against a disposable `ucrt64` install (next
+  item) before you rely on a rig receipt for it.
+- **Reproduce the hosted `ucrt64` layout without touching the rig's shared
+  install:** download `PortableGit-<version>-64-bit.7z.exe` from the
+  git-for-windows releases and run it with `-o<dir> -y`. It unpacks, then
+  hangs in its post-install `git-bash.exe` with no desktop; stop that
+  process. `<dir>\cmd` and `<dir>\ucrt64\bin` then work as the launcher and
+  direct entries.
 - **The first `gix` open in a process starts three processes** unless
-  `EXEPATH` is set: gix-path runs `git --exec-path` through the launcher to
-  find the system config (launcher, real `git.exe`, `conhost.exe`; cached per
-  process). Git Bash sets `EXEPATH`; SSH, PowerShell, and CI shells do not, so
-  `wt` sets it to the launcher layout's `<top>` in `main`. In a short-lived
+  `EXEPATH` names an installation with exactly one prefix directory: gix-path
+  runs `git config -lz --show-origin` (and `git --exec-path` for its system
+  prefix) through the launcher to find the system config (launcher, real
+  `git.exe`, `conhost.exe`; cached per process). Its `--exec-path` fallback
+  now derives the same prefix as the hint, so a test that the hint is used
+  must assert that no such process started, not compare prefixes. Git Bash sets `EXEPATH`; SSH, PowerShell, and CI shells do not, so
+  `wt` sets it to the installation's `<top>` in `main`. In a short-lived
   process that opens no other repository, "read it in-process" turns one
   `rev-parse` into three. Diagnose with `GIT_TRACE2_EVENT=<dir>` (one file per
   git process, with `cmd_ancestry`; a parent that wrote no trace is the
   launcher).
+- **`Start-Process -Wait` hangs after a Cargo build finishes.** PowerShell 7
+  waits for every process in the started process's job, and the MSVC linker
+  leaves `vctip.exe` (its telemetry helper) running there for many minutes
+  after `cargo` exits. A rig script that runs `cargo nextest` through
+  `Start-Process -Wait` reports nothing until then. Use `-PassThru` without
+  `-Wait` and call `$p.WaitForExit()`, which waits for that process alone.
 - **Defender is about a quarter of a parallel test run's CPU on
   `build-win-native`** (`MsMpEng` 120–145 of ~575 CPU-s; Search, `System`,
   and `svchost` another 80–90). Roughly 5 ms per process start, 2–5 ms per
@@ -157,6 +221,56 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   The hosted `windows-latest` image disables real-time monitoring, so this
   host is slower than CI per process. Never change the host's Defender
   settings; cut processes and fresh files.
+- **A freshly copied executable costs about 0.3 s on its first run** on
+  `build-win-native` (Defender scans it; later runs take about 10 ms). A hard
+  link to a file that has already run costs about 20 ms. A test fixture that
+  installs one stub `.exe` under several names should hard-link them to one
+  file rather than copy each (`scripts/ci-push/integration/fixture.rs`
+  `link_or_copy`: 0.35–0.75 s per `ci-push` parity test). A nextest archive
+  run extracts its binaries under `%TEMP%`, the fixtures' own volume, so the
+  link can be to the extracted binary itself. The first launch of a freshly
+  extracted large binary (28 MB `ci-push.exe`) took about 0.55 s once per run.
+- **A Python helper process costs far more than its interpreter start.**
+  Measured on `build-win` (Python 3.13): `python -c pass` about 21 ms, about
+  45 ms when a Git Bash recipe starts it. With `PYTHONDONTWRITEBYTECODE=1` and
+  no `__pycache__` beside the source (a fresh fixture or temporary worktree),
+  every start recompiles what it imports: `scripts/ci/schema.py` alone is
+  31 ms, and the 6,000-line planner about 0.15 s. A script run as a file
+  (`python x.py`, `runpy.run_path`) is never cached; `runpy.run_module` reads
+  and writes bytecode beside the module. `platform.system()` and
+  `platform.release()` run a WMI query (about 50–100 ms) on their first call in
+  each process. So a pipeline of helper processes costs about 0.15–0.25 s per
+  helper there before any `git` child; count helper processes, not lines of
+  Python. Profile with a `sitecustomize.py` on `PYTHONPATH` that wraps
+  `subprocess.run` and `atexit`-logs `sys.argv` (and, optionally, `cProfile`),
+  and Bash with `SHELLOPTS=xtrace PS4='+${EPOCHREALTIME} '` in the child's
+  environment; both reach every descendant without editing the code.
+- **`PYTHONDONTWRITEBYTECODE=1` stops writing bytecode, not reading it.**
+  Importing `local_evidence` and `observation_notes` took about 130 ms
+  uncached and 76 ms with a valid `__pycache__` beside them. A fixture that
+  compiles its committed helpers once (`compileall`, in the interpreter start
+  it already makes; `__pycache__/` is ignored there) saves every later
+  helper start that recompile, even though `ci-push` sets the variable.
+- **Budget an L1 test by what one push costs under the full suite.** In the
+  `repo-deps` owning-suite run on `build-win` (12 logical CPUs, 900+ tests
+  beside Cargo-building `ci-build` tests), a `ci-push` parity push with a stub
+  gate cost about 3.0 s when it published nothing and 3.8 s when it published
+  a receipt; the real `ci-local` recipe run directly about 2.6–3.3 s; and
+  seeding prior evidence through the real helpers in one interpreter about
+  0.8 s. A push through `ci-push` and the real recipe together therefore
+  cannot fit 5 s there; ask each question at its own boundary (recipe run
+  directly, hook with a modeled gate, verifier over seeded evidence) and pin
+  the boundaries to each other.
+- **Batch `git` reads in a Python helper.** One
+  `git cat-file --batch-check=%(objectname)` answers every
+  `rev-parse --verify` a helper makes and whether a ref exists (an absent
+  notes ref needs no `git notes list`), and `git ls-tree` takes several
+  pathspecs and lists their union. In the `ci-push` parity fixtures that took
+  a push from 24 helper `git` children to 13. A fixture's `PATH` that names
+  Git's `<prefix>\bin` (and the `usr\bin` the launcher would add, for the
+  local transport's `sh`) instead of `<top>\cmd` made each of those about
+  20 ms instead of 30 ms (`scripts/ci-push/integration/evidence_fixture.rs`
+  `fixture_git`).
 - **Fresh files are slow to write and slower to read back.** A ~400-file
   libgit2 fixture took 1.9 s as loose objects, and `Index::add_all` over the
   fresh tree 1.2 s (7 ms on macOS). For a `git2` fixture, add a mempack
@@ -511,6 +625,36 @@ on Windows sees the timeout instead of the refusal (schematic-schema's
 `query_secret_is_absent_from_every_dial_error` got `HandshakeTimeout(2s)`).
 Give such a dial a budget well past 2 s (10 s costs nothing, since the
 refusal ends it), or assert on a live listener that rejects instead.
+
+## Pushing from native Windows
+
+Git runs every hook through its bundled `sh`, so the pre-push launcher
+(`.githooks/pre-push`) works the same whether `git push` starts from Git Bash
+or PowerShell; it only `cd`s to the top level and `exec`s `cargo run … --bin
+ci-push`. What differs is around it:
+
+- **Both entry shells are supported and tested.** `launcher::windows_git_bash_…`
+  pushes through `bash.exe -c`, `launcher::windows_powershell_…` through
+  `powershell.exe -NoProfile -NonInteractive -Command`, in `auto` and
+  `strict`, from a checkout path with a space and `ü`. A missing shell fails
+  those tests rather than skipping them. A Git Bash ancestor can still hit the
+  `0xC0000005` local-transport crash above; confirm a Git Bash-only failure
+  from PowerShell before diagnosing it.
+- **Python is picked by running it.** `ci-push` probes `python3`, then
+  `py -3`, then `python` (3.10+, 2 s each) and hands the winner to every
+  helper and to `just ci-local` as `BISCUIT_CI_PYTHON` plus a NUL-separated
+  `BISCUIT_CI_PYTHON_ARGS_FILE` (`-3` for `py`). An App Execution Alias stub
+  or Cygwin shim fails the probe and is skipped. Only `.exe` names are found
+  on `PATH`: a `.bat`/`.cmd` would re-parse arguments through `cmd.exe`.
+- **Children are owned through a kill-on-close Job Object.** A child is
+  created suspended, assigned, then resumed, so no grandchild escapes. Where
+  the session's own Job forbids nesting (some SSH sessions), the child runs
+  without the Job and cancellation ends only that child.
+- **Committed-tree reviews use a temporary linked worktree**
+  (`ci-push-review-<pid>-<random>` under `%TEMP%`), removed with no repository
+  handle left open so the directory can be deleted. A force-killed `ci-push`
+  can leave the directory and its worktree record; `git worktree prune` clears
+  the record once the directory is gone.
 
 ## The `windows-latest` leg
 

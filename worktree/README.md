@@ -20,6 +20,10 @@ The **worktree** package area, like many in this monorepo, is composed of both a
         - help system
         - shell completions
 
+## Prebuilt binaries (planned)
+
+Prebuilt `wt` binaries for macOS and Linux (archives, a shell installer, Homebrew, and cargo-binstall) are **planned**; see [Distributing prebuilt binaries](../docs/distribution.md).
+
 ## CLI Commands
 
 Run repository commands from inside a Git repository or one of its worktrees.

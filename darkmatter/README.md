@@ -55,6 +55,10 @@ For details, choose one or more of the packages in this package area.
 | [**LSP**](./dmls/README.md)    | `dmls`                     | The Darkmatter Language Server (binary: `dmls`); LSP 3.17 over stdio for Markdown + the Darkmatter DSL — schema-aware frontmatter, wiki links, navigation, diagnostics, rename, formatting, semantic tokens |
 | **Zed maintenance CLI**        | `zed-dmls-cli`             | Stages the DMLS Zed extension outside worktrees and diagnoses the native binary, dev-extension registration, manifest, and recent Zed log evidence (binary: `zed-dmls`)                       |
 
+## Prebuilt binaries (planned)
+
+Prebuilt `md` and `dmls` binaries for macOS and Linux (archives, a shell installer, Homebrew, and cargo-binstall) are **planned**; see [Distributing prebuilt binaries](../docs/distribution.md).
+
 ## Testing
 
 Run package-area checks from `darkmatter/`:

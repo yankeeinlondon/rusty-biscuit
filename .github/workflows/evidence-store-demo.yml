@@ -1,0 +1,170 @@
+name: evidence-store-demo
+
+# MANUAL-ONLY. Submits one explicitly named, already retained CI artifact to
+# the evidence store, authenticating with this job's GitHub OIDC token. It is
+# the only OIDC workflow the service trusts (`oidc.trusted_workflows` in the
+# service configuration names this file on `refs/heads/main`), so it runs
+# from `main` and nothing else may call it.
+#
+# It runs no tests, imports no history, and adds no publication hook: it
+# downloads the named artifact, ingests the named collection, and stages the
+# proof files it references. A producer identity cannot publish staged bytes,
+# so the job uploads its resume state (no token) as an artifact, and the
+# operator finalizes from a host with a verifier credential through the
+# service's `evidence-finalize` recipe.
+#
+# Dispatch it with the service's `demo-hosted` recipe, which refuses to run
+# until this file is on `main`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID of the workflow run that retained the artifact"
+        required: true
+        type: string
+      artifact:
+        description: "Name of the retained artifact to ingest from"
+        required: true
+        type: string
+      collection:
+        description: "Path of the collection or v2 receipt inside the artifact"
+        required: true
+        type: string
+      proof_dir:
+        description: "Directory inside the artifact holding the referenced proof files (optional)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: evidence-store-demo
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  ingest:
+    name: evidence-store / demo ingest / ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Inputs reach every script through `env`, never by `${{ }}`
+      # interpolation into the script text, so no input can inject shell.
+      - name: Check the inputs and the service endpoint
+        shell: bash
+        env:
+          EVIDENCE_STORE_ENDPOINT: ${{ vars.EVIDENCE_STORE_ENDPOINT }}
+          RUN_ID: ${{ inputs.run_id }}
+          COLLECTION: ${{ inputs.collection }}
+          PROOF_DIR: ${{ inputs.proof_dir }}
+        run: |
+          set -euo pipefail
+          if [ -z "${EVIDENCE_STORE_ENDPOINT}" ]; then
+            echo "::error::The repository variable EVIDENCE_STORE_ENDPOINT is unset; set it to the deployed service URL."
+            exit 1
+          fi
+          if ! [[ "${RUN_ID}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::run_id must be a numeric workflow run ID."
+            exit 1
+          fi
+          for path in "${COLLECTION}" "${PROOF_DIR}"; do
+            if [[ "${path}" == /* || "/${path}/" == *"/../"* ]]; then
+              echo "::error::collection and proof_dir must be relative paths inside the artifact, without '..'."
+              exit 1
+            fi
+          done
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install the evidence-store dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --filter @rusty-biscuit/evidence-store...
+
+      - name: Download the retained artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ inputs.run_id }}
+          ARTIFACT: ${{ inputs.artifact }}
+        run: |
+          set -euo pipefail
+          gh run download "${RUN_ID}" -n "${ARTIFACT}" -D "${RUNNER_TEMP}/artifact"
+
+      - name: Request the OIDC token
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "${RUNNER_TEMP}/oidc"
+          token="$(curl -fsS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=rusty-biscuit-evidence-store" | jq -r '.value')"
+          if [ -z "${token}" ] || [ "${token}" = "null" ]; then
+            echo "::error::GitHub issued no OIDC token for the evidence-store audience."
+            exit 1
+          fi
+          echo "::add-mask::${token}"
+          printf '%s\n' "${token}" >"${RUNNER_TEMP}/oidc/token"
+          chmod 600 "${RUNNER_TEMP}/oidc/token"
+
+      - name: Ingest the collection
+        shell: bash
+        env:
+          EVIDENCE_STORE_ENDPOINT: ${{ vars.EVIDENCE_STORE_ENDPOINT }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          COLLECTION: ${{ inputs.collection }}
+          PROOF_DIR: ${{ inputs.proof_dir }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/ingest"
+          artifact="${RUNNER_TEMP}/artifact"
+          args=(
+            "${artifact}/${COLLECTION}"
+            --endpoint "${EVIDENCE_STORE_ENDPOINT}"
+            --repo "${REPOSITORY_ID}"
+            --token-file "${RUNNER_TEMP}/oidc/token"
+            --state "${RUNNER_TEMP}/ingest/state.json"
+          )
+          if [ -n "${PROOF_DIR}" ]; then
+            args+=(--proof-dir "${artifact}/${PROOF_DIR}")
+          fi
+          node tools/evidence-store/node_modules/tsx/dist/cli.mjs tools/evidence-store/cli/ingest.ts ingest "${args[@]}"
+
+      # The token lives outside the uploaded directory; it is removed anyway so
+      # nothing later in the job can read it.
+      - name: Remove the OIDC token
+        if: ${{ always() }}
+        shell: bash
+        run: rm -rf "${RUNNER_TEMP}/oidc"
+
+      # Uploaded even after a failed ingestion: the state is what resumes it.
+      - name: Upload the resume state
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: evidence-store-demo-state-${{ github.run_id }}
+          path: ${{ runner.temp }}/ingest
+          if-no-files-found: warn
+          retention-days: 14

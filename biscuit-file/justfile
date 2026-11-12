@@ -93,6 +93,7 @@ slow-tests *args="":
 test-minimal *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
 
     # Matched as one quoted string rather than split into an array: a nextest
     # filterset reaches here with its parentheses already unquoted by `just`,

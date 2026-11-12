@@ -59,6 +59,7 @@ test *args="":
 test-minimal *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
 
     case " {{ args }} " in
         *" --archive-file "* | *" --archive-file="*)

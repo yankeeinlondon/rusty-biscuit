@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import itertools
 import json
 import ntpath
@@ -3208,6 +3210,408 @@ class EventSchedulingTests(unittest.TestCase):
         self.assertIn("--event", result.stderr)
 
 
+class DependentCheckSchedulingTests(unittest.TestCase):
+    """A dependents-only check cell exists only where the event schedules its host.
+
+    `alpha-core` is a library with no example or bench target, so no kind of
+    its own needs a check; `beta-app` is its unchanged direct consumer. That is
+    the shape of the pushes to `main` that failed with
+    `cell-contract-mismatch: the plan knows no environment 'ubuntu-latest'`:
+    the push was proven by its pull request, so Linux was removed from the
+    plan, but the dependents check still named it.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        self.metadata, self.policy = self.fixture(["lib"])
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def fixture(
+        self, core_targets: list[str]
+    ) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml", targets=core_targets),
+            package(self.root, "beta-app", "beta/app/Cargo.toml", targets=["bin"]),
+        ]
+        metadata: dict[str, object] = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": None,
+        }
+        declare_dependencies(metadata, {"beta-app": ["alpha-core"]})
+        policy = package_ci_policy(
+            workspace_packages_from(metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+        return metadata, policy
+
+    def plan(self, **kwargs: object) -> dict[str, object]:
+        metadata = kwargs.pop("metadata", self.metadata)
+        policy = kwargs.pop("policy", self.policy)
+        return calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            metadata,  # type: ignore[arg-type]
+            EventSchedulingTests.shipped_events(),
+            policy,  # type: ignore[arg-type]
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    @staticmethod
+    def check_cells(plan: dict[str, object]) -> list[dict[str, object]]:
+        return [cell for cell in plan["cells"] if cell["gate"] == "check"]  # type: ignore[union-attr]
+
+    def test_a_push_its_pull_request_proved_plans_no_dependents_check(self) -> None:
+        plan = self.plan(event="push", proven_event="pull_request")
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        self.assertEqual([], plan["cells"])
+        self.assertEqual([], plan["builds"])
+        self.assertEqual([], plan["preflight_os"])
+        self.assertEqual(
+            [], [row for document in row_sets_of(plan).values()
+                 for name in schema.ROW_SET_NAMES for row in document[name]]
+        )
+        self.assertEqual([], legacy_scope_document(plan)["scheduled_areas"])
+        self.assertEqual(
+            [
+                {"name": "ubuntu-latest", "event": "pull_request"},
+                {"name": "macos-latest", "event": "pull_request"},
+            ],
+            plan["proven_environments"],
+        )
+        # The facts stay; only the work the pull request already did goes.
+        self.assertEqual(["beta-app"], plan["reverse_dependencies"])
+
+    def test_an_unproven_event_plans_exactly_one_linux_dependents_check(self) -> None:
+        for kwargs in ({"event": "pull_request"}, {"event": "push"}):
+            with self.subTest(kwargs=kwargs):
+                plan = self.plan(**kwargs)
+                self.assertEqual([], schema.validate_resolved_plan(plan))
+                checks = self.check_cells(plan)
+                self.assertEqual(
+                    [("alpha-core", "ubuntu-latest")],
+                    [(cell["package"], cell["environment"]) for cell in checks],
+                )
+                self.assertEqual(["beta-app"], checks[0]["dependents"])
+                self.assertEqual([], checks[0]["target_kinds"])
+                self.assertIs(False, checks[0]["reusable"])
+                self.assertEqual(
+                    [], [cell for cell in plan["cells"] if cell["package"] == "beta-app"]
+                )
+                self.assertNotIn("beta-app", gates_by_package(plan))
+                self.assertEqual(["alpha"], legacy_scope_document(plan)["scheduled_areas"])
+                self.assertIn(("ubuntu-latest", "check"), dispatched(plan, "alpha-core"))
+
+    def test_an_example_target_folds_the_dependents_into_one_check(self) -> None:
+        metadata, policy = self.fixture(["lib", "example"])
+        plan = self.plan(metadata=metadata, policy=policy, event="pull_request")
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        checks = self.check_cells(plan)
+        self.assertEqual(["ubuntu-latest"], [cell["environment"] for cell in checks])
+        self.assertEqual(["beta-app"], checks[0]["dependents"])
+        self.assertIn("example", checks[0]["target_kinds"])
+        self.assertIs(False, checks[0]["reusable"])
+
+        proven = self.plan(
+            metadata=metadata, policy=policy, event="push", proven_event="pull_request"
+        )
+        self.assertEqual([], schema.validate_resolved_plan(proven))
+        self.assertEqual([], proven["cells"])
+
+    def test_a_nightly_keeping_linux_only_as_a_producer_plans_no_linux_cell(self) -> None:
+        plan = self.plan(event="schedule")
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        self.assertEqual(
+            [{"name": "ubuntu-latest", "for": ["wsl2-ubuntu"]}], plan["producing_environments"]
+        )
+        self.assertEqual(
+            [], [cell for cell in plan["cells"] if cell["environment"] == "ubuntu-latest"]
+        )
+        self.assertEqual([], self.check_cells(plan))
+        self.assertEqual(
+            {("windows-latest", "L1"), ("wsl2-ubuntu", "L1")},
+            {(cell["environment"], cell["gate"]) for cell in plan["cells"]},
+        )
+        self.assertEqual(
+            {
+                "ubuntu-latest": [{"environment": "wsl2-ubuntu", "gate": "L1"}],
+                "windows-latest": [{"environment": "windows-latest", "gate": "L1"}],
+            },
+            {record["producer"]: record["consumers"] for record in plan["builds"]},
+        )
+
+    def test_local_l1_evidence_leaves_the_dependents_check_executing(self) -> None:
+        accepted = [
+            {"package": "alpha-core", "environment": "ubuntu-latest", "gate": "L1",
+             "origin": "prior-local", "outcome": "pass",
+             "evidence": {"ref": "refs/notes/ci-local/ubuntu-latest"}}
+        ]
+        for name, plan in (
+            ("planned", self.plan(event="pull_request", accepted_cells=accepted)),
+            ("applied", apply_accepted_cells(self.plan(event="pull_request"), accepted, [])),
+        ):
+            with self.subTest(name):
+                self.assertEqual([], schema.validate_resolved_plan(plan))
+                cells = {(cell["environment"], cell["gate"]): cell for cell in plan["cells"]}
+                # The evidence is real: it does satisfy the L1 cell.
+                self.assertEqual("reuse", cells[("ubuntu-latest", "L1")]["execution"])
+                check = cells[("ubuntu-latest", "check")]
+                self.assertEqual("execute", check["execution"])
+                self.assertEqual("pending", check["state"])
+                self.assertIs(False, check["reusable"])
+
+    def test_the_validator_accepts_the_planned_documents(self) -> None:
+        # Control rows: the unedited pull-request plan, and a nightly that
+        # carries Linux as a producer with build records but no cells.
+        for plan in (self.plan(event="pull_request"), self.plan(event="schedule")):
+            self.assertEqual([], schema.validate_resolved_plan(plan))
+
+    def test_the_validator_refuses_a_cell_on_an_environment_the_plan_lacks(self) -> None:
+        plan = copy.deepcopy(self.plan(event="pull_request"))
+        check = self.check_cells(plan)[0]
+        check["environment"] = "windows-latest"
+        problems = schema.validate_resolved_plan(plan)
+        refusal = [
+            problem for problem in problems
+            if problem.startswith("malformed-receipt:")
+            and "alpha-core/windows-latest/check" in problem
+            and "does not carry" in problem
+        ]
+        self.assertEqual(1, len(refusal), problems)
+        with self.assertRaises(RuntimeError) as raised:
+            apply_accepted_cells(plan, [], [])
+        self.assertIn("malformed-receipt", str(raised.exception))
+
+    def test_the_validator_refuses_a_cell_on_a_producer_only_environment(self) -> None:
+        plan = copy.deepcopy(self.plan(event="schedule"))
+        cell = next(cell for cell in plan["cells"] if cell["environment"] == "wsl2-ubuntu")
+        cell["environment"] = "ubuntu-latest"
+        problems = schema.validate_resolved_plan(plan)
+        refusal = [
+            problem for problem in problems
+            if problem.startswith("malformed-receipt:")
+            and "alpha-core/ubuntu-latest/L1" in problem
+            and "producer of archives for wsl2-ubuntu" in problem
+        ]
+        self.assertEqual(1, len(refusal), problems)
+        self.assertFalse(any("does not carry" in problem for problem in problems), problems)
+
+    def test_the_validator_refuses_a_reused_cell_on_an_absent_environment(self) -> None:
+        accepted = [
+            {"package": "alpha-core", "environment": "ubuntu-latest", "gate": "L1",
+             "origin": "prior-local", "outcome": "pass",
+             "evidence": {"ref": "refs/notes/ci-local/ubuntu-latest"}}
+        ]
+        plan = copy.deepcopy(self.plan(event="pull_request", accepted_cells=accepted))
+        reused = next(cell for cell in plan["cells"] if cell["execution"] == "reuse")
+        reused["environment"] = "windows-latest"
+        problems = schema.validate_resolved_plan(plan)
+        self.assertTrue(
+            any(
+                problem.startswith("malformed-receipt:")
+                and "alpha-core/windows-latest/L1" in problem
+                and "does not carry" in problem
+                for problem in problems
+            ),
+            problems,
+        )
+
+    def test_the_cli_publishes_nothing_for_an_invalid_calculated_plan(self) -> None:
+        plan_out = self.root / "plan.json"
+        real_package_cells = affected_scope.package_cells
+
+        def misplaced(*args: object, **kwargs: object) -> list[dict[str, object]]:
+            # A planner defect of the kind this rule exists for: the
+            # dependents check names an environment the pull request defers.
+            cells = real_package_cells(*args, **kwargs)  # type: ignore[arg-type]
+            for cell in cells:
+                if cell["gate"] == "check":
+                    cell["environment"] = "windows-latest"
+            return cells
+
+        argv = [
+            "affected_scope.py", "--resolved-plan", "--event", "pull_request",
+            "--plan-out", str(plan_out), "alpha/lib/src/lib.rs",
+        ]
+        stdout = io.StringIO()
+        with unittest.mock.patch.object(sys, "argv", argv), \
+                unittest.mock.patch.object(affected_scope, "ROOT", self.root), \
+                unittest.mock.patch.object(
+                    affected_scope, "load_metadata", lambda root: self.metadata
+                ), \
+                unittest.mock.patch.object(
+                    affected_scope, "load_environments",
+                    lambda *args, **kwargs: EventSchedulingTests.shipped_events(),
+                ), \
+                unittest.mock.patch.object(
+                    affected_scope, "package_ci_policy", lambda *args, **kwargs: self.policy
+                ), \
+                unittest.mock.patch.object(
+                    affected_scope, "validate_no_shadow_workspaces", lambda *args: None
+                ), \
+                unittest.mock.patch.object(affected_scope, "package_cells", misplaced), \
+                contextlib.redirect_stdout(stdout), \
+                self.assertRaises(RuntimeError) as raised:
+            affected_scope.main()
+        self.assertIn("the calculated plan is invalid", str(raised.exception))
+        self.assertIn(
+            "malformed-receipt: cell alpha-core/windows-latest/check names environment "
+            "'windows-latest', which the plan's environment table does not carry",
+            str(raised.exception),
+        )
+        self.assertFalse(plan_out.exists())
+        self.assertEqual("", stdout.getvalue())
+
+    def assert_refused(self, plan: dict[str, object], label: str) -> list[str]:
+        """`plan` is refused with coded problems, in the validator and the overlay alike."""
+        problems = schema.validate_resolved_plan(plan)
+        self.assertTrue(problems, label)
+        self.assertTrue(
+            all(problem.split(":", 1)[0] in schema.REJECTIONS for problem in problems),
+            (label, problems),
+        )
+        with self.assertRaises(RuntimeError, msg=label) as raised:
+            apply_accepted_cells(plan, [], [])
+        self.assertEqual(
+            f"the plan to apply evidence to is invalid: {problems[0]}",
+            str(raised.exception),
+            label,
+        )
+        return problems
+
+    def test_malformed_producer_records_are_coded_problems(self) -> None:
+        nightly = self.plan(event="schedule")
+        self.assertEqual([], schema.validate_resolved_plan(nightly))
+        self.assertEqual(
+            nightly["producing_environments"],
+            apply_accepted_cells(nightly, [], [])["producing_environments"],
+        )
+        exact_keys = "producing_environments entries carry exactly 'name' and 'for'"
+        bad_name = "unknown-environment: resolved plan producing_environments name is"
+        bad_guests = "must name scheduled guests it produces for"
+        cases: list[tuple[str, str, object, str]] = [
+            ("for absent", "for", None, exact_keys),
+            ("name absent", "name", None, exact_keys),
+        ]
+        for value in (None, 3, "", [], {}, ["ubuntu-latest"], [3]):
+            cases.append((f"name {value!r}", "name", value, bad_name))
+        for value in (None, 3, {}, "", [], ["wsl2-ubuntu", 3], [3], ["ubuntu-latest"]):
+            cases.append((f"for {value!r}", "for", value, bad_guests))
+        for label, key, value, expected in cases:
+            with self.subTest(label):
+                plan = copy.deepcopy(nightly)
+                producer = plan["producing_environments"][0]  # type: ignore[index]
+                if label.endswith("absent"):
+                    del producer[key]
+                else:
+                    producer[key] = value
+                problems = self.assert_refused(plan, label)
+                self.assertTrue(any(expected in problem for problem in problems), (label, problems))
+
+        # The collection itself: absence is the documented "no producer"
+        # default; every present shape other than a list of records is refused.
+        absent = copy.deepcopy(nightly)
+        del absent["producing_environments"]
+        self.assertFalse(
+            any("producing_environments" in problem for problem in schema.validate_resolved_plan(absent))
+        )
+        for value in (None, 3, {}, [], [3], ["ubuntu-latest"], [[]]):
+            with self.subTest(collection=value):
+                plan = copy.deepcopy(nightly)
+                plan["producing_environments"] = value
+                problems = self.assert_refused(plan, repr(value))
+                self.assertTrue(
+                    any("resolved plan producing_environments" in problem for problem in problems),
+                    problems,
+                )
+
+    def test_non_name_identities_are_coded_problems_not_exceptions(self) -> None:
+        # Every identity the validator uses as a lookup key or set member,
+        # replaced by an unhashable value. Each is a coded refusal; none
+        # escapes as a `TypeError` or `KeyError`.
+        pull_request = self.plan(event="pull_request")
+        nightly = self.plan(event="schedule")
+        proven = self.plan(event="push", proven_event="pull_request")
+        for plan in (pull_request, nightly, proven):
+            self.assertEqual([], schema.validate_resolved_plan(plan))
+        executing_l1 = next(
+            index for index, cell in enumerate(nightly["cells"])  # type: ignore[arg-type]
+            if cell.get("build") is not None
+        )
+        row_set = next(
+            (area, name) for area, document in row_sets_of(pull_request).items()
+            for name in schema.ROW_SET_NAMES if document[name]
+        )
+        sites: list[tuple[str, dict[str, object], tuple[object, ...]]] = [
+            ("area record area", pull_request, ("areas", 0, "area")),
+            ("package record package", pull_request, ("packages", 0, "package")),
+            ("package record area", pull_request, ("packages", 0, "area")),
+            ("reverse dependency", pull_request, ("reverse_dependencies", 0)),
+            ("compiled dependent", pull_request, ("packages", 0, "dependent_seam", "dependents", 0)),
+            ("cell package", pull_request, ("cells", 0, "package")),
+            ("cell environment", pull_request, ("cells", 0, "environment")),
+            ("cell gate", pull_request, ("cells", 0, "gate")),
+            ("cell build reference", nightly, ("cells", executing_l1, "build")),
+            ("row package", pull_request, ("rows", row_set[0], row_set[1], 0, "package")),
+            ("row environment", pull_request, ("rows", row_set[0], row_set[1], 0, "environment")),
+            ("environment table name", nightly, ("environments", 0, "name")),
+            ("proven environment name", proven, ("proven_environments", 0, "name")),
+            ("producer name", nightly, ("producing_environments", 0, "name")),
+            ("build key", nightly, ("builds", 0, "key")),
+            ("build package", nightly, ("builds", 0, "package")),
+            ("build producer", nightly, ("builds", 0, "producer")),
+            ("build compatible environment", nightly, ("builds", 0, "compatible_environments", 0)),
+            ("build consumer environment", nightly, ("builds", 0, "consumers", 0, "environment")),
+        ]
+        for label, source, path in sites:
+            for value in ([], {}):
+                with self.subTest(label, value=value):
+                    plan = copy.deepcopy(source)
+                    parent: object = plan
+                    for step in path[:-1]:
+                        parent = parent[step]  # type: ignore[index]
+                    self.assertIsInstance(parent[path[-1]], str, label)  # type: ignore[index]
+                    parent[path[-1]] = value  # type: ignore[index]
+                    self.assert_refused(plan, label)
+
+    def test_the_cli_refuses_a_carried_plan_with_a_malformed_producer(self) -> None:
+        nightly = self.plan(event="schedule")
+        cases = {
+            "producer for absent": (
+                lambda producer: producer.pop("for"),
+                "producing_environments entries carry exactly 'name' and 'for'",
+            ),
+            "producer name a list": (
+                lambda producer: producer.__setitem__("name", ["ubuntu-latest"]),
+                "unknown-environment: resolved plan producing_environments name is",
+            ),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            cwd = Path(temporary)
+            for label, (edit, reason) in cases.items():
+                with self.subTest(label):
+                    plan = copy.deepcopy(nightly)
+                    edit(plan["producing_environments"][0])  # type: ignore[index]
+                    (cwd / "plan.json").write_text(schema.canonical(plan), encoding="utf-8")
+                    plan_out = cwd / "applied.json"
+                    result = ApplyCliTests.run_planner(
+                        self, "--apply-to", "plan.json", "--plan-out", str(plan_out), cwd=cwd  # type: ignore[arg-type]
+                    )
+                    self.assertNotEqual(0, result.returncode, label)
+                    self.assertIn("the plan to apply evidence to is invalid", result.stderr)
+                    self.assertIn(reason, result.stderr)
+                    self.assertNotIn("KeyError", result.stderr)
+                    self.assertNotIn("TypeError", result.stderr)
+                    self.assertEqual("", result.stdout)
+                    self.assertFalse(plan_out.exists())
+
+
 class CheckCellScopeTests(unittest.TestCase):
     """The same contract read off a plan: declared targets in, cells and matrix out."""
 
@@ -4034,9 +4438,11 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
     EXPECTED_COMPANION_OWNERS = {
         "archive-path-guard": "test-toolkit",
         "artifact-publisher": "repo-deps",
+        "distribution": "repo-deps",
         "homelab-frontend": "homelab-server",
         "test_affected_scope.py": "repo-deps",
         "test_build_key.py": "repo-deps",
+        "test_build_status.py": "repo-deps",
         "test_ci_local.py": "repo-deps",
         "test_completion.py": "repo-deps",
         "test_constraints.py": "repo-deps",
@@ -4050,6 +4456,7 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
         "test_runner_loss.py": "repo-deps",
         "test_schema.py": "repo-deps",
         "test_seed.py": "repo-deps",
+        "test_storage_sample.py": "repo-deps",
         "test-audit-typecheck": "test-toolkit",
         "test-audit-vitest": "test-toolkit",
     }
@@ -4313,6 +4720,19 @@ class ToolingPathOwnershipTests(unittest.TestCase):
         # where CI's own suites are declared to run at all.
         self.assert_selects("scripts/Cargo.toml", ["repo-deps"])
         self.assert_selects("tools/test-toolkit/Cargo.toml", ["test-toolkit"])
+
+    def test_a_distribution_configuration_change_selects_repo_deps_alone(self) -> None:
+        # No compiled code reads these; the `distribution` companion suite
+        # validates the real files, and the recipe file defines its command.
+        for path in (
+            "docs/deployment.yaml",
+            "dist-workspace.toml",
+            "about.toml",
+            ".github/distribution/build-images.json",
+            ".github/distribution/rollout.json",
+            "just/distribution.just",
+        ):
+            self.assert_selects(path, ["repo-deps"])
 
     def test_another_packages_manifest_is_not_a_trigger(self) -> None:
         # The other half of R13.6: the exception is two paths wide, not general.

@@ -158,7 +158,8 @@ fn git_relative_path(relative: &Path) -> Option<BString> {
     {
         return None;
     }
-    Some(gix::path::to_unix_separators_on_windows(gix::path::into_bstr(relative)).into_owned())
+    let relative = gix::path::into_bstr(relative).expect("prefix path doesn't contain ill-formed UTF-8");
+    Some(gix::path::to_unix_separators_on_windows(relative).into_owned())
 }
 
 fn metadata(path: &Path) -> Result<Option<std::fs::Metadata>> {
@@ -376,7 +377,8 @@ impl<'repo> Probe<'repo> {
             .stack
             .at_entry(relative, None, repo)
             .map_err(|error| SniffError::git("attributes", error))?;
-        let rela_path = gix::path::from_bstr(relative);
+        let rela_path =
+            gix::path::from_bstr(relative).map_err(|error| SniffError::git("path", error))?;
         // Auto-CRLF consults the index blob: Git leaves CRs alone in a file
         // whose committed form already contains them.
         let mut index_object = |buffer: &mut Vec<u8>| {

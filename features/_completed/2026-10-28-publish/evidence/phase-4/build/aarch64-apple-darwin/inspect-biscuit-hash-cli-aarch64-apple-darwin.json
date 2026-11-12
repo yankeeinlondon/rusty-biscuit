@@ -1,0 +1,69 @@
+{
+  "archive": "biscuit-hash-cli-aarch64-apple-darwin.tar.xz",
+  "binary": {
+    "arch": "arm64",
+    "format": "macho"
+  },
+  "command": "bh",
+  "entries": [
+    {
+      "mode": "0o755",
+      "name": "biscuit-hash-cli-aarch64-apple-darwin",
+      "size": 0,
+      "type": "dir"
+    },
+    {
+      "mode": "0o755",
+      "name": "biscuit-hash-cli-aarch64-apple-darwin/bh",
+      "size": 979136,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "biscuit-hash-cli-aarch64-apple-darwin/README.md",
+      "size": 5071,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "biscuit-hash-cli-aarch64-apple-darwin/SOURCE.txt",
+      "size": 322,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "biscuit-hash-cli-aarch64-apple-darwin/THIRD-PARTY-NOTICES.md",
+      "size": 49014,
+      "type": "file"
+    },
+    {
+      "mode": "0o644",
+      "name": "biscuit-hash-cli-aarch64-apple-darwin/LICENSE",
+      "size": 34523,
+      "type": "file"
+    }
+  ],
+  "evidence": {
+    "otool_libraries": "otool-libraries-biscuit-hash-cli-aarch64-apple-darwin.txt",
+    "otool_load_commands": "otool-load-commands-biscuit-hash-cli-aarch64-apple-darwin.txt"
+  },
+  "executables": [
+    "biscuit-hash-cli-aarch64-apple-darwin/bh"
+  ],
+  "failures": [],
+  "linkage": {
+    "dylibs": [
+      "/usr/lib/libiconv.2.dylib",
+      "/usr/lib/libSystem.B.dylib"
+    ],
+    "minos": "15.0",
+    "platform": "1",
+    "rpaths": []
+  },
+  "mode": "archive",
+  "package": "biscuit-hash-cli",
+  "passed": true,
+  "schema_version": 1,
+  "tag": "biscuit-hash-cli-v0.1.0",
+  "target": "aarch64-apple-darwin"
+}

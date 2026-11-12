@@ -28,15 +28,18 @@ import schema  # noqa: E402
 
 TODAY = date(2026, 9, 11)
 MODULE = Path(__file__).resolve().parent / "constraints.py"
+#: Shared with the Rust reader's tests (`scripts/ci-push/tests/constraints.rs`);
+#: both must reach every expected outcome.
+PARITY = Path(__file__).resolve().parent / "fixtures" / "pre-push" / "constraints" / "parity.json"
 
 
 class StoreFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
+        # A cleanup, not `tearDown`: cleanups run last-in-first-out, so one a
+        # test registers later (restoring permissions) runs before this.
+        self.addCleanup(self.temporary_directory.cleanup)
         self.store = Path(self.temporary_directory.name)
-
-    def tearDown(self) -> None:
-        self.temporary_directory.cleanup()
 
     def write(self, name: str, document: object) -> Path:
         path = self.store / f"{name}.json"
@@ -303,7 +306,7 @@ class CommandTests(StoreFixture):
         plan.write_text("{not json", encoding="utf-8")
         result = self.run_check("--plan", str(plan))
         self.assertNotEqual(0, result.returncode, "an unreadable plan proves nothing")
-        self.assertIn("cannot read the resolved plan", result.stderr)
+        self.assertIn(f"the resolved plan at {plan} is not valid JSON", result.stderr)
 
     def test_a_plan_without_readable_cells_blocks(self) -> None:
         self.write("current", self.constraint())
@@ -311,7 +314,15 @@ class CommandTests(StoreFixture):
         plan.write_text(json.dumps({"cells": "none"}), encoding="utf-8")
         result = self.run_check("--plan", str(plan))
         self.assertNotEqual(0, result.returncode)
-        self.assertIn("no readable 'cells' list", result.stderr)
+        self.assertIn("`cells` must be an array, found a string", result.stderr)
+
+    def test_an_unreadable_store_blocks_and_names_the_path(self) -> None:
+        record = self.write("current", self.constraint())
+        if not _make_unreadable(self, record):
+            self.skipTest("this host cannot make a file unreadable")
+        result = self.run_check()
+        self.assertNotEqual(0, result.returncode, "a hidden record might bind")
+        self.assertIn(f"cannot read the constraint store at {record}", result.stderr)
 
     def test_a_missing_plan_file_blocks(self) -> None:
         result = self.run_check("--plan", str(self.store.parent / "absent.json"))
@@ -375,6 +386,135 @@ class CommandTests(StoreFixture):
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("wsl2-ubuntu", result.stdout.strip())
+
+
+def _make_unreadable(test: unittest.TestCase, path: Path) -> bool:
+    """Removes every permission bit from `path` until the test ends.
+
+    False where that cannot make it unreadable: Windows ignores the bits, and
+    a privileged user reads through them.
+    """
+    if os.name == "nt":
+        return False
+    mode = path.stat().st_mode
+    path.chmod(0)
+    test.addCleanup(path.chmod, mode)
+    try:
+        if path.is_dir():
+            os.listdir(path)
+        else:
+            path.read_bytes()
+    except PermissionError:
+        return True
+    return False
+
+
+class StrictReaderTests(StoreFixture):
+    """The reader agrees with the Rust one: see `ParityTests` for the cases."""
+
+    def test_a_missing_store_or_a_file_holds_no_records(self) -> None:
+        file = self.write("store", self.constraint())
+        self.assertEqual(([], [], []), constraints.load(str(file), today=TODAY))
+        self.assertEqual(([], [], []), constraints.load(str(file / "below"), today=TODAY))
+
+    def test_an_unreadable_record_raises_rather_than_being_skipped(self) -> None:
+        record = self.write("current", self.constraint())
+        if not _make_unreadable(self, record):
+            self.skipTest("this host cannot make a file unreadable")
+        with self.assertRaises(constraints.StoreError) as raised:
+            self.load()
+        self.assertEqual(record, raised.exception.path)
+
+    def test_an_unreadable_directory_in_the_store_raises(self) -> None:
+        nested = self.store / "github.com"
+        nested.mkdir()
+        (nested / "current.json").write_text(json.dumps(self.constraint()), encoding="utf-8")
+        if not _make_unreadable(self, nested):
+            self.skipTest("this host cannot make a directory unreadable")
+        with self.assertRaises(constraints.StoreError) as raised:
+            self.load()
+        self.assertEqual(nested, raised.exception.path)
+
+    def test_a_malformed_record_names_its_path_and_field(self) -> None:
+        path = self.write("current", self.constraint(gate=None))
+        _active, _expired, malformed = self.load()
+        self.assertEqual("gate", malformed[0].location)
+        self.assertEqual(
+            f"{path}: `gate` must be a string when present, found null", malformed[0].describe()
+        )
+
+    def test_a_malformed_record_applies_everywhere_and_never_expires(self) -> None:
+        self.write("current", self.constraint(branch=7, repository="github.com/other/repo"))
+        entry = self.load(repository="github.com/mine/repo", branches=["main"])[2][0]
+        self.assertTrue(entry.applies_to("github.com/mine/repo", ["main"]))
+        self.assertFalse(entry.expired(date(2200, 1, 1)))
+        plan = {"cells": [{"environment": "macos-latest", "gate": "L1", "execution": "reuse"}]}
+        self.assertEqual([entry], constraints.unsatisfied([entry], plan))
+
+    def test_a_malformed_record_still_names_a_textual_environment_to_the_planner(self) -> None:
+        self.write("named", self.constraint(environments="typo"))
+        self.write("unnamed", self.constraint(environment=7))
+        malformed = self.load()[2]
+        self.assertEqual(["wsl2-ubuntu", ""], [entry.environment for entry in malformed])
+
+
+class ParityTests(unittest.TestCase):
+    """Every case in the fixture the Rust reader also runs."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.fixture = json.loads(PARITY.read_text(encoding="utf-8"))
+
+    def test_every_identity_case_agrees(self) -> None:
+        for case in self.fixture["identities"]:
+            with self.subTest(remote=case["remote"]):
+                identity = constraints.repository_identity(case["remote"])
+                self.assertEqual(case["identity"], identity)
+                self.assertEqual(case["segments"], constraints.store_segments(identity))
+
+    def test_every_store_case_agrees(self) -> None:
+        for case in self.fixture["cases"]:
+            with self.subTest(case=case["name"]), tempfile.TemporaryDirectory() as temporary:
+                self.check_case(case, Path(temporary))
+
+    def check_case(self, case: dict, temporary: Path) -> None:
+        store = temporary / "store"
+        if case["store"] is not None:
+            store.mkdir()
+            for relative, content in case["store"].items():
+                path = store.joinpath(*relative.split("/"))
+                path.parent.mkdir(parents=True, exist_ok=True)
+                text = content if isinstance(content, str) else json.dumps(content)
+                path.write_bytes(text.encode("utf-8"))
+        active, expired, malformed = constraints.load(
+            str(store),
+            case["repository"],
+            case["branches"],
+            date.fromisoformat(case["today"]),
+        )
+
+        def names(entries: list) -> list[str]:
+            return [entry.path.relative_to(store).as_posix() for entry in entries]
+
+        expected = case["expected"]
+        self.assertEqual(expected["active"], names(active), "active")
+        self.assertEqual(expected["expired"], names(expired), "expired")
+        self.assertEqual(
+            [(entry["path"], entry["location"]) for entry in expected["malformed"]],
+            [(name, entry.location) for name, entry in zip(names(malformed), malformed)],
+            "malformed",
+        )
+        plan = None
+        if "plan" in case:
+            path = temporary / "plan.json"
+            path.write_bytes(case["plan"].encode("utf-8"))
+            if "plan_error" in expected:
+                with self.assertRaises(constraints.DocumentError) as raised:
+                    constraints.read_plan(str(path))
+                self.assertEqual(expected["plan_error"], raised.exception.location)
+                return
+            plan = constraints.read_plan(str(path))
+        self.assertEqual(expected["unsatisfied"], names(constraints.unsatisfied(active, plan)))
 
 
 class LocationTests(StoreFixture):

@@ -65,12 +65,10 @@ pub(crate) fn merge_conflicts_between(
     reject_unsafe_configuration(&probe, &ours_index, &participating)?;
 
     let attribute_stack = committed_attribute_stack(&probe, &ours_index);
-    let filter = gix::filter::plumbing::Pipeline::default();
+    let filter =
+        gix::filter::plumbing::Pipeline::new(Default::default(), probe.object_hash(), Default::default());
     let pipeline = gix::merge::blob::Pipeline::new(Default::default(), filter, Default::default());
-    let default_driver = probe
-        .config_snapshot()
-        .string("merge.default")
-        .map(|value| value.into_owned());
+    let default_driver = probe.config_snapshot().string("merge.default");
     let mut blob_merge = gix::merge::blob::Platform::new(
         pipeline,
         gix::merge::blob::pipeline::Mode::ToGit,
@@ -140,14 +138,11 @@ fn committed_diff_cache(
     repo: &gix::Repository,
     index: &gix::index::State,
 ) -> Result<gix::diff::blob::Platform> {
-    let options = gix::filter::plumbing::pipeline::Options {
-        object_hash: repo.object_hash(),
-        ..Default::default()
-    };
     let filter = gix::filter::plumbing::Pipeline::new(
         repo.command_context()
             .map_err(|error| SniffError::git("merge_command_context", error))?,
-        options,
+        repo.object_hash(),
+        Default::default(),
     );
     let pipeline =
         gix::diff::blob::Pipeline::new(Default::default(), filter, Vec::new(), Default::default());
@@ -272,7 +267,7 @@ fn collect_tree_changes(
         })
         .for_each_to_obtain_tree_with_cache(&to, diff_cache, |change| {
             out.insert(change.location().to_owned());
-            Ok::<_, std::convert::Infallible>(gix::object::tree::diff::Action::Continue(()))
+            Ok::<_, gix::Error>(gix::object::tree::diff::Action::Continue(()))
         })
         .map_err(|error| SniffError::git("merge_participating_changes", error))?;
     Ok(())

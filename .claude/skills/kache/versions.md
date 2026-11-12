@@ -26,6 +26,17 @@ in `SKILL.md` or the topical references and keep version-bound facts here.
   `--no-pager` with full output redirection, or structured `--json` output instead of a truncating
   pipe when automating this release.
 
+## 2.0.0
+
+- On the macOS development host, `daemon start` failed with `Permission denied`
+  while `daemon run` worked: the store's `daemon.lock` was owned by root with
+  mode `0600`. This lock serializes background spawning, distinct from
+  `daemon.run.lock`. With the daemon stopped and no concurrent start, preserving
+  the inaccessible lock under a backup name in the user-owned store let
+  `daemon start` recreate it and succeed without elevated privileges. Do not
+  rename a live lock. Rerun `just _ensure-kache` afterward: a prior init failure
+  deliberately leaves Cargo's `rustc-wrapper` empty until setup succeeds.
+
 ## 0.23.1
 
 - `stats --help` explicitly says that `--last-build` reports the latest activity session, that a

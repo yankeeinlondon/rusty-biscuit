@@ -1,0 +1,34 @@
+{{!--
+  Rendered by cargo-about 0.8.4 from `licenses.sh`, which writes the header
+  naming the package before this output and appends `native_notices.py`'s
+  sections after it. Crates without a `source` are this repository's own path
+  crates, covered by the archive's LICENSE, so they and the AGPL-3.0-only text
+  are left out of the license sections.
+
+  `native_notices.py` parses two things here, so their format is a contract:
+  the crate index lines, the only place a third-party AGPL-3.0-only crate
+  still appears (the helper refuses one); and the "(standard text)" heading
+  suffix, which marks cargo-about's SPDX text used for crates that package no
+  license file of their own.
+--}}
+## Rust crates
+
+Each license text appears once, after the crates (name and exact version) it
+covers. The crate index at the end gives each crate's license expression.
+{{#each licenses}}{{#unless (eq id "AGPL-3.0-only")}}
+
+### {{name}} (`{{id}}`){{#unless source_path}} (standard text){{/unless}}
+
+Used by:
+
+{{#each used_by}}{{#if crate.source}}- `{{crate.name}} {{crate.version}}`
+{{/if}}{{/each}}
+`````text
+{{{text}}}
+`````
+{{/unless}}{{/each}}
+
+## Crate index
+
+{{#each crates}}{{#if package.source}}- `{{package.name}} {{package.version}}`: {{{license}}}
+{{/if}}{{/each}}

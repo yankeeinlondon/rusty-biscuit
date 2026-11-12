@@ -485,8 +485,9 @@ uploaded and runs `scripts/ci/publish_gaps.py`, which creates one check run
 per accepted-gap cell on the pull request head (`POST
 /repos/{owner}/{repo}/check-runs`; `github.sha` on a `pull_request` event is
 the merge commit, and a check there never reaches the PR's checks list). The
-check's name identifies the cell (`accepted gap: <area> / <package> / <gate>
-(<environment>)`); its title and summary carry the `ACCEPTED GAP` marker with
+check's name identifies the cell in plain words (`ACCEPTED GAP: <package>:
+<action> on <environment>`, for example `ACCEPTED GAP: alpha-cli: run Level 2
+tests on Windows`); its title and summary carry the `ACCEPTED GAP` marker with
 the environment, package, gate, capability, owner, expiry, and reason; its text
 carries the change/revoke instructions and the `closes` work; `details_url`
 links the policy entry's line at the tested head. The conclusion is `neutral`
@@ -862,16 +863,27 @@ resolved plan. The `build` matrix has one leg per native producer environment,
 derived from `build_owners`; its runner and union of native prerequisites come
 from that projection. An all-reused plan schedules no owner.
 
-Each owner invokes `scripts/ci/produce-owner.sh` once, without `--key`. Separate,
-deterministically ordered package invocations share one Cargo target directory.
-The artifact publisher uses the pinned `@actions/artifact` client to upload each
-`build-<package>-<producer>-<key>` independently, including that package's
-manifest, archive, sidecars, and verifier. A failed record or upload does not
-stop publication of unrelated records. No owner bundle replaces package keys.
+Each owner runs `scripts/ci/artifacts/produce.cjs`, which invokes
+`scripts/ci/produce-owner.sh --key` once per record in `(package, key)` order;
+every invocation shares one Cargo target directory. After each record it uses
+the pinned `@actions/artifact` client to upload
+`build-<package>-<producer>-<key>` (that package's manifest, archive, sidecars,
+and verifier) and its status, then deletes the uploaded archive and copied
+sidecars before the next record starts. A local publication ledger keeps any
+artifact from being uploaded twice; an always-run finalizer publishes whatever
+is still outstanding, including statuses for records never reached. A failed
+record or upload does not stop publication of unrelated records. No owner
+bundle replaces package keys.
+
+The Ubuntu owner writes storage samples (`scripts/ci/storage_sample.py`) around
+the cache restore, the schematic guard, every record attempt, and publication,
+and always uploads them as `build-diagnostics-<producer>`; see
+`docs/topics/ci-cd.md` for the fields. A sample never changes a result.
 
 With `measure-compiler-work: true`, the owner script enables the counter for
-package compiles. Each package artifact carries its own compiler-work report
-and an owner aggregate, including measured record count and owner wall time.
+package compiles. Each package artifact carries its own compiler-work report;
+the owner aggregate, including measured record count and owner wall time, is
+published once by the finalizer as `compiler-work-owner-<producer>`.
 Ordinary CI does not enable the counter. Hosted cold/warm comparisons and the
 15% architecture decision remain required before rollout acceptance.
 
@@ -916,11 +928,27 @@ baselined. What it publishes is
 for success, compile failure, upload failure, and cancellation alike — with the
 realized digest and stage timings when the producer got far enough to have
 them. A runner-lost owner leaves none, and `runner_loss.py attribute --plan`
-synthesizes it from the plan's own record. `ci-rollup` reads those documents
-and renders a dependent cell as `MISSING — blocked by build <key> …`, which
-blocks and which the skip baseline (test identities only) can never excuse. An
-unrelated area or environment proceeds untouched, and a real test result
-outranks the plumbing diagnostic.
+synthesizes it from the plan's own record, saying the per-record production
+and publication outcome is unknown; a real status always wins.
+
+A consumer reads its record's status **before** downloading the archive:
+"Download this cell's build status" (the one `continue-on-error` step), then
+`scripts/ci/build_status.py`, then the archive download. Native cells do this
+when they consume an archive; WSL2 does it on the Windows host before any guest
+is provisioned. A `failure` or `cancelled` status stops the cell with `not run:
+producer failed: build <key> for <package> on <producer> concluded <result> at
+the <stage> stage`; no status stops it with `not run: producer outcome unknown`
+and names the owner job; a malformed or mismatched document stops it naming the
+file and field. A missing archive after a successful status is an
+artifact-publication failure. Nothing compiles in its place and no completion
+record is written, so the audit sees the cell as `MISSING`, which blocks and
+which the skip baseline (test identities only) can never excuse.
+
+`ci-rollup` renders a cell with no results as `not run: producer failed; build
+<key> (<package> on <producer>) concluded …`, and a cell that did run tests
+keeps its own result with `producer failed; build …` as context. An absent
+status is never read as a compilation failure. An unrelated area or environment
+proceeds untouched.
 
 **Consumers verify, then run.** A tier whose `{environment, gate}` appears in a
 record's `consumers` installs no toolchain (except the one a
@@ -1057,13 +1085,15 @@ output). It refuses the whole plan rather than truncating it.
 
 A called workflow's jobs render as `<caller job name> / <called job name>`, and
 GitHub builds a matrix job's label from every value in its row in key order, so
-a producer reads `area-ci (playa) / package-ci / test (playa-cli, L1,
+a producer reads `area-ci (playa) / Run package work / test (playa-cli, L1,
 macos-latest, macos-latest)`: area first, then the whole cell with its runner.
 A WSL2 row rides on the delegating job, `… / wsl2 (playa, L1, wsl2-ubuntu,
-windows-latest) / test (wsl2-ubuntu)`, because the delegated job's name is
+windows-latest) / Run guest tests`, because the delegated job's name is
 static. No display name is parsed for identity, which still comes from each
 artifact's `manifest.jsonl` and `status.json`; `runner_loss.py` parses the
-label only to attribute a lost runner to its cell.
+label only to attribute a lost runner to its cell, and `reuse_validation.py`
+finds each area's audit job (`Check required results`, historically
+`coverage-audit`) by its label.
 
 **Area is a grouping; package is the identity.** Nothing is re-keyed by area.
 The one place an area name appears in a stored name is the per-area result
@@ -1075,13 +1105,16 @@ rejects `/` in an artifact name.
 and `area_rows`, derived from its executing cells. Grouping in the planner
 rather than in workflow `jq` is what gives the shape test coverage.
 
-**Skippable jobs carry no `name:`.** GitHub never evaluates the matrix context
-for a job it skips, so a declared `name:` containing `${{ matrix.… }}` reaches
-the Checks tab as raw expression text — 63 such labels in run 34638047631. A
-job that can be skipped as a whole therefore omits `name:` and lets GitHub fall
-back to the job id, which is static when the job is skipped and gains the
-row's values when it runs — which is how `lint`'s environment stays visible
-too.
+**No job name contains an expression.** GitHub never evaluates the matrix
+context for a job it skips, so a declared `name:` containing `${{ matrix.… }}`
+reaches the Checks tab as raw expression text — 63 such labels in run
+34638047631. Jobs that own no result cell carry a literal descriptive name
+(`Verify build prerequisites`, `Run package work`, `Check required results`).
+The cell-carrying matrix jobs (`area-ci`, `build`, and `_package-ci.yml`'s
+`check`, `test`, `lint`, `wsl2`) omit `name:` and let GitHub fall back to the
+job id, which is static when the job is skipped and gains the row's values when
+it runs — which is how `lint`'s environment stays visible too. See
+`docs/topics/ci-cd.md`, "Reading job and check names", for the full name map.
 
 ## Each area audits its planned coverage
 
@@ -1359,10 +1392,12 @@ Version 5 added `deleted`, the subset of those paths the diff reported as
 removed. A deleted path is still in its bucket — it changed — and the extra
 list is what lets a reader tell it from a path that is simply absent, which
 `git diff --name-only` cannot express. Every boundary therefore takes
-`git diff --name-status -z` and renders it through `scripts/ci/diff_scope.py`
-into `--deleted <path>... --renamed-from <path>... -- <changed path>...`: the
-scope step of `ci.yml`, `just/ci-local.just` (which unions untracked files,
-never deletions), and `.githooks/pre-push`. A rename's destination is the
+`git diff --name-status -z` and renders it into
+`--deleted <path>... --renamed-from <path>... -- <changed path>...`: the
+scope step of `ci.yml` and `just/ci-local.just` (which unions untracked files,
+never deletions) through `scripts/ci/diff_scope.py`, and the pre-push hook's
+`ci-push` (`scripts/ci-push/git.rs`), which diffs the committed trees itself
+and writes the same tail byte for byte. A rename's destination is the
 changed path; its source is neither a declared removal nor a file left to read,
 so it enters neither list and is passed as `--renamed-from` for the test-input
 search alone.
@@ -1471,7 +1506,7 @@ three times:
    every ordinary lint cell runs it exactly as before. A skipped Clippy records
    no `duration_s`, which the status step already spells as an absent
    measurement rather than a `0`.
-2. the **Companion suites (lint)** step, which receives
+2. the **Run companion lint suites** step, which receives
    `BISCUIT_ARCHIVE_GUARD_PLAN` pointing at the plan the job already
    downloaded to resolve its cell. It is an **absolute** path — neither the recipe
    (`cd tools/test-toolkit && …`) nor nextest's test binary runs in the
@@ -1545,6 +1580,7 @@ member directory, plus the two owners' own manifests:
 | `.github/ci/schemas/contract.json`, `.github/ci/schemas/archive_guard_cases.json` | `repo-deps`, `test-toolkit` |
 | `.github/ci/**` (otherwise) | `repo-deps` |
 | `scripts/Cargo.toml` | `repo-deps` |
+| `docs/deployment.yaml`, `dist-workspace.toml`, `about.toml`, `.github/distribution/build-images.json`, `.github/distribution/rollout.json`, `just/distribution.just` | `repo-deps` (its `distribution` companion suite reads them) |
 | `.github/workflows/**` | `test-toolkit` |
 | `tools/test-audit/**`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` | `test-toolkit` |
 | `tools/test-toolkit/Cargo.toml` | `test-toolkit` |
@@ -1566,12 +1602,15 @@ dependencies and no dependent seam, and the owner's area reports
 No path selects the full workspace; `workflow_dispatch` / `--all` remains the
 only full-scope route.
 
-One suite is not yet in that table: the build owner's artifact publisher
-(`node --test 'scripts/ci/artifacts/*.test.cjs'`, the owner aggregate AC8 is
-read from). It is a Node module under `scripts/`, so a change to it already
-selects `repo-deps` by ordinary source ownership; it still needs a
-`SUITE_REGISTRY` entry — with the Node toolchain the `tools/test-audit` suites
-declare — before that selection schedules it.
+The build owner's artifact publisher is not in that table because it needs no
+row: it is a Node module under `scripts/`, so a change to it selects
+`repo-deps` by ordinary source ownership, and its `SUITE_REGISTRY` entry
+`artifact-publisher` (with the Node toolchain the `tools/test-audit` suites
+declare) is what schedules its suite, `node --test
+'scripts/ci/artifacts/*.test.cjs'`. That suite covers the per-record
+coordinator, the publication ledger, and the owner aggregate AC8 is read from.
+The consumer's build-status check is likewise a `repo-deps` companion,
+`test_build_status.py`, run through `scripts/ci/suite_runner.py`.
 
 ### CI helper runtime floors
 

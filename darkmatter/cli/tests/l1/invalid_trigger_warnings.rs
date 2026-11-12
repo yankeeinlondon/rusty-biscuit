@@ -23,8 +23,11 @@ const INCIDENT: &str =
 const VALID_TRIGGER: &str = "kind: schema-trigger\nmatch:\n  kind: enum(prompt; required)\n$schema: prompt.yaml\n";
 const VALID_PAYLOAD: &str = "$schema:\n  owner: string(required)\n";
 
+/// Writes `content` at `relative` (`/`-separated) under `root` and returns
+/// the path in `root`'s spelling, joined component by component so it uses
+/// the native separator throughout, as `md` names it in a warning.
 fn write(root: &Path, relative: &str, content: &str) -> PathBuf {
-    let path = root.join(relative);
+    let path = relative.split('/').fold(root.to_path_buf(), |path, component| path.join(component));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, content).unwrap();
     path
@@ -470,8 +473,7 @@ fn compose_reference_refusal_keeps_a_child_only_warning() {
         let row = report["diagnostics"].as_array().unwrap().iter().find(|row| row["code"] == CODE).unwrap();
         assert_eq!(row["severity"], "warning", "{report:#}");
         let message = row["message"].as_str().unwrap();
-        let portable = |text: &str| compact(text).replace('\\', "/");
-        assert!(portable(message).contains(&portable(&trigger.display().to_string())), "names alpha's trigger: {report:#}");
+        assert!(message.contains(&trigger.display().to_string()), "names alpha's trigger: {report:#}");
     }
 }
 
@@ -1020,10 +1022,7 @@ fn assert_denied_before_the_shell(process: &CliProcessFixture, trigger: &Path, l
     let row = report["diagnostics"].as_array().unwrap().iter().find(|row| row["code"] == CODE).unwrap();
     assert_eq!(row["severity"], "warning", "{case}: {report:#}");
     let message = row["message"].as_str().unwrap();
-    let names_trigger = [trigger.to_path_buf(), biscuit_file::canonicalize_simplified(trigger).unwrap()]
-        .iter()
-        .any(|path| message.contains(&path.display().to_string()));
-    assert!(names_trigger && message.contains("found unknown keys"), "{case}: {report:#}");
+    assert!(message.contains(&trigger.display().to_string()) && message.contains("found unknown keys"), "{case}: {report:#}");
     assert!(!marker.exists(), "{case}: the approved shell ran before the stop");
 }
 

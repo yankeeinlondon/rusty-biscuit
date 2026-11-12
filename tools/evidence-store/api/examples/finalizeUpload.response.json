@@ -1,0 +1,37 @@
+{
+  "upload": {
+    "upload_id": "ff4085ad157354dc8ea67a848e7c2270",
+    "observation_id": "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b",
+    "reference_kind": "report",
+    "reference_digest": "845e91831319e89c4d656bdb80c278ac09a7230d61e5dfd2e1b1fbb436ac8917",
+    "path": "biscuit-hash-L1.junit.xml",
+    "bytes": 18432,
+    "part_bytes": 1048576,
+    "part_count": 1,
+    "parts_received": 1,
+    "state": "finalized",
+    "expires_at_ms": 1794398400000
+  },
+  "sha256": "845e91831319e89c4d656bdb80c278ac09a7230d61e5dfd2e1b1fbb436ac8917",
+  "location": {
+    "event_id": "71313aab-3776-3895-eb7e-3fc1df415c45",
+    "sequence": 656,
+    "observation_id": "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b",
+    "reference_kind": "report",
+    "reference_digest": "845e91831319e89c4d656bdb80c278ac09a7230d61e5dfd2e1b1fbb436ac8917",
+    "path": "biscuit-hash-L1.junit.xml",
+    "location_key": "ecd1ad00179b84a0ac2bc8809339ee14dd2eb2b6d52306ecd9f5cc51edc520db",
+    "locator": {
+      "kind": "object",
+      "upload_id": "ff4085ad157354dc8ea67a848e7c2270"
+    },
+    "kind": "verified",
+    "verification_method": "bytes",
+    "checked_at_ms": 1794312300000,
+    "valid_until_ms": 1794398700000,
+    "checked_by": {
+      "kind": "credential",
+      "credential_id": "a73782ac11e7dd2654ce3b967b1511f3"
+    }
+  }
+}

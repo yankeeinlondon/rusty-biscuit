@@ -1948,6 +1948,174 @@ fn a_key_narrowed_leg_produces_only_its_own_record() {
     );
 }
 
+/// A storage sampler that records each invocation's arguments and then fails,
+/// so one fixture proves both that every boundary is sampled and that a broken
+/// diagnostic leaves the build's own result alone.
+#[cfg(unix)]
+fn failing_recorder(dir: &Path) -> (String, PathBuf) {
+    let log = dir.join("samples.log");
+    let argv = json!([
+        "sh",
+        "-c",
+        format!("printf '%s\\n' \"$*\" >> '{}'; exit 3", log.display()),
+        "sampler",
+        "--fixed",
+    ]);
+    (argv.to_string(), log)
+}
+
+/// Every record attempt is sampled after its status is written, including a
+/// record refused before it compiles, and the sampler's own failure changes
+/// neither the record's status nor the owner's exit code.
+#[cfg(unix)]
+#[test]
+fn every_record_attempt_is_sampled_and_a_failing_sampler_changes_no_outcome() {
+    let dir = Scratch::new("sampled-owner");
+    let triple = host_triple();
+    let plan = plan_with_identity(dir.path(), &triple, "host", "s390x-unknown-linux-gnu");
+    let (argv, log) = failing_recorder(dir.path());
+
+    let unsampled = produce_with(dir.path(), &plan, &[]);
+    let unsampled_status = fixture_status(dir.path());
+    let sampled = produce_with(dir.path(), &plan, &["--sample-command", &argv, "--json"]);
+
+    assert_eq!(sampled.status.code(), unsampled.status.code());
+    assert_eq!(fixture_status(dir.path()), unsampled_status);
+    assert_eq!(unsampled_status["stage"], "preflight");
+    let stdout: Value = serde_json::from_slice(&sampled.stdout)
+        .expect("the sampler's output must not leak into the --json document");
+    assert_eq!(stdout.as_array().map(Vec::len), Some(1));
+
+    let lines: Vec<String> = fs::read_to_string(&log)
+        .expect("the sampler ran")
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "--fixed --label produce-start".to_owned(),
+            "--fixed --label record --record build-archive-portability-local-host-0f1e2d3c4b5a6978 \
+             --outcome failure:preflight"
+                .to_owned(),
+        ]
+    );
+    let stderr = String::from_utf8_lossy(&sampled.stderr);
+    assert!(stderr.contains("storage sample"), "the failure is reported: {stderr}");
+}
+
+/// The hosted path end to end: `produce-owner.sh` with the job's
+/// `BUILD_DIAGNOSTICS` set hands the shipped `storage_sample.py` to the
+/// producer, which appends one JSON line at the owner's start and one after the
+/// record. Unix only: it needs the wrapper's `jq` and a `python3`, which the
+/// Ubuntu owner — the only one that samples — always has.
+#[cfg(unix)]
+#[test]
+fn the_hosted_wrapper_samples_each_record_through_the_shipped_sampler() {
+    let dir = Scratch::new("wrapper-samples");
+    let plan = plan_with_identity(dir.path(), &host_triple(), "host", "s390x-unknown-linux-gnu");
+    let diagnostics = dir.path().join("build-diagnostics");
+    let target = dir.path().join("target");
+    let output = Command::new("bash")
+        .arg(repo_root().join("scripts/ci/produce-owner.sh"))
+        .env("CI_BUILD_BIN", crate::tests::shipped_wrapper())
+        .env("CI_BUILD_PLAN", &plan)
+        .env("PRODUCER", "local-host")
+        .env("RUNNER_TEMP", dir.path())
+        .env("BUILD_DIAGNOSTICS", &diagnostics)
+        .env("CARGO_TARGET_DIR", &target)
+        .arg("--workspace")
+        .arg(dir.path().join("workspace"))
+        .arg("--sidecars")
+        .arg(fixture_sidecars(dir.path()))
+        .output()
+        .expect("running the owner wrapper");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "the refused record still fails the owner: {stderr}");
+
+    let samples: Vec<Value> = fs::read_to_string(diagnostics.join("storage.jsonl"))
+        .unwrap_or_else(|error| panic!("the wrapper must sample ({error}): {stderr}"))
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("each sample is one JSON document"))
+        .collect();
+    let labels: Vec<(&str, Option<&str>)> = samples
+        .iter()
+        .map(|sample| (sample["label"].as_str().unwrap_or(""), sample["outcome"].as_str()))
+        .collect();
+    assert_eq!(labels, [("produce-start", None), ("record", Some("failure:preflight"))]);
+    for sample in &samples {
+        assert_eq!(sample["schema"], "storage-sample/1");
+        assert_eq!(sample["locations"]["target"]["path"], json!(target.to_string_lossy()));
+        assert_eq!(
+            sample["locations"]["output"]["path"],
+            json!(dir.path().join("build").to_string_lossy())
+        );
+        assert!(sample["locations"]["output"]["free_bytes"].is_u64(), "{sample}");
+    }
+    assert_eq!(
+        samples[1]["categories"]["metadata"]["entries"], 1,
+        "the refused record's status is already on disk when it is sampled"
+    );
+}
+
+/// The wrapper's two modes: local (unset) writes the owner timing itself;
+/// `record`, one child of the hosted coordinator, leaves it to the coordinator
+/// that spans every record. Any other mode is refused before producing.
+#[test]
+fn the_owner_wrapper_leaves_owner_timing_to_the_coordinator_in_record_mode() {
+    let dir = Scratch::new("wrapper-modes");
+    let bash = which("bash").expect("bash must be on PATH");
+    let run = |mode: Option<&str>| {
+        let mut command = Command::new(&bash);
+        command
+            .arg(repo_root().join("scripts/ci/produce-owner.sh"))
+            // A stand-in producer: this test is about the wrapper, not `ci-build`.
+            .env("CI_BUILD_BIN", "true")
+            .env("PRODUCER", "local-host")
+            .env("RUNNER_TEMP", dir.path())
+            .env("MEASURE", "true")
+            .env_remove("BUILD_DIAGNOSTICS")
+            .env_remove("CI_BUILD_OUT")
+            .env_remove("PRODUCE_MODE");
+        if let Some(mode) = mode {
+            command.env("PRODUCE_MODE", mode);
+        }
+        command.output().expect("running the owner wrapper")
+    };
+    let timing = dir.path().join("build").join("owner-timing.json");
+
+    assert!(run(Some("record")).status.success());
+    assert!(!timing.exists(), "a record child must not write the owner's timing");
+    assert!(run(None).status.success());
+    assert!(timing.exists(), "the local mode times the owner itself");
+
+    let refused = run(Some("upload"));
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("unknown PRODUCE_MODE 'upload'"));
+}
+
+/// A sampler that cannot even start is reported and ignored: an owner with no
+/// records still succeeds. Runs on every platform, unlike the recorder above.
+#[test]
+fn a_sampler_that_cannot_start_leaves_a_successful_owner_successful() {
+    let dir = Scratch::new("unstartable-sampler");
+    let triple = host_triple();
+    let plan = fixture_plan(dir.path(), &triple);
+    let mut document: Value =
+        serde_json::from_str(&fs::read_to_string(&plan).expect("reading the plan")).expect("the plan is JSON");
+    document["builds"][0]["producer"] = json!("some-other-owner");
+    fs::write(&plan, serde_json::to_string_pretty(&document).unwrap()).expect("writing the plan");
+
+    let output = produce_with(
+        dir.path(),
+        &plan,
+        &["--sample-command", r#"["ci-build-no-such-storage-sampler"]"#],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "a diagnostic must not fail the owner: {stderr}");
+    assert!(stderr.contains("could not start"), "the failure is reported: {stderr}");
+}
+
 /// Rewrite one field of the fixture record's identity.
 fn plan_with_identity(dir: &Path, triple: &str, field: &str, value: &str) -> PathBuf {
     let path = fixture_plan(dir, triple);
@@ -2168,6 +2336,7 @@ fn empty_sidecars(dir: &Path) -> PathBuf {
 
 struct SharedDeps {
     out: PathBuf,
+    uploaded: PathBuf,
     counters: PathBuf,
     target: PathBuf,
 }
@@ -2182,30 +2351,43 @@ impl SharedDeps {
         .expect("the producer's own manifest must parse")
     }
 
+    /// The archive as the fake artifact transport received it. The local copy
+    /// is released once its upload is recorded.
     fn archive(&self, package: &str, key: &str) -> PathBuf {
-        self.out
-            .join(format!("{}.tar.zst", shared_deps_artifact(package, key)))
+        let artifact = shared_deps_artifact(package, key);
+        self.uploaded.join(&artifact).join(format!("{artifact}.tar.zst"))
     }
 }
 
-/// Produce both fixture records, measured, into one owner target tree.
+/// Produce both fixture records, measured, into one owner target tree through
+/// the hosted coordinator: one `produce-owner.sh --key` child per record, each
+/// published to a directory standing in for the artifact service before the
+/// next starts.
 fn produce_shared_deps(dir: &Path) -> SharedDeps {
     let binary = crate::tests::shipped_wrapper();
     let plan = shared_deps_plan(dir, &host_triple());
     let out = dir.join("build");
+    let uploaded = dir.join("uploaded");
     let counters = dir.join("build-counters");
     let target = dir.join("owner-target");
 
-    // From PATH, not a bare `bash`: Windows' `Command` searches System32
-    // first, and on the hosted runner that holds the WSL launcher.
-    let bash = which("bash").expect("bash must be on PATH");
-    let output = Command::new(bash)
-        .arg(repo_root().join("scripts/ci/produce-owner.sh"))
-        .env("CI_BUILD_BIN", &binary)
-        .env("CI_BUILD_PLAN", &plan)
-        .env("PRODUCER", "local-host")
-        .env("RUNNER_TEMP", dir)
-        .env("MEASURE", "true")
+    let node = which("node").unwrap_or_else(|| {
+        panic!("node must be on PATH: the owner's records are produced by scripts/ci/artifacts/produce.cjs")
+    });
+    let output = Command::new(node)
+        .arg(repo_root().join("scripts/ci/artifacts/produce.cjs"))
+        .arg("--plan")
+        .arg(&plan)
+        .arg("--producer")
+        .arg("local-host")
+        .arg("--out")
+        .arg(&out)
+        .arg("--verifier")
+        .arg(&binary)
+        .arg("--upload-dir")
+        .arg(&uploaded)
+        .arg("--measure")
+        .arg("--")
         .arg("--workspace")
         .arg(dir.join("workspace"))
         .arg("--target-dir")
@@ -2213,8 +2395,13 @@ fn produce_shared_deps(dir: &Path) -> SharedDeps {
         .arg("--sidecars")
         .arg(empty_sidecars(dir))
         .arg("--json")
+        // `produce-owner.sh` runs this as its command word, and Bash looks a
+        // word with no `/` up on PATH: `C:\…\ci-build.exe` is "command not
+        // found" under Git Bash, while `C:/…/ci-build.exe` runs.
+        .env("CI_BUILD_BIN", binary.to_string_lossy().replace('\\', "/"))
+        .env("RUNNER_TEMP", dir)
         .output()
-        .expect("running ci-build produce");
+        .expect("running the hosted coordinator");
     assert!(
         output.status.success(),
         "producing both fixture records failed: {}",
@@ -2222,6 +2409,7 @@ fn produce_shared_deps(dir: &Path) -> SharedDeps {
     );
     SharedDeps {
         out,
+        uploaded,
         counters,
         target,
     }
@@ -2362,6 +2550,20 @@ fn one_owner_tree_shares_a_dependency_compile_without_unifying_features() {
         produced.target.is_dir(),
         "both records compiled into one owner target tree"
     );
+    for (package, key) in [
+        ("shared-deps-alpha", ALPHA_KEY),
+        ("shared-deps-beta", BETA_KEY),
+    ] {
+        let artifact = shared_deps_artifact(package, key);
+        assert!(
+            !produced.out.join(format!("{artifact}.tar.zst")).exists(),
+            "{package}'s archive is released locally once it is published"
+        );
+        assert!(
+            produced.uploaded.join(format!("build-status-{package}-local-host-{key}")).is_dir(),
+            "{package}'s status is published"
+        );
+    }
 }
 
 /// The producer keeps one Cargo invocation per package because a combined one

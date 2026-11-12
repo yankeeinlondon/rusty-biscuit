@@ -5,6 +5,9 @@ use std::path::Path;
 
 fn assert_reports_reject(repo: &Repo, root: &Path, index: &Path, length: usize) {
     let original = std::fs::read(index).unwrap();
+    // The product names the repository by its canonical long spelling, which
+    // differs from an 8.3 short Windows temp path or macOS `/var` symlink.
+    let canonical_root = biscuit_file::canonicalize_simplified(root).expect("canonical repository root");
     assert_eq!(original.len(), 104, "known tool-written index");
     for command in ["functions", "types", "symbols", "classes"] {
         let expected: Vec<&str> = match command {
@@ -32,7 +35,7 @@ fn assert_reports_reject(repo: &Repo, root: &Path, index: &Path, length: usize) 
                     assert_eq!(output.status.code(), Some(1), "{length}: {args:?}: {stderr}");
                     assert!(output.stdout.is_empty(), "no partial report for {args:?}");
                     assert!(stderr.contains("index"), "index context: {stderr}");
-                    assert!(stderr.contains(&root.display().to_string()), "repository context: {stderr}");
+                    assert!(stderr.contains(&canonical_root.display().to_string()), "repository context: {stderr}");
                     assert!(!stderr.contains("cache: "), "failure precedes source/cache analysis: {stderr}");
                 }
             }

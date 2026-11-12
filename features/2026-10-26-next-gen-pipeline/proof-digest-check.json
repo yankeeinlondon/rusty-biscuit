@@ -1,0 +1,18 @@
+{
+  "development": {
+    "service": "development",
+    "observations": 14,
+    "objects_referenced": 41,
+    "objects_digest_ok": 41,
+    "bytes": 9713679,
+    "failures": []
+  },
+  "restore-test": {
+    "service": "restore-test",
+    "observations": 14,
+    "objects_referenced": 41,
+    "objects_digest_ok": 41,
+    "bytes": 9713679,
+    "failures": []
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "certificate_id": "7d1e5c3b-2a49-4f86-b0c1-e2d3f4a5b6c7",
+  "snapshot": {
+    "repository_id": "873451209",
+    "generation": "e661f4c935e8a5a83349afb5e347695c",
+    "retention_epoch": 3,
+    "evidence_revision": 1842,
+    "observation_event_watermark": 1207,
+    "location_event_watermark": 655
+  },
+  "cells": [
+    {
+      "package": "biscuit-hash",
+      "environment": "ubuntu-latest",
+      "gate": "L1",
+      "candidate_ids": [
+        "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b",
+        "bb87fab67a46501d93922dcda6a33ab75b2e015659d9b28e08cc706a5a89cd7d"
+      ],
+      "retained_ids": [
+        "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b"
+      ],
+      "supersessions": [
+        {
+          "superseded_id": "bb87fab67a46501d93922dcda6a33ab75b2e015659d9b28e08cc706a5a89cd7d",
+          "superseded_by_id": "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b",
+          "evidence": {
+            "kind": "strict-ancestry",
+            "ancestor_head": "872648a548ff41e3da9f8d60ccab494c855c1cb1",
+            "descendant_head": "9f2e6d33a3717ee826353a404ba4618d1aeeb687"
+          }
+        }
+      ]
+    }
+  ],
+  "verifier_policy": {
+    "name": "rusty-biscuit-reuse",
+    "version": "1",
+    "digest": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812"
+  },
+  "release_pins": [
+    {
+      "release": "biscuit-hash-v0.4.0",
+      "observation_ids": [
+        "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b"
+      ]
+    }
+  ]
+}

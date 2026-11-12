@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites><testsuite name="darkmatter" tests="3" failures="1" errors="0" skipped="0"><testcase classname="darkmatter" name="render::tables"><failure message="boom"/></testcase><testcase classname="darkmatter" name="ok_0"/><testcase classname="darkmatter" name="ok_1"/></testsuite></testsuites>

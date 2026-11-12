@@ -68,7 +68,7 @@ impl Commits {
             return None;
         }
         // Git reads the `shallow` file when it exists, even an empty one.
-        let shallow = repo.shallow_file().is_file();
+        let shallow = repo.shallow_file().ok()?.is_file();
         let cut = match repo.shallow_commits().ok()? {
             Some(commits) => commits.iter().copied().collect(),
             None => HashSet::new(),

@@ -1,0 +1,45 @@
+host: Linux aarch64
+os-release: Ubuntu 22.04.5 LTS
+build tools on PATH: 
+
+$ bh --version
+bh 0.1.0
+[exit 0]
+
+$ bh --help
+Hash content using various algorithms (xxHash, BLAKE3, Argon2id)
+
+Usage: bh [OPTIONS] [CONTENT]
+
+Arguments:
+  [CONTENT]  Content to hash (use "-" with --password to read from stdin)
+
+Options:
+  -f, --file <PATH>  Hash contents of a file instead of direct content
+  -c, --crypto       Use BLAKE3 cryptographic hash instead of xxHash
+  -p, --password     Password hashing mode (Argon2id). Use "-" as content to read from stdin
+  -h, --help         Print help
+  -V, --version      Print version
+
+SHELL COMPLETIONS:
+  Enable tab completions by adding one line to your shell config:
+
+  Bash (~/.bashrc):
+    source <(COMPLETE=bash bh)
+
+  Zsh (~/.zshrc):
+    source <(COMPLETE=zsh bh)
+
+  Fish (~/.config/fish/config.fish):
+    COMPLETE=fish bh | source
+
+  PowerShell ($PROFILE):
+    Invoke-Expression (& bh _complete powershell)
+
+EXAMPLES:
+  bh "hello world"              # xxHash of string
+  bh --file Cargo.toml           # xxHash of file contents
+  bh --crypto "hello world"     # BLAKE3 cryptographic hash
+  bh --password "secret"        # Argon2id password hash
+  echo "secret" | bh --password -  # Password from stdin
+[exit 0]

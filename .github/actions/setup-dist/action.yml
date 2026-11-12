@@ -1,0 +1,127 @@
+name: Set up distribution tools
+description: >-
+  Provide the pinned tools the binary distribution jobs use: a Python
+  environment with scripts/ci/requirements-distribution.txt, and optionally
+  dist (cargo-dist) and cargo-about, each downloaded from its upstream
+  release and checked against a pinned SHA-256 before it runs.
+
+# Pins live in one place each: dist's version and per-platform SHA-256 values
+# in .github/distribution/build-images.json (build.sh reads the same entries
+# inside the Linux container), cargo-about's below. A pin that does not match
+# the download fails the job; there is no unpinned fallback.
+
+inputs:
+  dist:
+    description: "'true' to put the pinned dist on PATH (runner host target)."
+    default: "false"
+  cargo-about:
+    description: "'true' to put the pinned cargo-about on PATH (Linux x86_64 runners only)."
+    default: "false"
+  binstall:
+    description: "'true' to provide the pinned cargo-binstall as CARGO_BINSTALL (not on PATH)."
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Create the pinned Python environment
+      shell: bash
+      run: |
+        set -euo pipefail
+        venv="${RUNNER_TEMP}/distribution-venv"
+        python3 -m venv "${venv}"
+        "${venv}/bin/python" -m pip install --quiet --disable-pip-version-check --no-input \
+          -r scripts/ci/requirements-distribution.txt
+        echo "PYTHON=${venv}/bin/python" >> "$GITHUB_ENV"
+
+    - name: Install the pinned dist
+      if: inputs.dist == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "$(uname -s)-$(uname -m)" in
+          Darwin-arm64) host=aarch64-apple-darwin ;;
+          Darwin-x86_64) host=x86_64-apple-darwin ;;
+          Linux-aarch64) host=aarch64-unknown-linux-gnu ;;
+          Linux-x86_64) host=x86_64-unknown-linux-gnu ;;
+          *) echo "::error title=distribution tools::no pinned dist for $(uname -s) $(uname -m)"; exit 1 ;;
+        esac
+        pins="$(python3 - "${host}" <<'PY'
+        import json, sys
+        dist = json.load(open(".github/distribution/build-images.json", encoding="utf-8"))["dist"]
+        host = sys.argv[1]
+        print(dist["version"], f"{dist['release_url']}/cargo-dist-{host}.tar.xz", dist["sha256"][host])
+        PY
+        )"
+        read -r version url sha <<< "${pins}"
+        dir="${RUNNER_TEMP}/dist-bin"
+        mkdir -p "${dir}"
+        curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --max-time 300 -o "${RUNNER_TEMP}/dist.tar.xz" "${url}"
+        echo "${sha}  ${RUNNER_TEMP}/dist.tar.xz" | shasum -a 256 -c -
+        tar -xJf "${RUNNER_TEMP}/dist.tar.xz" -C "${dir}" --strip-components=1
+        reported="$("${dir}/dist" --version)"
+        if [ "${reported}" != "cargo-dist ${version}" ]; then
+          echo "::error title=distribution tools::expected cargo-dist ${version}, found '${reported}'"
+          exit 1
+        fi
+        echo "${dir}" >> "$GITHUB_PATH"
+        echo "DIST_BIN=${dir}/dist" >> "$GITHUB_ENV"
+
+    - name: Install the pinned cargo-about
+      if: inputs.cargo-about == 'true'
+      shell: bash
+      env:
+        CARGO_ABOUT_VERSION: 0.8.4
+        # SHA-256 of the upstream x86_64-unknown-linux-musl release asset.
+        CARGO_ABOUT_SHA256: c7381aa0cdc41fc0ee662cec8daa260da7817ad8ddea04cd4ddad425460adf14
+      run: |
+        set -euo pipefail
+        if [ "$(uname -s)-$(uname -m)" != Linux-x86_64 ]; then
+          echo "::error title=distribution tools::cargo-about is pinned for Linux x86_64 runners only"
+          exit 1
+        fi
+        name="cargo-about-${CARGO_ABOUT_VERSION}-x86_64-unknown-linux-musl"
+        dir="${RUNNER_TEMP}/cargo-about-bin"
+        mkdir -p "${dir}"
+        curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --max-time 300 -o "${RUNNER_TEMP}/cargo-about.tar.gz" \
+          "https://github.com/EmbarkStudios/cargo-about/releases/download/${CARGO_ABOUT_VERSION}/${name}.tar.gz"
+        echo "${CARGO_ABOUT_SHA256}  ${RUNNER_TEMP}/cargo-about.tar.gz" | shasum -a 256 -c -
+        tar -xzf "${RUNNER_TEMP}/cargo-about.tar.gz" -C "${dir}" --strip-components=1 "${name}/cargo-about"
+        echo "CARGO_ABOUT=${dir}/cargo-about" >> "$GITHUB_ENV"
+
+    # Kept off PATH: the verification driver names this binary explicitly, so
+    # a runner's own cargo-binstall can never stand in for the pinned one.
+    - name: Install the pinned cargo-binstall
+      if: inputs.binstall == 'true'
+      shell: bash
+      env:
+        BINSTALL_VERSION: 1.26.2
+      run: |
+        set -euo pipefail
+        # SHA-256 of each upstream release asset (GitHub's recorded asset digests).
+        case "$(uname -s)-$(uname -m)" in
+          Darwin-arm64) asset=cargo-binstall-aarch64-apple-darwin.zip
+            sha=0f9ddd602d439ea64f03a5c188c59656d5ef389ecdcbff044c8d373e51c0e2b3 ;;
+          Darwin-x86_64) asset=cargo-binstall-x86_64-apple-darwin.zip
+            sha=a114e207a9cd116f97708f175ba5e4f0a37836ff9c4d1ea63c8364436decf70f ;;
+          Linux-aarch64) asset=cargo-binstall-aarch64-unknown-linux-musl.tgz
+            sha=a235250cd684af9bf1e3a1e4c216b1d36e6c553553d5d789744f27689d81c2d6 ;;
+          Linux-x86_64) asset=cargo-binstall-x86_64-unknown-linux-musl.tgz
+            sha=9e0e064f189a9abb9f8df5fb93c3c810ef5cc19e7212d998c7a64c9e4d3527d5 ;;
+          *) echo "::error title=distribution tools::no pinned cargo-binstall for $(uname -s) $(uname -m)"; exit 1 ;;
+        esac
+        dir="${RUNNER_TEMP}/binstall-bin"
+        mkdir -p "${dir}"
+        curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --max-time 300 -o "${RUNNER_TEMP}/${asset}" \
+          "https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/${asset}"
+        echo "${sha}  ${RUNNER_TEMP}/${asset}" | shasum -a 256 -c -
+        case "${asset}" in
+          *.zip) unzip -q -o "${RUNNER_TEMP}/${asset}" cargo-binstall -d "${dir}" ;;
+          *) tar -xzf "${RUNNER_TEMP}/${asset}" -C "${dir}" cargo-binstall ;;
+        esac
+        reported="$("${dir}/cargo-binstall" -V)"
+        if [ "${reported}" != "${BINSTALL_VERSION}" ]; then
+          echo "::error title=distribution tools::expected cargo-binstall ${BINSTALL_VERSION}, found '${reported}'"
+          exit 1
+        fi
+        echo "CARGO_BINSTALL=${dir}/cargo-binstall" >> "$GITHUB_ENV"

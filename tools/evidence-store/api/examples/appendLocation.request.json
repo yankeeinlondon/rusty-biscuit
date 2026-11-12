@@ -1,0 +1,14 @@
+{
+  "event_id": "b2e4d6f8-1a3c-4e5f-8a7b-9c0d1e2f3a4b",
+  "observation_id": "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b",
+  "reference_kind": "report",
+  "reference_digest": "845e91831319e89c4d656bdb80c278ac09a7230d61e5dfd2e1b1fbb436ac8917",
+  "path": "biscuit-hash-L1.junit.xml",
+  "locator": {
+    "kind": "host-dir",
+    "host": "rig-linux-01",
+    "directory": "~/.rusty-biscuit/reports/run-0001"
+  },
+  "kind": "verified",
+  "verification_method": "bytes"
+}

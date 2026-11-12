@@ -1395,52 +1395,101 @@ fn recorded_process_alive(pid_file: &Path) -> bool {
     system.process(pid).is_some_and(|process| process.status() != sysinfo::ProcessStatus::Zombie)
 }
 
-/// `script` as a PowerShell `-EncodedCommand` value (Base64 of UTF-16LE), so
-/// no shell between the test and PowerShell reinterprets its quoting.
-fn encoded_powershell(script: &str) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let n = chunk.iter().enumerate().fold(0u32, |n, (i, byte)| n | u32::from(*byte) << (16 - 8 * i));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
-            } else {
-                out.push('=');
+/// The helper test the barrier's processes run as: this test executable,
+/// launched again with an exact filter, so neither role pays a shell's or
+/// PowerShell's startup inside the runner's elapsed-time limit.
+const BARRIER_HELPER: &str = "barrier_process_helper";
+
+/// The argument that makes a helper invocation the barrier's parent: the
+/// runner's command is argv only and inherits this process's environment, so
+/// the role travels as an extra libtest filter, which `--exact` matches to no
+/// test. Its value is the directory holding the barrier files.
+const BARRIER_PARENT_ARG: &str = "barrier-parent-dir=";
+
+/// Set only on the grandchild the barrier's parent spawns; its value is the
+/// directory holding the barrier files.
+const BARRIER_GRANDCHILD_ENV: &str = "MESSENGER_TEST_BARRIER_GRANDCHILD_DIR";
+
+/// How long an unreleased grandchild lives before exiting on its own.
+const BARRIER_CEILING: Duration = Duration::from_secs(60);
+
+/// The barrier's files, all in one directory: each role's PID, the
+/// grandchild's readiness, the release marker, and the completion file the
+/// grandchild writes only once released.
+struct BarrierFiles {
+    parent_pid: PathBuf,
+    grandchild_pid: PathBuf,
+    ready: PathBuf,
+    release: PathBuf,
+    done: PathBuf,
+}
+
+impl BarrierFiles {
+    fn in_dir(dir: &Path) -> Self {
+        Self {
+            parent_pid: dir.join("parent.pid"),
+            grandchild_pid: dir.join("grandchild.pid"),
+            ready: dir.join("ready"),
+            release: dir.join("release"),
+            done: dir.join("done"),
+        }
+    }
+}
+
+/// Kills whichever barrier process is still running when dropped, so a failed
+/// assertion never leaks one. A process is killed only while it is still an
+/// instance of this test executable, never a later holder of its PID.
+struct BarrierGuard<'a>(&'a BarrierFiles);
+
+impl Drop for BarrierGuard<'_> {
+    fn drop(&mut self) {
+        let _ = fs::write(&self.0.release, "");
+        let exe = std::env::current_exe().and_then(fs::canonicalize).ok();
+        let kind = sysinfo::ProcessRefreshKind::nothing().with_exe(sysinfo::UpdateKind::Always);
+        let mut system = sysinfo::System::new();
+        for pid_file in [&self.0.grandchild_pid, &self.0.parent_pid] {
+            let Some(pid) = fs::read_to_string(pid_file).ok().and_then(|text| text.trim().parse().ok()) else { continue };
+            let pid = sysinfo::Pid::from_u32(pid);
+            system.refresh_processes_specifics(sysinfo::ProcessesToUpdate::Some(&[pid]), true, kind);
+            if let Some(process) = system.process(pid)
+                && exe.is_some()
+                && process.exe().and_then(|path| fs::canonicalize(path).ok()) == exe
+            {
+                process.kill();
             }
         }
     }
-    out
 }
 
-/// PowerShell single-quoted literal of `path`.
-fn ps_path(path: &Path) -> String {
-    format!("'{}'", path.display().to_string().replace('\'', "''"))
+/// This test executable, filtered to exactly the barrier helper test.
+fn barrier_helper_argv() -> Vec<String> {
+    let exe = std::env::current_exe().expect("current test executable");
+    vec![exe.display().to_string(), "--exact".to_string(), BARRIER_HELPER.to_string(), "--nocapture".to_string()]
 }
 
-/// A sequence command whose direct process waits on a grandchild that writes
-/// its PID and a readiness file, waits (at most ten seconds) for `release`,
-/// and only then writes `done`.
-fn barrier_command(pid: &Path, ready: &Path, release: &Path, done: &Path) -> Vec<String> {
-    if cfg!(windows) {
-        let script = format!(
-            "Set-Content -LiteralPath {pid} -Value $PID; New-Item -ItemType File -Path {ready} | Out-Null; \
-             $until = (Get-Date).AddSeconds(10); \
-             while (-not (Test-Path -LiteralPath {release}) -and (Get-Date) -lt $until) {{ Start-Sleep -Milliseconds 100 }}; \
-             if (Test-Path -LiteralPath {release}) {{ New-Item -ItemType File -Path {done} | Out-Null }}",
-            pid = ps_path(pid), ready = ps_path(ready), release = ps_path(release), done = ps_path(done),
-        );
-        ["cmd", "/D", "/C", "powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand"]
-            .map(str::to_string)
-            .into_iter()
-            .chain([encoded_powershell(&script)])
-            .collect()
-    } else {
-        let inner = r#"echo $$ > "$1"; : > "$2"; i=0; while [ ! -f "$3" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; if [ -f "$3" ]; then : > "$4"; fi"#;
-        let mut command: Vec<String> = ["sh", "-c", r#"sh -c "$0" inner "$@" & wait"#, inner].map(str::to_string).to_vec();
-        command.extend([pid, ready, release, done].map(|path| path.display().to_string()));
-        command
+/// The barrier processes. Inert in normal discovery: without a role argument
+/// or variable it returns at once, and only the parent role spawns anything.
+#[test]
+fn barrier_process_helper() {
+    if let Some(dir) = std::env::var_os(BARRIER_GRANDCHILD_ENV) {
+        let files = BarrierFiles::in_dir(Path::new(&dir));
+        fs::write(&files.grandchild_pid, std::process::id().to_string()).expect("grandchild pid");
+        fs::write(&files.ready, "").expect("readiness");
+        if wait_for(&files.release, BARRIER_CEILING) {
+            fs::write(&files.done, "").expect("done");
+        }
+    } else if let Some(dir) = std::env::args().find_map(|arg| arg.strip_prefix(BARRIER_PARENT_ARG).map(PathBuf::from)) {
+        let files = BarrierFiles::in_dir(&dir);
+        fs::write(&files.parent_pid, std::process::id().to_string()).expect("parent pid");
+        let argv = barrier_helper_argv();
+        let mut grandchild = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .env(BARRIER_GRANDCHILD_ENV, &dir)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn the grandchild");
+        // The grandchild's own ceiling bounds the parent's lifetime.
+        let _ = grandchild.wait();
     }
 }
 
@@ -1451,35 +1500,43 @@ fn barrier_command(pid: &Path, ready: &Path, release: &Path, done: &Path) -> Vec
 fn a_timed_out_run_settles_its_descendants_before_releasing_the_fleet_lock() {
     let repo = Repo::published();
     let on = day("2026-09-18");
-    // PowerShell (about 0.2 s warm on the Windows build host) must start
-    // inside the limit for the readiness file to exist; Unix shells start in
-    // milliseconds.
+    // Both barrier processes are native, but hosted Windows starts processes
+    // far more slowly than a Unix host.
     let max_seconds = if cfg!(windows) { 2 } else { 1 };
     let first = repo.prepare_with(PlatformId::Discord, RunLimits { max_seconds, max_invocations: 8 }, &on);
     let second = repo.prepare(PlatformId::Slack, &on);
-    let files = tempfile::tempdir().expect("tempdir");
-    let [pid, ready, release, done] = ["pid", "ready", "release", "done"].map(|name| files.path().join(name));
-    let command = barrier_command(&pid, &ready, &release, &done);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let files = BarrierFiles::in_dir(dir.path());
+    let _guard = BarrierGuard(&files);
+    let mut command = barrier_helper_argv();
+    command.push(format!("{BARRIER_PARENT_ARG}{}", dir.path().display()));
     let state = repo.state();
 
-    let (record, overlap) = std::thread::scope(|scope| {
+    let (record, ready, overlap) = std::thread::scope(|scope| {
         let runner = scope.spawn(|| runner::execute_with_grace(&repo.loader, first.run_id.as_str(), &command, TEST_GRACE));
-        assert!(wait_for(&ready, Duration::from_secs(4)), "the grandchild started");
-        let overlap = runner::execute_with(&repo.loader, second.run_id.as_str(), &exit_command(0));
-        (runner.join().expect("runner thread").expect("run"), overlap)
+        let until = Instant::now() + Duration::from_secs(10);
+        while !files.ready.exists() && !runner.is_finished() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let ready = files.ready.exists();
+        let overlap = ready.then(|| runner::execute_with(&repo.loader, second.run_id.as_str(), &exit_command(0)));
+        (runner.join().expect("runner thread").expect("run"), ready, overlap)
     });
 
+    assert!(ready, "the grandchild started inside the elapsed-time limit");
     assert!(
-        matches!(&overlap, Err(RefreshError::RunnerLive { path }) if path == "messenger/.research-state/runs/fleet.lock"),
+        matches!(&overlap, Some(Err(RefreshError::RunnerLive { path })) if path == "messenger/.research-state/runs/fleet.lock"),
         "a second run is refused while the first owns live work: {overlap:?}"
     );
     assert_eq!(record.runner, Some(RunnerOutcome::Stopped));
     assert!(record.stop_reason.as_deref().is_some_and(|reason| reason.contains("elapsed-time limit")), "{:?}", record.stop_reason);
-    assert!(!recorded_process_alive(&pid), "the grandchild was settled before the runner returned");
+    assert!(!recorded_process_alive(&files.parent_pid), "the sequence process was settled before the runner returned");
+    assert!(!recorded_process_alive(&files.grandchild_pid), "the grandchild was settled before the runner returned");
     assert!(!state.fleet_lock_held(), "the lock is released after settlement");
-    fs::write(&release, "").expect("release");
-    std::thread::sleep(Duration::from_millis(300));
-    assert!(!done.exists(), "no work of the stopped run survives to write");
+    // Both processes have exited, so nothing remains that could act on the
+    // release marker.
+    fs::write(&files.release, "").expect("release");
+    assert!(!files.done.exists(), "no work of the stopped run survives to write");
     assert!(!repo.run(&second).launched, "the refused run recorded nothing");
 }
 

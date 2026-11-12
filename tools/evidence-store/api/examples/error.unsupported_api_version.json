@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "unsupported_api_version",
+    "message": "API version v2 is not supported; use v1",
+    "location": null,
+    "retryable": false,
+    "retry_after_ms": null
+  },
+  "request_id": "c62c09134d47ffc2731248f9906c89d8"
+}

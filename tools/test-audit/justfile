@@ -30,7 +30,7 @@ typecheck:
 
 # Run the tool's own vitest suite.
 test *args="":
-    pnpm --dir "{{ justfile_directory() }}" exec vitest run {{ args }}
+    @eval "$(just _test_run_scope)"; pnpm --dir "{{ justfile_directory() }}" exec vitest run {{ args }}
 
 # typecheck → test, for local use. CI invokes each half separately, as the two
 # companion suites `SUITE_REGISTRY` registers to `test-toolkit`, so that it can

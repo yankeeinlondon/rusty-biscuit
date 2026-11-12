@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "identity_conflict",
+    "message": "observation already recorded with different canonical bytes or collection context",
+    "location": "/collection/observations/0",
+    "retryable": false,
+    "retry_after_ms": null
+  },
+  "request_id": "7c8b7853257b096d7d327533434fb123"
+}

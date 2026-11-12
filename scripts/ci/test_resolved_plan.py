@@ -817,10 +817,10 @@ class StoredPlanDocumentTests(unittest.TestCase):
     suite is what makes the next bump fail at its source.
     """
 
-    HOOK_FIXTURES = ROOT / ".githooks" / "tests" / "fixtures"
+    HOOK_FIXTURES = ROOT / "scripts" / "ci" / "fixtures" / "pre-push"
 
     def test_every_stored_hook_plan_validates(self) -> None:
-        stored = sorted(self.HOOK_FIXTURES.glob("plan-*.json"))
+        stored = sorted((self.HOOK_FIXTURES / "plans").glob("plan-*.json"))
         self.assertNotEqual(
             [], stored, f"no plan fixture under {self.HOOK_FIXTURES}"
         )

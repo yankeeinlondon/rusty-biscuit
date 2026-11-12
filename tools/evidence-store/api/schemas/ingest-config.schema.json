@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusty-biscuit.invalid/evidence-store/ingest-config.schema.json",
+  "title": "Evidence ingestion configuration",
+  "description": "The ingestion configuration, checked in full before any network request. Every path is a literal native path on the submitting host, never a historic report-reference string from an observation. The token file holds the bearer token; its contents are never logged. The ingestion CLI (`cli/ingest.ts`) takes these values as flags (`--endpoint`, `--repo`, `--token-file`, `--state`) and builds `proofs` from `--proof-dir`: each report path, and each proof's `{package}-{gate}.expected.json` and `.completion.json`, resolved inside that directory.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["endpoint", "repository_id", "token_file", "state_path", "proofs"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "endpoint": {
+      "description": "Service origin, without the `/v1` prefix: `https://host[:port]`, or `http://` only for a loopback host (`127.0.0.1`, `localhost`, `[::1]`) such as a local `wrangler dev`. No path, query, or credentials.",
+      "type": "string",
+      "pattern": "^(https://[^/?#@\\s]+|http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]{1,5})?)/?$"
+    },
+    "repository_id": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
+    "token_file": { "type": "string", "minLength": 1, "description": "Owner-only file holding the bearer token." },
+    "state_path": { "type": "string", "minLength": 1, "description": "Where resume state is written atomically." },
+    "proofs": {
+      "description": "Explicit map from each observation reference to upload to the local file holding its bytes. References not listed are not uploaded. Empty means no uploads.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["observation_id", "reference_kind", "reference_digest", "file"],
+        "properties": {
+          "observation_id": { "type": "string", "pattern": "^[0-9a-f]{8,64}$" },
+          "reference_kind": { "enum": ["report", "expected-listing", "completion-record"] },
+          "reference_digest": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "file": { "type": "string", "minLength": 1, "description": "Native local path." }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "endpoint": "https://evidence-store.example.workers.dev",
+      "repository_id": "873451209",
+      "token_file": "/home/ci/.config/evidence-store/rig-linux-01.token",
+      "state_path": "/home/ci/.local/state/evidence-store/ingest-0001.json",
+      "proofs": [
+        {
+          "observation_id": "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b",
+          "reference_kind": "report",
+          "reference_digest": "845e91831319e89c4d656bdb80c278ac09a7230d61e5dfd2e1b1fbb436ac8917",
+          "file": "/home/ci/.rusty-biscuit/reports/run-0001/biscuit-hash-L1.junit.xml"
+        }
+      ]
+    }
+  ]
+}

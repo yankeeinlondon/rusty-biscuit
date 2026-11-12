@@ -1,0 +1,34 @@
+{
+  "base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "cells": [
+    {
+      "backends": [],
+      "completion": "complete",
+      "counts": {
+        "errored": 0,
+        "failed": 0,
+        "passed": 9,
+        "skipped": 1,
+        "total": 10
+      },
+      "duration_s": 35,
+      "exit_code": 0,
+      "gate": "L1",
+      "gate_input_identity": "deadbeefcafe",
+      "outcome": "pass",
+      "package": "claudine",
+      "report": "nested/claudine L1.xml"
+    }
+  ],
+  "completion": "complete",
+  "environment": "ubuntu-latest",
+  "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "host": {
+    "kernel": "Linux 6.8.0",
+    "os": "Linux",
+    "report_dir": "~"
+  },
+  "schema_version": 2,
+  "scope_identity": "0123456789abcdef",
+  "tree": "cccccccccccccccccccccccccccccccccccccccc"
+}

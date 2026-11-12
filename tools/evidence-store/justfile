@@ -1,0 +1,137 @@
+set dotenv-load
+set positional-arguments
+
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
+
+# Windows PATH order for recipe shells; see just/shell.just.
+import "../../just/shell.just"
+
+BOLD := '\033[1m'
+RESET := '\033[0m'
+ROOT := justfile_directory() + "/../.."
+
+default:
+    @echo
+    @echo -e "{{ BOLD }}evidence-store{{ RESET }} (private evidence store Worker and its tooling)"
+    @echo "======================================================================================"
+    @echo
+    @just --list | grep -v 'default'
+    @echo
+
+# Install pinned Node dependencies through the root pnpm workspace lockfile.
+install *args="":
+    pnpm --dir "{{ ROOT }}" install --frozen-lockfile "$@"
+
+# Type-check the Worker, CLI, spike, and tests (tsc --noEmit).
+typecheck:
+    pnpm --dir "{{ justfile_directory() }}" typecheck
+
+# Run the Node and Workers-runtime vitest projects.
+test *args="":
+    @eval "$(just _test_run_scope)"; pnpm --dir "{{ justfile_directory() }}" exec vitest run "$@"
+
+# No L2 tier: the deployed acceptance suite is `just test-real`.
+test-l2:
+    @echo "evidence-store: no L2 tests (the deployed acceptance suite runs through 'just test-real')"
+
+# Deployed acceptance suite against a real service (needs EVIDENCE_STORE_ENDPOINT, EVIDENCE_STORE_OPERATOR_TOKEN_FILE, EVIDENCE_STORE_ACCEPTANCE_REPO): [--report /abs/path.json] [vitest args].
+test-real *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    missing=()
+    for name in EVIDENCE_STORE_ENDPOINT EVIDENCE_STORE_OPERATOR_TOKEN_FILE EVIDENCE_STORE_ACCEPTANCE_REPO; do
+        if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "evidence-store test-real: the deployed suite needs $(IFS=,; echo "${missing[*]}" | sed "s/,/, /g"); set them (no interactive login is attempted). No test ran." >&2
+        exit 2
+    fi
+    # `--report PATH` becomes Vitest's JSON reporter beside the console one.
+    vitest_args=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --report|--report=*)
+                if [ "$1" = "--report" ]; then
+                    if [ "$#" -lt 2 ]; then echo "evidence-store test-real: --report needs a path" >&2; exit 2; fi
+                    report="$2"; shift 2
+                else
+                    report="${1#--report=}"; shift
+                fi
+                case "$report" in
+                    /*|[A-Za-z]:[\\/]*) ;;
+                    *) echo "evidence-store test-real: --report must be an absolute path" >&2; exit 2 ;;
+                esac
+                vitest_args+=(--reporter=default --reporter=json "--outputFile.json=$report")
+                ;;
+            *) vitest_args+=("$1"); shift ;;
+        esac
+    done
+    # Empty-array expansion that bash 3.2 (macOS) accepts under `set -u`.
+    EVIDENCE_STORE_REAL=1 exec pnpm --dir "{{ justfile_directory() }}" exec vitest run --project real ${vitest_args[@]+"${vitest_args[@]}"}
+
+# Static checks: the TypeScript compiler in strict mode.
+lint:
+    pnpm --dir "{{ justfile_directory() }}" lint
+
+# typecheck → test, for local use.
+check: typecheck test
+
+# Regenerate the frozen Python parity fixtures (`--check` compares instead).
+capture-parity *args="":
+    pnpm --dir "{{ justfile_directory() }}" exec tsx cli/capture-parity.ts "$@"
+
+# Read-only capacity inventory from notes, artifacts, and retained reports.
+inventory *args="":
+    pnpm --dir "{{ justfile_directory() }}" exec tsx cli/inventory.ts "$@"
+
+# Operator commands: bootstrap, register, issue, revoke, backup, verify-backup, restore, recover-jobs, maintenance (tokens only via owner-only files; absolute paths).
+operator *args="":
+    pnpm --dir "{{ justfile_directory() }}" exec tsx cli/operator.ts "$@"
+
+# Create an environment's D1 database, R2 bucket, database_id, and cursor secret; safe to rerun: [--env development|restore-test] (defaults to development; needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID).
+provision *args:
+    node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/provision.ts" "$@"
+
+# Apply migrations and deploy the Worker: [--env development|restore-test] (defaults to development) [--manifest /abs/path.json] (needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID).
+deploy *args:
+    node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/deploy.ts" "$@"
+
+# Run the package's pinned Wrangler against this package's wrangler.jsonc, e.g. `d1 create evidence-store-development` (needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID).
+wrangler *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Never `pnpm exec wrangler`: when the package is not installed it falls
+    # through to any `wrangler` on PATH, such as the retired Wrangler 1 that
+    # cargo installs, which rejects every current subcommand.
+    bin="{{ justfile_directory() }}/node_modules/wrangler/bin/wrangler.js"
+    if [ ! -f "$bin" ]; then
+        echo "evidence-store wrangler: the pinned Wrangler is not installed; run 'just evidence-store install' (or 'just init')." >&2
+        exit 2
+    fi
+    exec node "$bin" "$@"
+
+# Dispatch the hosted OIDC ingestion workflow on main: --run-id ID --artifact NAME --collection PATH [--proof-dir PATH] [--repo owner/name] (needs GITHUB_TOKEN or GH_TOKEN).
+demo-hosted *args:
+    node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/dispatch-demo.ts" "$@"
+
+# D1 feasibility checkpoint on a disposable database (needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID).
+prove-d1 *args="":
+    pnpm --dir "{{ justfile_directory() }}" exec tsx cli/prove-d1.ts "$@"
+
+# Submit a collection or v2 receipt and stage its files: INPUT --endpoint URL --repo ID --token-file PATH --state PATH [--proof-dir PATH].
+# Runs in the caller's directory so relative paths resolve there; "$@" keeps paths with spaces whole.
+[no-cd]
+evidence-ingest *args:
+    node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/ingest.ts" ingest "$@"
+
+# Continue an interrupted ingestion from its resume state: STATE.
+[no-cd]
+evidence-resume *args:
+    node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/ingest.ts" resume "$@"
+
+# Finalize every staged upload with a verifier credential: STATE --token-file PATH.
+[no-cd]
+evidence-finalize *args:
+    node "{{ justfile_directory() }}/node_modules/tsx/dist/cli.mjs" "{{ justfile_directory() }}/cli/ingest.ts" finalize "$@"

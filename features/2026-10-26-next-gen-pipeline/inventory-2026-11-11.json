@@ -1,0 +1,336 @@
+{
+  "generated_at": "2026-11-11T21:10:51.000Z",
+  "window_days": 30,
+  "feasible": true,
+  "failures": [],
+  "assumptions": {
+    "volume_multiplier": 2,
+    "d1_overhead_factor": 2,
+    "d1_base_rows_per_observation": 3,
+    "d1_index_write_factor": 2,
+    "r2_class_a_fixed_ops_per_object": 2,
+    "breach_ratio": "refuse_ratio",
+    "retention_grace_days": 14,
+    "daily_date_source": "an observation is dated by the committer time of the earliest notes commit whose blob contains it (notes history, not annotated-commit time, which is not fetched)",
+    "v2_sizing": "a v2 receipt cell counts as one observation sized as the cell plus copied receipt context and one host-dir report; its report bytes are known only when retained locally",
+    "unresolved_ordering": "latest observation per {package, environment, gate} by first-seen time (approximates the store's ancestry ordering)"
+  },
+  "notes": {
+    "refs": [
+      {
+        "ref": "refs/notes/ci-local/macos-latest",
+        "environment": "macos-latest",
+        "notes": 158,
+        "observations": 1653,
+        "unparseable_notes": 4,
+        "versions": 240
+      },
+      {
+        "ref": "refs/notes/ci-local/scope",
+        "environment": "scope",
+        "notes": 214,
+        "observations": 0,
+        "unparseable_notes": 0,
+        "versions": 305
+      },
+      {
+        "ref": "refs/notes/ci-local/windows-latest",
+        "environment": "windows-latest",
+        "notes": 23,
+        "observations": 903,
+        "unparseable_notes": 0,
+        "versions": 52
+      },
+      {
+        "ref": "refs/notes/ci-local/wsl2-ubuntu",
+        "environment": "wsl2-ubuntu",
+        "notes": 12,
+        "observations": 418,
+        "unparseable_notes": 0,
+        "versions": 19
+      }
+    ],
+    "observations": 2974,
+    "observations_by_environment": {
+      "macos-latest": 1653,
+      "windows-latest": 903,
+      "wsl2-ubuntu": 418
+    },
+    "observations_by_source_version": {
+      "v2": 1046,
+      "v3": 1928
+    },
+    "unparseable_notes": 4,
+    "unparseable_reasons": [
+      "refs/notes/ci-local/macos-latest 0156096ff: unsupported schema_version 1",
+      "refs/notes/ci-local/macos-latest 05ab70065: unsupported schema_version 1",
+      "refs/notes/ci-local/macos-latest 73bdd6d53: unsupported schema_version 1",
+      "refs/notes/ci-local/macos-latest c9e3f7a7d: unsupported schema_version 1"
+    ],
+    "scope_notes": 214,
+    "observed_cells": 211,
+    "cells_by_environment": {
+      "macos-latest": 74,
+      "windows-latest": 71,
+      "wsl2-ubuntu": 66
+    },
+    "observation_canonical_bytes": {
+      "count": 2974,
+      "p50": 1041,
+      "p95": 1413,
+      "max": 3390
+    },
+    "collection_canonical_bytes": {
+      "count": 75,
+      "p50": 15891,
+      "p95": 88470,
+      "max": 156811
+    },
+    "note_blob_bytes": {
+      "count": 407,
+      "p50": 29336,
+      "p95": 294902,
+      "max": 356050
+    }
+  },
+  "volume": {
+    "window_days_effective": 30,
+    "first_observation_at": "2026-09-13T03:14:42.000Z",
+    "observations_in_window": 1890,
+    "daily_mean": 63,
+    "daily_max": 387,
+    "per_day": {
+      "2026-10-12": 17,
+      "2026-10-13": 66,
+      "2026-10-14": 102,
+      "2026-10-16": 387,
+      "2026-10-17": 5,
+      "2026-10-18": 26,
+      "2026-10-19": 30,
+      "2026-10-20": 11,
+      "2026-10-22": 314,
+      "2026-10-23": 6,
+      "2026-10-24": 140,
+      "2026-10-25": 50,
+      "2026-10-26": 18,
+      "2026-10-28": 43,
+      "2026-10-29": 12,
+      "2026-10-30": 339,
+      "2026-10-31": 38,
+      "2026-11-02": 31,
+      "2026-11-03": 37,
+      "2026-11-05": 45,
+      "2026-11-06": 8,
+      "2026-11-07": 8,
+      "2026-11-08": 8,
+      "2026-11-09": 8,
+      "2026-11-10": 113,
+      "2026-11-11": 28
+    }
+  },
+  "history": {
+    "observations_at_window_start": 1084,
+    "observations_now": 2974,
+    "growth_per_day": 63,
+    "failures_total": 273,
+    "unresolved_cells_at_window_start": 0,
+    "unresolved_cells_now": 6,
+    "unresolved_growth_per_day": 0.2,
+    "unresolved_by_environment": {
+      "windows-latest": 6
+    }
+  },
+  "reports": {
+    "recorded_bytes": {
+      "count": 1854,
+      "p50": 33518,
+      "p95": 1005890,
+      "max": 2451110
+    },
+    "recorded_by_store": {
+      "host-dir": 573,
+      "artifact": 1281
+    },
+    "without_recorded_size": 891,
+    "local": {
+      "present": 24,
+      "present_bytes": 11500728,
+      "missing": 1430,
+      "missing_recorded_bytes": 139762204
+    }
+  },
+  "proofs": {
+    "referenced_files": 47,
+    "local_present": 47,
+    "local_missing": 0,
+    "local_bytes": {
+      "count": 47,
+      "p50": 921,
+      "p95": 615392,
+      "max": 1251470
+    }
+  },
+  "github_actions": {
+    "runs": 30,
+    "artifacts": 1806,
+    "expired": 0,
+    "artifact_bytes": {
+      "count": 1806,
+      "p50": 412,
+      "p95": 74564,
+      "max": 400645473
+    },
+    "live_bytes": 2160667738,
+    "expired_bytes": 0
+  },
+  "account_usage": {
+    "r2_bytes": 10763738,
+    "r2_class_a_per_month": 161,
+    "d1_bytes": 2850816,
+    "d1_rows_written_per_day": 12860
+  },
+  "measurements": {
+    "baseline_observations": 2974,
+    "daily_mean": 63,
+    "daily_max": 387,
+    "observation_p95_bytes": 1413,
+    "report_p95_bytes": 1005890,
+    "reports_per_observation": 0.923,
+    "proof_p95_bytes": 615392,
+    "proofs_per_observation": 0.8198,
+    "observed_cells": 211,
+    "unresolved_cells": 6,
+    "unresolved_growth_per_day": 0.2
+  },
+  "forecast": {
+    "admission_daily_observations": 126,
+    "admission_peak_daily_observations": 774,
+    "months": [
+      {
+        "month": 1,
+        "d1_bytes": 22094293,
+        "r2_bytes": 3177801912,
+        "r2_bytes_unpruned": 9768247498
+      },
+      {
+        "month": 2,
+        "d1_bytes": 32933247,
+        "r2_bytes": 3195249327,
+        "r2_bytes_unpruned": 15264183068
+      },
+      {
+        "month": 3,
+        "d1_bytes": 43772200,
+        "r2_bytes": 3212696741,
+        "r2_bytes_unpruned": 20760118639
+      },
+      {
+        "month": 4,
+        "d1_bytes": 54611154,
+        "r2_bytes": 3230144156,
+        "r2_bytes_unpruned": 26256054209
+      },
+      {
+        "month": 5,
+        "d1_bytes": 65450107,
+        "r2_bytes": 3247591570,
+        "r2_bytes_unpruned": 31751989780
+      },
+      {
+        "month": 6,
+        "d1_bytes": 76289061,
+        "r2_bytes": 3265038985,
+        "r2_bytes_unpruned": 37247925350
+      },
+      {
+        "month": 7,
+        "d1_bytes": 87128014,
+        "r2_bytes": 3282486399,
+        "r2_bytes_unpruned": 42743860921
+      },
+      {
+        "month": 8,
+        "d1_bytes": 97966968,
+        "r2_bytes": 3299933814,
+        "r2_bytes_unpruned": 48239796491
+      },
+      {
+        "month": 9,
+        "d1_bytes": 108805921,
+        "r2_bytes": 3317381228,
+        "r2_bytes_unpruned": 53735732062
+      },
+      {
+        "month": 10,
+        "d1_bytes": 119644874,
+        "r2_bytes": 3334828643,
+        "r2_bytes_unpruned": 59231667632
+      },
+      {
+        "month": 11,
+        "d1_bytes": 130483828,
+        "r2_bytes": 3352276057,
+        "r2_bytes_unpruned": 64727603203
+      },
+      {
+        "month": 12,
+        "d1_bytes": 141322781,
+        "r2_bytes": 3369723472,
+        "r2_bytes_unpruned": 70223538773
+      }
+    ],
+    "checks": [
+      {
+        "limit": "d1_database_bytes",
+        "allowance": 500000000,
+        "projected": 141322781,
+        "alert_at": 350000000,
+        "refuse_at": 400000000,
+        "alert_month": null,
+        "breach_month": null,
+        "formula": "(baseline + 2×daily_mean×30.44×month) × observation_p95 × d1_overhead_factor + account usage"
+      },
+      {
+        "limit": "d1_rows_written_per_day",
+        "allowance": 100000,
+        "projected": 18933,
+        "alert_at": 70000,
+        "refuse_at": 80000,
+        "alert_month": null,
+        "breach_month": null,
+        "formula": "2×daily_max × (3 + reports_per_observation) × index_write_factor + account usage"
+      },
+      {
+        "limit": "r2_live_plus_staging_bytes",
+        "allowance": 8589934592,
+        "projected": 3369723472,
+        "alert_at": 6012954214,
+        "refuse_at": 6871947674,
+        "alert_month": null,
+        "breach_month": null,
+        "formula": "(2×(cells + unresolved + unresolved_growth×30.44×month) + 2×daily_mean×grace_days) × (report_p95×reports_per_obs + proof_p95×proofs_per_obs) + account usage"
+      },
+      {
+        "limit": "r2_class_a_per_month",
+        "allowance": 800000,
+        "projected": 20214,
+        "alert_at": 560000,
+        "refuse_at": 640000,
+        "alert_month": null,
+        "breach_month": null,
+        "formula": "2×daily_mean×30.44 × Σ objects_per_obs × (ceil(p95/upload_part_bytes) + create + complete) + account usage"
+      }
+    ],
+    "unpruned_r2": {
+      "limit": "r2_live_plus_staging_bytes_unpruned",
+      "allowance": 8589934592,
+      "projected": 70223538773,
+      "alert_at": 6012954214,
+      "refuse_at": 6871947674,
+      "alert_month": 1,
+      "breach_month": 1,
+      "formula": "(baseline + 2×daily_mean×30.44×month) × (report_p95×reports_per_obs + proof_p95×proofs_per_obs) + account usage",
+      "constraint": "producers must not send evidence to the store automatically until a retention verifier certifies prunes; until then only explicit ingestion writes, and at the refusal ratio the store refuses uploads rather than evicting"
+    }
+  }
+}

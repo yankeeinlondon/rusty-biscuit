@@ -1457,11 +1457,16 @@ pub fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError>
         }
         // Upward-search exhaustion is the only "not a repository" outcome;
         // trust, permission, and corruption failures propagate as errors.
-        Err(gix::discover::Error::Discover(
-            Up::NoGitRepository { .. }
-            | Up::NoGitRepositoryWithinCeiling { .. }
-            | Up::NoGitRepositoryWithinFs { .. },
-        )) => {
+        Err(e)
+            if matches!(
+                e.downcast_any_ref::<Up>(),
+                Some(
+                    Up::NoGitRepository { .. }
+                        | Up::NoGitRepositoryWithinCeiling { .. }
+                        | Up::NoGitRepositoryWithinFs { .. }
+                )
+            ) =>
+        {
             trace!("no git repository found");
             Ok(None)
         }
@@ -1796,5 +1801,22 @@ mod tests {
         // inaccessible directory rather than report "no repository".
         let root = find_git_root(&std::env::temp_dir()).unwrap();
         assert!(root.is_none());
+    }
+
+    /// A repository that is found but cannot be opened is a failure, not
+    /// "no repository": only upward-search exhaustion means `Ok(None)`.
+    #[test]
+    #[cfg(feature = "file-reference")]
+    fn find_git_root_reports_an_unreadable_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = dir.path().join(".git");
+        std::fs::create_dir_all(git.join("objects")).unwrap();
+        std::fs::create_dir_all(git.join("refs")).unwrap();
+        std::fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(git.join("config"), "[core\n").unwrap();
+
+        let result = find_git_root(dir.path());
+
+        assert!(matches!(result, Err(FileReferenceError::Git(_))), "{result:?}");
     }
 }

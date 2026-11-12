@@ -487,21 +487,45 @@ def row_set_input(block: str) -> str | None:
     return matched.group(1) if matched else None
 
 
-def job_label(job_id: str, block: str, row: dict[str, str]) -> str:
-    """The label GitHub gives a job, derived from what the file declares.
+def matrix_keys(block: str) -> list[str] | None:
+    """A job's `strategy.matrix` keys in declared order; `None` without a matrix."""
+    lines = block.splitlines()
+    if "      matrix:" not in lines:
+        return None
+    keys: list[str] = []
+    for line in lines[lines.index("      matrix:") + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith("        "):
+            break
+        key = re.match(r"^        ([A-Za-z0-9_-]+):", line)
+        if key:
+            keys.append(key.group(1))
+    return keys
 
-    A declared `name:` wins. Otherwise the id, plus — for a matrix job — every
-    value of the expanded row, in the order the planner emitted them. That
-    ordering is the contract: GitHub renders a matrix job's label from the
-    row's values, which is why `runner` is in the row at all (ruling R1).
+
+def job_label(job_id: str, block: str, row: dict[str, str]) -> str:
+    """The label GitHub gives an EXPANDED job, derived from what the file declares.
+
+    The base is the declared `name:`, or the id when there is none. A matrix
+    job then gets its values appended in parentheses whether or not it is
+    named: display check run 42963148323 rendered a static `name: Run tests`
+    as `Run tests (claudine-cli, L1, ubuntu-latest, ubuntu-latest)`. An
+    `include:` row contributes every value in the order the planner emitted
+    them, which is why `runner` is in the row at all (ruling R1); a keyed
+    matrix contributes `row[key]` per declared key. A name that itself reads
+    the matrix gets no suffix (GitHub's documented rule, not observed there).
+    A skipped job is not modelled: it shows the bare base.
     """
     declared = declared_name(block)
-    if declared:
+    if declared and "${{" in declared:
         return resolve(declared, row["package"], row["environment"])
-    if row_set_input(block) is None:
-        return job_id
-    values = ", ".join(row[field] for field in ("package", "gate", "environment", "runner"))
-    return f"{job_id} ({values})"
+    base = declared or job_id
+    keys = matrix_keys(block)
+    if keys is None:
+        return base
+    fields = ("package", "gate", "environment", "runner") if row_set_input(block) else keys
+    return f"{base} ({', '.join(row[field] for field in fields)})"
 
 
 def uploads_cell_status(block: str) -> bool:
@@ -581,21 +605,26 @@ class JobNameCorpusTests(unittest.TestCase):
             "",
         )["status_artifact"]
 
-    def area_prefix(self) -> str:
-        """`area-ci (<area>) / package-ci / `, derived, not assumed."""
+    def caller(self) -> str:
+        """`area-ci (<area>)`, the automatic matrix label of ci.yml's caller."""
         area_ci = jobs_in("ci.yml")["area-ci"]
         self.assertIsNone(
             declared_name(area_ci),
             "ci.yml's area-ci must stay unnamed so GitHub labels it from the matrix",
         )
-        caller = f"area-ci ({self.AREA})"
+        return f"area-ci ({self.AREA})"
+
+    def area_prefix(self) -> str:
+        """`area-ci (<area>) / <execution call label> / `, derived, not assumed."""
         execution = jobs_in("_area-ci.yml")["package-ci"]
-        self.assertIsNone(
-            declared_name(execution),
-            "the area's execution call is skippable, so it must carry no name "
-            "expression GitHub would render raw",
+        name = job_label("package-ci", execution, self.row("L1", "ubuntu-latest"))
+        self.assertNotIn(
+            "${{",
+            name,
+            "the area's execution call is skippable, so its name must be static: "
+            "GitHub renders an expression in a skipped job's name raw",
         )
-        return f"{caller} / package-ci / "
+        return f"{self.caller()} / {name} / "
 
     def producers(self) -> dict[str, tuple[str, str, dict[str, str]]]:
         """Composite label -> (job id, status directory, row) per producer."""
@@ -614,6 +643,7 @@ class JobNameCorpusTests(unittest.TestCase):
         rows_by_input = {
             "test-rows": [
                 self.row("L1", "ubuntu-latest"),
+                self.row("L1", "windows-latest"),
                 self.row("L2", "macos-latest"),
                 self.row("browser", "ubuntu-latest"),
             ],
@@ -677,11 +707,29 @@ class JobNameCorpusTests(unittest.TestCase):
 
     def test_the_areas_coverage_audit_is_not_a_cell_but_can_veto_retry(self) -> None:
         audit = jobs_in("_area-ci.yml")["coverage-audit"]
-        label = self.area_prefix().split(" / ")[0] + " / " + job_label(
+        label = self.caller() + " / " + job_label(
             "coverage-audit", audit, self.row("L1", "ubuntu-latest")
         )
         self.assertFalse(is_non_producer(label), label)
         self.assertIsNone(parse_job_name(label), label)
+        failed = {
+            **AREA_AUDIT_JOB,
+            "name": label,
+            "steps": [
+                {
+                    "name": "Verify required results and policy exceptions",
+                    "status": "completed",
+                    "conclusion": "failure",
+                }
+            ],
+        }
+        result = classify(
+            [LOST_WSL_JOB, failed],
+            {LOST_WSL_JOB["id"]: LOST_ANNOTATION, failed["id"]: []},
+        )
+        self.assertEqual([label], result["other_failures"])
+        rerun, reason = should_rerun(result, attempt=1)
+        self.assertFalse(rerun, reason)
 
     def test_the_legacy_area_rollup_label_remains_non_producer(self) -> None:
         self.assertTrue(is_non_producer("area-ci (playa) / rollup"))
@@ -691,6 +739,53 @@ class JobNameCorpusTests(unittest.TestCase):
         label = job_label("ci-reporting", report, self.row("L1", "ubuntu-latest"))
         self.assertIn("continue-on-error: true", report)
         self.assertTrue(is_non_producer(label), label)
+
+    def test_the_model_reproduces_the_observed_static_named_matrix_label(self) -> None:
+        # Verbatim from display check run 42963148323: a literal `name:` does
+        # not suppress the matrix suffix.
+        block = (
+            "    name: Run tests\n"
+            "    strategy:\n"
+            "      fail-fast: false\n"
+            "      matrix:\n"
+            "        include: ${{ fromJSON(inputs.test-rows) }}\n"
+        )
+        row = {
+            "package": "claudine-cli",
+            "gate": "L1",
+            "environment": "ubuntu-latest",
+            "runner": "ubuntu-latest",
+        }
+        self.assertEqual(
+            "Run tests (claudine-cli, L1, ubuntu-latest, ubuntu-latest)",
+            job_label("test-static", block, row),
+        )
+
+    def test_static_named_matrix_jobs_render_a_suffix_and_stay_unclassified(self) -> None:
+        # The shipped literal-named matrix jobs. Neither owns a cell nor judges
+        # the run, so their true labels classify exactly as the automatic
+        # `preflight (windows-latest)` did, expanded or skipped.
+        ci = jobs_in("ci.yml")
+        expected = {
+            "preflight": ({"os": "windows-latest"}, "Verify build prerequisites (windows-latest)"),
+            "certify-nightly": (
+                {"environment": "wsl2-ubuntu"},
+                "Publish nightly coverage evidence (wsl2-ubuntu)",
+            ),
+        }
+        named_matrix = {
+            job
+            for job, block in ci.items()
+            if declared_name(block) and matrix_keys(block) is not None
+        }
+        self.assertEqual(set(expected), named_matrix)
+        for job, (row, label) in expected.items():
+            with self.subTest(job=job):
+                self.assertEqual(label, job_label(job, ci[job], row))
+                for name in (label, declared_name(ci[job])):
+                    self.assertIsNone(parse_job_name(name), name)
+                    self.assertIsNone(parse_build_job_name(name), name)
+                    self.assertFalse(is_non_producer(name), name)
 
     def test_the_pre_rename_advisory_spelling_stays_recognized(self) -> None:
         # A retry decision may be taken over a run created before `summary`
@@ -754,6 +849,11 @@ class BuildOwnerAttributionTests(unittest.TestCase):
         self.assertEqual("abc0123456789def", document["key"])
         self.assertIn("lost communication", document["detail"])
         self.assertIn("Produce the archive", document["detail"])
+        # A missing status does not prove a missing archive.
+        self.assertIn(
+            "per-record production/publication outcome is unknown", document["detail"]
+        )
+        self.assertNotIn("no archive was uploaded", document["detail"])
         self.assertEqual(
             [
                 {"environment": "ubuntu-latest", "gate": "L1"},
@@ -958,6 +1058,182 @@ class DirectExecutionAttributionTests(unittest.TestCase):
             "the execution workflow declares the four row-set inputs the area "
             "call passes; JobNameCorpusTests derives every label from them",
         )
+
+
+class RenamedJobNameTests(unittest.TestCase):
+    """The display names the workflows carry today, beside the historical ones.
+
+    The execution call is `Run package work`, the guest job `Run guest tests`,
+    the audit `Check required results`, and the advisory report
+    `Report CI results (advisory)`. Runs created before the rename keep their
+    old labels, and a retry decision may be taken over either.
+    """
+
+    GUEST_L1 = (
+        "area-ci (schematic) / Run package work / "
+        "wsl2 (schematic-gen, L1, wsl2-ubuntu, windows-latest) / Run guest tests"
+    )
+    GUEST_L2 = (
+        "area-ci (schematic) / Run package work / "
+        "wsl2 (schematic-gen, L2, wsl2-ubuntu, windows-latest) / Run guest tests"
+    )
+    NATIVE = (
+        "area-ci (messenger) / Run package work / "
+        "test (messenger, L1, windows-latest, windows-latest)"
+    )
+    RENAMED_AUDIT = "area-ci (playa) / Check required results"
+
+    def test_the_guest_leaf_takes_its_cell_from_the_delegating_row(self) -> None:
+        self.assertEqual(
+            {"package": "schematic-gen", "job": "L1", "environment": "wsl2-ubuntu"},
+            parse_job_name(self.GUEST_L1),
+        )
+        self.assertEqual(
+            {"package": "schematic-gen", "job": "L2", "environment": "wsl2-ubuntu"},
+            parse_job_name(self.GUEST_L2),
+        )
+
+    def test_the_guest_leaf_without_a_valid_delegating_row_is_refused(self) -> None:
+        for name in [
+            "Run guest tests",
+            "area-ci (schematic) / Run guest tests",
+            "area-ci (schematic) / Run package work / Run guest tests",
+            "area-ci (schematic) / Run package work / wsl2 / Run guest tests",
+            "area-ci (schematic) / Run package work / "
+            "wsl2 (schematic-gen, wsl2-ubuntu, windows-latest) / Run guest tests",
+            "area-ci (schematic) / Run package work / "
+            "wsl2 (schematic-gen, L9, wsl2-ubuntu, windows-latest) / Run guest tests",
+            # The row must be the IMMEDIATELY enclosing segment.
+            "area-ci (schematic) / wsl2 (schematic-gen, L1, wsl2-ubuntu, windows-latest) "
+            "/ Run package work / Run guest tests",
+        ]:
+            self.assertIsNone(parse_job_name(name), name)
+
+    def test_the_documented_projected_names_parse_to_their_cells(self) -> None:
+        # The same strings `ci_workflow_contracts.rs::
+        # projected_full_names_compose_from_the_declared_names` composes from
+        # the workflows; the audit owns no cell and is not a non-producer.
+        research = "area-ci (research) / Run package work / test (research, {}, ubuntu-latest, ubuntu-latest)"
+        self.assertEqual(
+            {"package": "research", "job": "L1", "environment": "ubuntu-latest"},
+            parse_job_name(research.format("L1")),
+        )
+        self.assertEqual(
+            {"package": "research", "job": "L2", "environment": "ubuntu-latest"},
+            parse_job_name(research.format("L2")),
+        )
+        self.assertEqual(
+            {"package": "schematic-gen", "job": "L1", "environment": "wsl2-ubuntu"},
+            parse_job_name(
+                "area-ci (schematic) / Run package work / "
+                "wsl2 (schematic-gen, L1, wsl2-ubuntu, windows-latest) / Run guest tests"
+            ),
+        )
+        nested_audit = "area-ci (claudine/rendezvous) / Check required results"
+        self.assertIsNone(parse_job_name(nested_audit))
+        self.assertFalse(is_non_producer(nested_audit))
+
+    def test_a_renamed_native_producer_parses(self) -> None:
+        self.assertEqual(
+            {"package": "messenger", "job": "L1", "environment": "windows-latest"},
+            parse_job_name(self.NATIVE),
+        )
+
+    def test_native_windows_and_wsl2_rows_stay_two_cells(self) -> None:
+        guest = self.GUEST_L1.replace("schematic-gen", "messenger").replace(
+            "schematic", "messenger"
+        )
+        self.assertNotEqual(
+            status_directory(parse_job_name(self.NATIVE)),
+            status_directory(parse_job_name(guest)),
+        )
+
+    def test_historical_row_names_still_parse(self) -> None:
+        cases = {
+            "area-ci (messenger) / package-ci / "
+            "test (messenger, L1, windows-latest, windows-latest)": (
+                "messenger", "L1", "windows-latest",
+            ),
+            "area-ci (playa) / package-ci / "
+            "wsl2 (playa-cli, L1, wsl2-ubuntu, windows-latest) / test (wsl2-ubuntu)": (
+                "playa-cli", "L1", "wsl2-ubuntu",
+            ),
+            "area-ci (playa) / playa-cli / wsl2 / test (wsl2-ubuntu)": (
+                "playa-cli", "L1", "wsl2-ubuntu",
+            ),
+            "area-ci (claudine) / claudine-cli / lint (ubuntu-latest)": (
+                "claudine-cli", "lint", None,
+            ),
+        }
+        for name, (package, job, environment) in cases.items():
+            self.assertEqual(
+                {"package": package, "job": job, "environment": environment},
+                parse_job_name(name),
+                name,
+            )
+
+    def test_build_attribution_is_unchanged(self) -> None:
+        self.assertEqual("ubuntu-latest", parse_build_job_name("build (ubuntu-latest)"))
+        self.assertIsNone(parse_job_name("build (ubuntu-latest)"))
+
+    def test_every_advisory_spelling_is_a_non_producer(self) -> None:
+        for name in (
+            "Report CI results (advisory)",
+            "ci-reporting (advisory)",
+            "infrastructure summary (advisory)",
+        ):
+            self.assertTrue(is_non_producer(name), name)
+
+    def test_the_renamed_and_historical_audit_failures_veto_retry(self) -> None:
+        for name in (self.RENAMED_AUDIT, "area-ci (playa) / coverage-audit"):
+            with self.subTest(name):
+                self.assertFalse(is_non_producer(name))
+                self.assertIsNone(parse_job_name(name))
+                audit = {**AREA_AUDIT_JOB, "name": name}
+                result = classify(
+                    [LOST_WSL_JOB, audit],
+                    {LOST_WSL_JOB["id"]: LOST_ANNOTATION, audit["id"]: []},
+                )
+                self.assertEqual([name], result["other_failures"])
+                rerun, reason = should_rerun(result, attempt=1)
+                self.assertFalse(rerun, reason)
+
+    def test_a_lost_guest_runner_under_the_new_leaf_is_attributed(self) -> None:
+        lost = {**LOST_WSL_JOB, "name": self.GUEST_L1}
+        result = classify([lost], {lost["id"]: LOST_ANNOTATION})
+        [record] = result["runner_lost"]
+        self.assertEqual("status-schematic-gen-L1-wsl2-ubuntu", status_directory(record["cell"]))
+        rerun, reason = should_rerun(result, attempt=1)
+        self.assertTrue(rerun, reason)
+
+    def test_renamed_steps_classify_to_their_stage(self) -> None:
+        cases = {
+            # Was `test` under the old name, by accident of the words "no test".
+            "Check compilation of declared targets": "check",
+            "Run planned tests": "test",
+            # The old `Companion suites` read as `other`.
+            "Run companion test suites": "test",
+            "Lint source": "lint",
+            "Run companion lint suites": "lint",
+            "Verify all expected results reported": "other",
+            "Run Level 1 tests from the archive": "archive",
+            "Upload WSL2 Level 1 test results": "artifact-upload",
+            "Collect guest diagnostics": "other",
+            "Collect host diagnostics": "other",
+            "Verify required results and policy exceptions": "other",
+        }
+        for step, stage in cases.items():
+            self.assertEqual(stage, failure_stage(step), step)
+
+    def test_the_historical_step_names_keep_their_stages(self) -> None:
+        cases = {
+            "cargo check (declared kinds no test gate compiles)": "test",
+            "Companion suites": "other",
+            "L1 tests from the archive": "archive",
+            "Upload wsl2-ubuntu L1 JUnit": "artifact-upload",
+        }
+        for step, stage in cases.items():
+            self.assertEqual(stage, failure_stage(step), step)
 
 
 if __name__ == "__main__":

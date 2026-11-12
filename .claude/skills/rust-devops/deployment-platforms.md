@@ -45,7 +45,10 @@ last_updated: 2026-09-10
 > **Research snapshot, not repository policy.** This survey captures options as
 > of 2026-06-02. Verify changing versions, service requirements, and review
 > rules against primary sources. For the live rusty-biscuit release contract,
-> read `docs/topics/ci-cd.md` and [CI/CD and releases](./ci-cd.md).
+> read `docs/topics/ci-cd.md` and [CI/CD and releases](./ci-cd.md); for the
+> binary distribution it adopted (dist-built archives, shell installer, own
+> Homebrew tap, cargo-binstall), read `docs/distribution.md` and the
+> [distribution contract](./SKILL.md#distribution-contract-rusty-biscuit).
 
 Rust can produce native binaries without a language runtime, but target-specific
 native libraries, signing, packaging, and installer conventions still shape
@@ -57,7 +60,7 @@ and `md` (Darkmatter) CLIs in this monorepo.
 ## TL;DR
 
 - **One artifact source feeds almost everything.** Build per-platform binaries once, attach them to a **GitHub Release**, and the majority of package managers become thin manifests that point at those assets. Invest here first.
-- **`cargo-dist` (now `dist`) can generate much of the long tail** — shell/PowerShell installers, a Homebrew tap formula, an npm wrapper package, and a Windows MSI — from one config block. It is an option, not an adopted rusty-biscuit authority.
+- **`cargo-dist` (now `dist`) can generate much of the long tail** — shell/PowerShell installers, a Homebrew tap formula, an npm wrapper package, and a Windows MSI — from one config block. rusty-biscuit uses pinned dist 0.34.0 for building only (plan, local and global artifacts); release-plz owns tags and Releases, and `scripts/ci/distribution.py` owns approval and uploads.
 - **Neon is the wrong tool for shipping a CLI to npm.** Neon builds native *Node addons* (libraries called from JS). A standalone CLI ships to npm as a tiny JS shim plus per-platform binary packages — the `esbuild`/`biome`/`ruff` pattern. No FFI required.
 - **crates.io (`cargo install`) is *not* a quick win for this repo** because publishable targets depend on an internal path-based crate graph; publishing requires explicit versions and a topological release plan.
 - **Community registries (Homebrew core, nixpkgs, winget, Fedora, Debian) gate on review.** Your own tap/bucket/flake/apt-repo is instant and fully under your control; the official channels add reach but cost weeks and notability thresholds.
@@ -163,6 +166,15 @@ git tag claudine-v0.1.0 && git push --tags   # CI builds + publishes everything
 The `shell`/`powershell` installers give users `curl --proto '=https' -sSfL https://.../installer.sh | sh`. The `homebrew` installer commits a formula to your tap. The `npm` installer publishes a wrapper package. That is **four targets from one config**.
 
 > **Caveat — maintenance status.** Axo Dev (dist's original sponsor) wound down, so the project's long-term cadence is uncertain. It still works well today, but for a repo that already standardizes on `release-plz`, an alternative is a hand-rolled build matrix (below) that you fully own.
+
+**dist 0.34.0 facts that cost time here** (verified against real runs and the pinned source):
+
+- Unknown config keys are ignored silently; prove each key by its effect on `dist plan`/archives, never by "dist accepted it".
+- `min-glibc-version` reaches the shell installer only from the **workspace** config (`dist-workspace.toml`); a package-level copy leaves the default glibc 2.31 check.
+- `[package.metadata.dist.binaries] "*" = ["<cmd>"]` replaces the package's binaries, so test-helper bins never reach archives.
+- dist never passes `--locked`; prove the lockfile with `cargo metadata --locked` plus a `Cargo.lock` byte comparison around the build.
+- The global step embeds archive checksums and fills `sha256.sum` only when each target's JSON output sits at `target/distrib/<target>-dist-manifest.json`; `sha256.sum` and sidecars end with a blank line and list archives only (not the installer or formula).
+- Plan JSON hosting fields are `artifact_base_url` + `artifact_download_path`; real plans are checked in under `scripts/ci/fixtures/distribution/`.
 
 ### Option B — release-plz + a build-and-attach matrix
 
@@ -588,17 +600,20 @@ flowchart LR
 
 The repo already uses `release-plz`: successful CI on `main` opens or updates a
 draft release PR, and merging a PR labeled `release` creates versioned tags and
-GitHub releases. It does not publish on every merge to `main`. General CLI
-binary artifacts are a separate, unadopted distribution decision; the existing
-release-triggered integration workflow covers only its named integration
-packages.
+GitHub releases. It does not publish on every merge to `main`. Binary
+distribution has since been built for eight CLI packages (including
+`claudine` and `md`; none approved yet) as the `Distribute binaries` workflow,
+which covers the GitHub Release archives, shell installer, own Homebrew tap,
+and cargo-binstall items below; `docs/distribution.md` records what it does and
+what is still pending. The phases below remain the survey's original
+proposal.
 
 A few repo-specific notes that shape the plan:
 
 - **Binary names.** Claudine ships `claudine`; Darkmatter ships **`md`**. `md` is an extremely common name and will collide in flat namespaces (Homebrew core, winget, an unscoped npm/PyPI name, `/usr/bin/md`). Keep distribution under a **scope/namespace** (`@rusty-biscuit/md`, `yankeeinlondon.md`, your own tap/bucket) and confirm name availability before chasing the official channels.
 - **AGPL-3.0-only.** Accepted by every registry above; it is a *consumer* consideration (some corporate users avoid AGPL), not a publishing blocker.
 - **crates.io is gated by the `path =` graph.** Do not put `cargo install` from crates.io in Phase 1.
-- **Drift to fix in passing.** `darkmatter/cli/Cargo.toml` sets `repository = "https://github.com/yankeeinlondon/dockhand"`, but this repo is `rusty-biscuit`. Several managers (binstall, Homebrew, AUR) derive URLs from `repository`; correct it before publishing.
+- **`repository` URLs.** Several managers (binstall, Homebrew, AUR) derive URLs from `repository`. The distributed CLI manifests now point at `https://github.com/yankeeinlondon/rusty-biscuit` (an earlier `dockhand` URL in `darkmatter/cli/Cargo.toml` was corrected).
 
 ### Phase 1 — Quick wins (days)
 

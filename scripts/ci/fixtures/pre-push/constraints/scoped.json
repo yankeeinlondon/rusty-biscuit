@@ -1,0 +1,9 @@
+{
+  "environment": "wsl2-ubuntu",
+  "gate": "L1",
+  "repository": "github.com/yankeeinlondon/rusty-biscuit",
+  "branch": "feature",
+  "reason": "WSL L1 already ran for this branch on build-wsl",
+  "owner": "ken",
+  "expiry": "2099-01-01"
+}

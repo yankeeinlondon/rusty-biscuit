@@ -28,6 +28,7 @@ import "./just/ai.just"
 import "./just/devops.just"
 import "./just/ci-local.just"
 import "./just/spec.just"
+import "./just/distribution.just"
 
 # Every package area in this monorepo that owns tests.
 #
@@ -97,6 +98,7 @@ shipped-schemas:
 test-prompts:
     #!/usr/bin/env bash
     set -uo pipefail
+    eval "$(just _test_run_scope)"
     failed=()
     step() {
         local name="$1"
@@ -144,7 +146,7 @@ check-tier-coverage *args="":
 # stdout/stderr; this also catches detached orphans (exit code 99 if any survive,
 # rooted at the repo). Pass `--warn-only` semantics by running leak-sweep directly.
 test-leaks *args="":
-    @cargo run -q -p test-toolkit --features leak-sweep --bin leak-sweep -- just test {{ args }}
+    @eval "$(just _test_run_scope)"; cargo run -q -p test-toolkit --features leak-sweep --bin leak-sweep -- just test {{ args }}
 
 # Show the workspace's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
 slow-tests *args:
@@ -195,13 +197,22 @@ cross-check-test:
 ci-seed *args:
     @python3 scripts/ci/seed.py {{ args }}
 
-# run Level 1 tests for the .githooks/pre-push shell hook itself
+# Usage: just evidence-store <recipe> [args]   e.g. just evidence-store test-real
+# `[no-cd]` keeps the caller's directory for the recipes that resolve relative
+# paths there (`evidence-ingest`, `evidence-resume`, `evidence-finalize`).
+# run a recipe of the evidence-store service (local only; no CI cell runs it)
+[no-cd]
+evidence-store *args:
+    @just --justfile "{{ justfile_directory() }}/tools/evidence-store/justfile" "$@"
+
+# run Level 1 tests for the pre-push hook (ci-push's library and integration tests)
 test-pre-push-hook:
-    @./.githooks/tests/test-pre-push.sh
+    @just _test repo-deps --lib ci_push::
+    @just _test repo-deps --test ci-push
 
 # prove the shared hook directory dispatches to each linked worktree's hook
 test-pre-push-dispatcher:
-    @./.githooks/tests/test-pre-push-dispatcher.sh
+    @just _test repo-deps --test ci-push dispatcher::
 
 # run Level 1 tests for every versioned git hook
 test-githooks: test-pre-push-dispatcher test-pre-push-hook
@@ -582,6 +593,9 @@ init: _ensure-native-bash
     just _ensure-kache
     just _ensure-gitnexus
     just _ensure-git-hooks
+    # The pnpm workspace packages (evidence-store's pinned Wrangler among them);
+    # pnpm itself comes from _ensure-ci-tools above.
+    pnpm install --frozen-lockfile
     echo
     (cd sniff && just install)
     sniff runtime

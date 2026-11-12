@@ -1,4 +1,4 @@
-name: area-ci
+name: Package area checks
 
 # One package AREA's whole CI slice: its packages' gates, and the coverage
 # audit that reconciles planned cells with their evidence.
@@ -6,9 +6,11 @@ name: area-ci
 # `ci.yml` calls this once per selected area, which is what makes the area the
 # top-level identity in the Actions graph and the Checks tab. A called
 # workflow's jobs render as `<caller job name> / <called job name>`, so a
-# package's compile cell reads `area-ci (claudine) / claudine-cli /
-# check (windows-latest)` — area first, package under it, no display-name
-# parsing anywhere.
+# package's compile cell reads `area-ci (claudine) / Run package work /
+# check (claudine-cli, check, windows-latest, windows-latest)` — area first,
+# then the package's own row. Two grandfathered readers parse these names:
+# `runner_loss.py` (which cell a lost runner owned) and
+# `reuse_validation.py`'s audit-job lookup. Nothing else may.
 #
 # Area is a GROUPING, never an identity (Design Decision 1). Nothing here
 # re-keys an artifact, a baseline entry, or a receipt by area: the package
@@ -65,15 +67,16 @@ jobs:
   # blocking coverage audit below, because none of those depend on a producer
   # having run.
   #
-  # No `name:`: the job is skippable, and GitHub never evaluates a skipped
-  # job's contexts. The default label is the job id, and the area comes from
-  # `ci.yml`'s own matrix, so a producer reads
-  # `area-ci (claudine) / package-ci / test (claudine-cli, L1, macos-latest,
-  # macos-latest)`.
+  # A LITERAL `name:`: the job is skippable, and GitHub never evaluates a
+  # skipped job's contexts, so an expression here would reach the Checks tab as
+  # raw text. The area comes from `ci.yml`'s own matrix, so a producer reads
+  # `area-ci (claudine) / Run package work / test (claudine-cli, L1,
+  # macos-latest, macos-latest)`.
   #
   # This job's result is what `ci.yml`'s `area-ci` — and so `ci-gate` — sees
   # of the producers. A failed gate command therefore fails visibly here too.
   package-ci:
+    name: Run package work
     if: >-
       fromJSON(inputs.rows).has_test_rows ||
       fromJSON(inputs.rows).has_check_rows ||
@@ -123,9 +126,10 @@ jobs:
   # coverage audit stays read-only. Presentation only (Design Decision 10):
   # the audit, the gate, and runner-loss never read what this job publishes.
   #
-  # `if:` makes this job skippable, so it carries no `name:` and is labelled
-  # `accepted-gaps` whether it runs or not (AC10).
+  # `if:` makes this job skippable, so its `name:` is a literal and reads the
+  # same whether it runs or not (AC10).
   accepted-gaps:
+    name: Publish accepted capability gaps
     if: inputs.accepted-gaps
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -176,9 +180,12 @@ jobs:
   # failed or was cancelled must not skip the job that reports it. `needs:` is
   # a "wait for, then download from" list, not a gate.
   #
-  # No `name:`, so the whole-job skip that a cancelled run produces is labelled
-  # `coverage-audit` rather than an unresolved expression (AC10).
+  # A literal `name:`, so the whole-job skip that a cancelled run produces is
+  # labelled `Check required results` rather than an unresolved expression
+  # (AC10). `reuse_validation.py::AUDIT_JOB` finds this job by that name and by
+  # its historical `coverage-audit` label.
   coverage-audit:
+    name: Check required results
     needs: package-ci
     if: always()
     runs-on: ubuntu-latest
@@ -336,7 +343,7 @@ jobs:
       # policy gap, or an exact-skip violation; exit 1 means the audit could
       # not read its inputs. Both fail closed because no producer failure
       # already represents them.
-      - name: Enforce coverage completeness and exceptions
+      - name: Verify required results and policy exceptions
         if: needs.package-ci.result == 'success' || needs.package-ci.result == 'skipped'
         shell: bash
         env:

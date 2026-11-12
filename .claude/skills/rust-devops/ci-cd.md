@@ -29,7 +29,8 @@ run that schedules nothing resolves both to `skipped` right after `scope`
 instead of depending on GitHub's empty-matrix handling. Neither may declare a
 `name:` containing a matrix expression — GitHub never evaluates the matrix
 context for a job it skips, so such a label reaches the Checks tab as raw
-expression text.
+expression text. `preflight` carries the literal `Verify build prerequisites`;
+`area-ci` carries none, so its `area-ci (<area>)` prefix stays automatic.
 
 ## Affected scope
 
@@ -106,7 +107,14 @@ local and hosted runs. Its package policy is deliberately narrow:
   the package there is not compile-checked again. The reused cell links that
   receipt with no test counts; a version-1 whole-environment note never
   satisfies it, and the cell that compiles unchanged dependents is never
-  reusable.
+  reusable. That dependents-only cell exists only when the event schedules
+  `DEPENDENTS_ENVIRONMENT` (`ubuntu-latest`): a push proven by its pull
+  request, and the nightly (where Linux is a producer only), plan none.
+- `schema.validate_resolved_plan` refuses (`malformed-receipt:`) any cell
+  naming an environment outside the plan's cell-bearing environments: one
+  absent from `environments`, or one listed in `producing_environments`.
+  `calculate_scope` runs that validation before returning, so the planner CLI
+  exits nonzero and writes neither `--plan-out` nor stdout for such a plan.
   `_wsl-ci.yml` declares no archive selector at all — it takes one row and
   resolves that cell's build record from the plan through `cell_contract.py` —
   so a check selector has nowhere to
@@ -283,10 +291,12 @@ empty scan and a full one. It is exactly one of `{selected: false, reason}`,
 `paths` is the real "nothing eligible changed" state and is never upgraded to a
 full scan. `--deleted PATH` is how a caller declares a removal, because
 `git diff --name-only` cannot tell one from a missing file. Every selection
-boundary — `ci.yml`'s scope step, `just/ci-local.just`, and `.githooks/pre-push`
-— therefore takes `git diff --name-status -z` and renders it through
-`scripts/ci/diff_scope.py`, the one parser that emits
-`--deleted <path>... --renamed-from <path>... -- <changed path>...`. A rename
+boundary — `ci.yml`'s scope step and `just/ci-local.just` — therefore takes
+`git diff --name-status -z` and renders it through `scripts/ci/diff_scope.py`,
+the one parser that emits
+`--deleted <path>... --renamed-from <path>... -- <changed path>...`; the
+pre-push hook's `ci-push` diffs the committed trees itself and writes the same
+tail, held byte-equal to the parser's by `ci_push::tests::git`. A rename
 contributes its destination to the changed list; its source is not a reported
 deletion, and listing it as changed would be exactly the unexplained absence
 the declaration exists to remove. It travels only as `--renamed-from`, whose
@@ -359,6 +369,39 @@ installer would make every sibling execute that checkout's version. `just
 init` installs the stable `.githooks/pre-push-dispatcher` as a regular file;
 at invocation it resolves `git rev-parse --show-toplevel` and executes the
 active worktree's `.githooks/pre-push`.
+
+That hook is a launcher only: it `cd`s to the top level and `exec`s `cargo run
+-p repo-deps --no-default-features --features local-tools --bin ci-push`.
+Every decision lives in `repo_deps::ci_push::run` (`scripts/ci-push/`); the
+behavior is documented in
+[How the hook runs](../../../docs/topics/ci-cd.md#how-the-hook-runs). When
+changing it:
+
+- **Put logic in Rust, never in the launcher.** The launcher forwards argv,
+  stdin, cwd, and exit status; nothing else. Its tests read it with
+  `include_str!` inside each `launcher::` test, so editing it schedules
+  exactly those tests (and the dispatcher's D1 test reads the dispatcher).
+- **Decisions are tested in-process** through the `PushSession` fake in
+  `scripts/ci-push/tests/orchestration.rs`, which asserts the exact helper
+  argv; the `ci-push` integration target runs the real binary, real Git
+  transport, and the real Python helpers. Fixture tools are one compiled
+  binary (`ci-push-test-tool`) copied under each name, found with
+  `bin_exe!`, so archives work. Run `just test-githooks`.
+- **Every Python child uses the interpreter `ci-push` selected.** A Python
+  helper or recipe must never relaunch `python3` itself; the gates get it as
+  `BISCUIT_CI_PYTHON` plus a NUL-separated `BISCUIT_CI_PYTHON_ARGS_FILE`, which
+  `just ci-local` honors.
+- **Review blocks in every mode.** Only an ordinary gate failure passes in
+  `warn`; an interruption, a constraint refusal (exit 1), and a review failure
+  (exit 2) never do.
+- The end-to-end parity tests are portable except those that send Unix
+  signals; the native Windows launch paths (Git Bash, PowerShell) are
+  `launcher::windows_*`, one push per test. A push through `ci-push` and the
+  real `ci-local.just` together is too slow for an L1 test on native
+  Windows, so the real recipe runs directly as `ci-push` starts it
+  (`parity::the_real_recipe_*`), the hook tests use a gate that stages
+  what the recipe stages, and prior evidence is seeded through the real
+  helpers; tests pin each substitution to the real thing.
 
 Parallel test workers default to `max(1, logical_cores - 2)` locally. CI uses
 all logical cores on runners with four or fewer, otherwise `logical_cores - 2`.
@@ -500,20 +543,24 @@ schedule nothing while keeping its audit, its slice, and its gap publisher.
 runner}` and nothing else; every other value the job needs comes from
 `scripts/ci/cell_contract.py`, the one reader, which joins the row back to its
 cell in `ci-resolved-plan` and refuses an unknown, duplicated, non-executing,
-or mismatched row with a `cell-contract-*` code before anything runs. **No job
+or mismatched row with a `cell-contract-*` code before anything runs. Every
+upload whose name comes from `steps.cell.outputs.*` (status, JUnit, WSL2
+observation) also carries a `!= ''` check on that output, so a refused
+contract shows only its own error, not a second invalid-artifact-name one. **No job
 reads `environments.json`, a Cargo manifest, or a package policy block**, and
 no reader-facing workflow declares an environment-list input any more.
 
 Two consequences worth knowing. **Job labels carry the whole cell**: GitHub
 builds a matrix job's label from every value in its row, in key order, so a
-producer reads `area-ci (playa) / package-ci / test (playa-cli, L1,
+producer reads `area-ci (playa) / Run package work / test (playa-cli, L1,
 macos-latest, macos-latest)`. The order `package, gate, environment, runner`
 is the label contract (ruling R1 of `2026-09-19-direct-cell-execution`, which
 accepted the duplicated runner token rather than keep a second runner-lookup
 document aligned with the rows): reordering the row, or dropping `runner`, is a
 label-format change for `runner_loss.py`, which parses both that four-token
 form and the older three-token one. A WSL2 row rides on the delegating
-`wsl2 (…)` segment, because `_wsl-ci.yml`'s own job name is static. And **no test job waits on another** (ruling R3): the
+`wsl2 (…)` segment, because `_wsl-ci.yml`'s own job name is the static
+`Run guest tests`. And **no test job waits on another** (ruling R3): the
 `needs: test` staging that used to order L2 and browser behind L1 is gone,
 because a red L1 must never erase a required tier's evidence. Each area's `coverage-audit` job runs `if: always()` behind
 its producers, renders the result slice, and narrows runner-loss attribution to
@@ -537,17 +584,40 @@ this right; nothing turns red when it breaks, so it is pinned by a fixture.
 
 Two rules the presentation depends on, both cheap to break:
 
-- A job that can be skipped as a whole carries **no `name:`**. GitHub does not
-  evaluate the matrix context for a skipped job, so a `name:` holding
-  `${{ matrix.… }}` reaches the Checks tab as raw expression text. Omitting it
-  makes the label the job id when skipped and `job-id (matrix values)` when it
-  runs. The package half of the identity comes from the caller, because a
+- No job `name:` may contain an expression. GitHub does not evaluate the
+  matrix context for a skipped job, so a `name:` holding `${{ matrix.… }}`
+  reaches the Checks tab as raw expression text. Two kinds of job follow from
+  that. **Infrastructure jobs** that own no result cell carry a literal,
+  descriptive name (`Choose required work`, `Run package work`,
+  `Check required results`, `Run guest tests`, …; the full map is in
+  `docs/topics/ci-cd.md`, "Reading job and check names"). **Cell-carrying matrix
+  jobs** — `ci.yml`'s `area-ci` and `build`, and `_package-ci.yml`'s `check`,
+  `test`, `lint`, `wsl2` — carry **no `name:`**. A literal name does NOT drop
+  the suffix (GitHub renders `<name> (matrix values)` for an expanded matrix
+  job, so `preflight` reads `Verify build prerequisites (<os>)`); it replaces
+  the job id (`test`, `check`, `lint`, `wsl2`, `build`) that `runner_loss.py`
+  matches, and `area-ci` keeps the `area-ci (<dir>)` spelling every recorded
+  run uses. Their label is the job id when skipped and `job-id (matrix
+  values)` when it runs, so the suffix keeps the stored wording (`L1`,
+  `wsl2-ubuntu`) and repeats the runner for native cells. A display-only
+  `label` row value was rejected because GitHub cuts each name segment at 100
+  characters (97 + `...`): a leading label pushes the runner, sometimes part
+  of the environment, past the cut for package names of about 13-15
+  characters and up (display check run 42963148323). The package half of the
+  identity comes from the caller, because a
   called workflow's jobs render as `<caller job name> / <called job name>`.
-  That composite label is a **parsed contract**, not just presentation:
-  `runner_loss.py` reads the row parenthetical
-  `<job> (<package>, <gate>, <environment>, <runner>)` from the tail (for
-  WSL2, from the delegating `wsl2 (…)` segment) to attribute a dead runner's
-  cell, and still accepts the pre-row `<package> / <gate> (<env>)` form. Phase 6's renaming broke all six
+  That composite label is a **parsed contract**, not just presentation, for
+  exactly two grandfathered readers; add no third. `runner_loss.py` reads the
+  row parenthetical `<job> (<package>, <gate>, <environment>, <runner>)` from
+  the tail (for a `Run guest tests` leaf, only from the immediately enclosing
+  `wsl2 (…)` segment, else `None`) to attribute a dead runner's cell, and still
+  accepts the pre-row `<package> / <gate> (<env>)` form and the old
+  `package-ci` / `test (wsl2-ubuntu)` spellings. `reuse_validation.py`'s
+  `AUDIT_JOB` finds each area's audit as `coverage-audit` or
+  `Check required results`, so nightly reuse still reads older runs.
+  `ci.yml`'s title (`Continuous integration`) is a third coupling: the
+  `workflow_run` triggers in `release-plz.yml` and `ci-infra-retry.yml` match
+  it by title, and a contract test pins them together. Phase 6's renaming broke all six
   producer labels at once and nothing turned red, because every fixture spelled
   the names by hand. `test_runner_loss.py` now derives them from the shipped
   workflows instead, and runs in `just ci-local`'s self-test loop.
@@ -633,11 +703,67 @@ rustc, or linker on `PATH`.
 ### The owner job, and what it is not
 
 `ci.yml`'s `build` job uses one matrix leg per producer environment from
-`build_owners`. `scripts/ci/produce-owner.sh` invokes the producer once without
-`--key`, sharing its target tree across package invocations. The programmatic
-publisher in `scripts/ci/artifacts/` uploads separate package-keyed archives and
-statuses, including successful records when a sibling fails. Artifact transport
-must not change build ownership. Its Node dependencies are pinned by `npm ci`.
+`build_owners`. Publication is **incremental**: the `actions/github-script`
+step "Produce and publish the archives" runs `scripts/ci/artifacts/produce.cjs`,
+which starts `scripts/ci/produce-owner.sh --key <key>` once per record in Rust's
+`(package, key)` byte order, every child sharing one target tree, and publishes
+each record before starting the next. It lives in github-script because only
+JavaScript actions receive the artifact runtime token; exporting that token to
+shell steps would widen its exposure. A failed child or upload is remembered and
+later records are still attempted. Artifact transport must not change build
+ownership. Its Node dependencies are pinned by `npm ci`.
+
+```mermaid
+flowchart LR
+    C[produce.cjs] -->|PRODUCE_MODE=record, --key| W[produce-owner.sh]
+    W --> U[upload archive]
+    U -->|resolved| L[ledger write]
+    L --> D[delete archive + sidecars]
+    U -->|failed| K[keep payload, status stage=upload]
+    D --> S[upload status]
+    K --> S
+    S --> C
+    C -->|done| F[always() finalizer]
+```
+
+- `produce-owner.sh`: `PRODUCE_MODE` unset is the local, upload-free, single
+  `ci-build produce` run (it writes `owner-timing.json`); `record` is one child
+  of the coordinator, which owns owner timing; anything else exits 2.
+  `CI_BUILD_OUT` overrides the output directory (default `$RUNNER_TEMP/build`).
+- `publish.cjs` exports `publishRecord` and `finalizeOwner` (`publish` is an
+  alias of the latter). `<out>/publication-ledger.json` records `archive` and
+  `status` uploads separately, written by temp file + rename **after** the
+  awaited upload and **before** any deletion. Artifact names are immutable in a
+  run: a failed status upload retries the status alone, never the archive, and a
+  failed archive upload is not retried (its status already says `upload`). A
+  process lost between a remote upload and the ledger write is an
+  infrastructure failure, never papered over by overwriting.
+- Deletion releases only the uploaded archive and `<artifact>-sidecars`, after a
+  containment check (inside `out`, not a symlink, no realpath escape). Manifests,
+  statuses, the verifier copy, counters, and `target/` stay. A failed deletion is
+  logged and never fails the published record.
+- The `always()` step "Publish package builds and statuses" runs
+  `finalizeOwner`: it uploads only what the ledger lacks, synthesizes a
+  `failure`/`cancelled` status at stage `produce` for records never reached, and
+  publishes the owner compiler-work total. The coordinator step is not
+  `always()`, so a failed schematic guard skips production and still fails the
+  job.
+- Only incremental publication was enabled as a storage remedy. Deleting
+  inventory scratch and isolating the Ubuntu target cache were not: neither
+  measured any removable bytes. The guard's `target/schematic-fresh-output` is
+  live target output and is not deleted. Hosted confirmation that a
+  full-workspace Ubuntu owner now fits its disk is still outstanding.
+
+The Ubuntu owner alone samples storage: the job's first step exports
+`BUILD_DIAGNOSTICS` on Linux, workflow steps call `scripts/ci/storage_sample.py`
+around the cache restore, the schematic guard, and publication, and
+`produce-owner.sh` passes the same sampler to `ci-build produce
+--sample-command '<json argv>'`, which runs it at producer start and after every
+record's status is written; under the coordinator each per-key child therefore
+adds a `produce-start` sample before its record. Samples land in `build-diagnostics-<producer>`
+(always uploaded). Every sample step ends in `|| true` — never
+`continue-on-error`, which the owner job may not carry — and the producer
+ignores the sampler's exit: a diagnostic never decides a result.
 
 Manifest generation 3 verifies clean tracked source at the planned commit on
 both boundaries. That makes the checkout ref part of the contract: every
@@ -656,8 +782,10 @@ resolved again on the consumer; external library hashes/Mach-O UUIDs must match.
 This conservative compatibility rule can reject ABI-compatible library upgrades.
 `--source-tree` only asserts the observed Git tree; it cannot override it.
 The producer-scoped workflow entry point is covered by a real-Cargo shared-dependency
-fixture. Opt-in measurements include per-record counts and owner totals in each
-package artifact; hosted comparisons still decide the architecture's acceptance.
+fixture, which drives `produce.cjs`'s local command line with a fake directory
+upload. Opt-in measurements put each record's own counts in its package artifact
+and the owner total in `compiler-work-owner-<producer>`; hosted comparisons still
+decide the architecture's acceptance.
 
 Declaring `executes` in `environments.json` is what makes an environment a
 producer, and all three own the archive their consumers execute: Linux (with the
@@ -699,10 +827,27 @@ identity, publishes no JUnit or `status-…` artifact, and is never baselined. I
 publishes `build-status-<package>-<producer>-<key>/build-status.json` under
 `always()` — success, compile failure, upload failure, cancellation — and
 `runner_loss.py attribute --plan` synthesizes one from the plan when the owner's
-runner died. `ci-rollup` renders a dependent cell as
-`MISSING — blocked by build <key> …`, which blocks and which the skip baseline
-cannot excuse; an unrelated key proceeds, and a real test result outranks the
-diagnostic.
+runner died; its detail says the per-record production/publication outcome is
+unknown, and a real status always wins over a synthesized one.
+
+**Consumers check the status before the archive.** `_package-ci.yml` (gated on
+`consumes_archive`) and `_wsl-ci.yml` (on the Windows host, before guest
+provisioning) run "Download this cell's build status" — the only
+`continue-on-error` step allowed there, see
+`only_recovery_and_diagnostic_steps_ignore_errors` — then
+`scripts/ci/build_status.py`, then the archive download. The checker reads with
+`schema.loads_strict` and exits 0 only for a valid `success` status whose
+`package`/`key`/`producer`/`artifact` match the cell. `failure`/`cancelled`
+renders `not run: producer failed: build <key> for <package> on <producer>
+concluded <result> at the <stage> stage`; an absent file renders
+`not run: producer outcome unknown: …` naming the owner job; anything malformed names its
+file and field. No fallback compile and no completion record follow, so the
+audit sees the cell `MISSING`. `ci-rollup` renders a cell with no results as
+`not run: producer failed; build <key> (…) concluded …`, and a cell that did run
+tests keeps its result with `producer failed; build …` added as context. An
+absent status never blocks in the rollup — it cannot tell a missing status from
+a lost consumer report — and the skip baseline can never excuse a blocked cell;
+an unrelated key proceeds.
 
 The producer stages `ci-build` itself inside the artifact. A consumer with no
 Cargo — the WSL2 guest above all — cannot build a verifier, and shipping it
@@ -829,7 +974,8 @@ defaults false at every level of the chain.
 **The counter's report crosses into JavaScript.** `ci-build`'s `Report` is
 serialized into each manifest's `compiler_work`, and
 `scripts/ci/artifacts/publish.cjs` reads `compiler_invocations` and
-`compiler_ms` out of it by name to build the owner aggregate that AC8's
+`compiler_ms` out of it by name to build the owner aggregate
+(`compiler-work-owner-<producer>`, published once by the finalizer) that AC8's
 compile-once claim is read from. Node cannot see the Rust struct, so its test
 asserts against `scripts/fixtures/compiler-work/publisher-documents.json`,
 which `ci-build-tests.rs::the_javascript_publisher_reads_a_fixture_generated_from_this_report`
@@ -859,8 +1005,8 @@ area count × artifact count before adding it.
 
 **CI runs no separate job for its own tooling.** Those suites are scheduled by
 `SUITE_REGISTRY` in `scripts/ci/affected_scope.py` and executed by
-`scripts/ci/companion_suites.py` from the `Companion suites` step of
-`_package-ci.yml`'s `test` job (and `Companion suites (lint)` in `lint`, for a
+`scripts/ci/companion_suites.py` from the `Run companion test suites` step of
+`_package-ci.yml`'s `test` job (and `Run companion lint suites` in `lint`, for a
 suite declaring a `lint_recipe`). A registered suite must also be named in its
 owner's `companion-suites` manifest list, or `validate_suite_registry` refuses
 the plan — registration alone schedules nothing.
@@ -958,7 +1104,7 @@ Three rules when adding a Python suite to the registry:
   nothing about coverage. The declaration is **per job, never a blanket fail
   under `CI`**: `preflight` runs on up to three operating systems and
   provisions neither `sniff` nor `jq`, so a global rule would turn macOS and
-  Windows red on every push. Today `_package-ci.yml`'s `Companion suites` step
+  Windows red on every push. Today `_package-ci.yml`'s `Run companion test suites` step
   declares `BISCUIT_REQUIRE_CARGO`/`JUST`/`JQ`/`BASH`, and `area-drift`
   declares `SNIFF`.
   `ci_workflow_contracts::every_tool_guard_declaration_is_set_by_the_job_that_enforces_it`
@@ -978,13 +1124,41 @@ Three rules when adding a Python suite to the registry:
   `ci-build` is not on disk and `build_key.py` falls back to `cargo run`:
   correct, but ~14–26s rather than the 0.1s it costs beside a built binary.
 
-The `just ci-local` self-test list is spelled out in four coupled files
-(`just/ci-local.just`, `scripts/ci/test_ci_local.py` twice, and
-`.githooks/tests/test-pre-push.sh`). Editing the recipe alone produces ten
-failures — the fixtures stub each suite by name.
+The `just ci-local` self-test list is spelled out in `just/ci-local.just` and
+twice in `scripts/ci/test_ci_local.py`; editing the recipe alone produces ten
+failures — the fixtures stub each suite by name. `ci-push`'s end-to-end
+fixture (`scripts/ci-push/integration/evidence_fixture.rs`) reads the list from
+the recipe itself, so it follows without an edit.
 
 Measurements: `reviews/2026-09-15-python-test-code/spike-3-results.md` and
 `spike-4-results.md`.
+
+## The evidence store (explicit ingestion only)
+
+`tools/evidence-store` (a Cloudflare Worker over D1 and a private R2 bucket)
+is **not part of CI scope or gating**. It has no CI cells, no Node
+provisioning, and no entry in `affected_scope.py`'s `SUITE_REGISTRY`; a change
+under it schedules nothing. Git-note publication (`publish-receipt`, the
+pre-push hook, `ci.yml`, `seed.py`) remains the authority and never calls the
+service — do not add a call site.
+
+Evidence reaches the store only by explicit ingestion:
+
+- `just evidence-ingest INPUT --endpoint URL --repo ID --token-file PATH --state PATH [--proof-dir PATH]`
+  from a host submits a v3 collection or a v2 receipt (converted locally) and
+  stages the files `--proof-dir` maps; `just evidence-resume STATE` continues
+  from the `--state` file without rerunning anything.
+- A producer only stages bytes. `just evidence-finalize STATE --token-file PATH`
+  with a **verifier** token publishes them.
+- `.github/workflows/evidence-store-demo.yml` is manual-only
+  (`workflow_dispatch` on `main`): it ingests a named retained artifact with a
+  GitHub OIDC token (audience `rusty-biscuit-evidence-store`), which the
+  service grants producer and reader only. Dispatch it with `just demo-hosted`;
+  it runs no tests and is not a publication hook.
+
+Local checks go through the root delegation, `just evidence-store <recipe>`
+(`typecheck`, `test`, `lint`; `test-real` and `deploy` need a deployment).
+The operating guide is `docs/cicd/evidence-store.md`.
 
 ## The merge gate
 
@@ -1247,7 +1421,7 @@ Each update is planned against the base of every run it triggers, because
 `ci.yml` fires `push` for `main` only and `pull_request` for every target
 branch: the remote's `main` for a push to `main`; otherwise the current remote
 tip of each open pull request's target branch (`gh pr list` on a GitHub
-remote — `gh` or `jq` missing, unauthenticated, or failing blocks the push
+remote — `gh` missing, unauthenticated, or failing blocks the push
 and names the command), each context planned and checked in turn with the
 first failure blocking; or a provisional plan against the remote's `main` when
 no pull request is open. When the same push also updates a target branch, the
@@ -1318,15 +1492,94 @@ every remaining OS continues before the final verdict fails.
 
 ## Release contract
 
-Release-plz is the sole version/tag/changelog authority:
+Release-plz is the sole version/tag/changelog authority. `docs/releases.md` is
+the operational guide (App setup, cutting, recovery, dry run); this is the
+contract it defines. Every event decision is made by
+`scripts/ci/release_path.py` reading `GITHUB_EVENT_PATH`; the job `if:` guards
+are a coarse filter, not the authority.
 
-1. A successful `ci` run on `main` triggers a non-canceling release-plz job for
-   that exact validated commit. It opens or updates a draft release PR.
-2. Merging a PR labeled `release` triggers publication. Ordinary pushes do not
-   publish releases.
-3. `publish = false` means no crate is published to crates.io. Git tags and
-   GitHub releases are the current package release channel; the specialized
-   integration workflow may attach its own cross-compiled release assets.
+1. **Preparation** (`release-plz-pr`, `workflow_run`, concurrency
+   `release-plz-pr`, non-canceling): only a completed, successful `ci` *push*
+   run on `main` in the canonical repository. It checks out the `main` branch
+   (not the SHA: release-plz needs `@{upstream}`) and stands down with a notice
+   if HEAD is no longer `workflow_run.head_sha`. It opens or updates the draft
+   proposal (labels `release`, `automated`; branch `release-plz-*`).
+2. **Writes use only a release App installation token**, minted per job just
+   before use, scoped to this repository with contents and pull-requests write.
+   Configuration is `RELEASE_APP_ID` (variable), `RELEASE_APP_PRIVATE_KEY`
+   (secret), and `RELEASE_APP_BOT_LOGIN` (variable, exact login with `[bot]`).
+   Missing configuration is a named error before any token; there is never a
+   `GITHUB_TOKEN` fallback (its events would not trigger `ci` on the proposal
+   or `release: published` downstream). Workflow default is `contents: read`;
+   checkouts set `persist-credentials: false`; release-plz gets the token as
+   `GIT_TOKEN` plus a credential helper injected through `GIT_CONFIG_COUNT`
+   in its own environment, so nothing is written to disk or Git config.
+3. **Review**: CI runs on the draft unchanged (no `ready_for_review` trigger);
+   a human marks it ready; `ci-gate` is required; it must be merged with a
+   merge commit.
+4. **Publication** (`release-plz-release`, PR `closed`, concurrency
+   `release-plz-release`): checks out `merge_commit_sha`, never current `main`.
+   Before any token it requires merged into `main`, `release` label,
+   `release-plz-` branch, canonical base/head repositories, author type `Bot`
+   with login `RELEASE_APP_BOT_LOGIN`, and a two-parent merge whose second
+   parent is `pull_request.head.sha`. Squash and rebase merges are refused.
+   Candidates are the packages whose version changed from the merge base of
+   (first parent, proposal head) to the proposal head; tags
+   `{package}-v{version}` target the proposal head, never the merge SHA.
+5. **Inventory and recovery**: every candidate's remote tag (peeled) and
+   Release is classified before any write: `new`, `recovery` (correct tag,
+   no Release), `complete`; a tag at another commit, a Release without its
+   tag, a draft Release, or any non-404 API error refuses publication
+   outright. One release-plz process per package in a fresh clone detached at
+   the proposal head; recovery deletes the tag only from that clone and sets
+   `git_tag_enable = false`, so release-plz creates the Release and the remote
+   tag is never moved. The first failing exit status is kept and the
+   inventory is uploaded as `release-publication-{run_id}-{attempt}`. The
+   supported recovery is re-running the original run; never
+   `gh release create`.
+6. **Dry run** (`release-dry-run`, `workflow_dispatch` from any branch) is the
+   only branch-runnable calculation: read-only, no App credentials, and its
+   failure stays red while `release-dry-run-{run_id}-{attempt}` keeps the
+   diagnostics. All three jobs get release-plz and the `rust-toolchain.toml`
+   toolchain through `.github/actions/setup-release-plz`, which builds 0.4.3
+   from the upstream tag archive (SHA-256 pinned in the action) with the
+   in-repo `release-plz-0.4.3-historical-manifest-path.patch`, runs the
+   patch's upstream unit tests, `cargo build --locked`, checks the version,
+   and only then saves the binary with `actions/cache/save` (key: version,
+   archive SHA, `hashFiles` of the patch, toolchain, runner OS/arch). No
+   binstall, prebuilt, or unpatched fallback exists.
+   The dry run (`release_path.py update`) and `release-pr` calculate in one
+   environment, `calculation_env`: a temporary `core.attributesFile` with the
+   `.gitattributes` `*.ps1 text eol=crlf` rule, so release-plz's history walk
+   back past the commit that added `.gitattributes` keeps `scripts/init.ps1`
+   clean. Never call `release-plz update`/`release-pr` directly from a job.
+   Why the patch: git-only reconstruction looks every workspace package
+   (eligible or not) up by its current name at its newest tag, and the
+   `-v0.1.0` tags of the three packages renamed on 2026-10-03
+   (`sniff-detection-cli`, `git-wt-cli`, `darkmatter-lsp`) point at
+   `907cd6e`, where they are `sniff-cli`, `worktree-cli`, `dmls`. Published
+   tags are never moved, so the patch falls back to the member with the same
+   workspace-relative manifest path (current name first; neither is still an
+   error), keys the result by the current name, and does the same in the
+   `Cargo.lock` comparison. It touches only `next_ver.rs`,
+   `registry_packages.rs`, `lock_compare.rs`, never publication;
+   `the_release_tool_is_built_from_verified_source_with_the_in_repo_patch`
+   holds that. Drop it by deleting the patch and the build steps once an
+   upstream release resolves renamed packages.
+   Tag-only recovery relies on 0.4.3's local-only `git tag -l` skip and
+   separate tag/Release switches;
+   `tag_only_recovery_relies_on_the_release_plz_version_it_was_verified_against`
+   fails on a pin change until those are re-read upstream.
+7. **Temporary allowlist**: `[workspace].release = false` with only
+   `sniff-detection-cli` and `git-wt-cli` enabled, mirrored by
+   `APPROVED_RELEASE_SET`; a proposal must bump exactly that set. Widening it
+   is a separate change after the first release is verified, editing both.
+8. `publish = false` means no crate is published to crates.io. Git tags and
+   GitHub Releases are the current package release channel.
+   `build-integrations.yml` builds and attaches an archive only for the one
+   integration (`arcam-amp-integration`, `eversolo-integration`,
+   `sony-receiver-integration`) its exact `{package}-v{semver}` tag names,
+   from that tag's commit; any other Release builds nothing.
 
 Do not introduce a second version authority, publish from a feature branch, or
 silently turn on crates.io. A new registry, installer generator, signing path,

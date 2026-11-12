@@ -34,7 +34,6 @@ ROOT = Path(__file__).resolve().parents[2]
 RECIPE = ROOT / "just" / "ci-local.just"
 DEVOPS = ROOT / "just" / "devops.just"
 CONSTRAINTS = ROOT / "scripts" / "ci" / "constraints.py"
-PRE_PUSH = ROOT / ".githooks" / "pre-push"
 JUST = shutil.which("just")
 
 #: The only job that runs this suite. `preflight` does not, so the tools below
@@ -88,13 +87,6 @@ def clean_policy_environment() -> dict[str, str]:
     ):
         environment.pop(key, None)
     return environment
-
-
-class PrePushEvidenceContractTests(unittest.TestCase):
-    def test_a_same_head_retry_preserves_reports_and_merges_the_prior_receipt(self) -> None:
-        hook = PRE_PUSH.read_text(encoding="utf-8")
-        self.assertNotIn('rm -rf "$REPORT_DIR"', hook)
-        self.assertIn('--prior-receipt "$PRIOR_RECEIPT_FILE"', hook)
 
 
 def gate_loop_package(name: str, **overrides: object) -> dict:
@@ -273,6 +265,10 @@ class CiLocalTests(unittest.TestCase):
                 "TEST_POLICY_RECIPE": str(root / "policy.just"),
                 "TEST_COMPANION_LOG": str(root / "companions.jsonl"),
             })
+            # The hook runs this suite with CARGO_HOME exported, which would
+            # hand the wrapper decision the developer's own Cargo config.
+            environment["CARGO_HOME"] = str(root / "home" / ".cargo")
+            environment.pop("CARGO_BUILD_RUSTC_WRAPPER", None)
             environment.pop("RUSTC_WRAPPER", None)
             if wrapper is not None:
                 environment["RUSTC_WRAPPER"] = wrapper
@@ -1638,6 +1634,243 @@ class PlanFedRunTests(unittest.TestCase):
         self.assertEqual(run["plan"], run["written_plan"])
 
 
+#: The recipe's self-test loop, in its order; each is an empty stub in the
+#: interpreter fixture, so running one proves only which interpreter ran it.
+SELF_TEST_SUITES = (
+    "test_schema.py",
+    "test_affected_scope.py",
+    "test_resolved_plan.py",
+    "test_ci_local.py",
+    "test_completion.py",
+    "test_constraints.py",
+    "test_publish_gaps.py",
+    "test_runner_loss.py",
+    "test_build_key.py",
+    "test_consolidation.py",
+    "test_evidence_index.py",
+)
+
+
+@requires_tools("just", "jq", "git", enforced_by=CI_TOOLING)
+class SelectedInterpreterTests(unittest.TestCase):
+    """`ci-push` hands the recipe the interpreter it selected; nothing restarts `python3`.
+
+    On native Windows `python3` can be a broken shim while `py -3` works, so a
+    helper launched as `python3` would fail after the selection succeeded. The
+    fixture puts such a shim first on PATH and selects a recording wrapper
+    around this suite's own interpreter. Every stub on PATH is a Bash script,
+    because a `#!/usr/bin/env python3` stub would itself reach the shim.
+    """
+
+    #: Two records, one containing a space: each must reach the interpreter as
+    #: exactly one argument, in order.
+    PREFIX = ("--selected prefix", "-3")
+
+    #: Logs its arguments and fails, as the Cygwin shim does; with
+    #: `TEST_PYTHON3_WORKS` it records and then runs the real interpreter.
+    PYTHON3 = (
+        "#!/usr/bin/env bash\n"
+        'printf \'%s\\n\' "$*" >> "$TEST_PYTHON3_LOG"\n'
+        'if [[ -n "${TEST_PYTHON3_WORKS:-}" ]]; then exec "$TEST_REAL_PYTHON" "$@"; fi\n'
+        "echo 'python3: this shim cannot start an interpreter' >&2\n"
+        "exit 9\n"
+    )
+
+    #: The selected interpreter: one tab-separated log line per launch (argc,
+    #: then each argument), then the real interpreter without the prefix.
+    SELECTED = (
+        "#!/usr/bin/env bash\n"
+        '{ printf \'%s\' "$#"; printf \'\\t%s\' "$@"; printf \'\\n\'; } >> "$TEST_SELECTED_LOG"\n'
+        'shift "$TEST_PREFIX_COUNT"\n'
+        'exec "$TEST_REAL_PYTHON" "$@"\n'
+    )
+
+    #: The replanning path's planner: a plan that schedules no package, so
+    #: the run reaches its self-test loop and gate summary without a gate.
+    REPLANNER = (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "arguments = sys.argv[1:]\n"
+        "assert '--apply-to' not in arguments, arguments\n"
+        "plan = {'packages': [], 'cells': [], 'change_inventory': {}}\n"
+        "Path(arguments[arguments.index('--plan-out') + 1]).write_text(json.dumps(plan))\n"
+        "print(json.dumps({'packages': [], 'full_scope': False,\n"
+        "                  'change_class': 'package', 'full_scope_gates': []}))\n"
+    )
+
+    def stub(self, directory: Path, name: str, body: str) -> None:
+        """A Bash launcher on PATH running `body` under the real interpreter."""
+        (directory / f"{name}.stub.py").write_text(body, encoding="utf-8")
+        path = directory / name
+        path.write_text('#!/usr/bin/env bash\nexec "$TEST_REAL_PYTHON" "$0.stub.py" "$@"\n', encoding="utf-8")
+        path.chmod(0o755)
+
+    def run_recipe(
+        self,
+        prefix: bytes | None,
+        fed: bool = True,
+        prefix_count: int | None = None,
+        python3_works: bool = False,
+        selected: bool = True,
+    ) -> dict:
+        """Run `just ci-local` with a broken `python3` first on PATH.
+
+        `prefix` is the args file's raw bytes (None: the variable is unset).
+        `fed` runs the hook's reviewed-plan path; otherwise a real repository
+        with one committed change takes the working-tree replan.
+        """
+        with tempfile.TemporaryDirectory(prefix="ci-local-python-") as temporary:
+            root = Path(temporary).resolve()
+            bin_dir = root / "bin"
+            scripts = root / "scripts" / "ci"
+            bin_dir.mkdir()
+            scripts.mkdir(parents=True)
+            shutil.copyfile(RECIPE, root / "ci-local.just")
+            (root / "justfile").write_text(
+                'red := ""\ngreen := ""\nreset := ""\nimport "ci-local.just"\n',
+                encoding="utf-8",
+            )
+            shutil.copyfile(CONSTRAINTS, scripts / "constraints.py")
+            for suite in SELF_TEST_SUITES:
+                (scripts / suite).write_text("", encoding="utf-8")
+            (bin_dir / "python3").write_text(self.PYTHON3, encoding="utf-8")
+            (bin_dir / "python3").chmod(0o755)
+            self.stub(bin_dir, "sniff", (
+                "import json, sys\n"
+                "assert sys.argv[1:] == ['os', '--json'], sys.argv\n"
+                "print(json.dumps({'os_type': 'MacOS', 'kernel': 'Darwin'}))\n"
+            ))
+            self.stub(bin_dir, "just", (
+                "import json, os, sys\n"
+                "assert sys.argv[1] in ('_lint', '_test', '_test_l2'), sys.argv\n"
+                "with open(os.environ['TEST_CALL_LOG'], 'a', encoding='utf-8') as log:\n"
+                "    log.write(json.dumps({'args': sys.argv[1:]}) + '\\n')\n"
+            ))
+            self.stub(bin_dir, "cargo", "raise SystemExit('Rust builds are forbidden in this test')\n")
+            self.stub(bin_dir, "tmux", "raise SystemExit('tmux must only be detected, never started')\n")
+            interpreter = root / "selected" / "python-selected"
+            interpreter.parent.mkdir()
+            interpreter.write_text(self.SELECTED, encoding="utf-8")
+            interpreter.chmod(0o755)
+
+            environment = clean_policy_environment()
+            relocate_home(environment, root / "home")
+            for key in (
+                "BISCUIT_L2_THREADS", "BISCUIT_TEST_REQUIRED_BACKENDS", "BISCUIT_CI_SCOPE_OUT",
+                "BISCUIT_CI_PLAN_OUT", "BISCUIT_CI_PLAN_IN", "BISCUIT_CI_REPORTS_OUT",
+                "BISCUIT_CI_PYTHON", "BISCUIT_CI_PYTHON_ARGS_FILE", "TEST_PYTHON3_WORKS",
+                "WEZTERM_UNIX_SOCKET", "KITTY_LISTEN_ON", "GIT_DIR", "GIT_WORK_TREE",
+                "GIT_INDEX_FILE",
+            ):
+                environment.pop(key, None)
+            environment.update({
+                "PATH": str(bin_dir) + os.pathsep + environment.get("PATH", ""),
+                "TEST_REAL_PYTHON": sys.executable,
+                "TEST_CALL_LOG": str(root / "calls.jsonl"),
+                "TEST_PLANNER_LOG": str(root / "planner.log"),
+                "TEST_PYTHON3_LOG": str(root / "python3.log"),
+                "TEST_SELECTED_LOG": str(root / "selected.log"),
+                "TEST_PREFIX_COUNT": str(
+                    prefix_count if prefix_count is not None else len(self.PREFIX)
+                ),
+            })
+            if python3_works:
+                environment["TEST_PYTHON3_WORKS"] = "1"
+            if selected:
+                environment["BISCUIT_CI_PYTHON"] = str(interpreter)
+            if prefix is not None:
+                (root / "python-args").write_bytes(prefix)
+                environment["BISCUIT_CI_PYTHON_ARGS_FILE"] = str(root / "python-args")
+
+            if fed:
+                document = PlanFedRunTests.fed_plan(self, "pass")  # type: ignore[arg-type]
+                (root / "plan.json").write_text(schema.canonical(document), encoding="utf-8")
+                (scripts / "affected_scope.py").write_text(
+                    PlanFedRunTests.TRAMPOLINE, encoding="utf-8"
+                )
+                environment["TEST_REAL_PLANNER"] = str(PLANNER)
+                environment["BISCUIT_CI_PLAN_IN"] = str(root / "plan.json")
+            else:
+                shutil.copyfile(ROOT / "scripts" / "ci" / "diff_scope.py", scripts / "diff_scope.py")
+                (scripts / "affected_scope.py").write_text(self.REPLANNER, encoding="utf-8")
+                (root / "lib.rs").write_text("pub fn kept() {}\n", encoding="utf-8")
+                fixture_git(root, "init", "-q", "-b", "main")
+                fixture_git(root, "add", "-A")
+                fixture_git(root, "commit", "-q", "-m", "base")
+                environment["CI_LOCAL_BASE"] = fixture_git(root, "rev-parse", "HEAD")
+                (root / "lib.rs").write_text("pub fn kept() { let _ = 1; }\n", encoding="utf-8")
+                fixture_git(root, "commit", "-q", "-am", "head")
+
+            result = subprocess.run(
+                [JUST, "--justfile", str(root / "justfile"), "ci-local"],
+                cwd=root, env=environment, capture_output=True, text=True, timeout=60,
+            )
+
+            def lines(name: str) -> list[str]:
+                path = root / name
+                return path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+
+            return {
+                "result": result,
+                "output": result.stdout + result.stderr,
+                "python3": lines("python3.log"),
+                "selected": [line.split("\t")[1:] for line in lines("selected.log")],
+                "calls": [json.loads(line)["args"] for line in lines("calls.jsonl")],
+                "planner": lines("planner.log"),
+            }
+
+    def assert_only_the_selected_interpreter_ran(self, run: dict, prefix: tuple[str, ...]) -> None:
+        self.assertEqual(0, run["result"].returncode, run["output"])
+        self.assertEqual([], run["python3"], "the broken `python3` must never be launched")
+        self.assertTrue(run["selected"], run["output"])
+        for argv in run["selected"]:
+            self.assertEqual(list(prefix), argv[: len(prefix)], argv)
+        scripts = {Path(argv[len(prefix)]).name for argv in run["selected"]}
+        self.assertTrue(
+            {"constraints.py", "affected_scope.py", *SELF_TEST_SUITES} <= scripts, scripts
+        )
+
+    def test_a_fed_plan_runs_every_helper_under_the_selected_interpreter(self) -> None:
+        prefix = b"".join(argument.encode() + b"\0" for argument in self.PREFIX)
+        run = self.run_recipe(prefix)
+        self.assert_only_the_selected_interpreter_ran(run, self.PREFIX)
+        # The run went through to its gates, and the planner only projected.
+        self.assertIn(["_test", "beta", "--no-fail-fast", "--features", "beta-tests"], run["calls"])
+        self.assertEqual(1, len(run["planner"]), run["planner"])
+        self.assertIn("--apply-to", run["planner"][0])
+
+    def test_a_working_tree_replan_runs_every_helper_under_the_selected_interpreter(self) -> None:
+        prefix = b"".join(argument.encode() + b"\0" for argument in self.PREFIX)
+        run = self.run_recipe(prefix, fed=False)
+        self.assert_only_the_selected_interpreter_ran(run, self.PREFIX)
+        scripts = [Path(argv[len(self.PREFIX)]).name for argv in run["selected"]]
+        self.assertIn("diff_scope.py", scripts)
+        self.assertIn("Changed vs ", run["output"])
+
+    def test_an_empty_args_file_adds_no_prefix(self) -> None:
+        run = self.run_recipe(b"", prefix_count=0)
+        self.assert_only_the_selected_interpreter_ran(run, ())
+
+    def test_a_truncated_args_file_fails_and_runs_nothing(self) -> None:
+        run = self.run_recipe(b"--selected prefix\0-3")
+        self.assertNotEqual(0, run["result"].returncode, run["output"])
+        self.assertIn("ci-local: BISCUIT_CI_PYTHON_ARGS_FILE", run["result"].stderr)
+        self.assertIn("no terminating NUL", run["result"].stderr)
+        self.assertEqual([], run["selected"])
+        self.assertEqual([], run["python3"])
+        self.assertEqual([], run["calls"])
+        self.assertEqual([], run["planner"])
+
+    def test_without_a_selection_the_helpers_run_under_python3(self) -> None:
+        run = self.run_recipe(None, python3_works=True, selected=False)
+        self.assertEqual(0, run["result"].returncode, run["output"])
+        self.assertEqual([], run["selected"])
+        launched = {Path(line.split(" ")[0]).name for line in run["python3"]}
+        self.assertTrue(
+            {"constraints.py", "affected_scope.py", *SELF_TEST_SUITES} <= launched, launched
+        )
+
+
 #: `CI_WORKFLOW_UNDER_TEST=<path>` runs the step suites against another copy
 #: of the workflow, so a new regression can be shown to fail on the pre-change
 #: step (the same seam `PRE_PUSH_HOOK_UNDER_TEST` gives the hook suite).
@@ -2041,7 +2274,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
     @staticmethod
     def tool(root: Path, name: str, *args: str) -> str:
         result = subprocess.run(
-            ["python3", str(root / "scripts" / "ci" / name), *args],
+            [sys.executable, str(root / "scripts" / "ci" / name), *args],
             cwd=root, capture_output=True, text=True, check=False,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         )
@@ -2928,11 +3161,10 @@ class NativeProvisioningTests(unittest.TestCase):
         already resolved for its producer's runner label by the planner — not a
         runner-keyed map to index into.
         """
-        step = next(
-            step
-            for step in job_run_steps(ROOT / ".github/workflows/ci.yml", "build")
-            if step.name == "Install native prerequisites"
-        )
+        # One named step, not `job_run_steps`: the build job's diagnostic steps
+        # use `run: >-`, which the whole-job reader refuses. The name occurs
+        # once in ci.yml, inside `build`.
+        script = step_script(ROOT / ".github/workflows/ci.yml", "Install native prerequisites")
         with tempfile.TemporaryDirectory(prefix="ci-native-owner-") as temporary:
             output = Path(temporary) / "arguments"
             environment = os.environ.copy()
@@ -2941,7 +3173,7 @@ class NativeProvisioningTests(unittest.TestCase):
                 [
                     shutil.which("bash"),
                     "-c",
-                    'just() { printf "%s\\n" "$@" >> "$NATIVE_OUTPUT"; }\n' + step.script,
+                    'just() { printf "%s\\n" "$@" >> "$NATIVE_OUTPUT"; }\n' + script,
                 ],
                 cwd=temporary,
                 env=environment,
@@ -3162,17 +3394,25 @@ class EmptyMatrixGuardTests(unittest.TestCase):
         cls.blocks = {job: workflow_job_block(WORKFLOW, job) for job in cls.MATRIX_JOBS}
 
     def test_neither_matrix_job_is_labelled_with_a_matrix_expression(self) -> None:
-        # NOT pending: both jobs already omit `name:`, and the comments above
-        # them explain why. Pinned so adding the scalar guard cannot come with
-        # a display name that reaches the Checks tab as raw expression text.
+        # Pinned so adding the scalar guard cannot come with a display name
+        # that reaches the Checks tab as raw expression text. `preflight`
+        # owns no result cell, so a literal name is safe (GitHub still appends
+        # the `os` value when the job expands); `area-ci` keeps its automatic
+        # `area-ci (<directory>)` label, the spelling the naming contract and
+        # every recorded run use. A literal there would read `<name>
+        # (<directory>)`, not hide the area.
+        expected = {"preflight": "Verify build prerequisites", "area-ci": None}
+        self.assertEqual(set(expected), set(self.blocks))
         for job, block in self.blocks.items():
             with self.subTest(job=job):
                 name = job_key(block, "name")
-                self.assertIsNone(
+                self.assertEqual(
+                    expected[job],
                     name,
-                    f"{job} is skippable as a whole, so a declared name would "
-                    f"render unevaluated; got {name!r}",
+                    f"{job} is skippable as a whole, so it may carry only a "
+                    f"literal name or none; got {name!r}",
                 )
+                self.assertNotIn("${{", name or "")
 
     def test_both_matrix_jobs_carry_a_scalar_guard(self) -> None:
         for job, block in self.blocks.items():

@@ -1,0 +1,13 @@
+{
+  "upload_id": "ff4085ad157354dc8ea67a848e7c2270",
+  "observation_id": "b0542a447a1c3a7df84315ac8948134048ecfe69b8c836ad4f60d04b2a2f199b",
+  "reference_kind": "report",
+  "reference_digest": "845e91831319e89c4d656bdb80c278ac09a7230d61e5dfd2e1b1fbb436ac8917",
+  "path": "biscuit-hash-L1.junit.xml",
+  "bytes": 18432,
+  "part_bytes": 1048576,
+  "part_count": 1,
+  "parts_received": 0,
+  "state": "open",
+  "expires_at_ms": 1794398400000
+}

@@ -1,0 +1,1002 @@
+name: Distribute binaries
+
+# Attach prebuilt CLI binaries to a package's existing GitHub Release.
+#
+# release-plz owns versions, tags, and Releases (`release-plz.yml`). This
+# workflow never creates, edits, or publishes a Release, never moves a tag,
+# and never marks a Release latest: it builds the tagged commit of ONE
+# approved package and adds assets to the Release that already exists.
+#
+#   preflight -> prepare -> build (4 targets) -> package -> smoke (4 targets)
+#             -> upload -> install (4 targets) -> homebrew-tap
+#                          -> brew-install (4 targets, when the tap now
+#                             holds this version)
+#                       -> binstall (4 targets, when that channel is on)
+#             -> rollout-candidate (the ledger entry this run proves)
+#
+# Every decision is made by `scripts/ci/distribution.py`, which reads the
+# event from `GITHUB_EVENT_PATH`; the `if:` guards below are a coarse filter,
+# not the authority. Event values reach `run:` scripts only through `env:`.
+#
+# Three ways in:
+# - `release: published` (production): the Release's tag must name an approved
+#   package in both the tagged and the current `docs/deployment.yaml`. Any
+#   package but biscuit-hash-cli also needs a verified biscuit-hash-cli entry
+#   with every channel `pass` in the current `.github/distribution/rollout.json`.
+# - `workflow_dispatch` mode `recover`: repeat the same checks for an EXISTING
+#   tag. With `bundle-run-id`, reuse that run's verified build bundle instead
+#   of rebuilding; a Release that already holds some of its assets accepts
+#   only its original bundle, because a rebuild's bytes may differ.
+# - `workflow_dispatch` mode `verify`: build the dispatched revision for one
+#   package with fixture approval and keep the results as workflow artifacts.
+#   It cannot reach `upload`, `install`, `binstall`, `homebrew-tap`,
+#   `brew-install`, or `rollout-candidate`: their `if:` requires a production
+#   event (or a job that does), the selection says
+#   `publishable: false`, and `distribution.py publish` refuses a verification
+#   selection and rechecks everything against GitHub before writing.
+#
+# Credentials: every job reads with the workflow token except `upload`, the
+# only job with `contents: write`, and `homebrew-tap`, the only job that sees
+# `HOMEBREW_TAP_TOKEN`. Build and installation jobs see no secret; the
+# Homebrew installation check uses the public tap anonymously. The
+# operational guide is `docs/distribution.md`.
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "verify: build the dispatched revision, publish nothing. recover: finish an existing tag's distribution."
+        type: choice
+        options:
+          - verify
+          - recover
+        default: verify
+      tag:
+        description: "recover: an existing package tag, e.g. biscuit-hash-cli-v0.3.1"
+        type: string
+        default: ""
+      bundle-run-id:
+        description: "recover: the distribution run whose build bundle to reuse (required once the Release holds any of its assets)"
+        type: string
+        default: ""
+      package:
+        description: "verify: the Cargo package to build, e.g. biscuit-hash-cli"
+        type: string
+        default: ""
+      brew:
+        description: "verify: a Homebrew formula name to exercise the formula output (empty: off)"
+        type: string
+        default: ""
+      binstall:
+        description: "verify: exercise the binstall channel's manifest checks"
+        type: boolean
+        default: false
+
+env:
+  # dist and Cargo compile here. The repository tracks no rustc wrapper; it is
+  # cleared so a stray environment value cannot intercept a release build.
+  RUSTC_WRAPPER: ""
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHONDONTWRITEBYTECODE: "1"
+  GIT_TERMINAL_PROMPT: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      selected: ${{ steps.select.outputs.selected }}
+      publishable: ${{ steps.select.outputs.publishable }}
+      package: ${{ steps.select.outputs.package }}
+      command: ${{ steps.select.outputs.command }}
+      version: ${{ steps.select.outputs.version }}
+      tag: ${{ steps.select.outputs.tag }}
+      commit: ${{ steps.select.outputs.commit }}
+      brew: ${{ steps.select.outputs.brew }}
+      binstall: ${{ steps.select.outputs.binstall }}
+      formula_update: ${{ steps.select.outputs.formula_update }}
+      build_matrix: ${{ steps.select.outputs.build_matrix }}
+      bundle_run_id: ${{ steps.select.outputs.bundle_run_id }}
+    steps:
+      # This run's own revision supplies the scripts. For a release event it
+      # is the tagged commit; for a manual run, the dispatched branch.
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Checkout the default branch (current policy)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: current
+          persist-credentials: false
+
+      - name: Checkout the tag (tagged policy and manifests)
+        if: github.event_name == 'release' || inputs.mode == 'recover'
+        uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          path: tagged
+          persist-credentials: false
+
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+
+      # Exit 3 is pending setup (for example the release App's identity is not
+      # configured): a selected production release fails here with the
+      # instruction, never falling back to another release path.
+      - name: Select the release
+        id: select
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+          MODE: ${{ inputs.mode }}
+          PACKAGE: ${{ inputs.package }}
+          BREW: ${{ inputs.brew }}
+          BINSTALL: ${{ inputs.binstall }}
+          BUNDLE_RUN_ID: ${{ inputs.bundle-run-id }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/distribution"
+          mkdir -p "${out}"
+          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${MODE}" = verify ]; then
+            args=(verify-select --package "${PACKAGE}" --root .)
+            [ -z "${BREW}" ] || args+=(--brew "${BREW}")
+            [ "${BINSTALL}" != true ] || args+=(--binstall)
+            BUNDLE_RUN_ID=""
+          else
+            args=(preflight --event-name "${GITHUB_EVENT_NAME}" --event-path "${GITHUB_EVENT_PATH}"
+                  --tagged-root tagged --current-root current --snapshot-dir "${out}/policy")
+          fi
+          if ! [[ "${BUNDLE_RUN_ID}" =~ ^[0-9]*$ ]]; then
+            echo "::error title=distribution::bundle-run-id must be a run number"
+            exit 1
+          fi
+          status=0
+          "${PYTHON}" scripts/ci/distribution.py "${args[@]}" --output "${out}/selection.json" > /dev/null || status=$?
+          reason="$(jq -r '.reason // ""' "${out}/selection.json" 2> /dev/null || true)"
+          case "${status}" in
+            0) ;;
+            3) echo "::error title=distribution setup pending::${reason}"; exit 1 ;;
+            *) echo "::error title=distribution preflight::${reason}"; exit 1 ;;
+          esac
+          if [ "$(jq -r .status "${out}/selection.json")" != selected ]; then
+            echo "::notice title=distribution::${reason}"
+            echo "selected=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          "${PYTHON}" scripts/ci/distribution.py build-matrix --selection "${out}/selection.json" \
+            --images .github/distribution/build-images.json --output "${out}/build-matrix.json" > /dev/null
+          {
+            echo "selected=true"
+            echo "publishable=$(jq -r .publishable "${out}/selection.json")"
+            echo "package=$(jq -r .package "${out}/selection.json")"
+            echo "command=$(jq -r .command "${out}/selection.json")"
+            echo "version=$(jq -r .version "${out}/selection.json")"
+            echo "tag=$(jq -r .tag "${out}/selection.json")"
+            echo "commit=$(jq -r .commit "${out}/selection.json")"
+            echo "brew=$(jq -r '.channels.brew // ""' "${out}/selection.json")"
+            echo "binstall=$(jq -r 'if .channels.binstall then "true" else "false" end' "${out}/selection.json")"
+            echo "formula_update=$(jq -r .formula_update "${out}/selection.json")"
+            echo "build_matrix=$(jq -c .build_matrix "${out}/build-matrix.json")"
+            echo "bundle_run_id=${BUNDLE_RUN_ID}"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice title=distribution::${reason}"
+
+      - name: Keep the selection and policy snapshots
+        if: steps.select.outputs.selected == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-preflight
+          path: ${{ runner.temp }}/distribution
+          if-no-files-found: error
+
+  # Notices, the staged opt-in, and dist's plan, validated once for all targets.
+  prepare:
+    name: Prepare
+    needs: preflight
+    if: needs.preflight.outputs.selected == 'true' && needs.preflight.outputs.bundle_run_id == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      COMMIT: ${{ needs.preflight.outputs.commit }}
+      PACKAGE: ${{ needs.preflight.outputs.package }}
+      TAG: ${{ needs.preflight.outputs.tag }}
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Checkout the selected commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          path: source
+          persist-credentials: false
+
+      - name: Prove the checkout is the selected commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          head="$(git -C source rev-parse HEAD)"
+          if [ "${head}" != "${COMMIT}" ]; then
+            echo "::error title=distribution::checked out ${head}, selected ${COMMIT}"
+            exit 1
+          fi
+
+      - name: Download the selection
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-preflight
+          path: ${{ runner.temp }}/distribution
+
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+        with:
+          dist: "true"
+          cargo-about: "true"
+
+      - name: Write the third-party notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/inputs"
+          bash scripts/distribution/licenses.sh source "${PACKAGE}" "${RUNNER_TEMP}/inputs/THIRD-PARTY-NOTICES.md"
+
+      - name: Stage, plan, and validate the plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          inputs="${RUNNER_TEMP}/inputs"
+          cp "${RUNNER_TEMP}/distribution/selection.json" "${inputs}/selection.json"
+          "${PYTHON}" scripts/ci/distribution.py stage --selection "${inputs}/selection.json" --source source \
+            --dest "${RUNNER_TEMP}/staging" --notices "${inputs}/THIRD-PARTY-NOTICES.md" --record-dir "${inputs}" > /dev/null
+          (cd "${RUNNER_TEMP}/staging" && dist plan --tag="${TAG}" --output-format=json) > "${inputs}/plan.json"
+          "${PYTHON}" scripts/ci/distribution.py validate-plan --selection "${inputs}/selection.json" \
+            --plan "${inputs}/plan.json"
+
+      - name: Keep the build inputs
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-inputs
+          path: ${{ runner.temp }}/inputs
+          if-no-files-found: error
+
+  # One native job per target: macOS on its own runner, Linux inside the
+  # pinned Ubuntu 22.04 image (build.sh container), which defines the glibc
+  # floor. No job here holds a credential beyond reading the repository.
+  build:
+    name: Build ${{ matrix.target }}
+    needs: [preflight, prepare]
+    if: needs.preflight.outputs.selected == 'true' && needs.preflight.outputs.bundle_run_id == ''
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.preflight.outputs.build_matrix) }}
+    env:
+      COMMIT: ${{ needs.preflight.outputs.commit }}
+      PACKAGE: ${{ needs.preflight.outputs.package }}
+      COMMAND: ${{ needs.preflight.outputs.command }}
+      TAG: ${{ needs.preflight.outputs.tag }}
+      TARGET: ${{ matrix.target }}
+      TARGET_OS: ${{ matrix.os }}
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Checkout the selected commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          path: source
+          persist-credentials: false
+
+      - name: Prove the checkout is the selected commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          head="$(git -C source rev-parse HEAD)"
+          if [ "${head}" != "${COMMIT}" ]; then
+            echo "::error title=distribution::checked out ${head}, selected ${COMMIT}"
+            exit 1
+          fi
+
+      - name: Download the build inputs
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-inputs
+          path: ${{ runner.temp }}/inputs
+
+      # Linux builds download dist inside the container; macOS needs it here.
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+        with:
+          dist: ${{ matrix.os == 'macos' }}
+
+      - name: Stage the selected commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          inputs="${RUNNER_TEMP}/inputs"
+          "${PYTHON}" scripts/ci/distribution.py stage --selection "${inputs}/selection.json" --source source \
+            --dest "${RUNNER_TEMP}/staging" --notices "${inputs}/THIRD-PARTY-NOTICES.md" > /dev/null
+
+      - name: Build, inspect, and smoke-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/out"
+          if [ "${TARGET_OS}" = linux ]; then
+            DIST_CONTAINER_CACHE="${RUNNER_TEMP}/container-cache" \
+              bash scripts/distribution/build.sh container "${RUNNER_TEMP}/staging" "${TAG}" "${TARGET}" "${COMMAND}" "${out}"
+          else
+            bash scripts/distribution/build.sh build "${RUNNER_TEMP}/staging" "${TAG}" "${TARGET}" "${COMMAND}" "${out}"
+          fi
+
+      - name: Keep the target's outputs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-target-${{ matrix.target }}
+          path: ${{ runner.temp }}/out
+          if-no-files-found: error
+
+  # The global artifacts (installer, formula, sha256.sum) are generated once,
+  # after every target, so no two jobs race to write differing copies. The
+  # verified bundle is kept before anything is uploaded.
+  package:
+    name: Package
+    needs: [preflight, prepare, build]
+    if: needs.preflight.outputs.selected == 'true' && needs.preflight.outputs.bundle_run_id == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      COMMIT: ${{ needs.preflight.outputs.commit }}
+      PACKAGE: ${{ needs.preflight.outputs.package }}
+      TAG: ${{ needs.preflight.outputs.tag }}
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Checkout the selected commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          path: source
+          persist-credentials: false
+
+      - name: Prove the checkout is the selected commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          head="$(git -C source rev-parse HEAD)"
+          if [ "${head}" != "${COMMIT}" ]; then
+            echo "::error title=distribution::checked out ${head}, selected ${COMMIT}"
+            exit 1
+          fi
+
+      - name: Download the build inputs
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-inputs
+          path: ${{ runner.temp }}/inputs
+
+      - name: Download every target's outputs
+        uses: actions/download-artifact@v6
+        with:
+          pattern: distribution-target-*
+          path: ${{ runner.temp }}/targets
+
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+        with:
+          dist: "true"
+
+      - name: Generate the installer, formula, and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          inputs="${RUNNER_TEMP}/inputs"
+          staging="${RUNNER_TEMP}/staging"
+          assets="${RUNNER_TEMP}/assets"
+          "${PYTHON}" scripts/ci/distribution.py stage --selection "${inputs}/selection.json" --source source \
+            --dest "${staging}" --notices "${inputs}/THIRD-PARTY-NOTICES.md" > /dev/null
+          mkdir -p "${staging}/target/distrib" "${assets}" "${RUNNER_TEMP}/build-env"
+          for dir in "${RUNNER_TEMP}"/targets/distribution-target-*; do
+            target="${dir##*/distribution-target-}"
+            cp "${dir}/dist-manifest-${target}.json" "${staging}/target/distrib/${target}-dist-manifest.json"
+            cp "${dir}/${PACKAGE}-${target}.tar.xz" "${dir}/${PACKAGE}-${target}.tar.xz.sha256" "${staging}/target/distrib/"
+            cp "${dir}/${PACKAGE}-${target}.tar.xz" "${dir}/${PACKAGE}-${target}.tar.xz.sha256" "${assets}/"
+            cp "${dir}/build-env-${target}.json" "${RUNNER_TEMP}/build-env/"
+          done
+          (cd "${staging}" && dist build --tag="${TAG}" --artifacts=global --output-format=json) > "${inputs}/global.json"
+          cp "${staging}/target/distrib/sha256.sum" "${staging}/target/distrib/${PACKAGE}-installer.sh" "${assets}/"
+          brew_name="$(jq -r '.channels.brew // ""' "${inputs}/selection.json")"
+          if [ -n "${brew_name}" ]; then
+            cp "${staging}/target/distrib/${brew_name}.rb" "${assets}/"
+          fi
+          "${PYTHON}" scripts/distribution/installers.py harden "${assets}/${PACKAGE}-installer.sh" \
+            --output "${assets}/${PACKAGE}-installer.sh"
+          "${PYTHON}" scripts/distribution/installers.py check-sums "${assets}"
+
+      - name: Record provenance and keep the verified bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          inputs="${RUNNER_TEMP}/inputs"
+          envs=()
+          for file in "${RUNNER_TEMP}"/build-env/build-env-*.json; do envs+=(--build-env "${file}"); done
+          "${PYTHON}" scripts/ci/distribution.py provenance --selection "${inputs}/selection.json" \
+            --plan "${inputs}/plan.json" --assets-dir "${RUNNER_TEMP}/assets" "${envs[@]}" --write > /dev/null
+          "${PYTHON}" scripts/ci/distribution.py bundle --selection "${inputs}/selection.json" \
+            --plan "${inputs}/plan.json" --assets-dir "${RUNNER_TEMP}/assets" "${envs[@]}" \
+            --run-id "${GITHUB_RUN_ID}" --output-dir "${RUNNER_TEMP}/bundle" > /dev/null
+          "${PYTHON}" scripts/ci/distribution.py check-bundle --bundle "${RUNNER_TEMP}/bundle" \
+            --selection "${inputs}/selection.json" --current-run-id "${GITHUB_RUN_ID}" > /dev/null
+
+      - name: Keep the build bundle
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-bundle
+          path: ${{ runner.temp }}/bundle
+          if-no-files-found: error
+          retention-days: 90
+
+  # Manual recovery with `bundle-run-id`: the original run's bundle, checked
+  # against this run's fresh preflight and that run's successful Package job,
+  # becomes this run's bundle. Nothing is rebuilt.
+  reuse-bundle:
+    name: Reuse bundle
+    needs: preflight
+    if: needs.preflight.outputs.selected == 'true' && needs.preflight.outputs.bundle_run_id != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    env:
+      BUNDLE_RUN_ID: ${{ needs.preflight.outputs.bundle_run_id }}
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Download the selection
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-preflight
+          path: ${{ runner.temp }}/distribution
+
+      - name: Download the original bundle
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-bundle
+          run-id: ${{ needs.preflight.outputs.bundle_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/bundle
+
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+
+      - name: Check the bundle against this run's preflight
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docs="${RUNNER_TEMP}/bundle-run"
+          mkdir -p "${docs}"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${BUNDLE_RUN_ID}" > "${docs}/run.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${BUNDLE_RUN_ID}/jobs?per_page=100" > "${docs}/jobs.json"
+          "${PYTHON}" scripts/ci/distribution.py check-bundle --bundle "${RUNNER_TEMP}/bundle" \
+            --selection "${RUNNER_TEMP}/distribution/selection.json" --run "${docs}/run.json" \
+            --jobs "${docs}/jobs.json" --current-run-id "${GITHUB_RUN_ID}"
+          "${PYTHON}" scripts/distribution/installers.py check-sums "${RUNNER_TEMP}/bundle/assets"
+
+      - name: Keep the bundle as this run's
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-bundle
+          path: ${{ runner.temp }}/bundle
+          if-no-files-found: error
+          retention-days: 90
+
+  # Each archive from the bundle runs on its own platform before anything is
+  # uploaded; Linux in the pinned runtime image without build tools.
+  smoke:
+    name: Smoke ${{ matrix.target }}
+    needs: [preflight, package, reuse-bundle]
+    if: >-
+      always() && needs.preflight.outputs.selected == 'true' &&
+      (needs.package.result == 'success' || needs.reuse-bundle.result == 'success')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.preflight.outputs.build_matrix) }}
+    env:
+      PACKAGE: ${{ needs.preflight.outputs.package }}
+      COMMAND: ${{ needs.preflight.outputs.command }}
+      TARGET: ${{ matrix.target }}
+      TARGET_OS: ${{ matrix.os }}
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Download the bundle
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-bundle
+          path: ${{ runner.temp }}/bundle
+
+      - name: Run the archived command
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/bundle/assets/${PACKAGE}-${TARGET}.tar.xz"
+          if [ "${TARGET_OS}" = linux ]; then
+            bash scripts/distribution/build.sh smoke-container "${archive}" "${PACKAGE}" "${TARGET}" "${COMMAND}" "${RUNNER_TEMP}/smoke"
+          else
+            bash scripts/distribution/build.sh smoke "${archive}" "${PACKAGE}" "${TARGET}" "${COMMAND}" "${RUNNER_TEMP}/smoke"
+          fi
+
+      - name: Keep the smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-smoke-${{ matrix.target }}
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: warn
+
+  # The only job that writes to the repository. It rechecks the Release, the
+  # tag's commit, the release proposal, and the CURRENT policy immediately
+  # before writing, compares the complete asset set byte for byte, and then
+  # uploads only missing assets. A same-name asset with different bytes stops
+  # it before any upload; nothing is replaced or deleted.
+  upload:
+    name: Upload
+    needs: [preflight, package, reuse-bundle, smoke]
+    if: >-
+      always() && needs.smoke.result == 'success' &&
+      needs.preflight.outputs.publishable == 'true' &&
+      (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'recover'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    concurrency:
+      group: distribute-binaries-${{ needs.preflight.outputs.package }}
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.preflight.outputs.tag }}
+      FRESH_REBUILD: ${{ github.event_name == 'workflow_dispatch' && needs.preflight.outputs.bundle_run_id == '' }}
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Checkout the default branch (current policy)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: current
+          persist-credentials: false
+
+      - name: Download the selection
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-preflight
+          path: ${{ runner.temp }}/distribution
+
+      - name: Download the bundle
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-bundle
+          path: ${{ runner.temp }}/bundle
+
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+
+      - name: Upload missing assets to the existing Release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+        run: |
+          set -euo pipefail
+          selection="${RUNNER_TEMP}/distribution/selection.json"
+          "${PYTHON}" scripts/ci/distribution.py check-bundle --bundle "${RUNNER_TEMP}/bundle" \
+            --selection "${selection}" --current-run-id "${GITHUB_RUN_ID}" > /dev/null
+          "${PYTHON}" scripts/distribution/installers.py check-sums "${RUNNER_TEMP}/bundle/assets"
+          args=(publish --selection "${selection}" --bundle "${RUNNER_TEMP}/bundle" --current-root current
+                --output "${RUNNER_TEMP}/publication.json")
+          [ "${FRESH_REBUILD}" != true ] || args+=(--fresh-rebuild)
+          "${PYTHON}" scripts/ci/distribution.py "${args[@]}"
+          {
+            echo "### Distributed ${TAG}"
+            echo
+            echo "Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+            echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo '```json'
+            cat "${RUNNER_TEMP}/publication.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the publication record
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-publication
+          path: ${{ runner.temp }}/publication.json
+          if-no-files-found: warn
+
+  # The published installer, downloaded from the Release, installs into an
+  # isolated directory on every target. The formula is published only after
+  # every target passes.
+  install:
+    name: Install ${{ matrix.target }}
+    needs: [preflight, upload]
+    if: always() && needs.upload.result == 'success'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.preflight.outputs.build_matrix) }}
+    env:
+      PACKAGE: ${{ needs.preflight.outputs.package }}
+      COMMAND: ${{ needs.preflight.outputs.command }}
+      TAG: ${{ needs.preflight.outputs.tag }}
+      TARGET: ${{ matrix.target }}
+      TARGET_OS: ${{ matrix.os }}
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Download the bundle
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-bundle
+          path: ${{ runner.temp }}/bundle
+
+      - name: Install from the Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/${PACKAGE}-installer.sh"
+          mode=native
+          [ "${TARGET_OS}" != linux ] || mode=container
+          bash scripts/distribution/install_check.sh "${mode}" "${url}" \
+            "${RUNNER_TEMP}/bundle/assets/${PACKAGE}-installer.sh" "${PACKAGE}" "${TARGET}" "${COMMAND}" "${RUNNER_TEMP}/install"
+
+      - name: Keep the install evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-install-${{ matrix.target }}
+          path: ${{ runner.temp }}/install
+          if-no-files-found: warn
+
+  # The binstall channel, checked from the exact tagged checkout with compile
+  # fallback disabled, only when the package enables it.
+  binstall:
+    name: Binstall ${{ matrix.target }}
+    needs: [preflight, upload]
+    if: always() && needs.upload.result == 'success' && needs.preflight.outputs.binstall == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.preflight.outputs.build_matrix) }}
+    env:
+      TAG: ${{ needs.preflight.outputs.tag }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Checkout the tag
+        uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ needs.preflight.outputs.tag }}
+          path: tagged
+          persist-credentials: false
+
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+        with:
+          binstall: "true"
+
+      - name: Install with cargo-binstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${PYTHON}" scripts/distribution/verify_binstall.py manifest --tag "${TAG}" --checkout tagged \
+            --target "${TARGET}" --binstall "${CARGO_BINSTALL}" --out "${RUNNER_TEMP}/binstall"
+
+      - name: Keep the binstall evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-binstall-${{ matrix.target }}
+          path: ${{ runner.temp }}/binstall
+          if-no-files-found: warn
+
+  # One tap-wide group serializes every package's formula update; a run never
+  # cancels another. Only this job sees HOMEBREW_TAP_TOKEN, and it fails with
+  # an instruction when the token or the author variable is missing.
+  homebrew-tap:
+    name: Homebrew tap
+    needs: [preflight, upload, install]
+    if: >-
+      always() && needs.install.result == 'success' &&
+      needs.preflight.outputs.formula_update == 'true' &&
+      needs.preflight.outputs.publishable == 'true' &&
+      (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'recover'))
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
+    outputs:
+      # 'true' only when the tap's formula names this version after the run
+      # (created, updated, or already identical); an older retry under a newer
+      # formula is 'false' and installs nothing.
+      formula_current: ${{ steps.current.outputs.formula_current }}
+    env:
+      BREW_NAME: ${{ needs.preflight.outputs.brew }}
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Download the selection
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-preflight
+          path: ${{ runner.temp }}/distribution
+
+      - name: Download the bundle
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-bundle
+          path: ${{ runner.temp }}/bundle
+
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+
+      - name: Prepare and audit the formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/formula"
+          "${PYTHON}" scripts/distribution/tap.py prepare --selection "${RUNNER_TEMP}/distribution/selection.json" \
+            --assets-dir "${RUNNER_TEMP}/bundle/assets" --output "${RUNNER_TEMP}/formula/${BREW_NAME}.rb"
+          "${PYTHON}" scripts/distribution/tap.py audit --formula "${RUNNER_TEMP}/formula/${BREW_NAME}.rb" --name "${BREW_NAME}"
+
+      - name: Publish the formula
+        shell: bash
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_AUTHOR: ${{ vars.HOMEBREW_TAP_AUTHOR }}
+        run: |
+          set -euo pipefail
+          PYTHON="${PYTHON}" bash scripts/distribution/publish-tap.sh \
+            --selection "${RUNNER_TEMP}/distribution/selection.json" \
+            --assets-dir "${RUNNER_TEMP}/bundle/assets" --report "${RUNNER_TEMP}/tap-report.json"
+
+      - name: Read whether the tap now holds this version
+        id: current
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${PYTHON}" scripts/distribution/tap.py formula-current --selection "${RUNNER_TEMP}/distribution/selection.json" \
+            --tap-report "${RUNNER_TEMP}/tap-report.json" > "${RUNNER_TEMP}/formula-current.json"
+          echo "formula_current=$(jq -r .formula_current "${RUNNER_TEMP}/formula-current.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the tap report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-tap
+          path: ${{ runner.temp }}/tap-report.json
+          if-no-files-found: warn
+
+  # The Homebrew channel installed as a user would: `brew install` from the
+  # public tap on every target, then the installed command's `--version`.
+  # Publishing the formula proves nothing about installing it; only this job's
+  # success lets the rollout candidate record `brew: pass`. It runs only when
+  # the tap now names this version, sees no secret, and uses the runner's
+  # Homebrew, or installs the pinned Homebrew/brew release where the runner
+  # has none.
+  brew-install:
+    name: Homebrew install ${{ matrix.target }}
+    needs: [preflight, homebrew-tap]
+    if: >-
+      always() && needs.homebrew-tap.result == 'success' &&
+      needs.homebrew-tap.outputs.formula_current == 'true' &&
+      needs.preflight.outputs.formula_update == 'true' &&
+      needs.preflight.outputs.publishable == 'true' &&
+      (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'recover'))
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.preflight.outputs.build_matrix) }}
+    env:
+      TARGET: ${{ matrix.target }}
+      # Homebrew/brew release installed only where the runner has no Homebrew;
+      # the tag is resolved and must be this commit.
+      HOMEBREW_BREW_TAG: 7.0.12
+      HOMEBREW_BREW_COMMIT: bf464f57275cae0be106b43d190c98564ac59b0e
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      NONINTERACTIVE: "1"
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Download the selection
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-preflight
+          path: ${{ runner.temp }}/distribution
+
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+
+      - name: Put Homebrew on PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew_bin="$(command -v brew || true)"
+          for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do
+            if [ -z "${brew_bin}" ] && [ -x "${candidate}" ]; then
+              brew_bin="${candidate}"
+            fi
+          done
+          if [ -z "${brew_bin}" ]; then
+            if [ "$(uname -s)" != Linux ]; then
+              echo "::error title=distribution::this macOS runner has no Homebrew"
+              exit 1
+            fi
+            prefix=/home/linuxbrew/.linuxbrew
+            sudo mkdir -p "${prefix}"
+            sudo chown -R "$(id -un):$(id -gn)" /home/linuxbrew
+            git -c advice.detachedHead=false clone --quiet --depth 1 --branch "${HOMEBREW_BREW_TAG}" \
+              https://github.com/Homebrew/brew "${prefix}/Homebrew"
+            head="$(git -C "${prefix}/Homebrew" rev-parse HEAD)"
+            if [ "${head}" != "${HOMEBREW_BREW_COMMIT}" ]; then
+              echo "::error title=distribution::Homebrew/brew ${HOMEBREW_BREW_TAG} is ${head}, pinned ${HOMEBREW_BREW_COMMIT}"
+              exit 1
+            fi
+            mkdir -p "${prefix}/bin"
+            ln -s ../Homebrew/bin/brew "${prefix}/bin/brew"
+            brew_bin="${prefix}/bin/brew"
+          fi
+          dirname "${brew_bin}" >> "$GITHUB_PATH"
+
+      - name: Install with Homebrew from the tap
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/brew-install"
+          "${PYTHON}" scripts/distribution/tap.py install-check --selection "${RUNNER_TEMP}/distribution/selection.json" \
+            --target "${TARGET}" --report "${RUNNER_TEMP}/brew-install/brew-install.json"
+
+      - name: Keep the Homebrew install evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-brew-install-${{ matrix.target }}
+          path: ${{ runner.temp }}/brew-install
+          if-no-files-found: warn
+
+  # The rollout ledger entry this run proves, kept as an artifact. A reviewed
+  # change copies it into `.github/distribution/rollout.json`; until it holds a
+  # biscuit-hash-cli entry with every channel `pass`, preflight refuses every
+  # other package.
+  rollout-candidate:
+    name: Rollout candidate
+    needs: [preflight, upload, install, binstall, homebrew-tap, brew-install]
+    if: >-
+      always() && needs.install.result == 'success' &&
+      needs.preflight.outputs.publishable == 'true' &&
+      (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'recover'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the workflow revision
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Download the selection
+        uses: actions/download-artifact@v6
+        with:
+          name: distribution-preflight
+          path: ${{ runner.temp }}/distribution
+
+      - name: Set up distribution tools
+        uses: ./.github/actions/setup-dist
+
+      - name: Write the ledger candidate
+        shell: bash
+        env:
+          INSTALL_RESULT: ${{ needs.install.result }}
+          BINSTALL_RESULT: ${{ needs.binstall.result }}
+          TAP_RESULT: ${{ needs.homebrew-tap.result }}
+          FORMULA_CURRENT: ${{ needs.homebrew-tap.outputs.formula_current }}
+          BREW_INSTALL_RESULT: ${{ needs.brew-install.result }}
+        run: |
+          set -euo pipefail
+          "${PYTHON}" scripts/ci/distribution.py rollout-candidate \
+            --selection "${RUNNER_TEMP}/distribution/selection.json" --run-id "${GITHUB_RUN_ID}" \
+            --install "${INSTALL_RESULT}" --binstall "${BINSTALL_RESULT}" --tap "${TAP_RESULT}" \
+            --brew-install "${BREW_INSTALL_RESULT}" --formula-current "${FORMULA_CURRENT}" \
+            --output "${RUNNER_TEMP}/rollout-candidate.json" > /dev/null
+          {
+            echo "### Rollout ledger candidate"
+            echo
+            echo "Add this entry to \`verified\` in \`.github/distribution/rollout.json\` through a reviewed change."
+            echo
+            echo '```json'
+            cat "${RUNNER_TEMP}/rollout-candidate.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the ledger candidate
+        uses: actions/upload-artifact@v6
+        with:
+          name: distribution-rollout-candidate
+          path: ${{ runner.temp }}/rollout-candidate.json
+          if-no-files-found: error

@@ -1,0 +1,94 @@
+{
+  "binstall": {
+    "argv": [
+      "/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T//verify-binstall.GYJyZC/cargo-binstall",
+      "--manifest-path",
+      "/Volumes/coding/rusty-biscuit/features/2026-10-28-publish/evidence/phase-5/verify/binstall/fixture/crate/Cargo.toml",
+      "--no-confirm",
+      "--disable-telemetry",
+      "--no-discover-github-token",
+      "--strategies",
+      "crate-meta-data",
+      "--targets",
+      "aarch64-apple-darwin",
+      "--root",
+      "/Volumes/coding/rusty-biscuit/features/2026-10-28-publish/evidence/phase-5/verify/binstall/optional-helper/install-root",
+      "--install-path",
+      "/Volumes/coding/rusty-biscuit/features/2026-10-28-publish/evidence/phase-5/verify/binstall/optional-helper/install-root/bin",
+      "--no-track",
+      "--log-level",
+      "debug",
+      "--allow-insecure-http",
+      "binstall-fixture"
+    ],
+    "exit": 0,
+    "logs": [
+      "binstall.stdout.log",
+      "binstall.stderr.log"
+    ],
+    "path": "/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T//verify-binstall.GYJyZC/cargo-binstall",
+    "version": "1.26.2"
+  },
+  "cases": [
+    {
+      "case": "optional-helper",
+      "exit": 0,
+      "installed": [
+        "bin/fixture-tool"
+      ],
+      "tolerated_absent": [
+        "fixture-helper"
+      ]
+    },
+    {
+      "argv": [
+        "/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T//verify-binstall.GYJyZC/cargo-binstall",
+        "--manifest-path",
+        "/Volumes/coding/rusty-biscuit/features/2026-10-28-publish/evidence/phase-5/verify/binstall/fixture/crate-missing-command/Cargo.toml",
+        "--no-confirm",
+        "--disable-telemetry",
+        "--no-discover-github-token",
+        "--strategies",
+        "crate-meta-data",
+        "--targets",
+        "aarch64-apple-darwin",
+        "--root",
+        "/Volumes/coding/rusty-biscuit/features/2026-10-28-publish/evidence/phase-5/verify/binstall/missing-command/install-root",
+        "--install-path",
+        "/Volumes/coding/rusty-biscuit/features/2026-10-28-publish/evidence/phase-5/verify/binstall/missing-command/install-root/bin",
+        "--no-track",
+        "--log-level",
+        "debug",
+        "--allow-insecure-http",
+        "binstall-fixture"
+      ],
+      "case": "missing-command",
+      "exit": 94,
+      "failure": "binstall exited 94; see /Volumes/coding/rusty-biscuit/features/2026-10-28-publish/evidence/phase-5/verify/binstall/missing-command/binstall.stderr.log",
+      "installed": [],
+      "logs": [
+        "binstall.stdout.log",
+        "binstall.stderr.log"
+      ]
+    }
+  ],
+  "command": "fixture-tool",
+  "errors": [],
+  "installed": [
+    "bin/fixture-tool"
+  ],
+  "package": "binstall-fixture",
+  "route": "fixture",
+  "source": "/Volumes/coding/rusty-biscuit/features/2026-10-28-publish/evidence/phase-5/verify/binstall/fixture/crate/Cargo.toml",
+  "status": "passed",
+  "target": "aarch64-apple-darwin",
+  "tolerated_absent": [
+    "fixture-helper"
+  ],
+  "url": "http://127.0.0.1:65114/releases/download/binstall-fixture-v0.3.1/binstall-fixture-aarch64-apple-darwin.tar.xz",
+  "version": "0.3.1",
+  "version_check": {
+    "exit": 0,
+    "stdout": "fixture-tool 0.3.1"
+  }
+}

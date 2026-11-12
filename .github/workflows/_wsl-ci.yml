@@ -1,4 +1,4 @@
-name: wsl-ci
+name: WSL2 tests
 
 # The `wsl2-ubuntu` environment: one Cargo package's canonical L1 suite, run
 # inside a WSL2 Ubuntu guest hosted by a `windows-latest` runner.
@@ -85,7 +85,7 @@ jobs:
   # Checks tab as raw text (AC10). The package and gate come from the caller's
   # own label, which carries the whole dispatch row (ruling R1).
   wsl:
-    name: test (wsl2-ubuntu)
+    name: Run guest tests
     runs-on: windows-latest
     timeout-minutes: 60
     env:
@@ -134,6 +134,33 @@ jobs:
             --row "$ROW" \
             --head '${{ inputs.tested-revision }}' \
             --github-output "$GITHUB_OUTPUT"
+      # The owner's per-record outcome, on the HOST and before the guest exists,
+      # so a build that failed or never reported costs no provisioning. This
+      # download alone may fail: an absent status is a finding the check below
+      # reports as `producer outcome unknown`, not a broken download. Not gated
+      # on `consumes_archive`, like the archive download below: every WSL2 cell
+      # consumes one, and a contract without a build is refused by the check.
+      - name: Download this cell's build status
+        id: build_status_download
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: build-status-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.build_producer }}-${{ steps.cell.outputs.build_key }}
+          path: ${{ github.workspace }}/ci-build-status
+      # Only a valid `success` status for exactly this record lets the archive
+      # download run; a failed, cancelled, absent, or malformed status fails
+      # here, so no archive is fetched, no guest is provisioned, and no test
+      # starts.
+      - name: Check this cell's build status
+        id: build_status
+        shell: bash
+        run: |
+          python3 scripts/ci/build_status.py \
+            --status ci-build-status/build-status.json \
+            --package '${{ steps.cell.outputs.package }}' \
+            --key '${{ steps.cell.outputs.build_key }}' \
+            --producer '${{ steps.cell.outputs.build_producer }}' \
+            --artifact '${{ steps.cell.outputs.build_artifact }}'
       # Transfer clock. An artifact download is an action, not a command, so its
       # cost can only be observed between two steps; the manifest read below
       # closes the window.
@@ -527,7 +554,7 @@ jobs:
       # Gate command: a failed suite fails this producer visibly. The status
       # and report steps below still run when the job was not cancelled, so
       # the area rollup can render the cell-level diagnosis.
-      - name: L1 tests from the archive
+      - name: Run Level 1 tests from the archive
         id: l1
         shell: wsl-bash {0}
         env:
@@ -660,8 +687,8 @@ jobs:
             "$workspace/wsl-junit/" 2>/dev/null || true
           # Staging must never change the tier's outcome.
           exit 0
-      - name: Upload wsl2-ubuntu L1 JUnit
-        if: ${{ !cancelled() }}
+      - name: Upload WSL2 Level 1 test results
+        if: ${{ !cancelled() && steps.cell.outputs.junit_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cell.outputs.junit_artifact }}
@@ -670,7 +697,7 @@ jobs:
       # DIAGNOSTIC ONLY, and deliberately `continue-on-error`: if the guest is
       # dead this step cannot run, and that failure is itself the finding — it
       # must not be allowed to overwrite the tier's real outcome.
-      - name: Guest post-mortem
+      - name: Collect guest diagnostics
         id: guest_postmortem
         if: ${{ !cancelled() && steps.l1.outcome == 'failure' }}
         continue-on-error: true
@@ -688,7 +715,7 @@ jobs:
             echo "--- dmesg tail ---"
             dmesg -T 2>&1 | tail -120
           } 2>&1 | tee "$workspace/wsl-diag/guest-postmortem.txt"
-      - name: Host post-mortem
+      - name: Collect host diagnostics
         if: ${{ !cancelled() && steps.l1.outcome == 'failure' }}
         continue-on-error: true
         shell: pwsh
@@ -764,6 +791,7 @@ jobs:
           L1: ${{ steps.l1.outcome }}
           STAGED: ${{ steps.stage_junit.outcome }}
           VERIFIED: ${{ steps.verified.outcome }}
+          BUILD_STATUS: ${{ steps.build_status.outcome }}
           BUILD_KEY: ${{ steps.cell.outputs.build_key }}
           BUILD_PRODUCER: ${{ steps.cell.outputs.build_producer }}
           BUILD_DIGEST: ${{ steps.manifest.outputs.digest }}
@@ -790,7 +818,11 @@ jobs:
           # A failing TEST needs no detail: the guest stays healthy, staging
           # succeeds, and the report the rollup reads is uploaded normally.
           detail=""
-          if [ "$PROVISION" != "success" ]; then
+          # First: a refused build status skips provisioning, which must not
+          # then be reported as a guest that failed to provision.
+          if [ "$BUILD_STATUS" = "failure" ]; then
+            detail="build ${BUILD_KEY} produced on ${BUILD_PRODUCER} has no successful build status; the guest was not provisioned and no test was started"
+          elif [ "$PROVISION" != "success" ]; then
             detail="the WSL2 guest failed to provision (attempt 1: ${PROVISION_FIRST}, attempt 2: ${PROVISION}); no test could run"
           elif [ "$VERIFIED" != "success" ]; then
             detail="build ${BUILD_KEY} produced on ${BUILD_PRODUCER} was refused by the guest's verification (${VERIFIED}); no test was started and nothing was compiled to replace it"
@@ -841,8 +873,11 @@ jobs:
                 else {build: {key: $key, producer: $producer, digest: $digest}} end)
              + {timings: $timings}' \
             >"$RUNNER_TEMP/status/status.json"
+      # Named by the cell contract, so skipped when it never resolved: an empty
+      # name would add a second, misleading error, and the failed resolution
+      # step already blocks the gate.
       - name: Upload producer status
-        if: ${{ always() }}
+        if: ${{ always() && steps.cell.outputs.status_artifact != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cell.outputs.status_artifact }}
@@ -854,7 +889,7 @@ jobs:
       # and the Windows host cannot read them. `completion.py` is stdlib Python
       # precisely so it can run where there is no compiler. The record crosses
       # the 9p mount once, as a file, for the upload below.
-      - name: Certify this cell's completeness
+      - name: Verify all expected results reported
         id: completion
         shell: wsl-bash {0}
         run: |
@@ -913,7 +948,7 @@ jobs:
             --host-kernel "WSL2 Ubuntu guest on a hosted $RUNNER_OS runner" \
             --out "$RUNNER_TEMP/observation/observation.json"
       - name: Upload this cell's observation
-        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+        if: ${{ !cancelled() && github.event_name == 'schedule' && steps.cell.outputs.package != '' }}
         uses: actions/upload-artifact@v6
         with:
           name: observation-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.gate }}-wsl2-ubuntu

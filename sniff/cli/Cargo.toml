@@ -3,6 +3,9 @@ name = "sniff-detection-cli"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+description = "Detect system and repository information"
+repository = "https://github.com/yankeeinlondon/rusty-biscuit"
+homepage = "https://github.com/yankeeinlondon/rusty-biscuit/tree/main/sniff"
 autotests = false
 
 # The package was renamed from `sniff-cli`; the library keeps its crate name so
@@ -93,3 +96,16 @@ l2-backends = ["tmux"]
 sidecars = ["backend-proof", "harness-broker"]
 features = ["test-fixtures"]
 local-features = []
+
+# cargo-binstall reads these from the tagged manifest (`--git`, or `--manifest-path`
+# on a tag checkout). release-plz tags are `{package}-v{version}`, which binstall's
+# default URL guesses never match. Binary distribution is not approved for this
+# package, so `crate-meta-data` is disabled: binstall reports an opt-out instead of
+# probing for archives. Enabling the `binstall` channel in `docs/deployment.yaml`
+# removes `crate-meta-data` here in the same release proposal; distribution preflight
+# refuses the two disagreeing.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/{ name }-v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+disabled-strategies = ["crate-meta-data", "quick-install", "compile"]

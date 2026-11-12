@@ -9,11 +9,21 @@ pub enum ProviderOpenRouter {
     Bespoke(String),
 }
 
-fn main() {
+#[test]
+fn compiles_and_behaves() {
     // Test aggregator model_id() with provider prefix
-    assert_eq!(ProviderOpenRouter::OpenAi___Gpt_4o.model_id(), "openai/gpt.4o");
-    assert_eq!(ProviderOpenRouter::OpenAi___Gpt_4o__Mini.model_id(), "openai/gpt.4o-mini");
-    assert_eq!(ProviderOpenRouter::Anthropic___Claude_3__Opus.model_id(), "anthropic/claude.3-opus");
+    assert_eq!(
+        ProviderOpenRouter::OpenAi___Gpt_4o.model_id(),
+        "openai/gpt.4o"
+    );
+    assert_eq!(
+        ProviderOpenRouter::OpenAi___Gpt_4o__Mini.model_id(),
+        "openai/gpt.4o-mini"
+    );
+    assert_eq!(
+        ProviderOpenRouter::Anthropic___Claude_3__Opus.model_id(),
+        "anthropic/claude.3-opus"
+    );
 
     // Test Bespoke
     let custom = ProviderOpenRouter::Bespoke("google/gemini-pro".to_string());

@@ -1,0 +1,39 @@
+# Base configuration for `dist` (cargo-dist), pinned below. This file never opts
+# a package in: `dist = false` keeps every package out, and the distribution
+# workflow writes the one approved package's `[package.metadata.dist]` into a
+# temporary copy of the tagged checkout (`scripts/ci/distribution.py config`).
+# Approval lives in `docs/deployment.yaml`; a checked-in package opt-in is
+# refused by preflight as a second authority. See docs/releases.md.
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.34.0"
+dist = false
+# Without it `dist build` compiles the whole workspace for one package tag.
+precise-builds = true
+ci = "github"
+# The release workflow is handwritten: release-plz owns tags and Releases, and
+# distribution only uploads assets, so dist's generated workflow is not used.
+allow-dirty = ["ci"]
+pr-run-mode = "skip"
+create-release = false
+install-updater = false
+install-path = "CARGO_HOME"
+source-tarball = false
+checksum = "sha256"
+unix-archive = ".tar.xz"
+installers = ["shell"]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+]
+
+# The Linux glibc floor: Ubuntu 22.04's, the pinned build image. dist's shell
+# installer refuses an older system before downloading, and reads this setting
+# from the workspace configuration only, never from a package's.
+[dist.min-glibc-version]
+aarch64-unknown-linux-gnu = "2.35"
+x86_64-unknown-linux-gnu = "2.35"

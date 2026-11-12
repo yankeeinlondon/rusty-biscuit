@@ -1,0 +1,12 @@
+{
+  "steps": [
+    {
+      "job_id": "9b1e6f0c2a4d4e7f8a3c5d1b0e2f4a6c",
+      "repository_id": "873451209",
+      "from_state": "deleting-objects",
+      "to_state": "deleting-rows"
+    }
+  ],
+  "released_locks": 1,
+  "expired_uploads": 2
+}

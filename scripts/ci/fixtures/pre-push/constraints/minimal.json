@@ -1,0 +1,6 @@
+{
+  "environment": "wsl2-ubuntu",
+  "reason": "do not rerun WSL for this branch",
+  "owner": "ken",
+  "expiry": "2099-01-01"
+}

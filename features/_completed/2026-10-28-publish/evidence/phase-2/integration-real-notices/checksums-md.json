@@ -1,0 +1,17 @@
+{
+  "assets": "/tmp/dist-assets-md",
+  "verified": [
+    {
+      "name": "darkmatter-cli-aarch64-apple-darwin.tar.xz",
+      "sha256": "e09ccfa1a932293ba60d43fcceb2f3e5911fd5aa84869afd06dbc02e625a5ee8",
+      "sources": [
+        "sha256.sum",
+        "darkmatter-cli-aarch64-apple-darwin.tar.xz.sha256"
+      ]
+    }
+  ],
+  "uncovered": [
+    "darkmatter-cli-installer.sh",
+    "darkmatter-cli.rb"
+  ]
+}

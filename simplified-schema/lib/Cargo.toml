@@ -65,7 +65,7 @@ proptest = "1.6"
 tempfile = "3"
 serial_test = "3.0"
 # `gix::init` for repository fixtures in resolution tests.
-gix = { version = "=0.84.0", default-features = false, features = ["sha1"] }
+gix = { version = "=0.90.0", default-features = false, features = ["sha1"] }
 # `test_toolkit::test_layout`, for the layout gate in the `l1` binary.
 test-toolkit = { path = "../../tools/test-toolkit" }
 # Manifest parsing for the dependency-direction guard.

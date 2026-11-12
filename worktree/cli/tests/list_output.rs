@@ -65,20 +65,63 @@ impl Home {
     }
 }
 
-/// `wt` reads repository metadata in-process with gix, which on Windows ran
-/// `git --exec-path` (through Git for Windows' launcher, with a hidden
-/// console) once per process to find the system configuration, unless
-/// `EXEPATH` names the installation. `wt` names it, so no run asks.
+/// `wt` reads repository metadata in-process with gix, which on Windows runs
+/// `git --exec-path` or `git config --show-origin` (through Git for Windows'
+/// launcher, with a hidden console) once per process to find the system
+/// configuration, unless `EXEPATH` names the installation. `wt` names it, so
+/// no run asks.
 #[cfg(windows)]
 #[test]
 fn a_listing_never_asks_git_for_its_exec_path() {
+    assert_a_listing_never_asks_git_for_its_exec_path(None);
+}
+
+/// The same with the launcher, `<top>\cmd\git.exe`, first on `PATH`.
+#[cfg(windows)]
+#[test]
+fn a_listing_through_the_launcher_never_asks_git_for_its_exec_path() {
+    let (top, _) = git_installation();
+    assert_a_listing_never_asks_git_for_its_exec_path(Some(&top.join("cmd")));
+}
+
+/// The same with `<top>\<prefix>\bin`, the real `git.exe`, first on `PATH`.
+#[cfg(windows)]
+#[test]
+fn a_listing_through_the_direct_binary_never_asks_git_for_its_exec_path() {
+    let (_, prefix) = git_installation();
+    assert_a_listing_never_asks_git_for_its_exec_path(Some(&prefix.join("bin")));
+}
+
+/// `(<top>, <top>\<prefix>)` of this host's Git for Windows, from the exec
+/// path `<top>\<prefix>\libexec\git-core` it reports.
+#[cfg(windows)]
+fn git_installation() -> (PathBuf, PathBuf) {
+    let output = worktree::git::command().arg("--exec-path").output().expect("git should be installed");
+    let exec_path = PathBuf::from(String::from_utf8(output.stdout).expect("utf-8 exec path").trim());
+    let prefix = exec_path.ancestors().nth(2).expect("<top>\\<prefix>").to_path_buf();
+    let top = prefix.parent().expect("<top>").to_path_buf();
+    (top, prefix)
+}
+
+/// Runs `wt list` with `first_on_path` ahead of the inherited `PATH` (when
+/// given) and asserts no Git process it started was gix-path asking where
+/// the installation is.
+#[cfg(windows)]
+fn assert_a_listing_never_asks_git_for_its_exec_path(first_on_path: Option<&Path>) {
     let repo = tempfile::tempdir().expect("repo dir");
     init_repo(repo.path());
     commit(repo.path(), "a.txt", "a");
     let traces = tempfile::tempdir().expect("trace dir");
     let home = Home::new();
-    let output = home
-        .command(repo.path(), &["list"])
+    let mut command = home.command(repo.path(), &["list"]);
+    if let Some(dir) = first_on_path {
+        assert!(dir.join("git.exe").is_file(), "{}", dir.display());
+        let mut path = dir.as_os_str().to_owned();
+        path.push(";");
+        path.push(std::env::var_os("PATH").unwrap_or_default());
+        command.env("PATH", path);
+    }
+    let output = command
         .env_remove("EXEPATH")
         .env_remove("GIT_EXEC_PATH")
         .env("GIT_TRACE2_EVENT", traces.path())
@@ -90,7 +133,10 @@ fn a_listing_never_asks_git_for_its_exec_path() {
         .map(|entry| fs::read_to_string(entry.expect("entry").path()).expect("trace file"))
         .collect();
     assert!(!started.is_empty(), "the listing ran git, and each git process wrote a trace");
-    let asked = started.iter().filter(|trace| trace.contains("\"--exec-path\"")).count();
+    let asked = started
+        .iter()
+        .filter(|trace| trace.contains("\"--exec-path\"") || trace.contains("\"--show-origin\""))
+        .count();
     assert_eq!(asked, 0, "{started:#?}");
 }
 

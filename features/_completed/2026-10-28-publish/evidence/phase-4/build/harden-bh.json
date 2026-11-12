@@ -1,0 +1,25 @@
+{
+  "source": "/tmp/phase4-assets/biscuit-hash-cli-installer.sh",
+  "glibc_floor": "2.35",
+  "macos_floor": "15.0",
+  "anchors": {
+    "app-name": 26,
+    "installer-function": 151,
+    "architecture-detection": 208,
+    "archive-selection": 216,
+    "entry-point": 1728
+  },
+  "insertions": [
+    {
+      "at_line": 208,
+      "lines": 1,
+      "what": "preflight call"
+    },
+    {
+      "at_line": 1728,
+      "lines": 100,
+      "what": "preflight functions"
+    }
+  ],
+  "output": "/tmp/phase4-assets/biscuit-hash-cli-installer.sh"
+}
