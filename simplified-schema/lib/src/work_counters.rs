@@ -72,6 +72,10 @@ pub enum Work {
     /// YAML reparsed to locate nodes. A deferred map counts one when its
     /// first coordinate query forces it.
     PositionMapConstruction,
+    /// A schema serialized to canonical JSON and hashed to find its
+    /// validator-cache identity (`validate::SchemaDigest::canonical`). A
+    /// known layered or prepared digest avoids it.
+    CanonicalSchemaSerialization,
 }
 
 impl Work {
@@ -98,6 +102,7 @@ impl Work {
         Work::ArtifactFallbackConfiguration,
         Work::ArtifactFallbackRecord,
         Work::PositionMapConstruction,
+        Work::CanonicalSchemaSerialization,
     ];
 }
 

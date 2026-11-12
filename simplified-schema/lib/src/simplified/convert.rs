@@ -2504,7 +2504,7 @@ fn check_alphanumeric_values(
 fn alphanumeric_check_validator(target: &Value) -> Result<std::sync::Arc<jsonschema::Validator>, SchemaError> {
     let cache = &*crate::validate::SHARED_VALIDATOR_CACHE;
     let content = crate::validate::schema_content_hash(target);
-    if let Some(validator) = cache.cached_structural(content) {
+    if let Some(validator) = cache.cached_structural(crate::validate::SchemaIdentity::canonical(content)) {
         return Ok(validator);
     }
     crate::note_work!(AlphanumericCheckCompile);

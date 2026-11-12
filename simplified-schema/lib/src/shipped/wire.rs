@@ -6,7 +6,8 @@
 //! A line-based diff of two artifacts therefore names the header field or
 //! payload section that changed, while the bulk of the payload costs no
 //! indentation to scan. [`decode_header`], [`decode_laid_out`],
-//! [`decode_payload`], and [`decode_section`] are its only readers. Both refuse what JSON permits but an artifact never contains: a
+//! [`decode_payload`], and [`decode_section`] are its only readers. All four
+//! refuse what JSON permits but an artifact never contains: a
 //! repeated object key (anywhere, payload schemas included), content after
 //! the document, and empty input. JSON5 comments and trailing commas are
 //! not JSON and fail the parser. Every refusal carries the JSON pointer of
@@ -186,18 +187,28 @@ pub(crate) fn decode_section<T: DeserializeOwned>(text: &str, pointer: &str, lin
         refusal
     };
     check_document(text.as_bytes()).map_err(located)?;
-    let mut deserializer = serde_json::Deserializer::from_str(text);
-    serde_path_to_error::deserialize(&mut deserializer).map_err(|error| located(typed_refusal(error, text.as_bytes(), 0)))
+    decode_typed(text).map_err(|error| located(typed_refusal(error, text.as_bytes(), 0)))
 }
 
 /// Decodes the payload of an artifact whose header was accepted.
 pub(crate) fn decode_payload<T: DeserializeOwned>(decoded: &DecodedHeader<'_>) -> Result<T, Refusal> {
-    let mut deserializer = serde_json::Deserializer::from_str(decoded.payload.get());
-    serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+    decode_typed(decoded.payload.get()).map_err(|error| {
         let mut refusal = typed_refusal(error, decoded.bytes, decoded.payload_offset);
         refusal.pointer = Some(format!("/payload{}", refusal.pointer.as_deref().unwrap_or("")));
         refusal
     })
+}
+
+/// The typed decode of `text`. Tracking the path costs about as much as the
+/// decode itself, so it runs only to locate a refusal: the decode is
+/// deterministic, so the repeat fails at the same place.
+fn decode_typed<T: DeserializeOwned>(text: &str) -> Result<T, serde_path_to_error::Error<serde_json::Error>> {
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    if let Ok(value) = T::deserialize(&mut deserializer) {
+        return Ok(value);
+    }
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    serde_path_to_error::deserialize(&mut deserializer)
 }
 
 /// A typed-decoding error at `offset` bytes into the artifact, located in

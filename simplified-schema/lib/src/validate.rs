@@ -13,9 +13,11 @@
 //!   A root union that contests a `file(match(...))` glob also carries
 //!   [`super::file_match::DARKMATTER_MATCH_KEYWORD`].
 //! - **Caching** — compiling a `Validator` is several milliseconds of work;
-//!   the [`ValidatorCache`] hashes the canonicalised schema bytes and reuses
-//!   compiled validators across calls. The default bound (64 entries) is
-//!   adjustable via `DARKMATTER_SCHEMA_CACHE_SIZE`.
+//!   the [`ValidatorCache`] keys compiled validators by a typed
+//!   [`SchemaIdentity`] and reuses them across calls. A schema built by
+//!   merging known layers can supply its [`LayeredIdentity`] instead of
+//!   having its canonical bytes serialized and hashed. The default bound (64
+//!   entries) is adjustable via `DARKMATTER_SCHEMA_CACHE_SIZE`.
 //!
 //! Validation problems are mapped from `jsonschema::ValidationError` into the
 //! public [`super::ValidationProblem`] shape (JSON-pointer path, friendly
@@ -60,7 +62,8 @@ pub const DEFAULT_CACHE_SIZE: usize = 64;
 pub static SHARED_VALIDATOR_CACHE: std::sync::LazyLock<ValidatorCache> =
     std::sync::LazyLock::new(ValidatorCache::new);
 
-/// Cache of compiled validators keyed by canonicalised schema hash.
+/// Cache of compiled validators keyed by the schema's typed identity
+/// ([`SchemaIdentity`]: canonical or layered) and its file-judging anchors.
 ///
 /// The hashmap entry stores the compiled validator together with an internal
 /// LRU "tick" so eviction is `O(n)` over the cache rather than requiring a
@@ -77,7 +80,7 @@ pub static SHARED_VALIDATOR_CACHE: std::sync::LazyLock<ValidatorCache> =
 ///
 /// The prompt document directory (`base_dir`) is supplied per call to
 /// [`Self::validator_for`] because it varies per document. It participates in
-/// the cache key alongside the schema JSON so validators preserve the
+/// the cache key alongside the schema's identity so validators preserve the
 /// document-first, then repository-relative candidate plan of their document.
 /// The request's file-resolution context, passed per call, is part of cache
 /// identity too, since it supplies the repository tier of that plan.
@@ -110,12 +113,23 @@ struct CacheInner {
     /// and its transcluded children share one), so a slot holds every
     /// validator whose `judged_in` differs rather than replacing one with
     /// another and recompiling on each alternation.
-    entries: HashMap<u64, Vec<CacheEntry>>,
-    /// Content hashes of shared schemas, by allocation. The `Weak` keeps the
-    /// allocation from being reused for another schema while it is listed.
+    entries: HashMap<CacheKey, Vec<CacheEntry>>,
+    /// Canonical digests of shared schemas, by allocation. The `Weak` keeps
+    /// the allocation from being reused for another schema while it is
+    /// listed.
     schema_hashes: Vec<(Weak<Value>, SchemaDigest)>,
     tick: u64,
     capacity: usize,
+}
+
+/// A cache slot's key: the schema's typed identity, and a hash of what its
+/// file values are judged against (the anchors; see [`anchor_hash`]). The
+/// identity stays an enum, so a canonical and a layered identity never share
+/// a slot even when their digests are equal.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct CacheKey {
+    identity: SchemaIdentity,
+    anchors: u64,
 }
 
 struct CacheEntry {
@@ -347,7 +361,8 @@ impl ValidatorCache {
         base_dir: Option<&Path>,
         context: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<Validator>, SchemaError> {
-        self.validator_for_hashed(schema, schema_digest(schema), base_dir, context)
+        self.lookup_or_compile(schema, SchemaDigest::canonical(schema), base_dir, context)
+            .map(|(validator, _)| validator)
     }
 
     /// [`Self::validator_for`] for a schema shared through an `Arc`: its
@@ -364,17 +379,41 @@ impl ValidatorCache {
         base_dir: Option<&Path>,
         context: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<Validator>, SchemaError> {
-        let digest = self.shared_schema_digest(schema);
-        self.validator_for_hashed(schema, digest, base_dir, context)
+        let digest = self.canonical_digest_shared(schema);
+        self.lookup_or_compile(schema, digest, base_dir, context).map(|(validator, _)| validator)
     }
 
-    /// The content hash of a shared schema, computed once per allocation
-    /// (see [`Self::validator_for_shared`]).
+    /// [`Self::validator_for`] for a schema whose identity the caller
+    /// already knows: nothing is serialized or hashed. `digest` must
+    /// describe `schema` exactly, as a [`LayeredIdentity`] of the layers it
+    /// was merged from or [`SchemaDigest::canonical`] of `schema` itself;
+    /// a wrong digest serves a validator compiled for another schema.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::validator_for`].
+    pub fn validator_for_shared_with_digest(
+        &self,
+        schema: &Value,
+        digest: SchemaDigest,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Arc<Validator>, SchemaError> {
+        self.lookup_or_compile(schema, digest, base_dir, context).map(|(validator, _)| validator)
+    }
+
+    /// The canonical content hash of a shared schema, computed once per
+    /// allocation (see [`Self::validator_for_shared`]). It is always the
+    /// canonical hash, whatever identity a caller compiled the schema under.
     pub fn shared_schema_hash(&self, schema: &Arc<Value>) -> u64 {
-        self.shared_schema_digest(schema).hash
+        match self.canonical_digest_shared(schema).identity {
+            SchemaIdentity::Canonical { digest, .. } | SchemaIdentity::Layered { digest, .. } => digest,
+        }
     }
 
-    fn shared_schema_digest(&self, schema: &Arc<Value>) -> SchemaDigest {
+    /// [`SchemaDigest::canonical`] of a shared schema, computed once per
+    /// allocation and remembered while the allocation lives.
+    pub fn canonical_digest_shared(&self, schema: &Arc<Value>) -> SchemaDigest {
         let pointer = Arc::as_ptr(schema);
         {
             let guard = self.inner.lock().expect("validator cache lock poisoned");
@@ -382,7 +421,7 @@ impl ValidatorCache {
                 return *digest;
             }
         }
-        let digest = schema_digest(schema);
+        let digest = SchemaDigest::canonical(schema);
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.schema_hashes.retain(|(weak, _)| weak.strong_count() > 0);
         guard.schema_hashes.push((Arc::downgrade(schema), digest));
@@ -401,17 +440,7 @@ impl ValidatorCache {
         base_dir: Option<&Path>,
         context: &biscuit_file::FileResolutionContext,
     ) -> Result<(Arc<Validator>, bool), SchemaError> {
-        self.lookup_or_compile(schema, schema_digest(schema), base_dir, context)
-    }
-
-    fn validator_for_hashed(
-        &self,
-        schema: &Value,
-        digest: SchemaDigest,
-        base_dir: Option<&Path>,
-        context: &biscuit_file::FileResolutionContext,
-    ) -> Result<Arc<Validator>, SchemaError> {
-        self.lookup_or_compile(schema, digest, base_dir, context).map(|(validator, _)| validator)
+        self.lookup_or_compile(schema, SchemaDigest::canonical(schema), base_dir, context)
     }
 
     /// The validator and whether it was compiled by this call.
@@ -425,10 +454,13 @@ impl ValidatorCache {
         // A schema with no file value to judge validates identically in every
         // context, so one structural validator serves every document.
         if !digest.judges_files {
-            return self.structural_lookup_or_compile(schema, digest.hash);
+            return self.structural_lookup_or_compile(schema, digest.identity);
         }
         let judged_in = JudgedIn::Context(Box::new(context.clone()), self.caller_origins.clone());
-        let key = canonical_hash(digest.hash, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
+        let key = CacheKey {
+            identity: digest.identity,
+            anchors: anchor_hash(base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in),
+        };
         // Fast path: hit.
         if let Some(hit) = self.lookup(&key, &judged_in) {
             return Ok((hit, false));
@@ -459,15 +491,37 @@ impl ValidatorCache {
         self.structural_validator_hashed(schema, schema_content_hash(schema))
     }
 
-    /// [`Self::structural_validator_for`] for a schema whose content hash is
-    /// known.
+    /// [`Self::structural_validator_for`] for a schema whose canonical
+    /// content hash is known.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::structural_validator_for`].
     pub fn structural_validator_hashed(&self, schema: &Value, content: u64) -> Result<Arc<Validator>, SchemaError> {
-        self.structural_lookup_or_compile(schema, content).map(|(validator, _)| validator)
+        self.structural_validator_identified(schema, SchemaIdentity::canonical(content))
+    }
+
+    /// [`Self::structural_validator_for`] for a schema whose identity is
+    /// known (see [`Self::validator_for_shared_with_digest`]).
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::structural_validator_for`].
+    pub fn structural_validator_identified(
+        &self,
+        schema: &Value,
+        identity: SchemaIdentity,
+    ) -> Result<Arc<Validator>, SchemaError> {
+        self.structural_lookup_or_compile(schema, identity).map(|(validator, _)| validator)
     }
 
     /// The structural validator and whether it was compiled by this call.
-    fn structural_lookup_or_compile(&self, schema: &Value, content: u64) -> Result<(Arc<Validator>, bool), SchemaError> {
-        let key = canonical_hash(content, None, None, &JudgedIn::Syntax);
+    fn structural_lookup_or_compile(
+        &self,
+        schema: &Value,
+        identity: SchemaIdentity,
+    ) -> Result<(Arc<Validator>, bool), SchemaError> {
+        let key = CacheKey { identity, anchors: anchor_hash(None, None, &JudgedIn::Syntax) };
         if let Some(hit) = self.lookup(&key, &JudgedIn::Syntax) {
             return Ok((hit, false));
         }
@@ -476,13 +530,14 @@ impl ValidatorCache {
         Ok((validator, true))
     }
 
-    /// The structural validator for a schema whose content hash is
-    /// `content`, when this cache already holds one; builds nothing.
-    pub(crate) fn cached_structural(&self, content: u64) -> Option<Arc<Validator>> {
-        self.lookup(&canonical_hash(content, None, None, &JudgedIn::Syntax), &JudgedIn::Syntax)
+    /// The structural validator for the schema `identity` names, when this
+    /// cache already holds one; builds nothing.
+    pub(crate) fn cached_structural(&self, identity: SchemaIdentity) -> Option<Arc<Validator>> {
+        let key = CacheKey { identity, anchors: anchor_hash(None, None, &JudgedIn::Syntax) };
+        self.lookup(&key, &JudgedIn::Syntax)
     }
 
-    fn lookup(&self, key: &u64, judged_in: &JudgedIn) -> Option<Arc<Validator>> {
+    fn lookup(&self, key: &CacheKey, judged_in: &JudgedIn) -> Option<Arc<Validator>> {
         super::timings::looked_up_validator();
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
@@ -496,7 +551,7 @@ impl ValidatorCache {
         Some(entry.validator.clone())
     }
 
-    fn insert(&self, key: u64, validator: Arc<Validator>, judged_in: JudgedIn) {
+    fn insert(&self, key: CacheKey, validator: Arc<Validator>, judged_in: JudgedIn) {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
@@ -1857,36 +1912,239 @@ fn default_capacity() -> usize {
 /// their object key order, while array order (`enum`, `required`, `anyOf`, ...)
 /// stays significant.
 pub(super) fn schema_content_hash(schema: &Value) -> u64 {
+    crate::note_work!(CanonicalSchemaSerialization);
     biscuit_hash::xx_hash_json(schema)
 }
 
-/// A schema's content hash, and whether it judges any file value.
-#[derive(Clone, Copy)]
-struct SchemaDigest {
-    hash: u64,
-    /// `false` only when the schema names neither the eager `darkmatter-file`
-    /// format nor the `match()` keyword, so no part of its verdict reads a
-    /// context. The lazy `darkmatter-file-reference` format checks syntax only
-    /// and does not count; the built-in baseline uses it, so counting it sent
-    /// every baseline-merged schema to a per-document validator. A mention
-    /// inside a description reads as `true`, which only costs a context-keyed
-    /// validator.
-    judges_files: bool,
+/// The revision of the canonical identity: the canonical JSON encoding
+/// hashed and the [`judges_files`] classification. A prepared record that
+/// stores a canonical digest names the revision it was computed under.
+pub const CANONICAL_IDENTITY_REVISION: u32 = 1;
+
+/// The revision of [`LayeredIdentity`]'s byte encoding.
+pub const LAYERED_IDENTITY_REVISION: u32 = 1;
+
+/// Which schema a cached validator was compiled for.
+///
+/// The two variants are separate cache domains: a canonical identity hashes
+/// the schema's own canonical JSON, and a layered identity hashes the
+/// ordered identities of the layers a host merged it from (see
+/// [`LayeredIdentity`]). Equal digests in different variants never share a
+/// cached validator. As with any 64-bit hash, two different schemas of one
+/// variant could collide; the cache accepts that, as it always has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SchemaIdentity {
+    /// The xxHash-64 of the schema's canonical JSON
+    /// (`biscuit_hash::canonical_json`): equal for schemas that differ only
+    /// in object key order.
+    Canonical { revision: u32, digest: u64 },
+    /// The xxHash-64 of a [`LayeredIdentity`] encoding.
+    Layered { revision: u32, digest: u64 },
 }
 
-fn schema_digest(schema: &Value) -> SchemaDigest {
-    let text = biscuit_hash::canonical_json(schema);
-    SchemaDigest {
-        hash: biscuit_hash::xx_hash_bytes(text.as_bytes()),
-        // Quoted, so the `darkmatter-file-reference` value does not match.
-        judges_files: text.contains(&format!("\"{}\"", super::format::DARKMATTER_FILE_FORMAT))
-            || text.contains(super::file_match::DARKMATTER_MATCH_KEYWORD),
+impl SchemaIdentity {
+    /// The canonical identity of a schema whose canonical content hash is
+    /// `digest`, under the current [`CANONICAL_IDENTITY_REVISION`].
+    #[must_use]
+    pub const fn canonical(digest: u64) -> Self {
+        Self::Canonical { revision: CANONICAL_IDENTITY_REVISION, digest }
+    }
+
+    fn encode(self, bytes: &mut Vec<u8>) {
+        let (tag, revision, digest) = match self {
+            Self::Canonical { revision, digest } => (1u8, revision, digest),
+            Self::Layered { revision, digest } => (2u8, revision, digest),
+        };
+        bytes.push(tag);
+        bytes.extend_from_slice(&revision.to_le_bytes());
+        bytes.extend_from_slice(&digest.to_le_bytes());
     }
 }
 
-/// xxHash (XXH64) of the canonicalised JSON Schema bytes plus both file-reference
-/// anchors (the document `base_dir` and the launch-area `fallback`) used as the
-/// cache key.
+/// A schema's identity, and whether it judges any file value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SchemaDigest {
+    pub identity: SchemaIdentity,
+    /// `false` only when the schema names neither the eager `darkmatter-file`
+    /// format nor the `match()` keyword, so no part of its verdict reads a
+    /// context; such a schema shares one structural validator across
+    /// documents. A layered digest ORs its layers' classifications, which
+    /// can only over-report (a cache miss, never a wrong context).
+    pub judges_files: bool,
+}
+
+impl SchemaDigest {
+    /// The canonical digest of `schema`: its canonical JSON serialized,
+    /// hashed, and classified ([`judges_files`]). This is the work a known
+    /// digest avoids for a large schema.
+    #[must_use]
+    pub fn canonical(schema: &Value) -> Self {
+        crate::note_work!(CanonicalSchemaSerialization);
+        let text = biscuit_hash::canonical_json(schema);
+        Self {
+            identity: SchemaIdentity::canonical(biscuit_hash::xx_hash_bytes(text.as_bytes())),
+            judges_files: judges_files(&text),
+        }
+    }
+}
+
+/// Whether a schema whose canonical JSON is `canonical_text` judges any file
+/// value against a context: it names the eager `darkmatter-file` format or
+/// the `match()` keyword.
+///
+/// The lazy `darkmatter-file-reference` format checks syntax only and does
+/// not count; the built-in baseline uses it, so counting it sent every
+/// baseline-merged schema to a per-document validator. A mention inside a
+/// description reads as `true`, which only costs a context-keyed validator.
+#[must_use]
+pub fn judges_files(canonical_text: &str) -> bool {
+    // Quoted, so the `darkmatter-file-reference` value does not match.
+    canonical_text.contains(&format!("\"{}\"", super::format::DARKMATTER_FILE_FORMAT))
+        || canonical_text.contains(super::file_match::DARKMATTER_MATCH_KEYWORD)
+}
+
+/// The part a layer plays in a merged schema. Each role has a fixed tag in
+/// [`LayeredIdentity`]'s encoding, so a document layer never shares an
+/// identity with an equal baseline or trigger layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayerRole {
+    /// The baseline, the lowest layer.
+    Baseline,
+    /// One matched trigger payload; triggers keep their layering order.
+    Trigger,
+    /// The document's own schema, the highest layer.
+    Document,
+}
+
+impl LayerRole {
+    const fn tag(self) -> u8 {
+        match self {
+            Self::Baseline => 1,
+            Self::Trigger => 2,
+            Self::Document => 3,
+        }
+    }
+}
+
+/// Tags of the non-layer steps in [`LayeredIdentity`]'s encoding.
+const SOURCE_STEP: u8 = 4;
+const PHASE_STEP: u8 = 5;
+
+/// Builds the [`SchemaIdentity::Layered`] identity of a schema a host
+/// assembles from known parts, so the assembled schema is never serialized
+/// to find its cache key.
+///
+/// The identity hashes an unambiguous encoding: a length-prefixed domain,
+/// [`LAYERED_IDENTITY_REVISION`], the merge algorithm's revision
+/// ([`crate::resolve::MERGE_ALGORITHM_REVISION`]), the step count, and each
+/// step in order, every number little-endian and fixed-width. Order is
+/// significant: the same layers merged in another order, or the same schema
+/// in another role, is another identity.
+///
+/// ## Examples
+///
+/// ```
+/// use serde_json::json;
+/// use simplified_schema::validate::{LayerRole, LayeredIdentity, SchemaDigest};
+///
+/// let baseline = SchemaDigest::canonical(&json!({"type": "object"}));
+/// let document = SchemaDigest::canonical(&json!({"type": "object", "required": ["title"]}));
+/// let merged = LayeredIdentity::new()
+///     .layer(LayerRole::Baseline, baseline)
+///     .layer(LayerRole::Document, document)
+///     .finish();
+/// let reversed = LayeredIdentity::new()
+///     .layer(LayerRole::Baseline, document)
+///     .layer(LayerRole::Document, baseline)
+///     .finish();
+/// assert_ne!(merged.identity, reversed.identity);
+/// ```
+#[derive(Clone, Debug, Default)]
+pub struct LayeredIdentity {
+    steps: Vec<u8>,
+    count: u32,
+    judges_files: bool,
+}
+
+impl LayeredIdentity {
+    const DOMAIN: &'static [u8] = b"simplified-schema/layered-identity";
+
+    /// An identity with no steps yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// An identity for a schema derived from the schema `source` names:
+    /// later steps describe the derivation.
+    #[must_use]
+    pub fn derived_from(source: SchemaDigest) -> Self {
+        Self::new().step(SOURCE_STEP, source)
+    }
+
+    /// Adds the next layer of the merge, in precedence order (lowest first).
+    #[must_use]
+    pub fn layer(self, role: LayerRole, digest: SchemaDigest) -> Self {
+        self.step(role.tag(), digest)
+    }
+
+    /// Adds the phase projection a host applies after merging: `phase`'s
+    /// presence rules ([`crate::phase`], under
+    /// [`crate::phase::PROJECTION_REVISION`]), merged from `projected_document`
+    /// (the projected document schema, when the schema has one) and made
+    /// passive.
+    #[must_use]
+    pub fn phase_projection(mut self, phase: crate::SchemaPhase, projected_document: Option<SchemaDigest>) -> Self {
+        self.steps.push(PHASE_STEP);
+        self.steps.extend_from_slice(&crate::phase::PROJECTION_REVISION.to_le_bytes());
+        self.steps.push(match phase {
+            crate::SchemaPhase::Launch => 1,
+            crate::SchemaPhase::Completion => 2,
+        });
+        match projected_document {
+            Some(digest) => {
+                self.steps.push(1);
+                digest.identity.encode(&mut self.steps);
+                self.judges_files |= digest.judges_files;
+            }
+            None => self.steps.push(0),
+        }
+        self.count += 1;
+        self
+    }
+
+    fn step(mut self, tag: u8, digest: SchemaDigest) -> Self {
+        self.steps.push(tag);
+        digest.identity.encode(&mut self.steps);
+        self.judges_files |= digest.judges_files;
+        self.count += 1;
+        self
+    }
+
+    /// The identity, and whether any step judges file values.
+    #[must_use]
+    pub fn finish(self) -> SchemaDigest {
+        let mut bytes = Vec::with_capacity(Self::DOMAIN.len() + 16 + self.steps.len());
+        bytes.extend_from_slice(&u32::try_from(Self::DOMAIN.len()).unwrap_or(u32::MAX).to_le_bytes());
+        bytes.extend_from_slice(Self::DOMAIN);
+        bytes.extend_from_slice(&LAYERED_IDENTITY_REVISION.to_le_bytes());
+        bytes.extend_from_slice(&crate::resolve::MERGE_ALGORITHM_REVISION.to_le_bytes());
+        bytes.extend_from_slice(&self.count.to_le_bytes());
+        bytes.extend_from_slice(&self.steps);
+        SchemaDigest {
+            identity: SchemaIdentity::Layered {
+                revision: LAYERED_IDENTITY_REVISION,
+                digest: biscuit_hash::xx_hash_bytes(&bytes),
+            },
+            judges_files: self.judges_files,
+        }
+    }
+}
+
+/// xxHash (XXH64) of what a cached validator's file values are judged
+/// against: both file-reference anchors (the document `base_dir` and the
+/// launch-area `fallback`), the caller origins, and the repository anchors.
+/// It sits beside the schema's [`SchemaIdentity`] in the cache key.
 ///
 /// Both anchors are folded in because they parameterize the compiled
 /// `format: darkmatter-file` validator: the same schema validated for two
@@ -1897,19 +2155,12 @@ fn schema_digest(schema: &Value) -> SchemaDigest {
 /// every `DarkmatterSchemas` instance safely, regardless of its fallback.
 ///
 /// A non-cryptographic hash suffices here: this is a cache identity, not a
-/// security boundary. An accidental collision could only serve a wrong
-/// validator, and XXH64's collision resistance over these small distinct inputs
-/// is more than adequate (repo convention — [`biscuit_hash`]).
-fn canonical_hash(
-    content: u64,
-    base_dir: Option<&Path>,
-    fallback: Option<&Path>,
-    judged_in: &JudgedIn,
-) -> u64 {
-    let mut bytes = content.to_le_bytes().to_vec();
-    // Domain-separate each anchor from the schema hash (and from each other)
-    // so path bytes cannot alias a different (schema, base_dir, fallback)
-    // triple.
+/// security boundary, and the full context is compared on lookup
+/// ([`JudgedIn`]).
+fn anchor_hash(base_dir: Option<&Path>, fallback: Option<&Path>, judged_in: &JudgedIn) -> u64 {
+    let mut bytes = Vec::new();
+    // Domain-separate each anchor from each other so path bytes cannot alias
+    // a different (base_dir, fallback) pair.
     bytes.push(0xff);
     if let Some(dir) = base_dir {
         bytes.extend_from_slice(dir.to_string_lossy().as_bytes());

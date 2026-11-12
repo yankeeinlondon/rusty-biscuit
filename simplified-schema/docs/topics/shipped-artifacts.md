@@ -21,11 +21,26 @@ artifact is refused. The module is `simplified_schema::shipped`.
 ## What you need to do
 
 When you edit a shipped YAML file, or change code that parses, admits, or
-lowers it, regenerate the artifacts from the repository root:
+lowers it, regenerate the artifacts from the repository root and commit them
+with your change:
 
 ```sh
 just shipped-schemas
 ```
+
+It lists each artifact whose bytes changed. For example, after an edit to
+`darkmatter/schemas/partials/fm.yaml`:
+
+```text
+regenerated darkmatter/lib/generated/shipped.json
+regenerated claudine/lib/generated/shipped.json
+```
+
+Claudine's artifact changes too because it is built over Darkmatter's (see
+[What the root command does](#what-the-root-command-does)). When nothing
+changed, the command prints `every shipped artifact is current`.
+
+### When the freshness test fails
 
 Each crate's L1 suite has a `shipped_artifact_is_fresh` test. It prepares
 the compiled text from scratch, encodes the result, and compares it byte for
@@ -35,6 +50,12 @@ run:
 ```text
 `simplified-schema/lib/generated/shipped.json` is stale (first difference at line 9); regenerate it with `just shipped-schemas`
 ```
+
+The fix is always the same: run `just shipped-schemas` from the repository
+root and commit the files it regenerated. Never edit an artifact by hand. A
+hand edit cannot match fresh generation, so the freshness test keeps
+failing, and at run time the edited artifact is refused and its items are
+prepared from text.
 
 Within this area, `just shipped-schemas` regenerates only Simplified Schema's
 artifact, and `just shipped-schemas --check` reports whether it is current
@@ -70,7 +91,13 @@ flowchart LR
    and proves every artifact is accepted and current.
 
 A crate area's own `just shipped-schemas` (`--write` by default) refuses to
-write when a lower artifact is stale and names the root command instead.
+write when a lower artifact is stale and names the root command instead. For
+example, `just shipped-schemas` in `darkmatter/` after an edit to a Simplified
+Schema envelope definition stops with:
+
+```text
+error: the compiled-in `simplified-schema/lib/generated/shipped.json` is stale, so `darkmatter/lib/generated/shipped.json` cannot be checked or written over it; regenerate every artifact with `just shipped-schemas` from the repository root
+```
 
 ### When CI runs the freshness tests
 
@@ -99,6 +126,35 @@ rule, an admission check, a record's shape. The revision is in the header,
 so an artifact generated before the change is refused rather than trusted,
 and the freshness test fails until you regenerate. The root
 `just shipped-schemas` regenerates the artifacts built over this one too.
+
+Why the revision matters: the header proves an artifact matches the
+compiled **text**, but it cannot see the **code** that prepared it. Suppose
+you change how `number(integer)` lowers to JSON Schema, and Darkmatter's
+baseline uses it. No YAML file changed, so every source digest in
+Darkmatter's old artifact still matches, and without a new revision a build
+that has not been regenerated yet would accept that artifact and serve the
+old lowering. Increment Darkmatter's revision and that build refuses the
+artifact and prepares from text instead, with the new code. The rule is to
+increment the revision of each owner whose payload the change alters;
+`just shipped-schemas` lists which artifacts changed.
+
+| You changed | Increment | Then |
+| --- | --- | --- |
+| only shipped YAML text | nothing; the source digests already differ | `just shipped-schemas` |
+| how shipped text is prepared (lowering, admission, resolution, a check) | the `PREPARATION_REVISION` of each owner whose payload changes | `just shipped-schemas` |
+| the shape of a record an owner stores | that owner's `PREPARATION_REVISION` (Claudine's records embed Darkmatter's trigger-payload record, so a change there bumps both) | `just shipped-schemas` |
+| what `merge_baseline` produces | `resolve::MERGE_ALGORITHM_REVISION` | update the pinned values in `lib/tests/l1/schema_identities.rs` |
+| what a phase projection produces | `phase::PROJECTION_REVISION` | update the pinned values in `lib/tests/l1/schema_identities.rs` |
+| the canonical JSON hashed for a validator key, or the `judges_files` rule | `validate::CANONICAL_IDENTITY_REVISION` | `just shipped-schemas` (stored digests of the old revision are refused) |
+
+The owners' preparation revisions are `shipped::registry::PREPARATION_REVISION`
+here, `darkmatter::markdown::schemas::shipped::PREPARATION_REVISION`, and
+`claudine::composition::schema::shipped::PREPARATION_REVISION`. The merge and
+projection revisions are not stored in any artifact: they are folded into the
+validator-cache keys of merged schemas (see
+[Stored validator-cache digests](#stored-validator-cache-digests)), so that a
+merge or projection that changed is never served a validator compiled for
+the old result.
 
 ## What an artifact holds
 
@@ -156,7 +212,7 @@ The owners and their artifacts, in dependency order:
 | --- | --- | --- |
 | `simplified-schema` | `simplified-schema/lib/generated/shipped.json` | nothing |
 | `darkmatter` | `darkmatter/lib/generated/shipped.json` | `simplified-schema` |
-| `claudine` | `claudine/lib/generated/shipped.json` (**planned**) | `simplified-schema`, `darkmatter` |
+| `claudine` | `claudine/lib/generated/shipped.json` | `simplified-schema`, `darkmatter` |
 
 ## How an artifact is loaded
 
@@ -229,9 +285,65 @@ A lower artifact that is refused refuses every artifact built over it, even
 when the higher artifact's header still matches the lower artifact's bytes:
 an artifact is only as trustworthy as what it was prepared from.
 
+### Across the three owners
+
+A `claudine` process uses all three artifacts. Each owner loads its own the
+first time something reads it, and its header check includes the state of
+the artifacts below it:
+
+```mermaid
+flowchart TD
+    S{"Simplified Schema artifact<br/>accepted?"} -- no --> R1["all three refused"]
+    S -- yes --> D{"Darkmatter artifact: header matches<br/>its text, its revision, and the<br/>Simplified Schema artifact?"}
+    D -- no --> R2["Darkmatter's and Claudine's refused"]
+    D -- yes --> C{"Claudine artifact: header matches<br/>its text, its revision, and<br/>both lower artifacts?"}
+    C -- no --> R3["Claudine's refused"]
+    C -- yes --> A["all three accepted"]
+    A --> L["each section decoded on its first read;<br/>a damaged section is refused alone"]
+    R1 --> F["each refused item is prepared<br/>from its compiled text when first read"]
+    R2 --> F
+    R3 --> F
+    L -. damaged section .-> F
+```
+
+`md` and DMLS stop at Darkmatter's artifact; they never read Claudine's.
+
+### What a fallback costs
+
+A fallback never changes a result, only the time it takes to get it. The
+refused item is prepared exactly as it was before artifacts existed, with
+every check. How much that costs depends on the item. Measured on an Apple
+M4 Max in a debug build, reading Claudine's prepared trigger bundle from its
+section takes about 180 ms, and preparing the same bundle from text takes
+about 630 ms (25 ms and 100 ms in a release build). A stale artifact
+therefore shows up as a slower `claudine` start and slower tests, never as
+a different verdict. When a suite slows down after you edited shipped YAML,
+check that you ran `just shipped-schemas`.
+
 The library's own artifact is loaded the first time any envelope is admitted.
 Its definitions' validators are still compiled on first use; the artifact
 holds lowered schemas, never compiled validators.
+
+### Stored validator-cache digests
+
+Finding a compiled validator in the cache normally means serializing the
+schema to canonical JSON and hashing it, which costs as much as a large
+schema is long. An artifact can store that digest beside a lowered schema as
+a `CanonicalDigestRecord`, computed once at generation:
+
+```json
+"digest": { "revision": 1, "digest": "9ad01b57acd8b1fb", "judges_files": false }
+```
+
+`revision` is the canonical identity revision it was computed under; a
+record from another revision is refused (`UnusableRecord`) and that member is
+prepared from text, where the digest is computed again. `judges_files` says
+whether the schema reads a file context (see the validator cache in
+Darkmatter's schema definition topic). Darkmatter stores one for its
+baseline, and every prepared trigger payload carries one (Claudine's bundle
+records do); a host then builds the
+validator key of a merged schema from those digests without serializing it
+(`validate::LayeredIdentity`).
 
 ## Fresh generation
 

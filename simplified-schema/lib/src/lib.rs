@@ -137,7 +137,9 @@ pub use simplified::{
 };
 pub use span::{SourceSpan, Spanned, line_col_of_offset, line_of_offset};
 pub use timings::{CompileCache, ValidationStage, ValidationTimings};
-pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
+pub use validate::{
+    CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, LayerRole, LayeredIdentity, PositionMap, SchemaDigest, SchemaIdentity, ValidatorCache,
+};
 pub use validation::{
     CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer, SCHEMA_CONSTRAINT_CODE,
     SCHEMA_INVALID_FILE_REFERENCE_CODE, SCHEMA_KIND_CHECK_CODE, SCHEMA_MISSING_REQUIRED_CODE, SCHEMA_PREPARE_CODE,
@@ -151,7 +153,8 @@ pub use validation::{
 /// Cleared: the shared, conversion, completion-alternative, and
 /// example-target validator caches; the conversion-plan, format-validator,
 /// example-artifact, emitted-pattern, named-type parse, and root-arm caches. A host
-/// clears its own memos beside this call.
+/// clears its own memos beside this call. The shipped artifact registry (the
+/// envelope definitions) is kept.
 #[doc(hidden)]
 pub fn reset_process_caches() {
     validate::SHARED_VALIDATOR_CACHE.clear();

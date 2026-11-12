@@ -29,6 +29,7 @@ mod resolution_unavailable;
 mod root_union_assertions;
 mod schema_file_selection;
 mod schema_files;
+mod schema_identities;
 mod scanner_corpus;
 mod schema_object;
 mod schema_target_classification;

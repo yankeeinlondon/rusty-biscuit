@@ -4835,6 +4835,12 @@ fn resolve_one_example(
     Ok(object)
 }
 
+/// The revision of [`merge_baseline`]'s algorithm. A
+/// [`LayeredIdentity`](crate::validate::LayeredIdentity) folds it in, since
+/// the same ordered layers merged by another algorithm are another schema:
+/// increment it with any change to what a merge produces.
+pub const MERGE_ALGORITHM_REVISION: u32 = 1;
+
 /// Merges a baseline JSON Schema into a document JSON Schema using the
 /// property-keyed deep merge documented in the spec.
 ///

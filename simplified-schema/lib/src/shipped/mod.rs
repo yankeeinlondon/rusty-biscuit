@@ -7,7 +7,10 @@
 //! but only after [`accept`] proves the artifact describes exactly the text
 //! compiled into this binary. Anything else (a missing, malformed, stale, or
 //! incompatible artifact) is refused as a whole, and the owner prepares the
-//! text as it always has ([`load_or_prepare`]).
+//! text as it always has ([`load_or_prepare`]). An owner that accepts with
+//! [`accept_deferred`] checks each payload section on its first read
+//! instead, and a damaged section is refused on its own: only that item is
+//! prepared from text.
 //!
 //! Three crates own one artifact each, in dependency order: Simplified
 //! Schema (its envelope definitions), Darkmatter, and Claudine. This module
@@ -36,8 +39,8 @@
 //! ## Fresh generation
 //!
 //! [`generate`] encodes a payload the owner prepared with
-//! [`PreparationMode::Uncached`]: from current text, consulting no artifact
-//! and no process memo along its whole dependency chain. A freshness test
+//! [`PreparationMode::Uncached`]: from current text, consulting no artifact,
+//! registry, or identity-keyed memo along its whole dependency chain. A freshness test
 //! compares that output with the checked-in bytes ([`check_fresh`]).
 
 pub(crate) mod records;
@@ -91,6 +94,52 @@ impl<'de> Deserialize<'de> for Digest {
             )));
         }
         u64::from_str_radix(&text, 16).map(Self).map_err(serde::de::Error::custom)
+    }
+}
+
+/// A lowered schema's canonical validator-cache digest
+/// ([`SchemaDigest::canonical`](crate::validate::SchemaDigest::canonical)),
+/// computed at generation so a process that serves the schema never
+/// serializes it to find its validator. `revision` is the
+/// [`CANONICAL_IDENTITY_REVISION`](crate::validate::CANONICAL_IDENTITY_REVISION)
+/// it was computed under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalDigestRecord {
+    pub revision: u32,
+    pub digest: Digest,
+    pub judges_files: bool,
+}
+
+impl CanonicalDigestRecord {
+    /// The record of `schema`'s canonical digest, for generation.
+    #[must_use]
+    pub fn of(schema: &serde_json::Value) -> Self {
+        let digest = crate::validate::SchemaDigest::canonical(schema);
+        let crate::validate::SchemaIdentity::Canonical { revision, digest: hash } = digest.identity else {
+            unreachable!("a canonical digest has a canonical identity")
+        };
+        Self { revision, digest: Digest(hash), judges_files: digest.judges_files }
+    }
+
+    /// The digest this record holds.
+    ///
+    /// ## Errors
+    ///
+    /// The message for a record computed under another canonical identity
+    /// revision, whose digest this process would not reproduce.
+    pub fn digest(self) -> Result<crate::validate::SchemaDigest, String> {
+        if self.revision != crate::validate::CANONICAL_IDENTITY_REVISION {
+            return Err(format!(
+                "the digest was computed under canonical identity revision {}, not {}",
+                self.revision,
+                crate::validate::CANONICAL_IDENTITY_REVISION
+            ));
+        }
+        Ok(crate::validate::SchemaDigest {
+            identity: crate::validate::SchemaIdentity::canonical(self.digest.0),
+            judges_files: self.judges_files,
+        })
     }
 }
 
@@ -229,8 +278,9 @@ pub enum PreparationMode<'a> {
     /// memos are consulted.
     #[default]
     Runtime,
-    /// Generation: no artifact, registry, or memo is consulted along the
-    /// whole dependency chain; the freshly prepared lower data is passed in.
+    /// Generation: no artifact, registry, or identity-keyed memo is
+    /// consulted along the whole dependency chain; the freshly prepared lower
+    /// data is passed in.
     Uncached(&'a FreshLower),
 }
 
