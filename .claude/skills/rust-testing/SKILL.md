@@ -62,8 +62,17 @@ the wrong thing.
     across agents, each runs only its slice's tests and the full suite runs
     once, after merging. → [verification-scope.md](verification-scope.md)
 11. **An L1 test over 5 s is a failing test.** It passes on a development host
-    and times out on a 2-core CI runner. Make it fast; a `slow_` prefix or a
+    and times out on a 2-core CI runner. On a host under load the allowance is
+    10 s: a test between 5 and 10 s in a loaded run must be re-measured alone
+    before it counts, and one at 10 s or longer fails regardless. Make it fast; a `slow_` prefix or a
     nextest `slow-timeout` override is not a fix. → [test-speed.md](test-speed.md)
+12. **A green run on your host proves nothing about text the host supplies.**
+    Pull requests run only Linux and macOS, so an assertion on spawned output
+    that embeds the program name, a path, a line ending, a wrap point, or
+    ambient color first fails in the Windows nightly, after merge. Run the
+    checklist before asserting on it, and never count a `#[cfg(unix)]` twin
+    of your assertion as Windows coverage.
+    → [cli-output-testing.md](cli-output-testing.md#host-dependent-output)
 
 ## Decision Tree: "What tier should my test live in?"
 
@@ -182,7 +191,7 @@ the runner):
 | L2 WezTerm capture traps | [wezterm-harness-pitfalls.md](wezterm-harness-pitfalls.md) |
 | L2 Apple Terminal traps | [apple-terminal-harness-pitfalls.md](apple-terminal-harness-pitfalls.md) |
 | Browser render tests | [browser-testing.md](browser-testing.md) |
-| CLI output: channels, color modes, completions | [cli-output-testing.md](cli-output-testing.md) |
+| CLI output: channels, color modes, completions, host-dependent text | [cli-output-testing.md](cli-output-testing.md) |
 | TUI rendering and event/reducer tests | [tui-testing.md](tui-testing.md) |
 | Snapshot redaction | [snapshot-redaction.md](snapshot-redaction.md) |
 | Benchmarks: which tool, where they live | [performance-testing.md](performance-testing.md) |

@@ -66,6 +66,10 @@ and DMLS both read it.
 - Build the site over `DeclaredTypes::for_schema(Some(&effective))` (every
   layer: document, triggers, the merged JSON's `RawDeclarations`, layered
   definitions) without static frontmatter: a set value is runtime data.
+  `for_schema` holds the schema, not its projection: `RawDeclarations` (about
+  a quarter of a release `md compose` when it was eager) is built on the
+  first declaration read (`Work::RawDeclarationProjection`,
+  `tests/l1/raw_declaration_projection.rs`); keep new readers lazy too.
   `DeclaredTypes::new(simplified)` is the document layer alone (tests,
   callers with no `EffectiveSchema`). Host globals are typed by the host
   catalog (`with_global_catalog`; `EventRegistry::register_global_catalog`

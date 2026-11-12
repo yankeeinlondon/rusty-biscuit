@@ -151,7 +151,9 @@ flowchart TD
 An invalid trigger in an [embedded bundle](./definition.md#embedded-trigger-bundles)
 is skipped the same way. Its warning names it as
 `embedded:{bundle}/{file name}`, never as a file path, and the name stays
-claimed from later bundles.
+claimed from later bundles. A host that ships its bundle
+[prepared](./definition.md#prepared-bundles) cannot ship an invalid trigger
+this way: generating its artifact fails on one.
 
 ### Where the warning appears
 
@@ -376,6 +378,13 @@ The effective schema combines the baseline, matching triggers in their
 established order, and the document's own schema. Later declarations win for
 the same property. See [Merge Semantics](./definition.md#merge-semantics-baseline--document)
 for the complete precedence rules.
+
+The order also decides when a compiled validator is reused. Two documents
+matched by the same triggers in the same order, with the same baseline and
+`$schema`, share one validator (one per document folder when the schema
+checks files); the same triggers in another order get their own,
+because a later layer can win a property the other order would not (see
+[Validator Cache](./definition.md#validator-cache)).
 
 A type belongs to the source that declares it. A `node` in this trigger and a
 `node` in the document's own `$schema` remain different types. Recursive

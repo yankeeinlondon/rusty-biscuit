@@ -195,9 +195,20 @@ Each returns lists, not prose:
 
 Judge each item with "Stopping for a human" below. Record every item that does
 not need a human under `## Implementation decisions (informational)` in the
-review body, and put a one-line summary of each in `human_review_items` (see
-the readiness rules); they never stop the cycle.
+review body; they never stop the cycle. Only an item that passes the readiness
+rules' **worth the author's time** test also goes in `human_review_items`;
+expect most runs to have none.
 ::end-block
+
+### Correcting the implementation record
+
+When the implementation log or implementation record in `{{dir}}` states
+something about behavior that you have verified to be false (for example, it
+says a command fails when a direct run shows it succeeds), correct that
+statement in place and add a dated note saying what was wrong, what is true,
+and how you verified it. This is not a finding and not a `human_review_items`
+entry. It applies only to those two records: a false statement in code, tests,
+a `docs/` page, or a skill is a finding, and the spec is never edited this way.
 
 ### Stopping for a human
 
@@ -405,6 +416,8 @@ the level of verification appropriate for it. Reviewers MUST list any requiremen
 test is at the wrong level under "Findings" with severity at least "high".
 
 ::file "../_test-tiers.md"
+
+::file "../_slow-tests-fail.md"
 
 ## Closure
 

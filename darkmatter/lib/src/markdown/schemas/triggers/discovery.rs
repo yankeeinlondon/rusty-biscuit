@@ -39,7 +39,9 @@
 //!   bundle file claiming `kind: schema-trigger` becomes a trigger. Its
 //!   payload and imports resolve inside its bundle. An invalid bundle trigger
 //!   is a finding identified by bundle and document name, and still claims
-//!   its name from later bundles.
+//!   its name from later bundles. A surviving document of a bundle whose
+//!   [prepared form](super::prepared) matches it is served from that form
+//!   instead of being prepared.
 //!
 //! The user-facing contract is the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
@@ -261,7 +263,10 @@ impl TriggerRegistry {
     /// [`scan_with_embedded`]) is skipped unread. Every other bundle document
     /// is classified like a root file: one that does not claim
     /// `kind: schema-trigger` is an import target only. Each embedded
-    /// trigger's payload is resolved now, inside the bundle. A document that
+    /// trigger's payload is resolved now, inside the bundle, unless the
+    /// bundle's [prepared form](EmbeddedSchemaBundle::with_prepared) matches
+    /// the bundle: its entry is then used as generation checked it, and only
+    /// the envelope is parsed again. A document that
     /// claims the envelope but whose envelope or payload fails to load is
     /// skipped and reported in [`findings`](Self::findings); it claims its
     /// name all the same, so a later bundle never stands in for it.
@@ -276,6 +281,8 @@ impl TriggerRegistry {
         let base_dir = self.context.base_dir().to_path_buf();
         let mut loaded = Vec::new();
         let mut skipped = Vec::new();
+        // Asked only once a document survives filename selection.
+        let mut prepared: Option<Option<&'static super::prepared::PreparedTriggerBundle>> = None;
         for (name, text) in bundle.sorted_files() {
             if self.claimed_names.contains(name) {
                 continue;
@@ -284,7 +291,20 @@ impl TriggerRegistry {
                 bundle: bundle.name().to_string(),
                 name: name.to_string(),
             };
-            match load_embedded_trigger(bundle, name, text) {
+            let descriptor = bundle.prepared();
+            let served = descriptor
+                .and_then(|descriptor| *prepared.get_or_insert_with(|| (descriptor.provider)()))
+                .and_then(|prepared| prepared.load(&bundle, name));
+            let result = match served {
+                Some(served) => Ok(served),
+                None => {
+                    if descriptor.is_some() {
+                        crate::note_work!(ShippedRuntimePreparation);
+                    }
+                    load_embedded_trigger(bundle, name, text)
+                }
+            };
+            match result {
                 Ok(None) => {}
                 Ok(Some((envelope, payload))) => {
                     let trigger = LoadedTrigger {
@@ -373,7 +393,7 @@ impl TriggerRegistry {
 
 /// An embedded trigger's envelope and resolved payload, or `None` for a bundle
 /// document that does not claim `kind: schema-trigger`.
-type EmbeddedTriggerLoad = Option<(TriggerEnvelope, super::assemble::ResolvedPayload)>;
+pub(super) type EmbeddedTriggerLoad = Option<(TriggerEnvelope, super::assemble::ResolvedPayload)>;
 
 /// `(bundle name, document name, document text)`.
 type EmbeddedKey = (&'static str, String, &'static str);
@@ -732,8 +752,11 @@ pub fn scan_with_source(
             Ok(None) => continue,
             Ok(Some(envelope)) => envelope,
             Err(cause) => {
-                let cause = super::envelope::locate_trigger_error(cause, &content);
-                findings.push(InvalidTriggerFinding::new(trigger_source, cause).located_in(&content));
+                // One position holder per reported snapshot: the error's span
+                // and the finding's line share a single map.
+                let positions = super::envelope::TriggerSourcePositions::new(&content);
+                let cause = super::envelope::locate_trigger_error(cause, &positions);
+                findings.push(InvalidTriggerFinding::new(trigger_source, cause).located_in(&positions));
                 continue;
             }
         };

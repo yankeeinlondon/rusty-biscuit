@@ -52,6 +52,7 @@ pub mod resolve;
 pub mod rewrite;
 pub mod roots;
 mod schema_files;
+pub mod shipped;
 pub mod slots;
 pub mod triggers;
 pub mod yaml_documents;
@@ -122,29 +123,38 @@ use simplified_schema::{
 };
 use positions::ProblemPositions;
 
-/// The runtime baseline, prepared from the embedded table: its typed form with
-/// every import expanded, the shared definitions its references point into,
-/// and the pair lowered to JSON Schema.
-struct ShippedBaseline {
-    schema: SchemaRoot,
-    definitions: Arc<DefinitionTable>,
-    json_schema: Arc<Value>,
+use shipped::ShippedBaseline;
+
+/// The runtime baseline: the accepted shipped artifact's, or
+/// [`baseline_from_sources`].
+fn shipped_baseline() -> &'static ShippedBaseline {
+    shipped::registry().baseline()
 }
 
-/// Prepared and lowered once per process, on first use.
-static BASELINE: std::sync::OnceLock<ShippedBaseline> = std::sync::OnceLock::new();
-
-/// [`darkmatter_base_schema`]'s definition-free form, resolved on first use.
-static INLINE_BASELINE: std::sync::OnceLock<SchemaRoot> = std::sync::OnceLock::new();
-
-fn shipped_baseline() -> &'static ShippedBaseline {
+/// The runtime baseline prepared from the embedded table and lowered, once
+/// per process: the fallback when the shipped artifact was refused.
+pub(crate) fn baseline_from_sources() -> &'static ShippedBaseline {
+    static BASELINE: std::sync::OnceLock<ShippedBaseline> = std::sync::OnceLock::new();
     BASELINE.get_or_init(|| {
-        let (schema, definitions) = catalog::GlobalCatalog::darkmatter()
+        crate::note_work!(ShippedRuntimePreparation);
+        let (schema, definitions) = catalog::GlobalCatalog::darkmatter_from_sources()
             .baseline()
             .expect("Darkmatter's catalog declares `fm`");
         let json_schema = to_json_schema_with_definitions(&schema, &definitions)
             .unwrap_or_else(|error| panic!("the embedded baseline schema must lower: {error}"));
-        ShippedBaseline { schema, definitions, json_schema: Arc::new(json_schema) }
+        let digest = simplified_schema::SchemaDigest::canonical(&json_schema);
+        ShippedBaseline { schema, definitions, json_schema: Arc::new(json_schema), digest }
+    })
+}
+
+/// [`darkmatter_base_schema`]'s definition-free form resolved from the
+/// embedded table, once per process: the fallback when the shipped artifact
+/// was refused.
+pub(crate) fn inline_baseline_from_sources() -> &'static SchemaRoot {
+    static INLINE_BASELINE: std::sync::OnceLock<SchemaRoot> = std::sync::OnceLock::new();
+    INLINE_BASELINE.get_or_init(|| {
+        crate::note_work!(ShippedRuntimePreparation);
+        catalog::darkmatter_inline_baseline()
     })
 }
 
@@ -156,7 +166,7 @@ pub(crate) fn darkmatter_shared_baseline() -> (&'static SchemaRoot, &'static Arc
 }
 
 fn darkmatter_base_schema_ref() -> &'static SchemaRoot {
-    INLINE_BASELINE.get_or_init(catalog::darkmatter_inline_baseline)
+    shipped::registry().inline_baseline()
 }
 
 fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
@@ -175,7 +185,8 @@ fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
 /// expanded at each of its uses. The catalog declaration and the lowered
 /// baseline ([`darkmatter_base_json_schema`]) store a structured type the
 /// baseline uses at two or more sites once instead; both forms validate
-/// alike. It is prepared at first call and cached.
+/// alike. It comes from the shipped artifact ([`shipped`]), or is prepared
+/// at first call and cached when that artifact was refused.
 ///
 /// ## Examples
 ///
@@ -196,7 +207,8 @@ pub fn darkmatter_base_schema() -> SchemaRoot {
 /// Returns the Darkmatter baseline frontmatter schema as a compiled Draft
 /// 2020-12 JSON Schema value.
 ///
-/// The result is the baseline lowered once and cached, with each structured
+/// The result is the baseline as the shipped artifact holds it lowered (or,
+/// when that artifact was refused, lowered once and cached), with each structured
 /// type it uses at two or more sites emitted once under its root `$defs`;
 /// [`darkmatter_base_schema`] is the same baseline with those types expanded,
 /// and it validates alike. Each call returns an independent owned value;
@@ -268,6 +280,7 @@ pub struct DarkmatterSchemas {
 }
 
 use simplified_schema::prepared::{CompiledValidators, wrapped_root_arms};
+use simplified_schema::{LayerRole, LayeredIdentity, SchemaDigest};
 use simplified_schema::validate::SHARED_VALIDATOR_CACHE;
 
 /// Benchmarking seam: empties the process-wide schema caches so the next
@@ -278,7 +291,10 @@ use simplified_schema::validate::SHARED_VALIDATOR_CACHE;
 /// example-artifact, emitted-pattern, and named-type parse caches; the
 /// trigger payload and embedded-trigger memos; the trigger merge, phase
 /// derivation, and root-arm memos; the schema-slot resolution cache; and the calling thread's trigger-matcher regex cache. Compiled-in
-/// constants (the shipped baseline, the global catalog) are kept.
+/// data is kept: the shipped artifact registries (Darkmatter's baseline,
+/// global catalog, kind definitions, and function catalogs, and the
+/// library's envelope definitions) and the per-item preparations a refused
+/// artifact falls back to.
 ///
 /// Never call it from production code: it only discards work. Verdicts are
 /// unchanged; a reset makes the next lookup of each cache a miss.
@@ -374,6 +390,11 @@ struct BaselineSchema {
     /// refcount bump) instead of deep-cloning the whole baseline schema on the
     /// common baseline-only / baseline+document paths (F29).
     json_schema: Arc<Value>,
+    /// The canonical digest of `json_schema`, when known without serializing
+    /// it (the shipped baseline's, generated with its artifact). `None` for
+    /// a caller's baseline, whose digest the validator cache computes once
+    /// per allocation.
+    digest: Option<SchemaDigest>,
     advisories: Vec<SchemaAdvisory>,
     declarations: BaselineDeclarations,
 }
@@ -433,6 +454,8 @@ struct TriggerLayer {
     /// The resolved payload JSON Schema (guaranteed simple-object), shared
     /// with the registry that resolved it.
     json_schema: Arc<Value>,
+    /// The canonical digest of `json_schema`.
+    digest: SchemaDigest,
     /// The payload's SimplifiedSchema object shape, when it has one.
     shape: Option<Arc<SchemaShape>>,
     /// The cyclic named types `shape` reaches.
@@ -694,11 +717,29 @@ impl DarkmatterSchemas {
     ///
     /// Returns [`SchemaError::Baseline`] if the built-in schema is not a
     /// simple object schema. This indicates a library defect.
-    pub fn with_darkmatter_baseline_json_schema(mut self) -> Result<Self, SchemaError> {
-        let json_schema = Arc::clone(darkmatter_base_json_schema_arc());
-        simplified_schema::resolve::validate_baseline_schema(&json_schema)?;
+    pub fn with_darkmatter_baseline_json_schema(self) -> Result<Self, SchemaError> {
+        self.with_darkmatter_baseline_in(shipped::registry())
+    }
+
+    /// [`Self::with_darkmatter_baseline_json_schema`] with the baseline of
+    /// `registry`, for tests that inject a refused artifact. The baseline
+    /// check runs unless the baseline came from an accepted artifact, whose
+    /// generation ran it.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::with_darkmatter_baseline_json_schema`].
+    #[doc(hidden)]
+    pub fn with_darkmatter_baseline_in(mut self, registry: &shipped::Registry) -> Result<Self, SchemaError> {
+        let baseline = registry.baseline();
+        let json_schema = Arc::clone(&baseline.json_schema);
+        if !registry.baseline_is_accepted() {
+            crate::note_work!(BaselineCheck);
+            simplified_schema::resolve::validate_baseline_schema(&json_schema)?;
+        }
         self.baseline = Some(BaselineSchema {
             json_schema,
+            digest: Some(baseline.digest),
             advisories: Vec::new(),
             declarations: BaselineDeclarations::Darkmatter,
         });
@@ -711,9 +752,11 @@ impl DarkmatterSchemas {
         advisories: Vec<SchemaAdvisory>,
         declarations: BaselineDeclarations,
     ) -> Result<(), SchemaError> {
+        crate::note_work!(BaselineCheck);
         simplified_schema::resolve::validate_baseline_schema(&value)?;
         self.baseline = Some(BaselineSchema {
             json_schema: Arc::new(value),
+            digest: None,
             advisories,
             declarations,
         });
@@ -963,23 +1006,36 @@ impl DarkmatterSchemas {
             baseline: self.baseline.is_some(),
         };
 
-        let merged_json: Arc<Value> = match (&self.baseline, trigger_layers.is_empty(), doc_json) {
+        // The validator cache key is the layered identity of the layers
+        // merged, so the merged schema (the baseline alone is hundreds of
+        // kilobytes) is never serialized to find its validator.
+        let baseline = self.baseline.as_ref().map(|base| {
+            let digest = base.digest.unwrap_or_else(|| self.cache.canonical_digest_shared(&base.json_schema));
+            (&base.json_schema, digest)
+        });
+        let (merged_json, digest): (Arc<Value>, SchemaDigest) = match (baseline, trigger_layers.is_empty(), doc_json) {
             // Baseline only — share the Arc, no deep clone.
-            (Some(base), true, None) => Arc::clone(&base.json_schema),
+            (Some((json, digest)), true, None) => {
+                (Arc::clone(json), LayeredIdentity::new().layer(LayerRole::Baseline, digest).finish())
+            }
             (None, true, None) => return Ok(SiteSchema::Effective(None)),
             // A lone trigger payload is shared as resolved.
-            (None, false, None) if trigger_layers.len() == 1 => Arc::clone(&trigger_layers[0].json_schema),
-            (baseline, _, doc) => merged_trigger_schema(
-                baseline.as_ref().map(|base| &base.json_schema),
-                &trigger_layers,
-                doc,
-            )?,
+            (None, false, None) if trigger_layers.len() == 1 => (
+                Arc::clone(&trigger_layers[0].json_schema),
+                LayeredIdentity::new().layer(LayerRole::Trigger, trigger_layers[0].digest).finish(),
+            ),
+            (baseline, _, doc) => merged_trigger_schema(baseline, &trigger_layers, doc)?,
         };
 
         // Keep eager-file validation on the same request-scoped candidate plan
         // as expression-side `file_exists` and `frontmatter` resolution.
-        let validators =
-            CompiledValidators::build(&merged_json, &self.cache, Some(&base_dir), &self.file_resolution_context)?;
+        let validators = CompiledValidators::build_with_digest(
+            &merged_json,
+            digest,
+            &self.cache,
+            Some(&base_dir),
+            &self.file_resolution_context,
+        )?;
         let origins = build_origin_map_with_triggers(
             resolved.as_ref(),
             &trigger_layers,
@@ -1019,6 +1075,7 @@ impl DarkmatterSchemas {
                 .collect(),
             layers,
             json_schema: merged_json,
+            digest: Some(digest),
             origins,
             validators,
             base_dir: Some(base_dir),
@@ -1185,9 +1242,13 @@ impl DarkmatterSchemas {
                 payload.dependencies.clone(),
                 payload.advisories.clone(),
             );
+            // A prepared payload's digest was generated with it; any other is
+            // hashed once per allocation (a template's once per resolution).
+            let digest = payload.digest.unwrap_or_else(|| self.cache.canonical_digest_shared(&json_schema));
             layers.push(TriggerLayer {
                 source: trigger.source.clone(),
                 json_schema,
+                digest,
                 shape,
                 definitions,
                 dependencies,
@@ -1453,6 +1514,11 @@ pub struct EffectiveSchema {
     /// shared from the configured baseline by reference rather than deep-cloned
     /// per resolution (F29). Derefs to `&Value` transparently at read sites.
     pub json_schema: Arc<Value>,
+    /// The identity [`Self::json_schema`]'s validators and conversion plan
+    /// are cached under: the layered identity of the layers it was merged
+    /// from (and the phase it was projected to). `None` for a schema with no
+    /// tracked provenance, which is found by its canonical hash.
+    digest: Option<SchemaDigest>,
     /// Per-top-level-property origins (document vs baseline vs referenced
     /// file), so diagnostics can point `relatedInformation` at the schema
     /// source (R-5 Priority 2). Empty for root-union schemas, whose per-arm
@@ -1501,8 +1567,9 @@ impl EffectiveSchema {
 
     /// The conversion plan for [`Self::json_schema`].
     fn conversion(&self) -> &simplified_schema::coerce::ConversionPlan {
-        self.conversion.get_or_init(|| {
-            simplified_schema::coerce::ConversionPlan::for_hashed(SHARED_VALIDATOR_CACHE.shared_schema_hash(&self.json_schema))
+        self.conversion.get_or_init(|| match self.digest {
+            Some(digest) => simplified_schema::coerce::ConversionPlan::for_identity(digest.identity),
+            None => simplified_schema::coerce::ConversionPlan::for_hashed(SHARED_VALIDATOR_CACHE.shared_schema_hash(&self.json_schema)),
         })
     }
 
@@ -1587,6 +1654,7 @@ impl EffectiveSchema {
     /// and for layers no SimplifiedSchema represents. Projected on first use.
     pub fn raw_declarations(&self) -> &crate::markdown::compose::expression::RawDeclarations {
         self.raw_declarations.get_or_init(|| {
+            crate::note_work!(RawDeclarationProjection);
             Arc::new(crate::markdown::compose::expression::RawDeclarations::from_json_schema(&self.json_schema))
         })
     }
@@ -1749,6 +1817,7 @@ impl EffectiveSchema {
             trigger_definitions: Vec::new(),
             layers: SchemaLayers { document: true, ..SchemaLayers::default() },
             json_schema,
+            digest: None,
             origins,
             validators,
             base_dir: Some(base_dir),
@@ -1900,13 +1969,21 @@ impl EffectiveSchema {
             }
             None => (None, Arc::clone(&self.definitions), None),
         };
-        let json_schema = phase_json_schema(&self.json_schema, projected_document, phase)?;
+        let (json_schema, digest) = phase_json_schema(&self.json_schema, self.digest, projected_document, phase)?;
         let mut cache = SHARED_VALIDATOR_CACHE.clone().with_caller_origins(self.caller_origins.clone());
         if let Some(fallback) = self.file_ref_fallback_dir.as_deref() {
             cache = cache.with_file_ref_fallback_dir(fallback);
         }
-        let validators =
-            CompiledValidators::build(&json_schema, &cache, self.base_dir.as_deref(), &self.file_resolution_context)?;
+        let validators = match digest {
+            Some(digest) => CompiledValidators::build_with_digest(
+                &json_schema,
+                digest,
+                &cache,
+                self.base_dir.as_deref(),
+                &self.file_resolution_context,
+            )?,
+            None => CompiledValidators::build(&json_schema, &cache, self.base_dir.as_deref(), &self.file_resolution_context)?,
+        };
         let projected = Self {
             simplified: projected,
             raw_document: self.raw_document.clone(),
@@ -1917,6 +1994,7 @@ impl EffectiveSchema {
             trigger_definitions: self.trigger_definitions.clone(),
             layers: self.layers.clone(),
             json_schema,
+            digest,
             origins: self.origins.clone(),
             validators,
             base_dir: self.base_dir.clone(),
@@ -2352,16 +2430,25 @@ impl Default for ValidationOptions {
 
 struct Derivation {
     effective: Arc<Value>,
+    effective_digest: Option<SchemaDigest>,
     projected_document: Option<Value>,
     phase: SchemaPhase,
     derived: Arc<Value>,
+    derived_digest: Option<SchemaDigest>,
 }
 const RECENT_DERIVATIONS: usize = 8;
 /// [`phase_json_schema`]'s memo; module-level so [`reset_process_caches_for_bench`] can clear it.
 static DERIVATIONS: std::sync::Mutex<Vec<Derivation>> = std::sync::Mutex::new(Vec::new());
 
 /// `effective` judged at `phase`: the phase projection of its document schema
-/// (`projected_document`, when it has one) merged over it, made passive.
+/// (`projected_document`, when it has one) merged over it, made passive; and
+/// the identity of the result.
+///
+/// A result equal to `effective` is `effective` itself, with its identity
+/// `effective_digest`. A changed result is identified as `effective_digest`
+/// derived through the projection (the phase, the projected document's
+/// canonical digest, and the projection revision), or, when `effective`
+/// has no tracked identity, `None`: it is then found by its canonical hash.
 ///
 /// Memoized for the process over a few recent derivations, matched by `Arc`
 /// identity for `effective` (which an entry holds alive) and by value for the
@@ -2371,11 +2458,13 @@ static DERIVATIONS: std::sync::Mutex<Vec<Derivation>> = std::sync::Mutex::new(Ve
 /// validator for it.
 fn phase_json_schema(
     effective: &Arc<Value>,
+    effective_digest: Option<SchemaDigest>,
     projected_document: Option<Value>,
     phase: SchemaPhase,
-) -> Result<Arc<Value>, SchemaError> {
+) -> Result<(Arc<Value>, Option<SchemaDigest>), SchemaError> {
     let same = |derivation: &Derivation| {
         Arc::ptr_eq(&derivation.effective, effective)
+            && derivation.effective_digest == effective_digest
             && derivation.phase == phase
             && derivation.projected_document == projected_document
     };
@@ -2383,7 +2472,7 @@ fn phase_json_schema(
         let mut derivations = DERIVATIONS.lock().expect("phase schema memo poisoned");
         if let Some(index) = derivations.iter().position(same) {
             let hit = derivations.remove(index);
-            let derived = Arc::clone(&hit.derived);
+            let derived = (Arc::clone(&hit.derived), hit.derived_digest);
             derivations.push(hit);
             return Ok(derived);
         }
@@ -2396,10 +2485,15 @@ fn phase_json_schema(
     phase::make_passive(&mut json_schema);
     // Nothing to project and no eager file to make passive: the phase judges
     // the effective schema itself, and shares its compiled validator.
-    let derived = if json_schema == **effective {
-        Arc::clone(effective)
+    let (derived, derived_digest) = if json_schema == **effective {
+        (Arc::clone(effective), effective_digest)
     } else {
-        Arc::new(json_schema)
+        let digest = effective_digest.map(|digest| {
+            LayeredIdentity::derived_from(digest)
+                .phase_projection(phase, projected_document.as_ref().map(SchemaDigest::canonical))
+                .finish()
+        });
+        (Arc::new(json_schema), digest)
     };
 
     let mut derivations = DERIVATIONS.lock().expect("phase schema memo poisoned");
@@ -2408,11 +2502,13 @@ fn phase_json_schema(
     }
     derivations.push(Derivation {
         effective: Arc::clone(effective),
+        effective_digest,
         projected_document,
         phase,
         derived: Arc::clone(&derived),
+        derived_digest,
     });
-    Ok(derived)
+    Ok((derived, derived_digest))
 }
 
 struct Merge {
@@ -2420,13 +2516,18 @@ struct Merge {
     layers: Vec<Arc<Value>>,
     doc: Option<Value>,
     merged: Arc<Value>,
+    digest: SchemaDigest,
 }
 const RECENT_MERGES: usize = 8;
 /// [`merged_trigger_schema`]'s memo; module-level so [`reset_process_caches_for_bench`] can clear it.
 static MERGES: std::sync::Mutex<Vec<Merge>> = std::sync::Mutex::new(Vec::new());
 
-/// The merge of `baseline`, the trigger `layers` (in order), and the document
-/// schema `doc`, highest precedence last.
+/// The merge of `baseline` (its schema and canonical digest), the trigger
+/// `layers` (in order), and the document schema `doc`, highest precedence
+/// last; and the merge's [`LayeredIdentity`]: each layer's canonical digest
+/// in that order, under its role. The document's digest is the canonical
+/// digest of its fully resolved schema (imports, template results), so a
+/// changed import or template result is a changed identity.
 ///
 /// This is the library's generic layering,
 /// `doc.layer_under([baseline, ...layers])` on
@@ -2440,17 +2541,17 @@ static MERGES: std::sync::Mutex<Vec<Merge>> = std::sync::Mutex::new(Vec::new());
 /// judged several times per run, so re-merging them would dominate every
 /// verdict. An entry holds its inputs alive and is matched by `Arc` identity
 /// for the baseline and payloads and by value for the (small) document
-/// schema, so a hit is always the merge of equal inputs. The shared result
-/// also keeps the validator cache's pointer-keyed content hash warm, which is
-/// why a document schema with no trigger layer (alone or over the baseline)
-/// is memoized here too: each request resolves it to a new value.
+/// schema, so a hit is always the merge of equal inputs, and its identity
+/// theirs. A document schema with no trigger layer (alone or over the
+/// baseline) is memoized here too: each request resolves it to a new value,
+/// and a hit shares the result and skips hashing the document again.
 fn merged_trigger_schema(
-    baseline: Option<&Arc<Value>>,
+    baseline: Option<(&Arc<Value>, SchemaDigest)>,
     layers: &[TriggerLayer],
     doc: Option<Value>,
-) -> Result<Arc<Value>, SchemaError> {
+) -> Result<(Arc<Value>, SchemaDigest), SchemaError> {
     let same = |merge: &Merge| {
-        merge.baseline.as_ref().map(Arc::as_ptr) == baseline.map(Arc::as_ptr)
+        merge.baseline.as_ref().map(Arc::as_ptr) == baseline.map(|(json, _)| Arc::as_ptr(json))
             && merge.layers.len() == layers.len()
             && merge.layers.iter().zip(layers).all(|(held, layer)| Arc::ptr_eq(held, &layer.json_schema))
             && merge.doc == doc
@@ -2459,16 +2560,28 @@ fn merged_trigger_schema(
         let mut merges = MERGES.lock().expect("trigger merge memo poisoned");
         if let Some(index) = merges.iter().position(same) {
             let hit = merges.remove(index);
-            let merged = Arc::clone(&hit.merged);
+            let merged = (Arc::clone(&hit.merged), hit.digest);
             merges.push(hit);
             return Ok(merged);
         }
     }
 
+    let mut identity = LayeredIdentity::new();
+    if let Some((_, digest)) = baseline {
+        identity = identity.layer(LayerRole::Baseline, digest);
+    }
+    for layer in layers {
+        identity = identity.layer(LayerRole::Trigger, layer.digest);
+    }
+    if let Some(doc) = &doc {
+        identity = identity.layer(LayerRole::Document, SchemaDigest::canonical(doc));
+    }
+    let digest = identity.finish();
+
     // The lowest layer is borrowed as the first merge base; each higher one
     // is cloned because a merge consumes it.
     let (lowest, rest): (Option<&Value>, &[TriggerLayer]) = match (baseline, layers.split_first()) {
-        (Some(base), _) => (Some(base), layers),
+        (Some((base, _)), _) => (Some(base), layers),
         (None, Some((first, rest))) => (Some(&first.json_schema), rest),
         (None, None) => (None, layers),
     };
@@ -2491,12 +2604,13 @@ fn merged_trigger_schema(
         merges.remove(0);
     }
     merges.push(Merge {
-        baseline: baseline.cloned(),
+        baseline: baseline.map(|(json, _)| Arc::clone(json)),
         layers: layers.iter().map(|layer| Arc::clone(&layer.json_schema)).collect(),
         doc,
         merged: Arc::clone(&merged),
+        digest,
     });
-    Ok(merged)
+    Ok((merged, digest))
 }
 
 

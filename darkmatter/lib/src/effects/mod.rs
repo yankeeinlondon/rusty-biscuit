@@ -8,7 +8,7 @@
 pub mod catalog;
 mod error;
 mod fs_write;
-mod types;
+pub(crate) mod types;
 mod verbs;
 
 pub use catalog::{

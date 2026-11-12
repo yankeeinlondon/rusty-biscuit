@@ -471,8 +471,9 @@ fn run_for_help(fixture: &CliProcessFixture, args: &[&str]) -> (i32, String, Str
 /// Every Claudine help form on a composition command shows help and exits 0
 /// whether the file is omitted, absent, or present but unreadable — a help
 /// request is answered before the file requirement and never opens the file.
-/// A `--help` after the authored `--` belongs to the provider, so that run is
-/// an ordinary missing-document failure.
+/// Help before the command is the grouped root overview; help after it is the
+/// command's own screen. A `--help` after the authored `--` belongs to the
+/// provider, so that run is an ordinary missing-document failure.
 #[test]
 fn help_opens_no_composition_file() {
     let fixture = CliProcessFixture::named("own-help");
@@ -494,10 +495,18 @@ fn help_opens_no_composition_file() {
             vec![subcommand, &unreadable, "--codex", "-h"],
             vec!["--help", subcommand, &unreadable],
         ];
+        let command_help = format!("Usage: claudine {subcommand} ");
         for args in help_forms {
             let (code, stdout, stderr) = run_for_help(&fixture, &args);
             assert_eq!(code, 0, "{args:?}: {stderr}");
-            assert!(stdout.contains(ROOT_HELP), "{args:?} showed no help: {stdout}");
+            let help_index = args.iter().position(|token| *token == "--help" || *token == "-h");
+            let command_index = args.iter().position(|token| *token == subcommand);
+            let expected = if help_index < command_index {
+                ROOT_HELP
+            } else {
+                command_help.as_str()
+            };
+            assert!(stdout.contains(expected), "{args:?} showed no {expected:?} help: {stdout}");
         }
 
         let (code, stdout, stderr) = run_for_help(&fixture, &[subcommand, "missing.md", "--", "--help"]);

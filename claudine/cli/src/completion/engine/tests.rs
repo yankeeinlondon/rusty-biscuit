@@ -89,14 +89,24 @@ fn classifier_composition_flag_slot_routes_to_provider_flag() {
 
 #[test]
 fn composition_provider_flag_completer_is_catalog_derived() {
-    // Every provider's switch is offered — including kilo/pi/antigravity,
-    // which have no dedicated clap boolean field — so the derived surface
-    // never drifts as providers are added.
+    // Every provider's switch is offered, so the derived surface never
+    // drifts as providers are added.
     let a = argv(&["claudine", "compose", "--"]);
     let got = run_composition_provider_flag("--", &a, 2);
     for flag in ["--claude", "--kilo", "--pi", "--antigravity"] {
         assert!(got.iter().any(|c| c == flag), "{flag} missing: {got:?}");
     }
+    // Clap now declares the same switches, so the catalog/clap merge must
+    // emit each provider token exactly once.
+    for token in crate::completion::root_menu::wrapper_tokens() {
+        let flag = format!("--{token}");
+        let count = got.iter().filter(|c| **c == flag).count();
+        assert_eq!(count, 1, "{flag} offered {count} times: {got:?}");
+    }
+    let mut unique = got.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), got.len(), "duplicate candidates: {got:?}");
     // Prefix filtering keeps only matching switches. (argv[current_index]
     // must equal the partial — the clap merge reads the token from argv.)
     let narrowed_argv = argv(&["claudine", "compose", "--kil"]);

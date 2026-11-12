@@ -1075,6 +1075,80 @@ bundle. The embedded copy is the **last** location:
 `md` and DMLS register no embedded bundle. They see Claudine's schemas only
 when a disk bundle is reachable.
 
+### How the built-in copy is prepared
+
+Turning a trigger file into something a document can be checked against
+takes work: each payload's imports are resolved, the result is converted
+to JSON Schema, and it is checked to merge and compile. The host catalog
+`globals.yaml` is resolved the same way. Instead of repeating that work in
+every `claudine` process, the result is checked into the repository as
+`claudine/lib/generated/shipped.json` (the **shipped artifact**) and compiled
+into the binary next to the eight files and `globals.yaml`.
+
+```mermaid
+flowchart TD
+    B["claudine starts: bundle files, globals.yaml,<br/>and shipped.json are compiled in"] --> H{"does shipped.json describe exactly<br/>these texts, the current Simplified Schema<br/>and Darkmatter artifacts, and this code?"}
+    H -- yes --> U["use the prepared bundle and host catalog"]
+    H -- no --> T["prepare from the compiled-in text,<br/>as before (same result, slower)"]
+    U --> D["trigger discovery picks files by name as always"]
+    T --> D
+    D --> W{"which file won the name?"}
+    W -- "embedded file" --> P["prepared entry (or text, if refused)"]
+    W -- "disk file" --> R["the disk file is prepared at run time"]
+```
+
+**What you do.** After editing any file in `claudine/schemas/` (the bundle
+or `globals.yaml`), or code that changes how they are prepared, run from the
+repository root:
+
+```sh
+just shipped-schemas
+```
+
+It regenerates Simplified Schema's, Darkmatter's, and Claudine's artifacts in
+that order, because Claudine's is built over the other two. Inside `claudine/`,
+`just shipped-schemas` rewrites only Claudine's artifact and `just
+shipped-schemas --check` only reports whether it is current; both stop and
+name the root command when either lower artifact is out of date. If you
+forget, the L1 test `shipped_artifacts::shipped_artifact_is_fresh` fails with
+the same command in its message. A code-only change that alters the prepared
+result also increments `PREPARATION_REVISION` in
+[`schema/shipped.rs`](../../lib/src/composition/schema/shipped.rs) (see
+[When to bump the preparation revision](../../../simplified-schema/docs/topics/shipped-artifacts.md#when-to-bump-the-preparation-revision)).
+
+**When the artifact does not fit, nothing breaks.** The artifact is used only
+when its header proves it was generated from exactly the compiled-in texts,
+over the current lower artifacts, at the current preparation revision. When
+any of that is not true (an edited YAML file, a stale lower artifact, a
+damaged record), the artifact is refused and Claudine prepares from the text
+as it did before, with the same result; no warning is printed. The bundle and
+the host catalog are separate sections, so a damaged catalog record leaves the
+prepared bundle in use, and the other way around.
+
+**The selection rules above do not change.** The prepared form is consulted
+only after discovery has chosen a file for each name:
+
+- A same-name file in a disk schema location still wins. It is prepared from
+  disk at run time, with every check, while the embedded files it did not
+  replace still come from the artifact. For example, a
+  `schemas/claudine.yaml` at a repository's root replaces the built-in
+  `claudine.yaml` trigger for documents in that repository, while the
+  built-in `inline-compose.yaml` and `sequence.yaml` triggers are still
+  served prepared.
+- Shadowing changes which schema a document is checked against; it is not a
+  way to make a command or a test faster. The built-in triggers are already
+  prepared, so a test that replaces `claudine.yaml` with a smaller schema
+  only stops checking what users get. Shadow a trigger only when the
+  shadowing itself, or a custom definition, is what the test is about.
+- A bundle that is not exactly Claudine's (another name, or any file whose
+  text differs) is prepared from its own text.
+- `md` and DMLS do not read Claudine's artifact. DMLS still reads the host
+  catalog `globals.yaml` and `globals.lifecycle.json` from disk, as described
+  in [What Claudine adds to expression checking](#what-claudine-adds-to-expression-checking).
+
+How artifacts are encoded, checked, and loaded is described in
+[Shipped Artifacts](../../../simplified-schema/docs/topics/shipped-artifacts.md).
+
 ### When a trigger is invalid
 
 A trigger file that cannot be used, such as an unfinished

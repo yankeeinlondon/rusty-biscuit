@@ -22,7 +22,13 @@ the layer maintainable as the CLI surface grows.
 
 ```mermaid
 flowchart LR
-    A["std::env::args_os()"] --> B["argv::normalize"]
+    A["std::env::args_os()"] --> CI["completion::maybe_complete<br/>(COMPLETE=&lt;shell&gt; exits here)"]
+    CI --> H{"argv::select_composition_help<br/>(original argv)"}
+    H -- "help before the command" --> HR["grouped root help"]
+    H -- "help after the command" --> HC["that command's clap help"]
+    HR --> X["exit 0"]
+    HC --> X
+    H -- "no help selected" --> B["argv::normalize"]
     subgraph B["argv::normalize"]
         direction TB
         R1["Rule 1 — provider boolean rewrite<br/><i>composition subcommands only</i>"]
@@ -45,10 +51,44 @@ flowchart LR
     D --> E["Commands dispatch"]
 ```
 
-`main.rs` collects argv once, hands it to `argv::normalize`, and reuses
-the same normalized vector for the `--plain` pre-scan and for every
-subsequent clap parse pass. Library code never touches argv and
-therefore never pre-parses.
+`main.rs` collects argv once. Before anything rewrites it,
+`argv::select_composition_help` decides whether the invocation is a help
+request for a composition command (see
+[Composition help is selected first](#composition-help-is-selected-first)).
+Otherwise the argv goes to `argv::normalize`, and the same normalized vector
+serves the `--plain` pre-scan and every subsequent clap parse pass. Library
+code never touches argv and therefore never pre-parses.
+
+### Composition help is selected first
+
+A help request for `compose`, `inline-compose`, or `sequence` is answered
+from the argv exactly as typed, before normalization, the ownership
+partition, configuration, tracing, or any composition work:
+
+```sh
+claudine compose -h                       # compose's own help
+claudine compose missing.md --gemini --help   # compose's own help; no file is read
+claudine --help compose prompt.md         # the grouped root overview
+claudine compose prompt.md -- --help      # not help: forwarded to the provider
+```
+
+The selector finds the command the same way the rest of the pre-parser does
+(`find_subcommand`: root options and the value of `--debug` are skipped, and
+the first command-shaped token decides), then takes the first exact `-h` or
+`--help` before the first literal `--`. Before the command it means the
+grouped root overview; after it, the command's own screen, rendered by
+clap from the same command model normal parsing uses (`build_cli_command`).
+Exact `--plain` on either side of the command disables color. The process
+exits 0 through `shutdown::exit_before_runtime`.
+
+Selection never validates the other tokens. That is the point: an unknown
+provider, a missing option value, malformed `--set` JSON, or conflicting
+switches would otherwise fail in the partition or in clap before help could
+be shown. Tokens are compared exactly, so `name=--help`, `--help=x`, and
+`-hh` are not help. Three things leave the argv to the ordinary path:
+completion mode (`COMPLETE` set, or the `__complete` command), a root
+`-V`/`--version` before the command and before any help token, and a help
+token only after `--`, which belongs to the provider.
 
 ## Pre-parsing stage
 
@@ -60,7 +100,7 @@ rules in a fixed order, and returns the rewritten vector:
 |---|---|---|
 | **Rule 1** | Catalog-derived `--<provider>` booleans → `--provider <slug>` | `compose`, `inline-compose`, `sequence` |
 | **Rule 2** | Fuzzy canonicalization of `--provider <value>` and `--provider=<value>` via `Provider::fuzzy_match_cli_name` | Any subcommand (flag-driven) |
-| **Rule 4** | Hoist a trailing `--help` / `-h` to argv position 1 so the root custom help handler fires | `compose`, `inline-compose`, `sequence` |
+| **Rule 4** | Hoist a trailing `--help` / `-h` to argv position 1, so a normalized argv never traps it in the greedy positional (the executable has already answered such requests; see above) | `compose`, `inline-compose`, `sequence` |
 
 **Retired: Rule 3.** A former Rule 3 inserted a synthetic `--` separator to
 protect trailing setters. It was removed when composition gained
@@ -77,7 +117,9 @@ Help and version never reach ownership, so they never open a file. The same
 page documents the forwarding notice,
 redaction, and correlated error report that composition and the direct
 wrappers share, and how a lifecycle `resume` re-sends the tail.
-Rule 4 still runs so `--help` is hoisted before the partition sees it.
+In the executable a composition help request exits before normalization, so
+the partition never sees one. Rule 4 remains a normalization contract for the
+other callers of `argv::normalize`, such as completion ownership.
 
 For the token-level semantics of each rule — including every pass-through
 guarantee and the full corner-case matrix — see
@@ -144,28 +186,27 @@ standard clap error.
 Several properties of the clap surface shape the pre-parser's rules:
 
 - `Cli` sets `disable_help_flag = true` and declares its own non-global
-  `help: bool`. Composition subcommands therefore never inherit a
-  functional `--help` handler. Rule 4 exists precisely to route
-  `--help` / `-h` into the root handler on those subcommands. Because that
-  root `help` is an ordinary Boolean, clap would validate the subcommand's
-  required arguments before reporting it; `parse_cli_from` therefore answers
-  a root help request even when that validation fails, so
-  `claudine compose --help` needs no file.
-- Every other subcommand, at every depth (`budget grant`, `mcp alias`),
-  gets an injected `--help` / `-h` of clap's own help action, which clap
-  handles before required-argument validation. Direct wrappers keep their
-  own help screen instead.
+  `help: bool` for the grouped overview. Every subcommand except the direct
+  wrappers, at every depth (`compose`, `budget grant`, `mcp alias`), gets an
+  injected `--help` / `-h` of clap's own help action, which clap handles
+  before required-argument validation. Direct wrappers keep their own help
+  screen instead. For the composition commands, help is selected from the
+  original argv before clap runs at all (see
+  [Composition help is selected first](#composition-help-is-selected-first)),
+  because the partition or an invalid option beside the help token could
+  otherwise fail first.
 - `ComposeArgs`, `InlineComposeArgs`, and `SequenceArgs` each expose a
   greedy multi-value positional (`#[arg(num_args = 1..)]`) that collects
   files plus `key=value` setters in any order. The ownership partition
   holds back everything after the file, so this positional only ever
   receives the file and the setters before it; type-aware ownership later
-  adds the setters and positionals after the file. Rule 4 handles the
-  trailing `--help` case separately.
-- The original seven provider booleans on `SharedComposeArgs` are retained only
-  as clap help entries. Rule 1 accepts every catalog-derived provider boolean,
-  including providers without a dedicated struct field, and rewrites it before
-  clap sees it. `explicit_provider()` therefore reads only `self.provider`.
+  adds the setters and positionals after the file. A trailing `--help`
+  never reaches this collector in the executable; Rule 4 keeps normalized
+  argv safe from it for other callers.
+- `SharedComposeArgs` declares one boolean for every catalog-derived provider
+  shortcut (`--claude` … `--antigravity`), so all ten appear in the command
+  help. Rule 1 rewrites each to `--provider <slug>` before clap sees it, and
+  `explicit_provider()` reads only `self.provider`.
 - `Provider::fuzzy_match_cli_name` is the single source of truth for
   fuzzy provider name resolution. Rule 2 delegates to it so the same
   fuzzy behavior applied to `--provider <value>` remains intact after
@@ -197,8 +238,9 @@ want `--help` as a value.
 This is structurally unavoidable in clap's derive model without giving
 up either the greedy positional or help recognition. The pre-parser and
 ownership partition convert argv into a shape clap already handles correctly:
-`--help` is hoisted to a root-level flag position, and the arguments after
-the file are held back for type-aware ownership before clap parses.
+the arguments after the file are held back for type-aware ownership before
+clap parses. A help request is answered even earlier, from the original argv,
+so today the command above prints `compose`'s own help and exits 0.
 
 ### 2. Catalog-derived provider booleans plus `--provider`
 

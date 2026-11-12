@@ -19,11 +19,13 @@ use super::schema_interactive::emit_dropped_optional_warnings;
 /// in any order. Inline setters override `--set` on overlapping keys; reserved
 /// per-step overlay keys still win over both.
 #[derive(Debug, Clone, Args)]
+#[command(after_help = super::compose::composition_help_footer!("sequence", "sequence.md"))]
 pub struct SequenceArgs {
     #[command(flatten)]
     pub shared: SharedComposeArgs,
 
-    /// File reference and/or `key=value` setters.
+    /// One required file reference, then optional `key=value` setters
+    /// (overriding `--set`) and arguments for the provider.
     #[arg(value_name = "ARG", num_args = 1.., required = true)]
     pub args: Vec<String>,
 
@@ -460,6 +462,9 @@ mod tests {
             kimicode: false,
             opencode: false,
             qwen: false,
+            kilo: false,
+            pi: false,
+            antigravity: false,
             exclude: Vec::new(),
             yolo: false,
             interactive: false,

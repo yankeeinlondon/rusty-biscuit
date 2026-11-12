@@ -322,8 +322,9 @@ fn collect_supplied_setter_names(argv: &[String], current_index: usize) -> HashS
 /// argv normalizer's Rule 1 rewrites each to `--provider <slug>`), then
 /// merges clap's other composition flags (`--model`, `--output`,
 /// `--provider`, …) so the whole flag surface completes. Deduped, providers
-/// first. Kilo/Pi/Antigravity (and any future provider) appear automatically
-/// even though they have no dedicated clap boolean field.
+/// first. The provider switches clap also declares (every current provider
+/// has a boolean field) are emitted once, from the catalog; a future provider
+/// still appears before its clap field lands.
 fn run_composition_provider_flag(
     partial: &str,
     argv: &[String],

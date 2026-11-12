@@ -43,6 +43,8 @@ use std::{
 use std::fs;
 
 use biscuit_file::FileResolutionContext;
+
+use crate::shipped::PreparationMode;
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
@@ -55,7 +57,7 @@ use super::{
     simplified::{
         AlphanumericOptions, DefKey, DefNamespace, DefinitionTable, SchemaConstraintConflictKind,
         SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaDeclaration, SchemaReferenceSite, SchemaSourceId, SchemaSourceMap,
-        SchemaSourcePath, SchemaUnionRejection, parse_standalone_schema_document, parse_yaml_schema,
+        SchemaSourcePath, SchemaUnionRejection, parse_standalone_schema_document, parse_standalone_schema_document_with_mode, parse_yaml_schema,
         to_json_schema, to_json_schema_with_definitions,
         grammar::{is_suggestion_list, suggestion_list_span},
         types::{
@@ -1337,11 +1339,25 @@ pub fn parse_referenced_schema_document(
     text: &str,
     path: &Path,
 ) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
+    parse_referenced_schema_document_with_mode(text, path, PreparationMode::Runtime)
+}
+
+/// [`parse_referenced_schema_document`] admitted against the envelope
+/// definitions `mode` prepares with.
+///
+/// ## Errors
+///
+/// As [`parse_referenced_schema_document`].
+pub fn parse_referenced_schema_document_with_mode(
+    text: &str,
+    path: &Path,
+    mode: PreparationMode<'_>,
+) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
     let selected_by_kind = || SchemaError::NotASchemaDocument {
         path: path.to_path_buf(),
         reason: NotSchemaReason::SelectedByKind,
     };
-    match parse_standalone_schema_document(text, path) {
+    match crate::simplified::parse_standalone_schema_document_with_mode(text, path, mode) {
         Ok(Some(document)) if document.envelope == StandaloneSchemaEnvelope::YamlSchema => Err(selected_by_kind()),
         Err(_) if crate::simplified::standalone::claims_yaml_schema(text) => Err(selected_by_kind()),
         other => other,
@@ -1525,6 +1541,21 @@ pub fn prepare_embedded_schema_in(
     bundle: &str,
     shipped: ShippedSources,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    prepare_embedded_schema_with_mode(path, documents, bundle, shipped, PreparationMode::Runtime)
+}
+
+/// [`prepare_embedded_schema_in`] in `mode`.
+/// The same preparation in `mode`: [`PreparationMode::Uncached`] admits
+/// against a generation's freshly prepared envelope definitions and consults
+/// no shipped artifact or named-type memo, for the shipped-artifact
+/// generators.
+pub fn prepare_embedded_schema_with_mode(
+    path: &str,
+    documents: &[EmbeddedDocument<'_>],
+    bundle: &str,
+    shipped: ShippedSources,
+    mode: PreparationMode<'_>,
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let unsupported = |message: &str| SchemaError::SchemaDocument {
         path: PathBuf::from(path),
         message: message.to_string(),
@@ -1533,7 +1564,7 @@ pub fn prepare_embedded_schema_in(
     };
     let document = embedded::find(documents, path)
         .ok_or_else(|| unsupported("not a registered embedded schema document"))?;
-    let Some(standalone) = parse_referenced_schema_document(document.text, Path::new(path))? else {
+    let Some(standalone) = parse_referenced_schema_document_with_mode(document.text, Path::new(path), mode)? else {
         return Err(SchemaError::NotASchemaDocument {
             path: PathBuf::from(path),
             reason: NotSchemaReason::NoSchemaProperty,
@@ -1552,7 +1583,7 @@ pub fn prepare_embedded_schema_in(
             return Err(unsupported("an embedded schema cannot be a whole-file reference"));
         }
     };
-    lower_embedded_schema(schema, standalone.local_types.as_ref(), path, documents, bundle, Sharing::Automatic, shipped)
+    lower_embedded_schema(schema, standalone.local_types.as_ref(), path, documents, bundle, Sharing::Automatic, shipped, mode)
 }
 
 /// Prepares the exported `$schema` of the embedded `kind: yaml-schema`
@@ -1573,6 +1604,20 @@ pub fn prepare_embedded_yaml_schema(
     documents: &[EmbeddedDocument<'_>],
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
+    prepare_embedded_yaml_schema_with_mode(path, documents, shipped, PreparationMode::Runtime)
+}
+
+/// [`prepare_embedded_yaml_schema`] in `mode`.
+/// The same preparation in `mode`: [`PreparationMode::Uncached`] admits
+/// against a generation's freshly prepared envelope definitions and consults
+/// no shipped artifact or named-type memo, for the shipped-artifact
+/// generators.
+pub fn prepare_embedded_yaml_schema_with_mode(
+    path: &str,
+    documents: &[EmbeddedDocument<'_>],
+    shipped: ShippedSources,
+    mode: PreparationMode<'_>,
+) -> Result<ResolvedSchema, SchemaError> {
     let refused = || SchemaError::NotASchemaDocument {
         path: PathBuf::from(path),
         reason: NotSchemaReason::NoSchemaProperty,
@@ -1583,7 +1628,7 @@ pub fn prepare_embedded_yaml_schema(
         source: None,
         span: None,
     })?;
-    let standalone = parse_standalone_schema_document(document.text, Path::new(path))?
+    let standalone = parse_standalone_schema_document_with_mode(document.text, Path::new(path), mode)?
         .filter(|standalone| standalone.envelope == StandaloneSchemaEnvelope::YamlSchema)
         .ok_or_else(refused)?;
     let SchemaDeclaration::Schema(schema) = standalone.declaration else {
@@ -1594,7 +1639,8 @@ pub fn prepare_embedded_yaml_schema(
             span: None,
         });
     };
-    lower_embedded_definition(schema, standalone.local_types.as_ref(), path, documents, shipped)
+    lower_embedded_schema(schema, standalone.local_types.as_ref(), path, documents, "", Sharing::Automatic, shipped, mode)
+        .map(|(resolved, _)| resolved)
 }
 
 /// Prepares the exported `$schema` of the `kind: yaml-schema` document at
@@ -1712,7 +1758,7 @@ pub(crate) fn lower_embedded_definition(
     documents: &[EmbeddedDocument<'_>],
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    lower_embedded_schema(schema, local_types, path, documents, "", Sharing::Automatic, shipped)
+    lower_embedded_schema(schema, local_types, path, documents, "", Sharing::Automatic, shipped, PreparationMode::Runtime)
         .map(|(resolved, _)| resolved)
 }
 
@@ -1731,6 +1777,22 @@ pub fn prepare_embedded_inline_schema(
     bundle: &str,
     shipped: ShippedSources,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    prepare_embedded_inline_schema_with_mode(value, importer, documents, bundle, shipped, PreparationMode::Runtime)
+}
+
+/// [`prepare_embedded_inline_schema`] in `mode`.
+/// The same preparation in `mode`: [`PreparationMode::Uncached`] admits
+/// against a generation's freshly prepared envelope definitions and consults
+/// no shipped artifact or named-type memo, for the shipped-artifact
+/// generators.
+pub fn prepare_embedded_inline_schema_with_mode(
+    value: &YamlValue,
+    importer: &str,
+    documents: &[EmbeddedDocument<'_>],
+    bundle: &str,
+    shipped: ShippedSources,
+    mode: PreparationMode<'_>,
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let schema = parse_yaml_schema(value)?;
     if matches!(schema, SchemaRoot::Union(_)) {
         return Err(SchemaError::SchemaDocument {
@@ -1740,7 +1802,7 @@ pub fn prepare_embedded_inline_schema(
             span: None,
         });
     }
-    lower_embedded_schema(schema, None, importer, documents, bundle, Sharing::Automatic, shipped)
+    lower_embedded_schema(schema, None, importer, documents, bundle, Sharing::Automatic, shipped, mode)
 }
 
 /// [`prepare_embedded_inline_schema`] for one global catalog declaration,
@@ -1753,6 +1815,22 @@ pub fn prepare_embedded_catalog_declaration(
     sharing: Sharing,
     shipped: ShippedSources,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    prepare_embedded_catalog_declaration_with_mode(value, importer, documents, sharing, shipped, PreparationMode::Runtime)
+}
+
+/// [`prepare_embedded_catalog_declaration`] in `mode`.
+/// The same preparation in `mode`: [`PreparationMode::Uncached`] admits
+/// against a generation's freshly prepared envelope definitions and consults
+/// no shipped artifact or named-type memo, for the shipped-artifact
+/// generators.
+pub fn prepare_embedded_catalog_declaration_with_mode(
+    value: &YamlValue,
+    importer: &str,
+    documents: &[EmbeddedDocument<'_>],
+    sharing: Sharing,
+    shipped: ShippedSources,
+    mode: PreparationMode<'_>,
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let schema = parse_yaml_schema(value)?;
     if matches!(schema, SchemaRoot::Union(_)) {
         return Err(SchemaError::SchemaDocument {
@@ -1762,11 +1840,12 @@ pub fn prepare_embedded_catalog_declaration(
             span: None,
         });
     }
-    lower_embedded_schema(schema, None, importer, documents, "", sharing, shipped)
+    lower_embedded_schema(schema, None, importer, documents, "", sharing, shipped, mode)
 }
 
 /// Expands a single-object embedded schema authored at `path` and lowers it,
 /// alongside the virtual paths of `path` and every document it imported.
+#[allow(clippy::too_many_arguments)]
 fn lower_embedded_schema(
     schema: SchemaRoot,
     local_types: Option<&SchemaShape>,
@@ -1775,6 +1854,7 @@ fn lower_embedded_schema(
     bundle: &str,
     sharing: Sharing,
     shipped: ShippedSources,
+    mode: PreparationMode<'_>,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let mut definitions = DefinitionTable::default();
     let (schema, mut reads) = expand_imports(
@@ -1783,7 +1863,7 @@ fn lower_embedded_schema(
         Path::new(""),
         DefNamespace::Embedded(path.to_string()),
         &if local_types.is_some() { SchemaSourcePath::root().property("$schema") } else { SchemaSourcePath::root() },
-        NamespaceSource::Embedded { documents, bundle },
+        NamespaceSource::Embedded { documents, bundle, mode },
         sharing,
         // Embedded imports resolve lexically in the table and probe no disk.
         &mut BTreeSet::new(),
@@ -2257,6 +2337,9 @@ enum NamespaceSource<'a> {
     Embedded {
         documents: &'a [EmbeddedDocument<'a>],
         bundle: &'a str,
+        /// Whether the shipped artifacts and process memos may serve what
+        /// this expansion reads, or a generation prepares it freshly.
+        mode: PreparationMode<'a>,
     },
 }
 
@@ -3212,12 +3295,12 @@ impl ImportEngine<'_> {
                     (path, canonical)
                 }
             }
-            NamespaceSource::Embedded { documents, bundle } => {
-                let (documents, bundle) = (*documents, *bundle);
+            NamespaceSource::Embedded { documents, bundle, mode } => {
+                let (documents, bundle, mode) = (*documents, *bundle, *mode);
                 let DefNamespace::Embedded(importer) = &current.key else {
                     unreachable!("an embedded expansion holds only embedded namespaces")
                 };
-                return self.resolve_embedded_namespace(documents, bundle, importer, reference);
+                return self.resolve_embedded_namespace(documents, bundle, importer, reference, mode);
             }
         };
 
@@ -3275,6 +3358,7 @@ impl ImportEngine<'_> {
         bundle: &str,
         importer: &str,
         reference: &str,
+        mode: PreparationMode<'_>,
     ) -> Result<Namespace, SchemaError> {
         let invalid = |reason: String| SchemaError::SchemaDocument {
             path: PathBuf::from(importer),
@@ -3296,7 +3380,7 @@ impl ImportEngine<'_> {
                     invalid(format!("`{target}` is not an embedded schema document"))
                 })?;
                 let named_types =
-                    Arc::new(named_types_from_text(document.text, Path::new(document.path))?);
+                    Arc::new(named_types_from_text_in(document.text, Path::new(document.path), mode)?);
                 self.embedded_cache.insert(target.clone(), Arc::clone(&named_types));
                 named_types
             }
@@ -3313,13 +3397,17 @@ impl ImportEngine<'_> {
     /// dependency edge, since a shipped document is an immutable build input
     /// and names no host file.
     fn shipped_namespace(&mut self, path: &str) -> Result<Namespace, SchemaError> {
-        if matches!(self.source, NamespaceSource::Embedded { .. }) {
-            self.dependencies.insert(PathBuf::from(path));
-        }
+        let mode = match self.source {
+            NamespaceSource::Embedded { mode, .. } => {
+                self.dependencies.insert(PathBuf::from(path));
+                mode
+            }
+            NamespaceSource::Files { .. } => PreparationMode::Runtime,
+        };
         let named_types = match self.shipped_cache.get(path) {
             Some(cached) => Arc::clone(cached),
             None => {
-                let named_types = shipped_named_types(self.shipped, path)?;
+                let named_types = shipped_named_types(self.shipped, path, mode)?;
                 self.shipped_cache.insert(path.to_string(), Arc::clone(&named_types));
                 named_types
             }
@@ -3349,9 +3437,9 @@ static SHIPPED_NAMED_TYPES: std::sync::LazyLock<std::sync::Mutex<HashMap<(&'stat
     std::sync::LazyLock::new(Default::default);
 
 /// A schema document's top-level named types, unexpanded.
-struct NamedTypes {
-    properties: IndexMap<String, PropertyDef>,
-    root: SchemaSourcePath,
+pub(crate) struct NamedTypes {
+    pub(crate) properties: IndexMap<String, PropertyDef>,
+    pub(crate) root: SchemaSourcePath,
 }
 
 impl std::ops::Deref for NamedTypes {
@@ -3370,12 +3458,33 @@ pub(crate) fn reset_process_caches() {
 }
 
 /// The named types of the shipped partial registered at `path`.
-fn shipped_named_types(shipped: ShippedSources, path: &str) -> Result<Arc<NamedTypes>, SchemaError> {
+///
+/// At run time an accepted shipped artifact serves the table when the host
+/// attached one ([`ShippedSources::with_prepared`]) and the documents it
+/// carries are the ones the artifact was prepared from; otherwise the
+/// partial is parsed once per process. A generation
+/// ([`PreparationMode::Uncached`]) parses it every time.
+fn shipped_named_types(
+    shipped: ShippedSources,
+    path: &str,
+    mode: PreparationMode<'_>,
+) -> Result<Arc<NamedTypes>, SchemaError> {
     let document = embedded::find(shipped.documents(), path).expect("the caller found the shipped document");
+    if let PreparationMode::Uncached(_) = mode {
+        return named_types_from_text_in(document.text, Path::new(document.path), mode).map(Arc::new);
+    }
+    if let Some(table) = shipped
+        .prepared()
+        .and_then(|descriptor| (descriptor.provider)())
+        .and_then(|prepared| prepared.table(shipped.documents(), path))
+    {
+        return Ok(table);
+    }
     let key = (document.path, document.text.as_ptr() as usize);
     if let Some(cached) = SHIPPED_NAMED_TYPES.lock().expect("shipped partial memo poisoned").get(&key) {
         return Ok(Arc::clone(cached));
     }
+    crate::note_work!(ShippedRuntimePreparation);
     let named_types = Arc::new(named_types_from_text(document.text, Path::new(document.path))?);
     SHIPPED_NAMED_TYPES
         .lock()
@@ -3604,7 +3713,16 @@ struct FileTable {
 /// The explicit `types` table, or the mapping payload when no separate table
 /// exists; `path` identifies the document in errors.
 fn named_types_from_text(text: &str, path: &Path) -> Result<NamedTypes, SchemaError> {
-    let Some(document) = parse_referenced_schema_document(text, path)? else {
+    named_types_from_text_in(text, path, PreparationMode::Runtime)
+}
+
+/// [`named_types_from_text`], admitting the document in `mode`.
+pub(crate) fn named_types_from_text_in(
+    text: &str,
+    path: &Path,
+    mode: PreparationMode<'_>,
+) -> Result<NamedTypes, SchemaError> {
+    let Some(document) = parse_referenced_schema_document_with_mode(text, path, mode)? else {
         return Err(SchemaError::NotASchemaDocument {
             path: path.to_path_buf(),
             reason: NotSchemaReason::NoSchemaProperty,
@@ -4716,6 +4834,12 @@ fn resolve_one_example(
     deps.insert(canonical);
     Ok(object)
 }
+
+/// The revision of [`merge_baseline`]'s algorithm. A
+/// [`LayeredIdentity`](crate::validate::LayeredIdentity) folds it in, since
+/// the same ordered layers merged by another algorithm are another schema:
+/// increment it with any change to what a merge produces.
+pub const MERGE_ALGORITHM_REVISION: u32 = 1;
 
 /// Merges a baseline JSON Schema into a document JSON Schema using the
 /// property-keyed deep merge documented in the spec.

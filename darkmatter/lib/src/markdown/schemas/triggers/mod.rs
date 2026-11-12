@@ -29,6 +29,7 @@ pub mod finding;
 pub mod grammar;
 pub mod lint;
 pub mod matcher;
+pub mod prepared;
 #[cfg(test)]
 mod payload_memo_tests;
 
@@ -50,3 +51,7 @@ pub use grammar::{
     parse_match_conditions,
 };
 pub use matcher::{PathSubject, first_defeat, matches};
+pub use prepared::{
+    AdvisoryRecord, PayloadRecord, PreparedBundleDescriptor, PreparedTriggerBundle, TriggerBundleRecord,
+    TriggerDocumentRecord, TriggerOutcomeRecord, prepare_trigger_bundle,
+};

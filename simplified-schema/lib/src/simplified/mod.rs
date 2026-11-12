@@ -58,7 +58,7 @@ pub use source::locate_frontmatter_value;
 pub(crate) use source::{LocatedSchemaValue, parse_keyed_declaration, project_keyed_declaration_spans};
 pub use standalone::{
     SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_selected_standalone_schema_document,
-    parse_standalone_schema_document,
+    parse_standalone_schema_document, parse_standalone_schema_document_with_mode,
 };
 pub use types::{
     CallExample, Constraint, DynamicElement, DynamicKind, DynamicList, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,

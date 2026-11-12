@@ -10,7 +10,8 @@
 | `sniff` (optional, `file`) | Repository discovery for path-based schema factories. It is built with Sniff's default (local-only) features, so the default build compiles no HTTP stack: no `reqwest`, `hyper`, or `tokio`. The library never makes a network call, and a `default-features = false` build holds no `sniff` at all (of the resolver crates it keeps only `globset`, through `biscuit-file`'s passive glob grammar). |
 | `jsonschema` | Compiles and runs the lowered JSON Schema (default features off, as in Darkmatter). |
 | `fancy-regex`, `regex` | Pattern-key precedence needs lookaround (`fancy-regex`, already compiled through `jsonschema`); `regex` escapes and checks emitted patterns. |
-| `indexmap` | Declaration-ordered maps in the AST and source maps. |
+| `indexmap` (`serde`) | Declaration-ordered maps in the AST and source maps; its `serde` feature keeps authored order in shipped artifact records. |
+| `serde_path_to_error` | The JSON pointer of a shipped artifact member that fails typed decoding, reported with the refusal (`shipped`). |
 | `serde_yaml_ng` | The YAML value model schemas are parsed from. |
 | `biscuit-hash` (`json`) | Schema-content hashes that key the validator and plan caches. |
 | `chrono` (`std` only) | The date and time format checks; no clock. |

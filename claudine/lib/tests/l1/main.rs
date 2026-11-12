@@ -35,6 +35,7 @@ mod path_lookup_guard;
 mod protocol_fixture_replay;
 mod semantic_fidelity;
 mod sequence_schema;
+mod shipped_artifacts;
 mod single_loop_engine;
 mod status_report_caller_files;
 mod test_layout;

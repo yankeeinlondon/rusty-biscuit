@@ -231,9 +231,13 @@ This cycle runs non-interactively, so never stop to ask. When a repair needs a
 decision the spec does not settle, such as two reasonable fixes with different
 user-visible results, make it: choose the option that best fits the spec, the
 area's `docs/`, and existing behavior, and implement it with tests. Record the
-decision, the alternatives, and why in the ledger row, add a one-line summary
-to the review's `human_review_items`, and set its `human_review` to `true`, so
-the author can confirm or reverse it afterward. When the spec pre-authorizes
+decision, the alternatives, and why in the ledger row. Only when the decision
+passes the readiness rules' **worth the author's time** test (it is hard to
+reverse, departs from a decision, changes scope, touches safety or trust, or
+you genuinely doubt it) also add a one-line summary to the review's
+`human_review_items` and set its `human_review` to `true`, keeping that list at
+3 items or fewer; a choice you would simply recommend keeping stays in the
+ledger only. When the spec pre-authorizes
 bounded implementer autonomy and the choice meets its conditions, also amend
 the spec as that decision directs.
 
@@ -297,7 +301,8 @@ Now your task is to:
    insufficient. Run `just test` and `just lint` in each affected package area
    after the final change, plus the verification tiers required by the behavior.
    Account for unrelated failures explicitly; never claim checks passed when
-   they did not. Continue with remaining findings after a blocked repair.
+   they did not. A slow test counts as a failure (see "A Slow Test Is a
+   Failing Test"). Continue with remaining findings after a blocked repair.
 
 4. Write the closing log entries to the log file ({{log}}):
 
@@ -345,3 +350,5 @@ complete, ready for review" only for a complete cycle.
 ::file "../_os.md"
 
 ::file "../_test-tiers.md"
+
+::file "../_slow-tests-fail.md"

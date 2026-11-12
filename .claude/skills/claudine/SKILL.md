@@ -403,7 +403,21 @@ construct preflight models directly; they do not authorize old YAML syntax.
 The canonical shipped trigger schema lives in `claudine/schemas/`, not
 Darkmatter's docs tree. A malformed disk `claudine.yaml` is skipped with a
 warning and still shadows the embedded copy; there is no fallback to it
-(`claudine_schemas_embedded.rs`, `launch_trigger_schemas.rs`). Action shapes are Darkmatter's: `action.yaml`'s
+(`claudine_schemas_embedded.rs`, `launch_trigger_schemas.rs`). The embedded
+bundle's triggers and the host catalog are served prepared from the checked-in
+`claudine/lib/generated/shipped.json` (`composition/schema/shipped.rs`,
+prepared over Simplified Schema's and Darkmatter's artifacts;
+`claudine_schema_bundle()` attaches `shipped::BUNDLE`, `claudine_globals()` is
+a registry view). A refused artifact or section falls back to preparing the
+text; disk shadowing happens before the prepared lookup and is unchanged.
+After editing `claudine/schemas/` (or a lower artifact changes), run the
+root `just shipped-schemas`; `shipped_artifacts::shipped_artifact_is_fresh`
+fails with that command, and a code-only change to preparation bumps
+`shipped::PREPARATION_REVISION`. Do not shadow `claudine.yaml` with a
+reduced schema (such as a copy of `inline-compose.yaml`) to speed a test up:
+preparation is precompiled, and shadowing only stops the test checking the
+shipped schemas. Shadow only when shadowing or a custom definition is the
+subject. Action shapes are Darkmatter's: `action.yaml`'s
 categories and bundles, the `cancelled-*` types, and `loop`'s loose verbs are
 mappings whose values reference per-verb types `@darkmatter:lifecycle` (a
 reserved reference that resolves from Darkmatter's embedded partials, so the
@@ -707,6 +721,14 @@ The `claudine` library's modules and what each owns are in
 ## CLI Commands
 
 The `claudine` binary provides interactive setup, hook inspection, event handling, shared-resource management, MCP management, log reporting, provider wrapping, and Markdown composition. Output flows through a structured logging system that separates pipeable data (stdout) from status messages (stderr), formatted with biscuit-terminal components. Provider names accept fuzzy matching (exact → prefix → contains), so `cl` resolves to `claude`. Full reference: [cli-reference.md](cli-reference.md).
+
+Composition help (`compose`/`inline-compose`/`sequence` `-h`) is selected
+from the original argv in `main.rs::run`, before normalization and the
+ownership partition, and rendered from the same clap model normal parsing
+builds (`build_cli_command`); help before the command is the grouped overview,
+help after `--` is the provider's. Direct wrappers keep their custom help;
+other subcommands use clap's injected help. See
+[CLI Pre-Parsing](topics/cli-pre-parsing.md#composition-help-is-selected-first).
 
 Every command group and the cross-cutting behaviors (schema validation,
 `match()` completion walks, retry/resume, shell pre-flight, dry run, protect)

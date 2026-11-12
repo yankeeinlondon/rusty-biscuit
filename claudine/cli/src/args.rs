@@ -26,6 +26,10 @@ impl DebugLevel {
 #[derive(Parser)]
 #[command(
     name = "claudine",
+    // Without this clap takes argv[0]'s file name, so parsed help and errors
+    // would read `claudine.exe` on Windows while help rendered without argv
+    // reads `claudine`.
+    bin_name = "claudine",
     version,
     about,
     disable_help_flag = true,

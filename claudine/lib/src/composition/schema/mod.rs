@@ -60,6 +60,7 @@ pub mod bundle;
 pub mod classify;
 pub mod findings;
 pub mod globals;
+pub mod shipped;
 mod status_render;
 pub mod supplied;
 pub mod translate;

@@ -75,7 +75,8 @@ Most callers need one type, `SimplifiedSchema`: build it from text or a file, va
 - `resolve`: named-type imports, cycle checks, use-site merges, and layering, over sources the caller supplies;
 - `validate`, `format`, `file_match`: compiled validators with the `darkmatter-*` formats and `x-darkmatter-*` keywords;
 - `coercion`, `coerce`: the conversion engine and frontmatter conversion;
-- `numeric`, `span`, `expression` (passive `{{ … }}` syntax), and `pending` (the `{{!data:v1:…}}` literal-token codec): the shared foundations.
+- `numeric`, `span`, `expression` (passive `{{ … }}` syntax), and `pending` (the `{{!data:v1:…}}` literal-token codec): the shared foundations;
+- `shipped`: checked-in artifacts holding the prepared form of compiled-in schema text, and the loader that accepts or refuses them.
 
 Darkmatter keeps its own policy (its baseline, schema roots, trigger discovery, and which values are still pending) and calls in here.
 
@@ -143,6 +144,7 @@ assert_eq!(decode_leaf(&token), Some(Ok("{{ kept as data }}".to_string())));
 - [The `SimplifiedSchema` object](docs/topics/simplified-schema-struct.md): building, validating, layering, querying, and exporting a schema.
 - [Language core](./docs/topics/language-core.md): the modules, the resolver's supplied sources, and what stays in a host.
 - [Foundations](./docs/topics/foundations.md): the numeric model, spans, the expression scan, and the literal-token codec.
+- [Shipped artifacts](./docs/topics/shipped-artifacts.md): the checked-in prepared form of compiled-in schema text, how to regenerate it, and the fallback when it is stale.
 - [Expression syntax](./docs/topics/expression-syntax.md): parsing expressions without evaluating them.
 - [Strict and soft validation](./docs/topics/validation.md): judging values with a prepared schema, with or without conversion.
 - [Property paths](./docs/topics/property-paths.md): naming a value inside a document's data, walking it, and editing it without surprises.

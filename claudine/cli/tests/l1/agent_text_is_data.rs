@@ -227,10 +227,6 @@ Body.
 #[test]
 fn inline_agent_added_frontmatter_survives_a_second_run() {
     let fixture = CliProcessFixture::named("agent-text-inline");
-    fixture.seed_inline_metadata_schema(
-        include_str!("../../../schemas/inline-compose.yaml"),
-        include_str!("../../../schemas/document.yaml"),
-    );
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
@@ -298,10 +294,6 @@ fn frontmatter_value(document: &str, key: &str) -> serde_json::Value {
 #[test]
 fn inline_agent_values_are_stored_as_data_and_read_back_exactly() {
     let fixture = CliProcessFixture::named("agent-text-inline-accept");
-    fixture.seed_inline_metadata_schema(
-        include_str!("../../../schemas/inline-compose.yaml"),
-        include_str!("../../../schemas/document.yaml"),
-    );
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
@@ -435,10 +427,6 @@ mod malformed_structured_agent_values_are_refused_not_saved_as_text {
     fn assert_value_refused(value: &str) {
         let original = ORIGINAL;
         let fixture = CliProcessFixture::named("agent-text-inline-malformed");
-        fixture.seed_inline_metadata_schema(
-            include_str!("../../../schemas/inline-compose.yaml"),
-            include_str!("../../../schemas/document.yaml"),
-        );
         let md = fixture.cwd().join("doc.md");
         fs::write(&md, original).unwrap();
         whole_file_agent(
@@ -461,10 +449,6 @@ mod malformed_structured_agent_values_are_refused_not_saved_as_text {
     fn plain_text_with_a_colon_is_still_repaired() {
         let original = ORIGINAL;
         let fixture = CliProcessFixture::named("agent-text-inline-malformed");
-        fixture.seed_inline_metadata_schema(
-            include_str!("../../../schemas/inline-compose.yaml"),
-            include_str!("../../../schemas/document.yaml"),
-        );
         let md = fixture.cwd().join("doc.md");
         fs::write(&md, original).unwrap();
         whole_file_agent(&fixture, &md, "---\nprompt: write it\ntitle: t\nadded: Fix: colons\n---\nnew body\n");

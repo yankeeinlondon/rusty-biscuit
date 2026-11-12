@@ -87,6 +87,15 @@ test *args="":
     echo
     exit "${exit_code}"
 
+# Regenerate this area's shipped artifact, `lib/generated/shipped.json` (the
+# prepared catalog, baseline, kind definitions, and function catalogs); run
+# after editing `schemas/` or the code that prepares them. `--check` instead
+# fails when it is stale. Both first require Simplified Schema's artifact to
+# be current and otherwise name the root `just shipped-schemas`, which
+# regenerates every artifact in order.
+shipped-schemas *args="--write":
+    cargo run --quiet -p {{ LIBRARY }} --example shipped_schemas -- {{ args }}
+
 # Show this area's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
 slow-tests *args="":
     @just _slow_tests {{ args }}
