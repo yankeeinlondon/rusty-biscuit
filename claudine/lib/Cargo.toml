@@ -169,6 +169,9 @@ features = ["work-counters"]
 # The context construction and path lookup guards include darkmatter-cli's
 # shared engines by `#[path]` and spell those files in their tests. The
 # lifecycle lift-ready guard spells Darkmatter's lifecycle parser slice.
+# `shipped_artifact_is_fresh` spells the Darkmatter and Simplified Schema code
+# that prepares Claudine's bundle and host catalog: a change there can alter
+# Claudine's artifact without changing either lower artifact.
 source-inputs = [
   "darkmatter/cli/tests/common/context_guard.rs",
   "darkmatter/cli/tests/common/path_lookup_guard.rs",
@@ -194,4 +197,25 @@ source-inputs = [
   "darkmatter/lib/src/lifecycle/signatures.rs",
   "darkmatter/lib/src/lifecycle/source_map.rs",
   "darkmatter/lib/src/lifecycle/validate.rs",
+  "darkmatter/lib/src/markdown/schemas/catalog.rs",
+  "darkmatter/lib/src/markdown/schemas/embedded.rs",
+  "darkmatter/lib/src/markdown/schemas/resolve.rs",
+  "darkmatter/lib/src/markdown/schemas/shipped.rs",
+  "darkmatter/lib/src/markdown/schemas/triggers/assemble.rs",
+  "darkmatter/lib/src/markdown/schemas/triggers/envelope.rs",
+  "darkmatter/lib/src/markdown/schemas/triggers/prepared.rs",
+  "simplified-schema/lib/src/embedded.rs",
+  "simplified-schema/lib/src/envelope.rs",
+  "simplified-schema/lib/src/resolve.rs",
+  "simplified-schema/lib/src/resolve/graph.rs",
+  "simplified-schema/lib/src/shipped/mod.rs",
+  "simplified-schema/lib/src/shipped/records.rs",
+  "simplified-schema/lib/src/shipped/wire.rs",
+  "simplified-schema/lib/src/shipped/wire_support.rs",
+  "simplified-schema/lib/src/simplified/convert.rs",
+  "simplified-schema/lib/src/simplified/definitions.rs",
+  "simplified-schema/lib/src/simplified/grammar.rs",
+  "simplified-schema/lib/src/simplified/mod.rs",
+  "simplified-schema/lib/src/simplified/standalone.rs",
+  "simplified-schema/lib/src/simplified/types.rs",
 ]

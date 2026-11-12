@@ -217,6 +217,23 @@ Important contracts:
 - The runtime baseline is compiled in with its imports (Content Policy's
   `EDITOR_SCHEMA` types `content_policy`) and is the default for compose,
   `md schema validate`, and DMLS; see [schema.md](schema.md#runtime-baseline).
+  Its prepared form (catalog, baseline, `darkmatter:` named types, kind
+  definitions, function and effects catalogs) loads from the checked-in
+  `lib/generated/shipped.json` (`markdown::schemas::shipped`; each payload
+  member is a section decoded on first read, so `md compose` decodes only
+  the catalog and baseline; a refused artifact or section falls back per item
+  to text; `Registry::check_all` forces every section). A host's trigger
+  bundle can carry prepared payloads (`EmbeddedSchemaBundle::with_prepared`,
+  `triggers::prepared`): served after filename selection, only when the
+  bundle's name and every file's text match, skipping the payload
+  merge/compile checks (`Work::PayloadMergeCheck`/`PayloadCompileCheck`). After editing `darkmatter/schemas/`
+  or the code that prepares it, run `just shipped-schemas` from the root
+  (bump `shipped::PREPARATION_REVISION` for code-only changes). That runs
+  `scripts/shipped_schemas.py`, which regenerates Simplified Schema's,
+  Darkmatter's, and Claudine's artifacts together (Claudine's is prepared
+  over this one, so it goes stale too) and replaces none unless all three
+  generate. A new file Claudine's preparation reads must be spelled in
+  Claudine's `shipped_artifact_is_fresh` and listed in its `source-inputs`.
 
 Read [schema.md](schema.md) for imports, recursive named types (`$defs`,
 `TypeExpr::Ref`), unions, pattern dictionaries, suggestions, triggers, and

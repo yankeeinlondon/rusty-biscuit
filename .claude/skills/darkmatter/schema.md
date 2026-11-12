@@ -331,6 +331,14 @@ validation report, shared by every problem and root-union arm):
   `PositionMap::new()` (and `EffectiveSchema::validate`) is source-free: no
   positions. `simplified_schema::positions::build_position_map(yaml)` is slice-relative (line 1
   = first YAML line). `PositionMap` is opaque, not an `IndexMap`.
+  `PositionMap::deferred(Arc<str>)` holds the exact text and builds that same
+  map on the first coordinate query (`locate_all(&mut [])` does not force;
+  clones and threads share one build; `Work::SourcePositionMapConstruction`
+  counts builds). Envelope admission, whole-YAML loading (`LoadedYaml`, over
+  the text after a BOM, `offset` added back), and trigger error spans
+  (only when a node must be located; one `TriggerSourcePositions` holder per
+  reported file serves both the error span and the finding's line) never
+  build a map for a valid source.
 - `md schema validate` prints `(at line L, column C)`; the compose block
   prints ` at L:C`; DMLS ranges start at the same nodes.
 - Every projection keeps the instance path beside the position; a position

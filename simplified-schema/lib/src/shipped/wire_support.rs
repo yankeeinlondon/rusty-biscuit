@@ -18,8 +18,10 @@ use crate::simplified::{DefKey, DefNamespace, Definition, DefinitionTable, Schem
 
 /// Deserializes an `Option` that must be present: `null` is `None`, and an
 /// absent member is a missing-field error (serde's derive defaults an absent
-/// `Option` to `None` unless the field names its own deserializer).
-pub(crate) fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+/// `Option` to `None` unless the field names its own deserializer). Hosts
+/// use it on their own records' `Option` fields:
+/// `#[serde(deserialize_with = "simplified_schema::shipped::present")]`.
+pub fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,

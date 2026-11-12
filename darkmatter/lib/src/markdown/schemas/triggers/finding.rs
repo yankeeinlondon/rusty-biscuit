@@ -77,15 +77,15 @@ impl InvalidTriggerFinding {
         }
     }
 
-    /// This finding positioned, in `source` (the trigger file's text), at the
-    /// node its envelope or match-grammar cause is about, when it has no
-    /// position yet.
+    /// This finding positioned, in the trigger file's text `positions`
+    /// locates in, at the node its envelope or match-grammar cause is about,
+    /// when it has no position yet.
     #[must_use]
-    pub(crate) fn located_in(mut self, source: &str) -> Self {
+    pub(crate) fn located_in(mut self, positions: &super::envelope::TriggerSourcePositions<'_>) -> Self {
         if self.position.is_none()
-            && let Some(span) = super::envelope::trigger_error_span(&self.cause, source)
+            && let Some(span) = positions.span(&self.cause)
         {
-            self.position = Some(simplified_schema::line_col_of_offset(source, span.start));
+            self.position = Some(simplified_schema::line_col_of_offset(positions.source(), span.start));
         }
         self
     }

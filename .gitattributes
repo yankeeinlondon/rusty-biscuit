@@ -21,6 +21,8 @@ claudine/features/_completed/**/reproduce_output.txt -text
 # LF text (the freshness tests compare their bytes on every OS) but are
 # collapsed in review diffs.
 simplified-schema/lib/generated/shipped.json linguist-generated=true
+darkmatter/lib/generated/shipped.json linguist-generated=true
+claudine/lib/generated/shipped.json linguist-generated=true
 
 # Binaries: never touch, never diff as text.
 *.png binary

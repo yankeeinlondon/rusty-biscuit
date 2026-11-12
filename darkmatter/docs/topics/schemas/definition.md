@@ -431,8 +431,9 @@ on disk:
   fallback, so a reference to a path the table does not hold is an error;
 - an embedded document is never a file dependency, so DMLS never watches it
   and `EffectiveSchema::dependencies()` does not list it;
-- the baseline is prepared and lowered to JSON Schema once per process and
-  shared by every caller;
+- the baseline is not prepared at run time: it is loaded, already resolved
+  and lowered to JSON Schema, from Darkmatter's
+  [shipped artifact](#the-shipped-artifact) and shared by every caller;
 - a structured type the baseline uses at two or more sites is
   [stored once](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#shared-named-types) under the lowered schema's root
   `$defs`. When a document schema or trigger payload is merged over the
@@ -447,6 +448,59 @@ lowered baseline accepts.
 
 Resolving the authored `darkmatter.yaml` from a checkout with the ordinary
 disk resolver gives the same JSON Schema.
+
+### The Shipped Artifact
+
+Preparing the compiled-in schemas (resolving the global catalog and its
+imports, lowering the baseline, loading the expression-function and
+side-effect catalogs) gives the same result in every process, so it is done
+once, when the schema text changes, and checked in as
+`darkmatter/lib/generated/shipped.json`. A process loads that file instead
+of preparing the text. It holds:
+
+| Entry | Serves |
+| --- | --- |
+| the global catalog, `fm` included | `GlobalCatalog::darkmatter()` and the runtime baseline |
+| the baseline lowered to JSON Schema, and its definition-free form | `darkmatter_base_json_schema()`, `darkmatter_base_schema()`, and every `with_darkmatter_baseline_json_schema()` |
+| the named types of each partial under `schemas/partials/` | `Name@darkmatter:<stem>` references |
+| the YAML document-kind definitions (`schema-trigger.yaml` and Simplified Schema's two envelope definitions) | `KindRegistry::shipped()` and the seed of every kind registry |
+| the expression-function catalog (`functions.yaml`, with its file-form examples) | `expression_function_catalog()` |
+| the side-effect catalog (`mutations.yaml`) | `effect_function_catalog()` |
+
+The artifact is used only after its header proves that it was generated from
+exactly the text compiled into this binary, over the current Simplified
+Schema artifact, by the current preparation code. Otherwise it is refused as
+a whole, silently, and each item above is prepared from its text the first
+time it is read, exactly as before; validation results are the same either
+way, only startup is slower.
+
+Each entry is decoded only when something first reads it, so a process pays
+for what it uses: composing a plain document decodes the catalog and the
+baseline, not the function catalog or the named types. An entry whose
+stored data turns out to be damaged when it is first read is refused on its
+own, and only that item is prepared from its text. The baseline check (the baseline must be a
+simple object schema) runs when the artifact is generated; a baseline from a
+refused artifact is checked again when it is attached.
+
+After editing a file under `darkmatter/schemas/`, Content Policy's editor
+schema, or the code that prepares them, regenerate from the repository root:
+
+```sh
+just shipped-schemas
+```
+
+`just shipped-schemas --check`, run in `darkmatter/`, reports whether the
+artifact is current without writing it, and the L1 test
+`shipped_artifact_is_fresh` fails with the same command when it is stale.
+How artifacts are encoded, checked, and regenerated is described in
+Simplified Schema's
+[shipped artifacts](../../../../simplified-schema/docs/topics/shipped-artifacts.md)
+page.
+
+Disk schemas are unaffected: a checkout copy of a shipped kind definition
+still replaces the compiled-in one (see
+[schema discovery](./schema-discovery.md)), and a document's own `$schema`,
+trigger payloads, and schema-root files are prepared from disk as before.
 
 ### Lifecycle Event Typing
 
@@ -1542,7 +1596,7 @@ instead; see [Validating from the Library](#validating-from-the-library).
 | `PreparationSummary`  | What the effective-schema resolution behind `DarkmatterSchemas::validate_summarized` found, returned beside its report: its `layers` and `has_schema()`, which is `false` when no baseline, trigger, or `$schema` applied. |
 | `SchemaLayers`        | Which layers an effective schema merged: `document` (the document's own `$schema`), `triggers` (the matching `TriggerSource`s that layered a payload), and `baseline`. Read from `PreparationSummary::layers` or `EffectiveSchema::layers()`. |
 | `ValidationTimings`   | Stage breakdown of one validation, from `DarkmatterSchemas::validate_timed` (same result as `validate`, timings on failure too) or `ValidationTimings::record(|| ...)`: per-`ValidationStage` durations (`discover`, `match`, `resolve`, `compile`, `validate`), `total()`, `unassigned()`, `compile_cache()` (`CompileCache::Hit` / `Miss` / `NotRequested`), and `matched_triggers()`. See [Stage timings](../../inline/schema-validation.md#stage-timings--vv). |
-| `PositionMap`         | Opaque source positions for one frontmatter snapshot, passed to `validate_with_positions`. `PositionMap::new()` (also `Default`) is empty and source-free; `is_empty()` reports whether any position can be given; `validate::build_position_map(yaml)` builds one from bare YAML. |
+| `PositionMap`         | Opaque source positions for one frontmatter snapshot, passed to `validate_with_positions`. `PositionMap::new()` (also `Default`) is empty and source-free; `is_empty()` reports whether any position can be given; `validate::build_position_map(yaml)` builds one from bare YAML; `PositionMap::deferred(text)` holds the text and builds the same map only when a coordinate is first requested. |
 | `ValidationProblemCode` | Fine-grained problem taxonomy: `MissingRequired`, `TypeMismatch`, `ConstraintViolation`, `UnknownKey`, `InvalidFileReference`, and `KindCheck` (a YAML document's [kind check](#kind-checks)). |
 | `ValidationOptions` / `PendingValue` | Mirror the compose deferral rules as data: `pending_policy` (`Defer` / `Report`) plus `excluded_keys`; a `PendingValue` records a value validation skipped because it is a whole-value `$(...)` shell expression or still holds an unresolved `{{ }}` template. |
 | `SchemaRoot`          | A parsed `$schema`: either `Single(SchemaShape)` or `Union(Vec<SchemaArm>)`.                                        |
@@ -2181,3 +2235,72 @@ if let Some(TriggerSource::Embedded { bundle, name }) = effective.origins["model
     assert_eq!((bundle.as_str(), name.as_str()), ("my-tool", "my-tool.yaml"));
 }
 ```
+
+##### Prepared bundles
+
+Preparing a bundle trigger means parsing its envelope, resolving its
+payload and imports, checking that the payload is a mergeable object schema,
+and compiling it. A host with a large bundle can do that work once, when it
+generates its shipped artifact, instead of on every launch. It checks in the
+result and attaches it to the bundle; discovery then reads each document from
+it. The results are the same either way: only the work moves.
+
+```rust
+use darkmatter::markdown::schemas::EmbeddedSchemaBundle;
+use darkmatter::markdown::schemas::triggers::{PreparedBundleDescriptor, PreparedTriggerBundle};
+
+fn accepted() -> Option<&'static PreparedTriggerBundle> {
+    // The host's accepted artifact; `None` when its artifact was refused.
+    my_tool_registry().prepared_bundle()
+}
+
+const PREPARED: PreparedBundleDescriptor = PreparedBundleDescriptor { owner: "my-tool", provider: accepted };
+const BUNDLE: EmbeddedSchemaBundle = EmbeddedSchemaBundle::new("my-tool", FILES).with_prepared(&PREPARED);
+```
+
+The host's generator calls `prepare_trigger_bundle(bundle, PreparationMode::Uncached(&fresh))`,
+which runs every check discovery runs and fails if any document fails, so an
+invalid trigger never reaches an artifact. The result is a
+`TriggerBundleRecord`: one record per bundle file, in file-name order, each
+`NotTrigger`, `MatcherOnly`, or `Payload` with the lowered schema. The host
+stores it in its artifact (see Simplified Schema's
+[shipped artifacts](../../../../simplified-schema/docs/topics/shipped-artifacts.md));
+`PreparedTriggerBundle::from_record` rebuilds it only while that artifact is
+being accepted, and refuses a record that names a file the artifact does not
+fingerprint, lists one twice or out of order, omits one, or holds a payload
+that is not a JSON object.
+
+Discovery uses a prepared bundle only under these rules:
+
+- **Filename selection comes first.** A schema-root file named like a bundle
+  file still replaces it, whatever the disk file holds, exactly as above.
+  The prepared form is consulted only for the files that survive.
+- **The whole bundle must match.** It is used only when the registered
+  bundle has the same name and exactly the same files, byte for byte, as the
+  bundle it was prepared from. A bundle of the same name with one file
+  changed, added, or removed is prepared as an ordinary bundle, every file of
+  it, with every check.
+- **Accepted entries skip the payload checks.** A file served from the
+  prepared form skips payload resolution, the mergeable-object check, and the
+  compile check, which generation already ran. Its envelope is parsed again
+  from the compiled text, so its `match` conditions and `$path` patterns are
+  judged in the document's own context. Disk triggers, custom bundles, and a
+  bundle whose prepared form is unavailable or does not match run every
+  check, as before. Validating a document still compiles its effective
+  schema.
+- **Imports stay inside the bundle.** A surviving trigger's payload was
+  resolved among the bundle's own files and the reserved `darkmatter:`
+  namespace. A disk file named like an imported library takes that file's
+  place only in trigger discovery: with a disk `steps.yaml`,
+  `step[]@./steps.yaml` in a surviving embedded trigger still means the
+  bundle's `steps.yaml`.
+
+```mermaid
+flowchart LR
+    S["bundle file survives<br/>filename selection"] --> M{"prepared form available<br/>and the bundle matches it?"}
+    M -- yes --> P["entry from the prepared form;<br/>envelope parsed again"]
+    M -- no --> O["ordinary preparation:<br/>resolve, merge check, compile check"]
+```
+
+A prepared descriptor does not change what a bundle is: two bundles with the
+same name and files are equal whether or not one carries a descriptor.

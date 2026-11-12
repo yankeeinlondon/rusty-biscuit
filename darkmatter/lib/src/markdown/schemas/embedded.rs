@@ -33,11 +33,29 @@ use simplified_schema::errors::SchemaError;
 /// bundle of its own; a host
 /// registers one with
 /// [`DarkmatterSchemas::with_embedded_trigger_bundle`](super::DarkmatterSchemas::with_embedded_trigger_bundle).
-#[derive(Clone, Copy, PartialEq, Eq)]
+///
+/// A host that ships a prepared form of its bundle attaches it with
+/// [`Self::with_prepared`]; discovery then serves the bundle's documents
+/// from it while the bundle's files are exactly the ones it was prepared
+/// from (see [`PreparedTriggerBundle`](super::triggers::PreparedTriggerBundle)).
+///
+/// Equality compares the name and the files only: a prepared descriptor
+/// changes how discovery prepares the documents, never what they mean, so a
+/// bundle with one equals the same bundle without one.
+#[derive(Clone, Copy)]
 pub struct EmbeddedSchemaBundle {
     name: &'static str,
     files: &'static [(&'static str, &'static str)],
+    prepared: Option<&'static super::triggers::PreparedBundleDescriptor>,
 }
+
+impl PartialEq for EmbeddedSchemaBundle {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.files == other.files
+    }
+}
+
+impl Eq for EmbeddedSchemaBundle {}
 
 impl EmbeddedSchemaBundle {
     /// A bundle named `name` holding `files` as `(file name, text)` pairs.
@@ -47,7 +65,28 @@ impl EmbeddedSchemaBundle {
     /// case-folding) plain `.yaml`/`.yml` file name.
     #[must_use]
     pub const fn new(name: &'static str, files: &'static [(&'static str, &'static str)]) -> Self {
-        Self { name, files }
+        Self { name, files, prepared: None }
+    }
+
+    /// This bundle with `descriptor`'s prepared form attached. The provider
+    /// is called only when discovery reaches the bundle's documents.
+    #[must_use]
+    pub const fn with_prepared(self, descriptor: &'static super::triggers::PreparedBundleDescriptor) -> Self {
+        Self { prepared: Some(descriptor), ..self }
+    }
+
+    /// The prepared-form descriptor [`Self::with_prepared`] attached.
+    #[must_use]
+    pub const fn prepared(&self) -> Option<&'static super::triggers::PreparedBundleDescriptor> {
+        self.prepared
+    }
+
+    /// The bundle's documents as `(virtual path, text)` pairs, in `files`
+    /// order: the identities a host's artifact header fingerprints them under
+    /// (`simplified_schema::shipped::SourceFingerprint`).
+    #[must_use]
+    pub fn documents(&self) -> Vec<(String, &'static str)> {
+        self.files.iter().map(|(name, text)| (self.virtual_path(name), *text)).collect()
     }
 
     #[allow(missing_docs)]
@@ -131,6 +170,7 @@ impl std::fmt::Debug for EmbeddedSchemaBundle {
         f.debug_struct("EmbeddedSchemaBundle")
             .field("name", &self.name)
             .field("files", &self.files.iter().map(|(name, _)| *name).collect::<Vec<_>>())
+            .field("prepared", &self.prepared.map(|descriptor| descriptor.owner))
             .finish()
     }
 }
@@ -219,9 +259,12 @@ pub(crate) fn shipped_kind_definitions() -> &'static [EmbeddedDocument<'static>]
 pub(crate) const SHIPPED_NAMESPACE: &str = "darkmatter:";
 
 /// Darkmatter's reserved namespace over [`SHIPPED`], the source set every
-/// Darkmatter resolution hands the library resolver.
+/// Darkmatter resolution hands the library resolver. A partial's named types
+/// come from the accepted shipped artifact ([`super::shipped::NAMED_TYPES`])
+/// and are parsed from [`SHIPPED`] when that artifact was refused.
 pub(crate) const SHIPPED_SOURCES: ShippedSources =
-    ShippedSources::new(SHIPPED_NAMESPACE, "darkmatter/schemas/partials", SHIPPED);
+    ShippedSources::new(SHIPPED_NAMESPACE, "darkmatter/schemas/partials", SHIPPED)
+        .with_prepared(&super::shipped::NAMED_TYPES);
 
 /// The `<stem>` of a reference written in the reserved form
 /// `darkmatter:<stem>`, or `None` for any other reference.

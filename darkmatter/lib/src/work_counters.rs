@@ -95,6 +95,45 @@ pub enum Work {
     /// A cached slot resolution's input file read again to confirm its bytes
     /// are unchanged.
     SlotInputRehash,
+    /// A shipped artifact's bytes decoded (any owner; counted by
+    /// simplified-schema's shared loader).
+    ArtifactDecode,
+    /// A shipped artifact accepted: its entries replace runtime preparation.
+    ArtifactAccept,
+    /// A fresh, uncached preparation for artifact generation.
+    ArtifactGeneration,
+    /// A shipped source prepared from its compiled text at run time because
+    /// no accepted artifact entry served it (library and Darkmatter sources
+    /// together).
+    ShippedRuntimePreparation,
+    /// An artifact refused because none was supplied.
+    ArtifactFallbackMissing,
+    /// An artifact refused as malformed.
+    ArtifactFallbackMalformed,
+    /// An artifact refused for its wire version.
+    ArtifactFallbackWireVersion,
+    /// An artifact refused for its owner's preparation revision.
+    ArtifactFallbackRevision,
+    /// An artifact refused because a source text changed.
+    ArtifactFallbackSource,
+    /// An artifact refused because a lower artifact changed or was refused.
+    ArtifactFallbackDependency,
+    /// An artifact refused because preparation configuration changed.
+    ArtifactFallbackConfiguration,
+    /// An artifact refused for an unusable payload record or another owner.
+    ArtifactFallbackRecord,
+    /// The baseline simple-object check (`validate_baseline_schema`) run on
+    /// a baseline being attached; an accepted shipped baseline skips it.
+    BaselineCheck,
+    /// A trigger payload's merge-compatibility (simple-object) check run;
+    /// an accepted prepared trigger skips it.
+    PayloadMergeCheck,
+    /// A trigger payload's compile check run; an accepted prepared trigger
+    /// skips it.
+    PayloadCompileCheck,
+    /// A simplified-schema `PositionMap` built from its source text (an
+    /// eager map, or a deferred one forced by its first query).
+    SourcePositionMapConstruction,
 }
 
 impl Work {
@@ -127,6 +166,22 @@ impl Work {
         Work::StandaloneImportCheck,
         Work::SlotResolution,
         Work::SlotInputRehash,
+        Work::ArtifactDecode,
+        Work::ArtifactAccept,
+        Work::ArtifactGeneration,
+        Work::ShippedRuntimePreparation,
+        Work::ArtifactFallbackMissing,
+        Work::ArtifactFallbackMalformed,
+        Work::ArtifactFallbackWireVersion,
+        Work::ArtifactFallbackRevision,
+        Work::ArtifactFallbackSource,
+        Work::ArtifactFallbackDependency,
+        Work::ArtifactFallbackConfiguration,
+        Work::ArtifactFallbackRecord,
+        Work::BaselineCheck,
+        Work::PayloadMergeCheck,
+        Work::PayloadCompileCheck,
+        Work::SourcePositionMapConstruction,
     ];
 
     /// Whether [`add`] records the thread this work ran on.
@@ -218,6 +273,19 @@ fn library_kind(work: Work) -> Option<simplified_schema::work_counters::Work> {
         Work::AlternativeMatcherPrepare => Some(Library::AlternativeMatcherPrepare),
         Work::RecursiveTargetTranslate => Some(Library::RecursiveTargetTranslate),
         Work::PositionKeyComparison => Some(Library::PositionKeyComparison),
+        Work::ArtifactDecode => Some(Library::ArtifactDecode),
+        Work::ArtifactAccept => Some(Library::ArtifactAccept),
+        Work::ArtifactGeneration => Some(Library::ArtifactGeneration),
+        Work::ShippedRuntimePreparation => Some(Library::ShippedRuntimePreparation),
+        Work::ArtifactFallbackMissing => Some(Library::ArtifactFallbackMissing),
+        Work::ArtifactFallbackMalformed => Some(Library::ArtifactFallbackMalformed),
+        Work::ArtifactFallbackWireVersion => Some(Library::ArtifactFallbackWireVersion),
+        Work::ArtifactFallbackRevision => Some(Library::ArtifactFallbackRevision),
+        Work::ArtifactFallbackSource => Some(Library::ArtifactFallbackSource),
+        Work::ArtifactFallbackDependency => Some(Library::ArtifactFallbackDependency),
+        Work::ArtifactFallbackConfiguration => Some(Library::ArtifactFallbackConfiguration),
+        Work::ArtifactFallbackRecord => Some(Library::ArtifactFallbackRecord),
+        Work::SourcePositionMapConstruction => Some(Library::PositionMapConstruction),
         _ => None,
     }
 }

@@ -335,6 +335,18 @@ earlier registry. Each workspace folder (and each package within it) selects
 from its own roots; a registry or contract is never shared across contexts. A document
 outside every workspace folder selects from the shipped definitions only.
 
+The **shipped definitions** are the one part every registry shares. They are
+compiled into the server and never change while it runs, so their prepared
+form is read from Darkmatter's checked-in artifact (see [The Shipped
+Artifact](definition.md#the-shipped-artifact)) the first time any registry
+needs them, and every registry, contract, and workspace folder reuses that one
+copy. Nothing above changes for them: the artifact holds only the compiled-in
+seed, never a workspace's definitions, buffers, or roots, so a checkout copy of
+a shipped definition still replaces it, and an unsaved edit still refreshes
+exactly the registries that read it. The same holds for the baseline, the
+global catalog, the function catalogs, and the `Name@darkmatter:` named
+types.
+
 ## Implemented LSP Features
 
 Only capabilities that are actually implemented are ever advertised — the capability advertisement grows feature by feature and never claims a surface the server cannot answer. This section walks through each implemented feature as it interacts with schemas.

@@ -81,10 +81,12 @@ test *args="":
     @just _test_workspace {{ args }}
 
 # Regenerate every shipped schema artifact (`*/lib/generated/shipped.json`) in
-# dependency order. Run after editing a shipped schema YAML file or the code
-# that prepares one. Only Simplified Schema has an artifact so far.
+# dependency order: Simplified Schema's, Darkmatter's over it, then
+# Claudine's over both. Run after editing a shipped schema YAML file or the
+# code that prepares one. Every output is generated and checked before any
+# file is replaced, so a failure leaves all three as they were.
 shipped-schemas:
-    @cd simplified-schema && just shipped-schemas
+    @python3 scripts/shipped_schemas.py
 
 # The internal `prompts/` folders (root, `darkmatter/`, `claudine/`) are never
 # tested by CI or `just test`. This schema-validates every prompt with

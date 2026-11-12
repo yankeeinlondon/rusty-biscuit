@@ -68,6 +68,10 @@ pub enum Work {
     ArtifactFallbackConfiguration,
     /// An artifact refused for an unusable payload record or another owner.
     ArtifactFallbackRecord,
+    /// A [`PositionMap`](crate::PositionMap) built from its source text: the
+    /// YAML reparsed to locate nodes. A deferred map counts one when its
+    /// first coordinate query forces it.
+    PositionMapConstruction,
 }
 
 impl Work {
@@ -93,6 +97,7 @@ impl Work {
         Work::ArtifactFallbackDependency,
         Work::ArtifactFallbackConfiguration,
         Work::ArtifactFallbackRecord,
+        Work::PositionMapConstruction,
     ];
 }
 

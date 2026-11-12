@@ -243,8 +243,8 @@ refused! {
     trailing_content_is_malformed: Some([fresh().artifact(), b"{}"].concat()) => MalformedArtifact at None;
     a_json5_comment_is_malformed: Some([b"// generated\n".as_slice(), fresh().artifact()].concat()) => MalformedArtifact at None;
     a_trailing_comma_is_malformed: Some(String::from_utf8(fresh().artifact().to_vec()).unwrap().replacen("\"payload\"", "\"x\": 1,,\"payload\"", 1).into_bytes()) => MalformedArtifact at None;
-    a_repeated_top_level_key_is_malformed: Some(String::from_utf8(fresh().artifact().to_vec()).unwrap().replacen("{\n  \"header\"", "{\n  \"payload\": null,\n  \"header\"", 1).into_bytes()) => MalformedArtifact at Some("/payload");
-    a_repeated_key_inside_a_payload_schema_is_malformed: Some(String::from_utf8(fresh().artifact().to_vec()).unwrap().replacen("\"json_schema\": {", "\"json_schema\": {\n\"$schema\": \"x\",", 1).into_bytes()) => MalformedArtifact at Some("/payload/definitions/0/json_schema/$schema");
+    a_repeated_top_level_key_is_malformed: Some(String::from_utf8(fresh().artifact().to_vec()).unwrap().replacen("{\n\"header\"", "{\n\"payload\": null,\n\"header\"", 1).into_bytes()) => MalformedArtifact at Some("/payload");
+    a_repeated_key_inside_a_payload_schema_is_malformed: Some(String::from_utf8(fresh().artifact().to_vec()).unwrap().replacen("\"json_schema\":{", "\"json_schema\":{\"$schema\":\"x\",", 1).into_bytes()) => MalformedArtifact at Some("/payload/definitions/0/json_schema/$schema");
     an_unknown_top_level_member_is_malformed: edited(|value| set(value, "/extra", json!(1))) => MalformedArtifact at None;
     a_missing_payload_is_malformed: edited(|value| remove(value, "/payload")) => MalformedArtifact at None;
     a_null_payload_is_malformed: edited(|value| set(value, "/payload", Value::Null)) => MalformedArtifact at Some("/payload");

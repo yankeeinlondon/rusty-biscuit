@@ -13,7 +13,8 @@
 //! ```
 //!
 //! Darkmatter's catalog, `darkmatter/schemas/darkmatter.yaml`, is compiled in
-//! with its partials and resolved through [`GlobalCatalog::darkmatter`]. The
+//! with its partials, prepared ahead of time into the shipped artifact
+//! ([`super::shipped`]), and read through [`GlobalCatalog::darkmatter`]. The
 //! runtime baseline is its resolved `fm` definition, the `ctx.*` descriptor
 //! catalog projects its `ctx` declaration, and `current` declares the same
 //! shape. A host declares its own globals in a catalog of the same format and
@@ -43,7 +44,9 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 use serde_yaml_ng::{Mapping, Value as YamlValue};
+use simplified_schema::shipped::{PreparationMode, RecordError};
 use thiserror::Error;
 
 use super::embedded::{self, EmbeddedDocument};
@@ -221,7 +224,7 @@ pub struct GlobalCatalog {
 
 /// Where a catalog's imports resolve.
 enum Source<'a> {
-    Embedded(&'a [EmbeddedDocument<'a>]),
+    Embedded(&'a [EmbeddedDocument<'a>], PreparationMode<'a>),
     Disk {
         dir: &'a Path,
         context: &'a biscuit_file::FileResolutionContext,
@@ -229,18 +232,26 @@ enum Source<'a> {
 }
 
 impl GlobalCatalog {
-    /// Darkmatter's compiled-in catalog, resolved once per process from the
-    /// embedded bundle. It reads no disk or network and does not depend on the
-    /// launch directory.
+    /// Darkmatter's compiled-in catalog: the accepted shipped artifact's
+    /// ([`super::shipped`]), or, when that artifact was refused, resolved once
+    /// per process from the embedded documents. It reads no disk or network
+    /// and does not depend on the launch directory.
     ///
     /// ## Panics
     ///
-    /// When the compiled-in catalog does not load. This is a library bug, not
-    /// an author error; a test loads it.
+    /// When the artifact was refused and the compiled-in catalog does not
+    /// load. This is a library bug, not an author error; a test loads it.
     pub fn darkmatter() -> &'static GlobalCatalog {
+        super::shipped::registry().global_catalog()
+    }
+
+    /// [`Self::darkmatter`] prepared from the embedded documents, once per
+    /// process: the fallback when the shipped artifact was refused.
+    pub(crate) fn darkmatter_from_sources() -> &'static GlobalCatalog {
         static CATALOG: OnceLock<GlobalCatalog> = OnceLock::new();
         CATALOG.get_or_init(|| {
-            Self::load_embedded(DARKMATTER_CATALOG_PATH, embedded::SHIPPED, DARKMATTER_GLOBALS)
+            crate::note_work!(ShippedRuntimePreparation);
+            Self::load_embedded(DARKMATTER_CATALOG_PATH, embedded::SHIPPED, DARKMATTER_GLOBALS, PreparationMode::Runtime)
                 .unwrap_or_else(|error| panic!("the embedded global catalog must load: {error}"))
         })
     }
@@ -259,7 +270,7 @@ impl GlobalCatalog {
     ) -> Result<Self, CatalogError> {
         let table: Vec<EmbeddedDocument<'_>> =
             documents.iter().map(|&(path, text)| EmbeddedDocument { path, text }).collect();
-        Self::load_embedded(path, &table, requirements)
+        Self::load_embedded(path, &table, requirements, PreparationMode::Runtime)
     }
 
     /// Loads the catalog file at `path`, resolving its imports from the
@@ -367,6 +378,7 @@ impl GlobalCatalog {
         path: &str,
         documents: &[EmbeddedDocument<'_>],
         requirements: &[GlobalRequirement],
+        mode: PreparationMode<'_>,
     ) -> Result<Self, CatalogError> {
         let Some(document) = embedded::find(documents, path) else {
             return Err(CatalogError {
@@ -375,7 +387,7 @@ impl GlobalCatalog {
                 reason: CatalogErrorReason::Missing,
             });
         };
-        Self::load(path, document.text, &Source::Embedded(documents), requirements)
+        Self::load(path, document.text, &Source::Embedded(documents, mode), requirements)
     }
 
     fn load(
@@ -469,6 +481,113 @@ impl GlobalCatalog {
         let fm = self.global("fm")?;
         let shape = fm.shape()?.clone();
         Some((SchemaRoot::Single(shape), Arc::clone(&fm.definitions)))
+    }
+
+    /// The catalog that `record` describes, checked against `requirements`:
+    /// the recorded globals are exactly the required ones, in requirement
+    /// order, each of its required kind and `same_as` shape. Shipped-artifact
+    /// acceptance builds a catalog this way instead of resolving its text.
+    ///
+    /// ## Errors
+    ///
+    /// A [`RecordError`] whose pointer is relative to the record
+    /// (`/globals/2`) when a global is missing, extra, out of order, or not
+    /// of its required kind.
+    pub fn from_record(record: GlobalCatalogRecord, requirements: &[GlobalRequirement]) -> Result<Self, RecordError> {
+        if record.globals.len() != requirements.len() {
+            return Err(RecordError::new(
+                "/globals",
+                format!("{} globals are recorded, {} are required", record.globals.len(), requirements.len()),
+            ));
+        }
+        let mut globals = IndexMap::with_capacity(requirements.len());
+        for (index, (global, requirement)) in record.globals.into_iter().zip(requirements).enumerate() {
+            let at = format!("/globals/{index}");
+            if global.name != requirement.name {
+                return Err(RecordError::new(
+                    format!("{at}/name"),
+                    format!("`{}` is recorded where `{}` is required", global.name, requirement.name),
+                ));
+            }
+            check_kind(requirement, &global.definition, &global.definitions)
+                .map_err(|reason| RecordError::new(at.clone(), format!("`{}` {reason}", global.name)))?;
+            if let Some(other) = &requirement.same_as {
+                let same = globals
+                    .get(other.as_ref())
+                    .is_some_and(|earlier: &GlobalDeclaration| same_shape(&earlier.definition, &global.definition));
+                if !same {
+                    return Err(RecordError::new(at, format!("`{}` must declare the same shape as `{other}`", global.name)));
+                }
+            }
+            globals.insert(
+                global.name.clone(),
+                GlobalDeclaration { name: global.name, definition: global.definition, definitions: Arc::new(global.definitions) },
+            );
+        }
+        Ok(Self { description: record.description, globals })
+    }
+}
+
+/// A loaded [`GlobalCatalog`] as shipped-artifact data: the catalog's
+/// virtual path, its description, and each global's resolved definition and
+/// stored-definition table, in requirement order.
+///
+/// A host that ships a catalog prepares its record at generation
+/// ([`Self::prepare`]) and rebuilds the catalog from an accepted artifact
+/// with [`GlobalCatalog::from_record`] and the same requirements.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GlobalCatalogRecord {
+    /// The catalog's virtual path.
+    pub identity: String,
+    #[serde(deserialize_with = "simplified_schema::shipped::present")]
+    pub description: Option<String>,
+    pub globals: Vec<GlobalDeclarationRecord>,
+}
+
+/// One global of a [`GlobalCatalogRecord`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GlobalDeclarationRecord {
+    pub name: String,
+    /// The resolved definition; a stored type stays a reference into
+    /// `definitions`.
+    pub definition: PropertyDef,
+    pub definitions: DefinitionTable,
+}
+
+impl GlobalCatalogRecord {
+    /// Loads the catalog at virtual path `path` from `documents`, as
+    /// [`GlobalCatalog::from_documents`] does, in `mode`; generation passes
+    /// [`PreparationMode::Uncached`].
+    ///
+    /// ## Errors
+    ///
+    /// The [`CatalogError`] of the first failing field.
+    pub fn prepare(
+        path: &str,
+        documents: &[EmbeddedDocument<'_>],
+        requirements: &[GlobalRequirement],
+        mode: PreparationMode<'_>,
+    ) -> Result<Self, CatalogError> {
+        GlobalCatalog::load_embedded(path, documents, requirements, mode).map(|catalog| Self::of(path, &catalog))
+    }
+
+    /// The record of an already loaded `catalog` found at `path`.
+    #[must_use]
+    pub fn of(path: &str, catalog: &GlobalCatalog) -> Self {
+        Self {
+            identity: path.to_string(),
+            description: catalog.description.clone(),
+            globals: catalog
+                .globals()
+                .map(|global| GlobalDeclarationRecord {
+                    name: global.name.clone(),
+                    definition: global.definition.clone(),
+                    definitions: global.definitions.as_ref().clone(),
+                })
+                .collect(),
+        }
     }
 }
 
@@ -1112,10 +1231,14 @@ fn resolve_declaration(
     single.insert(YamlValue::String(name.to_string()), value.clone());
     let single = YamlValue::Mapping(single);
     let resolved = match source {
-        Source::Embedded(documents) => {
-            resolve::prepare_embedded_catalog_declaration(&single, catalog, documents, simplified_schema::resolve::Sharing::Automatic)
-                .map(|(resolved, _)| resolved)
-        }
+        Source::Embedded(documents, mode) => resolve::prepare_embedded_catalog_declaration_with_mode(
+            &single,
+            catalog,
+            documents,
+            simplified_schema::resolve::Sharing::Automatic,
+            *mode,
+        )
+        .map(|(resolved, _)| resolved),
         Source::Disk { dir, context } => resolve::resolve_catalog_declaration(&single, dir, context),
     }
     .map_err(|error| match error {
@@ -1142,30 +1265,37 @@ fn resolve_declaration(
 /// When the compiled-in declaration does not resolve: a library bug, which
 /// a test catches.
 pub(crate) fn darkmatter_inline_baseline() -> SchemaRoot {
-    let fail = |reason: &dyn std::fmt::Display| -> ! { panic!("the embedded baseline must resolve inline: {reason}") };
-    let document =
-        embedded::find(embedded::SHIPPED, DARKMATTER_CATALOG_PATH).unwrap_or_else(|| fail(&"the catalog is missing"));
-    let root: YamlValue = serde_yaml_ng::from_str(document.text).unwrap_or_else(|error| fail(&error));
+    darkmatter_inline_baseline_with_mode(PreparationMode::Runtime)
+        .unwrap_or_else(|reason| panic!("the embedded baseline must resolve inline: {reason}"))
+}
+
+/// [`darkmatter_inline_baseline`] in `mode`, failing with a message instead
+/// of panicking; shipped-artifact generation passes
+/// [`PreparationMode::Uncached`].
+pub(crate) fn darkmatter_inline_baseline_with_mode(mode: PreparationMode<'_>) -> Result<SchemaRoot, String> {
+    let document = embedded::find(embedded::SHIPPED, DARKMATTER_CATALOG_PATH).ok_or("the catalog is missing")?;
+    let root: YamlValue = serde_yaml_ng::from_str(document.text).map_err(|error| error.to_string())?;
     let value = root
         .get("$schema")
         .and_then(|declarations| declarations.get("fm"))
-        .unwrap_or_else(|| fail(&"the catalog declares no `fm`"));
+        .ok_or("the catalog declares no `fm`")?;
     let mut single = Mapping::new();
     single.insert(YamlValue::String("fm".into()), value.clone());
-    let (resolved, _) = resolve::prepare_embedded_catalog_declaration(
+    let (resolved, _) = resolve::prepare_embedded_catalog_declaration_with_mode(
         &YamlValue::Mapping(single),
         DARKMATTER_CATALOG_PATH,
         embedded::SHIPPED,
         simplified_schema::resolve::Sharing::Off,
+        mode,
     )
-    .unwrap_or_else(|error| fail(&error));
+    .map_err(|error| error.to_string())?;
     let Some(SchemaRoot::Single(mut shape)) = resolved.simplified else {
-        fail(&"`fm` is not a single definition");
+        return Err("`fm` is not a single definition".into());
     };
-    let definition = shape.properties.shift_remove("fm").unwrap_or_else(|| fail(&"`fm` is missing"));
+    let definition = shape.properties.shift_remove("fm").ok_or("`fm` is missing")?;
     match resolved_atom(&definition, &resolved.definitions).map(|atom| &atom.ty) {
-        Some(TypeExpr::InlineObject(shape)) => SchemaRoot::Single(shape.clone()),
-        _ => fail(&"`fm` is not an object shape"),
+        Some(TypeExpr::InlineObject(shape)) => Ok(SchemaRoot::Single(shape.clone())),
+        _ => Err("`fm` is not an object shape".into()),
     }
 }
 

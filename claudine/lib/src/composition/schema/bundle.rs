@@ -5,7 +5,8 @@
 //! offered to Darkmatter's trigger discovery as the last-resort location after
 //! the five document-context schema roots, so an installed `claudine` validates
 //! its controls without a checkout. A disk file of the same name in any root
-//! always wins; see `claudine/docs/topics/schemas.md`.
+//! always wins; see `claudine/docs/topics/schemas.md`. Their prepared form
+//! ships in Claudine's artifact ([`super::shipped`]).
 
 use darkmatter::markdown::schemas::TriggerOrigin;
 use darkmatter::markdown::schemas::triggers::TriggerSource;
@@ -33,9 +34,19 @@ pub const CLAUDINE_SCHEMA_FILES: &[(&str, &str)] = &[
 pub const CLAUDINE_TRIGGER_FILES: &[&str] = &["claudine.yaml", "inline-compose.yaml", "sequence.yaml"];
 
 /// The embedded bundle handed to
-/// [`DarkmatterSchemas::with_embedded_trigger_bundle`](darkmatter::markdown::schemas::DarkmatterSchemas::with_embedded_trigger_bundle).
+/// [`DarkmatterSchemas::with_embedded_trigger_bundle`](darkmatter::markdown::schemas::DarkmatterSchemas::with_embedded_trigger_bundle),
+/// with the shipped artifact's prepared form attached
+/// ([`shipped::BUNDLE`](super::shipped::BUNDLE)): discovery serves each
+/// document it selects from that form while the artifact is accepted, and
+/// prepares it from text otherwise.
 #[must_use]
 pub const fn claudine_schema_bundle() -> EmbeddedSchemaBundle {
+    source_bundle().with_prepared(&super::shipped::BUNDLE)
+}
+
+/// The bundle without a prepared form: what generation prepares, so it never
+/// consults the artifact it is producing.
+pub(crate) const fn source_bundle() -> EmbeddedSchemaBundle {
     EmbeddedSchemaBundle::new(CLAUDINE_SCHEMA_BUNDLE_NAME, CLAUDINE_SCHEMA_FILES)
 }
 

@@ -138,6 +138,11 @@ ownership line with Darkmatter's `KindRegistry` are in
 shipped YAML or its preparation code, run `just shipped-schemas` (bump
 `PREPARATION_REVISION` for code-only changes); see
 [shipped-artifacts.md](../../../simplified-schema/docs/topics/shipped-artifacts.md).
+The encoder writes the header pretty and each payload member compact on its
+own line; a large payload loads with `accept_deferred` (`Sections::take` →
+`Section::get`), which checks only layout, header, and member list at load
+and decodes each member on first read, refusing that member alone. Tests that
+hand-edit an artifact must re-encode it in that layout (or edit the text).
 
 ## Paths, features, and guards
 

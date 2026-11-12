@@ -40,6 +40,56 @@ Within this area, `just shipped-schemas` regenerates only Simplified Schema's
 artifact, and `just shipped-schemas --check` reports whether it is current
 without writing anything.
 
+### What the root command does
+
+Three crates ship an artifact, each prepared over the ones below it:
+Simplified Schema's, Darkmatter's, and Claudine's. A change to a lower
+crate's sources therefore changes every artifact above it too. The root
+`just shipped-schemas` runs `scripts/shipped_schemas.py`, which regenerates
+all three as one step:
+
+```mermaid
+flowchart LR
+    G1[simplified-schema<br/>generator] --> G2[darkmatter<br/>generator] --> G3[claudine<br/>generator]
+    G3 --> V{every output<br/>is its owner's<br/>artifact?}
+    V -->|yes| W[replace all three files]
+    V -->|no| K[change nothing, exit 1]
+    W --> C[each generator's --check]
+```
+
+1. It runs each crate's `shipped_schemas` example with no flags, in
+   dependency order. Each example prepares its whole chain from the current
+   text and prints its artifact, without reading any checked-in artifact,
+   so it works even when those are stale or damaged.
+2. It checks every output in memory: JSON, one final line feed, the right
+   owner, and the lower owners listed as dependencies.
+3. Only then does it write each output beside its file and rename it into
+   place. If any generator fails or any output is wrong, none of the three
+   files changes.
+4. It runs each example with `--check`, which rebuilds over the new files
+   and proves every artifact is accepted and current.
+
+A crate area's own `just shipped-schemas` (`--write` by default) refuses to
+write when a lower artifact is stale and names the root command instead.
+
+### When CI runs the freshness tests
+
+CI runs a package's tests when its own source changes. An artifact also
+depends on other packages' files, so each higher owner's
+`shipped_artifact_is_fresh` names those files in its body (with
+`include_str!`/`include_bytes!`), and its manifest lists the other
+packages' preparation code under `[package.metadata.ci.tests]
+source-inputs`. A change to any of them then adds one Linux L1 run of just
+that test (see `docs/cicd/test-inputs.md` at the repository root). For
+example, editing `darkmatter/lib/src/markdown/schemas/catalog.rs` runs
+Darkmatter's whole suite and Claudine's `shipped_artifact_is_fresh` alone.
+
+| Changed file | Also runs |
+| --- | --- |
+| a Simplified Schema envelope YAML, preparation file, or its artifact | Darkmatter's and Claudine's freshness tests |
+| Content Policy's editor schema | Darkmatter's and Claudine's freshness tests |
+| a Darkmatter shipped YAML, preparation file, or its artifact | Claudine's freshness test |
+
 ### When to bump the preparation revision
 
 Each owning crate has a preparation revision (Simplified Schema's is
@@ -47,31 +97,43 @@ Each owning crate has a preparation revision (Simplified Schema's is
 what preparation produces without changing any shipped text: a lowering
 rule, an admission check, a record's shape. The revision is in the header,
 so an artifact generated before the change is refused rather than trusted,
-and the freshness test fails until you regenerate. Then regenerate the
-artifacts built over this one too: the root `just shipped-schemas` does all
-of them in dependency order.
+and the freshness test fails until you regenerate. The root
+`just shipped-schemas` regenerates the artifacts built over this one too.
 
 ## What an artifact holds
 
-An artifact is one JSON object with a `header` and a `payload`, written with
-two-space indentation and one final line feed:
+An artifact is one JSON object with a `header` and a `payload`. The header
+is pretty-printed; each member of the payload is compact JSON on its own
+line; the file ends with one line feed:
 
 ```json
 {
-  "header": {
-    "wire_version": 1,
-    "owner": "simplified-schema",
-    "preparation_revision": 1,
-    "sources": [
-      { "identity": "simplified-schema/schemas/schema.yaml", "digest": "24ea8b08f42922ce" },
-      { "identity": "simplified-schema/schemas/yaml-schema.yaml", "digest": "d3c3ff207ca0cd96" }
-    ],
-    "dependencies": [],
-    "configuration": []
-  },
-  "payload": { "definitions": [ … ] }
+"header": {
+  "wire_version": 1,
+  "owner": "simplified-schema",
+  "preparation_revision": 1,
+  "sources": [
+    {
+      "identity": "simplified-schema/schemas/schema.yaml",
+      "digest": "24ea8b08f42922ce"
+    },
+    …
+  ],
+  "dependencies": [],
+  "configuration": []
+},
+"payload": {
+"definitions":[{"identity":"simplified-schema/schemas/schema.yaml","json_schema":{…}}, …]
+}
 }
 ```
+
+The layout keeps two things cheap. A diff of a regenerated artifact shows
+which header field or which payload member changed, line by line, and a
+loader can find each payload member without scanning the JSON of the others
+(see [Deferred sections](#deferred-sections)). Payloads are large: Darkmatter's
+is about 1.8 MB, and indenting it would quadruple both its size and the time
+to scan it.
 
 | Header member | Meaning |
 | --- | --- |
@@ -93,7 +155,7 @@ The owners and their artifacts, in dependency order:
 | Owner | Artifact | Built over |
 | --- | --- | --- |
 | `simplified-schema` | `simplified-schema/lib/generated/shipped.json` | nothing |
-| `darkmatter` | `darkmatter/lib/generated/shipped.json` (**planned**) | `simplified-schema` |
+| `darkmatter` | `darkmatter/lib/generated/shipped.json` | `simplified-schema` |
 | `claudine` | `claudine/lib/generated/shipped.json` (**planned**) | `simplified-schema`, `darkmatter` |
 
 ## How an artifact is loaded
@@ -115,6 +177,33 @@ flowchart TD
 the owner's ordinary preparation as the fallback. Acceptance is all or
 nothing: one bad record refuses the whole artifact, and no entry of a refused
 artifact is ever used.
+
+### Deferred sections
+
+An owner whose payload is large reads it with `shipped::accept_deferred`
+instead. Loading then checks the layout, the header, and the payload's
+member list (every member the owner expects, no other, none twice) and
+nothing else: each member stays text, a `Section`, until a consumer first
+reads it. `Section::get` then checks that member's JSON (repeated keys
+included), decodes it, and validates its records, once per process.
+
+```mermaid
+flowchart TD
+    L[load: layout, header,<br/>member list] -->|refused| W[whole artifact refused:<br/>every item prepared from text]
+    L -->|accepted| S[sections kept as text]
+    S --> G{first read of a section:<br/>JSON and records check?}
+    G -->|yes| U[section's entries used]
+    G -->|no| F[that section refused:<br/>its item prepared from text]
+```
+
+A section refused on first read refuses only itself; the owner prepares that
+one item from text, and the other sections still serve. This keeps a
+process's cost proportional to what it reads: `md compose` on a plain
+document decodes Darkmatter's catalog and baseline sections, never its
+function catalog. The refusal names the section's JSON pointer
+(`/payload/functions/descriptors/0/order`) and its line and column in the
+artifact. A deferred artifact must be in the exact layout above, which the
+generator writes; one re-indented by hand is `MalformedArtifact`.
 
 A refusal carries a `FallbackReason`, the JSON pointer of the offending
 member when known, and the parser's line and column:

@@ -243,7 +243,7 @@ impl ResolvedPayload {
     /// The stand-in for a matcher-only trigger (no `$schema`): no schema, no
     /// dependencies. Effective-schema assembly layers nothing for such a
     /// trigger, so `json_schema` is never read.
-    fn matcher_only() -> Self {
+    pub(crate) fn matcher_only() -> Self {
         Self {
             json_schema: std::sync::Arc::new(Value::Object(serde_json::Map::new())),
             shape: None,
@@ -286,7 +286,14 @@ pub(crate) fn resolve_trigger_payload(
     let source = match (&trigger.source, trigger.bundle) {
         (TriggerSource::File(path), _) => path,
         (TriggerSource::Embedded { name, .. }, Some(bundle)) => {
-            return resolve_embedded_payload(trigger, bundle, name).map(|(payload, _)| payload);
+            return resolve_embedded_payload(
+                trigger.envelope.payload.as_ref(),
+                bundle,
+                name,
+                simplified_schema::shipped::PreparationMode::Runtime,
+                &crate::markdown::schemas::SHARED_VALIDATOR_CACHE,
+            )
+            .map(|(payload, _)| payload);
         }
         (TriggerSource::Embedded { bundle, name }, None) => {
             return Err(SchemaError::EmbeddedBundle {
@@ -783,7 +790,13 @@ pub(crate) fn resolve_embedded_trigger_payload(
     trigger: &LoadedTrigger,
 ) -> Result<(ResolvedPayload, Vec<PathBuf>), SchemaError> {
     match (&trigger.source, trigger.bundle) {
-        (TriggerSource::Embedded { name, .. }, Some(bundle)) => resolve_embedded_payload(trigger, bundle, name),
+        (TriggerSource::Embedded { name, .. }, Some(bundle)) => resolve_embedded_payload(
+            trigger.envelope.payload.as_ref(),
+            bundle,
+            name,
+            simplified_schema::shipped::PreparationMode::Runtime,
+            &crate::markdown::schemas::SHARED_VALIDATOR_CACHE,
+        ),
         (source, _) => Err(SchemaError::EmbeddedBundle {
             bundle: String::new(),
             message: format!("trigger `{source}` is not an embedded bundle trigger"),
@@ -791,23 +804,28 @@ pub(crate) fn resolve_embedded_trigger_payload(
     }
 }
 
-/// Resolves an embedded trigger's `$schema` inside `bundle`.
+/// Resolves an embedded trigger's `$schema` value `payload` inside `bundle`.
 ///
 /// A string payload is a relative reference to another bundle document
 /// (`payload.yaml`, `./payload.yaml`); a mapping is an inline schema whose
 /// `Name@./file.yaml` imports and `@this` resolve among the bundle's
 /// documents. Nothing falls back to the disk, the schema roots, or the
 /// network. Errors carry the virtual path `{bundle}/{name}` where a
-/// [`SchemaError`] field needs a path.
-fn resolve_embedded_payload(
-    trigger: &LoadedTrigger,
+/// [`SchemaError`] field needs a path. `mode` and `cache` are the resolution
+/// mode and the validator cache of the compile check: a generation passes
+/// [`PreparationMode::Uncached`](simplified_schema::shipped::PreparationMode::Uncached)
+/// and a private cache.
+pub(super) fn resolve_embedded_payload(
+    payload: Option<&YamlValue>,
     bundle: EmbeddedSchemaBundle,
     name: &str,
+    mode: simplified_schema::shipped::PreparationMode<'_>,
+    cache: &simplified_schema::ValidatorCache,
 ) -> Result<(ResolvedPayload, Vec<PathBuf>), SchemaError> {
     let _resolve = simplified_schema::timings::stage(simplified_schema::ValidationStage::Resolve);
     let importer = bundle.virtual_path(name);
     let importer_path = PathBuf::from(&importer);
-    let Some(payload) = trigger.envelope.payload.as_ref() else {
+    let Some(payload) = payload else {
         return Ok((ResolvedPayload::matcher_only(), Vec::new()));
     };
     let resolved = bundle.with_documents(|documents| match payload {
@@ -833,10 +851,10 @@ fn resolve_embedded_payload(
                     chain: format!("{importer} -> {target}{suffix}"),
                 });
             }
-            resolve::prepare_embedded_schema_in(&target, documents, bundle.name())
+            resolve::prepare_embedded_schema_with_mode(&target, documents, bundle.name(), mode)
         }
         YamlValue::Mapping(_) => {
-            resolve::prepare_embedded_inline_schema(payload, &importer, documents, bundle.name())
+            resolve::prepare_embedded_inline_schema_with_mode(payload, &importer, documents, bundle.name(), mode)
         }
         YamlValue::Sequence(_) => Err(SchemaError::TriggerPayloadNotMergeable {
             path: importer_path.clone(),
@@ -856,7 +874,7 @@ fn resolve_embedded_payload(
     let (resolved, reads) = resolved;
     enforce_merge_compatible(&importer_path, payload, None, &resolved.json_schema)?;
     let json_schema = std::sync::Arc::new(resolved.json_schema);
-    enforce_compiles(&importer_path, payload, None, &json_schema)?;
+    enforce_compiles_in(cache, &importer_path, payload, None, &json_schema)?;
     let payload = ResolvedPayload {
         shape: payload_shape(resolved.simplified),
         definitions: resolved.definitions,
@@ -880,7 +898,18 @@ fn enforce_compiles(
     payload_path: Option<PathBuf>,
     json_schema: &std::sync::Arc<Value>,
 ) -> Result<(), SchemaError> {
-    let cache = &*crate::markdown::schemas::SHARED_VALIDATOR_CACHE;
+    enforce_compiles_in(&crate::markdown::schemas::SHARED_VALIDATOR_CACHE, trigger_source, payload, payload_path, json_schema)
+}
+
+/// [`enforce_compiles`] through `cache`.
+fn enforce_compiles_in(
+    cache: &simplified_schema::ValidatorCache,
+    trigger_source: &Path,
+    payload: &YamlValue,
+    payload_path: Option<PathBuf>,
+    json_schema: &std::sync::Arc<Value>,
+) -> Result<(), SchemaError> {
+    crate::note_work!(PayloadCompileCheck);
     let hash = cache.shared_schema_hash(json_schema);
     match cache.structural_validator_hashed(json_schema, hash) {
         Ok(_) => Ok(()),
@@ -904,6 +933,7 @@ fn enforce_merge_compatible(
     payload_path: Option<&Path>,
     json_schema: &Value,
 ) -> Result<(), SchemaError> {
+    crate::note_work!(PayloadMergeCheck);
     let payload_desc = describe_payload(payload);
     if !json_schema.is_object() {
         return Err(SchemaError::TriggerPayloadNotMergeable {

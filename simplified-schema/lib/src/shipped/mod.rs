@@ -46,12 +46,14 @@ mod wire;
 pub(crate) mod wire_support;
 
 use std::fmt;
+use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::embedded::EmbeddedDocument;
 
 pub use records::{NamedTypeTableRecord, PreparedNamedTypes, PreparedSourcesDescriptor};
+pub use wire_support::present;
 
 /// The artifact wire-format version this library reads and writes.
 pub const WIRE_VERSION: u32 = 1;
@@ -483,13 +485,7 @@ fn accept_inner<T, U>(
 where
     T: serde::de::DeserializeOwned,
 {
-    let bytes = bytes.ok_or_else(|| Refusal {
-        reason: FallbackReason::MissingArtifact,
-        pointer: None,
-        line: None,
-        column: None,
-        detail: format!("no `{}` artifact was supplied", expected.owner),
-    })?;
+    let bytes = bytes.ok_or_else(|| missing(expected))?;
     crate::note_work!(ArtifactDecode);
     let decoded = wire::decode_header(bytes)?;
     check_header(&decoded.header, expected)?;
@@ -498,6 +494,178 @@ where
         Refusal::at(FallbackReason::UnusableRecord, format!("/payload{}", error.pointer), error.message)
     })?;
     Ok(AcceptedArtifact { header: decoded.header, digest: Digest::of(bytes), payload })
+}
+
+/// [`accept`] for a payload whose members are [`Section`]s: the document
+/// layout, the header, and the payload's member list are checked now, and
+/// each section is walked, decoded, and validated only when its owner first
+/// reads it ([`Section::get`]). An owner with a large payload uses it so a
+/// process decodes only the sections it needs, and loading scans none of the
+/// payload's JSON.
+///
+/// The artifact must be in the canonical layout [`generate`] writes, each
+/// payload member on its own line; anything else is
+/// [`FallbackReason::MalformedArtifact`]. `validate` takes each member it
+/// expects from [`Sections`] and refuses one it does not
+/// ([`Sections::finish`]).
+///
+/// A section refused on first use refuses only that section: its owner
+/// prepares that item from text, as it would for a refused artifact. Every
+/// other section's entries remain those of an artifact whose header proved
+/// it describes the compiled text. [`Section::get`] counts the refusal.
+///
+/// ## Errors
+///
+/// The [`Refusal`] of the first check that failed before any section is read.
+pub fn accept_deferred<U>(
+    expected: &ArtifactDescriptor<'_>,
+    bytes: Option<&[u8]>,
+    validate: impl FnOnce(&Acceptance<'_>, &mut Sections) -> Result<U, RecordError>,
+) -> Result<AcceptedArtifact<U>, Refusal> {
+    let accepted = accept_deferred_inner(expected, bytes, validate);
+    #[cfg(feature = "work-counters")]
+    match &accepted {
+        Ok(_) => crate::work_counters::add(crate::work_counters::Work::ArtifactAccept, 1),
+        Err(refusal) => crate::work_counters::add(refusal.reason.work(), 1),
+    }
+    accepted
+}
+
+fn accept_deferred_inner<U>(
+    expected: &ArtifactDescriptor<'_>,
+    bytes: Option<&[u8]>,
+    validate: impl FnOnce(&Acceptance<'_>, &mut Sections) -> Result<U, RecordError>,
+) -> Result<AcceptedArtifact<U>, Refusal> {
+    let bytes = bytes.ok_or_else(|| missing(expected))?;
+    crate::note_work!(ArtifactDecode);
+    let laid_out = wire::decode_laid_out(bytes)?;
+    check_header(&laid_out.header, expected)?;
+    let acceptance = Acceptance { header: &laid_out.header };
+    let mut sections = Sections {
+        header: Arc::new(laid_out.header.clone()),
+        members: laid_out
+            .members
+            .into_iter()
+            .map(|(key, text, line, column)| (key, Some((Box::<str>::from(text), line, column))))
+            .collect(),
+    };
+    let payload = validate(&acceptance, &mut sections)
+        .and_then(|payload| sections.finish().map(|()| payload))
+        .map_err(|error| Refusal::at(FallbackReason::UnusableRecord, format!("/payload{}", error.pointer), error.message))?;
+    Ok(AcceptedArtifact { header: laid_out.header, digest: Digest::of(bytes), payload })
+}
+
+fn missing(expected: &ArtifactDescriptor<'_>) -> Refusal {
+    Refusal {
+        reason: FallbackReason::MissingArtifact,
+        pointer: None,
+        line: None,
+        column: None,
+        detail: format!("no `{}` artifact was supplied", expected.owner),
+    }
+}
+
+/// The members of a deferred payload ([`accept_deferred`]), each still its
+/// authored JSON text.
+pub struct Sections {
+    header: Arc<ArtifactHeader>,
+    /// Each member by key; `None` once taken.
+    members: Vec<(String, Option<SectionText>)>,
+}
+
+/// A member's JSON text and the 1-based line and column it starts at.
+type SectionText = (Box<str>, usize, usize);
+
+impl Sections {
+    /// The member `name` as a [`Section`] decoded on first read.
+    ///
+    /// ## Errors
+    ///
+    /// A [`RecordError`] when the payload has no member `name`.
+    pub fn take<T>(&mut self, name: &str) -> Result<Section<T>, RecordError> {
+        let pointer = format!("/{}", name.replace('~', "~0").replace('/', "~1"));
+        let (text, line, column) = self
+            .members
+            .iter_mut()
+            .find(|(key, _)| key == name)
+            .and_then(|(_, member)| member.take())
+            .ok_or_else(|| RecordError::new(pointer.clone(), format!("the payload has no `{name}` member")))?;
+        Ok(Section {
+            pointer: format!("/payload{pointer}"),
+            text,
+            line,
+            column,
+            header: Arc::clone(&self.header),
+            value: std::sync::OnceLock::new(),
+        })
+    }
+
+    /// Refuses a member no [`Self::take`] claimed.
+    fn finish(&self) -> Result<(), RecordError> {
+        match self.members.iter().find(|(_, member)| member.is_some()) {
+            Some((key, _)) => Err(RecordError::new(format!("/{key}"), format!("`{key}` is not a payload member"))),
+            None => Ok(()),
+        }
+    }
+}
+
+/// One member of a deferred payload ([`accept_deferred`]): its authored JSON
+/// text, decoded and validated into a `T` the first time it is read. Only
+/// [`Sections::take`] constructs one, during acceptance.
+pub struct Section<T> {
+    pointer: String,
+    text: Box<str>,
+    line: usize,
+    column: usize,
+    header: Arc<ArtifactHeader>,
+    value: std::sync::OnceLock<Result<T, Refusal>>,
+}
+
+impl<T> Section<T> {
+    /// The section's entries, decoded as `R` and built by `validate` on the
+    /// first call; every later call returns the same result. A record
+    /// error's pointer is relative to the section.
+    ///
+    /// ## Errors
+    ///
+    /// The section's [`Refusal`]: malformed JSON or a record `validate`
+    /// rejects. Its owner then prepares the item from text.
+    pub fn get<R: serde::de::DeserializeOwned>(
+        &self,
+        validate: impl FnOnce(&Acceptance<'_>, R) -> Result<T, RecordError>,
+    ) -> Result<&T, &Refusal> {
+        self.value
+            .get_or_init(|| {
+                let decoded = wire::decode_section::<R>(&self.text, &self.pointer, self.line, self.column).and_then(|record| {
+                    validate(&Acceptance { header: &self.header }, record).map_err(|error| {
+                        Refusal::at(FallbackReason::UnusableRecord, format!("{}{}", self.pointer, error.pointer), error.message)
+                    })
+                });
+                if let Err(refusal) = &decoded {
+                    #[cfg(feature = "work-counters")]
+                    crate::work_counters::add(refusal.reason.work(), 1);
+                    tracing::debug!(owner = self.header.owner, %refusal, "shipped artifact section refused; preparing compiled sources");
+                }
+                decoded
+            })
+            .as_ref()
+    }
+
+    /// Whether the section has been read.
+    pub fn is_decoded(&self) -> bool {
+        self.value.get().is_some()
+    }
+}
+
+impl<T> fmt::Debug for Section<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Section")
+            .field("pointer", &self.pointer)
+            .field("bytes", &self.text.len())
+            .field("decoded", &self.is_decoded())
+            .finish()
+    }
 }
 
 /// Compares a decoded header with what its owner expects, value by value.

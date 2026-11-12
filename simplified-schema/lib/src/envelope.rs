@@ -47,7 +47,7 @@ use crate::outcome::ValidationFailure;
 use crate::prepared::Prepared;
 use crate::simplified::standalone::{RecognizedStandalone, parse_standalone_unadmitted, recognize_standalone};
 use crate::simplified::{SchemaDeclaration, StandaloneSchemaEnvelope};
-use crate::positions::{PositionMap, build_position_map};
+use crate::positions::PositionMap;
 use crate::validation::{ValidationProblem, ValidationProblemCode};
 
 /// Virtual path of the definition of `kind: schema` documents.
@@ -75,7 +75,8 @@ pub struct EnvelopeAdmission {
     /// otherwise. Schema declarations (`$schema`, `types`) are never
     /// converted. An informal envelope's value carries no `kind`.
     pub value: Value,
-    /// Positions of `value`'s nodes in the authored text.
+    /// Positions of `value`'s nodes in the authored text, built when a
+    /// coordinate is first requested.
     pub positions: PositionMap,
     /// The definition's problems, located against the authored text; empty
     /// when the envelope is admitted.
@@ -228,7 +229,7 @@ fn admit_with(
     if informal && let Value::Object(map) = &mut value {
         map.shift_remove("kind");
     }
-    let positions = build_position_map(source);
+    let positions = PositionMap::deferred(std::sync::Arc::from(source));
     positions.locate_all(&mut problems);
     Ok(EnvelopeAdmission { envelope: recognized.envelope, definition, value, positions, problems })
 }

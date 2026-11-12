@@ -41,6 +41,7 @@ use std::sync::{Arc, OnceLock};
 use biscuit_file::FileResolutionContext;
 use serde_yaml_ng::Value as YamlValue;
 use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::shipped::PreparationMode;
 use simplified_schema::{SchemaArm, SchemaError, SchemaRoot, SimplifiedType, claimed_values};
 
 use super::super::embedded::{SHIPPED_SOURCES, shipped_kind_definitions};
@@ -183,7 +184,7 @@ impl KindRegistry {
         if scope == RegistryScope::WithRoots {
             builder.discover(context, source);
         }
-        builder.finish()
+        builder.finish(super::super::shipped::registry().kind_definitions())
     }
 
     /// [`Self::build`] reading the schema roots from the filesystem.
@@ -191,11 +192,17 @@ impl KindRegistry {
         Self::build(context, &mut super::super::triggers::discovery::FilesystemRoots, scope)
     }
 
-    /// The registry of the shipped definitions alone, prepared once.
+    /// The registry of the shipped definitions alone, built once per
+    /// process from the shipped artifact's definitions (or, when that
+    /// artifact was refused, from the definitions prepared from text).
     #[must_use]
     pub fn shipped() -> Arc<Self> {
-        static SHIPPED: OnceLock<Arc<KindRegistry>> = OnceLock::new();
-        Arc::clone(SHIPPED.get_or_init(|| Arc::new(Builder::default().finish())))
+        super::super::shipped::registry().shipped_kind_registry()
+    }
+
+    /// The registry of `definitions` alone.
+    pub(crate) fn shipped_from(definitions: &[ShippedDefinition]) -> Self {
+        Builder::default().finish(definitions)
     }
 
     /// What the registry knows about `kind`, compared exactly; `None` when no
@@ -356,10 +363,10 @@ impl Builder {
         }
     }
 
-    /// Adds every shipped definition no checkout copy replaced and groups
-    /// the claims.
-    fn finish(mut self) -> KindRegistry {
-        for shipped in shipped_definitions() {
+    /// Adds every shipped definition (of `shipped`) no checkout copy
+    /// replaced and groups the claims.
+    fn finish(mut self, shipped: &[ShippedDefinition]) -> KindRegistry {
+        for shipped in shipped {
             if self.replaced.contains(shipped.path) {
                 continue;
             }
@@ -413,31 +420,65 @@ fn group_claims(entries: Vec<(String, PathBuf, Entry)>) -> BTreeMap<String, Clai
 }
 
 /// A shipped definition and its preparation.
-struct ShippedDefinition {
+pub(crate) struct ShippedDefinition {
     path: &'static str,
     prepared: Result<Arc<KindDefinition>, Arc<SchemaError>>,
 }
 
-/// The shipped definitions, prepared once per process.
+impl ShippedDefinition {
+    /// The definition at `path` as an accepted shipped artifact recorded it.
+    pub(crate) fn from_record(path: &'static str, record: super::super::shipped::KindDefinitionRecord) -> Self {
+        let resolved = ResolvedSchema {
+            simplified: record.simplified,
+            definitions: Arc::new(record.definitions),
+            json_schema: record.json_schema,
+            origin: record.origin.origin(),
+            imports: Vec::new(),
+            examples: Vec::new(),
+            referenced_files: Vec::new(),
+            searched: Vec::new(),
+            advisories: Vec::new(),
+        };
+        let definition = KindDefinition { source: DefinitionSource::Shipped(path), resolved, kinds: record.kinds };
+        Self { path, prepared: Ok(Arc::new(definition)) }
+    }
+}
+
+/// The shipped definitions this process uses: the accepted artifact's, or
+/// [`shipped_definitions_from_sources`].
 fn shipped_definitions() -> &'static [ShippedDefinition] {
+    super::super::shipped::registry().kind_definitions()
+}
+
+/// The shipped definitions prepared from their text, once per process: the
+/// fallback when the shipped artifact was refused.
+pub(crate) fn shipped_definitions_from_sources() -> &'static [ShippedDefinition] {
     static PREPARED: OnceLock<Vec<ShippedDefinition>> = OnceLock::new();
     PREPARED.get_or_init(|| {
         let documents = shipped_kind_definitions();
         documents
             .iter()
-            .map(|document| ShippedDefinition {
-                path: document.path,
-                prepared: prepare_shipped(document.path, documents).map(Arc::new).map_err(Arc::new),
+            .map(|document| {
+                crate::note_work!(ShippedRuntimePreparation);
+                ShippedDefinition {
+                    path: document.path,
+                    prepared: prepare_shipped(document.path, documents, PreparationMode::Runtime)
+                        .map(Arc::new)
+                        .map_err(Arc::new),
+                }
             })
             .collect()
     })
 }
 
-fn prepare_shipped(
+/// Prepares the shipped definition at `path` from `documents` in `mode`;
+/// shipped-artifact generation passes [`PreparationMode::Uncached`].
+pub(crate) fn prepare_shipped(
     path: &'static str,
     documents: &[simplified_schema::embedded::EmbeddedDocument<'static>],
+    mode: PreparationMode<'_>,
 ) -> Result<KindDefinition, SchemaError> {
-    let resolved = simplified_schema::resolve::prepare_embedded_yaml_schema(path, documents, SHIPPED_SOURCES)?;
+    let resolved = simplified_schema::resolve::prepare_embedded_yaml_schema_with_mode(path, documents, SHIPPED_SOURCES, mode)?;
     let kinds = claimed_values(&resolved, "kind").map_err(|problem| claim_error(Path::new(path), &problem))?;
     Ok(KindDefinition { source: DefinitionSource::Shipped(path), resolved, kinds })
 }

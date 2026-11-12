@@ -196,30 +196,57 @@ pub(crate) fn trigger_error_segments(error: &SchemaError) -> Vec<String> {
     segments
 }
 
-/// The byte span, in `source` (a trigger file's text), of the node `error`
-/// is about (see [`trigger_error_segments`]); `None` for an error naming no
-/// node or a `source` whose structure cannot be located.
-pub(crate) fn trigger_error_span(error: &SchemaError, source: &str) -> Option<std::ops::Range<usize>> {
-    if let SchemaError::TriggerMatch { span: Some(span), .. } = error {
-        return Some(span.clone());
-    }
-    let segments = trigger_error_segments(error);
-    // An error naming no node (an unknown top-level key) gets no invented
-    // position at the document root.
-    if segments.is_empty() {
-        return None;
-    }
-    let offset = if source.starts_with('\u{feff}') { '\u{feff}'.len_utf8() } else { 0 };
-    let positions = simplified_schema::positions::build_position_map(&source[offset..]);
-    let located = crate::markdown::schemas::yaml_documents::locating_problem(&segments);
-    positions.byte_range(&located).map(|range| range.start + offset..range.end + offset)
+/// The positions of one reported trigger file's text: a deferred map over
+/// the text after any BOM, built at most once however many times the
+/// snapshot is located against (the error's own span, then the finding's
+/// line and column).
+pub(crate) struct TriggerSourcePositions<'a> {
+    source: &'a str,
+    offset: usize,
+    map: std::sync::OnceLock<simplified_schema::PositionMap>,
 }
 
-/// `error` with the byte span, in `source`, of the node it is about, when it
-/// is a [`SchemaError::TriggerMatch`] without one. Any other error is
-/// returned unchanged.
-pub(crate) fn locate_trigger_error(error: SchemaError, source: &str) -> SchemaError {
-    let span = trigger_error_span(&error, source);
+impl<'a> TriggerSourcePositions<'a> {
+    pub(crate) fn new(source: &'a str) -> Self {
+        let offset = if source.starts_with('\u{feff}') { '\u{feff}'.len_utf8() } else { 0 };
+        Self { source, offset, map: std::sync::OnceLock::new() }
+    }
+
+    /// The byte span, in the source, of the node `error` is about (see
+    /// [`trigger_error_segments`]); `None` for an error naming no node or a
+    /// source whose structure cannot be located.
+    pub(crate) fn span(&self, error: &SchemaError) -> Option<std::ops::Range<usize>> {
+        if let SchemaError::TriggerMatch { span: Some(span), .. } = error {
+            return Some(span.clone());
+        }
+        let segments = trigger_error_segments(error);
+        // An error naming no node (an unknown top-level key) gets no invented
+        // position at the document root.
+        if segments.is_empty() {
+            return None;
+        }
+        let positions = self
+            .map
+            .get_or_init(|| simplified_schema::PositionMap::deferred(std::sync::Arc::from(&self.source[self.offset..])));
+        let located = crate::markdown::schemas::yaml_documents::locating_problem(&segments);
+        positions.byte_range(&located).map(|range| range.start + self.offset..range.end + self.offset)
+    }
+
+    /// The source these positions locate in.
+    pub(crate) fn source(&self) -> &'a str {
+        self.source
+    }
+}
+
+/// `error` with the byte span, in `positions`' source, of the node it is
+/// about, when it is a [`SchemaError::TriggerMatch`] without one. Any other
+/// error is returned unchanged.
+pub(crate) fn locate_trigger_error(error: SchemaError, positions: &TriggerSourcePositions<'_>) -> SchemaError {
+    // Locating any other error would build a position map only to discard it.
+    if !matches!(error, SchemaError::TriggerMatch { span: None, .. }) {
+        return error;
+    }
+    let span = positions.span(&error);
     match error {
         SchemaError::TriggerMatch { message, span: None } => SchemaError::TriggerMatch { message, span },
         other => other,

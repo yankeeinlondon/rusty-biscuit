@@ -16,13 +16,15 @@
 use std::sync::LazyLock;
 
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use simplified_schema::shipped::PreparationMode;
 
 use crate::catalog::{Described, Example, ExampleVerification};
 use crate::markdown::compose::expression::call_binding::TypeResolver;
 use simplified_schema::simplified::{
     Constraint, ExampleOutcome, FunctionType, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SchemaRoot,
-    StandaloneSchemaEnvelope, TypeExpr, parse_standalone_schema_document, serialize_property_def,
+    StandaloneSchemaEnvelope, TypeExpr, parse_standalone_schema_document_with_mode, serialize_property_def,
 };
 
 mod roots;
@@ -30,9 +32,9 @@ mod roots;
 pub use roots::{ReservedRootDescriptor, RootEvaluation, RootMembers, reserved_root_descriptors};
 
 /// The embedded catalog file's repository path, used in load errors.
-const CATALOG_PATH: &str = "darkmatter/schemas/partials/functions.yaml";
+pub(crate) const CATALOG_PATH: &str = "darkmatter/schemas/partials/functions.yaml";
 
-const CATALOG_SOURCE: &str = include_str!("../../../../../../schemas/partials/functions.yaml");
+pub(crate) const CATALOG_SOURCE: &str = include_str!("../../../../../../schemas/partials/functions.yaml");
 
 /// The embedded function catalog's text, which a schema-slot resolution is
 /// keyed on: a build whose catalog differs never reuses a cached result.
@@ -44,7 +46,7 @@ pub(crate) fn catalog_source() -> &'static str {
 /// `example(./function-examples/<name>.yaml)`, keyed by that reference
 /// without its leading `./`. Compiled in so reading the catalog never touches
 /// the disk; an entry naming a file missing here is a load error.
-const EXAMPLE_FILES: &[(&str, &str)] = &[
+pub(crate) const EXAMPLE_FILES: &[(&str, &str)] = &[
     (
         "function-examples/as_line_separated.yaml",
         include_str!("../../../../../../schemas/partials/function-examples/as_line_separated.yaml"),
@@ -82,14 +84,17 @@ pub(crate) const EXAMPLE_DATA_FILES: &[(&str, &str)] = &[
 ];
 
 /// One entry of the catalog's `categories:` list.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CatalogCategory {
     pub name: Box<str>,
+    #[serde(deserialize_with = "simplified_schema::shipped::present")]
     pub description: Option<Box<str>>,
 }
 
 /// One parameter of a function overload.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FunctionParameterDescriptor {
     pub name: Box<str>,
     /// The declared type in canonical grammar spelling, without descriptions
@@ -100,7 +105,8 @@ pub struct FunctionParameterDescriptor {
 }
 
 /// An example attached to a function overload.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum FunctionExample {
     /// `example(CALL => RESULT)`; `result` is the authored literal text or
     /// `error`.
@@ -108,6 +114,7 @@ pub enum FunctionExample {
         call: Box<str>,
         expected: ExampleOutcome,
         result: Box<str>,
+        #[serde(deserialize_with = "simplified_schema::shipped::present")]
         display_only: Option<Box<str>>,
     },
     /// `example(./function-examples/x.yaml)`, read from the embedded file.
@@ -117,6 +124,7 @@ pub enum FunctionExample {
         path: Box<str>,
         invocation: Box<str>,
         returns: Box<str>,
+        #[serde(deserialize_with = "simplified_schema::shipped::present")]
         description: Option<Box<str>>,
     },
 }
@@ -126,7 +134,8 @@ pub enum FunctionExample {
 /// Owns every field. A descriptor borrowed from a static catalog (the
 /// built-in or mutation catalog) yields `&'static` field views; one borrowed
 /// from a host catalog lives as long as that catalog.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExpressionFunctionDescriptor {
     /// The canonical name.
     pub name: Box<str>,
@@ -234,7 +243,11 @@ impl Described for ExpressionFunctionDescriptor {
 /// The loaded catalog: categories in list order and every overload's
 /// descriptor in documentation order (category list order, then canonical
 /// name, then authored overload order).
-#[derive(Debug)]
+///
+/// Serializable as shipped-artifact data in that order; a decoded catalog
+/// is checked with [`Self::check_record`] before use.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FunctionCatalog {
     pub categories: Box<[CatalogCategory]>,
     pub descriptors: Box<[ExpressionFunctionDescriptor]>,
@@ -274,15 +287,64 @@ impl FunctionCatalog {
     pub fn named_type(&self, name: &str) -> Option<&PropertyDef> {
         self.named_types.get(name)
     }
+
+    /// Checks a decoded catalog's invariants, which the loader guarantees
+    /// and lookups rely on: every descriptor names a declared category, a
+    /// function's overloads are adjacent and numbered from 0 in order, and
+    /// each category's positions count 1, 2, … in descriptor order.
+    ///
+    /// ## Errors
+    ///
+    /// A [`simplified_schema::shipped::RecordError`] whose pointer is
+    /// relative to the catalog (`/descriptors/4`).
+    pub fn check_record(&self) -> Result<(), simplified_schema::shipped::RecordError> {
+        use simplified_schema::shipped::RecordError;
+        let mut positions = vec![0usize; self.categories.len()];
+        let mut seen: Vec<&str> = Vec::new();
+        for (index, descriptor) in self.descriptors.iter().enumerate() {
+            let at = format!("/descriptors/{index}");
+            let category = self
+                .categories
+                .iter()
+                .position(|category| category.name == descriptor.category)
+                .ok_or_else(|| RecordError::new(format!("{at}/category"), format!("`{}` is not a declared category", descriptor.category)))?;
+            positions[category] += 1;
+            if descriptor.order != positions[category] {
+                return Err(RecordError::new(format!("{at}/order"), format!("position {} is recorded where {} belongs", descriptor.order, positions[category])));
+            }
+            let continues = index > 0 && self.descriptors[index - 1].name == descriptor.name;
+            let expected_overload = if continues { self.descriptors[index - 1].overload + 1 } else { 0 };
+            if !continues {
+                if seen.contains(&&*descriptor.name) {
+                    return Err(RecordError::new(format!("{at}/name"), format!("`{}`'s overloads are not adjacent", descriptor.name)));
+                }
+                seen.push(&descriptor.name);
+            }
+            if descriptor.overload != expected_overload {
+                return Err(RecordError::new(format!("{at}/overload"), format!("overload {} is recorded where {expected_overload} belongs", descriptor.overload)));
+            }
+        }
+        Ok(())
+    }
 }
 
-/// The embedded catalog, loaded once.
+/// The embedded catalog: the accepted shipped artifact's
+/// ([`crate::markdown::schemas::shipped`]), or, when that artifact was
+/// refused, loaded once from the embedded file.
 ///
 /// ## Panics
 ///
-/// When the embedded file does not load; a unit test loads it.
+/// When the artifact was refused and the embedded file does not load; a
+/// unit test loads it.
 pub fn expression_function_catalog() -> &'static FunctionCatalog {
+    crate::markdown::schemas::shipped::registry().function_catalog()
+}
+
+/// [`expression_function_catalog`] loaded from the embedded file, once per
+/// process: the fallback when the shipped artifact was refused.
+pub(crate) fn expression_function_catalog_from_sources() -> &'static FunctionCatalog {
     static CATALOG: LazyLock<FunctionCatalog> = LazyLock::new(|| {
+        crate::note_work!(ShippedRuntimePreparation);
         load_catalog(CATALOG_SOURCE, CATALOG_PATH, EXAMPLE_FILES)
             .unwrap_or_else(|error| panic!("the embedded expression-function catalog does not load: {error}"))
     });
@@ -322,11 +384,22 @@ pub(crate) fn load_catalog(
     path: &str,
     example_files: &[(&str, &str)],
 ) -> Result<FunctionCatalog, CatalogError> {
+    load_catalog_with_mode(source, path, example_files, PreparationMode::Runtime)
+}
+
+/// [`load_catalog`] in `mode`; shipped-artifact generation passes
+/// [`PreparationMode::Uncached`].
+pub(crate) fn load_catalog_with_mode(
+    source: &str,
+    path: &str,
+    example_files: &[(&str, &str)],
+    mode: PreparationMode<'_>,
+) -> Result<FunctionCatalog, CatalogError> {
     let invalid = |message: String| CatalogError::Invalid {
         path: path.to_string(),
         message,
     };
-    let document = parse_standalone_schema_document(source, path)?
+    let document = parse_standalone_schema_document_with_mode(source, std::path::Path::new(path), mode)?
         .ok_or_else(|| invalid("not a SimplifiedSchema document; expected `kind: schema`".into()))?;
     if document.envelope != StandaloneSchemaEnvelope::Tagged {
         return Err(invalid("expected the tagged envelope (`kind: schema`, `categories:`, `types:`)".into()));

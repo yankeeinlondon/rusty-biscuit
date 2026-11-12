@@ -403,7 +403,17 @@ construct preflight models directly; they do not authorize old YAML syntax.
 The canonical shipped trigger schema lives in `claudine/schemas/`, not
 Darkmatter's docs tree. A malformed disk `claudine.yaml` is skipped with a
 warning and still shadows the embedded copy; there is no fallback to it
-(`claudine_schemas_embedded.rs`, `launch_trigger_schemas.rs`). Action shapes are Darkmatter's: `action.yaml`'s
+(`claudine_schemas_embedded.rs`, `launch_trigger_schemas.rs`). The embedded
+bundle's triggers and the host catalog are served prepared from the checked-in
+`claudine/lib/generated/shipped.json` (`composition/schema/shipped.rs`,
+prepared over Simplified Schema's and Darkmatter's artifacts;
+`claudine_schema_bundle()` attaches `shipped::BUNDLE`, `claudine_globals()` is
+a registry view). A refused artifact or section falls back to preparing the
+text; disk shadowing happens before the prepared lookup and is unchanged.
+After editing `claudine/schemas/` (or a lower artifact changes), run the
+root `just shipped-schemas`; `shipped_artifacts::shipped_artifact_is_fresh`
+fails with that command, and a code-only change to preparation bumps
+`shipped::PREPARATION_REVISION`. Action shapes are Darkmatter's: `action.yaml`'s
 categories and bundles, the `cancelled-*` types, and `loop`'s loose verbs are
 mappings whose values reference per-verb types `@darkmatter:lifecycle` (a
 reserved reference that resolves from Darkmatter's embedded partials, so the

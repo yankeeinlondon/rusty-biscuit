@@ -1,183 +1,22 @@
 {
-  "header": {
-    "wire_version": 1,
-    "owner": "simplified-schema",
-    "preparation_revision": 1,
-    "sources": [
-      {
-        "identity": "simplified-schema/schemas/schema.yaml",
-        "digest": "24ea8b08f42922ce"
-      },
-      {
-        "identity": "simplified-schema/schemas/yaml-schema.yaml",
-        "digest": "d3c3ff207ca0cd96"
-      }
-    ],
-    "dependencies": [],
-    "configuration": []
-  },
-  "payload": {
-    "definitions": [
-      {
-        "identity": "simplified-schema/schemas/schema.yaml",
-        "json_schema": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "anyOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "kind": {
-                  "const": "schema",
-                  "description": "the document kind that claims this definition"
-                },
-                "description": {
-                  "type": "string",
-                  "description": "what the schema is for"
-                },
-                "categories": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`"
-                },
-                "$schema": {
-                  "type": [
-                    "string",
-                    "object",
-                    "array"
-                  ],
-                  "x-darkmatter-schema": true,
-                  "description": "the exported document schema (an inline mapping or union, or a reference to a schema file)"
-                },
-                "types": {
-                  "type": [
-                    "string",
-                    "object",
-                    "array"
-                  ],
-                  "x-darkmatter-schema": {
-                    "mapping": true
-                  },
-                  "description": "reusable named types; these names are not document properties"
-                }
-              },
-              "required": [
-                "kind",
-                "$schema"
-              ]
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "kind": {
-                  "const": "schema",
-                  "description": "the document kind that claims this definition"
-                },
-                "description": {
-                  "type": "string",
-                  "description": "what the schema is for"
-                },
-                "categories": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "description": "the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`"
-                },
-                "$schema": {
-                  "type": [
-                    "string",
-                    "object",
-                    "array"
-                  ],
-                  "x-darkmatter-schema": true,
-                  "description": "the exported document schema (an inline mapping or union, or a reference to a schema file)"
-                },
-                "types": {
-                  "type": [
-                    "string",
-                    "object",
-                    "array"
-                  ],
-                  "x-darkmatter-schema": {
-                    "mapping": true
-                  },
-                  "description": "reusable named types; these names are not document properties"
-                }
-              },
-              "required": [
-                "kind",
-                "types"
-              ]
-            }
-          ]
-        }
-      },
-      {
-        "identity": "simplified-schema/schemas/yaml-schema.yaml",
-        "json_schema": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "kind": {
-              "const": "yaml-schema",
-              "description": "the document kind that claims this definition"
-            },
-            "description": {
-              "type": "string",
-              "description": "what the kind is for"
-            },
-            "categories": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`"
-            },
-            "$schema": {
-              "type": [
-                "string",
-                "object",
-                "array"
-              ],
-              "x-darkmatter-schema": {
-                "property": [
-                  {
-                    "name": "kind",
-                    "declaration": {
-                      "forms": [
-                        "literal",
-                        "enum"
-                      ],
-                      "declaredRequired": true
-                    }
-                  }
-                ]
-              },
-              "description": "the contract for documents of the claimed kind; its `kind` declaration names the kinds claimed"
-            },
-            "types": {
-              "type": [
-                "string",
-                "object",
-                "array"
-              ],
-              "x-darkmatter-schema": {
-                "mapping": true
-              },
-              "description": "reusable named types for `$schema`; these names are not document properties"
-            }
-          },
-          "required": [
-            "kind",
-            "$schema"
-          ]
-        }
-      }
-    ]
-  }
+"header": {
+  "wire_version": 1,
+  "owner": "simplified-schema",
+  "preparation_revision": 1,
+  "sources": [
+    {
+      "identity": "simplified-schema/schemas/schema.yaml",
+      "digest": "24ea8b08f42922ce"
+    },
+    {
+      "identity": "simplified-schema/schemas/yaml-schema.yaml",
+      "digest": "d3c3ff207ca0cd96"
+    }
+  ],
+  "dependencies": [],
+  "configuration": []
+},
+"payload": {
+"definitions":[{"identity":"simplified-schema/schemas/schema.yaml","json_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","anyOf":[{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"schema","description":"the document kind that claims this definition"},"description":{"type":"string","description":"what the schema is for"},"categories":{"type":"array","items":{"type":"string"},"description":"the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`"},"$schema":{"type":["string","object","array"],"x-darkmatter-schema":true,"description":"the exported document schema (an inline mapping or union, or a reference to a schema file)"},"types":{"type":["string","object","array"],"x-darkmatter-schema":{"mapping":true},"description":"reusable named types; these names are not document properties"}},"required":["kind","$schema"]},{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"schema","description":"the document kind that claims this definition"},"description":{"type":"string","description":"what the schema is for"},"categories":{"type":"array","items":{"type":"string"},"description":"the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`"},"$schema":{"type":["string","object","array"],"x-darkmatter-schema":true,"description":"the exported document schema (an inline mapping or union, or a reference to a schema file)"},"types":{"type":["string","object","array"],"x-darkmatter-schema":{"mapping":true},"description":"reusable named types; these names are not document properties"}},"required":["kind","types"]}]}},{"identity":"simplified-schema/schemas/yaml-schema.yaml","json_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"kind":{"const":"yaml-schema","description":"the document kind that claims this definition"},"description":{"type":"string","description":"what the kind is for"},"categories":{"type":"array","items":{"type":"string"},"description":"the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`"},"$schema":{"type":["string","object","array"],"x-darkmatter-schema":{"property":[{"name":"kind","declaration":{"forms":["literal","enum"],"declaredRequired":true}}]},"description":"the contract for documents of the claimed kind; its `kind` declaration names the kinds claimed"},"types":{"type":["string","object","array"],"x-darkmatter-schema":{"mapping":true},"description":"reusable named types for `$schema`; these names are not document properties"}},"required":["kind","$schema"]}}]
+}
 }

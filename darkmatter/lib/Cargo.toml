@@ -339,6 +339,9 @@ required-features = ["work-counters"]
 # The frozen recursive-schema fixture suite embeds the lifecycle-grammar spike's
 # generator with `include_str!` and runs it. The schema-language ownership
 # guard spells each `simplified-schema` file that defines an owned item.
+# `shipped_artifact_is_fresh` spells the `simplified-schema` files that parse,
+# admit, resolve, lower, and encode the shipped schemas, since a change there
+# can change Darkmatter's artifact without touching any of its own sources.
 source-inputs = [
     "biscuit-file/lib/src/file_reference/glob/parse.rs",
     "biscuit-file/lib/src/file_reference/glob/roots.rs",
@@ -354,8 +357,16 @@ source-inputs = [
     "simplified-schema/lib/src/expression/ast.rs",
     "simplified-schema/lib/src/expression/lexer.rs",
     "simplified-schema/lib/src/expression/parser.rs",
+    "simplified-schema/lib/src/embedded.rs",
+    "simplified-schema/lib/src/envelope.rs",
     "simplified-schema/lib/src/json_shape.rs",
     "simplified-schema/lib/src/numeric.rs",
+    "simplified-schema/lib/src/resolve.rs",
+    "simplified-schema/lib/src/resolve/graph.rs",
+    "simplified-schema/lib/src/shipped/mod.rs",
+    "simplified-schema/lib/src/shipped/records.rs",
+    "simplified-schema/lib/src/shipped/wire.rs",
+    "simplified-schema/lib/src/shipped/wire_support.rs",
     "simplified-schema/lib/src/simplified/convert.rs",
     "simplified-schema/lib/src/simplified/definitions.rs",
     "simplified-schema/lib/src/simplified/grammar.rs",

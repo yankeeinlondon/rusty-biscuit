@@ -532,7 +532,9 @@ judged against, the admitted and converted `value` (an informal envelope's
 copy carries no `kind`), its `positions` in the text, and the located
 `problems` (each with `line` and `column`), empty when `is_admitted()`.
 `PositionMap::byte_range(&problem)` returns the byte range a problem is
-reported at.
+reported at. The positions are built only when a coordinate is first
+requested, so an admitted envelope that is never asked for one builds none
+(see [Diagnostics](../diagnostics.md)).
 
 #### What Admission Does Not Check
 

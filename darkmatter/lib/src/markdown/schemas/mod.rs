@@ -52,6 +52,7 @@ pub mod resolve;
 pub mod rewrite;
 pub mod roots;
 mod schema_files;
+pub mod shipped;
 pub mod slots;
 pub mod triggers;
 pub mod yaml_documents;
@@ -122,29 +123,37 @@ use simplified_schema::{
 };
 use positions::ProblemPositions;
 
-/// The runtime baseline, prepared from the embedded table: its typed form with
-/// every import expanded, the shared definitions its references point into,
-/// and the pair lowered to JSON Schema.
-struct ShippedBaseline {
-    schema: SchemaRoot,
-    definitions: Arc<DefinitionTable>,
-    json_schema: Arc<Value>,
+use shipped::ShippedBaseline;
+
+/// The runtime baseline: the accepted shipped artifact's, or
+/// [`baseline_from_sources`].
+fn shipped_baseline() -> &'static ShippedBaseline {
+    shipped::registry().baseline()
 }
 
-/// Prepared and lowered once per process, on first use.
-static BASELINE: std::sync::OnceLock<ShippedBaseline> = std::sync::OnceLock::new();
-
-/// [`darkmatter_base_schema`]'s definition-free form, resolved on first use.
-static INLINE_BASELINE: std::sync::OnceLock<SchemaRoot> = std::sync::OnceLock::new();
-
-fn shipped_baseline() -> &'static ShippedBaseline {
+/// The runtime baseline prepared from the embedded table and lowered, once
+/// per process: the fallback when the shipped artifact was refused.
+pub(crate) fn baseline_from_sources() -> &'static ShippedBaseline {
+    static BASELINE: std::sync::OnceLock<ShippedBaseline> = std::sync::OnceLock::new();
     BASELINE.get_or_init(|| {
-        let (schema, definitions) = catalog::GlobalCatalog::darkmatter()
+        crate::note_work!(ShippedRuntimePreparation);
+        let (schema, definitions) = catalog::GlobalCatalog::darkmatter_from_sources()
             .baseline()
             .expect("Darkmatter's catalog declares `fm`");
         let json_schema = to_json_schema_with_definitions(&schema, &definitions)
             .unwrap_or_else(|error| panic!("the embedded baseline schema must lower: {error}"));
         ShippedBaseline { schema, definitions, json_schema: Arc::new(json_schema) }
+    })
+}
+
+/// [`darkmatter_base_schema`]'s definition-free form resolved from the
+/// embedded table, once per process: the fallback when the shipped artifact
+/// was refused.
+pub(crate) fn inline_baseline_from_sources() -> &'static SchemaRoot {
+    static INLINE_BASELINE: std::sync::OnceLock<SchemaRoot> = std::sync::OnceLock::new();
+    INLINE_BASELINE.get_or_init(|| {
+        crate::note_work!(ShippedRuntimePreparation);
+        catalog::darkmatter_inline_baseline()
     })
 }
 
@@ -156,7 +165,7 @@ pub(crate) fn darkmatter_shared_baseline() -> (&'static SchemaRoot, &'static Arc
 }
 
 fn darkmatter_base_schema_ref() -> &'static SchemaRoot {
-    INLINE_BASELINE.get_or_init(catalog::darkmatter_inline_baseline)
+    shipped::registry().inline_baseline()
 }
 
 fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
@@ -175,7 +184,8 @@ fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
 /// expanded at each of its uses. The catalog declaration and the lowered
 /// baseline ([`darkmatter_base_json_schema`]) store a structured type the
 /// baseline uses at two or more sites once instead; both forms validate
-/// alike. It is prepared at first call and cached.
+/// alike. It comes from the shipped artifact ([`shipped`]), or is prepared
+/// at first call and cached when that artifact was refused.
 ///
 /// ## Examples
 ///
@@ -196,7 +206,8 @@ pub fn darkmatter_base_schema() -> SchemaRoot {
 /// Returns the Darkmatter baseline frontmatter schema as a compiled Draft
 /// 2020-12 JSON Schema value.
 ///
-/// The result is the baseline lowered once and cached, with each structured
+/// The result is the baseline as the shipped artifact holds it lowered (or,
+/// when that artifact was refused, lowered once and cached), with each structured
 /// type it uses at two or more sites emitted once under its root `$defs`;
 /// [`darkmatter_base_schema`] is the same baseline with those types expanded,
 /// and it validates alike. Each call returns an independent owned value;
@@ -278,7 +289,10 @@ use simplified_schema::validate::SHARED_VALIDATOR_CACHE;
 /// example-artifact, emitted-pattern, and named-type parse caches; the
 /// trigger payload and embedded-trigger memos; the trigger merge, phase
 /// derivation, and root-arm memos; the schema-slot resolution cache; and the calling thread's trigger-matcher regex cache. Compiled-in
-/// constants (the shipped baseline, the global catalog) are kept.
+/// data is kept: the shipped artifact registries (Darkmatter's baseline,
+/// global catalog, kind definitions, and function catalogs, and the
+/// library's envelope definitions) and the per-item preparations a refused
+/// artifact falls back to.
 ///
 /// Never call it from production code: it only discards work. Verdicts are
 /// unchanged; a reset makes the next lookup of each cache a miss.
@@ -694,9 +708,25 @@ impl DarkmatterSchemas {
     ///
     /// Returns [`SchemaError::Baseline`] if the built-in schema is not a
     /// simple object schema. This indicates a library defect.
-    pub fn with_darkmatter_baseline_json_schema(mut self) -> Result<Self, SchemaError> {
-        let json_schema = Arc::clone(darkmatter_base_json_schema_arc());
-        simplified_schema::resolve::validate_baseline_schema(&json_schema)?;
+    pub fn with_darkmatter_baseline_json_schema(self) -> Result<Self, SchemaError> {
+        self.with_darkmatter_baseline_in(shipped::registry())
+    }
+
+    /// [`Self::with_darkmatter_baseline_json_schema`] with the baseline of
+    /// `registry`, for tests that inject a refused artifact. The baseline
+    /// check runs unless the baseline came from an accepted artifact, whose
+    /// generation ran it.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::with_darkmatter_baseline_json_schema`].
+    #[doc(hidden)]
+    pub fn with_darkmatter_baseline_in(mut self, registry: &shipped::Registry) -> Result<Self, SchemaError> {
+        let json_schema = Arc::clone(&registry.baseline().json_schema);
+        if !registry.baseline_is_accepted() {
+            crate::note_work!(BaselineCheck);
+            simplified_schema::resolve::validate_baseline_schema(&json_schema)?;
+        }
         self.baseline = Some(BaselineSchema {
             json_schema,
             advisories: Vec::new(),
@@ -711,6 +741,7 @@ impl DarkmatterSchemas {
         advisories: Vec<SchemaAdvisory>,
         declarations: BaselineDeclarations,
     ) -> Result<(), SchemaError> {
+        crate::note_work!(BaselineCheck);
         simplified_schema::resolve::validate_baseline_schema(&value)?;
         self.baseline = Some(BaselineSchema {
             json_schema: Arc::new(value),
