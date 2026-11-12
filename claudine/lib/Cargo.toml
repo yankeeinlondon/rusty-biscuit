@@ -169,10 +169,13 @@ features = ["work-counters"]
 # The context construction and path lookup guards include darkmatter-cli's
 # shared engines by `#[path]` and spell those files in their tests. The
 # lifecycle lift-ready guard spells Darkmatter's lifecycle parser slice.
-# `shipped_artifact_is_fresh` spells the Darkmatter and Simplified Schema code
-# that prepares Claudine's bundle and host catalog: a change there can alter
-# Claudine's artifact without changing either lower artifact.
+# `shipped_artifact_is_fresh` spells the Darkmatter, Simplified Schema, and
+# biscuit-hash code that prepares and digests Claudine's bundle and host
+# catalog: a change there can alter Claudine's artifact without changing
+# either lower artifact.
 source-inputs = [
+  "biscuit-hash/lib/src/json.rs",
+  "biscuit-hash/lib/src/xx.rs",
   "darkmatter/cli/tests/common/context_guard.rs",
   "darkmatter/cli/tests/common/path_lookup_guard.rs",
   "darkmatter/cli/tests/common/source_scan.rs",
@@ -203,11 +206,17 @@ source-inputs = [
   "darkmatter/lib/src/markdown/schemas/shipped.rs",
   "darkmatter/lib/src/markdown/schemas/triggers/assemble.rs",
   "darkmatter/lib/src/markdown/schemas/triggers/envelope.rs",
+  "darkmatter/lib/src/markdown/schemas/triggers/grammar.rs",
   "darkmatter/lib/src/markdown/schemas/triggers/prepared.rs",
   "simplified-schema/lib/src/embedded.rs",
   "simplified-schema/lib/src/envelope.rs",
+  "simplified-schema/lib/src/file_match.rs",
+  "simplified-schema/lib/src/format.rs",
+  "simplified-schema/lib/src/numeric.rs",
+  "simplified-schema/lib/src/numeric/ingress.rs",
   "simplified-schema/lib/src/resolve.rs",
   "simplified-schema/lib/src/resolve/graph.rs",
+  "simplified-schema/lib/src/resolve/recursive.rs",
   "simplified-schema/lib/src/shipped/mod.rs",
   "simplified-schema/lib/src/shipped/records.rs",
   "simplified-schema/lib/src/shipped/wire.rs",
@@ -216,6 +225,10 @@ source-inputs = [
   "simplified-schema/lib/src/simplified/definitions.rs",
   "simplified-schema/lib/src/simplified/grammar.rs",
   "simplified-schema/lib/src/simplified/mod.rs",
+  "simplified-schema/lib/src/simplified/query.rs",
+  "simplified-schema/lib/src/simplified/source.rs",
   "simplified-schema/lib/src/simplified/standalone.rs",
   "simplified-schema/lib/src/simplified/types.rs",
+  "simplified-schema/lib/src/simplified/yaml_scalar.rs",
+  "simplified-schema/lib/src/validate.rs",
 ]

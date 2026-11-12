@@ -82,8 +82,10 @@ path = "tests/l1/main.rs"
 # compile only with `work-counters`.
 features = ["work-counters", "terminal"]
 # The source guards load Darkmatter's shared engines by `#[path]` and spell
-# them with `include_str!` in their tests.
+# them with `include_str!` in their tests. `shipped_artifact_is_fresh` spells
+# biscuit-hash's xxHash, which computes the artifact header's digests.
 source-inputs = [
+  "biscuit-hash/lib/src/xx.rs",
   "darkmatter/cli/tests/common/context_guard.rs",
   "darkmatter/cli/tests/common/path_lookup_guard.rs",
   "darkmatter/cli/tests/common/source_scan.rs",

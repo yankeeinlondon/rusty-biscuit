@@ -8961,10 +8961,19 @@ class RealWorkspaceTestInputTests(unittest.TestCase):
         cases = {
             "simplified-schema/schemas/schema.yaml": ("darkmatter", "claudine"),
             "simplified-schema/lib/src/resolve.rs": ("darkmatter", "claudine"),
+            # The canonical digests both higher artifacts store, which leave
+            # Simplified Schema's own artifact unchanged.
+            "simplified-schema/lib/src/validate.rs": ("darkmatter", "claudine"),
+            # Recorded only in Darkmatter's artifact (its kind definitions);
+            # Claudine follows when that artifact is regenerated.
+            "simplified-schema/lib/src/claims.rs": ("darkmatter",),
+            # Another package's hashing: every artifact's digests.
+            "biscuit-hash/lib/src/xx.rs": ("simplified-schema", "darkmatter", "claudine"),
             "simplified-schema/lib/generated/shipped.json": ("darkmatter", "claudine"),
             "content-policy/schemas/content-policy.yaml": ("darkmatter", "claudine"),
             "darkmatter/schemas/partials/function-examples/as_tsv.yaml": ("claudine",),
             "darkmatter/lib/src/markdown/schemas/catalog.rs": ("claudine",),
+            "darkmatter/lib/src/markdown/schemas/triggers/grammar.rs": ("claudine",),
             "darkmatter/lib/generated/shipped.json": ("claudine",),
         }
         for changed, downstream in cases.items():

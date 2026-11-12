@@ -147,19 +147,31 @@ fn shipped_artifact_is_fresh() {
     let _ = include_str!("../../../../darkmatter/schemas/schema-trigger.yaml");
     let _ = include_str!("../../../../simplified-schema/schemas/schema.yaml");
     let _ = include_str!("../../../../simplified-schema/schemas/yaml-schema.yaml");
-    // The lower code that prepares Claudine's bundle and host catalog
-    // (declared as `source-inputs` in Claudine's manifest).
+    // The other packages' code whose behavior decides Claudine's bytes
+    // (declared as `source-inputs` in Claudine's manifest): parsing,
+    // admission, resolution, lowering, encoding, and the canonical digests
+    // the trigger payload records store. Code that changes only Darkmatter's
+    // artifact is not listed: its regenerated artifact, spelled above, runs
+    // this test.
+    let _ = include_str!("../../../../biscuit-hash/lib/src/json.rs");
+    let _ = include_str!("../../../../biscuit-hash/lib/src/xx.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/catalog.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/embedded.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/resolve.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/shipped.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/triggers/assemble.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/triggers/envelope.rs");
+    let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/triggers/grammar.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/triggers/prepared.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/embedded.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/envelope.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/file_match.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/format.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/numeric.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/numeric/ingress.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/resolve.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/resolve/graph.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/resolve/recursive.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/shipped/mod.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/shipped/records.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/shipped/wire.rs");
@@ -168,8 +180,12 @@ fn shipped_artifact_is_fresh() {
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/definitions.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/grammar.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/mod.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/simplified/query.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/simplified/source.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/standalone.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/types.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/simplified/yaml_scalar.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/validate.rs");
     let checked_in = include_bytes!("../../generated/shipped.json");
     let fresh = shipped::generate().expect("fresh generation");
     if let Err(stale) = mechanism::check_fresh(checked_in, &fresh, shipped::ARTIFACT_PATH, shipped::REGENERATE_COMMAND) {
@@ -543,4 +559,98 @@ fn a_failed_generation_leaves_the_artifact_in_place() {
     assert_eq!(run_generator(&["--write"], &artifact, lowers, refused).0, 1);
     assert_eq!(std::fs::read(&artifact).unwrap(), b"previous");
     assert!(!directory.path().join("shipped.json.tmp").exists());
+}
+
+/// `--lower <owner>=<path>` for each `(owner, bytes)`, each written under
+/// `directory`.
+fn lower_arguments(directory: &std::path::Path, lowers: &[(&str, &[u8])]) -> Vec<String> {
+    let mut arguments = Vec::new();
+    for (owner, bytes) in lowers {
+        let path = directory.join(format!("{owner}.json"));
+        std::fs::write(&path, bytes).unwrap();
+        arguments.extend(["--lower".to_string(), format!("{owner}={}", path.display())]);
+    }
+    arguments
+}
+
+#[test]
+fn emitting_accepts_the_candidate_over_the_lower_candidates_it_was_built_over() {
+    let directory = tempfile::tempdir().unwrap();
+    let (lower, darkmatter, claudine) = fresh();
+    let arguments =
+        lower_arguments(directory.path(), &[("simplified-schema", lower.artifact()), ("darkmatter", darkmatter.artifact())]);
+    let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+    let stale = generator::CompiledLowers { lower: b"stale lower", darkmatter: b"stale darkmatter" };
+    let artifact = directory.path().join("shipped.json");
+    let (code, stdout, stderr) = run_generator(&arguments, &artifact, stale, generated);
+    assert_eq!((code, stdout.as_slice(), stderr.as_str()), (0, claudine.artifact(), ""));
+    assert!(!artifact.exists(), "emitting writes nothing");
+}
+
+#[test]
+fn emitting_refuses_a_candidate_acceptance_rejects() {
+    let artifact = std::path::Path::new("unused.json");
+    let (lower, darkmatter, claudine) = fresh();
+    let generation = |artifact: Vec<u8>, lower: &[u8], darkmatter: &[u8]| generator::Generated {
+        lower: lower.to_vec(),
+        darkmatter: darkmatter.to_vec(),
+        artifact,
+    };
+    let cases = [
+        (
+            "corrupted payload",
+            generation(edited(|value| value["payload"]["globals"]["identity"] = json!(5)), lower.artifact(), darkmatter.artifact()),
+            "/payload/globals/identity",
+        ),
+        (
+            "another owner",
+            generation(edited(|value| value["header"]["owner"] = json!("darkmatter")), lower.artifact(), darkmatter.artifact()),
+            "/header/owner",
+        ),
+        // A fresh candidate over other lower bytes than its header records:
+        // acceptance is over the generation's lowers, never the compiled-in
+        // ones.
+        ("another lower", generation(claudine.artifact().to_vec(), b"another\n", darkmatter.artifact()), "/header/dependencies"),
+        ("another darkmatter", generation(claudine.artifact().to_vec(), lower.artifact(), b"another\n"), "/header/dependencies"),
+    ];
+    for (case, generated, pointer) in cases {
+        let (code, stdout, stderr) = run_generator(&[], artifact, compiled_lowers(), || Ok(generated));
+        assert_eq!(code, 1, "{case}");
+        assert!(stdout.is_empty(), "{case}: a refused candidate prints nothing");
+        assert!(stderr.contains("claudine/lib/generated/shipped.json` is refused") && stderr.contains(pointer), "{case}: {stderr}");
+    }
+}
+
+#[test]
+fn emitting_refuses_a_lower_candidate_other_than_the_generation_s() {
+    let (lower, darkmatter, _) = fresh();
+    for (owner, lowers) in [
+        ("simplified-schema", [("simplified-schema", &b"another\n"[..]), ("darkmatter", darkmatter.artifact())]),
+        ("darkmatter", [("simplified-schema", lower.artifact()), ("darkmatter", &b"another\n"[..])]),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let arguments = lower_arguments(directory.path(), &lowers);
+        let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+        let (code, stdout, stderr) = run_generator(&arguments, &directory.path().join("shipped.json"), compiled_lowers(), generated);
+        assert_eq!((code, stdout.is_empty()), (1, true), "{owner}");
+        assert!(stderr.contains(&format!("is not the `{owner}` artifact")), "{owner}: {stderr}");
+    }
+}
+
+#[test]
+fn malformed_lower_arguments_are_usage_errors() {
+    let artifact = std::path::Path::new("unused.json");
+    for arguments in [
+        &["--lower"][..],
+        &["--lower", "darkmatter"],
+        &["--lower", "darkmatter="],
+        &["--lower", "claudine=x"],
+        &["--lower", "darkmatter=x", "--lower", "darkmatter=y"],
+        &["--lower", "darkmatter=x", "--check"],
+        &["--write", "--lower", "simplified-schema=x"],
+    ] {
+        let (code, stdout, stderr) = run_generator(arguments, artifact, compiled_lowers(), generated);
+        assert_eq!((code, stdout.is_empty()), (2, true), "{arguments:?}: {stderr}");
+        assert!(stderr.contains("usage:"), "{arguments:?}: {stderr}");
+    }
 }

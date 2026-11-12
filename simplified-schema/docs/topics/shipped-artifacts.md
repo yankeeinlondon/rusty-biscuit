@@ -71,24 +71,36 @@ all three as one step:
 
 ```mermaid
 flowchart LR
-    G1[simplified-schema<br/>generator] --> G2[darkmatter<br/>generator] --> G3[claudine<br/>generator]
-    G3 --> V{every output<br/>is its owner's<br/>artifact?}
+    G1[simplified-schema<br/>generator] -->|its candidate| G2[darkmatter<br/>generator]
+    G1 -->|its candidate| G3[claudine<br/>generator]
+    G2 -->|its candidate| G3
+    G3 --> V{every generator<br/>accepted its<br/>candidate?}
     V -->|yes| W[replace all three files]
     V -->|no| K[change nothing, exit 1]
-    W --> C[each generator's --check]
 ```
 
-1. It runs each crate's `shipped_schemas` example with no flags, in
+1. It runs each crate's `shipped_schemas` example with no mode flag, in
    dependency order. Each example prepares its whole chain from the current
-   text and prints its artifact, without reading any checked-in artifact,
-   so it works even when those are stale or damaged.
-2. It checks every output in memory: JSON, one final line feed, the right
-   owner, and the lower owners listed as dependencies.
-3. Only then does it write each output beside its file and rename it into
-   place. If any generator fails or any output is wrong, none of the three
-   files changes.
-4. It runs each example with `--check`, which rebuilds over the new files
-   and proves every artifact is accepted and current.
+   text, without reading any checked-in artifact, so it works even when
+   those are stale or damaged.
+2. Before printing anything, each example accepts its candidate exactly as
+   `--check` would accept a checked-in file (header, source digests, lower
+   dependencies, preparation revision, and every payload section), but over
+   the fresh lower artifacts of the same generation instead of the ones
+   compiled into the build. The script passes each example the candidates
+   already printed below it (`--lower simplified-schema=<path>`,
+   `--lower darkmatter=<path>`), and the example refuses unless each one is
+   byte-for-byte the lower artifact it built over. A refusal exits 1 and
+   prints nothing.
+3. The script also checks every output in memory: JSON, one final line
+   feed, the right owner, and the lower owners listed as dependencies.
+4. Only then does it write each output beside its file and rename it into
+   place. If any generator fails or refuses, or any output is wrong, none
+   of the three files changes and no temporary file is left behind.
+
+Nothing is checked after the files are replaced; each crate's
+`shipped_artifact_is_fresh` test is the standing proof that the checked-in
+files equal fresh generation.
 
 A crate area's own `just shipped-schemas` (`--write` by default) refuses to
 write when a lower artifact is stale and names the root command instead. For
@@ -106,14 +118,25 @@ depends on other packages' files, so each higher owner's
 `shipped_artifact_is_fresh` names those files in its body (with
 `include_str!`/`include_bytes!`), and its manifest lists the other
 packages' preparation code under `[package.metadata.ci.tests]
-source-inputs`. A change to any of them then adds one Linux L1 run of just
-that test (see `docs/cicd/test-inputs.md` at the repository root). For
-example, editing `darkmatter/lib/src/markdown/schemas/catalog.rs` runs
-Darkmatter's whole suite and Claudine's `shipped_artifact_is_fresh` alone.
+source-inputs`. Preparation code is any code whose behavior changes the
+artifact's bytes: parsing, lowering, and encoding, and also the digest code
+whose results an artifact stores, such as the canonical validator digests in
+`simplified-schema/lib/src/validate.rs` and biscuit-hash's xxHash. Code that
+only checks or rejects a source is not listed. A change to any listed file
+then adds one Linux L1 run of just that test (see `docs/cicd/test-inputs.md`
+at the repository root). For example, editing
+`darkmatter/lib/src/markdown/schemas/catalog.rs` runs Darkmatter's whole
+suite and Claudine's `shipped_artifact_is_fresh` alone, and editing
+`simplified-schema/lib/src/validate.rs` runs Simplified Schema's whole suite
+and both higher owners' freshness tests: the digests it computes are stored
+in Darkmatter's baseline and Claudine's trigger payloads, while Simplified
+Schema's own artifact does not change.
 
 | Changed file | Also runs |
 | --- | --- |
 | a Simplified Schema envelope YAML, preparation file, or its artifact | Darkmatter's and Claudine's freshness tests |
+| biscuit-hash's xxHash (`biscuit-hash/lib/src/xx.rs`) | all three owners' freshness tests |
+| biscuit-hash's canonical JSON (`biscuit-hash/lib/src/json.rs`) | Darkmatter's and Claudine's freshness tests |
 | Content Policy's editor schema | Darkmatter's and Claudine's freshness tests |
 | a Darkmatter shipped YAML, preparation file, or its artifact | Claudine's freshness test |
 
@@ -361,15 +384,18 @@ instead of reading a memo or a prepared table.
 The generator for this library's artifact is an example program:
 
 ```sh
-cargo run -p simplified-schema --example shipped_schemas            # print fresh bytes
+cargo run -p simplified-schema --example shipped_schemas            # accept and print fresh bytes
 cargo run -p simplified-schema --example shipped_schemas -- --check  # fail if stale or refused
 cargo run -p simplified-schema --example shipped_schemas -- --write  # replace the file
 ```
 
 `--check --artifact <path>` checks another file and reports where it is
-refused. `--write` validates the fresh bytes before replacing the file
-through a temporary sibling, so a failed generation leaves the old artifact
-in place. Errors go to stderr; stdout carries only artifact bytes.
+refused. Printing and `--write` both accept the fresh bytes first: a refused
+generation prints nothing, and `--write` replaces the file only through a
+temporary sibling after acceptance, so a failed generation leaves the old
+artifact in place. Darkmatter's and Claudine's examples also take
+`--lower <owner>=<path>` when printing, as described above. Errors go to
+stderr; stdout carries only artifact bytes.
 
 ## Prepared named types for a host namespace
 

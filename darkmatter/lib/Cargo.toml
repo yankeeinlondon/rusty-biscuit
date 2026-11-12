@@ -339,12 +339,15 @@ required-features = ["work-counters"]
 # The frozen recursive-schema fixture suite embeds the lifecycle-grammar spike's
 # generator with `include_str!` and runs it. The schema-language ownership
 # guard spells each `simplified-schema` file that defines an owned item.
-# `shipped_artifact_is_fresh` spells the `simplified-schema` files that parse,
-# admit, resolve, lower, and encode the shipped schemas, since a change there
-# can change Darkmatter's artifact without touching any of its own sources.
+# `shipped_artifact_is_fresh` spells the `simplified-schema` and `biscuit-hash`
+# files that parse, admit, resolve, lower, encode, and digest the shipped
+# schemas, since a change there can change Darkmatter's artifact without
+# touching any of its own sources.
 source-inputs = [
     "biscuit-file/lib/src/file_reference/glob/parse.rs",
     "biscuit-file/lib/src/file_reference/glob/roots.rs",
+    "biscuit-hash/lib/src/json.rs",
+    "biscuit-hash/lib/src/xx.rs",
     "claudine/features/_completed/2026-10-20-lifecycle-grammar/spike/gen-action-schema.py",
     "darkmatter/cli/tests/common/context_guard.rs",
     "darkmatter/cli/tests/common/path_lookup_guard.rs",
@@ -352,6 +355,7 @@ source-inputs = [
     "darkmatter/dmls/src/overlay/schema.rs",
     "darkmatter/dmls/src/workspace/discover.rs",
     "renderable/tests/support/adjacent_code_matrix.rs",
+    "simplified-schema/lib/src/claims.rs",
     "simplified-schema/lib/src/coercion/error.rs",
     "simplified-schema/lib/src/coercion/mod.rs",
     "simplified-schema/lib/src/expression/ast.rs",
@@ -359,10 +363,16 @@ source-inputs = [
     "simplified-schema/lib/src/expression/parser.rs",
     "simplified-schema/lib/src/embedded.rs",
     "simplified-schema/lib/src/envelope.rs",
+    "simplified-schema/lib/src/example.rs",
+    "simplified-schema/lib/src/file_match.rs",
+    "simplified-schema/lib/src/format.rs",
     "simplified-schema/lib/src/json_shape.rs",
     "simplified-schema/lib/src/numeric.rs",
+    "simplified-schema/lib/src/numeric/ingress.rs",
+    "simplified-schema/lib/src/origin.rs",
     "simplified-schema/lib/src/resolve.rs",
     "simplified-schema/lib/src/resolve/graph.rs",
+    "simplified-schema/lib/src/resolve/recursive.rs",
     "simplified-schema/lib/src/shipped/mod.rs",
     "simplified-schema/lib/src/shipped/records.rs",
     "simplified-schema/lib/src/shipped/wire.rs",
@@ -371,10 +381,14 @@ source-inputs = [
     "simplified-schema/lib/src/simplified/definitions.rs",
     "simplified-schema/lib/src/simplified/grammar.rs",
     "simplified-schema/lib/src/simplified/mod.rs",
+    "simplified-schema/lib/src/simplified/query.rs",
     "simplified-schema/lib/src/simplified/serialize.rs",
+    "simplified-schema/lib/src/simplified/source.rs",
     "simplified-schema/lib/src/simplified/standalone.rs",
     "simplified-schema/lib/src/simplified/subtype.rs",
     "simplified-schema/lib/src/simplified/types.rs",
+    "simplified-schema/lib/src/simplified/yaml_scalar.rs",
+    "simplified-schema/lib/src/validate.rs",
 ]
 tiers = ["L1", "L2", "browser"]
 # The named-type memo and validator-cache regressions count work through

@@ -6,13 +6,20 @@ each built over the one before it:
 
     simplified-schema -> darkmatter -> claudine
 
-Each crate's `shipped_schemas` example prints its freshly generated artifact
-on stdout when run without a mode flag, preparing its whole dependency chain
-from current text without reading any checked-in artifact. This script runs
-the three in dependency order, checks every output in memory, writes them to
-sibling temporary files, and only then replaces the checked-in files. A
-failure at any step leaves all three files as they were. Each example is then
-run with `--check` against the new files.
+Each crate's `shipped_schemas` example, run without a mode flag, prepares
+its whole dependency chain from current text without reading any checked-in
+artifact, accepts its freshly generated artifact over the fresh lower
+artifacts of that same generation (the full acceptance `--check` and
+`--write` run: header, sources, dependencies, revision, and every payload
+section), and only then prints it on stdout; a refusal exits 1 and prints
+nothing. This script runs the three in dependency order and passes each one
+the candidates already emitted below it as `--lower <owner>=<path>`, so a
+generator also refuses when the lower artifact it validated against is not
+the one that will be published beside it. Only when all three are accepted
+are they written to sibling temporary files and renamed over the checked-in
+files; any refusal leaves all three files as they were and no temporary file
+behind. Nothing is checked after publication: the crates' freshness tests
+are the standing check that the published files match generation.
 
 Usage (from anywhere in the repository; `just shipped-schemas` runs it):
 
@@ -22,7 +29,7 @@ Usage (from anywhere in the repository; `just shipped-schemas` runs it):
 names the tree the artifact paths are relative to, and `--generator` replaces
 `cargo run --quiet -p <package> --example shipped_schemas --` with another
 program (a `.py` file runs under this interpreter), called as
-`<program> <package>` to emit and `<program> <package> --check` to verify.
+`<program> <package> [--lower <owner>=<path>]...`.
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # (package, owner in the artifact header, repository-relative artifact path),
@@ -55,8 +63,10 @@ def generator_command(generator: str | None, package: str, *extra: str) -> list[
     return [generator, package, *extra]
 
 
-def generate(root: Path, generator: str | None, package: str) -> bytes:
-    command = generator_command(generator, package)
+def generate(root: Path, generator: str | None, package: str, lowers: list[tuple[str, Path]]) -> bytes:
+    """Runs `package`'s generator over the lower candidates `lowers`, which it
+    must accept its own candidate over."""
+    command = generator_command(generator, package, *(arg for owner, path in lowers for arg in ("--lower", f"{owner}={path}")))
     completed = subprocess.run(command, cwd=root, stdin=subprocess.DEVNULL, capture_output=True)
     if completed.returncode != 0:
         detail = completed.stderr.decode("utf-8", "replace").strip()
@@ -111,19 +121,6 @@ def replace_all(root: Path, outputs: list[tuple[str, bytes]]) -> list[str]:
     return changed
 
 
-def verify(root: Path, generator: str | None) -> None:
-    for package, _, path in ARTIFACTS:
-        completed = subprocess.run(
-            generator_command(generator, package, "--check"),
-            cwd=root,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-        )
-        if completed.returncode != 0:
-            detail = completed.stderr.decode("utf-8", "replace").strip()
-            raise Refused(f"`{path}` was written but its check failed:\n{detail}")
-
-
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Regenerate every shipped schema artifact.")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
@@ -133,12 +130,16 @@ def main(argv: list[str]) -> int:
 
     try:
         outputs = []
-        for index, (package, owner, path) in enumerate(ARTIFACTS):
-            data = generate(root, arguments.generator, package)
-            check_output(owner, path, data, [lower for _, lower, _ in ARTIFACTS[:index]])
-            outputs.append((path, data))
+        with tempfile.TemporaryDirectory(prefix="shipped-schemas-") as scratch:
+            candidates: list[tuple[str, Path]] = []
+            for package, owner, path in ARTIFACTS:
+                data = generate(root, arguments.generator, package, candidates)
+                check_output(owner, path, data, [lower for lower, _ in candidates])
+                candidate = Path(scratch) / f"{owner}.json"
+                candidate.write_bytes(data)
+                candidates.append((owner, candidate))
+                outputs.append((path, data))
         changed = replace_all(root, outputs)
-        verify(root, arguments.generator)
     except Refused as refusal:
         print(f"error: {refusal}", file=sys.stderr)
         return 1

@@ -101,12 +101,28 @@ fn shipped_artifact_is_fresh() {
     let _ = include_str!("../../../../content-policy/schemas/content-policy.yaml");
     let _ = include_str!("../../../../simplified-schema/schemas/schema.yaml");
     let _ = include_str!("../../../../simplified-schema/schemas/yaml-schema.yaml");
-    // The library code that parses, admits, resolves, lowers, and encodes the
-    // shipped schemas (declared as `source-inputs` in Darkmatter's manifest).
+    // The other packages' code whose behavior decides the artifact's bytes
+    // (declared as `source-inputs` in Darkmatter's manifest): parsing,
+    // admission, resolution, lowering, the recorded kinds and function
+    // examples, encoding, and the canonical digests the baseline record
+    // stores. Code that only checks or rejects is not listed.
+    let _ = include_str!("../../../../biscuit-hash/lib/src/json.rs");
+    let _ = include_str!("../../../../biscuit-hash/lib/src/xx.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/claims.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/embedded.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/envelope.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/example.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/expression/ast.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/expression/lexer.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/expression/parser.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/file_match.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/format.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/numeric.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/numeric/ingress.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/origin.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/resolve.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/resolve/graph.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/resolve/recursive.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/shipped/mod.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/shipped/records.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/shipped/wire.rs");
@@ -115,8 +131,13 @@ fn shipped_artifact_is_fresh() {
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/definitions.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/grammar.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/mod.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/simplified/query.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/simplified/serialize.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/simplified/source.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/standalone.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/types.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/simplified/yaml_scalar.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/validate.rs");
     let checked_in = include_bytes!("../../generated/shipped.json");
     let fresh = shipped::generate().expect("fresh generation");
     if let Err(stale) = mechanism::check_fresh(checked_in, &fresh, shipped::ARTIFACT_PATH, shipped::REGENERATE_COMMAND) {
@@ -551,4 +572,71 @@ fn a_failed_generation_leaves_the_artifact_in_place() {
     assert_eq!(run_generator(&["--write"], &artifact, lower, refused).0, 1);
     assert_eq!(std::fs::read(&artifact).unwrap(), b"previous");
     assert!(!directory.path().join("shipped.json.tmp").exists());
+}
+
+#[test]
+fn emitting_accepts_the_candidate_over_the_lower_candidate_it_was_built_over() {
+    let directory = tempfile::tempdir().unwrap();
+    let artifact = directory.path().join("shipped.json");
+    let lower_candidate = directory.path().join("lower.json");
+    std::fs::write(&lower_candidate, fresh().0.artifact()).unwrap();
+    let lower_argument = format!("simplified-schema={}", lower_candidate.display());
+    let (code, stdout, stderr) = run_generator(&["--lower", &lower_argument], &artifact, b"stale lower", generated);
+    assert_eq!((code, stdout.as_slice(), stderr.as_str()), (0, fresh().1.artifact(), ""));
+    assert!(!artifact.exists(), "emitting writes nothing");
+}
+
+#[test]
+fn emitting_refuses_a_candidate_acceptance_rejects() {
+    let artifact = std::path::Path::new("unused.json");
+    let lower = fresh().0.artifact().to_vec();
+    let cases = [
+        ("corrupted payload", edited(|value| value["payload"]["catalog"]["identity"] = json!(5)), lower.clone(), "/payload/catalog/identity"),
+        ("another owner", edited(|value| value["header"]["owner"] = json!("claudine")), lower.clone(), "/header/owner"),
+        // The candidate is fresh, but over other lower bytes than its header
+        // records: acceptance is over the generation's lower, never the
+        // compiled-in one.
+        ("another lower", fresh().1.artifact().to_vec(), b"another lower\n".to_vec(), "/header/dependencies"),
+    ];
+    for (case, candidate, lower, pointer) in cases {
+        let refused = || Ok(generator::Generated { lower, artifact: candidate });
+        let (code, stdout, stderr) = run_generator(&[], artifact, simplified_schema::shipped::registry::ARTIFACT, refused);
+        assert_eq!(code, 1, "{case}");
+        assert!(stdout.is_empty(), "{case}: a refused candidate prints nothing");
+        assert!(stderr.contains("darkmatter/lib/generated/shipped.json` is refused") && stderr.contains(pointer), "{case}: {stderr}");
+    }
+}
+
+#[test]
+fn emitting_refuses_a_lower_candidate_other_than_the_generation_s() {
+    let directory = tempfile::tempdir().unwrap();
+    let lower_candidate = directory.path().join("lower.json");
+    std::fs::write(&lower_candidate, b"another generation\n").unwrap();
+    let lower_argument = format!("simplified-schema={}", lower_candidate.display());
+    let (code, stdout, stderr) =
+        run_generator(&["--lower", &lower_argument], &directory.path().join("shipped.json"), b"stale lower", generated);
+    assert_eq!((code, stdout.is_empty()), (1, true));
+    assert!(stderr.contains("is not the `simplified-schema` artifact"), "{stderr}");
+    let missing = format!("simplified-schema={}", directory.path().join("missing.json").display());
+    let (code, stdout, stderr) = run_generator(&["--lower", &missing], &directory.path().join("shipped.json"), b"stale lower", generated);
+    assert_eq!((code, stdout.is_empty()), (1, true));
+    assert!(stderr.contains("cannot read"), "{stderr}");
+}
+
+#[test]
+fn malformed_lower_arguments_are_usage_errors() {
+    let artifact = std::path::Path::new("unused.json");
+    for arguments in [
+        &["--lower"][..],
+        &["--lower", "simplified-schema"],
+        &["--lower", "simplified-schema="],
+        &["--lower", "darkmatter=x"],
+        &["--lower", "simplified-schema=x", "--lower", "simplified-schema=y"],
+        &["--lower", "simplified-schema=x", "--check"],
+        &["--write", "--lower", "simplified-schema=x"],
+    ] {
+        let (code, stdout, stderr) = run_generator(arguments, artifact, simplified_schema::shipped::registry::ARTIFACT, generated);
+        assert_eq!((code, stdout.is_empty()), (2, true), "{arguments:?}: {stderr}");
+        assert!(stderr.contains("usage:"), "{arguments:?}: {stderr}");
+    }
 }

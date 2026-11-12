@@ -2,14 +2,16 @@
 //! coordinator that regenerates the three shipped schema artifacts
 //! (Simplified Schema, Darkmatter, Claudine) in dependency order.
 //!
-//! Its observable contract: every artifact is generated and checked before
-//! any file is replaced, so a failed or malformed generation leaves all three
-//! files exactly as they were and no temporary file behind; a successful run
-//! replaces them, and a repeated run is a byte-identical no-op. The real
-//! generators are the crates' `shipped_schemas` examples, whose own suites
-//! test them; here the script runs through its normal command line with
-//! `--generator` naming a stand-in that prints canned artifacts from a scratch
-//! tree, so no test builds a crate.
+//! Its observable contract: every artifact is generated and accepted before
+//! any file is replaced, each generator over the lower candidates emitted
+//! before it, so a failed, malformed, or refused generation (any owner's) or a
+//! lower candidate that differs from the one a generator built over leaves
+//! all three files exactly as they were and no temporary file behind; a
+//! successful run replaces them, and a repeated run is a byte-identical
+//! no-op. The real generators are the crates' `shipped_schemas` examples,
+//! whose own suites test their acceptance; here the script runs through its
+//! normal command line with `--generator` naming a stand-in that prints
+//! canned artifacts from a scratch tree, so no test builds a crate.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,17 +43,41 @@ const ARTIFACTS: [(&str, &str); 3] = [
     ("claudine", "claudine/lib/generated/shipped.json"),
 ];
 
-/// The stand-in generator: prints `fake/<package>.json`, fails when
-/// `fake/<package>.fail` exists, and passes `--check` unless
-/// `fake/<package>.check-fail` exists.
+/// The stand-in generator, modeling the examples' emit mode: it takes one
+/// `--lower <owner>=<path>` per lower owner and exits 2 on any other
+/// argument; it fails when `fake/<package>.fail` exists; it refuses (exit 1,
+/// nothing printed) when a lower candidate differs from the lower it "built
+/// over" (`fake/<package>.over-<owner>.json`, else `fake/<owner>.json`) or
+/// when `fake/<package>.refuse` exists; otherwise it prints
+/// `fake/<package>.json`.
 const FAKE_GENERATOR: &str = r#"import sys
 from pathlib import Path
-package = sys.argv[1]
+ORDER = ["simplified-schema", "darkmatter", "claudine"]
+package, rest = sys.argv[1], sys.argv[2:]
 fake = Path.cwd() / "fake"
-if len(sys.argv) > 2 and sys.argv[2] == "--check":
-    sys.exit(1 if (fake / f"{package}.check-fail").exists() else 0)
+lowers = {}
+while rest:
+    if rest[0] != "--lower" or len(rest) < 2:
+        print(f"unexpected arguments {rest}", file=sys.stderr)
+        sys.exit(2)
+    owner, _, path = rest[1].partition("=")
+    lowers[owner] = Path(path).read_bytes()
+    rest = rest[2:]
+if sorted(lowers) != sorted(ORDER[:ORDER.index(package)]):
+    print(f"{package} was given lowers {sorted(lowers)}", file=sys.stderr)
+    sys.exit(2)
 if (fake / f"{package}.fail").exists():
     print(f"{package} does not prepare", file=sys.stderr)
+    sys.exit(1)
+for owner, candidate in lowers.items():
+    built_over = fake / f"{package}.over-{owner}.json"
+    if not built_over.exists():
+        built_over = fake / f"{owner}.json"
+    if candidate != built_over.read_bytes():
+        print(f"the {owner} candidate is not the one {package} is built over", file=sys.stderr)
+        sys.exit(1)
+if (fake / f"{package}.refuse").exists():
+    print(f"freshly generated {package} is refused", file=sys.stderr)
     sys.exit(1)
 sys.stdout.buffer.write((fake / f"{package}.json").read_bytes())
 "#;
@@ -183,11 +209,34 @@ fn output_that_is_not_the_owner_s_artifact_replaces_nothing() {
 }
 
 #[test]
-fn a_failed_check_after_writing_is_reported() {
+fn any_owner_s_refused_candidate_replaces_nothing() {
     let script = repo_root().join("scripts/shipped_schemas.py");
-    let tree = Tree::new();
-    fs::write(tree.fake("darkmatter.check-fail"), "").unwrap();
-    let output = tree.run(&script);
-    assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("darkmatter/lib/generated/shipped.json` was written but its check failed"), "{}", stderr(&output));
+    for (owner, _) in ARTIFACTS {
+        let tree = Tree::new();
+        fs::write(tree.fake(&format!("{owner}.refuse")), "").unwrap();
+        let output = tree.run(&script);
+        assert_eq!(output.status.code(), Some(1), "{owner}");
+        assert!(stderr(&output).contains(&format!("freshly generated {owner} is refused")), "{owner}: {}", stderr(&output));
+        assert_eq!(tree.artifacts(), tree.previous(), "{owner}");
+        assert!(tree.leftovers().is_empty(), "{owner}");
+    }
+}
+
+#[test]
+fn a_lower_candidate_other_than_the_one_a_generator_built_over_replaces_nothing() {
+    let script = repo_root().join("scripts/shipped_schemas.py");
+    for (owner, lower) in [("darkmatter", "simplified-schema"), ("claudine", "simplified-schema"), ("claudine", "darkmatter")] {
+        let tree = Tree::new();
+        let lowers: Vec<&str> = ARTIFACTS.iter().map(|(owner, _)| *owner).take_while(|candidate| *candidate != lower).collect();
+        fs::write(tree.fake(&format!("{owner}.over-{lower}.json")), artifact(lower, &lowers, "another generation")).unwrap();
+        let output = tree.run(&script);
+        assert_eq!(output.status.code(), Some(1), "{owner} over {lower}");
+        assert!(
+            stderr(&output).contains(&format!("the {lower} candidate is not the one {owner} is built over")),
+            "{owner} over {lower}: {}",
+            stderr(&output)
+        );
+        assert_eq!(tree.artifacts(), tree.previous(), "{owner} over {lower}");
+        assert!(tree.leftovers().is_empty(), "{owner} over {lower}");
+    }
 }

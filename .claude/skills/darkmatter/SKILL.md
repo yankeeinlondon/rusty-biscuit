@@ -232,8 +232,12 @@ Important contracts:
   `scripts/shipped_schemas.py`, which regenerates Simplified Schema's,
   Darkmatter's, and Claudine's artifacts together (Claudine's is prepared
   over this one, so it goes stale too) and replaces none unless all three
-  generate. A new file Claudine's preparation reads must be spelled in
-  Claudine's `shipped_artifact_is_fresh` and listed in its `source-inputs`.
+  generate and each generator accepts its candidate over the lower
+  candidates published with it. Another package's file whose behavior changes a higher
+  artifact's bytes (a source text, or code that parses, lowers, encodes, or
+  digests it, such as `simplified-schema`'s `validate.rs` or biscuit-hash's
+  xxHash) must be spelled in that owner's `shipped_artifact_is_fresh` and
+  listed in its `source-inputs`, for Darkmatter and Claudine alike.
 
 - Validators are cached by typed identity: an effective schema is keyed by
   the `LayeredIdentity` of its ordered layers (baseline, triggers, document,
