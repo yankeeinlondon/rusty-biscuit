@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use simplified_schema::errors::SchemaError;
-use simplified_schema::shipped::{Acceptance, PreparationMode, RecordError, SourceFingerprint};
+use simplified_schema::shipped::{Acceptance, CanonicalDigestRecord, PreparationMode, RecordError, SourceFingerprint};
 use simplified_schema::simplified::DefinitionTable;
 use simplified_schema::{SchemaAdvisory, SchemaAdvisoryKind, SchemaShape, ValidatorCache};
 
@@ -85,6 +85,9 @@ pub struct PayloadRecord {
     /// The cyclic named types `shape` reaches, in allocation order.
     pub definitions: DefinitionTable,
     pub advisories: Vec<AdvisoryRecord>,
+    /// The canonical digest of `json_schema`, which validators layering the
+    /// payload are cached under.
+    pub digest: CanonicalDigestRecord,
 }
 
 /// A [`SchemaAdvisory`] on the wire, naming its file by virtual path.
@@ -154,6 +157,7 @@ pub fn prepare_trigger_bundle(
                     let (resolved, _) = resolve_embedded_payload(Some(payload), bundle, name, mode, cache)
                         .map_err(|error| failed(name, error))?;
                     TriggerOutcomeRecord::Payload(Box::new(PayloadRecord {
+                        digest: CanonicalDigestRecord::of(&resolved.json_schema),
                         json_schema: (*resolved.json_schema).clone(),
                         shape: resolved.shape.as_deref().cloned(),
                         definitions: (*resolved.definitions).clone(),
@@ -260,6 +264,10 @@ impl PreparedTriggerBundle {
                             "a payload's JSON Schema is an object",
                         ));
                     }
+                    let digest = payload
+                        .digest
+                        .digest()
+                        .map_err(|message| RecordError::new(format!("{at}/outcome/Payload/digest/revision"), message))?;
                     PreparedEntry::Payload(Box::new(ResolvedPayload {
                         json_schema: Arc::new(payload.json_schema),
                         shape: payload.shape.map(Arc::new),
@@ -268,6 +276,7 @@ impl PreparedTriggerBundle {
                         searched: Vec::new(),
                         advisories: payload.advisories.iter().map(AdvisoryRecord::advisory).collect(),
                         pending: None,
+                        digest: Some(digest),
                     }))
                 }
             };

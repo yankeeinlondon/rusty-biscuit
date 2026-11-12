@@ -21,8 +21,8 @@ pub(crate) const MUTATIONS_PATH: &str = "darkmatter/schemas/partials/mutations.y
 pub(crate) const MUTATIONS_SOURCE: &str = include_str!("../../../schemas/partials/mutations.yaml");
 
 /// The typed side-effect catalog: the accepted shipped artifact's
-/// ([`crate::markdown::schemas::shipped`]), or, when that artifact was
-/// refused, loaded once from the embedded file.
+/// ([`crate::markdown::schemas::shipped`]), or, when that artifact or its
+/// section was refused, loaded once from the embedded file.
 ///
 /// ## Panics
 ///

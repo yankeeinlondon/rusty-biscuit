@@ -42,10 +42,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use simplified_schema::embedded::EmbeddedDocument;
 use simplified_schema::shipped::{
-    self as mechanism, Acceptance, AcceptedArtifact, ArtifactDescriptor, FreshLower, LowerArtifact, NamedTypeTableRecord,
+    self as mechanism, Acceptance, AcceptedArtifact, ArtifactDescriptor, CanonicalDigestRecord, FreshLower, LowerArtifact, NamedTypeTableRecord,
     PreparationMode, PreparedNamedTypes, PreparedSourcesDescriptor, RecordError, Refusal, Section, Sections,
 };
-use simplified_schema::{DefinitionTable, SchemaRoot, SchemaSourceId};
+use simplified_schema::{DefinitionTable, SchemaDigest, SchemaRoot, SchemaSourceId};
 
 use super::catalog::{DARKMATTER_CATALOG_PATH, DARKMATTER_GLOBALS, GlobalCatalog, GlobalCatalogRecord};
 use super::embedded::{self, SHIPPED};
@@ -61,7 +61,7 @@ pub const OWNER: &str = "darkmatter";
 /// what the shipped sources prepare to (catalog resolution, baseline
 /// lowering, kind-definition or function-catalog loading, a record's shape),
 /// then run `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 1;
+pub const PREPARATION_REVISION: u32 = 2;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "darkmatter/lib/generated/shipped.json";
@@ -122,9 +122,10 @@ pub struct DarkmatterPayload {
     pub named_types: NamedTypesRecord,
     /// The global catalog, `darkmatter/schemas/darkmatter.yaml`, resolved.
     pub catalog: GlobalCatalogRecord,
-    /// The runtime baseline (the catalog's `fm`) lowered to JSON Schema; its
-    /// typed form is the catalog record's `fm`.
-    pub baseline: Value,
+    /// The runtime baseline (the catalog's `fm`) lowered to JSON Schema, with
+    /// its canonical validator-cache digest; its typed form is the catalog
+    /// record's `fm`.
+    pub baseline: BaselineRecord,
     /// The baseline with every acyclic type expanded at each use.
     pub inline_baseline: SchemaRoot,
     /// Each shipped YAML document-kind definition, in source-table order.
@@ -143,6 +144,15 @@ pub struct DarkmatterPayload {
 pub struct NamedTypesRecord {
     pub inventory: Vec<String>,
     pub tables: Vec<NamedTypeTableRecord>,
+}
+
+/// The runtime baseline lowered, and the canonical digest its validators are
+/// cached under, so a process never serializes the baseline to find them.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BaselineRecord {
+    pub json_schema: Value,
+    pub digest: CanonicalDigestRecord,
 }
 
 /// One shipped `kind: yaml-schema` definition, prepared: the exported
@@ -212,6 +222,9 @@ pub(crate) struct ShippedBaseline {
     pub(crate) schema: SchemaRoot,
     pub(crate) definitions: Arc<DefinitionTable>,
     pub(crate) json_schema: Arc<Value>,
+    /// The canonical digest of `json_schema`: generated with the artifact,
+    /// or computed once when the baseline is prepared from its sources.
+    pub(crate) digest: SchemaDigest,
 }
 
 /// An accepted artifact's entries, one [`Section`] per payload member. A
@@ -325,7 +338,7 @@ impl Registry {
             return Err(self.refusal().expect("a refused artifact"));
         };
         let catalog = self.accepted_catalog();
-        prepared.baseline.get(|_, baseline: Value| accept_baseline(baseline, catalog))
+        prepared.baseline.get(|_, baseline: BaselineRecord| accept_baseline(baseline, catalog))
     }
 
     /// Darkmatter's global catalog.
@@ -449,14 +462,16 @@ fn accept_catalog(_: &Acceptance<'_>, catalog: GlobalCatalogRecord) -> Result<Gl
     GlobalCatalog::from_record(catalog, DARKMATTER_GLOBALS)
 }
 
-fn accept_baseline(baseline: Value, catalog: Option<&GlobalCatalog>) -> Result<ShippedBaseline, RecordError> {
+fn accept_baseline(baseline: BaselineRecord, catalog: Option<&GlobalCatalog>) -> Result<ShippedBaseline, RecordError> {
+    let BaselineRecord { json_schema: baseline, digest } = baseline;
     if !baseline.is_object() {
-        return Err(RecordError::new("", "the baseline lowers to a JSON Schema object"));
+        return Err(RecordError::new("/json_schema", "the baseline lowers to a JSON Schema object"));
     }
+    let digest = digest.digest().map_err(|message| RecordError::new("/digest/revision", message))?;
     let catalog = catalog.ok_or_else(|| RecordError::new("", "the catalog section it is typed by was refused"))?;
     let (schema, definitions) =
         catalog.baseline().ok_or_else(|| RecordError::new("", "the catalog declares no `fm` shape"))?;
-    Ok(ShippedBaseline { schema, definitions, json_schema: Arc::new(baseline) })
+    Ok(ShippedBaseline { schema, definitions, json_schema: Arc::new(baseline), digest })
 }
 
 fn accept_inline_baseline(_: &Acceptance<'_>, inline_baseline: SchemaRoot) -> Result<SchemaRoot, RecordError> {
@@ -569,10 +584,11 @@ pub fn prepare_payload(fresh: &FreshLower) -> Result<DarkmatterPayload, String> 
         catalog.check_record().map_err(|error| format!("the {name} catalog breaks `{}`: {}", error.pointer, error.message))?;
     }
 
+    let digest = CanonicalDigestRecord::of(&baseline);
     Ok(DarkmatterPayload {
         named_types,
         catalog,
-        baseline,
+        baseline: BaselineRecord { json_schema: baseline, digest },
         inline_baseline,
         kind_definitions,
         functions: functions_catalog,

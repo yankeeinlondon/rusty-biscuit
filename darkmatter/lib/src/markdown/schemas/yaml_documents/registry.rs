@@ -194,7 +194,7 @@ impl KindRegistry {
 
     /// The registry of the shipped definitions alone, built once per
     /// process from the shipped artifact's definitions (or, when that
-    /// artifact was refused, from the definitions prepared from text).
+    /// artifact or its section was refused, from the definitions prepared from text).
     #[must_use]
     pub fn shipped() -> Arc<Self> {
         super::super::shipped::registry().shipped_kind_registry()
@@ -451,7 +451,7 @@ fn shipped_definitions() -> &'static [ShippedDefinition] {
 }
 
 /// The shipped definitions prepared from their text, once per process: the
-/// fallback when the shipped artifact was refused.
+/// fallback when the shipped artifact or its section was refused.
 pub(crate) fn shipped_definitions_from_sources() -> &'static [ShippedDefinition] {
     static PREPARED: OnceLock<Vec<ShippedDefinition>> = OnceLock::new();
     PREPARED.get_or_init(|| {

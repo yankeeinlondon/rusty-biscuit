@@ -461,7 +461,7 @@ of preparing the text. It holds:
 | Entry | Serves |
 | --- | --- |
 | the global catalog, `fm` included | `GlobalCatalog::darkmatter()` and the runtime baseline |
-| the baseline lowered to JSON Schema, and its definition-free form | `darkmatter_base_json_schema()`, `darkmatter_base_schema()`, and every `with_darkmatter_baseline_json_schema()` |
+| the baseline lowered to JSON Schema with its [validator-cache digest](#validator-cache), and its definition-free form | `darkmatter_base_json_schema()`, `darkmatter_base_schema()`, and every `with_darkmatter_baseline_json_schema()` |
 | the named types of each partial under `schemas/partials/` | `Name@darkmatter:<stem>` references |
 | the YAML document-kind definitions (`schema-trigger.yaml` and Simplified Schema's two envelope definitions) | `KindRegistry::shipped()` and the seed of every kind registry |
 | the expression-function catalog (`functions.yaml`, with its file-form examples) | `expression_function_catalog()` |
@@ -492,6 +492,10 @@ just shipped-schemas
 `just shipped-schemas --check`, run in `darkmatter/`, reports whether the
 artifact is current without writing it, and the L1 test
 `shipped_artifact_is_fresh` fails with the same command when it is stale.
+A code change that alters what these sources prepare to, with no change to
+their text, also increments `PREPARATION_REVISION` in
+`darkmatter/lib/src/markdown/schemas/shipped.rs` (see
+[When to bump the preparation revision](../../../../simplified-schema/docs/topics/shipped-artifacts.md#when-to-bump-the-preparation-revision)).
 How artifacts are encoded, checked, and regenerated is described in
 Simplified Schema's
 [shipped artifacts](../../../../simplified-schema/docs/topics/shipped-artifacts.md)
@@ -1662,7 +1666,30 @@ Caller tools (for example Claudine) can render their own schema-language reports
 
 ### Validator Cache
 
-`ValidatorCache` (`simplified_schema::validate`) keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory, launch-area fallback, repository anchors, and the origins of caller-supplied properties, and is bounded by an LRU policy. `validator_for(schema, base_dir, &context)` takes the request's file-resolution context, and a hit requires that whole context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). `structural_validator_for(schema)` serves validators for callers with no request (coercion probes, example checks): they judge a `file` value by its syntax alone and never read the filesystem. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
+`ValidatorCache` (`simplified_schema::validate`) reuses compiled validators. Each cached validator is found by two things: **which schema** it was compiled for (a `SchemaIdentity`), and **what its file values are judged against** (the schema's base directory, launch-area fallback, repository anchors, and the origins of caller-supplied properties). The cache is bounded by an LRU policy. `validator_for(schema, base_dir, &context)` takes the request's file-resolution context, and a hit requires that whole context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). `structural_validator_for(schema)` serves validators for callers with no request (coercion probes, example checks): they judge a `file` value by its syntax alone and never read the filesystem. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
+
+A schema's identity takes one of two forms, and the two never share a cached validator:
+
+| Identity | How it is computed | Used for |
+| --- | --- | --- |
+| Canonical | the xxHash (XXH64, via `biscuit-hash`) of the schema's canonical JSON; object key order does not matter, array order does | any schema a caller hands the cache directly (`validator_for`, `validator_for_shared`), a root union's wrapped arms, and a whole YAML document's schema |
+| Layered | the xxHash of the ordered list of layers the schema was merged from: each layer's role (baseline, trigger, document) and canonical digest, plus any phase projection applied afterwards | every effective schema `DarkmatterSchemas` assembles |
+
+The layered form exists so the merged schema is never serialized just to find its validator. The built-in baseline is several hundred kilobytes of JSON Schema; its canonical digest is computed when the shipped artifact is generated and stored beside it, as is each prepared trigger payload's. At run time only layers with no stored digest are hashed: the document's own resolved `$schema` (imports and template results included, once per distinct schema) and trigger payloads read from disk (once per loaded payload). The `CanonicalSchemaSerialization` work counter counts each serialization.
+
+```mermaid
+flowchart LR
+    B["baseline<br/>(digest from the artifact)"] --> L[layered identity]
+    T["trigger payloads, in order<br/>(artifact digest, or hashed once)"] --> L
+    D["document $schema<br/>(hashed once per schema)"] --> L
+    L --> P{judged at a phase?}
+    P -- no --> K[validator cache key]
+    P -- "yes, and the projection changes the schema" --> Q["identity derived from it,<br/>the phase, and the projected document"] --> K
+```
+
+For example, a document with `$schema: { count: number }` validated against the built-in baseline is identified as "baseline `9ad0…`, then document `<digest of {count: number}>`". The same two schemas with their roles swapped, the same two triggers in the other order, or the same effective schema judged at `launch` instead of unphased are all different identities, because each can produce a different verdict. Two documents with the same layers but different frontmatter values share one validator: frontmatter data is never part of an identity (a template's resolved schema is, since the template resolves to it).
+
+Whether a validator depends on the file context is decided once per layer: a schema that names the eager `darkmatter-file` format or the `match()` keyword judges files; the lazy `darkmatter-file-reference` format checks syntax only and does not count. A merged schema judges files when any layer does. A schema that judges no file is compiled once for every context (the structural slot); one that does is compiled once per context. The built-in baseline types `style.page.stylesheet` with the lazy reference format, so a document validated against the baseline alone shares one validator across every folder and request.
 
 Composition's eager-`file` rewrite ([Files](../../../../simplified-schema/docs/topics/language/types.md#files)) takes each union arm's
 validator from the same cache. The arm is compiled whole, with the root
@@ -1692,7 +1719,7 @@ different options compile apart. Only the validator is reused: every default
 and suggestion is judged again on every load, so a rejected value stays
 rejected with the same diagnostic.
 
-A hit needs the whole resolution context to match, and the built-in baseline declares a `file` property (`style.page.stylesheet`), so its merged validator depends on that context. With the built-in baseline, each document whose schema or context differs therefore compiles the merged baseline once; this is most of the cost of validating many documents, and `--disable baseline-schema` avoids it when only document schemas matter.
+A document whose own schema declares an eager `file(eager)` property makes its merged schema judge files, so each document folder and request context compiles that merged schema once. This is most of the cost of validating many such documents.
 
 ## Shell-Completion Integration
 

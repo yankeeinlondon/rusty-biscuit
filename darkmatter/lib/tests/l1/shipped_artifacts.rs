@@ -192,7 +192,12 @@ fn the_checked_in_artifact_round_trips_to_uncached_preparation_in_order() {
     let tables: Vec<&str> = uncached.named_types.tables.iter().map(|table| table.identity.as_str()).collect();
     assert_eq!(tables.first(), Some(&"darkmatter/schemas/partials/fm.yaml"), "tables follow the source table");
     assert_eq!(registry.inline_baseline(), &uncached.inline_baseline);
-    assert_eq!(registry.baseline_json_schema(), &uncached.baseline);
+    assert_eq!(registry.baseline_json_schema(), &uncached.baseline.json_schema);
+    assert_eq!(
+        uncached.baseline.digest,
+        mechanism::CanonicalDigestRecord::of(&uncached.baseline.json_schema),
+        "the baseline's recorded digest is the canonical digest of its lowered schema"
+    );
 }
 
 #[test]
@@ -426,7 +431,15 @@ refused! {
     // A payload member: required, of its type.
     an_absent_payload_member: |value| remove(value, "/payload/effects") => UnusableRecord at "/payload/effects";
     an_unknown_payload_member: |value| value["payload"]["extra"] = json!(1) => UnusableRecord at "/payload/extra";
-    a_baseline_that_is_not_a_schema_object: |value| value["payload"]["baseline"] = json!(5) => UnusableRecord at "/payload/baseline";
+    a_baseline_that_is_not_a_schema_object: |value| value["payload"]["baseline"]["json_schema"] = json!(5) => UnusableRecord at "/payload/baseline/json_schema";
+    a_baseline_record_of_the_wrong_type: |value| value["payload"]["baseline"] = json!(5) => MalformedArtifact at "/payload/baseline";
+
+    // The baseline's digest: computed under this process's canonical revision, of its type.
+    a_baseline_digest_of_another_revision: |value| value["payload"]["baseline"]["digest"]["revision"] = json!(99) => UnusableRecord at "/payload/baseline/digest/revision";
+    an_absent_baseline_digest: |value| remove(value, "/payload/baseline/digest") => MalformedArtifact at "/payload/baseline";
+    a_null_baseline_digest: |value| value["payload"]["baseline"]["digest"] = Value::Null => MalformedArtifact at "/payload/baseline";
+    a_short_baseline_digest: |value| value["payload"]["baseline"]["digest"]["digest"] = json!("9ad0") => MalformedArtifact at "/payload/baseline";
+    a_baseline_classification_of_the_wrong_type: |value| value["payload"]["baseline"]["digest"]["judges_files"] = json!("no") => MalformedArtifact at "/payload/baseline";
     kind_definitions_of_the_wrong_type: |value| value["payload"]["kind_definitions"] = json!({}) => MalformedArtifact at "/payload/kind_definitions";
 
     // Named-type tables: only the shipped table's documents, once each.

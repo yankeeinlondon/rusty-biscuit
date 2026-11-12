@@ -216,6 +216,9 @@ mod schema_embedded_trigger_bundles;
 mod shipped_artifacts;
 mod prepared_trigger_bundles;
 mod effective_schema_layering;
+mod layered_validator_identities;
+#[cfg(feature = "work-counters")]
+mod raw_declaration_projection;
 mod schema_enhancements_matrix;
 mod schema_extraction_characterization;
 mod schema_language_ownership_guard;

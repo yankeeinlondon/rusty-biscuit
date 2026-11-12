@@ -134,6 +134,17 @@ pub enum Work {
     /// A simplified-schema `PositionMap` built from its source text (an
     /// eager map, or a deferred one forced by its first query).
     SourcePositionMapConstruction,
+    /// A schema serialized to canonical JSON and hashed for its
+    /// validator-cache identity (counted by simplified-schema). A baseline or
+    /// trigger payload served from a shipped artifact carries its digest,
+    /// and a merged or phase-projected schema is identified by its layers, so
+    /// neither is serialized for its key.
+    CanonicalSchemaSerialization,
+    /// An effective schema's merged JSON Schema projected to the declared
+    /// layer (`RawDeclarations`), done the first time an expression site
+    /// reads a declaration; a document whose expressions read none (or that
+    /// has none) never pays it.
+    RawDeclarationProjection,
 }
 
 impl Work {
@@ -182,6 +193,8 @@ impl Work {
         Work::PayloadMergeCheck,
         Work::PayloadCompileCheck,
         Work::SourcePositionMapConstruction,
+        Work::CanonicalSchemaSerialization,
+        Work::RawDeclarationProjection,
     ];
 
     /// Whether [`add`] records the thread this work ran on.
@@ -286,6 +299,7 @@ fn library_kind(work: Work) -> Option<simplified_schema::work_counters::Work> {
         Work::ArtifactFallbackConfiguration => Some(Library::ArtifactFallbackConfiguration),
         Work::ArtifactFallbackRecord => Some(Library::ArtifactFallbackRecord),
         Work::SourcePositionMapConstruction => Some(Library::PositionMapConstruction),
+        Work::CanonicalSchemaSerialization => Some(Library::CanonicalSchemaSerialization),
         _ => None,
     }
 }

@@ -143,3 +143,36 @@ while user CPU stays low is serialization. On macOS, CoreAudio setup behaves
 this way (the `os` skill's `macos.md`). Narrow the request of every test that
 does not assert what the service returns; a live network lookup the test
 never reads is the same case. Sniff's slowest such test went 8.7 s → 2.8 s.
+
+### 8. Shipped schemas prepared from text
+
+Simplified Schema, Darkmatter, and Claudine load their compiled-in schemas
+from checked-in artifacts instead of preparing them per process
+(`simplified-schema/docs/topics/shipped-artifacts.md`). Measured debug
+medians on an M4 Max under load (old and new binaries run side by side):
+`md compose` of a three-line document went 290 → 65 ms, and
+`claudine compose --goose --dry-run` of the frozen clarify prompt
+1450 → 839 ms. Two consequences for tests:
+
+- **Do not shadow a shipped schema to save time.** Copying a reduced schema
+  over a shipped trigger (for example `inline-compose.yaml` as
+  `schemas/claudine.yaml`) used to skip preparing Claudine's large bundle.
+  That preparation is now precompiled. A shadow still avoids compiling the
+  full schema's validator, but that saving has not been measured, and the
+  shadow stops the test checking the schemas users get. Shadow only when
+  shadowing is what the test checks.
+- **A stale artifact is slow, not wrong.** A refused artifact or section
+  falls back to preparing from text with the same verdicts. Claudine's
+  bundle takes about 630 ms to prepare that way in debug, against about
+  180 ms to decode its prepared section. If a schema-heavy suite slows
+  after a shipped YAML edit, run `just shipped-schemas`; the
+  `shipped_artifact_is_fresh` tests fail until you do. Under the
+  `work-counters` feature, `ShippedRuntimePreparation` and the
+  `ArtifactFallback*` counters show a fallback deterministically.
+
+What remains per process is not precompiled: compiling each effective
+schema into a validator (once per layered identity, and per document folder
+when the schema checks files), resolving a document's own `$schema`, and
+merging its layers. In a Time Profiler sample of that Claudine run (debug),
+the validator compile was about 17% of the process (about 150 ms) and
+decoding the prepared bundle section about 15%.

@@ -1014,11 +1014,32 @@ References; Choosing an Arm: Reporting versus Changing Data).
   files a successful preparation read, imports included (embedded schemas
   add none). `validate_schema(...)` does not use it for the read set: it
   records the resolver's observed reads, which survive a failed preparation.
-- Performance: `EffectiveSchema` keeps a `ConversionPlan` keyed by the digest
-  `ValidatorCache::shared_schema_hash` already records, and checks
-  `accepts_as_is` with its own compiled validators first. Never hash or
-  compile a large schema per call (`schema_content_hash` serializes the whole
-  schema); `Shape::describe` is capped at `DESCRIPTION_LIMIT`.
+- Performance: `EffectiveSchema` holds the `SchemaDigest` its validators were
+  compiled under (`digest`) and keeps a `ConversionPlan` found by the same
+  identity (`ConversionPlan::for_identity`), and checks `accepts_as_is` with
+  its own compiled validators first. Never hash or compile a large schema per
+  call (`SchemaDigest::canonical`/`schema_content_hash` serialize the whole
+  schema; `Work::CanonicalSchemaSerialization` counts it);
+  `Shape::describe` is capped at `DESCRIPTION_LIMIT`.
+- Validator identities (`simplified_schema::validate`): an assembled effective
+  schema is keyed by a `LayeredIdentity` over ordered `(LayerRole, digest)`
+  layers (`site_schema_with_override`, `merged_trigger_schema`, whose memo
+  stores the identity), and a phase result that changed the schema derives
+  one (`phase_json_schema`, `LayeredIdentity::derived_from(..).phase_projection(..)`);
+  `CompiledValidators::build_with_digest` compiles under it. The shipped
+  baseline and prepared trigger payloads carry generated canonical digests
+  (`BaselineRecord::digest`, `PayloadRecord::digest`,
+  `ResolvedPayload::digest`); any other layer is hashed once per allocation
+  (`ValidatorCache::canonical_digest_shared`). A transform with no tracked
+  provenance (root-union arms, `for_yaml_document`, `rewrite.rs`) takes the
+  canonical route. A layer's digest must describe its JSON exactly: a new
+  post-merge transformation either extends the identity or drops to `None`
+  (canonical). Changing what a merge or projection produces bumps
+  `resolve::MERGE_ALGORITHM_REVISION` or `phase::PROJECTION_REVISION`;
+  changing the canonical encoding bumps `CANONICAL_IDENTITY_REVISION` and
+  Darkmatter's and Claudine's preparation revisions (both store digests). Tests:
+  `darkmatter/lib/tests/l1/layered_validator_identities.rs`,
+  `simplified-schema/lib/tests/l1/schema_identities.rs`.
 - `number(integer)` lowers with `x-darkmatter-integer: true` (magnitude below
   2^64, a custom keyword in `validate.rs`); raw `integer` has no ceiling.
   `numberlike`/`boolish` lower to the `darkmatter-numberlike`/`-boolish`
@@ -1391,14 +1412,33 @@ library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
   it) or `trigger_source()`. Embedded triggers add no dependency edges.
   Tests: `tests/l1/schema_embedded_trigger_bundles.rs` (incl. the envelope
   input matrix for block YAML and JSON syntax).
+- Shipped artifacts: the baseline, global catalog, `Name@darkmatter:` tables,
+  kind definitions, and function/effect catalogs load from
+  `lib/generated/shipped.json` (`schemas/shipped.rs`, owner `darkmatter`,
+  built over Simplified Schema's; one lazily decoded section per payload
+  member; a refused artifact or section falls back per item to text). A
+  host bundle attaches its prepared form with
+  `EmbeddedSchemaBundle::with_prepared` (`triggers/prepared.rs`): consulted
+  only after filename selection, only when bundle name and every file's
+  bytes match; served entries reparse the envelope and skip payload
+  resolution and the merge/compile checks. After editing
+  `darkmatter/schemas/`, Content Policy's editor schema, or preparation
+  code, run the root `just shipped-schemas` (regenerates Simplified
+  Schema's, Darkmatter's, and Claudine's artifacts; replaces none unless all
+  generate); a code-only change to what Darkmatter prepares bumps
+  `shipped::PREPARATION_REVISION`. Tests: `tests/l1/shipped_artifacts.rs`
+  (`shipped_artifact_is_fresh`), `tests/l1/prepared_trigger_bundles.rs`.
+  User docs: `docs/topics/schemas/definition.md` ("The Shipped Artifact",
+  "Prepared bundles").
 - Large host payloads (Claudine's resolves to about 1.4 MB, its recursive
   families stored once in `$defs`) are kept affordable by
   process-wide memos, each holding its inputs alive and keyed by `Arc`
   identity (plus value equality for small authored schemas): embedded
-  trigger loads (`discovery.rs::load_embedded_trigger`, successes only),
+  trigger loads (`discovery.rs::load_embedded_trigger`, successes only; a
+  bundle served from an accepted prepared form skips resolution entirely),
   trigger merges and document schemas with or without the baseline
   (`mod.rs::merged_trigger_schema`, so an unchanged schema keeps one `Arc`
-  and its digest is computed once), phase schemas (`phase_json_schema`), and
+  and its layered identity), phase schemas (`phase_json_schema`), and
   wrapped root-union arms (`wrapped_root_arms`). Import namespaces are
   parsed once per file revision (`resolve.rs::load_named_types`, keyed by
   path and a hash of the bytes read on every use) and once per shipped

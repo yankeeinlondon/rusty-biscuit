@@ -233,7 +233,7 @@ enum Source<'a> {
 
 impl GlobalCatalog {
     /// Darkmatter's compiled-in catalog: the accepted shipped artifact's
-    /// ([`super::shipped`]), or, when that artifact was refused, resolved once
+    /// ([`super::shipped`]), or, when that artifact or its section was refused, resolved once
     /// per process from the embedded documents. It reads no disk or network
     /// and does not depend on the launch directory.
     ///
@@ -246,7 +246,8 @@ impl GlobalCatalog {
     }
 
     /// [`Self::darkmatter`] prepared from the embedded documents, once per
-    /// process: the fallback when the shipped artifact was refused.
+    /// process: the fallback when the shipped artifact or its section was
+    /// refused.
     pub(crate) fn darkmatter_from_sources() -> &'static GlobalCatalog {
         static CATALOG: OnceLock<GlobalCatalog> = OnceLock::new();
         CATALOG.get_or_init(|| {

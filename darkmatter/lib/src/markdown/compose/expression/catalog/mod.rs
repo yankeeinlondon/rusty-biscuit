@@ -329,8 +329,8 @@ impl FunctionCatalog {
 }
 
 /// The embedded catalog: the accepted shipped artifact's
-/// ([`crate::markdown::schemas::shipped`]), or, when that artifact was
-/// refused, loaded once from the embedded file.
+/// ([`crate::markdown::schemas::shipped`]), or, when that artifact or its
+/// section was refused, loaded once from the embedded file.
 ///
 /// ## Panics
 ///

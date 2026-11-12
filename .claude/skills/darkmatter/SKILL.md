@@ -235,6 +235,16 @@ Important contracts:
   generate. A new file Claudine's preparation reads must be spelled in
   Claudine's `shipped_artifact_is_fresh` and listed in its `source-inputs`.
 
+- Validators are cached by typed identity: an effective schema is keyed by
+  the `LayeredIdentity` of its ordered layers (baseline, triggers, document,
+  then any phase projection), built from digests the shipped artifacts store
+  (`BaselineRecord`/`PayloadRecord::digest`), so the merged schema is never
+  serialized for its key; untracked transforms take the canonical route. A
+  new post-merge transformation must extend the identity or fall back to it,
+  and a change to what a merge or projection produces bumps
+  `MERGE_ALGORITHM_REVISION`/`PROJECTION_REVISION` in `simplified-schema`;
+  see [schema.md](schema.md) ("Validator identities").
+
 Read [schema.md](schema.md) for imports, recursive named types (`$defs`,
 `TypeExpr::Ref`), unions, pattern dictionaries, suggestions, triggers, and
 DMLS schema behavior.

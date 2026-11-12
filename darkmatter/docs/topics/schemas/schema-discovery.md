@@ -20,7 +20,9 @@ and inferring a schema from existing documents is
 
 Every document can select three **shipped** kinds. Their definitions are
 compiled into Darkmatter, so they apply in any folder, with or without a
-repository:
+repository. Their prepared form is read from Darkmatter's
+[shipped artifact](./definition.md#the-shipped-artifact) instead of being
+prepared on every run:
 
 | Kind | Definition | Validates |
 |---|---|---|
@@ -110,6 +112,14 @@ still uses the compiled-in copy.
 
 A file at a shipped path that claims a different kind is an ordinary
 definition, and the shipped one stays in place.
+
+The disk copy is prepared from its text like any other definition in a
+schema root. The compiled-in copy changes only when you rebuild, so after
+editing a shipped definition run `just shipped-schemas` from the repository
+root to regenerate the shipped artifact. Until you do, the
+`shipped_artifact_is_fresh` test fails, and a rebuilt binary refuses the
+artifact and prepares what it holds from text: the same result, with a
+slower start.
 
 ## When a Definition Fails
 

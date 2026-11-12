@@ -237,6 +237,11 @@ pub(crate) struct ResolvedPayload {
     /// payload rules to the result). The other fields are then empty, except
     /// `dependencies`, which name the schema files the template read.
     pub pending: Option<simplified_schema::slots::PendingSchema>,
+    /// The canonical digest of `json_schema` when it is already known (a
+    /// prepared payload's, computed at generation); `None` for a payload
+    /// resolved here, whose digest the validator cache computes once per
+    /// allocation.
+    pub digest: Option<simplified_schema::SchemaDigest>,
 }
 
 impl ResolvedPayload {
@@ -252,6 +257,7 @@ impl ResolvedPayload {
             searched: Vec::new(),
             advisories: Vec::new(),
             pending: None,
+            digest: None,
         }
     }
 }
@@ -405,6 +411,7 @@ pub(crate) fn finish_file_payload(
         searched: resolved.searched,
         advisories: resolved.advisories,
         pending: None,
+        digest: None,
     })
 }
 
@@ -883,6 +890,7 @@ pub(super) fn resolve_embedded_payload(
         searched: Vec::new(),
         advisories: resolved.advisories,
         pending: None,
+        digest: None,
     };
     Ok((payload, reads))
 }
