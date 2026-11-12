@@ -30,7 +30,7 @@ reviewed_on: 2026-11-11
 needs_rulings: false
 clarified: false
 implemented: true
-review_iterations: 0
+review_iterations: 2
 packages:
     - simplified-schema
     - darkmatter
@@ -38,6 +38,7 @@ packages:
     - claudine
     - claudine-cli
 implemented_by: "claude/opus"
+completed: true
 ---
 
 # Precompiled shipped schemas
