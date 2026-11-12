@@ -265,6 +265,10 @@ class CiLocalTests(unittest.TestCase):
                 "TEST_POLICY_RECIPE": str(root / "policy.just"),
                 "TEST_COMPANION_LOG": str(root / "companions.jsonl"),
             })
+            # The hook runs this suite with CARGO_HOME exported, which would
+            # hand the wrapper decision the developer's own Cargo config.
+            environment["CARGO_HOME"] = str(root / "home" / ".cargo")
+            environment.pop("CARGO_BUILD_RUSTC_WRAPPER", None)
             environment.pop("RUSTC_WRAPPER", None)
             if wrapper is not None:
                 environment["RUSTC_WRAPPER"] = wrapper
