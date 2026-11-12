@@ -567,27 +567,51 @@ See [Rolling back a deployment](../../tools/evidence-store/api/README.md#rolling
 
 `.github/workflows/evidence-store-demo.yml` shows that a GitHub Actions run
 can send evidence without any stored secret. It runs only when dispatched by
-hand (`workflow_dispatch`) on `main`. It downloads a named, already-retained
-artifact from an earlier run, requests a GitHub OIDC token with audience
-`rusty-biscuit-evidence-store`, runs the ingestion CLI as a producer, and
-uploads the resume-state directory as an artifact. It runs no tests, imports
-no history, and adds no publication hook to any other workflow.
+hand (`workflow_dispatch`) on `main`, and it sends one cell that the nightly
+CI run already finished. It runs no tests, imports no history, and adds no
+publication hook to any other workflow.
 
-Dispatch it from a host with `GITHUB_TOKEN` or `GH_TOKEN` set:
+What it reads: for every cell it runs, the nightly keeps three artifacts for
+90 days, all named after the cell (`<package>-<gate>-<environment>`):
 
-```sh
-just demo-hosted --run-id 19283746501 --artifact ci-evidence-macos-latest \
-  --collection collection.json --proof-dir reports
+| Artifact | Holds |
+| --- | --- |
+| `observation-<cell>` | the cell's observation, with the commit it tested |
+| `junit-<cell>` | its test report and `expected-<gate>.json` listing |
+| `completion-<cell>` | its `completion.json` (passing cells only) |
+
+```mermaid
+flowchart LR
+  A["nightly run:<br/>observation-, junit-,<br/>completion- artifacts"] --> B["assemble a<br/>one-observation collection"]
+  B --> C["OIDC token<br/>(producer)"]
+  C --> D["ingest and stage<br/>report + proof files"]
+  D --> E["host: evidence-finalize<br/>(verifier)"]
 ```
 
-`--collection` and `--proof-dir` are paths inside the artifact. The recipe
-checks that the workflow exists on `main` before dispatching; if it does not,
-it exits 2 and reports a missing external prerequisite. It never pushes or
-merges anything. The workflow also needs the repository variable
-`EVIDENCE_STORE_ENDPOINT`, and the service's `oidc.trusted_workflows` must list
-the workflow on `refs/heads/main` for `workflow_dispatch`. A GitHub token only
-ever gets producer and reader, so finalize the staged files afterwards from a
-host: download the resume-state artifact and run
+The workflow downloads the three artifacts, looks up the tested commit's
+tree, and assembles a version-3 collection of that one observation with its
+original ID (`tools/evidence-store/cli/hosted-collection.ts`). It then
+requests a GitHub OIDC token with audience `rusty-biscuit-evidence-store`,
+runs the ingestion CLI as a producer, and uploads the resume-state directory
+as an artifact.
+
+Pick a cell from a recent nightly (`gh run list --workflow ci.yml --event
+schedule`, then that run's artifact list), and dispatch it from a host with
+`GITHUB_TOKEN` or `GH_TOKEN` set:
+
+```sh
+just evidence-store demo-hosted --run-id 43053316051 \
+  --observation observation-queue-L1-windows-latest
+```
+
+The recipe checks that the workflow exists on `main` before dispatching; if
+it does not, it exits 2 and reports a missing external prerequisite. It never
+pushes or merges anything. The workflow also needs the repository variable
+`EVIDENCE_STORE_ENDPOINT` (the `endpoint` in the deploy manifest), and the
+service's `oidc.trusted_workflows` must list the workflow on
+`refs/heads/main` for `workflow_dispatch`. A GitHub token only ever gets
+producer and reader, so finalize the staged files afterwards from a host:
+download the resume-state artifact and run
 `just evidence-finalize STATE --token-file /abs/verifier.token`. See
 [GitHub Actions (OIDC)](../../tools/evidence-store/api/README.md#github-actions-oidc).
 

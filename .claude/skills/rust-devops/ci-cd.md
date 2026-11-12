@@ -1151,7 +1151,9 @@ Evidence reaches the store only by explicit ingestion:
 - A producer only stages bytes. `just evidence-finalize STATE --token-file PATH`
   with a **verifier** token publishes them.
 - `.github/workflows/evidence-store-demo.yml` is manual-only
-  (`workflow_dispatch` on `main`): it ingests a named retained artifact with a
+  (`workflow_dispatch` on `main`): it assembles one nightly cell's retained
+  `observation-`, `junit-`, and `completion-` artifacts into a collection
+  (`tools/evidence-store/cli/hosted-collection.ts`) and ingests it with a
   GitHub OIDC token (audience `rusty-biscuit-evidence-store`), which the
   service grants producer and reader only. Dispatch it with `just demo-hosted`;
   it runs no tests and is not a publication hook.

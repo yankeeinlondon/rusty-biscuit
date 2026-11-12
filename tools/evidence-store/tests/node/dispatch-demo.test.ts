@@ -32,7 +32,7 @@ function fakeIo(env: NodeJS.ProcessEnv, answer: (call: Call) => Response, remote
   return { io, calls, spawns, stdout: () => out.join(""), stderr: () => err.join("") };
 }
 
-const ARGS = ["--run-id", "19012345678", "--artifact", "evidence-linux", "--collection", "evidence/collection.json"];
+const ARGS = ["--run-id", "19012345678", "--observation", "observation-queue-L1-windows-latest"];
 const API = "https://api.github.com/repos/example-owner/rusty-biscuit";
 
 describe("demo-hosted", () => {
@@ -55,7 +55,7 @@ describe("demo-hosted", () => {
     const fake = fakeIo({ GITHUB_TOKEN: "gh-token" }, (call) =>
       call.init?.method === "POST" ? new Response(null, { status: 204 }) : new Response(JSON.stringify({ name: "evidence-store-demo.yml" }), { status: 200 }),
     );
-    expect(await run([...ARGS, "--proof-dir", "evidence/proofs", "--repo", "example-owner/rusty-biscuit"], fake.io)).toBe(0);
+    expect(await run([...ARGS, "--repo", "example-owner/rusty-biscuit"], fake.io)).toBe(0);
 
     expect(fake.spawns).toEqual([]);
     expect(fake.calls).toHaveLength(2);
@@ -65,14 +65,17 @@ describe("demo-hosted", () => {
     expect((dispatch.init?.headers as Record<string, string>)["authorization"]).toBe("Bearer gh-token");
     expect(JSON.parse(String(dispatch.init?.body))).toEqual({
       ref: "main",
-      inputs: { run_id: "19012345678", artifact: "evidence-linux", collection: "evidence/collection.json", proof_dir: "evidence/proofs" },
+      inputs: { run_id: "19012345678", observation: "observation-queue-L1-windows-latest" },
     });
     expect(fake.stdout()).not.toContain("gh-token");
   });
 
-  it("rejects a collection path that leaves the artifact before any request", async () => {
+  it("rejects anything but a cell's observation artifact before any request", async () => {
     const fake = fakeIo({ GH_TOKEN: "gh-token" }, () => new Response(null, { status: 200 }));
-    expect(await run(["--run-id", "1", "--artifact", "x", "--collection", "../escape.json"], fake.io)).toBe(2);
+    for (const name of ["junit-queue-L1-windows-latest", "observation-../escape", "observation-"]) {
+      expect(await run(["--run-id", "1", "--observation", name], fake.io)).toBe(2);
+    }
+    expect(fake.stderr()).toContain("--observation must name");
     expect(fake.calls).toEqual([]);
   });
 
