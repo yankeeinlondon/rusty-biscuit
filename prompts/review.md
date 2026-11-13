@@ -12,14 +12,14 @@ description: |-
 
         - pass in a `spec` parameter to a valid specification file
         - the spec file will be evaluated and if the `review` Frontmatter property is _not_ **true** then we will run the spec review
-        - a spec review will make _inline_ changes to the spec file (versus 
+        - a spec review will make _inline_ changes to the spec file (versus writing a separate review file)
     
     2. **Review of the Implementation of a Spec**
 
         - pass in a `spec` parameter after implementing the spec to have the implementation reviewed relative to what the _spec_ specified
         - **Note:** the spec's `reviewed` or `implemented` property must be set to **true**
     
-    3. ** Review of the Implementation of Review Findings**
+    3. **Review of the Implementation of Review Findings**
 
         - pass in a `review` file reference to a review who's findings you have now implemented
         - the review will create a review _iteration_ with findings focused on what left to be done the original review finding and/or any additional new findings

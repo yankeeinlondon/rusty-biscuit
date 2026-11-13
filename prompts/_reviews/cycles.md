@@ -3,7 +3,7 @@ $schema:
     review: file
 description: |-
     Performs a review on the current package area for cyclometric risk.
-review: {{ ctx.area }}/reviews/{{ ctx.today }}-cyclometric-risk/review.md
+review: "{{ ctx.area }}/reviews/{{ ctx.today }}-cyclometric-risk/review.md"
 start:
     message: "👀  performing a cyclometric risk analysis on the **{{ctx.area}}** package area"
 success:
@@ -22,7 +22,7 @@ any source code.
 The module-graph scan for every crate in this package area (import cycles as
 SCCs with their intra-cycle edges, plus fan-in/fan-out hubs):
 
-::shell tsx .claude/scripts/module-cycles.ts {{ ctx.package_area_root }} --md
+::shell tsx {{ ctx.repo_root }}/.claudine/scripts/module-cycles.ts {{ ctx.package_area_root }} --md
 
 For every reported cycle (SCC):
 
