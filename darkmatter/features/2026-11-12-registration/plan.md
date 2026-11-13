@@ -164,6 +164,102 @@ packages:
 - darkmatter-cli
 - darkmatter-lsp
 - claudine
+- sniff
+- messenger
+source_files_during_phase_2:
+- claudine/lib/src/composition/schema/classify.rs
+- claudine/lib/src/composition/schema/defaults_tests.rs
+- claudine/lib/src/composition/schema/launch_defaults.rs
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/src/composition/schema/status_render.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/compose_schema.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/required_defaults.rs
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/atomic_replace.rs
+- darkmatter/lib/src/config/migration_receipt.rs
+- darkmatter/lib/src/config/mod.rs
+- darkmatter/lib/src/config/write.rs
+- darkmatter/lib/src/effects/fs_write.rs
+- darkmatter/lib/src/lib.rs
+- darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/hash/mod.rs
+- darkmatter/lib/src/markdown/hash/node_edit.rs
+- darkmatter/lib/src/markdown/hash/path_edit.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/src/strict_json.rs
+- darkmatter/lib/src/yaml_edit.rs
+- darkmatter/lib/tests/l1/compose_setters.rs
+- darkmatter/lib/tests/l1/composition_defaults.rs
+- darkmatter/lib/tests/l1/config_migration_receipt.rs
+- darkmatter/lib/tests/l1/config_write.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/schema_phase_validation.rs
+- darkmatter/lib/tests/l1/validation_contract_parity.rs
+- darkmatter/lib/tests/l1/yaml_edit.rs
+- messenger/lib/src/research/load.rs
+- messenger/lib/tests/research_corpus.rs
+- simplified-schema/lib/examples/validate_person.rs
+- simplified-schema/lib/src/coerce.rs
+- simplified-schema/lib/src/defaults.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/outcome.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/triggers/finding.rs
+- simplified-schema/lib/tests/l1/declaration_narrowing.rs
+- simplified-schema/lib/tests/l1/envelope_admission.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/required_defaults.rs
+- simplified-schema/lib/tests/l1/root_union_assertions.rs
+- simplified-schema/lib/tests/l1/validation_contract.rs
+- sniff/lib/src/error.rs
+- sniff/lib/src/filesystem/git/committed_tree.rs
+- sniff/lib/src/filesystem/git/mod.rs
+- sniff/lib/src/filesystem/mod.rs
+- sniff/lib/tests/l1/committed_tree.rs
+- sniff/lib/tests/l1/main.rs
+docs_updated_during_phase_2:
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/frontmatter-properties.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/frontmatter.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/README.md
+- simplified-schema/docs/topics/global-type-constraints.md
+- simplified-schema/docs/topics/language/types.md
+- simplified-schema/docs/topics/simplified-schema-struct.md
+- simplified-schema/docs/topics/validation.md
+- sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_2:
+- darkmatter/docs/topics/config-writes.md
+- darkmatter/docs/topics/yaml-editing.md
+skills_files_updated_during_phase_2:
+- .claude/skills/claudine/cli-commands.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/frontmatter.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/sniff/remote-and-repository.md
+- .claude/skills/sniff/SKILL.md
 ---
 
 # Configuration, permissions, and host registration implementation plan
@@ -847,7 +943,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
 
 ### Wave 3 — Independent foundations (parallel)
 
-- [ ] **Implement default candidates**
+- [x] **Implement default candidates**
   - Own Simplified Schema `defaults.rs`, `prepared.rs`, `outcome.rs`, exports,
     default/schema diagnostics, and shared-library tests. Implement Rules 4–6
     over existing resolved schema/definition data and validators.
@@ -859,7 +955,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
   - Update the standalone example and conversion-reporting tests. Verify
     external exported JSON Schema retains ordinary annotation semantics.
 
-- [ ] **Implement YAML edits**
+- [x] **Implement YAML edits**
   - Own `yaml_edit.rs`, extracted node edit internals, and existing Markdown
     path-editor regressions. Implement Rule 8 with no fabricated envelope.
   - Test empty roots, missing parents, nested mapping/list edits, explicit
@@ -867,7 +963,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
     CRLF, and no final newline. A refused alias/tag/flow mutation returns
     the original bytes unchanged.
 
-- [ ] **Capture committed trees**
+- [x] **Capture committed trees**
   - Own new Sniff `committed_tree.rs`, its exports, and focused public tests.
     Implement Rule 12's pinned tree/object view and symlink outcomes.
   - Use library-created fixture commits; compare results to read-only Git
@@ -878,7 +974,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
 
 ### Wave 4 — Foundation integration (parallel)
 
-- [ ] **Apply composition defaults**
+- [x] **Apply composition defaults**
   - Own Darkmatter `EffectiveSchema` reports, composition schema writeback,
     expression presence typing, and their tests. Consume the shared default
     engine before downstream stages; retain pending/caller/default origins.
@@ -888,7 +984,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
   - Audit every `ValidationReport` constructor and serialization consumer,
     including no-schema paths, YAML results, and report parity tests.
 
-- [ ] **Implement locked writes**
+- [x] **Implement locked writes**
   - Own new `config/{write,migration_receipt}.rs`, the shared atomic
     replacement helper, and `strict_json.rs`. Implement Rules 9/34 using the
     YAML editor; accept a caller-supplied passive validation callback so both
@@ -903,7 +999,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
     source modes, and no temp leaks. Inject replacement failures instead
     of depending on privileged filesystem permissions.
 
-- [ ] **Update default consumers**
+- [x] **Update default consumers**
   - Own Claudine's missing-property classification/collection tests and DMLS
     declaration narrowing/hover tests. Required resolved defaults count as
     present; optional defaults stay metadata; invalid defaults block rather
