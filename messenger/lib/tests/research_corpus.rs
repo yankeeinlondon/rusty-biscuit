@@ -18,7 +18,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, LoadedYamlDocument, ValidationReport, YamlOutcome};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationReport, YamlOutcome};
+use simplified_schema::yaml_documents::LoadedYamlDocument;
 use messenger::ProviderKind;
 use serde_json::Value;
 
