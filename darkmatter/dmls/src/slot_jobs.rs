@@ -39,7 +39,7 @@ use crossbeam_channel::{Receiver, Sender};
 use darkmatter::markdown::compose::DataRuntime;
 use darkmatter::markdown::compose::expression::data::ObservationKind;
 use darkmatter::markdown::compose::expression::iteration::IterationLimits;
-use darkmatter::markdown::schemas::TriggerRegistry;
+use simplified_schema::triggers::TriggerRegistry;
 use darkmatter::markdown::schemas::slots::SlotSession;
 use darkmatter::markdown::schemas::slots::grants::Grant;
 use lsp_types::Uri;

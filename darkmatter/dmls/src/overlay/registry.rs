@@ -63,11 +63,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::triggers::{
-    InvalidTriggerFinding, SchemaRootSource, TriggerRegistry, TriggerSource, enumerate_root_files,
-    parse_trigger_envelope_from_str, scan_with_source,
-};
-use darkmatter::markdown::schemas::{KindRegistry, RegistryScope, SchemaRootKind, SchemaRootState, SchemaRoots};
+use darkmatter::markdown::schemas::triggers::scan_with_source;
+use simplified_schema::triggers::{InvalidTriggerFinding, SchemaRootSource, TriggerRegistry, TriggerSource, enumerate_root_files, parse_trigger_envelope_from_str};
+use simplified_schema::yaml_documents::{KindRegistry, RegistryScope};
+use simplified_schema::roots::{SchemaRootKind, SchemaRootState, SchemaRoots};
 use simplified_schema::resolve::buffers::{self, SourceBuffers};
 use simplified_schema::{SchemaError, StandaloneSchemaEnvelope, parse_standalone_schema_document};
 
@@ -566,7 +565,7 @@ impl Preparation {
             // A definition's imports are read through the context, from the
             // open buffers where one is open at the imported path.
             let registry = buffers::with(&self.buffers, || {
-                KindRegistry::build(&self.context, &mut source, RegistryScope::WithRoots)
+                KindRegistry::build(&self.context, &mut source, RegistryScope::WithRoots, darkmatter::markdown::schemas::kind_host())
             });
             deps.kind_sources = source.read;
             // Root files already carry the hash the root contents recorded.

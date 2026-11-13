@@ -23,7 +23,7 @@
 
 use serde_yaml_ng::Value as YamlValue;
 
-use simplified_schema::errors::SchemaError;
+use crate::errors::SchemaError;
 
 use super::grammar::{MatchConditions, parse_match_conditions};
 use super::lint;
@@ -203,7 +203,7 @@ pub(crate) fn trigger_error_segments(error: &SchemaError) -> Vec<String> {
 pub(crate) struct TriggerSourcePositions<'a> {
     source: &'a str,
     offset: usize,
-    map: std::sync::OnceLock<simplified_schema::PositionMap>,
+    map: std::sync::OnceLock<crate::PositionMap>,
 }
 
 impl<'a> TriggerSourcePositions<'a> {
@@ -227,8 +227,8 @@ impl<'a> TriggerSourcePositions<'a> {
         }
         let positions = self
             .map
-            .get_or_init(|| simplified_schema::PositionMap::deferred(std::sync::Arc::from(&self.source[self.offset..])));
-        let located = crate::markdown::schemas::yaml_documents::locating_problem(&segments);
+            .get_or_init(|| crate::PositionMap::deferred(std::sync::Arc::from(&self.source[self.offset..])));
+        let located = crate::yaml_documents::locating_problem(&segments);
         positions.byte_range(&located).map(|range| range.start + self.offset..range.end + self.offset)
     }
 

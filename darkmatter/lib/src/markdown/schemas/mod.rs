@@ -50,7 +50,6 @@ pub mod detect;
 mod frontmatter_shape;
 pub mod resolve;
 pub mod rewrite;
-pub mod roots;
 mod schema_files;
 pub mod shipped;
 pub mod slots;
@@ -98,23 +97,25 @@ pub use detect::{
     detect_schema_with_contexts, schema_to_yaml,
 };
 pub use frontmatter_shape::effective_property_shape;
-pub use triggers::TriggerOrigin;
 pub use rewrite::NormalizationOutcome;
 use simplified::{
     DefKey, Definition, DefinitionOuter, DefinitionTable, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, to_json_schema_with_definitions,
 };
-pub use roots::{
-    InvalidSchemasDir, SCHEMAS_DIR_VARIABLE, SchemaSearchRoot, SchemaRootKind, SchemaRootState,
-    SchemaRoots, SearchedRoot,
-};
-pub use embedded::EmbeddedSchemaBundle;
-pub use yaml_documents::{KindRegistry, LoadedYamlDocument, RegistryScope, Route, YamlContract, YamlOutcome, YamlValidation};
-pub use triggers::{
-    InvalidTriggerFinding, LoadedTrigger, MatchConditions, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
-    TriggerConditionTrace, TriggerEvaluation, TriggerRegistry, TriggerSource, TriggerTrace,
-    TriggerTraceEntry, claims_trigger_envelope, evaluate_registry, matched_triggers, parse_trigger_envelope,
-    parse_trigger_envelope_from_str, trace_registry, scan, scan_with_embedded,
-};
+pub use yaml_documents::{Route, YamlContract, YamlOutcome, YamlValidation, kind_host, shipped_kind_registry};
+pub use triggers::{scan, scan_with_embedded};
+
+/// Darkmatter's reserved shipped namespace (`Name@darkmatter:<stem>`) over
+/// its compiled-in catalog and partials: what a caller passes to a
+/// [`simplified_schema`] entry point that takes
+/// [`ShippedSources`](simplified_schema::embedded::ShippedSources) to resolve
+/// exactly as Darkmatter does.
+#[must_use]
+pub fn shipped_sources() -> simplified_schema::embedded::ShippedSources {
+    embedded::SHIPPED_SOURCES
+}
+use simplified_schema::embedded::EmbeddedSchemaBundle;
+use simplified_schema::triggers::{self as library_triggers, TriggerOrigin, TriggerSource};
+use simplified_schema::yaml_documents::KindRegistry;
 use simplified_schema::{
     ValidationStage, ValidationTimings,
 };
@@ -264,7 +265,7 @@ pub fn darkmatter_base_json_schema_ref() -> &'static Value {
 pub struct DarkmatterSchemas {
     baseline: Option<BaselineSchema>,
     cache: ValidatorCache,
-    triggers: Option<triggers::TriggerRegistry>,
+    triggers: Option<library_triggers::TriggerRegistry>,
     /// Bundles [`Self::with_trigger_discovery`] appends after the roots.
     embedded_bundles: Vec<EmbeddedSchemaBundle>,
     file_resolution_context: biscuit_file::FileResolutionContext,
@@ -301,9 +302,6 @@ use simplified_schema::validate::SHARED_VALIDATOR_CACHE;
 #[doc(hidden)]
 pub fn reset_process_caches_for_bench() {
     simplified_schema::reset_process_caches();
-    triggers::assemble::reset_process_caches();
-    triggers::discovery::reset_process_caches();
-    triggers::matcher::reset_thread_caches();
     DERIVATIONS.lock().expect("phase schema memo poisoned").clear();
     MERGES.lock().expect("trigger merge memo poisoned").clear();
     slots::cache::clear();
@@ -347,7 +345,7 @@ fn declared_by_template(pending: &simplified_schema::slots::PendingSchema) -> Ve
 }
 
 /// The top-level properties a matched trigger payload declares.
-fn declared_by_payload(payload: &triggers::assemble::ResolvedPayload) -> Vec<String> {
+fn declared_by_payload(payload: &library_triggers::assemble::ResolvedPayload) -> Vec<String> {
     match &payload.pending {
         Some(pending) => declared_by_template(pending),
         None => declared_by_json(&payload.json_schema),
@@ -450,7 +448,7 @@ fn declarations_of_json_schema(json_schema: &Value) -> SchemaShape {
 struct TriggerLayer {
     /// The trigger envelope (for origin attribution; a file is also a
     /// dependency).
-    source: triggers::TriggerSource,
+    source: library_triggers::TriggerSource,
     /// The resolved payload JSON Schema (guaranteed simple-object), shared
     /// with the registry that resolved it.
     json_schema: Arc<Value>,
@@ -770,7 +768,7 @@ impl DarkmatterSchemas {
     /// The scan is performed eagerly at configuration time and recovers per
     /// trigger: an invalid trigger is skipped and reported by
     /// [`Self::discovery_findings`] while every valid one is installed. The
-    /// resulting [`triggers::TriggerRegistry`] is stored and consumed by
+    /// resulting [`library_triggers::TriggerRegistry`] is stored and consumed by
     /// [`Self::effective_for`], whose bare-name `$schema` lookup also
     /// searches its roots.
     ///
@@ -802,7 +800,7 @@ impl DarkmatterSchemas {
     /// ## Errors
     ///
     /// [`SchemaError::EmbeddedBundle`] (see
-    /// [`triggers::TriggerRegistry::append_embedded_bundle`]); the instance is
+    /// [`library_triggers::TriggerRegistry::append_embedded_bundle`]); the instance is
     /// consumed. An invalid trigger in the bundle is a discovery finding, not
     /// an error.
     pub fn with_embedded_trigger_bundle(
@@ -824,13 +822,13 @@ impl DarkmatterSchemas {
     /// A caller must explicitly ask for discovery (via
     /// [`Self::with_trigger_discovery`]) or supply a prebuilt registry.
     #[must_use]
-    pub fn with_trigger_registry(mut self, registry: triggers::TriggerRegistry) -> Self {
+    pub fn with_trigger_registry(mut self, registry: library_triggers::TriggerRegistry) -> Self {
         self.triggers = Some(registry);
         self
     }
 
     /// Returns the configured trigger registry, when present.
-    pub fn trigger_registry(&self) -> Option<&triggers::TriggerRegistry> {
+    pub fn trigger_registry(&self) -> Option<&library_triggers::TriggerRegistry> {
         self.triggers.as_ref()
     }
 
@@ -838,7 +836,7 @@ impl DarkmatterSchemas {
     /// empty without a registry. They belong to the discovery result, so they
     /// are reported whether or not any effective schema applies.
     #[must_use]
-    pub fn discovery_findings(&self) -> &[triggers::InvalidTriggerFinding] {
+    pub fn discovery_findings(&self) -> &[library_triggers::InvalidTriggerFinding] {
         self.triggers.as_ref().map_or(&[], |registry| registry.findings())
     }
 
@@ -952,11 +950,11 @@ impl DarkmatterSchemas {
                         &self.file_resolution_context,
                     )
                     .or_else(|error| self.resolve_template(error, &document_template_identity(value, &base_dir)))
-                    .map_err(|error| match triggers::assemble::refused_trigger_file(&error) {
-                        Some(path) => triggers::assemble::trigger_schema_referenced(&path),
+                    .map_err(|error| match library_triggers::assemble::refused_trigger_file(&error) {
+                        Some(path) => library_triggers::assemble::trigger_schema_referenced(&path),
                         None => error,
                     })?;
-                    triggers::assemble::check_document_schema_not_trigger(&r.referenced_files)?;
+                    library_triggers::assemble::check_document_schema_not_trigger(&r.referenced_files)?;
                     Ok::<_, SchemaError>(r)
                 });
                 match resolution {
@@ -1131,7 +1129,7 @@ impl DarkmatterSchemas {
                 Err(_) => {}
             }
         }
-        let Some(registry) = self.triggers.as_ref().filter(|registry| registry.payloads.len() == registry.triggers.len()) else {
+        let Some(registry) = self.triggers.as_ref().filter(|registry| registry.payloads().len() == registry.triggers.len()) else {
             return templates;
         };
         let document = match source.source() {
@@ -1139,11 +1137,11 @@ impl DarkmatterSchemas {
             _ => None,
         };
         let fm_json = frontmatter_as_json(source);
-        let matched: Vec<&triggers::assemble::ResolvedPayload> = triggers::assemble::evaluate_registry(registry, &fm_json, document)
+        let matched: Vec<&library_triggers::assemble::ResolvedPayload> = library_triggers::assemble::evaluate_registry(registry, &fm_json, document)
             .into_iter()
             .enumerate()
             .filter(|(_, eval)| eval.matched && eval.trigger.envelope.payload.is_some())
-            .map(|(idx, _)| &registry.payloads[idx])
+            .map(|(idx, _)| &registry.payloads()[idx])
             .collect();
         let declared: Vec<Vec<String>> = matched.iter().map(|payload| declared_by_payload(payload)).collect();
         for (payload, discarded) in matched.iter().zip(discarded_by_higher_layers(&document_declared, &declared)) {
@@ -1189,10 +1187,10 @@ impl DarkmatterSchemas {
 
         // Registries built by `scan` carry pre-resolved payloads; programmatically
         // constructed registries do not and fall back to on-demand resolution.
-        let pre_resolved = registry.payloads.len() == registry.triggers.len();
+        let pre_resolved = registry.payloads().len() == registry.triggers.len();
 
         let evaluations = ValidationStage::Match.time(|| {
-            let evaluations = triggers::assemble::evaluate_registry(registry, &fm_json, document);
+            let evaluations = library_triggers::assemble::evaluate_registry(registry, &fm_json, document);
             for eval in evaluations.iter().filter(|eval| eval.matched) {
                 timings::matched_trigger(|| {
                     eval.trigger
@@ -1212,12 +1210,13 @@ impl DarkmatterSchemas {
                 continue;
             }
             let payload = if pre_resolved {
-                std::borrow::Cow::Borrowed(&registry.payloads[idx])
+                std::borrow::Cow::Borrowed(&registry.payloads()[idx])
             } else {
-                std::borrow::Cow::Owned(triggers::assemble::resolve_trigger_payload(
+                std::borrow::Cow::Owned(library_triggers::assemble::resolve_trigger_payload(
                     eval.trigger,
                     registry.roots.search_paths(),
                     &self.file_resolution_context,
+                    registry.sources(),
                 )?)
             };
             matched.push((eval.trigger, payload));
@@ -1227,7 +1226,7 @@ impl DarkmatterSchemas {
 
         let mut layers = Vec::with_capacity(matched.len());
         for ((trigger, payload), discarded) in matched.iter().zip(discarded) {
-            let mut payload: &triggers::assemble::ResolvedPayload = payload;
+            let mut payload: &library_triggers::assemble::ResolvedPayload = payload;
             // A matched template payload resolves now, in this document's
             // slot session, and then passes the ordinary payload rules.
             let concrete;
@@ -1270,16 +1269,16 @@ impl DarkmatterSchemas {
     /// rule the resolved schema breaks.
     fn resolve_pending_payload(
         &self,
-        trigger: &triggers::LoadedTrigger,
+        trigger: &library_triggers::LoadedTrigger,
         pending: &simplified_schema::slots::PendingSchema,
-    ) -> Result<triggers::assemble::ResolvedPayload, SchemaError> {
+    ) -> Result<library_triggers::assemble::ResolvedPayload, SchemaError> {
         let (TriggerSource::File(source), Some(payload)) = (&trigger.source, trigger.envelope.payload.as_ref()) else {
             return Err(SchemaError::UnresolvedSlots(Box::new(simplified_schema::UnresolvedSlots::new(
                 pending.slots().to_vec(),
             ))));
         };
         if pending.slots().is_empty() {
-            return triggers::assemble::finish_file_payload(source, payload, pending.resolve_without_slots()?);
+            return library_triggers::assemble::finish_file_payload(source, payload, pending.resolve_without_slots()?);
         }
         // The omitted properties are part of the identity: the same files
         // and slots resolve to a different schema without them.
@@ -1292,7 +1291,7 @@ impl DarkmatterSchemas {
         let mut unresolved = simplified_schema::UnresolvedSlots::new(pending.slots().to_vec());
         unresolved.pending = Some(pending.clone());
         let resolved = self.resolve_template(SchemaError::UnresolvedSlots(Box::new(unresolved)), &identity)?;
-        triggers::assemble::finish_file_payload(source, payload, resolved)
+        library_triggers::assemble::finish_file_payload(source, payload, resolved)
     }
 
     /// Validates a document's frontmatter, returning a [`ValidationReport`].
@@ -2307,7 +2306,7 @@ pub struct ValidationReport {
     /// discovery order. Filled by [`DarkmatterSchemas::validate`] and
     /// [`DarkmatterSchemas::validate_for_phase`] whether or not an effective
     /// schema exists; empty from an [`EffectiveSchema`]'s own validation.
-    pub trigger_findings: Vec<triggers::InvalidTriggerFinding>,
+    pub trigger_findings: Vec<library_triggers::InvalidTriggerFinding>,
 }
 
 /// What preparing a document's effective schema found, returned beside the
@@ -2373,7 +2372,7 @@ impl ValidationReport {
 
 /// Code of the warning for a schema trigger automatic discovery skipped
 /// because its envelope or payload failed to load.
-pub const SCHEMA_INVALID_TRIGGER_CODE: &str = "dm.schema.invalid_trigger";
+pub use simplified_schema::triggers::SCHEMA_INVALID_TRIGGER_CODE;
 /// A top-level frontmatter value that cannot be validated yet because it holds
 /// a deferred composition construct (R-5 Priority 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4377,7 +4376,7 @@ mod phase4_trigger_assembly {
 
     /// The one finding of discovery for `doc_path`, whose trigger file is
     /// `name`; discovery itself succeeds.
-    fn only_finding(root: &Path, doc_path: &Path, name: &str) -> (DarkmatterSchemas, triggers::InvalidTriggerFinding) {
+    fn only_finding(root: &Path, doc_path: &Path, name: &str) -> (DarkmatterSchemas, library_triggers::InvalidTriggerFinding) {
         let api = DarkmatterSchemas::new(doc_context(root, doc_path))
             .with_trigger_discovery()
             .expect("an invalid trigger never fails discovery");

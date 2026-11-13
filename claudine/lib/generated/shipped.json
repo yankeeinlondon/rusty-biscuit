@@ -2,7 +2,7 @@
 "header": {
   "wire_version": 1,
   "owner": "claudine",
-  "preparation_revision": 2,
+  "preparation_revision": 3,
   "sources": [
     {
       "identity": "claudine/action.yaml",
@@ -44,13 +44,13 @@
   "dependencies": [
     {
       "owner": "darkmatter",
-      "preparation_revision": 2,
-      "digest": "aa2430f740b737f0"
+      "preparation_revision": 3,
+      "digest": "7c434db043b03e4b"
     },
     {
       "owner": "simplified-schema",
-      "preparation_revision": 1,
-      "digest": "f93af5267b7035ce"
+      "preparation_revision": 2,
+      "digest": "cff9a460e95d0aee"
     }
   ],
   "configuration": []

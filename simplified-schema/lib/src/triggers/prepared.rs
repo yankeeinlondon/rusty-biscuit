@@ -6,7 +6,7 @@
 //! payload's lowered schema. [`prepare_trigger_bundle`] produces that record
 //! with every check ordinary discovery runs; the host's artifact holds it;
 //! [`PreparedTriggerBundle::from_record`] rebuilds it inside artifact
-//! acceptance (`simplified_schema::shipped::accept`); and a bundle built with
+//! acceptance (`crate::shipped::accept`); and a bundle built with
 //! [`EmbeddedSchemaBundle::with_prepared`] offers it to discovery through a
 //! [`PreparedBundleDescriptor`].
 //!
@@ -26,15 +26,15 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use simplified_schema::errors::SchemaError;
-use simplified_schema::shipped::{Acceptance, CanonicalDigestRecord, PreparationMode, RecordError, SourceFingerprint};
-use simplified_schema::simplified::DefinitionTable;
-use simplified_schema::{SchemaAdvisory, SchemaAdvisoryKind, SchemaShape, ValidatorCache};
+use crate::errors::SchemaError;
+use crate::shipped::{Acceptance, CanonicalDigestRecord, PreparationMode, RecordError, SourceFingerprint};
+use crate::simplified::DefinitionTable;
+use crate::{SchemaAdvisory, SchemaAdvisoryKind, SchemaShape, ValidatorCache};
 
 use super::assemble::{ResolvedPayload, resolve_embedded_payload};
 use super::discovery::EmbeddedTriggerLoad;
 use super::envelope::parse_trigger_envelope_from_str;
-use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;
+use crate::embedded::{EmbeddedSchemaBundle, ShippedSources};
 
 /// What trigger discovery derives from one bundle, in the bundle's sorted
 /// file order (UTF-8 file-name bytes, the order its triggers layer in).
@@ -80,7 +80,7 @@ pub struct PayloadRecord {
     pub json_schema: Value,
     /// The payload's SimplifiedSchema object shape; `null` for a payload with
     /// no SimplifiedSchema projection.
-    #[serde(deserialize_with = "simplified_schema::shipped::present")]
+    #[serde(deserialize_with = "crate::shipped::present")]
     pub shape: Option<SchemaShape>,
     /// The cyclic named types `shape` reaches, in allocation order.
     pub definitions: DefinitionTable,
@@ -133,11 +133,12 @@ impl AdvisoryRecord {
 pub fn prepare_trigger_bundle(
     bundle: EmbeddedSchemaBundle,
     mode: PreparationMode<'_>,
+    sources: ShippedSources,
 ) -> Result<TriggerBundleRecord, SchemaError> {
     bundle.check()?;
     let private_cache;
     let cache: &ValidatorCache = match mode {
-        PreparationMode::Runtime => &simplified_schema::validate::SHARED_VALIDATOR_CACHE,
+        PreparationMode::Runtime => &crate::validate::SHARED_VALIDATOR_CACHE,
         PreparationMode::Uncached(_) => {
             private_cache = ValidatorCache::new();
             &private_cache
@@ -154,7 +155,7 @@ pub fn prepare_trigger_bundle(
             Some(envelope) => match envelope.payload.as_ref() {
                 None => TriggerOutcomeRecord::MatcherOnly,
                 Some(payload) => {
-                    let (resolved, _) = resolve_embedded_payload(Some(payload), bundle, name, mode, cache)
+                    let (resolved, _) = resolve_embedded_payload(Some(payload), bundle, name, mode, cache, sources)
                         .map_err(|error| failed(name, error))?;
                     TriggerOutcomeRecord::Payload(Box::new(PayloadRecord {
                         digest: CanonicalDigestRecord::of(&resolved.json_schema),
@@ -228,7 +229,7 @@ impl PreparedTriggerBundle {
     /// document, a header bundle source the record omits, or a payload whose
     /// JSON Schema is not an object.
     pub fn from_record(acceptance: &Acceptance<'_>, pointer: &str, record: TriggerBundleRecord) -> Result<Self, RecordError> {
-        if !simplified_schema::embedded::is_plain_segment(&record.bundle) {
+        if !crate::embedded::is_plain_segment(&record.bundle) {
             return Err(RecordError::new(
                 format!("{pointer}/bundle"),
                 format!("bundle name `{}` is not one path segment", record.bundle),
@@ -285,7 +286,7 @@ impl PreparedTriggerBundle {
         }
         if let Some(omitted) = header.sources.iter().find(|source| {
             source.identity.strip_prefix(&prefix).is_some_and(|name| {
-                simplified_schema::embedded::is_plain_segment(name) && !entries.contains_key(name)
+                crate::embedded::is_plain_segment(name) && !entries.contains_key(name)
             })
         }) {
             return Err(RecordError::new(
@@ -319,7 +320,7 @@ impl PreparedTriggerBundle {
         let mut supplied: Vec<SourceFingerprint> = bundle
             .documents()
             .iter()
-            .map(|(path, text)| SourceFingerprint::of(&simplified_schema::embedded::EmbeddedDocument { path, text }))
+            .map(|(path, text)| SourceFingerprint::of(&crate::embedded::EmbeddedDocument { path, text }))
             .collect();
         supplied.sort_by(|left, right| left.identity.cmp(&right.identity));
         let result = supplied == self.sources;

@@ -2,7 +2,7 @@
 //!
 //! A second document, a non-string mapping key, and (for a data file) a tag
 //! are refused once the value tree exists, and the tree has no positions. The
-//! [`PositionMap`](simplified_schema::PositionMap) cannot fill the gap: it
+//! [`PositionMap`](crate::PositionMap) cannot fill the gap: it
 //! refuses a layout it cannot match to the parsed value. These passes re-read the text with
 //! `serde_yaml_ng`'s event deserializer instead, walking it in step with the
 //! parsed value, and fail on purpose at the offending node; the deserializer

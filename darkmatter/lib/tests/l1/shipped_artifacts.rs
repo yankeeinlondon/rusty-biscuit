@@ -99,6 +99,7 @@ fn shipped_artifact_is_fresh() {
     // change to them (which regenerates the lower artifact) runs this test.
     let _ = include_bytes!("../../../../simplified-schema/lib/generated/shipped.json");
     let _ = include_str!("../../../../content-policy/schemas/content-policy.yaml");
+    let _ = include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml");
     let _ = include_str!("../../../../simplified-schema/schemas/schema.yaml");
     let _ = include_str!("../../../../simplified-schema/schemas/yaml-schema.yaml");
     // The other packages' code whose behavior decides the artifact's bytes
@@ -138,6 +139,7 @@ fn shipped_artifact_is_fresh() {
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/types.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/yaml_scalar.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/validate.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/yaml_documents/registry.rs");
     let checked_in = include_bytes!("../../generated/shipped.json");
     let fresh = shipped::generate().expect("fresh generation");
     if let Err(stale) = mechanism::check_fresh(checked_in, &fresh, shipped::ARTIFACT_PATH, shipped::REGENERATE_COMMAND) {
@@ -243,7 +245,7 @@ fn cold_accepted_lookups_prepare_nothing_and_skip_the_baseline_check() {
     let _ = darkmatter::markdown::schemas::darkmatter_base_json_schema_ref();
     let _ = darkmatter::markdown::schemas::darkmatter_base_schema();
     let _ = GlobalCatalog::darkmatter();
-    let kinds = darkmatter::markdown::schemas::KindRegistry::shipped();
+    let kinds = darkmatter::markdown::schemas::shipped_kind_registry();
     assert!(kinds.claim("schema-trigger").is_some());
     assert!(!darkmatter::markdown::compose::expression::expression_function_catalog().descriptors.is_empty());
     assert!(!darkmatter::effects::effect_function_catalog().descriptors.is_empty());
@@ -283,7 +285,7 @@ fn assert_falls_back(bytes: Option<&[u8]>, lower: LowerArtifact, reason: Fallbac
             .shipped_kind_registry()
             .claims()
             .map(|(kind, claim)| match claim {
-                darkmatter::markdown::schemas::yaml_documents::Claim::Healthy(definition) => {
+                simplified_schema::yaml_documents::Claim::Healthy(definition) => {
                     (kind.to_string(), vec![definition.resolved().json_schema.to_string()])
                 }
                 other => panic!("a shipped claim is healthy: {other:?}"),

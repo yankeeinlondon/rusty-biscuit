@@ -93,7 +93,7 @@ fn a_prompt_without_schema_composes_beside_the_incident_trigger() {
     assert!(!warning.message.contains("merge-conflicts.md"), "never blames the prompt: {}", warning.message);
     assert_eq!(
         warning.invalid_trigger_source(),
-        Some(crate::markdown::schemas::TriggerSource::File(repo.trigger())),
+        Some(simplified_schema::triggers::TriggerSource::File(repo.trigger())),
         "a host recognizes the trigger by its discovery identity"
     );
     assert_eq!(ComposeWarning::new("schema_validation", "other").invalid_trigger_source(), None);
@@ -168,8 +168,8 @@ fn a_payload_failure_names_the_payload_but_never_places_it_on_the_trigger() {
 
 #[test]
 fn an_embedded_trigger_record_has_no_source_even_with_a_position() {
-    let finding = crate::markdown::schemas::InvalidTriggerFinding::new(
-        crate::markdown::schemas::TriggerSource::Embedded { bundle: "host".into(), name: "broken.yaml".into() },
+    let finding = simplified_schema::triggers::InvalidTriggerFinding::new(
+        simplified_schema::triggers::TriggerSource::Embedded { bundle: "host".into(), name: "broken.yaml".into() },
         simplified_schema::errors::SchemaError::TriggerEnvelopeYaml {
             message: "did not find expected ',' or ']'".into(),
             line: Some(3),

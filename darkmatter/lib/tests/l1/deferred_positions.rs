@@ -6,7 +6,8 @@
 
 #![cfg(feature = "work-counters")]
 
-use darkmatter::markdown::schemas::{InvalidTriggerFinding, YamlOutcome, triggers};
+use darkmatter::markdown::schemas::{YamlOutcome, triggers};
+use simplified_schema::triggers::InvalidTriggerFinding;
 use darkmatter::work_counters::{Work, WorkSnapshot, snapshot};
 use simplified_schema::SchemaError;
 

@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileResolutionContext, PathIdentity, canonicalize_simplified};
 
-use simplified_schema::SchemaError;
+use crate::SchemaError;
 
 /// The environment variable naming the first schema root.
 pub const SCHEMAS_DIR_VARIABLE: &str = "SCHEMAS_DIR";

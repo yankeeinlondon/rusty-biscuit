@@ -23,9 +23,10 @@ use darkmatter::lifecycle::schema_projection::LifecycleSchemaProjection;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::expression_function_descriptors;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::triggers::{PathSubject, parse_trigger_envelope_from_str};
+use simplified_schema::triggers::{PathSubject, parse_trigger_envelope_from_str};
 use simplified_schema::validate::build_position_map;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, ValidationReport};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::embedded::EmbeddedSchemaBundle;
 use simplified_schema::SchemaError;
 use serde_json::{Value, json};
 

@@ -7,7 +7,7 @@
 //!
 //! Each property condition is `property: <type-expr>` where the type
 //! expression reuses the existing [`PropertyAtom`] / [`TypeExpr`] grammar
-//! from [`simplified_schema::simplified`]. Match loading rejects
+//! from [`crate::simplified`]. Match loading rejects
 //! constraints that resolve files, import types, load examples, provide
 //! defaults, or mark generated values (see [`is_match_safe_constraint`]).
 //!
@@ -29,8 +29,8 @@
 use biscuit_file::{FileReference, FileReferenceKind, GlobReference, GlobReferenceError};
 use serde_yaml_ng::Value as YamlValue;
 
-use simplified_schema::errors::SchemaError;
-use simplified_schema::simplified::{
+use crate::errors::SchemaError;
+use crate::simplified::{
     Constraint, PropertyAtom, PropertyDef, TypeExpr,
     grammar::parse_type_expr,
 };
@@ -101,7 +101,9 @@ pub enum MatchExpr {
 pub struct PathGlobs {
     /// The raw authored glob patterns (with `!` prefixes intact).
     pub patterns: Vec<String>,
-    /// One single-pattern reference per authored pattern, in order.
+    /// One single-pattern reference per authored pattern, in order; judged
+    /// only with the `file` feature.
+    #[cfg_attr(not(feature = "file"), allow(dead_code))]
     pub(crate) compiled: Vec<PathPattern>,
 }
 
@@ -109,6 +111,7 @@ pub struct PathGlobs {
 /// reference so each pattern can be judged in its own context (see
 /// [`super::matcher::PathSubject`]).
 #[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "file"), allow(dead_code))]
 pub(crate) struct PathPattern {
     pub negated: bool,
     /// Bare, `./`, and `../` patterns are read from the trigger's
@@ -492,7 +495,7 @@ fn parse_property_condition_atom(name: &str, value: &YamlValue) -> Result<Proper
     // Matching is passive and decides which payloads apply before anything
     // could resolve a slot, so a condition never holds one, at any depth;
     // only a payload may. Named as a slot, not as the keyword it fills.
-    if !simplified_schema::slots::definition_slots(&def).is_empty() {
+    if !crate::slots::definition_slots(&def).is_empty() {
         return Err(SchemaError::TriggerForbiddenConstraint {
             property: name.to_string(),
             constraint: "`{{ … }}` slot (only a trigger's payload may hold slots)".into(),
@@ -542,8 +545,8 @@ fn parse_property_condition_def(name: &str, value: &YamlValue) -> Result<Propert
 fn single_shape_from_yaml(
     name: &str,
     value: &YamlValue,
-) -> Result<simplified_schema::simplified::SchemaShape, SchemaError> {
-    use simplified_schema::simplified::{SchemaRoot, parse_yaml_schema};
+) -> Result<crate::simplified::SchemaShape, SchemaError> {
+    use crate::simplified::{SchemaRoot, parse_yaml_schema};
     match parse_yaml_schema(value)? {
         SchemaRoot::Single(shape) => Ok(shape),
         SchemaRoot::Union(_) => Err(SchemaError::TriggerMatch {
@@ -556,7 +559,7 @@ fn single_shape_from_yaml(
 }
 
 fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>, SchemaError> {
-    use simplified_schema::simplified::{SchemaRoot, parse_yaml_schema};
+    use crate::simplified::{SchemaRoot, parse_yaml_schema};
     let items = value.as_sequence().expect("sequence checked by caller");
     let mut atoms = Vec::with_capacity(items.len());
     for item in items {

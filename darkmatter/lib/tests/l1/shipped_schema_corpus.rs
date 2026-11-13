@@ -31,10 +31,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{
-    MatchExpr, PathSubject, parse_trigger_envelope_from_str,
-    resolve::{resolve_schema_with_roots, resolve_yaml_schema},
-};
+use darkmatter::markdown::schemas::{resolve::{resolve_schema_with_roots, resolve_yaml_schema}};
+use simplified_schema::triggers::{MatchExpr, PathSubject, parse_trigger_envelope_from_str};
 use simplified_schema::resolve::ResolvedSchema;
 use simplified_schema::{
     Constraint, NotSchemaReason, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaError, SchemaShape, SimplifiedType,
@@ -121,13 +119,27 @@ const EXCEPTIONS: &[Exception] = &[
         Class::GlobalCatalog,
         "Darkmatter's global catalog, registered explicitly",
     ),
-    // Darkmatter's `kind: yaml-schema` definition; the library's two live in
-    // `simplified-schema/schemas/`, covered by that crate's corpus.
+    // simplified-schema/schemas: the shipped `kind: yaml-schema` definitions
+    // (the two envelope definitions and the trigger definition). The
+    // library's corpus admits them; here Darkmatter's resolver must refuse
+    // each as a `$schema` target, since a definition is selected by `kind`.
     exception(
-        "darkmatter/schemas",
+        "simplified-schema/schemas",
+        "schema.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of `kind: schema` documents, applied by `kind`",
+    ),
+    exception(
+        "simplified-schema/schemas",
         "schema-trigger.yaml",
         Class::YamlSchemaDefinition,
         "the definition of `kind: schema-trigger` documents, applied by `kind`",
+    ),
+    exception(
+        "simplified-schema/schemas",
+        "yaml-schema.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of `kind: yaml-schema` documents, applied by `kind`",
     ),
     exception(
         "darkmatter/schemas",
@@ -668,6 +680,7 @@ fn shipped_schema_artifacts_parse_passively() {
             root.join("darkmatter/docs/schemas"),
         ),
         ("darkmatter/schemas", root.join("darkmatter/schemas")),
+        ("simplified-schema/schemas", root.join("simplified-schema/schemas")),
         (
             "content-policy/schemas",
             root.join("content-policy/schemas"),
@@ -872,6 +885,7 @@ fn loadable_shipped_schemas_resolve_and_lower() {
             root.join("darkmatter/docs/schemas"),
         ),
         ("darkmatter/schemas", root.join("darkmatter/schemas")),
+        ("simplified-schema/schemas", root.join("simplified-schema/schemas")),
         (
             "content-policy/schemas",
             root.join("content-policy/schemas"),
@@ -1667,7 +1681,7 @@ fn every_shipped_yaml_schema_definition_is_in_the_shipped_table() {
         }
     }
     on_disk.sort();
-    let mut shipped = darkmatter::markdown::schemas::yaml_documents::shipped_kind_definition_paths();
+    let mut shipped = simplified_schema::yaml_documents::shipped_kind_definition_paths();
     shipped.sort();
     assert_eq!(on_disk, shipped);
 }
@@ -1682,8 +1696,9 @@ fn every_shipped_yaml_schema_definition_is_in_the_shipped_table() {
 #[test]
 fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
     use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context, build_resolution_context_with_catalog};
-    use darkmatter::markdown::schemas::yaml_documents::{Claim, DefinitionSource};
-    use darkmatter::markdown::schemas::{DarkmatterSchemas, KindRegistry, RegistryScope, YamlOutcome};
+    use simplified_schema::yaml_documents::{Claim, DefinitionSource};
+    use darkmatter::markdown::schemas::{DarkmatterSchemas, YamlOutcome};
+    use simplified_schema::yaml_documents::{KindRegistry, RegistryScope};
 
     let root = repo_root();
     let areas = [
@@ -1720,18 +1735,18 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
         // decides its schema roots, and every artifact in it shares them.
         let snapshot = RequestSnapshot::new(path).with_home(None);
         let context = build_resolution_context_with_catalog(&snapshot, catalog.clone()).expect("checkout context");
-        let registry = std::sync::Arc::new(KindRegistry::from_filesystem(&context, RegistryScope::WithRoots));
+        let registry = std::sync::Arc::new(KindRegistry::from_filesystem(&context, RegistryScope::WithRoots, darkmatter::markdown::schemas::kind_host()));
         for (kind, claim) in registry.claims() {
             if let Claim::Duplicate(files) = claim {
                 failures.push(format!("{dir}: `{kind}` is claimed twice: {files:?}"));
             }
         }
-        if dir.starts_with("darkmatter/schemas") {
+        if *dir == "simplified-schema/schemas" {
             let Some(Claim::Healthy(trigger)) = registry.claim("schema-trigger") else {
                 panic!("schema-trigger is claimed in {dir}");
             };
             assert!(
-                matches!(trigger.source(), DefinitionSource::File(file) if file.ends_with("darkmatter/schemas/schema-trigger.yaml")),
+                matches!(trigger.source(), DefinitionSource::File(file) if file.ends_with("simplified-schema/schemas/schema-trigger.yaml")),
                 "the checkout copy replaces the built-in: {:?}",
                 trigger.source()
             );

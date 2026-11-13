@@ -411,13 +411,14 @@ The rules for a definition:
   and a Markdown schema share in a `kind: schema` file and import them from
   both (see [A `yaml-schema` Is Selected by `kind`, Never Referenced](../../../../simplified-schema/docs/topics/language/schema-documents.md#a-yaml-schema-is-selected-by-kind-never-referenced)).
 
-Darkmatter's own definitions are worked examples of each form:
+The shipped definitions, which Simplified Schema owns and Darkmatter
+compiles in, are worked examples of each form:
 
 - [`yaml-schema.yaml`](../../../../simplified-schema/schemas/yaml-schema.yaml)
   defines `yaml-schema` itself, and validates itself. Its
   `property(kind, ...)` declaration option is what requires your `$schema` to
   declare a literal or enum `kind`.
-- [`schema-trigger.yaml`](../../../schemas/schema-trigger.yaml) uses `types`
+- [`schema-trigger.yaml`](../../../../simplified-schema/schemas/schema-trigger.yaml) uses `types`
   for a recursive `match-expression` and a closed root.
 - [`schema.yaml`](../../../../simplified-schema/schemas/schema.yaml) uses a
   root union whose two arms claim the same `schema` kind: one requires
@@ -443,8 +444,8 @@ broken definition does to the documents around it.
 #### Changing a shipped definition
 
 In this repository the shipped definitions are ordinary files in schema roots:
-[`darkmatter/schemas/schema-trigger.yaml`](../../../schemas/schema-trigger.yaml)
-sits in the `darkmatter` package area's root. Edit it in place and the edit
+[`simplified-schema/schemas/schema-trigger.yaml`](../../../../simplified-schema/schemas/schema-trigger.yaml)
+sits in the `simplified-schema` package area's root. Edit it in place and the edit
 applies at once to documents whose roots include that folder, with no
 rebuild, because a file at a shipped definition's repository-relative path
 that claims the same kind replaces the compiled-in copy. Documents elsewhere

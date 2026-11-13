@@ -388,7 +388,7 @@ fn eager_is_universal_in_catalog_and_round_trips() {
 
 #[test]
 fn passive_trigger_schemas_reject_eager_on_every_shape_and_placement() {
-    use darkmatter::markdown::schemas::parse_trigger_envelope_from_str;
+    use simplified_schema::triggers::parse_trigger_envelope_from_str;
 use simplified_schema::SchemaError;
 
     for definition in [
@@ -551,7 +551,7 @@ fn yaml_files_in(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// covered the day it lands.
 #[test]
 fn shipped_schema_and_trigger_corpus_parses_passively() {
-    use darkmatter::markdown::schemas::parse_trigger_envelope_from_str;
+    use simplified_schema::triggers::parse_trigger_envelope_from_str;
 
     use simplified_schema::parse_property_definition;
 

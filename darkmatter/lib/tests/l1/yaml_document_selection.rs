@@ -307,7 +307,7 @@ fn null_metadata_and_payloads_fail_the_shipped_definitions_on_their_line() {
 /// declaration key ignores data and follows `kind` and `$schema`.
 #[test]
 fn a_prepared_contract_judges_later_data_as_validation_does_without_compiling() {
-    use darkmatter::markdown::schemas::LoadedYamlDocument;
+    use simplified_schema::yaml_documents::LoadedYamlDocument;
     #[cfg(feature = "work-counters")]
     use darkmatter::work_counters::{Work, snapshot};
 
@@ -357,7 +357,7 @@ fn a_prepared_contract_judges_later_data_as_validation_does_without_compiling() 
 /// contract reports that judging it reads files.
 #[test]
 fn a_schema_documents_contract_reads_files_to_judge_it() {
-    use darkmatter::markdown::schemas::LoadedYamlDocument;
+    use simplified_schema::yaml_documents::LoadedYamlDocument;
 
     let fixture = Fixture::new();
     let document = fixture.package().join("owners.yaml");

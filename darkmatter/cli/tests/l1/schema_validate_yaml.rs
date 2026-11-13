@@ -143,8 +143,8 @@ fn an_opened_checkout_yaml_schema_definition_admits_an_added_property() {
 #[test]
 fn an_opened_checkout_trigger_definition_admits_an_added_property() {
     assert_an_opened_checkout_copy_admits_an_added_property(
-        "darkmatter/schemas/schema-trigger.yaml",
-        include_str!("../../../schemas/schema-trigger.yaml"),
+        "simplified-schema/schemas/schema-trigger.yaml",
+        include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml"),
         "kind: schema-trigger\nmatch:\n    all:\n        - $path: \"docs/**\"\n        - title: string(required)\n",
     );
 }

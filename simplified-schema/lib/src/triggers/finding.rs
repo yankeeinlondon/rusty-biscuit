@@ -4,13 +4,13 @@
 //! to load is left out of the registry and reported as an
 //! [`InvalidTriggerFinding`] instead of failing the scan. The library never
 //! prints one; each host delivers them through its own warning surface under
-//! [`SCHEMA_INVALID_TRIGGER_CODE`](crate::markdown::schemas::SCHEMA_INVALID_TRIGGER_CODE).
+//! [`SCHEMA_INVALID_TRIGGER_CODE`](crate::triggers::SCHEMA_INVALID_TRIGGER_CODE).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use simplified_schema::SchemaAdvisory;
-use simplified_schema::errors::SchemaError;
+use crate::SchemaAdvisory;
+use crate::errors::SchemaError;
 
 use super::discovery::TriggerSource;
 
@@ -37,7 +37,7 @@ pub struct InvalidTriggerFinding {
 
 impl InvalidTriggerFinding {
     /// Shared diagnostic code of every skipped-trigger warning.
-    pub const CODE: &'static str = crate::markdown::schemas::SCHEMA_INVALID_TRIGGER_CODE;
+    pub const CODE: &'static str = crate::triggers::SCHEMA_INVALID_TRIGGER_CODE;
     /// Diagnostic source family, shared with the schema advisories.
     pub const SOURCE: &'static str = SchemaAdvisory::SOURCE;
 
@@ -47,7 +47,7 @@ impl InvalidTriggerFinding {
     /// [`SchemaError::TriggerEnvelopeYaml`] cause with a complete location
     /// gives the finding its [`position`](Self::position); a payload or import
     /// path the cause names gives its [`cause_path`](Self::cause_path).
-    pub(crate) fn new(source: TriggerSource, cause: SchemaError) -> Self {
+    pub fn new(source: TriggerSource, cause: SchemaError) -> Self {
         let identity = match &source {
             TriggerSource::File(path) => {
                 TriggerSource::File(biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.clone()))
@@ -85,7 +85,7 @@ impl InvalidTriggerFinding {
         if self.position.is_none()
             && let Some(span) = positions.span(&self.cause)
         {
-            self.position = Some(simplified_schema::line_col_of_offset(positions.source(), span.start));
+            self.position = Some(crate::line_col_of_offset(positions.source(), span.start));
         }
         self
     }
@@ -222,9 +222,9 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
         // A failed resolution names the file of the first slot it reports.
         SchemaError::SlotResolution(failure) => {
             let slot = match failure.error.as_ref() {
-                simplified_schema::slots::SlotResolutionError::Refused(refused) => refused.first().map(|(slot, _)| slot),
-                simplified_schema::slots::SlotResolutionError::Failed(failed) => failed.first().map(|(slot, _)| slot),
-                simplified_schema::slots::SlotResolutionError::Schema(schema) => return related_path(schema, trigger),
+                crate::slots::SlotResolutionError::Refused(refused) => refused.first().map(|(slot, _)| slot),
+                crate::slots::SlotResolutionError::Failed(failed) => failed.first().map(|(slot, _)| slot),
+                crate::slots::SlotResolutionError::Schema(schema) => return related_path(schema, trigger),
                 _ => None,
             };
             slot?.origin.as_ref()?
@@ -275,11 +275,11 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
 
 /// `source`'s host file when it is one other than `trigger`; never an
 /// embedded document, which names no host file.
-fn host_file(source: &simplified_schema::SchemaSourceId, trigger: &Path) -> Option<PathBuf> {
+fn host_file(source: &crate::SchemaSourceId, trigger: &Path) -> Option<PathBuf> {
     match source {
-        simplified_schema::SchemaSourceId::File(path) => other_file(path, trigger),
-        simplified_schema::SchemaSourceId::InlineDocument
-        | simplified_schema::SchemaSourceId::Embedded(_) => None,
+        crate::SchemaSourceId::File(path) => other_file(path, trigger),
+        crate::SchemaSourceId::InlineDocument
+        | crate::SchemaSourceId::Embedded(_) => None,
     }
 }
 

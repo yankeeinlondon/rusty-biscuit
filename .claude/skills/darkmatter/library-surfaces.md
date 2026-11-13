@@ -141,17 +141,27 @@ directly: `darkmatter::markdown::schemas` does not re-export them.
   `parse_standalone_schema_document` and its passive product
   `StandaloneSchemaDocument`, named-type resolution, JSON Schema lowering,
   subtyping, the conversion engine, `ValidatorCache`, `SchemaError`,
-  `ValidationProblem`, `SchemaOriginMap`, `SchemaPhase`, and the standalone
+  `ValidationProblem`, `SchemaOriginMap`, `SchemaPhase`, the standalone
   facade `simplified_schema::SimplifiedSchema` (with `Prepared`,
-  `validate_strict`/`validate_soft`, and layering). Darkmatter must not
+  `validate_strict`/`validate_soft`, and layering), and the schema-kind
+  infrastructure: `triggers` (grammar, discovery, matching, `TriggerOrigin`,
+  `SCHEMA_INVALID_TRIGGER_CODE`), `roots` (`SchemaRoots`), `embedded`
+  (`EmbeddedSchemaBundle`, `ShippedSources`), and `yaml_documents`
+  (`LoadedYamlDocument`, `KindRegistry`, selection, kind checks). Every entry
+  point there that resolves a payload or prepares a kind definition takes
+  the host's `ShippedSources`. Darkmatter must not
   redefine any of these names
   (`lib/tests/l1/schema_language_ownership_guard.rs`).
 - Darkmatter-owned (`darkmatter/lib/src/markdown/schemas/`):
   `DarkmatterSchemas` loads and merges document, trigger, and baseline schemas
   for a Markdown document; `EffectiveSchema`, `ValidationOptions`, and
-  `PendingPolicy`; the shipped baseline and global catalog; schema roots and
-  trigger discovery; the `schemas::resolve` wrappers that pass
-  `embedded::SHIPPED_SOURCES`; `TriggerOrigin`; `ProblemPositions`.
+  `PendingPolicy`; the shipped baseline and global catalog; the YAML adapter
+  (`YamlContract`, `YamlValidation`, `YamlOutcome`, `Route`); the wrappers
+  that pass `embedded::SHIPPED_SOURCES` to the library (`schemas::resolve`,
+  `schemas::triggers::{scan, scan_with_embedded, scan_with_source,
+  prepare_trigger_bundle}`, `shipped_sources()`, `kind_host()`,
+  `shipped_kind_registry()`); `ProblemPositions`. `darkmatter::markdown::schemas`
+  does not re-export the moved types; import them from `simplified_schema`.
 - `ValidationProblem` carries legacy message/kind fields plus typed code,
   instance/schema paths, offending property, source location, and optional
   file-reference detail.

@@ -2,9 +2,11 @@
 
 The crate parses SimplifiedSchema text into an AST, lowers it to Draft
 2020-12 JSON Schema, resolves the named types it imports, and judges values
-with the result. Nothing here reads a Markdown document, runs an expression,
-or decides which values are still waiting on a template: a host (Darkmatter)
-owns those decisions and calls in here.
+with the result. It also owns the document kinds built on the language:
+schema triggers, the schema roots they are found in, and the selection and
+checks of whole YAML documents by `kind`. Nothing here reads a Markdown
+document, runs an expression, or decides which values are still waiting on a
+template: a host (Darkmatter) owns those decisions and calls in here.
 
 ```rust
 use std::sync::Arc;
@@ -52,10 +54,14 @@ flowchart TD
 | `validate`, `format`, `file_match` | Compiled validators and their cache, the `darkmatter-*` formats, the `x-darkmatter-*` keywords, and `file(match(...))` globs |
 | `schema` | `SimplifiedSchema` (build from content or a file, validate, layer, query, export), `SchemaSource`, `TypeDefinition`, `FunctionView`, `SimplifiedSchemaError`; see [The `SimplifiedSchema` Object](simplified-schema-struct.md) |
 | `prepared`, `outcome` | `Prepared` (a schema compiled once, with `validate_strict` and `validate_soft`), `ValidationSuccess`, `ValidationFailure`; see [Strict and Soft Validation](./validation.md) |
-| `envelope` | The compiled definitions of the `kind: schema` and `kind: yaml-schema` envelopes (`ENVELOPE_DEFINITIONS`) and `admit_envelope_text`, which judges a standalone document against its definition; see [Admission](./language/schema-documents.md#admission-checking-an-envelope-against-its-definition) |
+| `envelope` | The compiled shipped definitions (`ENVELOPE_DEFINITIONS`: the `kind: schema` and `kind: yaml-schema` envelopes and the `kind: schema-trigger` kind definition) and `admit_envelope_text`, which judges a standalone document against its envelope definition; see [Admission](./language/schema-documents.md#admission-checking-an-envelope-against-its-definition) |
+| `roots` | `SchemaRoots::for_document`, the five schema roots of a document's context (`SCHEMAS_DIR`, package, package area, tree root, `~/schemas`) that bare file names and triggers are looked up in; `SchemaSearchRoot`, `SchemaRootKind` |
+| `triggers` | Schema triggers: the `match` grammar, the `kind: schema-trigger` envelope parser and lint, the matcher, discovery in the schema roots (`scan`, `scan_with_embedded`, `scan_with_source`, `TriggerRegistry`), payload assembly, prepared bundles (`prepare_trigger_bundle`), and the `dm.schema.invalid_trigger` finding (`SCHEMA_INVALID_TRIGGER_CODE`) |
+| `embedded` | Documents compiled into a binary: `EmbeddedDocument`, a host's reserved namespace (`ShippedSources`), and `EmbeddedSchemaBundle`, a host's trigger bundle |
+| `yaml_documents` | Whole YAML documents: the one loader (`load_yaml_document`, `LoadedYamlDocument`), the kinds a context can select (`KindRegistry`, `KindHost`, `ShippedDefinition`), selection by `kind` or root `$schema` (`select`, `Selection`), and the checks of the language's own kinds (`CHECKED_KINDS`) |
 | `validation`, `positions` | `ValidationProblem` and its codes, JSON Pointers, and where a problem sits in its source text (`PositionMap::byte_range`) |
 | `completion`, `frontmatter_shape` | Which definition governs a frontmatter path, and union-aware completion choices |
-| `slots` | Finding the `{{ … }}` slots of a template without evaluating them (`collect_slots`, `has_dynamic`, `reachable_slots`); see [Slots](./language/slots.md) |
+| `slots` | Finding the `{{ … }}` slots of a template without evaluating them (`collect_slots`, `has_dynamic`, `reachable_slots`), and the `SLOT_NOT_ALLOWED_IN_KIND_CODE` finding for a slot in a kinded document; see [Slots](./language/slots.md) |
 | `errors` | `SchemaError`, `UnresolvedSlots` |
 
 `SchemaRoot` is the parsed `$schema` itself: a root union stays a union, never
@@ -137,6 +143,30 @@ const HOST: ShippedSources = ShippedSources::new("host:", "host/partials", DOCUM
 // resolve_yaml_schema(&value, base_dir, &context, HOST)
 ```
 
+Every entry point that resolves a trigger payload or prepares a kind
+definition takes the host's `ShippedSources` the same way, so a trigger or a
+`kind: yaml-schema` file may import from the host's namespace:
+`triggers::scan(context, sources)`, `scan_with_embedded`, `scan_with_source`,
+`prepare_trigger_bundle`, `TriggerRegistry::new`, and
+`assemble::resolve_trigger_payload`. A YAML kind registry takes a `KindHost`, the
+host's `ShippedSources` plus the shipped definitions it prepared with them
+(`prepare_shipped_definitions(sources)`, or the prepared form its own shipped
+artifact recorded):
+
+```rust
+use simplified_schema::embedded::ShippedSources;
+use simplified_schema::yaml_documents::{KindHost, KindRegistry, RegistryScope, prepare_shipped_definitions};
+
+let shipped = prepare_shipped_definitions(ShippedSources::NONE); // once per process
+let host = KindHost { sources: ShippedSources::NONE, shipped: &shipped };
+let registry = KindRegistry::from_filesystem(&context, RegistryScope::for_context(&context), host);
+```
+
+Darkmatter wraps these with its own `darkmatter:` sources
+(`darkmatter::markdown::schemas::{shipped_sources, kind_host}` and its
+`triggers::scan*` wrappers), so a Darkmatter caller gets exactly the
+resolution Darkmatter uses.
+
 An `http://` or `https://` schema, import, or example reference is
 `SchemaError::RemoteUnsupported`.
 
@@ -149,8 +179,13 @@ An `http://` or `https://` schema, import, or example reference is
 - **Pending values.** The host decides which `{{ … }}` templates are still
   pending and hands their paths in (`coerce::NestedTemplates`); the library
   never asks.
-- **Trigger origins.** `SchemaOrigin` records a trigger layer by its
-  `SchemaSourceId`; mapping that back to a trigger file is the host's.
+- **Layering triggers.** Discovery and matching are the library's
+  (`TriggerRegistry`, `triggers::matched_triggers`; `TriggerOrigin` maps a
+  `SchemaOrigin` back to its `TriggerSource`); which matched payloads layer
+  between the host's baseline and a document's own `$schema` is the host's.
+- **Validating a YAML document.** The library loads it and selects its
+  schema; the host prepares the selected schema, judges the document, and
+  reports (Darkmatter's `validate_yaml_document`).
 - **Terminal output.** `SchemaError` renders in a terminal only with the
   opt-in `terminal` feature.
 

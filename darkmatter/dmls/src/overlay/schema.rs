@@ -22,10 +22,8 @@ use darkmatter::markdown::schemas::completion::DefinitionLookup;
 use darkmatter::markdown::schemas::resolve::resolve_schema;
 use simplified_schema::resolve::merge_baseline;
 use simplified_schema::simplified::query::resolved_alternatives;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, DocumentTemplate, EffectiveSchema, SiteSchema, darkmatter_base_json_schema_ref,
-    effective_property_shape, triggers::TriggerRegistry,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, DocumentTemplate, EffectiveSchema, SiteSchema, darkmatter_base_json_schema_ref, effective_property_shape};
+use simplified_schema::triggers::TriggerRegistry;
 use simplified_schema::{
     DefKey, Definition, DefinitionTable, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaAdvisory,
     SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind, SchemaRoot, SimplifiedType,

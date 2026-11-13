@@ -14,9 +14,10 @@ use std::sync::Arc;
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::yaml_documents::{Claim, DefinitionSource, shipped_kind_definition_paths};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, KindRegistry, RegistryScope, Route, YamlOutcome};
-use darkmatter::markdown::schemas::triggers::discovery::SchemaRootSource;
+use simplified_schema::yaml_documents::{Claim, DefinitionSource, shipped_kind_definition_paths};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, Route, YamlOutcome};
+use simplified_schema::yaml_documents::{KindRegistry, RegistryScope};
+use simplified_schema::triggers::discovery::SchemaRootSource;
 use simplified_schema::resolve::buffers::{self, SourceBuffers};
 use simplified_schema::{KindSelectionCause, SchemaError, ValidationProblemCode};
 
@@ -104,7 +105,7 @@ $schema:
 pub(crate) const ROSTER_DOCUMENT: &str = "kind: roster\nroster_version: 1\nplatforms:\n    - name: slack\n";
 
 fn registry(context: &FileResolutionContext) -> KindRegistry {
-    KindRegistry::from_filesystem(context, RegistryScope::WithRoots)
+    KindRegistry::from_filesystem(context, RegistryScope::WithRoots, darkmatter::markdown::schemas::kind_host())
 }
 
 fn healthy_source(registry: &KindRegistry, kind: &str) -> DefinitionSource {
@@ -132,13 +133,13 @@ fn validated(result: Result<YamlOutcome, SchemaError>) -> darkmatter::markdown::
 
 #[test]
 fn the_shipped_registry_claims_schema_yaml_schema_and_schema_trigger() {
-    let registry = KindRegistry::shipped();
+    let registry = darkmatter::markdown::schemas::shipped_kind_registry();
     let claimed: Vec<&str> = registry.claims().map(|(kind, _)| kind).collect();
     assert_eq!(claimed, ["schema", "schema-trigger", "yaml-schema"]);
     for (kind, path) in [
         ("schema", "simplified-schema/schemas/schema.yaml"),
         ("yaml-schema", "simplified-schema/schemas/yaml-schema.yaml"),
-        ("schema-trigger", "darkmatter/schemas/schema-trigger.yaml"),
+        ("schema-trigger", "simplified-schema/schemas/schema-trigger.yaml"),
     ] {
         assert_eq!(healthy_source(&registry, kind), DefinitionSource::Shipped(path));
     }
@@ -148,7 +149,7 @@ fn the_shipped_registry_claims_schema_yaml_schema_and_schema_trigger() {
         [
             PathBuf::from("simplified-schema/schemas/schema.yaml"),
             PathBuf::from("simplified-schema/schemas/yaml-schema.yaml"),
-            PathBuf::from("darkmatter/schemas/schema-trigger.yaml"),
+            PathBuf::from("simplified-schema/schemas/schema-trigger.yaml"),
         ]
     );
 }
@@ -159,14 +160,14 @@ fn the_shipped_registry_claims_schema_yaml_schema_and_schema_trigger() {
 #[test]
 fn each_shipped_definition_validates_against_the_shipped_yaml_schema_definition() {
     let schemas = DarkmatterSchemas::new(Fixture::new().context(&std::env::temp_dir().join("x.yaml"), &[]))
-        .with_kind_registry(KindRegistry::shipped());
+        .with_kind_registry(darkmatter::markdown::schemas::shipped_kind_registry());
     for (path, text) in [
         ("simplified-schema/schemas/schema.yaml", include_str!("../../../../simplified-schema/schemas/schema.yaml")),
         (
             "simplified-schema/schemas/yaml-schema.yaml",
             include_str!("../../../../simplified-schema/schemas/yaml-schema.yaml"),
         ),
-        ("darkmatter/schemas/schema-trigger.yaml", include_str!("../../../schemas/schema-trigger.yaml")),
+        ("simplified-schema/schemas/schema-trigger.yaml", include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml")),
     ] {
         let validation = validated(schemas.validate_yaml_document(text, Path::new(path)));
         assert_eq!(validation.route, Route::Kind("yaml-schema".into()), "{path}");
@@ -182,7 +183,7 @@ fn a_registry_built_outside_a_repository_holds_the_shipped_kinds_only() {
     write(&fixture.root().join("loose/schemas/roster.yaml"), ROSTER_DEFINITION);
     let context = fixture.context(&outside, &[]);
     assert_eq!(RegistryScope::for_context(&context), RegistryScope::ShippedOnly);
-    let registry = KindRegistry::from_filesystem(&context, RegistryScope::for_context(&context));
+    let registry = KindRegistry::from_filesystem(&context, RegistryScope::for_context(&context), darkmatter::markdown::schemas::kind_host());
     assert!(registry.claim("roster").is_none());
     assert!(registry.claim("schema").is_some());
     // Unclaimed and the registry is complete: not validated.
@@ -306,7 +307,7 @@ fn a_repository_file_claiming_a_shipped_kind_is_a_duplicate() {
     let text = "kind: schema-trigger\nmatch:\n    title: string(required)\n";
     let (kind, cause) = selection_cause(fixture.validate(&document, text));
     assert_eq!(kind, "schema-trigger");
-    let mut files = vec![PathBuf::from("darkmatter/schemas/schema-trigger.yaml"), mine];
+    let mut files = vec![PathBuf::from("simplified-schema/schemas/schema-trigger.yaml"), mine];
     files.sort();
     assert_eq!(cause, KindSelectionCause::Duplicate { files });
 }
@@ -329,10 +330,10 @@ fn kinds_compare_exactly_including_case() {
 #[test]
 fn a_modified_copy_at_the_shipped_path_replaces_the_built_in_definition() {
     let fixture = Fixture::new();
-    let copy = fixture.repo().join("darkmatter/schemas/schema-trigger.yaml");
-    // In this repository `darkmatter/schemas/` is a package-area root; here
+    let copy = fixture.repo().join("simplified-schema/schemas/schema-trigger.yaml");
+    // In this repository `simplified-schema/schemas/` is a package-area root; here
     // `SCHEMAS_DIR` names it, which puts the copy in a root the same way.
-    let roots = fixture.repo().join("darkmatter/schemas").display().to_string();
+    let roots = fixture.repo().join("simplified-schema/schemas").display().to_string();
     let env = [("SCHEMAS_DIR", roots.as_str())];
     let document = fixture.repo().join("docs/trigger.yaml");
     // A matcher-only trigger: no `$schema`.
@@ -343,7 +344,7 @@ fn a_modified_copy_at_the_shipped_path_replaces_the_built_in_definition() {
     };
 
     // Unedited copy: `$schema` is optional, so the trigger passes.
-    write(&copy, include_str!("../../../schemas/schema-trigger.yaml"));
+    write(&copy, include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml"));
     let registry = registry(&fixture.context(&document, &env));
     assert_eq!(healthy_source(&registry, "schema-trigger"), DefinitionSource::File(copy.clone()));
     let validation = validated(validate(trigger));
@@ -352,8 +353,8 @@ fn a_modified_copy_at_the_shipped_path_replaces_the_built_in_definition() {
 
     // The copy edited to require `$schema`: the same trigger now fails, at
     // its root mapping, with no Rust change.
-    let edited = include_str!("../../../schemas/schema-trigger.yaml").replace("schema(non-null)", "schema(required; non-null)");
-    assert_ne!(edited, include_str!("../../../schemas/schema-trigger.yaml"), "the edit applies");
+    let edited = include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml").replace("schema(non-null)", "schema(required; non-null)");
+    assert_ne!(edited, include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml"), "the edit applies");
     write(&copy, &edited);
     let validation = validated(validate(trigger));
     assert!(!validation.report.valid);
@@ -395,11 +396,11 @@ fn an_unsaved_copy_at_the_shipped_path_replaces_the_built_in_definition() {
     };
     #[cfg(not(unix))]
     let checkout = fixture.repo();
-    let folder = checkout.join("darkmatter/schemas");
+    let folder = checkout.join("simplified-schema/schemas");
     std::fs::create_dir_all(&folder).unwrap();
     let copy = folder.join("schema-trigger.yaml");
     assert!(!copy.exists(), "the copy exists only in the editor");
-    let edited = include_str!("../../../schemas/schema-trigger.yaml").replace("schema(non-null)", "schema(required; non-null)");
+    let edited = include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml").replace("schema(non-null)", "schema(required; non-null)");
     let mut buffers = SourceBuffers::default();
     buffers.insert(&copy, Arc::from(edited.as_str()));
 
@@ -407,7 +408,7 @@ fn an_unsaved_copy_at_the_shipped_path_replaces_the_built_in_definition() {
     let document = checkout.join("docs/trigger.yaml");
     let context = fixture.context(&document, &[("SCHEMAS_DIR", roots.as_str())]);
     let registry = buffers::with(&buffers, || {
-        KindRegistry::build(&context, &mut UnsavedRoots(&buffers), RegistryScope::WithRoots)
+        KindRegistry::build(&context, &mut UnsavedRoots(&buffers), RegistryScope::WithRoots, darkmatter::markdown::schemas::kind_host())
     });
     match healthy_source(&registry, "schema-trigger") {
         DefinitionSource::File(file) => assert_eq!(SourceBuffers::key(&file), SourceBuffers::key(&copy)),
@@ -428,14 +429,14 @@ fn an_unsaved_copy_at_the_shipped_path_replaces_the_built_in_definition() {
 #[test]
 fn a_copy_at_the_shipped_path_claiming_another_kind_is_an_ordinary_candidate() {
     let fixture = Fixture::new();
-    let copy = fixture.repo().join("darkmatter/schemas/schema-trigger.yaml");
+    let copy = fixture.repo().join("simplified-schema/schemas/schema-trigger.yaml");
     write(&copy, ROSTER_DEFINITION);
-    let roots = fixture.repo().join("darkmatter/schemas").display().to_string();
+    let roots = fixture.repo().join("simplified-schema/schemas").display().to_string();
     let registry = registry(&fixture.context(&fixture.repo().join("docs/a.yaml"), &[("SCHEMAS_DIR", roots.as_str())]));
     assert_eq!(healthy_source(&registry, "roster"), DefinitionSource::File(copy));
     assert_eq!(
         healthy_source(&registry, "schema-trigger"),
-        DefinitionSource::Shipped("darkmatter/schemas/schema-trigger.yaml")
+        DefinitionSource::Shipped("simplified-schema/schemas/schema-trigger.yaml")
     );
 }
 

@@ -64,8 +64,8 @@ fn the_library_definitions_are_admitted_the_yaml_schema_by_itself() {
 
 #[test]
 fn darkmatter_s_trigger_definition_is_admitted() {
-    let text = include_str!("../../../../darkmatter/schemas/schema-trigger.yaml");
-    let admission = admit_envelope_text(text, "darkmatter/schemas/schema-trigger.yaml").unwrap().unwrap();
+    let text = include_str!("../../../schemas/schema-trigger.yaml");
+    let admission = admit_envelope_text(text, "simplified-schema/schemas/schema-trigger.yaml").unwrap().unwrap();
     assert_eq!(admission.definition, YAML_SCHEMA_DEFINITION_PATH);
     assert!(admission.is_admitted(), "{:#?}", admission.problems);
 }
@@ -76,14 +76,14 @@ fn each_shipped_definition_claims_its_kind() {
         EmbeddedDocument { path: SCHEMA_DEFINITION_PATH, text: include_str!("../../../schemas/schema.yaml") },
         EmbeddedDocument { path: YAML_SCHEMA_DEFINITION_PATH, text: include_str!("../../../schemas/yaml-schema.yaml") },
         EmbeddedDocument {
-            path: "darkmatter/schemas/schema-trigger.yaml",
-            text: include_str!("../../../../darkmatter/schemas/schema-trigger.yaml"),
+            path: "simplified-schema/schemas/schema-trigger.yaml",
+            text: include_str!("../../../schemas/schema-trigger.yaml"),
         },
     ];
     for (path, kind) in [
         (SCHEMA_DEFINITION_PATH, "schema"),
         (YAML_SCHEMA_DEFINITION_PATH, "yaml-schema"),
-        ("darkmatter/schemas/schema-trigger.yaml", "schema-trigger"),
+        ("simplified-schema/schemas/schema-trigger.yaml", "schema-trigger"),
     ] {
         let resolved = prepare_embedded_yaml_schema(path, DOCUMENTS, ShippedSources::NONE)
             .unwrap_or_else(|error| panic!("{path}: {error}"));

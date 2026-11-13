@@ -56,11 +56,22 @@ pub const SCHEMA_DEFINITION_PATH: &str = "simplified-schema/schemas/schema.yaml"
 /// Virtual path of the definition of `kind: yaml-schema` documents.
 pub const YAML_SCHEMA_DEFINITION_PATH: &str = "simplified-schema/schemas/yaml-schema.yaml";
 
-/// The library's envelope definitions, keyed by repository-relative path, the
-/// keying a host's own embedded table uses.
+/// Virtual path of the definition of `kind: schema-trigger` documents.
+pub const SCHEMA_TRIGGER_DEFINITION_PATH: &str = "simplified-schema/schemas/schema-trigger.yaml";
+
+/// The library's shipped `kind: yaml-schema` definitions, keyed by
+/// repository-relative path, the keying a host's own embedded table uses:
+/// the two envelope definitions and the trigger definition. They seed every
+/// YAML document-kind registry ([`crate::yaml_documents::KindRegistry`]),
+/// and the key is the path a checkout copy must have to replace one. They
+/// reference each other by relative path only, so the slice is also the
+/// document set their imports resolve in. Only the two envelope definitions
+/// admit envelopes; the trigger definition is a kind definition like a
+/// user's.
 pub const ENVELOPE_DEFINITIONS: &[EmbeddedDocument<'static>] = &[
     EmbeddedDocument { path: SCHEMA_DEFINITION_PATH, text: include_str!("../../schemas/schema.yaml") },
     EmbeddedDocument { path: YAML_SCHEMA_DEFINITION_PATH, text: include_str!("../../schemas/yaml-schema.yaml") },
+    EmbeddedDocument { path: SCHEMA_TRIGGER_DEFINITION_PATH, text: include_str!("../../schemas/schema-trigger.yaml") },
 ];
 
 /// The outcome of judging one envelope against its definition.

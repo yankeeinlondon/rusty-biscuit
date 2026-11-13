@@ -2,7 +2,8 @@
 //!
 //! A registry holds every `kind: yaml-schema` definition that claims a kind
 //! for documents in one [`FileResolutionContext`]: the shipped definitions
-//! ([`shipped_kind_definitions`]) and, for [`RegistryScope::WithRoots`], the
+//! ([`ENVELOPE_DEFINITIONS`], prepared by the host and supplied as a
+//! [`KindHost`]) and, for [`RegistryScope::WithRoots`], the
 //! definitions found directly inside the context's five schema roots (the
 //! roots triggers use, [`SchemaRoots::for_document`]). Filenames never decide
 //! anything: two definitions claiming one kind are a [`Claim::Duplicate`],
@@ -36,18 +37,32 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use serde_yaml_ng::Value as YamlValue;
-use simplified_schema::resolve::ResolvedSchema;
-use simplified_schema::shipped::PreparationMode;
-use simplified_schema::{SchemaArm, SchemaError, SchemaRoot, SimplifiedType, claimed_values};
+use crate::resolve::ResolvedSchema;
+use crate::shipped::PreparationMode;
+use crate::{SchemaArm, SchemaError, SchemaRoot, SimplifiedType, claimed_values};
 
-use super::super::embedded::{SHIPPED_SOURCES, shipped_kind_definitions};
-use super::super::roots::{SchemaRootState, SchemaRoots};
-use super::super::triggers::discovery::SchemaRootSource;
-use super::super::triggers::envelope::lexically_declared_kind;
+use crate::embedded::{EmbeddedDocument, ShippedSources};
+use crate::envelope::ENVELOPE_DEFINITIONS;
+use crate::roots::{SchemaRootState, SchemaRoots};
+use crate::triggers::discovery::SchemaRootSource;
+use crate::triggers::envelope::lexically_declared_kind;
+
+/// What a host supplies to a registry: the reserved namespace its kind
+/// definitions resolve `Name@<namespace><stem>` imports through, and the
+/// prepared shipped definitions (one per [`ENVELOPE_DEFINITIONS`] entry, in
+/// that order), from the host's shipped artifact or
+/// [`prepare_shipped_definitions`].
+#[derive(Clone, Copy)]
+pub struct KindHost<'a> {
+    /// The host's shipped sources.
+    pub sources: ShippedSources,
+    /// The prepared shipped definitions.
+    pub shipped: &'a [ShippedDefinition],
+}
 
 /// Which definitions a registry holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,33 +191,33 @@ impl KindRegistry {
     /// `source` supplies the roots' file lists and texts (DMLS passes its
     /// unsaved buffers); imports of a discovered definition are read through
     /// `context`, from the
-    /// [`buffers`](simplified_schema::resolve::buffers) snapshot in force
+    /// [`buffers`](crate::resolve::buffers) snapshot in force
     /// where it holds one.
-    pub fn build(context: &FileResolutionContext, source: &mut dyn SchemaRootSource, scope: RegistryScope) -> Self {
-        let _discover = simplified_schema::timings::stage(simplified_schema::ValidationStage::Discover);
-        let mut builder = Builder::default();
+    pub fn build(
+        context: &FileResolutionContext,
+        source: &mut dyn SchemaRootSource,
+        scope: RegistryScope,
+        host: KindHost<'_>,
+    ) -> Self {
+        let _discover = crate::timings::stage(crate::ValidationStage::Discover);
+        let mut builder = Builder::new(host);
         if scope == RegistryScope::WithRoots {
             builder.discover(context, source);
         }
-        builder.finish(super::super::shipped::registry().kind_definitions())
+        builder.finish()
     }
 
     /// [`Self::build`] reading the schema roots from the filesystem.
-    pub fn from_filesystem(context: &FileResolutionContext, scope: RegistryScope) -> Self {
-        Self::build(context, &mut super::super::triggers::discovery::FilesystemRoots, scope)
+    #[cfg(feature = "file")]
+    pub fn from_filesystem(context: &FileResolutionContext, scope: RegistryScope, host: KindHost<'_>) -> Self {
+        Self::build(context, &mut crate::triggers::discovery::FilesystemRoots, scope, host)
     }
 
-    /// The registry of the shipped definitions alone, built once per
-    /// process from the shipped artifact's definitions (or, when that
-    /// artifact or its section was refused, from the definitions prepared from text).
+    /// The registry of `definitions` alone: a host's shipped-only registry,
+    /// which it builds once per process.
     #[must_use]
-    pub fn shipped() -> Arc<Self> {
-        super::super::shipped::registry().shipped_kind_registry()
-    }
-
-    /// The registry of `definitions` alone.
-    pub(crate) fn shipped_from(definitions: &[ShippedDefinition]) -> Self {
-        Builder::default().finish(definitions)
+    pub fn shipped_from(definitions: &[ShippedDefinition]) -> Self {
+        Builder::new(KindHost { sources: ShippedSources::NONE, shipped: definitions }).finish()
     }
 
     /// What the registry knows about `kind`, compared exactly; `None` when no
@@ -255,8 +270,8 @@ impl KindRegistry {
 }
 
 /// A registry under construction.
-#[derive(Default)]
-struct Builder {
+struct Builder<'a> {
+    host: KindHost<'a>,
     entries: Vec<(String, PathBuf, Entry)>,
     incomplete: Vec<Incomplete>,
     root_failures: Vec<Incomplete>,
@@ -267,7 +282,20 @@ struct Builder {
     replaced: BTreeSet<&'static str>,
 }
 
-impl Builder {
+impl<'a> Builder<'a> {
+    fn new(host: KindHost<'a>) -> Self {
+        Self {
+            host,
+            entries: Vec::new(),
+            incomplete: Vec::new(),
+            root_failures: Vec::new(),
+            roots: None,
+            dependencies: BTreeSet::new(),
+            searched: BTreeSet::new(),
+            replaced: BTreeSet::new(),
+        }
+    }
+
     /// Adds the definitions in `context`'s schema roots, read from `source`.
     fn discover(&mut self, context: &FileResolutionContext, source: &mut dyn SchemaRootSource) {
         let roots = match SchemaRoots::for_document(context) {
@@ -328,9 +356,9 @@ impl Builder {
         let Some(candidate) = Candidate::classify(text) else {
             return;
         };
-        let shipped = shipped_identity(context, &file);
-        let (prepared, observed) = simplified_schema::resolve::observed::collect(|| {
-            prepare_candidate(&file, text, roots.search_paths(), context)
+        let shipped = shipped_identity(context, &file, self.host.shipped);
+        let (prepared, observed) = crate::resolve::observed::collect(|| {
+            prepare_candidate(&file, text, roots.search_paths(), context, self.host.sources)
         });
         self.dependencies.extend(observed.read);
         self.searched.extend(observed.searched);
@@ -350,7 +378,7 @@ impl Builder {
             }
         };
         if let Some(shipped) = shipped
-            && kinds.iter().any(|kind| shipped_claims(shipped, kind))
+            && kinds.iter().any(|kind| shipped_claims(self.host.shipped, shipped, kind))
         {
             self.replaced.insert(shipped);
         }
@@ -363,10 +391,10 @@ impl Builder {
         }
     }
 
-    /// Adds every shipped definition (of `shipped`) no checkout copy
-    /// replaced and groups the claims.
-    fn finish(mut self, shipped: &[ShippedDefinition]) -> KindRegistry {
-        for shipped in shipped {
+    /// Adds every shipped definition no checkout copy replaced and groups
+    /// the claims.
+    fn finish(mut self) -> KindRegistry {
+        for shipped in self.host.shipped {
             if self.replaced.contains(shipped.path) {
                 continue;
             }
@@ -419,73 +447,81 @@ fn group_claims(entries: Vec<(String, PathBuf, Entry)>) -> BTreeMap<String, Clai
         .collect()
 }
 
-/// A shipped definition and its preparation.
-pub(crate) struct ShippedDefinition {
+/// A shipped definition and its preparation, as a host supplies it in a
+/// [`KindHost`].
+pub struct ShippedDefinition {
     path: &'static str,
     prepared: Result<Arc<KindDefinition>, Arc<SchemaError>>,
 }
 
 impl ShippedDefinition {
-    /// The definition at `path` as an accepted shipped artifact recorded it.
-    pub(crate) fn from_record(path: &'static str, record: super::super::shipped::KindDefinitionRecord) -> Self {
-        let resolved = ResolvedSchema {
-            simplified: record.simplified,
-            definitions: Arc::new(record.definitions),
-            json_schema: record.json_schema,
-            origin: record.origin.origin(),
-            imports: Vec::new(),
-            examples: Vec::new(),
-            referenced_files: Vec::new(),
-            searched: Vec::new(),
-            advisories: Vec::new(),
-        };
-        let definition = KindDefinition { source: DefinitionSource::Shipped(path), resolved, kinds: record.kinds };
+    /// The definition at `path` as the host's accepted shipped artifact
+    /// recorded it: its lowered export and the kinds it claims.
+    #[must_use]
+    pub fn accepted(path: &'static str, resolved: ResolvedSchema, kinds: Vec<String>) -> Self {
+        let definition = KindDefinition { source: DefinitionSource::Shipped(path), resolved, kinds };
         Self { path, prepared: Ok(Arc::new(definition)) }
+    }
+
+    /// The definition's repository-relative path.
+    #[must_use]
+    pub fn path(&self) -> &'static str {
+        self.path
+    }
+
+    /// The prepared definition, or why its preparation failed.
+    pub fn prepared(&self) -> Result<&Arc<KindDefinition>, &Arc<SchemaError>> {
+        self.prepared.as_ref()
     }
 }
 
-/// The shipped definitions this process uses: the accepted artifact's, or
-/// [`shipped_definitions_from_sources`].
-fn shipped_definitions() -> &'static [ShippedDefinition] {
-    super::super::shipped::registry().kind_definitions()
+impl std::fmt::Debug for ShippedDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShippedDefinition").field("path", &self.path).field("prepared", &self.prepared.is_ok()).finish()
+    }
 }
 
-/// The shipped definitions prepared from their text, once per process: the
-/// fallback when the shipped artifact or its section was refused.
-pub(crate) fn shipped_definitions_from_sources() -> &'static [ShippedDefinition] {
-    static PREPARED: OnceLock<Vec<ShippedDefinition>> = OnceLock::new();
-    PREPARED.get_or_init(|| {
-        let documents = shipped_kind_definitions();
-        documents
-            .iter()
-            .map(|document| {
-                crate::note_work!(ShippedRuntimePreparation);
-                ShippedDefinition {
-                    path: document.path,
-                    prepared: prepare_shipped(document.path, documents, PreparationMode::Runtime)
-                        .map(Arc::new)
-                        .map_err(Arc::new),
-                }
-            })
-            .collect()
-    })
+/// Every shipped definition ([`ENVELOPE_DEFINITIONS`]) prepared from its
+/// text with `sources`: the host's fallback when its shipped artifact (or
+/// the artifact's section) was refused. A host prepares them once per
+/// process.
+#[must_use]
+pub fn prepare_shipped_definitions(sources: ShippedSources) -> Vec<ShippedDefinition> {
+    ENVELOPE_DEFINITIONS
+        .iter()
+        .map(|document| {
+            crate::note_work!(ShippedRuntimePreparation);
+            ShippedDefinition {
+                path: document.path,
+                prepared: prepare_shipped(document.path, ENVELOPE_DEFINITIONS, sources, PreparationMode::Runtime)
+                    .map(Arc::new)
+                    .map_err(Arc::new),
+            }
+        })
+        .collect()
 }
 
 /// Prepares the shipped definition at `path` from `documents` in `mode`;
 /// shipped-artifact generation passes [`PreparationMode::Uncached`].
-pub(crate) fn prepare_shipped(
+///
+/// ## Errors
+///
+/// The definition's resolution error, or a claim error when its export
+/// claims no finite set of kinds.
+pub fn prepare_shipped(
     path: &'static str,
-    documents: &[simplified_schema::embedded::EmbeddedDocument<'static>],
+    documents: &[EmbeddedDocument<'static>],
+    sources: ShippedSources,
     mode: PreparationMode<'_>,
 ) -> Result<KindDefinition, SchemaError> {
-    let resolved = simplified_schema::resolve::prepare_embedded_yaml_schema_with_mode(path, documents, SHIPPED_SOURCES, mode)?;
+    let resolved = crate::resolve::prepare_embedded_yaml_schema_with_mode(path, documents, sources, mode)?;
     let kinds = claimed_values(&resolved, "kind").map_err(|problem| claim_error(Path::new(path), &problem))?;
     Ok(KindDefinition { source: DefinitionSource::Shipped(path), resolved, kinds })
 }
 
 /// Whether the shipped definition at `path` claims `kind`.
-fn shipped_claims(path: &str, kind: &str) -> bool {
-    shipped_definitions()
+fn shipped_claims(shipped: &[ShippedDefinition], path: &str, kind: &str) -> bool {
+    shipped
         .iter()
         .find(|shipped| shipped.path == path)
         .and_then(|shipped| shipped.prepared.as_ref().ok())
@@ -496,10 +532,10 @@ fn shipped_claims(path: &str, kind: &str) -> bool {
 /// path: `file` relative to the context's repository root, compared as
 /// `/`-joined components. `file` may exist only as an unsaved buffer, so only
 /// its nearest existing ancestor is canonicalized.
-fn shipped_identity(context: &FileResolutionContext, file: &Path) -> Option<&'static str> {
+fn shipped_identity(context: &FileResolutionContext, file: &Path, shipped: &[ShippedDefinition]) -> Option<&'static str> {
     let root = context.repository_root()?;
     let root = biscuit_file::canonicalize_simplified(root).unwrap_or_else(|_| root.to_path_buf());
-    let file = simplified_schema::resolve::buffers::SourceBuffers::key(file);
+    let file = crate::resolve::buffers::SourceBuffers::key(file);
     let relative = file.strip_prefix(root).ok()?.to_path_buf();
     let mut segments = Vec::new();
     for component in relative.components() {
@@ -509,7 +545,7 @@ fn shipped_identity(context: &FileResolutionContext, file: &Path) -> Option<&'st
         segments.push(segment.to_str()?.to_string());
     }
     let relative = segments.join("/");
-    shipped_kind_definitions().iter().map(|document| document.path).find(|path| *path == relative)
+    shipped.iter().map(ShippedDefinition::path).find(|path| *path == relative)
 }
 
 /// Prepares a discovered definition: admitted against the shipped
@@ -519,14 +555,15 @@ fn prepare_candidate(
     text: &str,
     schema_roots: &[PathBuf],
     context: &FileResolutionContext,
+    sources: ShippedSources,
 ) -> Result<KindDefinition, SchemaError> {
-    let resolved = simplified_schema::resolve::prepare_yaml_schema_text(file, text, schema_roots, context, SHIPPED_SOURCES)?;
+    let resolved = crate::resolve::prepare_yaml_schema_text(file, text, schema_roots, context, sources)?;
     let kinds = claimed_values(&resolved, "kind").map_err(|problem| claim_error(file, &problem))?;
     Ok(KindDefinition { source: DefinitionSource::File(file.to_path_buf()), resolved, kinds })
 }
 
 /// The error for a definition whose export claims no finite set of kinds.
-pub(crate) fn claim_error(file: &Path, problem: &simplified_schema::ClaimProblem) -> SchemaError {
+pub(crate) fn claim_error(file: &Path, problem: &crate::ClaimProblem) -> SchemaError {
     SchemaError::SchemaDocument {
         path: file.to_path_buf(),
         message: format!("the exported `$schema` claims no document kind: {problem}"),
@@ -557,7 +594,7 @@ impl Candidate {
     /// `kind: yaml-schema`).
     fn classify(text: &str) -> Option<Self> {
         let body = text.strip_prefix('\u{feff}').unwrap_or(text);
-        match simplified_schema::numeric::load_admitted_yaml(body) {
+        match crate::numeric::load_admitted_yaml(body) {
             Ok(value) => (value.get("kind").and_then(YamlValue::as_str) == Some("yaml-schema")).then_some(Self::Parsed(value)),
             Err(_) => lexically_declared_kind(body, &["yaml-schema"]).is_some().then_some(Self::Malformed),
         }
@@ -574,10 +611,10 @@ impl Candidate {
         let Some(export) = document.get("$schema") else {
             return Vec::new();
         };
-        let Ok(schema) = simplified_schema::parse_yaml_schema(export) else {
+        let Ok(schema) = crate::parse_yaml_schema(export) else {
             return Vec::new();
         };
-        let shapes: Vec<&simplified_schema::SchemaShape> = match &schema {
+        let shapes: Vec<&crate::SchemaShape> = match &schema {
             SchemaRoot::Single(shape) => vec![shape],
             SchemaRoot::Union(arms) => arms
                 .iter()
@@ -592,9 +629,9 @@ impl Candidate {
             let Some(definition) = shape.properties.get("kind") else {
                 continue;
             };
-            let atoms: Vec<&simplified_schema::PropertyAtom> = match definition {
-                simplified_schema::PropertyDef::Single(atom) => vec![atom],
-                simplified_schema::PropertyDef::Union(atoms) => atoms.iter().collect(),
+            let atoms: Vec<&crate::PropertyAtom> = match definition {
+                crate::PropertyDef::Single(atom) => vec![atom],
+                crate::PropertyDef::Union(atoms) => atoms.iter().collect(),
             };
             for atom in atoms {
                 for kind in inline_choices(atom) {
@@ -609,8 +646,8 @@ impl Candidate {
 }
 
 /// The string choices of an inline `literal(...)` or `enum(...)` atom.
-fn inline_choices(atom: &simplified_schema::PropertyAtom) -> Vec<String> {
-    use simplified_schema::{Constraint, TypeExpr};
+fn inline_choices(atom: &crate::PropertyAtom) -> Vec<String> {
+    use crate::{Constraint, TypeExpr};
     if atom.is_array {
         return Vec::new();
     }

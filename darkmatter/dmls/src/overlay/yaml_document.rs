@@ -29,7 +29,8 @@ use std::sync::Arc;
 
 use biscuit_hash::xx_hash_bytes;
 use darkmatter::markdown::compose::file_resolution_context_identity;
-use darkmatter::markdown::schemas::{LoadedYamlDocument, Route, YamlValidation};
+use darkmatter::markdown::schemas::{Route, YamlValidation};
+use simplified_schema::yaml_documents::LoadedYamlDocument;
 use simplified_schema::{SchemaError, SuggestionLintProblem};
 use simplified_schema::resolve::buffers::SourceBuffers;
 

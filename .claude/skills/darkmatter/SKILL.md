@@ -141,11 +141,17 @@ trigger file is reported as `TriggerSchemaReferenced`/`TriggerPayloadCycle`
 A whole `.yaml`/`.yml` document is validated by
 `DarkmatterSchemas::validate_yaml_document` (claimed `kind` > root `$schema` >
 none, no baseline or triggers) over a per-context `KindRegistry`; read
-[schema.md](schema.md#whole-yaml-documents-schemasyaml_documents) first.
-Ownership: the `simplified-schema` crate owns the `schema` and `yaml-schema`
-definitions (`simplified-schema/schemas/`) and envelope admission;
-Darkmatter owns `schema-trigger.yaml`, the `KindRegistry`, selection, and the
-kind checks. A registry is built per call (or once per folder/worker and
+[schema.md](schema.md#whole-yaml-documents) first.
+Ownership: the `simplified-schema` crate owns all three shipped definitions
+(`simplified-schema/schemas/{schema,yaml-schema,schema-trigger}.yaml`),
+envelope admission, triggers (`simplified_schema::triggers`), schema roots
+(`roots`), `EmbeddedSchemaBundle` (`embedded`), and the YAML loader,
+`KindRegistry`, selection, and kind checks (`yaml_documents`); edit those
+there (load the `simplified-schema` skill). Darkmatter supplies its
+`ShippedSources` and prepared shipped definitions (`schemas::kind_host()`,
+`shipped_sources()`), adapts the selected schema into an `EffectiveSchema`
+and `ValidationReport` (`YamlContract`, `YamlValidation`, `Route`), and
+re-exports nothing it moved. A registry is built per call (or once per folder/worker and
 passed with `with_kind_registry`); it never fails as a whole, and a
 duplicate, reserved, or broken claim is a `KindSelection` error only for a
 document whose `kind` it could affect. A YAML file is never Markdown: a
@@ -183,14 +189,18 @@ Important contracts:
   only `markdown::{span, literal_token}` and the expression items its
   composition API names (`compose::expression::{Expr, Lexer, parse, …}`).
   Edit the language in `simplified-schema/lib/src/`. What stays in Darkmatter:
-  `DarkmatterSchemas`/`EffectiveSchema`, the baseline, schema roots
-  (`SchemaSearchRoot`), triggers (`TriggerOrigin` maps a `SchemaOrigin` to its
-  `TriggerSource`), the shipped catalog (`embedded::SHIPPED_SOURCES`, which
-  `schemas::resolve` wrappers pass to the library resolver so
+  `DarkmatterSchemas`/`EffectiveSchema`, the baseline, trigger layering into
+  the effective schema, the YAML adapter (`schemas::yaml_documents`:
+  `YamlContract`, `YamlValidation`, `kind_host`, `shipped_kind_registry`), the
+  shipped catalog (`embedded::SHIPPED_SOURCES`, which `schemas::resolve` and
+  the `schemas::triggers::{scan, scan_with_embedded, scan_with_source,
+  prepare_trigger_bundle}` wrappers pass to the library so
   `Name@darkmatter:<stem>` resolves), pending classification
   (`coerce::nested_templates`), `ProblemPositions`, and completion over an
-  `EffectiveSchema`. Work counters for moved code are recorded by the library
-  and folded into `darkmatter::work_counters::snapshot()`.
+  `EffectiveSchema`. Work counters for moved code (including
+  `TriggerDiscovery`, `PayloadMergeCheck`, `PayloadCompileCheck`,
+  `YamlKindCheck`) are recorded by the library and folded into
+  `darkmatter::work_counters::snapshot()`/`threads()`.
 - The library's standalone object is `simplified_schema::SimplifiedSchema`
   (content and file factories, strict/soft validation, atomic layering, type
   queries, export; `simplified-schema/docs/topics/schema-object.md`).
@@ -207,7 +217,7 @@ Important contracts:
 - Trigger matching is schema-based and passive. A schema-trigger document is a
   kinded document and must retain its root `kind` declaration.
 - Triggers and bare-name `$schema` lookup use the five schema roots of the
-  **document's** context (`schemas::roots::SchemaRoots::for_document`):
+  **document's** context (`simplified_schema::roots::SchemaRoots::for_document`):
   `SCHEMAS_DIR` (the folder itself, from `ctx.env()`), package, package area,
   `base_dir()`, `~/schemas`. Never walk ancestors or read the process
   environment for them. Every bare-name consumer (`$schema`, `Name@file`,
@@ -224,7 +234,7 @@ Important contracts:
   the catalog and baseline; a refused artifact or section falls back per item
   to text; `Registry::check_all` forces every section). A host's trigger
   bundle can carry prepared payloads (`EmbeddedSchemaBundle::with_prepared`,
-  `triggers::prepared`): served after filename selection, only when the
+  `simplified_schema::triggers::prepared`): served after filename selection, only when the
   bundle's name and every file's text match, skipping the payload
   merge/compile checks (`Work::PayloadMergeCheck`/`PayloadCompileCheck`). After editing `darkmatter/schemas/`
   or the code that prepares it, run `just shipped-schemas` from the root

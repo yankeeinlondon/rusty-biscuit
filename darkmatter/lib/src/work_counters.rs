@@ -23,7 +23,8 @@ pub enum Work {
     /// simplified-schema, which owns the parser, as are the other kinds
     /// whose code moved there (see `library_kind`).
     ExpressionParse,
-    /// A trigger-registry scan of a document's schema roots.
+    /// A trigger-registry scan of a document's schema roots (counted by
+    /// simplified-schema, which owns discovery).
     TriggerDiscovery,
     /// An effective schema prepared for one document.
     EffectivePreparation,
@@ -83,7 +84,8 @@ pub enum Work {
     /// threads it ran on are recorded ([`threads`]).
     YamlContractPreparation,
     /// The file-reading kind checks of a `schema` or `yaml-schema` document
-    /// run (its own imports resolved). The threads are recorded.
+    /// run (its own imports resolved; counted by simplified-schema, which
+    /// owns the checks). The threads are recorded.
     YamlKindCheck,
     /// A standalone schema document's named-type imports checked through
     /// [`check_standalone_named_types`](crate::markdown::schemas::resolve::check_standalone_named_types)
@@ -199,7 +201,7 @@ impl Work {
 
     /// Whether [`add`] records the thread this work ran on.
     fn records_thread(self) -> bool {
-        matches!(self, Work::YamlContractPreparation | Work::YamlKindCheck | Work::StandaloneImportCheck)
+        matches!(self, Work::YamlContractPreparation | Work::StandaloneImportCheck)
     }
 }
 
@@ -221,11 +223,22 @@ pub fn add(work: Work, count: u64) {
 /// Distinct `(work, thread)` pairs, for the kinds that record their thread.
 static THREADS: std::sync::Mutex<Vec<(Work, std::thread::ThreadId)>> = std::sync::Mutex::new(Vec::new());
 
-/// Every thread `work` has run on, in first-run order; empty for a kind
-/// that does not record its thread.
+/// Every thread `work` has run on, in first-run order (Darkmatter's own
+/// records, then the library's for a kind whose code moved there); empty for
+/// a kind that does not record its thread.
 pub fn threads(work: Work) -> Vec<std::thread::ThreadId> {
-    let threads = THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    threads.iter().filter(|(kind, _)| *kind == work).map(|(_, thread)| *thread).collect()
+    let mut found: Vec<std::thread::ThreadId> = {
+        let threads = THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        threads.iter().filter(|(kind, _)| *kind == work).map(|(_, thread)| *thread).collect()
+    };
+    if let Some(kind) = library_kind(work) {
+        for thread in simplified_schema::work_counters::threads(kind) {
+            if !found.contains(&thread) {
+                found.push(thread);
+            }
+        }
+    }
+    found
 }
 
 /// Every counter's value at one moment, or the work between two
@@ -300,6 +313,10 @@ fn library_kind(work: Work) -> Option<simplified_schema::work_counters::Work> {
         Work::ArtifactFallbackRecord => Some(Library::ArtifactFallbackRecord),
         Work::SourcePositionMapConstruction => Some(Library::PositionMapConstruction),
         Work::CanonicalSchemaSerialization => Some(Library::CanonicalSchemaSerialization),
+        Work::TriggerDiscovery => Some(Library::TriggerDiscovery),
+        Work::PayloadMergeCheck => Some(Library::PayloadMergeCheck),
+        Work::PayloadCompileCheck => Some(Library::PayloadCompileCheck),
+        Work::YamlKindCheck => Some(Library::YamlKindCheck),
         _ => None,
     }
 }

@@ -50,7 +50,8 @@ use darkmatter::markdown::cleanup::rules::{
 use darkmatter::markdown::cleanup::{CleanOutcome, CleanRequest, CleanResult, clean_document};
 use darkmatter::markdown::delta::DeltaReport;
 use darkmatter::markdown::extract_frontmatter_block;
-use darkmatter::markdown::schemas::{CleanSchemaConfig, InvalidTriggerFinding};
+use darkmatter::markdown::schemas::CleanSchemaConfig;
+use simplified_schema::triggers::InvalidTriggerFinding;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use tracing::instrument;

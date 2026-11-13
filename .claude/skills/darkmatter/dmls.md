@@ -465,7 +465,7 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `schema.slow_validation_ms`, default 200, else `schema validation
   complete` at `debug`). `schema_cache_key` excludes the threshold. Tests:
   `tests/l1/validation_timing_log.rs`.
-- Payload memo (`triggers/assemble.rs::file_payload_memo`, process-wide,
+- Payload memo (`simplified-schema/lib/src/triggers/assemble.rs::file_payload_memo`, process-wide,
   32-entry true LRU, successes only): keyed by what resolution reads, never
   the requester's folder — trigger path, payload value, schema roots, the
   requester's tree (`base_dir` + origin), `for_cwd(trigger folder)`, and
@@ -482,7 +482,7 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   context again makes every package folder miss (the original incident). Its
   tests are `payload_memo_tests.rs` (rely on nextest's process per test).
 - Pass line: `run_pass` starts a `PayloadMemoTally` (thread-scoped, from
-  `darkmatter::markdown::schemas::triggers`) for the pass, and `run_document`
+  `simplified_schema::triggers`) for the pass, and `run_document`
   starts its own so an interrupting document job is excluded;
   `run_workspace` logs `trigger registries prepared` at `debug` with
   `prepare_workspace_probe`'s `ProbeOutcome` counts. Startup phases do not
@@ -803,7 +803,10 @@ User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
   root, or a searched candidate). An absent root whose folder does not exist
   is listed through `SchemaRootSource::absent_root_files` (default none;
   `BufferedRoots` lists its buffers there), so an editor-only
-  `schemas/roster.yaml` claims before `schemas/` exists. Outside a workspace folder: `KindRegistry::shipped()`.
+  `schemas/roster.yaml` claims before `schemas/` exists. The registry is
+  `KindRegistry::build(…, RegistryScope::WithRoots, darkmatter::markdown::schemas::kind_host())`
+  (`overlay/registry.rs`); outside a workspace folder it is
+  `darkmatter::markdown::schemas::shipped_kind_registry()`.
   `SourceBuffers` is `Send + Sync`: carry the snapshot to whichever thread
   prepares.
 - Every file-reading step of a YAML document runs in `overlay/yaml_contract.rs`

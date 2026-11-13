@@ -223,7 +223,7 @@ fn an_opened_yaml_schema_definition_admits_an_added_property_and_keeps_its_check
 
 #[test]
 fn an_opened_trigger_definition_admits_an_added_property_and_keeps_its_checks() {
-    let copy = OpenedCopy::new("darkmatter/schemas/schema-trigger.yaml", include_str!("../../../schemas/schema-trigger.yaml"));
+    let copy = OpenedCopy::new("simplified-schema/schemas/schema-trigger.yaml", include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml"));
     copy.assert_open(VALID_TRIGGER);
 
     let problem = copy.kind_check(&format!("{}note: hi\n", VALID_TRIGGER.replace("\"docs/**\"", "\"@/docs/**\"")));

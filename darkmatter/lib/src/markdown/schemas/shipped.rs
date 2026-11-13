@@ -3,8 +3,8 @@
 //!
 //! Darkmatter compiles in its global catalog with its partials and Content
 //! Policy's editor schema ([`embedded::SHIPPED`]), the YAML document-kind
-//! definitions (`schema-trigger.yaml` and the library's envelope
-//! definitions), the side-effect catalog (`mutations.yaml`), and the
+//! definitions (the library's `ENVELOPE_DEFINITIONS`: its two envelope
+//! definitions and `schema-trigger.yaml`), the side-effect catalog (`mutations.yaml`), and the
 //! expression catalog's file-form examples. Preparing them (resolving the
 //! catalog, lowering the baseline, loading the function catalogs) used to run
 //! on first use in every process. The checked-in artifact,
@@ -26,7 +26,7 @@
 //! | [`Registry::global_catalog`] | [`GlobalCatalog::darkmatter`] | the catalog resolved from [`embedded::SHIPPED`] |
 //! | baseline | the runtime baseline in [`super`] | the catalog's `fm`, lowered |
 //! | [`Registry::inline_baseline`] | [`super::darkmatter_base_schema`] | the `fm` declaration resolved inline |
-//! | kind definitions | [`super::KindRegistry`] | each definition prepared from its text |
+//! | kind definitions | [`super::yaml_documents::kind_host`] | each definition prepared from its text |
 //! | [`Registry::function_catalog`] | `expression_function_catalog` | `functions.yaml` loaded |
 //! | [`Registry::effect_catalog`] | `effect_function_catalog` | `mutations.yaml` loaded |
 //! | [`NAMED_TYPES`] | `Name@darkmatter:<stem>` references | the partial parsed |
@@ -49,8 +49,8 @@ use simplified_schema::{DefinitionTable, SchemaDigest, SchemaRoot, SchemaSourceI
 
 use super::catalog::{DARKMATTER_CATALOG_PATH, DARKMATTER_GLOBALS, GlobalCatalog, GlobalCatalogRecord};
 use super::embedded::{self, SHIPPED};
-use super::yaml_documents::KindRegistry;
-use super::yaml_documents::registry::ShippedDefinition;
+use simplified_schema::envelope::ENVELOPE_DEFINITIONS;
+use simplified_schema::yaml_documents::{KindRegistry, ShippedDefinition, prepare_shipped, prepare_shipped_definitions};
 use crate::markdown::compose::expression::FunctionCatalog;
 use crate::markdown::compose::expression::catalog as functions;
 
@@ -61,7 +61,7 @@ pub const OWNER: &str = "darkmatter";
 /// what the shipped sources prepare to (catalog resolution, baseline
 /// lowering, kind-definition or function-catalog loading, a record's shape),
 /// then run `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 2;
+pub const PREPARATION_REVISION: u32 = 3;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "darkmatter/lib/generated/shipped.json";
@@ -78,8 +78,8 @@ pub const ARTIFACT: &[u8] = include_bytes!("../../../generated/shipped.json");
 const PARTIALS: &str = "darkmatter/schemas/partials/";
 
 /// Every compiled-in text Darkmatter's preparation reads, by virtual path:
-/// [`embedded::SHIPPED`], the kind definitions (the library's envelope
-/// definitions and `schema-trigger.yaml`), `mutations.yaml`, and the
+/// [`embedded::SHIPPED`], the kind definitions (the library's
+/// `ENVELOPE_DEFINITIONS`), `mutations.yaml`, and the
 /// expression catalog's file-form examples under
 /// `darkmatter/schemas/partials/function-examples/`.
 pub fn sources() -> &'static [EmbeddedDocument<'static>] {
@@ -89,7 +89,7 @@ pub fn sources() -> &'static [EmbeddedDocument<'static>] {
         let example_paths =
             EXAMPLE_PATHS.get_or_init(|| functions::EXAMPLE_FILES.iter().map(|(key, _)| format!("{PARTIALS}{key}")).collect());
         let mut documents = SHIPPED.to_vec();
-        documents.extend_from_slice(embedded::shipped_kind_definitions());
+        documents.extend_from_slice(ENVELOPE_DEFINITIONS);
         documents.push(EmbeddedDocument {
             path: crate::effects::types::MUTATIONS_PATH,
             text: crate::effects::types::MUTATIONS_SOURCE,
@@ -251,7 +251,7 @@ impl std::fmt::Debug for Prepared {
 /// artifact, or that entry's section, was refused.
 pub struct Registry {
     artifact: Result<AcceptedArtifact<Prepared>, Refusal>,
-    /// [`KindRegistry::shipped`], built on first use from this registry's
+    /// [`super::yaml_documents::shipped_kind_registry`], built on first use from this registry's
     /// kind definitions.
     kinds: OnceLock<Arc<KindRegistry>>,
 }
@@ -378,15 +378,16 @@ impl Registry {
     }
 
     /// The shipped YAML document-kind definitions, in source-table order.
-    pub(crate) fn kind_definitions(&self) -> &[ShippedDefinition] {
+    pub fn kind_definitions(&self) -> &[ShippedDefinition] {
         match self.accepted().map(|prepared| prepared.kind_definitions.get(accept_kind_definitions)) {
             Some(Ok(definitions)) => definitions,
-            _ => super::yaml_documents::registry::shipped_definitions_from_sources(),
+            _ => shipped_definitions_from_sources(),
         }
     }
 
     /// The registry of the shipped kind definitions alone
-    /// ([`KindRegistry::shipped`]), built once from [`Self::kind_definitions`].
+    /// ([`super::yaml_documents::shipped_kind_registry`]), built once from
+    /// [`Self::kind_definitions`].
     pub fn shipped_kind_registry(&self) -> Arc<KindRegistry> {
         Arc::clone(self.kinds.get_or_init(|| Arc::new(KindRegistry::shipped_from(self.kind_definitions()))))
     }
@@ -485,7 +486,7 @@ fn accept_kind_definitions(
     _: &Acceptance<'_>,
     kind_definitions: Vec<KindDefinitionRecord>,
 ) -> Result<Vec<ShippedDefinition>, RecordError> {
-    let documents = embedded::shipped_kind_definitions();
+    let documents = ENVELOPE_DEFINITIONS;
     if kind_definitions.len() != documents.len() {
         return Err(RecordError::new(
             "",
@@ -510,7 +511,18 @@ fn accept_kind_definitions(
             if record.kinds.is_empty() {
                 return Err(RecordError::new(format!("{at}/kinds"), "a shipped definition claims at least one kind"));
             }
-            Ok(ShippedDefinition::from_record(document.path, record))
+            let resolved = simplified_schema::resolve::ResolvedSchema {
+                simplified: record.simplified,
+                definitions: Arc::new(record.definitions),
+                json_schema: record.json_schema,
+                origin: record.origin.origin(),
+                imports: Vec::new(),
+                examples: Vec::new(),
+                referenced_files: Vec::new(),
+                searched: Vec::new(),
+                advisories: Vec::new(),
+            };
+            Ok(ShippedDefinition::accepted(document.path, resolved, record.kinds))
         })
         .collect()
 }
@@ -556,11 +568,11 @@ pub fn prepare_payload(fresh: &FreshLower) -> Result<DarkmatterPayload, String> 
     let inline_baseline = super::catalog::darkmatter_inline_baseline_with_mode(mode)
         .map_err(|reason| format!("the inline baseline does not resolve: {reason}"))?;
 
-    let documents = embedded::shipped_kind_definitions();
+    let documents = ENVELOPE_DEFINITIONS;
     let kind_definitions = documents
         .iter()
         .map(|document| {
-            let definition = super::yaml_documents::registry::prepare_shipped(document.path, documents, mode)
+            let definition = prepare_shipped(document.path, documents, embedded::SHIPPED_SOURCES, mode)
                 .map_err(|error| format!("`{}`: {error}", document.path))?;
             kind_definition_record(document.path, definition.resolved(), definition.kinds())
         })
@@ -594,6 +606,13 @@ pub fn prepare_payload(fresh: &FreshLower) -> Result<DarkmatterPayload, String> 
         functions: functions_catalog,
         effects,
     })
+}
+
+/// The shipped definitions prepared from their text, once per process: the
+/// fallback when the shipped artifact or its section was refused.
+fn shipped_definitions_from_sources() -> &'static [ShippedDefinition] {
+    static PREPARED: OnceLock<Vec<ShippedDefinition>> = OnceLock::new();
+    PREPARED.get_or_init(|| prepare_shipped_definitions(embedded::SHIPPED_SOURCES))
 }
 
 /// The record of one prepared definition. Every path list of an embedded

@@ -146,6 +146,75 @@ fn darkmatter_defines_no_second_schema_language_implementation() {
             include_str!("../../../../simplified-schema/lib/src/simplified/definitions.rs"),
             &["DefinitionTable"],
         ),
+        // Schema-kind infrastructure: the trigger grammar, discovery, and
+        // matching, the schema roots, the bundle type, and whole-YAML loading
+        // and kind selection. Darkmatter keeps only wrappers that add its
+        // shipped sources and the `EffectiveSchema` adaptation.
+        (
+            "triggers/grammar.rs",
+            include_str!("../../../../simplified-schema/lib/src/triggers/grammar.rs"),
+            &["MatchConditions", "MatchExpr", "PathGlobs", "parse_match_conditions"],
+        ),
+        (
+            "triggers/matcher.rs",
+            include_str!("../../../../simplified-schema/lib/src/triggers/matcher.rs"),
+            &["PathSubject", "first_defeat"],
+        ),
+        (
+            "triggers/envelope.rs",
+            include_str!("../../../../simplified-schema/lib/src/triggers/envelope.rs"),
+            &["TriggerEnvelope", "parse_trigger_envelope_from_str", "claims_trigger_envelope"],
+        ),
+        (
+            "triggers/discovery.rs",
+            include_str!("../../../../simplified-schema/lib/src/triggers/discovery.rs"),
+            &["TriggerRegistry", "LoadedTrigger", "TriggerSource", "SchemaRootSource", "enumerate_root_files"],
+        ),
+        (
+            "triggers/assemble.rs",
+            include_str!("../../../../simplified-schema/lib/src/triggers/assemble.rs"),
+            &["ResolvedPayload", "evaluate_registry", "trace_registry", "resolve_trigger_payload"],
+        ),
+        (
+            "triggers/prepared.rs",
+            include_str!("../../../../simplified-schema/lib/src/triggers/prepared.rs"),
+            &["PreparedTriggerBundle", "TriggerBundleRecord"],
+        ),
+        (
+            "roots.rs",
+            include_str!("../../../../simplified-schema/lib/src/roots.rs"),
+            &["SchemaRoots", "SchemaSearchRoot", "SchemaRootKind"],
+        ),
+        (
+            "embedded.rs",
+            include_str!("../../../../simplified-schema/lib/src/embedded.rs"),
+            &["EmbeddedSchemaBundle"],
+        ),
+        (
+            "yaml_documents/registry.rs",
+            include_str!("../../../../simplified-schema/lib/src/yaml_documents/registry.rs"),
+            &["KindRegistry", "KindDefinition", "ShippedDefinition", "prepare_shipped"],
+        ),
+        (
+            "yaml_documents/load.rs",
+            include_str!("../../../../simplified-schema/lib/src/yaml_documents/load.rs"),
+            &["LoadedYaml", "load_yaml_document"],
+        ),
+        (
+            "yaml_documents/mod.rs",
+            include_str!("../../../../simplified-schema/lib/src/yaml_documents/mod.rs"),
+            &["LoadedYamlDocument"],
+        ),
+        (
+            "yaml_documents/select.rs",
+            include_str!("../../../../simplified-schema/lib/src/yaml_documents/select.rs"),
+            &["Selection"],
+        ),
+        (
+            "yaml_documents/semantic.rs",
+            include_str!("../../../../simplified-schema/lib/src/yaml_documents/semantic.rs"),
+            &["kind_checks"],
+        ),
     ];
 
     let mut stale = Vec::new();

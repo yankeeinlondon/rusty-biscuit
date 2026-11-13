@@ -23,7 +23,7 @@
 //! explicit environment inside a temporary directory; neither the checkout,
 //! the process environment, nor the process CWD is consulted.
 
-use darkmatter::markdown::schemas::TriggerOrigin;
+use simplified_schema::triggers::TriggerOrigin;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -39,10 +39,11 @@ use claudine::composition::{
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use simplified_schema::simplified::{DefKey, DefNamespace};
-use darkmatter::markdown::schemas::triggers::parse_trigger_envelope_from_str;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, SchemaRootKind, SchemaRoots, TriggerSource,
-};
+use simplified_schema::triggers::parse_trigger_envelope_from_str;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::embedded::EmbeddedSchemaBundle;
+use simplified_schema::roots::{SchemaRootKind, SchemaRoots};
+use simplified_schema::triggers::TriggerSource;
 use simplified_schema::{SchemaOriginKind, StandaloneSchemaEnvelope, parse_standalone_schema_document};
 
 use crate::claudine_schemas::{AC5_GROUPS, BundleFile, SchemaRepo, problems, shipped_bundle};

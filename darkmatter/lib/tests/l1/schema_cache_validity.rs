@@ -11,7 +11,8 @@ use std::path::PathBuf;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::embedded::EmbeddedSchemaBundle;
 use simplified_schema::{CompileCache, DRAFT_2020_12_DIALECT, SchemaError, SchemaPhase, parse_yaml_schema};
 use serde_json::json;
 

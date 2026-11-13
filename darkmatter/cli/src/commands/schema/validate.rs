@@ -23,9 +23,9 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Report, Result};
 use darkmatter::markdown::Markdown;
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, InvalidTriggerFinding, LoadedYamlDocument, SchemaLayers, TriggerSource, YamlOutcome,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SchemaLayers, YamlOutcome};
+use simplified_schema::triggers::{InvalidTriggerFinding, TriggerSource};
+use simplified_schema::yaml_documents::LoadedYamlDocument;
 use simplified_schema::{
     SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemCode, ValidationProblemKind, ValidationTimings,
 };

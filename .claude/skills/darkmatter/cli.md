@@ -103,7 +103,7 @@ context that does not admit the document into `string`). User contract:
 unopened argument by its spelling). A preflight opens every argument first
 and raises a usage error (exit 2) for assignments or `--schema` with any YAML input; the
 baseline is loaded only when some input is not YAML. The YAML route
-(`validate.rs::validate_yaml`) loads with `LoadedYamlDocument::load` (failure
+(`validate.rs::validate_yaml`) loads with `simplified_schema::yaml_documents::LoadedYamlDocument::load` (failure
 → `FileOutcome::YamlLoadError`, record `error: "yaml_parse"` with
 `line`/`column`) and validates with `validate_loaded_yaml_document` (error →
 record `error: "schema"`; `NoSchema` → the Markdown no-schema record); every

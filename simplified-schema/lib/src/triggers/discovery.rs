@@ -1,7 +1,7 @@
 //! Trigger discovery in the five schema roots and the per-document trigger
 //! registry.
 //!
-//! Trigger schemas live in the [schema roots](crate::markdown::schemas::roots):
+//! Trigger schemas live in the [schema roots](crate::roots):
 //! the `SCHEMAS_DIR` folder, the document's package, package-area, and tree
 //! root `schemas/` folders, and `~/schemas`, in that order. Folders between
 //! the document and those roots are not searched.
@@ -46,21 +46,22 @@
 //! The user-facing contract is the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
 
-use simplified_schema::{SchemaOrigin, SchemaOriginKind};
+use crate::{SchemaOrigin, SchemaOriginKind};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 
-use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;
-use simplified_schema::errors::SchemaError;
-use crate::markdown::schemas::roots::SchemaRoots;
-use simplified_schema::simplified::SchemaSourceId;
+use crate::embedded::{EmbeddedSchemaBundle, ShippedSources};
+use crate::errors::SchemaError;
+use crate::roots::SchemaRoots;
+use crate::simplified::SchemaSourceId;
 
 use super::envelope::{TriggerEnvelope, parse_trigger_envelope_from_str};
 use super::finding::InvalidTriggerFinding;
 
 /// Valid YAML extensions for schema-trigger files.
+#[cfg(feature = "file")]
 const YAML_EXTENSIONS: &[&str] = &["yaml", "yml"];
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -182,7 +183,7 @@ pub struct LoadedTrigger {
     /// The parsed, lint-clean trigger envelope.
     pub envelope: TriggerEnvelope,
     /// The `cwd` of the trigger's bare, `./`, and `../` `$path` patterns (see
-    /// [`SearchedRoot::pattern_cwd`](crate::markdown::schemas::roots::SearchedRoot::pattern_cwd));
+    /// [`SearchedRoot::pattern_cwd`](crate::roots::SearchedRoot::pattern_cwd));
     /// the document's tree root for an embedded trigger.
     pub pattern_cwd: PathBuf,
     /// The bundle an [`Embedded`](TriggerSource::Embedded) trigger's payload
@@ -235,13 +236,16 @@ pub struct TriggerRegistry {
     /// The document context the roots were computed in and `$path` patterns
     /// are judged in.
     context: FileResolutionContext,
+    /// The host's shipped sources every payload resolves through.
+    sources: ShippedSources,
 }
 
 impl TriggerRegistry {
-    /// A registry of `triggers`, with no schema roots, judged in `context`.
-    /// For callers (and tests) that build triggers without discovery.
+    /// A registry of `triggers`, with no schema roots, judged in `context`,
+    /// whose payloads resolve through `sources`. For callers (and tests) that
+    /// build triggers without discovery.
     #[must_use]
-    pub fn new(triggers: Vec<LoadedTrigger>, context: FileResolutionContext) -> Self {
+    pub fn new(triggers: Vec<LoadedTrigger>, context: FileResolutionContext, sources: ShippedSources) -> Self {
         let claimed_names = triggers
             .iter()
             .filter_map(|trigger| trigger.source.file_name().map(str::to_string))
@@ -254,6 +258,7 @@ impl TriggerRegistry {
             findings: Vec::new(),
             claimed_names,
             context,
+            sources,
         }
     }
 
@@ -301,7 +306,7 @@ impl TriggerRegistry {
                     if descriptor.is_some() {
                         crate::note_work!(ShippedRuntimePreparation);
                     }
-                    load_embedded_trigger(bundle, name, text)
+                    load_embedded_trigger(bundle, name, text, self.sources)
                 }
             };
             match result {
@@ -357,6 +362,20 @@ impl TriggerRegistry {
         &self.context
     }
 
+    /// The resolved payloads, parallel to [`Self::triggers`]; empty for a
+    /// registry built without discovery ([`Self::new`]), whose payloads
+    /// resolve on demand.
+    #[must_use]
+    pub fn payloads(&self) -> &[super::assemble::ResolvedPayload] {
+        &self.payloads
+    }
+
+    /// The host's shipped sources the payloads resolve through.
+    #[must_use]
+    pub fn sources(&self) -> ShippedSources {
+        self.sources
+    }
+
     /// The files an effective schema layered from this registry depends on:
     /// each file trigger's envelope, and each resolved payload file with its
     /// imports and examples. A skipped file trigger contributes its envelope
@@ -395,8 +414,8 @@ impl TriggerRegistry {
 /// document that does not claim `kind: schema-trigger`.
 pub(super) type EmbeddedTriggerLoad = Option<(TriggerEnvelope, super::assemble::ResolvedPayload)>;
 
-/// `(bundle name, document name, document text)`.
-type EmbeddedKey = (&'static str, String, &'static str);
+/// `(bundle name, document name, document text, shipped namespace)`.
+type EmbeddedKey = (&'static str, String, &'static str, &'static str);
 /// The `(virtual path, text)` of each bundle document a payload read.
 type EmbeddedReads = Vec<(PathBuf, &'static str)>;
 type EmbeddedMemo = std::sync::Mutex<HashMap<EmbeddedKey, Vec<(EmbeddedReads, EmbeddedTriggerLoad)>>>;
@@ -404,7 +423,7 @@ type EmbeddedMemo = std::sync::Mutex<HashMap<EmbeddedKey, Vec<(EmbeddedReads, Em
 static EMBEDDED_LOADED: std::sync::OnceLock<EmbeddedMemo> = std::sync::OnceLock::new();
 
 /// Empties the embedded trigger memo (see
-/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+/// [`crate::reset_process_caches`]).
 pub(crate) fn reset_process_caches() {
     if let Some(memo) = EMBEDDED_LOADED.get() {
         memo.lock().expect("embedded trigger memo poisoned").clear();
@@ -431,12 +450,13 @@ fn load_embedded_trigger(
     bundle: EmbeddedSchemaBundle,
     name: &str,
     text: &'static str,
+    sources: ShippedSources,
 ) -> Result<EmbeddedTriggerLoad, SchemaError> {
     let memo = EMBEDDED_LOADED.get_or_init(Default::default);
     let current_text = |path: &Path| {
         bundle.files().iter().find(|(file, _)| Path::new(&bundle.virtual_path(file)) == path).map(|(_, text)| *text)
     };
-    let key: EmbeddedKey = (bundle.name(), name.to_string(), text);
+    let key: EmbeddedKey = (bundle.name(), name.to_string(), text, sources.namespace());
     if let Some(entries) = memo.lock().expect("embedded trigger memo poisoned").get(&key)
         && let Some((_, hit)) = entries
             .iter()
@@ -457,7 +477,7 @@ fn load_embedded_trigger(
                 bundle: Some(bundle),
                 text: None,
             };
-            let (payload, read_paths) = super::assemble::resolve_embedded_trigger_payload(&trigger)?;
+            let (payload, read_paths) = super::assemble::resolve_embedded_trigger_payload(&trigger, sources)?;
             let reads: EmbeddedReads = read_paths
                 .into_iter()
                 .filter_map(|path| current_text(&path).map(|read| (path, read)))
@@ -495,6 +515,7 @@ struct RootFile {
 ///
 /// [`SchemaError::Io`] when the folder or one of its entries cannot be read;
 /// [`SchemaError::TriggerCaseFoldCollision`] for colliding names.
+#[cfg(feature = "file")]
 pub fn enumerate_root_files(root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
     Ok(enumerate_root(root)?.into_iter().map(|file| file.path).collect())
 }
@@ -527,7 +548,7 @@ pub trait SchemaRootSource {
     /// them as it reads a searched root's files; trigger discovery does not.
     /// None by default.
     ///
-    /// [`KindRegistry`]: crate::markdown::schemas::KindRegistry
+    /// [`KindRegistry`]: crate::yaml_documents::KindRegistry
     fn absent_root_files(&mut self, _root: &Path) -> Vec<PathBuf> {
         Vec::new()
     }
@@ -536,19 +557,21 @@ pub trait SchemaRootSource {
 /// The filesystem [`SchemaRootSource`] that [`scan`] uses.
 ///
 /// File text is read as the resolver reads a schema source
-/// ([`buffers::read_to_string`](simplified_schema::resolve::buffers::read_to_string)):
-/// inside a [`with_reads_retained`](simplified_schema::resolve::buffers::with_reads_retained)
+/// ([`buffers::read_to_string`](crate::resolve::buffers::read_to_string)):
+/// inside a [`with_reads_retained`](crate::resolve::buffers::with_reads_retained)
 /// scope, a root file discovery reads is not read again when the same
 /// operation later resolves it as a `$schema` target, import, or example.
+#[cfg(feature = "file")]
 pub(crate) struct FilesystemRoots;
 
+#[cfg(feature = "file")]
 impl SchemaRootSource for FilesystemRoots {
     fn root_files(&mut self, root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
         enumerate_root_files(root)
     }
 
     fn root_file_text(&mut self, path: &Path) -> Result<std::sync::Arc<str>, SchemaError> {
-        simplified_schema::resolve::buffers::read_to_string(path).map(Into::into).map_err(|source| SchemaError::Io {
+        crate::resolve::buffers::read_to_string(path).map(Into::into).map_err(|source| SchemaError::Io {
             path: path.to_path_buf(),
             source,
         })
@@ -560,6 +583,7 @@ impl SchemaRootSource for FilesystemRoots {
 ///
 /// Files are returned sorted by UTF-8 filename bytes. Two names that collide
 /// after case-folding are a load error.
+#[cfg(feature = "file")]
 fn enumerate_root(root: &Path) -> Result<Vec<RootFile>, SchemaError> {
     let entries = match std::fs::read_dir(root) {
         Ok(entries) => entries,
@@ -628,6 +652,7 @@ fn enumerate_root(root: &Path) -> Result<Vec<RootFile>, SchemaError> {
 /// Returns `Err` when two filenames in the same root collide after
 /// case-folding, preventing divergent behavior on case-sensitive vs
 /// case-insensitive filesystems.
+#[cfg(feature = "file")]
 fn check_case_fold_collision(
     root: &Path,
     files: &[RootFile],
@@ -671,8 +696,9 @@ fn check_case_fold_collision(
 /// contract](self#discovery-contract)): a schema root that cannot be
 /// enumerated, an enumerated file that cannot be read, or a case-fold
 /// collision.
-pub fn scan(context: &FileResolutionContext) -> Result<TriggerRegistry, SchemaError> {
-    scan_with_embedded(context, &[])
+#[cfg(feature = "file")]
+pub fn scan(context: &FileResolutionContext, sources: ShippedSources) -> Result<TriggerRegistry, SchemaError> {
+    scan_with_embedded(context, &[], sources)
 }
 
 /// [`scan`], then each of `bundles` in order as a last-resort trigger
@@ -688,11 +714,13 @@ pub fn scan(context: &FileResolutionContext) -> Result<TriggerRegistry, SchemaEr
 ///
 /// Every [`scan`] error, plus those of
 /// [`TriggerRegistry::append_embedded_bundle`].
+#[cfg(feature = "file")]
 pub fn scan_with_embedded(
     context: &FileResolutionContext,
     bundles: &[EmbeddedSchemaBundle],
+    sources: ShippedSources,
 ) -> Result<TriggerRegistry, SchemaError> {
-    scan_with_source(context, bundles, &mut FilesystemRoots)
+    scan_with_source(context, bundles, &mut FilesystemRoots, sources)
 }
 
 /// [`scan_with_embedded`], reading each searched root's file list and file
@@ -710,8 +738,9 @@ pub fn scan_with_source(
     context: &FileResolutionContext,
     bundles: &[EmbeddedSchemaBundle],
     source: &mut dyn SchemaRootSource,
+    sources: ShippedSources,
 ) -> Result<TriggerRegistry, SchemaError> {
-    let _discover = simplified_schema::timings::stage(simplified_schema::ValidationStage::Discover);
+    let _discover = crate::timings::stage(crate::ValidationStage::Discover);
     crate::note_work!(TriggerDiscovery);
     let roots = SchemaRoots::for_document(context)?;
 
@@ -767,8 +796,8 @@ pub fn scan_with_source(
             bundle: None,
             text: Some(std::sync::Arc::clone(&content)),
         };
-        let (payload, observed) = simplified_schema::resolve::observed::collect(|| {
-            super::assemble::resolve_trigger_payload(&trigger, roots.search_paths(), context)
+        let (payload, observed) = crate::resolve::observed::collect(|| {
+            super::assemble::resolve_trigger_payload(&trigger, roots.search_paths(), context, sources)
         });
         match payload {
             Ok(payload) => {
@@ -790,6 +819,7 @@ pub fn scan_with_source(
         findings,
         claimed_names: first_by_name.into_keys().collect(),
         context: context.clone(),
+        sources,
     };
     for bundle in bundles {
         registry.append_embedded_bundle(*bundle)?;
@@ -799,10 +829,11 @@ pub fn scan_with_source(
 
 
 
-#[cfg(test)]
+// Every case here enumerates real schema roots.
+#[cfg(all(test, feature = "file"))]
 mod tests {
     use super::*;
-    use simplified_schema::errors::SchemaError;
+    use crate::errors::SchemaError;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -856,7 +887,7 @@ mod tests {
         if doc.starts_with(root.join("pkg")) {
             context = context.with_package_root(root.join("pkg"));
         }
-        scan(&context)
+        scan(&context, crate::embedded::ShippedSources::NONE)
     }
 
     // ── File enumeration ────────────────────────────────────────────────

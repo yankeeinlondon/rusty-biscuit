@@ -2,7 +2,7 @@
 //! cycle detection.
 //!
 //! This module wires the Phase 1–3 primitives (matcher, discovery, bare-name
-//! resolution) into the helpers [`super::super`] (`DarkmatterSchemas`) consumes
+//! resolution) into the helpers a host's effective-schema assembly (Darkmatter's `DarkmatterSchemas`) consumes
 //! in `effective_for`. The assembly order is:
 //!
 //! 1. Caller-configured baseline.
@@ -13,7 +13,7 @@
 //!
 //! Shadowing is applied **before** matching (a shadowed trigger file is never
 //! in the registry). Later layers win per top-level property via the existing
-//! [`simplified_schema::resolve::merge_baseline`] contract.
+//! [`crate::resolve::merge_baseline`] contract.
 //!
 //! The user-facing contract is the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
@@ -23,13 +23,12 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use serde_yaml_ng::Value as YamlValue;
 
-use simplified_schema::errors::SchemaError;
-use crate::markdown::schemas::resolve::{self};
-use simplified_schema::resolve::{ResolvedSchema, validate_simple_object_schema};
+use crate::errors::SchemaError;
+use crate::resolve::{ResolvedSchema, validate_simple_object_schema};
 
-use crate::markdown::schemas::roots::SchemaRoots;
+use crate::roots::SchemaRoots;
 
-use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;
+use crate::embedded::{EmbeddedSchemaBundle, ShippedSources};
 
 use super::discovery::{LoadedTrigger, TriggerRegistry, TriggerSource};
 use super::envelope::parse_trigger_envelope_from_str;
@@ -209,46 +208,46 @@ pub fn matched_triggers<'a>(
 
 /// A resolved trigger payload ready for layering.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ResolvedPayload {
+pub struct ResolvedPayload {
     /// The resolved JSON Schema (guaranteed simple-object by the gate),
     /// shared by every effective schema layered from it.
     pub json_schema: std::sync::Arc<Value>,
     /// The payload's SimplifiedSchema object shape, retained so editor
     /// projections see the properties validation layers in. `None` for a raw
     /// JSON Schema payload, which has no SimplifiedSchema projection.
-    pub shape: Option<std::sync::Arc<simplified_schema::SchemaShape>>,
+    pub shape: Option<std::sync::Arc<crate::SchemaShape>>,
     /// The cyclic named types `shape` reaches through
-    /// [`TypeExpr::Ref`](simplified_schema::simplified::TypeExpr::Ref);
+    /// [`TypeExpr::Ref`](crate::simplified::TypeExpr::Ref);
     /// empty for a raw payload or one that does not recurse.
-    pub definitions: std::sync::Arc<simplified_schema::simplified::DefinitionTable>,
+    pub definitions: std::sync::Arc<crate::simplified::DefinitionTable>,
     /// Dependency edges: the payload file + its imports + its examples
     /// (sorted, deduplicated). Empty for an embedded trigger.
     pub dependencies: Vec<PathBuf>,
     /// Every location probed while resolving the payload and its references
-    /// ([`ResolvedSchema::searched`](simplified_schema::resolve::ResolvedSchema::searched)):
+    /// ([`ResolvedSchema::searched`](crate::resolve::ResolvedSchema::searched)):
     /// lexical, sorted, deduplicated, and possibly absent, so it is never read
     /// or hashed as a dependency file. Empty for an embedded trigger.
     pub searched: Vec<PathBuf>,
     /// Non-fatal findings produced while resolving payload references.
-    pub advisories: Vec<super::super::SchemaAdvisory>,
+    pub advisories: Vec<crate::SchemaAdvisory>,
     /// The payload is a template (it holds `{{ … }}` slots): it is neither
     /// invalid nor empty, and resolves only when a document matches it, in
     /// that document's slot session ([`finish_file_payload`] then applies the
     /// payload rules to the result). The other fields are then empty, except
     /// `dependencies`, which name the schema files the template read.
-    pub pending: Option<simplified_schema::slots::PendingSchema>,
+    pub pending: Option<crate::slots::PendingSchema>,
     /// The canonical digest of `json_schema` when it is already known (a
     /// prepared payload's, computed at generation); `None` for a payload
     /// resolved here, whose digest the validator cache computes once per
     /// allocation.
-    pub digest: Option<simplified_schema::SchemaDigest>,
+    pub digest: Option<crate::SchemaDigest>,
 }
 
 impl ResolvedPayload {
     /// The stand-in for a matcher-only trigger (no `$schema`): no schema, no
     /// dependencies. Effective-schema assembly layers nothing for such a
     /// trigger, so `json_schema` is never read.
-    pub(crate) fn matcher_only() -> Self {
+    pub fn matcher_only() -> Self {
         Self {
             json_schema: std::sync::Arc::new(Value::Object(serde_json::Map::new())),
             shape: None,
@@ -283,12 +282,13 @@ impl ResolvedPayload {
 /// An embedded trigger's payload resolves inside its bundle only (see
 /// [`resolve_embedded_payload`]); `schema_roots` and `context` are not
 /// consulted, and the result has no dependency edges.
-pub(crate) fn resolve_trigger_payload(
+pub fn resolve_trigger_payload(
     trigger: &LoadedTrigger,
     schema_roots: &[PathBuf],
     context: &biscuit_file::FileResolutionContext,
+    sources: ShippedSources,
 ) -> Result<ResolvedPayload, SchemaError> {
-    let _resolve = simplified_schema::timings::stage(simplified_schema::ValidationStage::Resolve);
+    let _resolve = crate::timings::stage(crate::ValidationStage::Resolve);
     let source = match (&trigger.source, trigger.bundle) {
         (TriggerSource::File(path), _) => path,
         (TriggerSource::Embedded { name, .. }, Some(bundle)) => {
@@ -296,8 +296,9 @@ pub(crate) fn resolve_trigger_payload(
                 trigger.envelope.payload.as_ref(),
                 bundle,
                 name,
-                simplified_schema::shipped::PreparationMode::Runtime,
-                &crate::markdown::schemas::SHARED_VALIDATOR_CACHE,
+                crate::shipped::PreparationMode::Runtime,
+                &crate::validate::SHARED_VALIDATOR_CACHE,
+                sources,
             )
             .map(|(payload, _)| payload);
         }
@@ -311,11 +312,11 @@ pub(crate) fn resolve_trigger_payload(
     let Some(payload) = trigger.envelope.payload.as_ref() else {
         return Ok(ResolvedPayload::matcher_only());
     };
-    file_payload_memo::resolve(source, payload, trigger.text.as_ref(), schema_roots, context)
+    file_payload_memo::resolve(source, payload, trigger.text.as_ref(), schema_roots, context, sources)
 }
 
 /// Empties the process-wide trigger payload memo (see
-/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+/// [`crate::reset_process_caches`]).
 pub(crate) fn reset_process_caches() {
     file_payload_memo::clear();
 }
@@ -329,9 +330,10 @@ fn resolve_file_payload(
     text: Option<&std::sync::Arc<str>>,
     schema_roots: &[PathBuf],
     context: &biscuit_file::FileResolutionContext,
+    sources: ShippedSources,
 ) -> Result<ResolvedPayload, SchemaError> {
     let base_dir = source.parent().unwrap_or_else(|| Path::new("."));
-    let authored = text.map(|text| simplified_schema::resolve::AuthoredSchemaValue {
+    let authored = text.map(|text| crate::resolve::AuthoredSchemaValue {
         file: Some(source.to_path_buf()),
         mapping: 0..text.len(),
         text: std::sync::Arc::clone(text),
@@ -341,13 +343,14 @@ fn resolve_file_payload(
     // A trigger file is never a schema document, so the loader refuses a
     // payload that names one before any cycle check could see it; that
     // refusal is reported as the cycle it is.
-    let resolved = match resolve::resolve_authored_yaml_schema(
+    let resolved = match crate::resolve::resolve_authored_yaml_schema(
         payload,
-        simplified_schema::resolve::InlineOwner::Trigger(source),
+        crate::resolve::InlineOwner::Trigger(source),
         authored.as_ref(),
         base_dir,
         schema_roots,
         context,
+        sources,
     ) {
         // A template payload is pending: matching stays passive, and only a
         // matched payload resolves, in the matching document's session.
@@ -370,10 +373,10 @@ fn resolve_file_payload(
 /// file `source`'s `$schema` value `payload`: no cycle back to a trigger, a
 /// merge-compatible object schema that compiles, and its dependency edges.
 /// A pending payload's resolution goes through the same rules.
-pub(crate) fn finish_file_payload(
+pub fn finish_file_payload(
     source: &Path,
     payload: &YamlValue,
-    resolved: simplified_schema::resolve::ResolvedSchema,
+    resolved: crate::resolve::ResolvedSchema,
 ) -> Result<ResolvedPayload, SchemaError> {
     // Cycle detection: the payload must not resolve to a trigger envelope.
     check_payload_cycles(source, &resolved)?;
@@ -461,7 +464,8 @@ mod file_payload_memo {
     use serde_yaml_ng::Value as YamlValue;
 
     use super::{ResolvedPayload, resolve_file_payload, tally};
-    use simplified_schema::errors::SchemaError;
+    use crate::embedded::ShippedSources;
+    use crate::errors::SchemaError;
 
     /// Room for one DMLS workspace pass over this repository (18 distinct
     /// inputs before keys stopped naming the requester) with headroom.
@@ -480,6 +484,9 @@ mod file_payload_memo {
         tree_origin: BaseDirOrigin,
         folder_context: FileResolutionContext,
         root_contexts: Vec<FileResolutionContext>,
+        /// The host's reserved namespace: the shipped documents a
+        /// `Name@<namespace><stem>` reference in the payload reaches.
+        namespace: &'static str,
     }
 
     impl Key {
@@ -489,6 +496,7 @@ mod file_payload_memo {
             text: Option<&std::sync::Arc<str>>,
             schema_roots: &[PathBuf],
             original: &FileResolutionContext,
+            sources: ShippedSources,
         ) -> Self {
             // Mirrors `resolve_file_payload`'s base folder.
             let folder = source.parent().unwrap_or_else(|| Path::new("."));
@@ -501,6 +509,7 @@ mod file_payload_memo {
                 tree_origin: original.base_dir_origin().clone(),
                 folder_context: original.for_cwd(folder),
                 root_contexts: schema_roots.iter().map(|root| original.for_trusted_external_cwd(root)).collect(),
+                namespace: sources.namespace(),
             }
         }
     }
@@ -524,8 +533,9 @@ mod file_payload_memo {
         text: Option<&std::sync::Arc<str>>,
         schema_roots: &[PathBuf],
         original: &FileResolutionContext,
+        sources: ShippedSources,
     ) -> Result<ResolvedPayload, SchemaError> {
-        let key = Key::new(source, payload, text, schema_roots, original);
+        let key = Key::new(source, payload, text, schema_roots, original, sources);
         let held = {
             let entries = ENTRIES.lock().expect("trigger payload memo poisoned");
             entries
@@ -546,7 +556,7 @@ mod file_payload_memo {
         }
 
         tally::record_miss();
-        let resolved = resolve_file_payload(source, payload, text, schema_roots, original)?;
+        let resolved = resolve_file_payload(source, payload, text, schema_roots, original, sources)?;
         let fingerprint = inputs_fingerprint(schema_roots, &resolved);
         let mut entries = ENTRIES.lock().expect("trigger payload memo poisoned");
         entries.retain(|entry| entry.key != key);
@@ -637,8 +647,8 @@ mod file_payload_memo {
 
         /// Makes every observation of `path` on this thread fail until the
         /// guard drops.
-        #[cfg(test)]
-        pub(in crate::markdown::schemas::triggers) fn fail_observing(path: &Path) -> impl Drop + use<> {
+        #[cfg(all(test, feature = "file"))]
+        pub(in crate::triggers) fn fail_observing(path: &Path) -> impl Drop + use<> {
             struct Restore;
             impl Drop for Restore {
                 fn drop(&mut self) {
@@ -672,15 +682,15 @@ mod file_payload_memo {
         /// was resolved from and a retaining scope opens no file twice.
         pub(super) fn read(path: &Path) -> std::io::Result<Vec<u8>> {
             injected(path)?;
-            simplified_schema::resolve::buffers::read_to_string(path).map(String::into_bytes)
+            crate::resolve::buffers::read_to_string(path).map(String::into_bytes)
         }
     }
 
-    #[cfg(test)]
-    pub(in crate::markdown::schemas::triggers) use observe::fail_observing;
+    #[cfg(all(test, feature = "file"))]
+    pub(in crate::triggers) use observe::fail_observing;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "file"))]
 pub(super) use file_payload_memo::fail_observing;
 
 /// Trigger-payload memo outcomes counted by a [`PayloadMemoTally`].
@@ -782,27 +792,29 @@ mod tally {
 /// A gated payload is never a root union, so only a single-object projection
 /// is kept.
 fn payload_shape(
-    simplified: Option<simplified_schema::SchemaRoot>,
-) -> Option<std::sync::Arc<simplified_schema::SchemaShape>> {
+    simplified: Option<crate::SchemaRoot>,
+) -> Option<std::sync::Arc<crate::SchemaShape>> {
     match simplified? {
-        simplified_schema::SchemaRoot::Single(shape) => Some(std::sync::Arc::new(shape)),
-        simplified_schema::SchemaRoot::Union(_) => None,
+        crate::SchemaRoot::Single(shape) => Some(std::sync::Arc::new(shape)),
+        crate::SchemaRoot::Union(_) => None,
     }
 }
 
 /// [`resolve_trigger_payload`] for an embedded trigger, which needs neither
 /// schema roots nor a document context, alongside the virtual paths
 /// (`{bundle}/{file}`) of every bundle document the payload read.
-pub(crate) fn resolve_embedded_trigger_payload(
+pub fn resolve_embedded_trigger_payload(
     trigger: &LoadedTrigger,
+    sources: ShippedSources,
 ) -> Result<(ResolvedPayload, Vec<PathBuf>), SchemaError> {
     match (&trigger.source, trigger.bundle) {
         (TriggerSource::Embedded { name, .. }, Some(bundle)) => resolve_embedded_payload(
             trigger.envelope.payload.as_ref(),
             bundle,
             name,
-            simplified_schema::shipped::PreparationMode::Runtime,
-            &crate::markdown::schemas::SHARED_VALIDATOR_CACHE,
+            crate::shipped::PreparationMode::Runtime,
+            &crate::validate::SHARED_VALIDATOR_CACHE,
+            sources,
         ),
         (source, _) => Err(SchemaError::EmbeddedBundle {
             bundle: String::new(),
@@ -820,16 +832,17 @@ pub(crate) fn resolve_embedded_trigger_payload(
 /// network. Errors carry the virtual path `{bundle}/{name}` where a
 /// [`SchemaError`] field needs a path. `mode` and `cache` are the resolution
 /// mode and the validator cache of the compile check: a generation passes
-/// [`PreparationMode::Uncached`](simplified_schema::shipped::PreparationMode::Uncached)
+/// [`PreparationMode::Uncached`](crate::shipped::PreparationMode::Uncached)
 /// and a private cache.
 pub(super) fn resolve_embedded_payload(
     payload: Option<&YamlValue>,
     bundle: EmbeddedSchemaBundle,
     name: &str,
-    mode: simplified_schema::shipped::PreparationMode<'_>,
-    cache: &simplified_schema::ValidatorCache,
+    mode: crate::shipped::PreparationMode<'_>,
+    cache: &crate::ValidatorCache,
+    sources: ShippedSources,
 ) -> Result<(ResolvedPayload, Vec<PathBuf>), SchemaError> {
-    let _resolve = simplified_schema::timings::stage(simplified_schema::ValidationStage::Resolve);
+    let _resolve = crate::timings::stage(crate::ValidationStage::Resolve);
     let importer = bundle.virtual_path(name);
     let importer_path = PathBuf::from(&importer);
     let Some(payload) = payload else {
@@ -837,7 +850,7 @@ pub(super) fn resolve_embedded_payload(
     };
     let resolved = bundle.with_documents(|documents| match payload {
         YamlValue::String(reference) => {
-            let target = crate::markdown::schemas::embedded::resolve_bundle_path(
+            let target = crate::embedded::resolve_bundle_path(
                 bundle.name(),
                 &importer,
                 reference,
@@ -848,7 +861,7 @@ pub(super) fn resolve_embedded_payload(
                 source: None,
                 span: None,
             })?;
-            let claims_trigger = crate::markdown::schemas::embedded::find(documents, &target)
+            let claims_trigger = crate::embedded::find(documents, &target)
                 .is_some_and(|document| matches!(parse_trigger_envelope_from_str(document.text), Ok(Some(_))));
             if target == importer || claims_trigger {
                 let suffix = if target == importer { " (self-reference)" } else { "" };
@@ -858,10 +871,10 @@ pub(super) fn resolve_embedded_payload(
                     chain: format!("{importer} -> {target}{suffix}"),
                 });
             }
-            resolve::prepare_embedded_schema_with_mode(&target, documents, bundle.name(), mode)
+            crate::resolve::prepare_embedded_schema_with_mode(&target, documents, bundle.name(), sources, mode)
         }
         YamlValue::Mapping(_) => {
-            resolve::prepare_embedded_inline_schema_with_mode(payload, &importer, documents, bundle.name(), mode)
+            crate::resolve::prepare_embedded_inline_schema_with_mode(payload, &importer, documents, bundle.name(), sources, mode)
         }
         YamlValue::Sequence(_) => Err(SchemaError::TriggerPayloadNotMergeable {
             path: importer_path.clone(),
@@ -874,7 +887,7 @@ pub(super) fn resolve_embedded_payload(
         other => Err(SchemaError::FrontmatterShape {
             message: format!(
                 "$schema must be a mapping, sequence, or string; got {}",
-                simplified_schema::resolve::describe_yaml(other)
+                crate::resolve::describe_yaml(other)
             ),
         }),
     })?;
@@ -906,12 +919,12 @@ fn enforce_compiles(
     payload_path: Option<PathBuf>,
     json_schema: &std::sync::Arc<Value>,
 ) -> Result<(), SchemaError> {
-    enforce_compiles_in(&crate::markdown::schemas::SHARED_VALIDATOR_CACHE, trigger_source, payload, payload_path, json_schema)
+    enforce_compiles_in(&crate::validate::SHARED_VALIDATOR_CACHE, trigger_source, payload, payload_path, json_schema)
 }
 
 /// [`enforce_compiles`] through `cache`.
 fn enforce_compiles_in(
-    cache: &simplified_schema::ValidatorCache,
+    cache: &crate::ValidatorCache,
     trigger_source: &Path,
     payload: &YamlValue,
     payload_path: Option<PathBuf>,
@@ -1004,7 +1017,7 @@ fn payload_cycle(trigger: &Path, ref_path: &Path) -> Option<SchemaError> {
 /// The canonical path of the file the loader refused as a schema document,
 /// when that file claims the `kind: schema-trigger` envelope. A refusal
 /// wrapped by a delegating schema file is found through the source chain.
-pub(crate) fn refused_trigger_file(error: &SchemaError) -> Option<PathBuf> {
+pub fn refused_trigger_file(error: &SchemaError) -> Option<PathBuf> {
     let mut cause: &dyn std::error::Error = error;
     loop {
         if let Some(
@@ -1026,7 +1039,7 @@ pub(crate) fn refused_trigger_file(error: &SchemaError) -> Option<PathBuf> {
 /// read as the resolver read it, so a retaining scope serves the bytes the
 /// `$schema` just resolved from instead of opening the file again.
 fn file_claims_trigger_envelope(path: &Path) -> bool {
-    let Ok(content) = simplified_schema::resolve::buffers::read_to_string(path) else {
+    let Ok(content) = crate::resolve::buffers::read_to_string(path) else {
         return false;
     };
     !matches!(parse_trigger_envelope_from_str(&content), Ok(None))
@@ -1038,7 +1051,7 @@ fn file_claims_trigger_envelope(path: &Path) -> bool {
 ///
 /// `referenced_files` comes from the resolved document `$schema`;
 /// `suggestion` is the payload filename to reference instead.
-pub(crate) fn check_document_schema_not_trigger(
+pub fn check_document_schema_not_trigger(
     referenced_files: &[PathBuf],
 ) -> Result<(), SchemaError> {
     for ref_path in referenced_files {
@@ -1051,7 +1064,7 @@ pub(crate) fn check_document_schema_not_trigger(
 
 /// [`SchemaError::TriggerSchemaReferenced`] for a document `$schema` that
 /// reached the trigger file at `trigger_path`.
-pub(crate) fn trigger_schema_referenced(trigger_path: &Path) -> SchemaError {
+pub fn trigger_schema_referenced(trigger_path: &Path) -> SchemaError {
     SchemaError::TriggerSchemaReferenced {
         reference: trigger_path.to_string_lossy().into_owned(),
         suggestion: payload_suggestion(trigger_path),
@@ -1088,11 +1101,12 @@ fn canonicalize(path: &Path) -> PathBuf {
     biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-#[cfg(test)]
+// Every case here scans or resolves real schema roots.
+#[cfg(all(test, feature = "file"))]
 mod tests {
     use super::*;
-    use simplified_schema::errors::SchemaError;
-    use crate::markdown::schemas::triggers::discovery;
+    use crate::errors::SchemaError;
+    use crate::triggers::discovery;
     use std::fs;
     use tempfile::TempDir;
 
@@ -1164,7 +1178,7 @@ mod tests {
         write(&root.join("schemas/other.yaml"), PAYLOAD);
 
         let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc_context(root)).unwrap();
+        let registry = discovery::scan(&doc_context(root), crate::embedded::ShippedSources::NONE).unwrap();
 
         // `prompt` present → a matches; b does not.
         let fm = frontmatter(&[("prompt", Value::String("x".into()))]);
@@ -1185,7 +1199,7 @@ mod tests {
         write(&root.join("schemas/claudine.yaml"), PAYLOAD);
 
         let doc = root.join("doc.md");
-        let registry = discovery::scan(&doc_context(root)).unwrap();
+        let registry = discovery::scan(&doc_context(root), crate::embedded::ShippedSources::NONE).unwrap();
 
         let fm = frontmatter(&[]);
         let evals = evaluate_registry(&registry, &fm, Some(&doc));
@@ -1207,9 +1221,9 @@ mod tests {
         );
         write(&root.join("schemas/claudine.yaml"), PAYLOAD);
 
-        let registry = discovery::scan(&doc_context(root)).unwrap();
+        let registry = discovery::scan(&doc_context(root), crate::embedded::ShippedSources::NONE).unwrap();
         let trigger = &registry.triggers[0];
-        let resolved = resolve_trigger_payload(trigger, registry.roots.search_paths(), &biscuit_file::FileResolutionContext::new(root)).unwrap();
+        let resolved = resolve_trigger_payload(trigger, registry.roots.search_paths(), &biscuit_file::FileResolutionContext::new(root), crate::embedded::ShippedSources::NONE).unwrap();
         assert_eq!(
             resolved.json_schema["type"], "object",
             "payload must resolve to an object schema"
@@ -1237,7 +1251,7 @@ mod tests {
              $schema:\n  - model: string(required)\n  - title: string(required)\n",
             &source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root), crate::embedded::ShippedSources::NONE).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadNotMergeable { .. }),
             "root union payload must be rejected: {err:?}"
@@ -1254,7 +1268,7 @@ mod tests {
             "kind: schema-trigger\nmatch:\n  prompt: string(required)\n",
             &source,
         );
-        let payload = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root))
+        let payload = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root), crate::embedded::ShippedSources::NONE)
             .expect("a matcher-only trigger loads");
         assert!(payload.dependencies.is_empty() && payload.shape.is_none(), "{payload:?}");
     }
@@ -1279,7 +1293,7 @@ mod tests {
              $schema: self.trigger.yaml\n",
             &source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root), crate::embedded::ShippedSources::NONE).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadCycle { .. }),
             "self-referencing payload must be rejected: {err:?}"
@@ -1308,7 +1322,7 @@ mod tests {
              $schema: b.trigger.yaml\n",
             &a_source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
+        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root), crate::embedded::ShippedSources::NONE).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerPayloadCycle { .. }),
             "payload referencing another trigger must be rejected: {err:?}"
@@ -1367,8 +1381,8 @@ mod tests {
         let repo = payload_repo();
         let root = repo.path();
 
-        let first = discovery::scan(&doc_context(root).for_source(root.join("a.md"))).unwrap();
-        let second = discovery::scan(&doc_context(root).for_source(root.join("b.md"))).unwrap();
+        let first = discovery::scan(&doc_context(root).for_source(root.join("a.md")), crate::embedded::ShippedSources::NONE).unwrap();
+        let second = discovery::scan(&doc_context(root).for_source(root.join("b.md")), crate::embedded::ShippedSources::NONE).unwrap();
 
         assert!(std::sync::Arc::ptr_eq(&first.payloads[0].json_schema, &second.payloads[0].json_schema));
     }
@@ -1377,11 +1391,11 @@ mod tests {
     fn an_edited_payload_file_is_resolved_again() {
         let repo = payload_repo();
         let root = repo.path();
-        assert_eq!(payload_properties(&discovery::scan(&doc_context(root)).unwrap()), ["model"]);
+        assert_eq!(payload_properties(&discovery::scan(&doc_context(root), crate::embedded::ShippedSources::NONE).unwrap()), ["model"]);
 
         write(&root.join("schemas/claudine.yaml"), "$schema:\n  owner: string(required)\n");
 
-        assert_eq!(payload_properties(&discovery::scan(&doc_context(root)).unwrap()), ["owner"]);
+        assert_eq!(payload_properties(&discovery::scan(&doc_context(root), crate::embedded::ShippedSources::NONE).unwrap()), ["owner"]);
     }
 
     #[test]
@@ -1390,11 +1404,11 @@ mod tests {
         let root = repo.path();
         fs::create_dir_all(root.join("pkg/schemas")).unwrap();
         let context = || doc_context(root).with_package_root(root.join("pkg")).for_source(root.join("pkg/doc.md"));
-        assert_eq!(payload_properties(&discovery::scan(&context()).unwrap()), ["model"]);
+        assert_eq!(payload_properties(&discovery::scan(&context(), crate::embedded::ShippedSources::NONE).unwrap()), ["model"]);
 
         write(&root.join("pkg/schemas/claudine.yaml"), "$schema:\n  owner: string(required)\n");
 
-        assert_eq!(payload_properties(&discovery::scan(&context()).unwrap()), ["owner"]);
+        assert_eq!(payload_properties(&discovery::scan(&context(), crate::embedded::ShippedSources::NONE).unwrap()), ["owner"]);
     }
 
     // ── payload_suggestion ──────────────────────────────────────────────

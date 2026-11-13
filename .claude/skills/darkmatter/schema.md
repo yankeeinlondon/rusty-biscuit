@@ -19,10 +19,13 @@ integration (baseline, `md schema`, compose, library API).
 Path shorthand in this file:
 
 - **Darkmatter** (`darkmatter/lib/src/markdown/schemas/`): `schemas/…`,
-  `triggers/…`, `roots.rs`, `catalog.rs`, `embedded.rs`, `rewrite.rs`,
-  `bound_operands.rs`, `schemas/positions.rs` (`ProblemPositions`),
-  `discovery.rs`, `assemble.rs`,
-  `finding.rs`, and `mod.rs` (`DarkmatterSchemas`, `EffectiveSchema`,
+  `catalog.rs`, `schemas/embedded.rs` (`SHIPPED`, `SHIPPED_SOURCES`),
+  `schemas/triggers.rs` (the `scan`/`scan_with_embedded`/`scan_with_source`/
+  `prepare_trigger_bundle` wrappers that add `SHIPPED_SOURCES`),
+  `schemas/yaml_documents/mod.rs` (the YAML adapter: `YamlContract`,
+  `YamlValidation`, `Route`, `kind_host`, `shipped_kind_registry`),
+  `rewrite.rs`, `bound_operands.rs`, `schemas/positions.rs`
+  (`ProblemPositions`), and `mod.rs` (`DarkmatterSchemas`, `EffectiveSchema`,
   `ValidationOptions`, `PendingPolicy`, `merged_trigger_schema`,
   `phase_json_schema`, `validate_timed`).
 - **Library** (`simplified-schema/lib/src/`): `simplified/…` (`convert.rs`,
@@ -37,13 +40,20 @@ Path shorthand in this file:
   a pending template's slot-free properties without resolving it), `positions.rs` (`PositionMap`, `build_position_map`),
   `timings.rs`, `errors.rs`
   (`SchemaError`), `pending.rs` (re-exported as
-  `darkmatter::markdown::literal_token`).
+  `darkmatter::markdown::literal_token`); and the schema-kind infrastructure:
+  `triggers/…` (`grammar.rs`, `envelope.rs`, `lint.rs`, `matcher.rs`,
+  `discovery.rs`, `assemble.rs`, `prepared.rs`, `finding.rs`), `roots.rs`,
+  `embedded.rs` (`EmbeddedSchemaBundle`, `ShippedSources`), and
+  `yaml_documents/…` (`load.rs`, `marks.rs`, `registry.rs`, `select.rs`,
+  `semantic.rs`). Edits to triggers, roots, the kind registry, selection, or
+  kind checks belong to the `simplified-schema` skill; their tests still
+  live in `darkmatter/lib/tests/l1/`.
 - The parsed `$schema` AST enum is `simplified_schema::SchemaRoot`; the
   standalone facade object is `simplified_schema::SimplifiedSchema`.
   `darkmatter::markdown::schemas::resolve` wraps the library resolver to pass
   Darkmatter's shipped sources (`embedded::SHIPPED_SOURCES`).
-- Darkmatter mirrors of the lowering (`call_binding/translate.rs`, the trigger
-  `matcher.rs`) must reuse the library's `simplified::declaration_options_payload`
+- Mirrors of the lowering (Darkmatter's `call_binding/translate.rs`, the
+  library's trigger `matcher.rs`) must reuse the library's `simplified::declaration_options_payload`
   and `format::{judge_schema, judge_type_definition}` for the `schema` /
   `type-definition` declaration options, and treat `non-null` as a marker
   (no null arm, never a presence requirement). `about.rs` catalogs constraints
@@ -93,9 +103,9 @@ admitted against the library's compiled `simplified-schema/schemas/schema.yaml`
 / `yaml-schema.yaml` (see the `simplified-schema` skill), so structural
 messages read "the `kind: schema` envelope does not satisfy its definition
 `simplified-schema/schemas/schema.yaml`: `/types`: …"; assert on that
-pointer, not on the old hand-written wording. Darkmatter's own
-`darkmatter/schemas/schema-trigger.yaml` is a `yaml-schema` too (corpus class
-`YamlSchemaDefinition`). `admits_top_level_key` decides only whether an
+pointer, not on the old hand-written wording. The library's
+`simplified-schema/schemas/schema-trigger.yaml` is a `yaml-schema` too (corpus class
+`YamlSchemaDefinition`), a kind definition that admits no envelope. `admits_top_level_key` decides only whether an
 untagged mapping is the informal envelope; the recognizer and DMLS's lexical
 `standalone_envelope_claim` read it. When both tables are present, `$schema` defines document properties and `types`
 supplies local names and named imports; local definitions and cross-file imports
@@ -120,7 +130,11 @@ but the loader no longer emits it. Classification is passive: it uses the
 already-parsed YAML value and performs no additional I/O. User docs:
 `darkmatter/docs/topics/schemas/definition.md#what-a-schema-reference-may-point-at`.
 
-### Whole YAML documents (`schemas/yaml_documents/`)
+### Whole YAML documents
+
+Library: `simplified_schema::yaml_documents` (`load.rs`, `select.rs`,
+`registry.rs`, `semantic.rs`). Darkmatter: the adapter in
+`schemas/yaml_documents/mod.rs`.
 
 `DarkmatterSchemas::validate_yaml_document(text, path)` is the one entry point
 for a `.yaml`/`.yml` file (`YamlOutcome::{NoSchema, Validated}`; the instance's
@@ -130,9 +144,13 @@ definition only (root `$schema` is ordinary data); else root `$schema` (via
 `resolve_schema_with_roots`, stripped from the copy); else `NoSchema`. No
 baseline, no trigger layer, `EffectiveSchema::validate_data` (soft, no template
 deferral). `load.rs` is the only loader (BOM offset, one document, non-string
-keys). `KindRegistry` (`registry.rs`) = shipped definitions
-(`embedded::shipped_kind_definitions()`; guard
-`every_shipped_yaml_schema_definition_is_in_the_shipped_table`) + `kind:
+keys). `KindRegistry` (`registry.rs`) = the host's shipped definitions
+(`KindHost { sources, shipped }`; Darkmatter passes `kind_host()`, whose
+definitions are its artifact's `kind_definitions` or, when refused,
+`prepare_shipped_definitions(SHIPPED_SOURCES)`; one per
+`simplified_schema::envelope::ENVELOPE_DEFINITIONS` entry; guard
+`shipped_schema_corpus.rs::every_shipped_yaml_schema_definition_is_in_the_shipped_table`)
++ `kind:
 yaml-schema` files in the five roots for `RegistryScope::WithRoots` (an
 `Absent` root whose folder does not exist adds the source's
 `absent_root_files`, an editor's unsaved definitions there); never
@@ -182,10 +200,12 @@ from the same load, never a second parser.
 
 Ownership and lifecycle:
 
-- **Who owns what.** `simplified-schema/schemas/{schema,yaml-schema}.yaml` are
-  the library's (envelope admission, see the `simplified-schema` skill);
-  `darkmatter/schemas/schema-trigger.yaml`, the registry, selection, and
-  `semantic.rs` are Darkmatter's. All three ship in `embedded.rs`.
+- **Who owns what.** `simplified-schema/schemas/{schema,yaml-schema,schema-trigger}.yaml`,
+  the registry, selection, and `semantic.rs` are the library's (see the
+  `simplified-schema` skill); only `schema.yaml` and `yaml-schema.yaml`
+  admit envelopes. All three ship in `envelope::ENVELOPE_DEFINITIONS`;
+  Darkmatter records their prepared form in its own artifact
+  (`kind_definitions`) and hands them over through `kind_host()`.
 - **Registry lifecycle.** Without `with_kind_registry` every
   `validate_loaded_yaml_document` builds a registry for the instance's
   context (`RegistryScope::for_context`), which scans the schema roots. A
@@ -1285,7 +1305,8 @@ library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
 
 ## Schema roots and `$path` triggers
 
-- `SchemaRoots::for_document(&ctx)` (`schemas/roots.rs`) is the one root list:
+- `SchemaRoots::for_document(&ctx)` (`simplified_schema::roots`, library
+  `roots.rs`) is the one root list:
   `SCHEMAS_DIR`, package, package area, `base_dir()`, `~/schemas` (reorder
   only the `candidates` array; `SchemaRootKind` variants follow it). When
   `SCHEMAS_DIR` aliases a repository `schemas/` folder, the `SchemasDir` root
@@ -1293,8 +1314,9 @@ library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
   `Duplicate { of: SchemasDir }`. Each root has a
   `SchemaRootState` (`Searched`, `Absent`, `Duplicate { of }`,
   `NotApplicable`, `Invalid`). `md schema triggers` prints exactly these
-  states; DMLS and `md` share them through `triggers::scan(&ctx)` (DMLS
-  calls `scan_with_source`, the same scan over its cached root contents;
+  states; DMLS and `md` share them through Darkmatter's
+  `schemas::triggers::scan(&ctx)` (the library's `scan(&ctx, sources)` with
+  `SHIPPED_SOURCES`; DMLS calls `scan_with_source`, the same scan over its cached root contents;
   `enumerate_root_files` is the one root listing). DMLS prepares workspace
   registries at startup and serves them from memory until an input changes;
   see [dmls.md](dmls.md) and `darkmatter/docs/lsp/indexing.md`.
@@ -1397,7 +1419,7 @@ library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
   triggers); `&`, `^`, `~`, absolute from the document's own context. `@`,
   `vault:`, `%`, and `{{` anywhere are `TriggerMatch` definition errors naming
   the pattern.
-- Embedded trigger bundles (`EmbeddedSchemaBundle`, `schemas/embedded.rs`):
+- Embedded trigger bundles (`simplified_schema::embedded::EmbeddedSchemaBundle`):
   a host registers `(file name, &'static str)` pairs with
   `DarkmatterSchemas::with_embedded_trigger_bundle` (or
   `triggers::scan_with_embedded`); they are appended after the five roots,

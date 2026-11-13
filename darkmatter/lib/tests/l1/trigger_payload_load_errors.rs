@@ -12,7 +12,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, InvalidTriggerFinding, TriggerSource};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::embedded::EmbeddedSchemaBundle;
+use simplified_schema::triggers::{InvalidTriggerFinding, TriggerSource};
 use simplified_schema::SchemaError;
 
 /// A trigger matching any document with a `prompt`.

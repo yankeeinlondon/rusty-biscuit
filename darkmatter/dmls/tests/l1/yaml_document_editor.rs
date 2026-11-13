@@ -806,10 +806,10 @@ fn an_opened_checkout_definition_alone_judges_its_documents_shape() {
             "docs/inventory.yaml",
             "kind: yaml-schema\n$schema:\n    kind: literal(inventory; required)\n    count: number\n",
         ),
-        ("darkmatter/schemas/schema-trigger.yaml", include_str!("../../../schemas/schema-trigger.yaml"), "docs/trigger.yaml", VALID_TRIGGER),
+        ("simplified-schema/schemas/schema-trigger.yaml", include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml"), "docs/trigger.yaml", VALID_TRIGGER),
         (
-            "darkmatter/schemas/schema-trigger.yaml",
-            include_str!("../../../schemas/schema-trigger.yaml"),
+            "simplified-schema/schemas/schema-trigger.yaml",
+            include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml"),
             "darkmatter/schemas/review.yaml",
             VALID_TRIGGER,
         ),

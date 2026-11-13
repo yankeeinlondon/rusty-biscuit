@@ -17,7 +17,7 @@ use biscuit_test_harness::manifest_dir;
 /// Files allowed to spell a renamed form, relative to the repository root.
 const ALLOWED: &[&str] = &[
     // The rejecting code and its diagnostics.
-    "darkmatter/lib/src/markdown/schemas/triggers/envelope.rs",
+    "simplified-schema/lib/src/triggers/envelope.rs",
     "simplified-schema/lib/src/errors.rs",
     "darkmatter/cli/src/main.rs",
     // Negative fixtures and the tests that prove the rejection.

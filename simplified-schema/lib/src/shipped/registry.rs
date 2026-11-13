@@ -1,8 +1,11 @@
 //! Simplified Schema's own artifact: the prepared envelope definitions.
 //!
-//! The library's shipped sources are its two envelope definitions
-//! ([`ENVELOPE_DEFINITIONS`]); their prepared form is each definition's
-//! lowered JSON Schema. The checked-in artifact
+//! The library's shipped sources are its kind definitions
+//! ([`ENVELOPE_DEFINITIONS`]: the two envelope definitions and the trigger
+//! definition); the payload's prepared form is each envelope definition's
+//! lowered JSON Schema. The trigger definition is fingerprinted here, and a
+//! host records its prepared form in its own artifact (Darkmatter's
+//! `kind_definitions`). The checked-in artifact
 //! (`simplified-schema/lib/generated/shipped.json`) is loaded once per
 //! process on first admission ([`envelopes`]); a refused artifact falls back
 //! to the bootstrap that parses and lowers the definitions from their text.
@@ -24,7 +27,7 @@ pub const OWNER: &str = "simplified-schema";
 /// This library's preparation revision. Increment it whenever lowering or
 /// admission changes what the envelope definitions prepare to, then run
 /// `just shipped-schemas`.
-pub const PREPARATION_REVISION: u32 = 1;
+pub const PREPARATION_REVISION: u32 = 2;
 
 /// The artifact's repository-relative path.
 pub const ARTIFACT_PATH: &str = "simplified-schema/lib/generated/shipped.json";

@@ -45,7 +45,8 @@ use std::sync::Arc;
 use biscuit_file::FileResolutionContext;
 use biscuit_hash::xx_hash_bytes;
 use darkmatter::markdown::compose::file_resolution_context_identity;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, KindRegistry, LoadedYamlDocument, Route, YamlContract, YamlValidation};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, Route, YamlContract, YamlValidation};
+use simplified_schema::yaml_documents::LoadedYamlDocument;
 use simplified_schema::resolve::buffers::{self, SourceBuffers};
 use simplified_schema::resolve::observed;
 use simplified_schema::{SchemaError, parse_selected_standalone_schema_document};
@@ -454,7 +455,7 @@ fn prepare(
     };
     let outer_context = context;
     let context = context.for_source(path);
-    let registry = kinds.map_or_else(KindRegistry::shipped, |kinds| kinds.registry);
+    let registry = kinds.map_or_else(darkmatter::markdown::schemas::shipped_kind_registry, |kinds| kinds.registry);
     let schema_roots = registry.roots().search_paths().to_vec();
     let schemas = DarkmatterSchemas::new(context.clone()).with_kind_registry(registry);
     let contract = schemas.prepare_yaml_contract(&loaded).map_err(Arc::new);

@@ -91,7 +91,7 @@ impl Fixture {
 /// tally's counts.
 fn tallied_scan(context: &FileResolutionContext) -> (TriggerRegistry, PayloadMemoCounts) {
     let tally = PayloadMemoTally::start();
-    let registry = scan(context).unwrap_or_else(|error| panic!("trigger scan: {error}"));
+    let registry = scan(context, crate::embedded::ShippedSources::NONE).unwrap_or_else(|error| panic!("trigger scan: {error}"));
     (registry, tally.counts())
 }
 
@@ -193,7 +193,7 @@ fn an_inherited_validation_failure_is_never_cleared_by_a_hit() {
     assert!(escaped.validate().is_err(), "the fixture context must fail validation");
 
     let tally = PayloadMemoTally::start();
-    let result = scan(&escaped);
+    let result = scan(&escaped, crate::embedded::ShippedSources::NONE);
 
     assert_eq!(tally.counts().hits, 0, "a failing requester never reuses a payload: {result:?}");
 }
@@ -295,7 +295,7 @@ fn eighteen_distinct_keys_fit_and_a_repeat_scan_resolves_nothing() {
 
     let cold = PayloadMemoTally::start();
     for document in &documents {
-        assert_eq!(scan(document).expect("cold scan").payloads.len(), 3);
+        assert_eq!(scan(document, crate::embedded::ShippedSources::NONE).expect("cold scan").payloads.len(), 3);
     }
     assert_eq!(cold.counts(), PayloadMemoCounts { hits: 0, misses: 18 });
     drop(cold);
@@ -303,7 +303,7 @@ fn eighteen_distinct_keys_fit_and_a_repeat_scan_resolves_nothing() {
     let (_, repeat) = {
         let tally = PayloadMemoTally::start();
         for document in &documents {
-            scan(document).expect("repeat scan");
+            scan(document, crate::embedded::ShippedSources::NONE).expect("repeat scan");
         }
         ((), tally.counts())
     };
@@ -365,8 +365,8 @@ fn a_file_added_to_a_schema_root_is_resolved_again() {
 
 /// The trigger `scan` skipped because its payload failed: the scan itself
 /// succeeds, and the trigger is reported instead of installed.
-fn skipped_by_payload_failure(context: &FileResolutionContext) -> crate::markdown::schemas::InvalidTriggerFinding {
-    let registry = scan(context).expect("a failed payload skips its trigger, not the scan");
+fn skipped_by_payload_failure(context: &FileResolutionContext) -> crate::triggers::InvalidTriggerFinding {
+    let registry = scan(context, crate::embedded::ShippedSources::NONE).expect("a failed payload skips its trigger, not the scan");
     assert!(registry.triggers.is_empty(), "a failed payload is never installed");
     let [finding] = registry.findings() else {
         panic!("one finding expected: {:?}", registry.findings());
@@ -399,15 +399,15 @@ fn a_nested_tally_excludes_the_interruption_from_the_outer_one() {
     let second_document = fixture.document(&fixture.repository_context(), "pkg-b/doc.md");
 
     let pass = PayloadMemoTally::start();
-    scan(&first_document).expect("pass scan");
+    scan(&first_document, crate::embedded::ShippedSources::NONE).expect("pass scan");
     {
         let interruption = PayloadMemoTally::start();
-        scan(&second_document).expect("interrupting scan");
+        scan(&second_document, crate::embedded::ShippedSources::NONE).expect("interrupting scan");
         assert_eq!(interruption.counts(), HIT);
     }
     let other_thread = std::thread::spawn({
         let first_document = first_document.clone();
-        move || scan(&first_document).map(|_| ())
+        move || scan(&first_document, crate::embedded::ShippedSources::NONE).map(|_| ())
     });
     other_thread.join().expect("other thread").expect("other-thread scan");
 

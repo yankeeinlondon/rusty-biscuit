@@ -24,7 +24,7 @@ use simplified_schema::coercion::{PathSegment, json_pointer};
 
 use super::contract::RowMode;
 use super::error::TabularSource;
-use crate::markdown::schemas::yaml_documents::{load_yaml_document, locating_problem};
+use simplified_schema::yaml_documents::{load_yaml_document, locating_problem};
 
 /// One step of a value's place in file order, compared level by level.
 ///

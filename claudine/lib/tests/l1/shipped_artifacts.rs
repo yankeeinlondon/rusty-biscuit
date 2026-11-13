@@ -25,7 +25,8 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::catalog::GlobalCatalog;
 use darkmatter::markdown::schemas::shipped::FreshDarkmatter;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::embedded::EmbeddedSchemaBundle;
 use serde_json::{Value, json};
 use simplified_schema::embedded::EmbeddedDocument;
 use simplified_schema::shipped::{self as mechanism, DependencyFingerprint, FallbackReason, FreshLower, LowerArtifact};
@@ -144,7 +145,7 @@ fn shipped_artifact_is_fresh() {
     let _ = include_str!("../../../../darkmatter/schemas/partials/mutations.yaml");
     let _ = include_str!("../../../../darkmatter/schemas/partials/style.yaml");
     let _ = include_str!("../../../../darkmatter/schemas/partials/timing.yaml");
-    let _ = include_str!("../../../../darkmatter/schemas/schema-trigger.yaml");
+    let _ = include_str!("../../../../simplified-schema/schemas/schema-trigger.yaml");
     let _ = include_str!("../../../../simplified-schema/schemas/schema.yaml");
     let _ = include_str!("../../../../simplified-schema/schemas/yaml-schema.yaml");
     // The other packages' code whose behavior decides Claudine's bytes
@@ -159,10 +160,6 @@ fn shipped_artifact_is_fresh() {
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/embedded.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/resolve.rs");
     let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/shipped.rs");
-    let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/triggers/assemble.rs");
-    let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/triggers/envelope.rs");
-    let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/triggers/grammar.rs");
-    let _ = include_str!("../../../../darkmatter/lib/src/markdown/schemas/triggers/prepared.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/embedded.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/envelope.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/file_match.rs");
@@ -185,6 +182,10 @@ fn shipped_artifact_is_fresh() {
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/standalone.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/types.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/simplified/yaml_scalar.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/triggers/assemble.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/triggers/envelope.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/triggers/grammar.rs");
+    let _ = include_str!("../../../../simplified-schema/lib/src/triggers/prepared.rs");
     let _ = include_str!("../../../../simplified-schema/lib/src/validate.rs");
     let checked_in = include_bytes!("../../generated/shipped.json");
     let fresh = shipped::generate().expect("fresh generation");

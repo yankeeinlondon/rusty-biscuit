@@ -60,6 +60,7 @@ pub mod prepared;
 pub mod property_path;
 pub mod reference;
 pub mod resolve;
+pub mod roots;
 pub mod schema;
 pub mod scope;
 pub mod setter_value;
@@ -68,8 +69,10 @@ pub mod simplified;
 pub mod slots;
 pub mod span;
 pub mod timings;
+pub mod triggers;
 pub mod validate;
 pub mod validation;
+pub mod yaml_documents;
 #[cfg(feature = "work-counters")]
 pub mod work_counters;
 
@@ -165,4 +168,7 @@ pub fn reset_process_caches() {
     simplified::convert::reset_process_caches();
     resolve::reset_process_caches();
     prepared::reset_process_caches();
+    triggers::assemble::reset_process_caches();
+    triggers::discovery::reset_process_caches();
+    triggers::matcher::reset_thread_caches();
 }

@@ -109,8 +109,8 @@ The meta-schema check runs offline; nothing is fetched. These rules apply only
 to a `$schema` target. A named-type import (`Name@file.yaml`) reads any
 `kind: schema` or informal envelope, a `types`-only one included, but never a
 `kind: yaml-schema` file. Other kinded YAML, such as ordinary data
-(`kind: roster`) or a host's own document kinds (Darkmatter's
-`kind: schema-trigger`), is never a target either: it fails with one of the
+(`kind: roster`) or a [schema trigger](#who-owns-each-definition)
+(`kind: schema-trigger`), is never a target either: it fails with one of the
 rows above.
 
 ### Migrating Raw JSON Schema Written in YAML
@@ -414,12 +414,21 @@ before admission when it is a `yaml-schema`.
 |---|---|---|
 | `simplified-schema/schemas/schema.yaml` | `kind: schema` (and the informal envelope) | this library |
 | `simplified-schema/schemas/yaml-schema.yaml` | `kind: yaml-schema`, itself included | this library |
-| `darkmatter/schemas/schema-trigger.yaml` | `kind: schema-trigger` | Darkmatter |
+| `simplified-schema/schemas/schema-trigger.yaml` | `kind: schema-trigger` | this library |
 
-The two library definitions are compiled in as
+All three are compiled in as
 `simplified_schema::envelope::ENVELOPE_DEFINITIONS`, keyed by the virtual
-paths `SCHEMA_DEFINITION_PATH` and `YAML_SCHEMA_DEFINITION_PATH`; admission
-reads no file. Both are `kind: yaml-schema` documents. This is the definition
+paths `SCHEMA_DEFINITION_PATH`, `YAML_SCHEMA_DEFINITION_PATH`, and
+`SCHEMA_TRIGGER_DEFINITION_PATH`; admission reads no file. All three are
+`kind: yaml-schema` documents, and together they seed every YAML
+document-kind registry (`simplified_schema::yaml_documents::KindRegistry`).
+Only `schema.yaml` and `yaml-schema.yaml` admit envelopes. The trigger
+definition is a kind definition like one a user writes: it validates a
+trigger file when that file is opened as a YAML document, while trigger
+discovery (`simplified_schema::triggers`) reads triggers with its own parser.
+A host prepares the three for its registry with its own `ShippedSources`
+(`yaml_documents::prepare_shipped_definitions`) and may record the prepared
+form in its own shipped artifact; Darkmatter does. This is the definition
 of a `yaml-schema`:
 
 ```yaml

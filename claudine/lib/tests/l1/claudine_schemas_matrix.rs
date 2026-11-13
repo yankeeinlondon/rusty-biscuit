@@ -17,7 +17,7 @@
 
 use biscuit_file::Yaml;
 use claudine::composition::schema::bundle::{CLAUDINE_SCHEMA_BUNDLE_NAME, CLAUDINE_TRIGGER_FILES};
-use darkmatter::markdown::schemas::TriggerSource;
+use simplified_schema::triggers::TriggerSource;
 use serde_json::{Map, Value, json};
 
 use crate::claudine_schemas::{BundleFile, Discovered, SchemaRepo, embedded_bundle, shipped_bundle};

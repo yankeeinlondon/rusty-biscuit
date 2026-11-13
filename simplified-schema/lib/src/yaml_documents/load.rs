@@ -2,7 +2,7 @@
 //!
 //! A `.yaml`/`.yml` document is read as exactly one YAML document through the
 //! shared admitted-YAML loader and numeric model
-//! ([`simplified_schema::numeric::load_admitted_yaml`]). A leading `---` is
+//! ([`crate::numeric::load_admitted_yaml`]). A leading `---` is
 //! a document-start marker and a trailing `...` a document-end marker, never
 //! Markdown frontmatter fences. Duplicate keys, a second document, an
 //! inadmissible number, a non-string mapping key, and malformed YAML are
@@ -18,7 +18,7 @@ use std::path::Path;
 
 use serde_yaml_ng::Value as YamlValue;
 use serde_json::Value;
-use simplified_schema::{PositionMap, SchemaError, ValidationProblem};
+use crate::{PositionMap, SchemaError, ValidationProblem};
 
 use super::marks::{self, Offender};
 
@@ -26,21 +26,21 @@ const BYTE_ORDER_MARK: char = '\u{feff}';
 
 /// A loaded YAML document and what locates its problems.
 #[derive(Debug, Clone)]
-pub(crate) struct LoadedYaml {
+pub struct LoadedYaml {
     /// The document as authored.
-    pub(crate) value: YamlValue,
+    pub value: YamlValue,
     /// The document as the JSON value schemas judge.
-    pub(crate) json: Value,
+    pub json: Value,
     /// Node positions of the text after the byte-order mark, built when a
     /// coordinate is first requested.
-    pub(crate) positions: PositionMap,
+    pub positions: PositionMap,
     /// Bytes skipped before the YAML text: the byte-order mark, or `0`.
-    pub(crate) offset: usize,
+    pub offset: usize,
 }
 
 impl LoadedYaml {
     /// The byte range of `problem`'s token in the original text.
-    pub(crate) fn byte_range(&self, problem: &ValidationProblem) -> Option<Range<usize>> {
+    pub fn byte_range(&self, problem: &ValidationProblem) -> Option<Range<usize>> {
         self.positions.byte_range(problem).map(|range| range.start + self.offset..range.end + self.offset)
     }
 }
@@ -52,17 +52,17 @@ impl LoadedYaml {
 /// [`SchemaError::SchemaDocument`] naming `path`, with the byte span of the
 /// failure in `text` when the parser reports one, for every load failure
 /// listed in the [module docs](self).
-pub(crate) fn load_yaml_document(text: &str, path: &Path) -> Result<LoadedYaml, SchemaError> {
+pub fn load_yaml_document(text: &str, path: &Path) -> Result<LoadedYaml, SchemaError> {
     let offset = if text.starts_with(BYTE_ORDER_MARK) { BYTE_ORDER_MARK.len_utf8() } else { 0 };
     let body = &text[offset..];
-    let value = simplified_schema::numeric::load_admitted_yaml(body).map_err(|error| {
+    let value = crate::numeric::load_admitted_yaml(body).map_err(|error| {
         // Only a second document has no parser location.
         let start = error.location().map(|location| location.index()).or_else(|| marks::second_document_start(body));
         let span = start.map(|start| {
             let start = (start + offset).min(text.len());
             start..start
         });
-        let message = if simplified_schema::numeric::is_yaml_admission_error(&error) {
+        let message = if crate::numeric::is_yaml_admission_error(&error) {
             error.to_string()
         } else {
             format!("not valid YAML: {error}")
@@ -83,7 +83,7 @@ pub(crate) fn load_yaml_document(text: &str, path: &Path) -> Result<LoadedYaml, 
 
 /// The byte offset in `text` of the first tagged value of `loaded`, which
 /// was loaded from `text`.
-pub(crate) fn first_tag_start(text: &str, loaded: &LoadedYaml) -> Option<usize> {
+pub fn first_tag_start(text: &str, loaded: &LoadedYaml) -> Option<usize> {
     marks::first_offender_start(&text[loaded.offset..], &loaded.value, Offender::Tag).map(|start| start + loaded.offset)
 }
 
@@ -121,18 +121,18 @@ fn first_non_string_key(value: &YamlValue, at: &mut Vec<String>) -> Option<Vec<S
 }
 
 /// A problem whose only purpose is to be located: the value at `segments`.
-pub(crate) fn locating_problem(segments: &[String]) -> ValidationProblem {
-    let pointer = simplified_schema::JsonPointer::parse(&pointer_string(segments));
+pub fn locating_problem(segments: &[String]) -> ValidationProblem {
+    let pointer = crate::JsonPointer::parse(&pointer_string(segments));
     ValidationProblem {
         path: pointer.as_pointer_string(),
         message: String::new(),
-        kind: simplified_schema::ValidationProblemKind::Invalid,
+        kind: crate::ValidationProblemKind::Invalid,
         property: None,
         line: None,
         column: None,
         arm_index: None,
         description: None,
-        code: simplified_schema::ValidationProblemCode::KindCheck,
+        code: crate::ValidationProblemCode::KindCheck,
         instance_path: pointer,
         schema_path: None,
         offending_property: None,
@@ -143,6 +143,6 @@ pub(crate) fn locating_problem(segments: &[String]) -> ValidationProblem {
 }
 
 /// `segments` as an RFC 6901 pointer string.
-pub(crate) fn pointer_string(segments: &[String]) -> String {
+pub fn pointer_string(segments: &[String]) -> String {
     segments.iter().map(|segment| format!("/{}", segment.replace('~', "~0").replace('/', "~1"))).collect()
 }

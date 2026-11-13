@@ -16,10 +16,9 @@ use crate::io::{DocumentOutsideRepository, open_argument};
 use crate::output::command::{CommandRun, Completed, DataShape};
 use crate::output::stderr_terminal;
 use crate::request::MdRequest;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, InvalidSchemasDir, InvalidTriggerFinding, SchemaSearchRoot, SchemaRootKind, SchemaRootState, TriggerTrace,
-    trace_registry,
-};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::roots::{InvalidSchemasDir, SchemaSearchRoot, SchemaRootKind, SchemaRootState};
+use simplified_schema::triggers::{InvalidTriggerFinding, TriggerTrace, trace_registry};
 use std::path::Path;
 
 /// Reports the five schema roots, shadowing, the triggers discovery skipped as

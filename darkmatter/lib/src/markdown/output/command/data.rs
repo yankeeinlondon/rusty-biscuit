@@ -14,9 +14,8 @@ use crate::markdown::dsl::CodeBlockMeta;
 use crate::markdown::hash::{
     ComparisonDetail, ComputedHash, HashComparison, IgnorePolicyAdvisory, MdHashKind, StoredHash, StoredHashValue,
 };
-use crate::markdown::schemas::{
-    InvalidSchemasDir, InvalidTriggerFinding, SchemaRootKind, SchemaRootState, SchemaSearchRoot, TriggerTrace,
-};
+use simplified_schema::roots::{InvalidSchemasDir, SchemaRootKind, SchemaRootState, SchemaSearchRoot};
+use simplified_schema::triggers::{InvalidTriggerFinding, TriggerTrace};
 
 /// `md set`.
 #[derive(Debug, Clone, Serialize)]

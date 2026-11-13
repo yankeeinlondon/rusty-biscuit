@@ -8,9 +8,10 @@
 //! always wins; see `claudine/docs/topics/schemas.md`. Their prepared form
 //! ships in Claudine's artifact ([`super::shipped`]).
 
-use darkmatter::markdown::schemas::TriggerOrigin;
-use darkmatter::markdown::schemas::triggers::TriggerSource;
-use darkmatter::markdown::schemas::{EffectiveSchema, EmbeddedSchemaBundle};
+use simplified_schema::triggers::TriggerOrigin;
+use simplified_schema::triggers::TriggerSource;
+use darkmatter::markdown::schemas::EffectiveSchema;
+use simplified_schema::embedded::EmbeddedSchemaBundle;
 use simplified_schema::SchemaOriginKind;
 
 /// The bundle's name in origins, traces, and errors (`embedded:claudine/…`).

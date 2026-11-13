@@ -51,7 +51,7 @@ use lsp_types::{
 };
 use darkmatter::markdown::compose::RequestSnapshot;
 use simplified_schema::ValidationStage;
-use darkmatter::markdown::schemas::triggers::{PayloadMemoCounts, PayloadMemoTally};
+use simplified_schema::triggers::{PayloadMemoCounts, PayloadMemoTally};
 use thiserror::Error;
 
 use crate::capabilities::{ClientProfile, negotiate_position_encoding, server_capabilities};

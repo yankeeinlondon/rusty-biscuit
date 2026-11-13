@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use crate::markdown::cleanup::diagnostic::{CleanCode, CleanDiagnostic};
 use crate::markdown::cleanup::{CleanOutcome, CleanResult};
 use crate::markdown::extract_frontmatter_block;
-use crate::markdown::schemas::InvalidTriggerFinding;
+use simplified_schema::triggers::InvalidTriggerFinding;
 use crate::markdown::span::line_col_of_offset;
 
 /// One skipped trigger in a data output; the same shape as a schema advisory

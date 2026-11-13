@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use biscuit_file::canonicalize_simplified;
 use common::{LspFixture, LspWorkspace};
 use darkmatter::markdown::compose::RequestSnapshot;
-use darkmatter::markdown::schemas::{SchemaRootKind, SchemaRoots};
+use simplified_schema::roots::{SchemaRootKind, SchemaRoots};
 use dmls::context::RepositoryContexts;
 use dmls::overlay::SchemaOutcome;
 use dmls::{DmlsConfig, OverlayState};

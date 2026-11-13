@@ -2,8 +2,9 @@ use std::collections::{BTreeSet, HashMap};
 
 use darkmatter::markdown::{
     Markdown, compose::{RequestSnapshot, build_resolution_context},
-    schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, darkmatter_base_json_schema, darkmatter_base_schema, resolve::resolve_yaml_schema},
+    schemas::{DarkmatterSchemas, darkmatter_base_json_schema, darkmatter_base_schema, resolve::resolve_yaml_schema},
 };
+use simplified_schema::embedded::EmbeddedSchemaBundle;
 use simplified_schema::{PropertyDef, SchemaShape, TypeExpr, parse_yaml_schema, to_json_schema};
 use biscuit_test_harness::manifest_dir;
 use serde_yaml_ng::Value as YamlValue;

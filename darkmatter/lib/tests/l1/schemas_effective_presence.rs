@@ -9,7 +9,7 @@ use std::path::Path;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
-use darkmatter::markdown::schemas::triggers::{PathSubject, parse_trigger_envelope_from_str};
+use simplified_schema::triggers::{PathSubject, parse_trigger_envelope_from_str};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
 use simplified_schema::SchemaPhase;
 use serde_json::{Value, json};

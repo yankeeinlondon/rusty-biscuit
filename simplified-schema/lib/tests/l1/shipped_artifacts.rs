@@ -108,7 +108,14 @@ fn a_mutated_source_fails_freshness_naming_the_regeneration_command() {
     let refusal = shipped::accept::<EnvelopePayload, _>(&descriptor, Some(CHECKED_IN), |_, payload| Ok(payload))
         .expect_err("a source mismatch");
     assert_eq!(refusal.reason, FallbackReason::SourceMismatch);
-    assert_eq!(refusal.pointer.as_deref(), Some("/header/sources/0/digest"), "{refusal}");
+    // The header lists sources in path order; the pointer names the edited one.
+    let index = fresh_value()["header"]["sources"]
+        .as_array()
+        .expect("a source list")
+        .iter()
+        .position(|source| source["identity"] == SCHEMA_DEFINITION_PATH)
+        .expect("the edited source is listed");
+    assert_eq!(refusal.pointer, Some(format!("/header/sources/{index}/digest")), "{refusal}");
 }
 
 #[test]
@@ -271,14 +278,14 @@ refused! {
     null_revision: edited(|value| set(value, "/header/preparation_revision", Value::Null)) => MalformedArtifact at Some("/header/preparation_revision");
     string_revision: edited(|value| set(value, "/header/preparation_revision", json!("1"))) => MalformedArtifact at Some("/header/preparation_revision");
     zero_revision: edited(|value| set(value, "/header/preparation_revision", json!(0))) => MalformedArtifact at Some("/header/preparation_revision");
-    another_revision: edited(|value| set(value, "/header/preparation_revision", json!(2))) => PreparationRevisionMismatch at Some("/header/preparation_revision");
+    another_revision: edited(|value| set(value, "/header/preparation_revision", json!(registry::PREPARATION_REVISION + 1))) => PreparationRevisionMismatch at Some("/header/preparation_revision");
 
     // `sources`: the complete, sorted inventory.
     absent_sources: edited(|value| remove(value, "/header/sources")) => MalformedArtifact at Some("/header");
     null_sources: edited(|value| set(value, "/header/sources", Value::Null)) => MalformedArtifact at Some("/header/sources");
     object_sources: edited(|value| set(value, "/header/sources", json!({}))) => MalformedArtifact at Some("/header/sources");
     empty_sources: edited(|value| set(value, "/header/sources", json!([]))) => SourceMismatch at Some("/header/sources");
-    one_invalid_source: edited(|value| value["header"]["sources"].as_array_mut().unwrap().push(json!(5))) => MalformedArtifact at Some("/header/sources/2");
+    one_invalid_source: edited(|value| value["header"]["sources"].as_array_mut().unwrap().push(json!(5))) => MalformedArtifact at Some("/header/sources/3");
     every_source_invalid: edited(|value| set(value, "/header/sources", json!([5, 6]))) => MalformedArtifact at Some("/header/sources/0");
     a_source_with_an_unknown_member: edited(|value| set(value, "/header/sources/0/extra", json!(1))) => MalformedArtifact at Some("/header/sources/0");
     a_repeated_source: edited(|value| { let first = value["header"]["sources"][0].clone(); value["header"]["sources"].as_array_mut().unwrap().insert(0, first); }) => MalformedArtifact at Some("/header/sources/1");

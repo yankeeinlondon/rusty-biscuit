@@ -20,7 +20,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use darkmatter::markdown::compose::ComposeWarning;
-use darkmatter::markdown::schemas::{InvalidTriggerFinding, TriggerSource};
+use simplified_schema::triggers::{InvalidTriggerFinding, TriggerSource};
 
 /// One skipped trigger, as it is shown to the user.
 #[derive(Debug, Clone, PartialEq, Eq)]

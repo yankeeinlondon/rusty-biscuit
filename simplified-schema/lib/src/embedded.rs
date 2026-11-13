@@ -14,6 +14,7 @@
 //! A host whose shipped artifact holds those partials' parsed named types
 //! attaches it with [`ShippedSources::with_prepared`].
 
+use crate::errors::SchemaError;
 use crate::shipped::PreparedSourcesDescriptor;
 
 /// One embedded schema document.
@@ -36,6 +37,23 @@ pub struct ShippedSources {
     partials: &'static str,
     documents: &'static [EmbeddedDocument<'static>],
     prepared: Option<&'static PreparedSourcesDescriptor>,
+}
+
+/// Two sources are equal when they reserve the same namespace over the same
+/// partials folder and the same documents (paths and texts): they resolve
+/// every reference alike. A prepared-table descriptor changes how a partial
+/// is prepared, never what it means, so it is not compared.
+impl PartialEq for ShippedSources {
+    fn eq(&self, other: &Self) -> bool {
+        self.namespace == other.namespace
+            && self.partials == other.partials
+            && self.documents.len() == other.documents.len()
+            && self
+                .documents
+                .iter()
+                .zip(other.documents)
+                .all(|(left, right)| left.path == right.path && left.text == right.text)
+    }
 }
 
 impl ShippedSources {
@@ -67,6 +85,14 @@ impl ShippedSources {
     #[must_use]
     pub const fn prepared(&self) -> Option<&'static PreparedSourcesDescriptor> {
         self.prepared
+    }
+
+    /// The reserved namespace prefix (`darkmatter:`); empty for
+    /// [`Self::NONE`]. Memos keyed on a resolution include it, since it
+    /// decides which shipped documents a reference reaches.
+    #[must_use]
+    pub const fn namespace(&self) -> &'static str {
+        self.namespace
     }
 
     /// The shipped documents.
@@ -183,6 +209,160 @@ pub fn resolve_bundle_path(root: &str, importer: &str, reference: &str) -> Resul
     }
 }
 
+/// A host-supplied set of schema documents compiled into the host binary,
+/// offered to trigger discovery as a last-resort trigger location.
+///
+/// `name` identifies the bundle in origins, traces, and errors; `files` pairs
+/// each document's plain file name (`claudine.yaml`) with its text. Within a
+/// bundle, documents address each other with relative references
+/// (`stack@./lifecycle.yaml`) that resolve lexically among the bundle's own
+/// files, never on the disk, and name Darkmatter's shipped partials with the
+/// reserved namespace of the [`ShippedSources`] resolution is given
+/// (`say-short@darkmatter:lifecycle`). A host registers one with trigger
+/// discovery ([`crate::triggers::scan_with_embedded`]; Darkmatter's
+/// `DarkmatterSchemas::with_embedded_trigger_bundle`).
+///
+/// A host that ships a prepared form of its bundle attaches it with
+/// [`Self::with_prepared`]; discovery then serves the bundle's documents
+/// from it while the bundle's files are exactly the ones it was prepared
+/// from (see [`PreparedTriggerBundle`](crate::triggers::PreparedTriggerBundle)).
+///
+/// Equality compares the name and the files only: a prepared descriptor
+/// changes how discovery prepares the documents, never what they mean, so a
+/// bundle with one equals the same bundle without one.
+#[derive(Clone, Copy)]
+pub struct EmbeddedSchemaBundle {
+    name: &'static str,
+    files: &'static [(&'static str, &'static str)],
+    prepared: Option<&'static crate::triggers::PreparedBundleDescriptor>,
+}
+
+impl PartialEq for EmbeddedSchemaBundle {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.files == other.files
+    }
+}
+
+impl Eq for EmbeddedSchemaBundle {}
+
+impl EmbeddedSchemaBundle {
+    /// A bundle named `name` holding `files` as `(file name, text)` pairs.
+    ///
+    /// The shape is checked when the bundle is registered: `name` must be one
+    /// non-empty path segment, and every file name a distinct (also after
+    /// case-folding) plain `.yaml`/`.yml` file name.
+    #[must_use]
+    pub const fn new(name: &'static str, files: &'static [(&'static str, &'static str)]) -> Self {
+        Self { name, files, prepared: None }
+    }
+
+    /// This bundle with `descriptor`'s prepared form attached. The provider
+    /// is called only when discovery reaches the bundle's documents.
+    #[must_use]
+    pub const fn with_prepared(self, descriptor: &'static crate::triggers::PreparedBundleDescriptor) -> Self {
+        Self { prepared: Some(descriptor), ..self }
+    }
+
+    /// The prepared-form descriptor [`Self::with_prepared`] attached.
+    #[must_use]
+    pub const fn prepared(&self) -> Option<&'static crate::triggers::PreparedBundleDescriptor> {
+        self.prepared
+    }
+
+    /// The bundle's documents as `(virtual path, text)` pairs, in `files`
+    /// order: the identities a host's artifact header fingerprints them under
+    /// (`crate::shipped::SourceFingerprint`).
+    #[must_use]
+    pub fn documents(&self) -> Vec<(String, &'static str)> {
+        self.files.iter().map(|(name, text)| (self.virtual_path(name), *text)).collect()
+    }
+
+    #[allow(missing_docs)]
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    #[allow(missing_docs)]
+    #[must_use]
+    pub const fn files(&self) -> &'static [(&'static str, &'static str)] {
+        self.files
+    }
+
+    /// The bundle's files in UTF-8 file-name byte order, the order its
+    /// triggers layer in (the same order a disk schema root uses).
+    pub(crate) fn sorted_files(&self) -> Vec<(&'static str, &'static str)> {
+        let mut files = self.files.to_vec();
+        files.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+        files
+    }
+
+    /// The virtual path that identifies `name` in this bundle:
+    /// `{bundle}/{name}`. It names no host file.
+    pub(crate) fn virtual_path(&self, name: &str) -> String {
+        format!("{}/{name}", self.name)
+    }
+
+    /// Calls `f` with the bundle's documents keyed by virtual path.
+    pub(crate) fn with_documents<R>(&self, f: impl FnOnce(&[EmbeddedDocument<'_>]) -> R) -> R {
+        let paths: Vec<String> = self.files.iter().map(|(name, _)| self.virtual_path(name)).collect();
+        let documents: Vec<EmbeddedDocument<'_>> = paths
+            .iter()
+            .zip(self.files)
+            .map(|(path, (_, text))| EmbeddedDocument { path, text })
+            .collect();
+        f(&documents)
+    }
+
+    /// Checks the bundle's name and file names.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::EmbeddedBundle`] naming the bundle and the defect.
+    pub fn check(&self) -> Result<(), SchemaError> {
+        let invalid = |message: String| SchemaError::EmbeddedBundle {
+            bundle: self.name.to_string(),
+            message,
+        };
+        if !is_plain_segment(self.name) {
+            return Err(invalid(format!(
+                "bundle name `{}` must be one non-empty path segment",
+                self.name
+            )));
+        }
+        let mut seen: Vec<(String, &str)> = Vec::with_capacity(self.files.len());
+        for (name, _) in self.files {
+            let is_yaml = name
+                .rsplit_once('.')
+                .is_some_and(|(stem, ext)| !stem.is_empty() && (ext == "yaml" || ext == "yml"));
+            if !is_plain_segment(name) || !is_yaml {
+                return Err(invalid(format!(
+                    "file name `{name}` must be a plain `.yaml`/`.yml` file name"
+                )));
+            }
+            let folded = name.to_lowercase();
+            if let Some((_, earlier)) = seen.iter().find(|(other, _)| *other == folded) {
+                return Err(invalid(format!(
+                    "file names `{earlier}` and `{name}` collide (after case-folding)"
+                )));
+            }
+            seen.push((folded, name));
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for EmbeddedSchemaBundle {
+    /// Names the bundle and its files, never their text.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EmbeddedSchemaBundle")
+            .field("name", &self.name)
+            .field("files", &self.files.iter().map(|(name, _)| *name).collect::<Vec<_>>())
+            .field("prepared", &self.prepared.map(|descriptor| descriptor.owner))
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,5 +438,35 @@ mod tests {
     fn without_a_reserved_namespace_no_reference_is_reserved() {
         assert_eq!(ShippedSources::NONE.reserved_stem("darkmatter:lifecycle"), None);
         assert!(ShippedSources::NONE.partial("lifecycle").is_none());
+    }
+
+    #[test]
+    fn bundle_checks_reject_unusable_names() {
+        const FILES: &[(&str, &str)] = &[("a.yaml", ""), ("b.yml", "")];
+        assert!(EmbeddedSchemaBundle::new("host", FILES).check().is_ok());
+        for name in ["", ".", "..", "a/b", "a\\b", "c:", " host", "~host", "*"] {
+            assert!(EmbeddedSchemaBundle::new(name, FILES).check().is_err(), "bundle `{name}`");
+        }
+        for files in [
+            &[("a/b.yaml", "")][..],
+            &[("..", "")],
+            &[(".yaml", "")],
+            &[("a.txt", "")],
+            &[("a", "")],
+            &[("a.yaml", ""), ("a.yaml", "")],
+            &[("a.yaml", ""), ("A.YAML", "")],
+        ] {
+            assert!(
+                matches!(EmbeddedSchemaBundle::new("host", files).check(), Err(SchemaError::EmbeddedBundle { .. })),
+                "{files:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bundle_debug_names_files_but_not_their_text() {
+        let bundle = EmbeddedSchemaBundle::new("host", &[("a.yaml", "secret: text")]);
+        let shown = format!("{bundle:?}");
+        assert!(shown.contains("a.yaml") && !shown.contains("secret"), "{shown}");
     }
 }

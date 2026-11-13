@@ -21,13 +21,13 @@
 use std::sync::Arc;
 
 use serde_yaml_ng::Value as YamlValue;
-use simplified_schema::{KindSelectionCause, SchemaError};
+use crate::{KindSelectionCause, SchemaError};
 
 use super::registry::{Claim, KindDefinition, KindRegistry};
-use crate::markdown::schemas::slots::codes::{SLOT_NOT_ALLOWED_IN_KIND_CODE, slots_not_allowed_message};
+use crate::slots::{SLOT_NOT_ALLOWED_IN_KIND_CODE, slots_not_allowed_message};
 
 /// The route a document selected.
-pub(crate) enum Selection<'a> {
+pub enum Selection<'a> {
     /// Not validated.
     NoSchema,
     /// Its `kind` is claimed by `definition`.
@@ -44,7 +44,7 @@ pub(crate) enum Selection<'a> {
 /// than one definition, whose definition failed, or that cannot be ruled out
 /// as unclaimed (a definition failed before revealing its claim, or a schema
 /// root could not be read).
-pub(crate) fn select<'a>(registry: &KindRegistry, document: &'a YamlValue) -> Result<Selection<'a>, SchemaError> {
+pub fn select<'a>(registry: &KindRegistry, document: &'a YamlValue) -> Result<Selection<'a>, SchemaError> {
     let Some(map) = document.as_mapping() else {
         return Ok(Selection::NoSchema);
     };

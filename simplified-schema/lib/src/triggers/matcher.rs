@@ -37,8 +37,8 @@ use std::path::Path;
 use biscuit_file::FileResolutionContext;
 use serde_json::Value;
 
-use simplified_schema::format::{judge_schema, judge_type_definition};
-use simplified_schema::simplified::{
+use crate::format::{judge_schema, judge_type_definition};
+use crate::simplified::{
     Constraint, PropertyAtom, SimplifiedType, TypeExpr, parse_type_definition_value,
     parse_schema_declaration,
 };
@@ -50,6 +50,7 @@ pub struct PathSubject<'a> {
     document: Option<(&'a Path, &'a FileResolutionContext)>,
     pattern_cwd: Option<&'a Path>,
     /// The document context re-anchored on `pattern_cwd`, built on first use.
+    #[cfg_attr(not(feature = "file"), allow(dead_code))]
     relative_context: OnceCell<FileResolutionContext>,
 }
 
@@ -90,6 +91,15 @@ impl<'a> PathSubject<'a> {
         self.document.map(|(path, _)| path)
     }
 
+    /// Without the `file` feature a `$path` pattern cannot be judged in a
+    /// context, so it never admits a document: a trigger with a `$path`
+    /// condition never matches, never silently matches.
+    #[cfg(not(feature = "file"))]
+    fn admits(&self, _globs: &PathGlobs) -> bool {
+        false
+    }
+
+    #[cfg(feature = "file")]
     fn admits(&self, globs: &PathGlobs) -> bool {
         let Some((document, context)) = self.document else {
             return false;
@@ -111,6 +121,7 @@ impl<'a> PathSubject<'a> {
         included
     }
 
+    #[cfg(feature = "file")]
     fn relative_context<'s>(&'s self, context: &'s FileResolutionContext) -> &'s FileResolutionContext {
         match self.pattern_cwd {
             Some(cwd) => self.relative_context.get_or_init(|| context.for_cwd(cwd)),
@@ -310,8 +321,8 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
             };
             for (name, def) in &shape.properties {
                 let atom = match def {
-                    simplified_schema::simplified::PropertyDef::Single(a) => a,
-                    simplified_schema::simplified::PropertyDef::Union(arms) => {
+                    crate::simplified::PropertyDef::Single(a) => a,
+                    crate::simplified::PropertyDef::Union(arms) => {
                         let v = map.get(name);
                         match v {
                             None => {
@@ -545,7 +556,7 @@ thread_local! {
 }
 
 /// Empties the calling thread's matcher regex cache (see
-/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+/// [`crate::reset_process_caches`]).
 pub(crate) fn reset_thread_caches() {
     REGEX_CACHE.with_borrow_mut(Vec::clear);
 }
@@ -569,10 +580,10 @@ fn regex_match(pattern: &str, input: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use simplified_schema::simplified::{
+    use crate::simplified::{
         Constraint, PropertyAtom, SimplifiedType, TypeExpr,
     };
-    use crate::markdown::schemas::triggers::grammar::{MatchExpr, PathGlobs};
+    use crate::triggers::grammar::{MatchExpr, PathGlobs};
     use serde_json::json;
 
     fn prop(name: &str, ty: SimplifiedType, constraints: Vec<Constraint>) -> MatchExpr {
@@ -722,9 +733,9 @@ mod tests {
 
     /// Loads `conditions` through the trigger grammar, as a trigger file's
     /// `match:` is loaded, so load-time match safety is exercised too.
-    fn loaded(conditions: &str) -> crate::markdown::schemas::triggers::grammar::MatchConditions {
+    fn loaded(conditions: &str) -> crate::triggers::grammar::MatchConditions {
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(conditions).expect("yaml");
-        crate::markdown::schemas::triggers::grammar::parse_match_conditions(&yaml)
+        crate::triggers::grammar::parse_match_conditions(&yaml)
             .unwrap_or_else(|error| panic!("`{conditions}` loads: {error}"))
     }
 
@@ -807,6 +818,7 @@ mod tests {
     }
 
     /// A repository root and a context for a document inside it.
+    #[cfg(feature = "file")]
     fn repo() -> (tempfile::TempDir, FileResolutionContext) {
         let dir = tempfile::tempdir().unwrap();
         let ctx = FileResolutionContext::from_snapshot(dir.path(), None, std::collections::HashMap::new())
@@ -814,12 +826,14 @@ mod tests {
         (dir, ctx)
     }
 
+    #[cfg(feature = "file")]
     fn path_matches(expr: &MatchExpr, ctx: &FileResolutionContext, document: &Path) -> bool {
         let doc_ctx = ctx.for_cwd(document.parent().unwrap());
         matches(expr, &json!({}), &PathSubject::new(document, &doc_ctx).with_pattern_cwd(ctx.cwd()))
     }
 
     #[test]
+    #[cfg(feature = "file")]
     fn path_bare_basename_matches_any_dir() {
         let (dir, ctx) = repo();
         let expr = path_expr(&["SKILL.md"]);
@@ -829,6 +843,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "file")]
     fn path_glob_with_separator() {
         let (dir, ctx) = repo();
         let expr = path_expr(&["prompts/**/*.md"]);
@@ -837,6 +852,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "file")]
     fn path_negation() {
         let (dir, ctx) = repo();
         let expr = path_expr(&["**/*.md", "!**/_*.md"]);
@@ -845,6 +861,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "file")]
     fn path_case_sensitive() {
         let (dir, ctx) = repo();
         let expr = path_expr(&["SKILL.md"]);

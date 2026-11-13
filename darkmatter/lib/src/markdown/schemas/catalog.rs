@@ -641,7 +641,7 @@ impl From<Arc<GlobalCatalog>> for CatalogHandle {
 /// A catalog that fails to load is returned as its error so a caller can
 /// report it; the others still load.
 pub fn host_catalogs(context: &biscuit_file::FileResolutionContext) -> Vec<Result<GlobalCatalog, CatalogError>> {
-    let Ok(roots) = super::roots::SchemaRoots::for_document(context) else {
+    let Ok(roots) = simplified_schema::roots::SchemaRoots::for_document(context) else {
         return Vec::new();
     };
     let mut seen = std::collections::BTreeSet::new();
@@ -705,7 +705,7 @@ impl std::error::Error for HostFunctionCatalogError {}
 pub fn host_function_catalogs(
     context: &biscuit_file::FileResolutionContext,
 ) -> Vec<Result<crate::markdown::compose::expression::HostFunctions, HostFunctionCatalogError>> {
-    let Ok(roots) = super::roots::SchemaRoots::for_document(context) else {
+    let Ok(roots) = simplified_schema::roots::SchemaRoots::for_document(context) else {
         return Vec::new();
     };
     let mut seen = std::collections::BTreeSet::new();
@@ -839,7 +839,7 @@ pub struct HostLifecycleDiscovery {
 /// caller holds it. A refusal retains no catalog or registry. A visited path
 /// whose catalog is gone, unreadable, or no longer loads loses its entry.
 pub fn host_lifecycle_profiles(context: &biscuit_file::FileResolutionContext) -> HostLifecycleProfiles<'_> {
-    let roots = super::roots::SchemaRoots::for_document(context)
+    let roots = simplified_schema::roots::SchemaRoots::for_document(context)
         .map(|roots| roots.search_paths().to_vec())
         .unwrap_or_default();
     HostLifecycleProfiles {

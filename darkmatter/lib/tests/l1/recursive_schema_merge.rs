@@ -625,7 +625,7 @@ const EMBEDDED_LIBRARY: &str = "kind: schema\ntypes:\n  item: \"{ id: number(req
 
 #[test]
 fn embedded_payload_namespaces_join_a_recursive_document_without_collision() {
-    let bundle = darkmatter::markdown::schemas::EmbeddedSchemaBundle::new(
+    let bundle = simplified_schema::embedded::EmbeddedSchemaBundle::new(
         "recursive-bundle",
         &[("host.yaml", EMBEDDED_TRIGGER), ("lib.yaml", EMBEDDED_LIBRARY)],
     );
@@ -772,7 +772,7 @@ fn embedded_inline_payloads_keep_their_own_same_named_definitions() {
     let left = prompt_trigger(&inline_node_payload("left", "left_value", "string")).leak();
     let right = prompt_trigger(&inline_node_payload("right", "right_value", "number")).leak();
     let documents: &'static [(&'static str, &'static str)] = Vec::leak(vec![("left.yaml", &*left), ("right.yaml", &*right)]);
-    let bundle = darkmatter::markdown::schemas::EmbeddedSchemaBundle::new("same-name-bundle", documents);
+    let bundle = simplified_schema::embedded::EmbeddedSchemaBundle::new("same-name-bundle", documents);
     let repo = Repository::new(&[]);
     let snapshot = RequestSnapshot::new(&repo.root).with_home(Some(repo.home.clone()));
     let context = build_resolution_context(&snapshot).expect("fixture context");

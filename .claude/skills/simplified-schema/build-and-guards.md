@@ -25,14 +25,17 @@ which is a trap when writing fixtures; an array of objects is a named type with
 
 | Feature | Default | Adds |
 |---|---|---|
-| `file` | yes | File factories, `SchemaSource`, `repository_scope_catalog`; pulls `biscuit-file/file-reference` and `sniff` |
+| `file` | yes | File factories, `SchemaSource`, `repository_scope_catalog`, filesystem trigger scans (`triggers::{scan, scan_with_embedded, enumerate_root_files}`, `FilesystemRoots`), `KindRegistry::from_filesystem`, `$path` matching; pulls `biscuit-file/file-reference` and `sniff` |
 | `terminal` | no | `biscuit-terminal` `BlockError` rendering of `SchemaError` (Darkmatter enables it) |
 | `work-counters` | no | Test-only `work_counters` module for complexity regressions |
 
 Without `file`, the crate depends on `biscuit-file` with
 `file-reference-syntax` only (no `gix`/`walkdir`/`sniff`); file-backed checks
 fail with `FileReferenceError::ResolutionUnavailable` or
-`ValidationFailure::UnavailableCheck`, never pass.
+`ValidationFailure::UnavailableCheck`, never pass. `scan_with_source`,
+`KindRegistry::build`, envelope parsing, lint, grammar, and supplied-source
+preparation still work; a `$path` condition never admits a document, so a
+trigger with one never matches (`matcher.rs`, `PathSubject::admits`).
 
 ```toml
 [dependencies]

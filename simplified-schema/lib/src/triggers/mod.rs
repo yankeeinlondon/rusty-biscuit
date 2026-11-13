@@ -2,7 +2,7 @@
 //!
 //! A schema trigger is a standalone YAML file claiming the
 //! `kind: schema-trigger` envelope. Triggers live in the five
-//! [schema roots](super::roots), activate by matching a document's parsed
+//! [schema roots](crate::roots), activate by matching a document's parsed
 //! frontmatter + path, and layer a payload schema between the caller
 //! baseline and the document `$schema`.
 //!
@@ -19,6 +19,16 @@
 //! build on top of these. A host may add an [`EmbeddedSchemaBundle`] as a
 //! last-resort trigger location after the five roots.
 //!
+//! The language owns the trigger grammar, discovery, and matching; a host
+//! supplies its reserved shipped namespace ([`ShippedSources`]) to every
+//! entry point that resolves a payload, and layers the matched payloads into
+//! its own effective schema (Darkmatter's `DarkmatterSchemas`). Discovery
+//! reads the filesystem only through a [`SchemaRootSource`]; the
+//! filesystem-backed source and the scans that use it need the `file`
+//! feature.
+//!
+//! [`ShippedSources`]: crate::embedded::ShippedSources
+//!
 //! The user-facing contract is the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
 
@@ -30,18 +40,19 @@ pub mod grammar;
 pub mod lint;
 pub mod matcher;
 pub mod prepared;
-#[cfg(test)]
+#[cfg(all(test, feature = "file"))]
 mod payload_memo_tests;
 
 pub use assemble::{
     PayloadMemoCounts, PayloadMemoTally, TriggerConditionTrace, TriggerEvaluation, TriggerTrace, TriggerTraceEntry, evaluate_registry,
     matched_triggers, trace_registry,
 };
-pub use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;
+pub use crate::embedded::EmbeddedSchemaBundle;
 pub use discovery::{
-    LoadedTrigger, SchemaRootSource, ShadowedFile, TriggerOrigin, TriggerRegistry, TriggerSource,
-    enumerate_root_files, scan, scan_with_embedded, scan_with_source,
+    LoadedTrigger, SchemaRootSource, ShadowedFile, TriggerOrigin, TriggerRegistry, TriggerSource, scan_with_source,
 };
+#[cfg(feature = "file")]
+pub use discovery::{enumerate_root_files, scan, scan_with_embedded};
 pub use finding::InvalidTriggerFinding;
 pub use envelope::{
     TriggerEnvelope, claims_trigger_envelope, parse_trigger_envelope, parse_trigger_envelope_from_str,
@@ -51,6 +62,10 @@ pub use grammar::{
     parse_match_conditions,
 };
 pub use matcher::{PathSubject, first_defeat, matches};
+/// Code of the warning for a schema trigger automatic discovery skipped
+/// because its envelope or payload failed to load.
+pub const SCHEMA_INVALID_TRIGGER_CODE: &str = "dm.schema.invalid_trigger";
+
 pub use prepared::{
     AdvisoryRecord, PayloadRecord, PreparedBundleDescriptor, PreparedTriggerBundle, TriggerBundleRecord,
     TriggerDocumentRecord, TriggerOutcomeRecord, prepare_trigger_bundle,

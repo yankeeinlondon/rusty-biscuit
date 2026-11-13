@@ -154,7 +154,8 @@ fn a_scalar_sequence_or_empty_root_is_valid_but_unvalidated() {
 
 #[test]
 fn loading_and_validating_are_separate_steps_so_a_referenced_files_load_error_is_not_the_documents() {
-    use darkmatter::markdown::schemas::{DarkmatterSchemas, LoadedYamlDocument};
+    use darkmatter::markdown::schemas::DarkmatterSchemas;
+    use simplified_schema::yaml_documents::LoadedYamlDocument;
 
     let fixture = Fixture::new();
     let document = fixture.package().join("doc.yaml");

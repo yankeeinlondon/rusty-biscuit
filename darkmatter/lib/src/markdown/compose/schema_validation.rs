@@ -231,7 +231,7 @@ impl PreparedSchemas {
 
     /// The schema triggers discovery skipped as invalid, in discovery order;
     /// empty when discovery did not run.
-    pub(crate) fn discovery_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
+    pub(crate) fn discovery_findings(&self) -> &[simplified_schema::triggers::InvalidTriggerFinding] {
         self.schemas.as_ref().map_or(&[], DarkmatterSchemas::discovery_findings)
     }
 
@@ -403,7 +403,7 @@ fn discovers_triggers(options: &crate::markdown::compose::ComposeRequest) -> boo
 pub(crate) fn prepare_schemas(
     markdown: &Markdown,
     options: &crate::markdown::compose::ComposeRequest,
-    trigger_registry: &mut Option<crate::markdown::schemas::triggers::TriggerRegistry>,
+    trigger_registry: &mut Option<simplified_schema::triggers::TriggerRegistry>,
 ) -> MarkdownResult<PreparedSchemas> {
     let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
     if !has_document_schema && options.baseline_schema.is_none() && !options.trigger_schemas {

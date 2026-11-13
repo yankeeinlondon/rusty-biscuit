@@ -1,15 +1,21 @@
 //! Validation of whole YAML documents (`.yaml`, `.yml`).
 //!
+//! Loading, kind selection, the [`KindRegistry`], and the checks of the
+//! language's own kinds are the library's
+//! ([`simplified_schema::yaml_documents`]). This module adapts them to
+//! Darkmatter: it supplies Darkmatter's shipped sources and prepared shipped
+//! definitions ([`kind_host`]), prepares the selected schema as an
+//! [`EffectiveSchema`], and reports through a [`ValidationReport`].
+//!
 //! A YAML document selects its schema by its top-level `kind` when a
 //! `kind: yaml-schema` definition claims it, and otherwise by a root
-//! `$schema`; a document with neither is not validated ([`select`]). The
-//! claims of one document context are its [`KindRegistry`]. The selected
-//! schema alone validates the document: no Markdown baseline and no trigger
-//! layers apply, on either route. Validation is soft, on a converted copy
-//! that is never written back, and whole-value `{{ … }}` / `$(…)` strings are
-//! ordinary data. Darkmatter's own kinds (`schema`, `schema-trigger`,
-//! `yaml-schema`) then get the checks their definitions cannot state
-//! ([`semantic`]), in the same report.
+//! `$schema`; a document with neither is not validated. The selected schema
+//! alone validates the document: no Markdown baseline and no trigger layers
+//! apply, on either route. Validation is soft, on a converted copy that is
+//! never written back, and whole-value `{{ … }}` / `$(…)` strings are
+//! ordinary data. The language's own kinds (`schema`, `schema-trigger`,
+//! `yaml-schema`) then get the checks their definitions cannot state, in the
+//! same report.
 //!
 //! The user-facing contract is the "YAML documents" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
@@ -18,18 +24,30 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use simplified_schema::yaml_documents::{
+    FILE_READING_KINDS, KindHost, KindRegistry, LoadedYaml, LoadedYamlDocument, RegistryScope, Selection, select,
+};
+use simplified_schema::triggers::assemble;
 use simplified_schema::{SchemaError, ValidationProblem};
 
+use super::embedded::SHIPPED_SOURCES;
 use super::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
 
-mod load;
-mod marks;
-pub mod registry;
-mod select;
-mod semantic;
+/// Darkmatter's [`KindHost`]: its shipped sources and the shipped
+/// definitions its accepted artifact recorded (or, when the artifact or its
+/// section was refused, the definitions prepared from text). Every registry
+/// Darkmatter, its CLI, and DMLS build passes it.
+#[must_use]
+pub fn kind_host() -> KindHost<'static> {
+    KindHost { sources: SHIPPED_SOURCES, shipped: super::shipped::registry().kind_definitions() }
+}
 
-pub(crate) use load::{first_tag_start, load_yaml_document, locating_problem, pointer_string};
-pub use registry::{Claim, DefinitionSource, Incomplete, KindDefinition, KindRegistry, RegistryScope};
+/// The registry of the shipped definitions alone, built once per process
+/// from [`kind_host`]'s definitions.
+#[must_use]
+pub fn shipped_kind_registry() -> Arc<KindRegistry> {
+    super::shipped::registry().shipped_kind_registry()
+}
 
 /// The route a validated YAML document took.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,7 +79,7 @@ pub struct YamlValidation {
     /// What validated it: the definition's label, or the `$schema` it named.
     pub definition: String,
     effective: Arc<EffectiveSchema>,
-    loaded: Arc<load::LoadedYaml>,
+    loaded: Arc<LoadedYaml>,
 }
 
 impl std::fmt::Debug for YamlValidation {
@@ -161,36 +179,36 @@ impl DarkmatterSchemas {
     ///
     /// The selection and schema errors of [`Self::validate_yaml_document`].
     pub fn prepare_yaml_contract(&self, document: &LoadedYamlDocument) -> Result<Option<YamlContract>, SchemaError> {
-        let (path, loaded) = (document.path.as_path(), &document.loaded);
+        let (path, loaded) = (document.path(), document.loaded());
         let context = &self.file_resolution_context;
         let registry = match &self.kind_registry {
             Some(registry) => Arc::clone(registry),
-            None => Arc::new(KindRegistry::from_filesystem(context, RegistryScope::for_context(context))),
+            None => Arc::new(KindRegistry::from_filesystem(context, RegistryScope::for_context(context), kind_host())),
         };
         let base_dir = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .map_or_else(|| context.cwd().to_path_buf(), Path::to_path_buf);
         let schema_roots = registry.roots().search_paths().to_vec();
-        let selection = select::select(&registry, &loaded.value)?;
-        if !matches!(selection, select::Selection::NoSchema) {
+        let selection = select(&registry, &loaded.value)?;
+        if !matches!(selection, Selection::NoSchema) {
             crate::note_work!(YamlContractPreparation);
         }
         let (route, definition, effective) = match selection {
-            select::Selection::NoSchema => return Ok(None),
-            select::Selection::Kind { kind, definition } => {
+            Selection::NoSchema => return Ok(None),
+            Selection::Kind { kind, definition } => {
                 let effective = EffectiveSchema::for_yaml_document(definition.resolved().clone(), base_dir, self)?;
                 (Route::Kind(kind), definition.source().label(), effective)
             }
-            select::Selection::RootSchema(value) => {
+            Selection::RootSchema(value) => {
                 let json = serde_json::to_value(value).map_err(|error| SchemaError::FrontmatterShape {
                     message: format!("$schema is not representable as JSON: {error}"),
                 })?;
                 // An inline `$schema`'s slots are positioned in this file.
                 let authored = super::mentions_slot(&json).then(|| simplified_schema::resolve::AuthoredSchemaValue {
                     file: Some(path.to_path_buf()),
-                    mapping: 0..document.text.len(),
-                    text: document.text.as_str().into(),
+                    mapping: 0..document.text().len(),
+                    text: document.text().into(),
                 });
                 // The trigger check reads the bytes the resolution just read.
                 let resolved = simplified_schema::resolve::buffers::with_reads_retained(|| {
@@ -204,11 +222,11 @@ impl DarkmatterSchemas {
                         // A template resolves through the slot session, as a
                         // Markdown document's `$schema` does.
                         .or_else(|error| self.resolve_template(error, &super::document_template_identity(&json, &base_dir)))
-                        .map_err(|error| match super::triggers::assemble::refused_trigger_file(&error) {
-                            Some(path) => super::triggers::assemble::trigger_schema_referenced(&path),
+                        .map_err(|error| match assemble::refused_trigger_file(&error) {
+                            Some(path) => assemble::trigger_schema_referenced(&path),
                             None => error,
                         })?;
-                    super::triggers::assemble::check_document_schema_not_trigger(&resolved.referenced_files)?;
+                    assemble::check_document_schema_not_trigger(&resolved.referenced_files)?;
                     Ok::<_, SchemaError>(resolved)
                 })?;
                 let label = match value.as_str() {
@@ -269,7 +287,7 @@ impl YamlContract {
     /// passive.
     #[must_use]
     pub fn checks_read_files(&self) -> bool {
-        matches!(&self.route, Route::Kind(kind) if semantic::FILE_READING_KINDS.contains(&kind.as_str()))
+        matches!(&self.route, Route::Kind(kind) if FILE_READING_KINDS.contains(&kind.as_str()))
     }
 
     /// Judges `document`, which must have the
@@ -280,7 +298,7 @@ impl YamlContract {
     /// [`Self::checks_read_files`].
     #[must_use]
     pub fn validate(&self, document: &LoadedYamlDocument) -> YamlValidation {
-        let (text, path, loaded) = (document.text.as_str(), document.path.as_path(), &document.loaded);
+        let loaded = document.loaded();
         let mut instance = loaded.json.clone();
         if self.route == Route::RootSchema
             && let serde_json::Value::Object(map) = &mut instance
@@ -290,11 +308,10 @@ impl YamlContract {
         let mut report = self.effective.validate_data(&instance, &loaded.positions);
         if report.valid
             && let Route::Kind(kind) = &self.route
-            && semantic::CHECKED_KINDS.contains(&kind.as_str())
+            && simplified_schema::yaml_documents::CHECKED_KINDS.contains(&kind.as_str())
         {
             let accepted = self.effective.data_copy(&instance);
-            report.problems =
-                semantic::kind_checks(kind, text, path, loaded, &accepted, &self.schema_roots, &self.context);
+            report.problems = document.kind_checks(kind, &accepted, &self.schema_roots, &self.context, SHIPPED_SOURCES);
             report.valid = report.problems.is_empty();
         }
         YamlValidation {
@@ -305,77 +322,4 @@ impl YamlContract {
             loaded: Arc::clone(loaded),
         }
     }
-}
-
-/// A whole YAML document admitted by the one YAML document loader, ready for
-/// [`DarkmatterSchemas::validate_loaded_yaml_document`].
-///
-/// Loading is separate from validation so a caller can tell a document that
-/// is not admissible YAML from one whose schema failed: both are
-/// [`SchemaError`]s, and a `$schema` may name a file whose own load error
-/// looks exactly like the document's.
-#[derive(Debug, Clone)]
-pub struct LoadedYamlDocument {
-    text: String,
-    path: PathBuf,
-    loaded: Arc<load::LoadedYaml>,
-}
-
-impl LoadedYamlDocument {
-    /// Loads `text`, the whole YAML document at `path`.
-    ///
-    /// ## Errors
-    ///
-    /// [`SchemaError::SchemaDocument`] naming `path`, with a span, when the
-    /// text is not one admissible YAML document (malformed YAML, a second
-    /// document, a duplicate or non-string key, an inadmissible number).
-    pub fn load(text: &str, path: &Path) -> Result<Self, SchemaError> {
-        let loaded = Arc::new(load::load_yaml_document(text, path)?);
-        Ok(Self { text: text.to_string(), path: path.to_path_buf(), loaded })
-    }
-
-    /// A hash of what [`DarkmatterSchemas::prepare_yaml_contract`] reads
-    /// from this document: its top-level `kind` and root `$schema`, as
-    /// authored. Two texts of one document with the same key select and
-    /// prepare the same contract in the same context and registry, so a
-    /// prepared [`YamlContract`] judges both.
-    #[must_use]
-    pub fn declaration_key(&self) -> u64 {
-        let map = self.loaded.value.as_mapping();
-        let declaration = (
-            map.is_some(),
-            map.and_then(|map| map.get("kind")),
-            map.and_then(|map| map.get("$schema")),
-        );
-        // The loader admitted these values (string keys, admissible
-        // numbers), so serializing them does not fail.
-        biscuit_hash::xx_hash(&serde_yaml_ng::to_string(&declaration).unwrap_or_default())
-    }
-
-    /// Whether this document's `kind` names a kind whose checks read files
-    /// (`schema`, `yaml-schema`): judging it then depends on its whole text,
-    /// not only on its [`Self::declaration_key`]
-    /// ([`YamlContract::checks_read_files`]).
-    #[must_use]
-    pub fn kind_checks_read_files(&self) -> bool {
-        self.loaded
-            .value
-            .get("kind")
-            .and_then(serde_yaml_ng::Value::as_str)
-            .is_some_and(|kind| semantic::FILE_READING_KINDS.contains(&kind))
-    }
-
-    /// The whole document as JSON, exactly as loaded: no soft conversion,
-    /// and a root `$schema` still present. The same value
-    /// [`YamlValidation::document_json`] returns after validation.
-    #[must_use]
-    pub fn json(&self) -> &serde_json::Value {
-        &self.loaded.json
-    }
-}
-
-/// The definition paths every YAML document kind registry starts from.
-#[must_use]
-pub fn shipped_kind_definition_paths() -> Vec<PathBuf> {
-    super::embedded::shipped_kind_definitions().iter().map(|document| PathBuf::from(document.path)).collect()
 }

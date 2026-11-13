@@ -2,8 +2,12 @@
 "header": {
   "wire_version": 1,
   "owner": "simplified-schema",
-  "preparation_revision": 1,
+  "preparation_revision": 2,
   "sources": [
+    {
+      "identity": "simplified-schema/schemas/schema-trigger.yaml",
+      "digest": "3269349b1a1b0c90"
+    },
     {
       "identity": "simplified-schema/schemas/schema.yaml",
       "digest": "24ea8b08f42922ce"

@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use darkmatter::markdown::compose::{ContextRequirements, RequestSnapshot};
-use darkmatter::markdown::schemas::{SchemaRootKind, SchemaRoots};
+use simplified_schema::roots::{SchemaRootKind, SchemaRoots};
 use tempfile::TempDir;
 
 use super::{DocumentEnvironment, EnvironmentSource, InvocationContext};

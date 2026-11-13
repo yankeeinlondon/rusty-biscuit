@@ -21,7 +21,7 @@ use simplified_schema::{
     locate_standalone_definition_failure, parse_property_definition_with_source, parse_type_definition_value,
     parse_schema_declaration, parse_schema_declaration_with_source, parse_yaml_schema,
 };
-use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
+use simplified_schema::triggers::InvalidTriggerFinding;
 use darkmatter::style::{self, StyleWarningKind};
 use lsp_types::{
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Position,

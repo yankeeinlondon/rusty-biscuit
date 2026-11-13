@@ -8973,7 +8973,7 @@ class RealWorkspaceTestInputTests(unittest.TestCase):
             "content-policy/schemas/content-policy.yaml": ("darkmatter", "claudine"),
             "darkmatter/schemas/partials/function-examples/as_tsv.yaml": ("claudine",),
             "darkmatter/lib/src/markdown/schemas/catalog.rs": ("claudine",),
-            "darkmatter/lib/src/markdown/schemas/triggers/grammar.rs": ("claudine",),
+            "simplified-schema/lib/src/triggers/grammar.rs": ("claudine",),
             "darkmatter/lib/generated/shipped.json": ("claudine",),
         }
         for changed, downstream in cases.items():

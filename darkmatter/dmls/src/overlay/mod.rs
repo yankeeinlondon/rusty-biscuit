@@ -42,8 +42,8 @@ use crate::validation_timing;
 use crate::work_counters;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::file_resolution_context_identity;
-use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
-use darkmatter::markdown::schemas::{SchemaRootKind, SchemaRootState, SchemaRoots};
+use simplified_schema::triggers::InvalidTriggerFinding;
+use simplified_schema::roots::{SchemaRootKind, SchemaRootState, SchemaRoots};
 use simplified_schema::{
     SchemaError, SchemaSourceId, StandaloneSchemaDocument, ValidationStage, StandaloneSchemaEnvelope,
     LocatedDefinitionFailure, SuggestionLintProblem, locate_standalone_definition_failure,
@@ -180,7 +180,7 @@ fn selected_standalone_document(
 ) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
     let accepted = match yaml.overlay.validation() {
         Some(validation) => validation.effective().data_copy(validation.document_json()).into_owned(),
-        None => darkmatter::markdown::schemas::LoadedYamlDocument::load(text, path)
+        None => simplified_schema::yaml_documents::LoadedYamlDocument::load(text, path)
             .map(|loaded| loaded.json().clone())
             .unwrap_or_default(),
     };
@@ -713,9 +713,9 @@ impl OverlayState {
             .and_then(Path::file_name)
             .is_some_and(|name| name == "schemas")
             && is_yaml_path(path)
-            && darkmatter::markdown::schemas::claims_trigger_envelope(text)
+            && simplified_schema::triggers::claims_trigger_envelope(text)
         {
-            match darkmatter::markdown::schemas::parse_trigger_envelope_from_str(text) {
+            match simplified_schema::triggers::parse_trigger_envelope_from_str(text) {
                 Err(error) if !judged => {
                     return Some(DocumentOverlay {
                         ast: None,
@@ -1826,7 +1826,7 @@ pub(crate) fn resolve_slot_templates(
     text: &str,
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
-    registry: Option<darkmatter::markdown::schemas::TriggerRegistry>,
+    registry: Option<simplified_schema::triggers::TriggerRegistry>,
     context: &FileResolutionContext,
     session: &Arc<darkmatter::markdown::schemas::slots::SlotSession>,
 ) -> Result<(), SchemaError> {

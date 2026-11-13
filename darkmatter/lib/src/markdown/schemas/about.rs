@@ -1529,7 +1529,7 @@ mod tests {
 
     #[test]
     fn trigger_combinator_descriptor_set_matches_grammar() {
-        use crate::markdown::schemas::triggers::grammar::{COMBINATOR_KEYS, PATH_KEY};
+        use simplified_schema::triggers::grammar::{COMBINATOR_KEYS, PATH_KEY};
 
         let described: HashSet<&str> = TRIGGER_GRAMMAR_DESCRIPTORS
             .iter()
@@ -1543,7 +1543,7 @@ mod tests {
 
     #[test]
     fn match_safe_constraint_descriptor_set_matches_implementation() {
-        use crate::markdown::schemas::triggers::grammar::is_match_safe_constraint;
+        use simplified_schema::triggers::grammar::is_match_safe_constraint;
 
         let constraints = [
             Constraint::Required,

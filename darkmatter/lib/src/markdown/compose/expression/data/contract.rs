@@ -161,7 +161,7 @@ pub fn prepare_contract(written: &str, document: &FileResolutionContext) -> Resu
     let mut shape = SchemaShape::new();
     shape.properties.insert(CONTRACT_PROPERTY.to_string(), parsed);
     let root = SchemaRoot::Single(shape);
-    let roots = crate::markdown::schemas::roots::SchemaRoots::for_document(document).map_err(schema_error)?;
+    let roots = simplified_schema::roots::SchemaRoots::for_document(document).map_err(schema_error)?;
     let mut expansion = crate::markdown::schemas::resolve::expand_named_types(
         &root,
         document.cwd(),

@@ -42,7 +42,8 @@ use darkmatter::markdown::compose::expression::data::{DataError, DataSourceIdent
 use darkmatter::markdown::compose::expression::{DataLocation, Diagnostic, DiagnosticSource, ReferenceDetails, Severity};
 use darkmatter::markdown::compose::policy::{STYLE_DEPRECATED_CODE, STYLE_UNKNOWN_KEY_CODE};
 use darkmatter::markdown::compose::report_diagnostics::INPUT_READ_CODE;
-use darkmatter::markdown::schemas::{EffectiveSchema, InvalidTriggerFinding};
+use darkmatter::markdown::schemas::EffectiveSchema;
+use simplified_schema::triggers::InvalidTriggerFinding;
 use darkmatter::style::layer::{STYLE_INVALID_ROOT_CODE, STYLE_INVALID_SETTER_CODE};
 use darkmatter::style::{
     PreparedStyle, StyleDiagnostic, build_yaml_position_map, StyleLayer, StyleOrigin, StylePreparationError, StylePreparationPolicy, StyleSetter,

@@ -9,7 +9,7 @@
 //! and judges frontmatter with [`MatchConditions::matches`], the evaluation
 //! discovery and DMLS share.
 
-use darkmatter::markdown::schemas::triggers::{MatchConditions, PathSubject, parse_trigger_envelope_from_str};
+use simplified_schema::triggers::{MatchConditions, PathSubject, parse_trigger_envelope_from_str};
 use simplified_schema::SchemaError;
 use serde_json::{Value, json};
 

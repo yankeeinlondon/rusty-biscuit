@@ -21,10 +21,11 @@ use std::sync::OnceLock;
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::triggers::{
-    PreparedBundleDescriptor, PreparedTriggerBundle, TriggerBundleRecord, TriggerOutcomeRecord, prepare_trigger_bundle,
-};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, TriggerOrigin, TriggerSource};
+use darkmatter::markdown::schemas::triggers::prepare_trigger_bundle;
+use simplified_schema::triggers::{PreparedBundleDescriptor, PreparedTriggerBundle, TriggerBundleRecord, TriggerOutcomeRecord};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::embedded::EmbeddedSchemaBundle;
+use simplified_schema::triggers::{TriggerOrigin, TriggerSource};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use simplified_schema::{SchemaError, ValidationProblemCode};

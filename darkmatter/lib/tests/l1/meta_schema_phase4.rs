@@ -4,8 +4,9 @@
 use std::fs;
 
 use darkmatter::markdown::{
-    Markdown, schemas::{DarkmatterSchemas, triggers::{MatchExpr, PathSubject, matches as trigger_matches}},
+    Markdown, schemas::DarkmatterSchemas,
 };
+use simplified_schema::triggers::{MatchExpr, PathSubject, matches as trigger_matches};
 use simplified_schema::{
     Constraint, PropertyAtom, SimplifiedType, TypeExpr, ValidationProblemCode, parse_yaml_schema, to_json_schema,
 };

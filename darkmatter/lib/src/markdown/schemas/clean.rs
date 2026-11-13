@@ -213,7 +213,7 @@ impl CleanSchemaContext {
     /// The schema triggers discovery skipped as invalid, in discovery order;
     /// empty when discovery did not run.
     #[must_use]
-    pub fn discovery_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
+    pub fn discovery_findings(&self) -> &[simplified_schema::triggers::InvalidTriggerFinding] {
         self.schemas.discovery_findings()
     }
 
@@ -273,7 +273,7 @@ impl CleanSchemaContext {
 pub struct SchemaCleanAnalysis {
     effective: Option<EffectiveSchema>,
     diagnostics: Vec<YamlDiagnostic>,
-    trigger_findings: Vec<crate::markdown::schemas::InvalidTriggerFinding>,
+    trigger_findings: Vec<simplified_schema::triggers::InvalidTriggerFinding>,
 }
 
 impl SchemaCleanAnalysis {
@@ -296,7 +296,7 @@ impl SchemaCleanAnalysis {
     /// The schema triggers discovery skipped as invalid, whether or not an
     /// effective schema constrains the document. Not diagnostics: they
     /// describe trigger files, not this frontmatter block.
-    pub fn trigger_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
+    pub fn trigger_findings(&self) -> &[simplified_schema::triggers::InvalidTriggerFinding] {
         &self.trigger_findings
     }
 
