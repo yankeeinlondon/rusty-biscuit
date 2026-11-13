@@ -31,7 +31,8 @@ pub use file_types::{
 };
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
-    BehindStatus, ChangedBase, ChangedContent, CommitInfo, CommitLink, DEFAULT_PATH_HISTORY_SCAN_LIMIT,
+    BehindStatus, ChangedBase, ChangedContent, CommitInfo, CommitLink, CommittedEntry,
+    CommittedTreeSnapshot, DEFAULT_PATH_HISTORY_SCAN_LIMIT,
     DEFAULT_RECENT_COMMIT_COUNT, DeltaKind, FileChange, GitHostingProvider, GitInfo, GitRepo,
     LocalBranchInfo, NamedDate, PathHistoryOptions, PathHistoryResult,
     RecentCommit, RecentCommitAuthor, RecentCommitFile, RecentCommitFileKind,

@@ -11,6 +11,7 @@ conflicts, and provider queries.
 - [Recent commits](#recent-commits)
 - [Conflicts and branches](#conflicts-and-branches)
 - [Per-path tracked state](#per-path-tracked-state)
+- [Committed tree snapshot](#committed-tree-snapshot)
 - [Remote snapshots](#remote-snapshots)
 - [Focused providers](#focused-providers)
 
@@ -116,6 +117,24 @@ component-wise against the `canonicalize_simplified` root. Bare repositories
 fail with `BareRepository`. Darkmatter's schema-slot automatic grant
 (`darkmatter/lib/src/markdown/schemas/slots/grants/auto.rs`) uses both. Code: `filesystem/git/tracked_state.rs`; tests:
 `tracked_state_tests.rs`.
+
+## Committed tree snapshot
+
+`GitRepo::committed_tree()` returns a `Send + Sync` `CommittedTreeSnapshot`
+that pins `HEAD`'s commit and tree ids from the already-open gix handle
+(`into_sync`; each read calls `to_thread_local`). Ref moves after capture do
+not change it; a linked worktree pins its own `HEAD`. Unborn `HEAD` is an
+empty view (`commit_id()`/`tree_id()` `None`). `read_file("a/b")` returns
+`CommittedEntry::{Absent, Blob { bytes, executable }, Symlink { target },
+Directory, Submodule { commit_id }}` (non-exhaustive; never follows links;
+below a file/link/submodule is `Absent`). `paths()` lists blobs and links in
+`git ls-tree -r` order and errors on non-UTF-8 names. Paths are `/`-only on
+every OS; `\`, absolute, drive, empty, `.`, `..`, NUL are
+`SniffError::InvalidRepositoryPath`. Missing/corrupt objects are
+`SniffError::Git`, never `Absent`. Do not build on `head_id()` (it `.ok()`s
+errors). No filters, hooks, or subprocesses. Code:
+`filesystem/git/committed_tree.rs`; tests: `tests/l1/committed_tree.rs`
+(parity against `git ls-tree`/`rev-parse`).
 
 ## Remote snapshots
 

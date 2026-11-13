@@ -526,6 +526,58 @@ immediately, as in Git); reads count toward `filesystem.io.file_opens` and
 `SniffError::BareRepository`, like `changed_paths`. Unlike `changed_paths`, a conflict elsewhere
 in the repository does not fail the call; only the conflicted path itself reports `Conflicted`.
 
+### Committed Tree Snapshot
+
+`GitRepo::committed_tree()` captures the tree committed at `HEAD` and lets you read files from it
+later, even after the repository moves on. Use it when a decision must rest on what is committed,
+not on what is on disk or staged: an uncommitted edit, a staged edit, and a file deleted from the
+working copy are all invisible to it.
+
+```rust
+use sniff::filesystem::git::{CommittedEntry, GitRepo};
+
+let repo = GitRepo::discover(std::path::Path::new("."))?.unwrap();
+let snapshot = repo.committed_tree()?;
+match snapshot.read_file("config/policy.yaml")? {
+    CommittedEntry::Blob { bytes, .. } => println!("{} committed bytes", bytes.len()),
+    CommittedEntry::Absent => println!("not committed"),
+    other => println!("not a file: {other:?}"),
+}
+```
+
+- **Pinned at capture.** The snapshot records the commit and tree ids when it is created. A new
+  commit, a branch switch, or a ref update afterwards does not change what it reads. In a linked
+  worktree it captures that worktree's own `HEAD`.
+- **No commits yet.** A repository whose `HEAD` is unborn (fresh `git init`) is a valid, empty
+  view: `commit_id()` and `tree_id()` are `None`, `paths()` is empty, and every read is `Absent`.
+- **Read results.** `read_file(path)` returns one `CommittedEntry`:
+
+| Entry | Meaning |
+|---|---|
+| `Absent` | No entry at that path, including a path below a file, symbolic link, or submodule. |
+| `Blob { bytes, executable }` | A regular file's stored bytes; `executable` is mode `100755`. |
+| `Symlink { target }` | A symbolic link's stored text. It is never followed; read the target yourself if you need it. |
+| `Directory` | A directory. It has no bytes. |
+| `Submodule { commit_id }` | A submodule, with the commit it pins. Its content is in another repository. |
+
+- **Listing.** `paths()` lists every file and symbolic link (not directories or submodules),
+  `/`-separated, in the same order as `git ls-tree -r --name-only HEAD`.
+- **Paths.** Pass repository-relative paths with `/` separators on every OS, Windows included.
+  An empty path, an absolute path (`/x`, `C:/x`), an empty, `.`, or `..` component, a `\`, or a
+  NUL fails with `SniffError::InvalidRepositoryPath`.
+- **Errors are never absence.** A missing or corrupt object, an unreadable `HEAD`, or a `HEAD` that
+  does not name a commit fails with `SniffError::Git`, never `Absent`. `paths()` also fails on a
+  committed path that is not valid UTF-8, rather than returning a spelling that could not be read
+  back.
+- **Nothing runs.** Bytes come straight from Git's object database: no line-ending conversion, no
+  LFS or other filter, no hooks, no `git` process. A file stored through Git LFS reads as its
+  pointer text.
+- **Threads.** The snapshot is `Send + Sync`; share it behind an `Arc` and read from any thread.
+  Each read opens a short-lived handle on the already-open repository, so nothing is rediscovered.
+
+Cost: capture reads `HEAD`, the commit, and the root tree. Each `read_file` reads one tree per path
+component plus one blob (counted as `git.blob_loads`); `paths()` reads every tree once.
+
 ### Focused Git Metadata
 
 `GitRequest.metadata` is an `Option<GitMetadataRequest>` giving fine-grained control over commits,

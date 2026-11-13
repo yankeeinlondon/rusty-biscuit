@@ -116,6 +116,10 @@ Tests: `filesystem/git/working_state_tests.rs`.
 "is this one file clean and committed?" without a status walk; see
 "Per-path tracked state" in [remote-and-repository.md](remote-and-repository.md).
 
+`GitRepo::committed_tree()` pins `HEAD`'s tree in a `Send + Sync` snapshot
+for reading committed bytes (`read_file`, `paths`) after refs move; errors are
+never absence. See "Committed tree snapshot" in the same file.
+
 `filesystem::repo::{PackageNameSource, PackageOwnershipLookup}` support callers
 that need declared identity and repeated file ownership. Check `name_source ==
 Manifest`; a nonempty `name` alone may be a relative-path fallback. Legacy
