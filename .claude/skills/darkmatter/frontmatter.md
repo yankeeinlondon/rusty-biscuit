@@ -404,6 +404,25 @@ serialized fallback, so a writer calls only that.
 - A comment stays on a value's first line when the value grows, because a block
   scalar's last line would read it as content. A new key goes past a `|+` scalar's
   blank lines, because the locator's span stops before them.
+- The node-range engine is `hash/node_edit.rs` (crate-private), shared through
+  its `Envelope` trait: `path_edit.rs` supplies the frontmatter block span and
+  `Markdown` reload; `crate::yaml_edit` supplies the whole file (past a leading
+  `---` line). Engine changes reach both editors; run both test modules
+  (`frontmatter_path_edit`, `yaml_edit`).
+
+## Plain YAML Files
+
+`darkmatter::yaml_edit::edit_yaml_paths(source, &[YamlEdit])` edits a whole
+YAML file (another program's configuration) with the same engine:
+`YamlEdit::Set { path, value }` / `Remove { path }` over `PropertyPath`s, with
+the pure edit computed inside (sets in order, then one `RemovalPlan` over the
+result). It **never** serializes the file whole: any form the engine cannot edit
+in place is a `YamlEditError { kind, path, location, reason }` located in the
+caller's source (1-based line/column, byte offset counting a BOM). Beyond the
+Markdown editor it appends (`Set` at index == sequence length), turns a `null`
+parent into a mapping, preserves BOM/CRLF/no final newline, and refuses any path
+reaching an alias, anchor, or tag, or walking into a non-empty flow collection,
+before editing. User docs: `darkmatter/docs/topics/yaml-editing.md`.
 
 ## `style:` Frontmatter
 

@@ -92,6 +92,8 @@ host OS input and take focus.
     - [Transclusion](./docs/topics/transclusion.md)
     - [Loading Data](./docs/topics/loading-data.md) — `load_data(file, as, options)`: formats, read options (format, delimiter, headerless CSV), CSV rows, optional files, and failures that point into the data file
     - [Frontmatter](./docs/topics/frontmatter.md) and [Frontmatter and Recursion](./docs/topics/frontmatter-recursion.md) — parsing, key order, merges, and what a transcluded child inherits
+    - [Editing Plain YAML Files](./docs/topics/yaml-editing.md) — the library's in-place, comment-preserving edits of a whole `.yaml` file
+    - [Writing Configuration Files Safely](./docs/topics/config-writes.md) — locked, validated, atomic configuration saves shared by every writer, and the receipts that let a migration finish its cleanup
     - [Lifecycle Events](./docs/topics/lifecycle/index.md) and [Lifecycle Error Handling](./docs/topics/lifecycle/error-handling.md) — the frontmatter stacks `md compose` runs before and after composition, and how failures, cleanup, and Ctrl-C route
     - [Rendering Output Formats](./docs/topics/output-formats.md)
     - [Delta Processing](./docs/topics/delta.md)

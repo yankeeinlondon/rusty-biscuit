@@ -22,6 +22,19 @@ behavior.
   hash.
 - YAML analysis and span support are shared through `biscuit-file` rather than
   reimplemented in Darkmatter.
+- `yaml_edit` (`edit_yaml_paths`, `YamlEdit`, `YamlEditError`) edits plain
+  YAML files in place with the frontmatter path editor's engine and never
+  serializes the whole file; see [frontmatter.md](frontmatter.md#plain-yaml-files).
+- `config::write` (`ConfigTransaction`, `TargetChange`, `ConfigWriteError`)
+  is the one configuration writer: sibling `<name>.darkmatter-lock` (kept,
+  `File::try_lock`, 2 s/20 ms), locks in portable-path order, re-read,
+  `edit_yaml_paths`, caller's passive validation callback, expected-bytes
+  check, then the shared `atomic_replace::persist` (also used by
+  `effects::fs_write`). `config::migration_receipt` is the one receipt
+  reader/writer (`<name>.darkmatter-migration.json`, parsed by
+  `strict_json`); `complete_cleanup` acts only on caller-listed known
+  sources. Test seams: `config::write::test_hooks` under
+  `effects-instrumentation`. User docs: `docs/topics/config-writes.md`.
 
 ## Composition and expressions
 

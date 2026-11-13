@@ -25,7 +25,9 @@ default = []
 # and attempts no network access. Also exposes
 # `markdown::compose::expression::function_test_hooks`: thread-local test
 # functions that dispatch consults before the built-in registry, and
-# thread-local counters of expression-function handler entries. Off by
+# thread-local counters of expression-function handler entries, and
+# `config::write::test_hooks` (a shorter lock deadline and an injected
+# replacement failure for the configuration writer). Off by
 # default; production builds carry no counter state and expose none of the
 # instrumentation API.
 effects-instrumentation = []
