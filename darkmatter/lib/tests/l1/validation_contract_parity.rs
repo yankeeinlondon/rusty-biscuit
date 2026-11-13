@@ -64,7 +64,7 @@ fn assert_parity(schema: &str, input: Value) {
     match prepared.validate_soft(&input) {
         Ok(success) => {
             assert!(coercing.valid, "soft accepted what validate rejects: {:?}", coercing.problems);
-            assert_eq!(success.is_converted(), coerced.changed, "soft converts exactly when coercion does");
+            assert_eq!(success.is_modified(), coerced.changed, "soft converts exactly when coercion does");
             assert_eq!(success.value.as_ref(), &coerced.value, "soft accepts the coerced value");
         }
         Err(failure) => {

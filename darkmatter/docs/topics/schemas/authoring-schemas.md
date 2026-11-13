@@ -97,9 +97,32 @@ $schema:
 
 Properties are optional unless their definition includes `required`. An
 unbound optional property therefore remains nullable at a use site, including
-when its definition contains `default(...)`: schema defaults are metadata and
-are not applied as runtime values. Only `required` or a concrete non-null
-frontmatter/caller binding establishes that a property is non-null.
+when its definition contains `default(...)`: the default of an optional
+property is metadata and is never applied as a runtime value. Only `required`
+or a concrete non-null frontmatter/caller binding establishes that a property
+is non-null.
+
+A `required` property that also declares a `default(...)` may be left out.
+Validation accepts the document and reports the default it relied on, and
+`md compose` writes the default into the composed frontmatter before anything
+reads it, so the body and later frontmatter values see it:
+
+```yaml
+---
+$schema:
+    greeting: string(required; default(hello))
+---
+Say {{ greeting }}
+```
+
+composes to `Say hello`. The default is applied only to the composed result;
+the source file is never edited. It counts only when the property is absent:
+an explicit `greeting: null` is judged by the declared type, and a default
+inside an object applies only when that object is present. Expressions treat
+the property as present, so no null guard is needed. A default that does not
+satisfy its own definition is reported as a problem at the schema's
+`default(...)`, with no line or column in the document. See
+[Required Properties with a Default](../../inline/schema-validation.md#required-properties-with-a-default).
 
 This distinction matters when an expression supplies a directive target. DMLS
 warns about an unguarded whole-value target such as `::file {{log}}` when

@@ -274,7 +274,7 @@ fn complete_validator_accepts(schema: &Value, data: &Value) -> bool {
 fn assert_accepted_as_written(result: Result<ValidationSuccess<'_>, ValidationFailure>, data: &Value) {
     match result {
         Ok(success) => {
-            assert!(!success.is_converted(), "expected the input borrowed, got {success:?}");
+            assert!(!success.is_modified(), "expected the input borrowed, got {success:?}");
             assert_eq!(success.value.as_ref(), data);
         }
         Err(failure) => panic!("expected {data} accepted, got {failure:?}"),
@@ -403,7 +403,7 @@ fn a_root_property_beside_a_restricted_union_converts_softly() {
     let data = json!({"name": "Ada", "age": 36, "count": "4"});
 
     let accepted = schema.validate_soft(&data).expect("converted copy accepted");
-    assert!(accepted.is_converted());
+    assert!(accepted.is_modified());
     assert_eq!(accepted.value.as_ref(), &json!({"name": "Ada", "age": 36, "count": 4}));
 }
 

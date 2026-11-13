@@ -261,7 +261,8 @@ Every type accepts:
 - `required` — the property must be present. Presence may still be deferred at
   stabilized launch so an actor inside the run can supply it; it is mandatory at
   completion. `required` has no effect on a property whose type admits `null`
-  (see [Null-Admitting Properties](#null-admitting-properties)).
+  (see [Null-Admitting Properties](#null-admitting-properties)). A required
+  property with a `default(...)` is satisfied by its default when absent.
 - `non-null` — the property may be omitted, but a present value is never
   `null`. It is not a presence rule: the property stays optional and out of the
   JSON Schema `required` list. Every type keyword except `null` and `unknown`
@@ -272,7 +273,11 @@ Every type accepts:
   ordinary schema preparation additionally retains the existing existence
   check; the passive phase validator itself checks syntax and presence without
   probing the filesystem.
-- `default(value)` — JSON Schema `default`. Darkmatter does **not** mutate documents; downstream tools and detection honor it.
+- `default(value)` — JSON Schema `default`. On a `required` property, an
+  absent value passes validation through its default, which validation
+  reports (and soft validation inserts); on an optional property it is
+  metadata only. See
+  [Required properties with a default](../validation.md#required-properties-with-a-default).
 - `category(Name)` — documentation metadata. The name is the text up to `)`,
   trimmed and case-sensitive, and may contain spaces and punctuation
   (`category(Date Arithmetic)`, `category(CI/CD)`). It emits the

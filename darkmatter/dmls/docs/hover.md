@@ -79,6 +79,13 @@ First character: `A-Z a-z 0-9`
 `..`: forbidden
 ```
 
+A definition with `default(...)` shows it under the `Required` line, so
+`retries: number(required; default(3))` hovers with `Required` and
+`Default: _3_`. The same line appears on the property's frontmatter key and on
+an expression that reads it (`{{ min(retries, 5) }}`). A required property
+with a default is treated as present: an expression may read it without a
+null guard, and strict mode reports no `missing_required` for it.
+
 A local type named like a built-in, referenced as `shell@this`, hovers and
 goes to its local definition; the bare `shell` is the built-in.
 

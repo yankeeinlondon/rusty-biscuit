@@ -870,6 +870,14 @@ User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
   informal classifier. Substrate hover declines inside a root-`$schema`
   contract (`DocumentOverlay::yaml_contract_covers`), as inside a standalone
   region.
+- Required defaults: a required property with a resolved `default(...)` is
+  present (no `missing_required`, non-null in expressions); hover shows
+  `Default: _v_` on the key, a use, and the `$schema` declaration
+  (`meta_schema_definition_hover_body`). A refused default (a
+  `ConstraintViolation` at a path with no authored node) ranges its inline
+  `$schema` declaration, or the `$schema` value, through
+  `diagnostics/frontmatter.rs::refused_default_range`; baseline/trigger
+  origins keep ordinary ranging. Tests: `tests/l1/required_defaults.rs`.
 - Diagnostics (`diagnostics/yaml_document.rs`) replace every Markdown
   frontmatter pass when `overlay.yaml_document` is set.
   `ProblemGrading::YamlDocument` makes `missing_required` and `unknown_key`

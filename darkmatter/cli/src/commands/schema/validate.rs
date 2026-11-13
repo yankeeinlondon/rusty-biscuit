@@ -27,7 +27,7 @@ use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SchemaLa
 use simplified_schema::triggers::{InvalidTriggerFinding, TriggerSource};
 use simplified_schema::yaml_documents::LoadedYamlDocument;
 use simplified_schema::{
-    SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemCode, ValidationProblemKind, ValidationTimings,
+    AppliedDefault, SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemCode, ValidationProblemKind, ValidationTimings,
 };
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -44,6 +44,9 @@ enum FileOutcome {
         report_valid: bool,
         problems: Vec<ValidationProblem>,
         advisories: Vec<SchemaAdvisory>,
+        /// Absent required properties the verdict accepted through their
+        /// schema default, in validator order.
+        defaults: Vec<AppliedDefault>,
         schema_label: Option<String>,
         layers: AppliedLayers,
     },
@@ -608,6 +611,7 @@ fn validate_one(
             report_valid: report.valid,
             problems: report.problems,
             advisories: report.advisories,
+            defaults: report.defaults,
             schema_label,
             layers: AppliedLayers::for_markdown(summary.layers, &md, baseline),
         },
@@ -673,6 +677,7 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
             report_valid: true,
             problems: Vec::new(),
             advisories: Vec::new(),
+            defaults: Vec::new(),
             schema_label: None,
             layers: AppliedLayers::default(),
         },
@@ -680,6 +685,7 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
             report_valid: validation.report.valid,
             problems: validation.report.problems,
             advisories: validation.report.advisories,
+            defaults: validation.report.defaults,
             layers: AppliedLayers {
                 document: Some(DocumentSchema::Definition(validation.definition.clone())),
                 ..AppliedLayers::default()
@@ -1025,6 +1031,7 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
             report_valid,
             problems,
             advisories,
+            defaults,
             schema_label,
             layers,
         } => {
@@ -1051,13 +1058,20 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                     "message": advisory.message(),
                 })
             }));
-            json!({
+            let mut record = json!({
                 "file": file_str,
                 "valid": report_valid,
                 "schema": schema_label,
                 "layers": layers.to_json(),
                 "problems": problems_json,
-            })
+            });
+            if !defaults.is_empty() {
+                record["defaults"] = defaults
+                    .iter()
+                    .map(|applied| json!({ "path": applied.path.to_string(), "value": applied.value }))
+                    .collect();
+            }
+            record
         }
         FileOutcome::Unopened(err) => json!({
             "file": file_str,

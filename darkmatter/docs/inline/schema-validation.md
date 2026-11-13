@@ -428,7 +428,7 @@ Apply --set / --state overrides
   └─ Materialize schema-selected caller files (captured per-property origin)
       └─ Call Check (declared types only; nothing evaluated)
           └─ Frontmatter Interpolation ({{ var }})
-              └─ Schema Validation      ◄── here (bind + coerce + validate)
+              └─ Schema Validation      ◄── here (bind + default + coerce + validate)
                   └─ Frontmatter Shell Expansion ($(cmd))
                       └─ … rest of pipeline
 ```
@@ -465,6 +465,53 @@ Library callers can inject a workspace-wide baseline directly:
 let opts = ComposeOptions::default()
     .with_baseline_schema(my_baseline);   // SimplifiedSchema
 ```
+
+### Required properties with a default
+
+A `required` property whose definition has a `default(...)` may be absent.
+Every validation entry point (`md schema validate`, `DarkmatterSchemas::validate`,
+`EffectiveSchema::validate*`, whole YAML documents, DMLS) accepts the
+document as if the default were written there and lists what it relied on in
+`ValidationReport::defaults`, without changing the value it was given.
+`md schema validate --output json` lists them in each file record's
+`defaults` array (`[{ "path": "greeting", "value": "hello" }]`).
+
+Composition goes one step further: the schema stage writes those defaults
+into the composed frontmatter, so frontmatter shell expansion, interpolation
+pass 2, the body, and the composed output all see them.
+
+```mermaid
+flowchart LR
+    A["Frontmatter after<br/>interpolation pass 1"] --> B["Insert defaults of absent<br/>required properties"]
+    B --> C["Convert values"]
+    C --> D["Validate; re-match triggers"]
+    D -->|"a newly matched trigger<br/>requires more defaults"| B
+    D --> E["Shell expansion, pass 2,<br/>body stages"]
+```
+
+Rules:
+
+- Only an **absent** property is filled. `x: null` is present and is judged by
+  the declared type.
+- A default inside an object applies only when that object exists:
+  `server: { port: 80 }` gains `name: web` under
+  `server: "{ name: string(required; default(web)), port: number }"`, while a
+  document with no `server` gains nothing.
+- An optional property's default is never inserted.
+- A default is never inserted into a value a later stage still resolves (a
+  whole-value `$(...)`, a value holding a `{{ }}` template) or into a key the
+  caller owns.
+- A trigger whose match a default satisfies is applied, and its own required
+  defaults are inserted too.
+- The source file is never edited. The inserted value is data: its text is
+  never scanned for `{{ }}` or `$(...)`.
+- Interpolation pass 1 runs before this stage, so a frontmatter template that
+  pass 1 resolves sees the property as absent. A template that waits for pass 2
+  (one that reads a `$(...)` value) sees the default.
+- A default that breaks its own definition (`n: number(required; default("x"))`)
+  is a schema problem at the default. Its message names the property and the
+  schema location (`/properties/n/default`); it has no line or column in the
+  document, because no document text holds it.
 
 ### Optional parameter bindings
 

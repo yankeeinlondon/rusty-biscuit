@@ -1306,6 +1306,33 @@ constraint. `eager` means "validate at launch when present"; `required` means
 `file(eager)` expresses an optional file that is resolved and validated at
 launch when supplied.
 
+#### A required property with a default is never collected
+
+A `required` property that declares `default(...)` is answered by its default
+when it is absent, so claudine never prompts for it and never reports it as
+missing, in either mode. Composition writes the default into the composed
+frontmatter (never into your file), and the status report marks the property
+as using its default:
+
+```yaml
+$schema:
+  retries: number(required; default(3))   # absent: runs with retries = 3
+  topic: string(required)                 # absent: prompted, as before
+```
+
+- An **optional** property's default is documentation only: the property is
+  not collected and no value is inserted.
+- An explicit `retries: null` is present, so it is judged by its type
+  (`SchemaValidation`), not replaced by the default.
+- A default the schema refuses (`number(required; min(5); default(3))`) blocks
+  the launch with a `SchemaValidation` error that names the default's schema
+  location, `/properties/retries/default`, instead of prompting. This holds
+  for `inline-compose` too, even for a property that is not `eager`, because
+  composition would otherwise fill it from that default.
+- A required property inside an absent object is the object's question: with
+  `config: '{ level: number(required; default(1)) }(required)'` and no
+  `config`, claudine collects `config`.
+
 Raw JSON Schema has no phase vocabulary: its `required` entries are enforced
 before either mode starts and are checked again at completion. Use
 SimplifiedSchema when an actor inside the run is meant to produce the value.
@@ -1323,7 +1350,7 @@ When required properties are missing, claudine offers to collect them interactiv
 
 When Interactive Mode is denied, claudine emits a `MissingProperties` error with the prompt file (OSC8-linked), the list of missing property names in declaration order with their type labels and descriptions, the frontmatter `description` (when present), and a remediation hint: `Pass key=value, use --set, or set prompt_for_missing to true in an interactive terminal.`
 
-When Interactive Mode is allowed, claudine first prints a per-property status report to stderr (required and optional, with valid/invalid/missing glyphs) and then drives `biscuit-tui` widgets sized to each property's `SimplifiedType`:
+When Interactive Mode is allowed, claudine first prints a per-property status report to stderr (required and optional, with valid/invalid/missing glyphs; a required property its default answers is marked as using its default) and then drives `biscuit-tui` widgets sized to each property's `SimplifiedType`:
 
 | Property type                                  | Widget                                  |
 | ---------------------------------------------- | --------------------------------------- |

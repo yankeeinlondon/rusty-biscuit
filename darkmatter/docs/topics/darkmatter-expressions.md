@@ -197,9 +197,11 @@ See [Inserted Text Is Data](../inline/interpolation.md#inserted-text-is-data).
 ### Nullable directive targets
 
 Optional schema properties remain nullable until the document or caller binds
-a concrete non-null value. A schema `default(...)` is descriptive metadata; it
-does not install a runtime value and therefore does not make an unbound target
-non-null. Use `required`, provide a concrete binding, or guard the directive:
+a concrete non-null value. The `default(...)` of an optional property is
+descriptive metadata; it does not install a runtime value and therefore does
+not make an unbound target non-null. (A `required` property with a default is
+present: composition writes its default.) Use `required`, provide a concrete
+binding, or guard the directive:
 
 ```md
 ::block when="file_exists(log)"
@@ -313,7 +315,7 @@ three layers, which stay separate:
 
 | Layer | Comes from | Example |
 | --- | --- | --- |
-| Declaration | the document's schema | `tag: string \| null`; an optional property includes `null`, and a `default(…)` binds no value |
+| Declaration | the document's schema | `tag: string \| null`; an optional property includes `null`, and its `default(…)` binds no value; a `required` property, with or without a default, excludes `null` |
 | Refinement | every guard enclosing the site | under `when="tag"`, `tag` is `string` |
 | Approval fallback | shell templates only | a placeholder of unknown or non-string type approves as `{{ string }}` |
 

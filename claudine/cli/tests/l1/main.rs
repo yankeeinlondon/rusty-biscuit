@@ -159,6 +159,7 @@ mod lifecycle_literal_escapes;
 #[cfg(unix)]
 mod lifecycle_traces;
 mod lifecycle_message_drain;
+mod lifecycle_mutation_root;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;

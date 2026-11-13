@@ -193,7 +193,7 @@ fn soft_conversion_passes_meta_type_carriers_through_untouched() {
         "shape": {"x": "number"},
     });
     let accepted = schema.validate_soft(&value).expect("accepted");
-    assert!(accepted.is_converted());
+    assert!(accepted.is_modified());
     assert_eq!(
         accepted.value.as_ref(),
         &json!({"note": "7", "types": {"Id": "string"}, "arms": [{"a": "string"}, "./b.yaml"], "shape": {"x": "number"}})

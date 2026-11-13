@@ -179,6 +179,22 @@ fn compose_with_required_property_supplied_succeeds() {
         .stdout(predicate::str::contains("Body"));
 }
 
+/// A required property the document leaves out composes with its schema
+/// default, in the frontmatter and the body, and the source file keeps its
+/// bytes.
+#[test]
+fn compose_fills_a_required_default_without_editing_the_source() {
+    let process = CliProcessFixture::new();
+    let content = "---\n$schema:\n  greeting: 'string(required; default(hello))'\n---\nSay {{ greeting }}\n";
+    let doc = process.write_file("defaulted.md", content);
+
+    let (stdout, frontmatter) = composed_document(&process, &doc, &[]);
+
+    assert_eq!(frontmatter.get("greeting"), Some(&serde_json::json!("hello")), "{stdout}");
+    assert!(stdout.contains("Say hello"), "{stdout}");
+    assert_eq!(read_to_string(&doc), content);
+}
+
 // ── Medium #4: md compose ↔ md schema validate parity ───────────────────────
 
 /// Both `md compose` and `md schema validate` consume the same input file and

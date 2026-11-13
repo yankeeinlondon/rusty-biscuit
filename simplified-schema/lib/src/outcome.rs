@@ -7,23 +7,32 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::defaults::AppliedDefault;
 use crate::{SchemaAdvisory, SchemaError, ValidationProblem};
 
 /// An accepted value and the non-fatal findings beside it.
 #[derive(Debug, Clone)]
 pub struct ValidationSuccess<'input> {
     /// The accepted effective value: the caller's own input, borrowed, when
-    /// it was accepted as written; the converted value, owned, when soft
-    /// validation had to convert it. The input itself is never changed.
+    /// it was accepted as written, and always after strict validation; an
+    /// owned copy when soft validation converted a value, inserted a
+    /// default, or both. The input itself is never changed.
     pub value: Cow<'input, Value>,
     /// Non-fatal findings from resolving the schema.
     pub advisories: Vec<SchemaAdvisory>,
+    /// Required properties that were absent and passed through their
+    /// `default(...)`, in validator order. Empty for an unconditional pass.
+    /// Soft validation has inserted them into `value`; strict validation
+    /// leaves `value` as the input, so the caller decides whether to apply
+    /// them.
+    pub defaults: Vec<AppliedDefault>,
 }
 
 impl ValidationSuccess<'_> {
-    /// Whether the accepted value is a conversion of the input rather than
-    /// the input itself.
-    pub fn is_converted(&self) -> bool {
+    /// Whether the accepted value is a modified copy of the input (a
+    /// conversion, an inserted default, or both) rather than the input
+    /// itself.
+    pub fn is_modified(&self) -> bool {
         matches!(self.value, Cow::Owned(_))
     }
 }
@@ -52,7 +61,10 @@ pub enum ValidationFailure {
     /// judged: it does not lower to JSON Schema (a function-typed property),
     /// `jsonschema` rejects the lowered form, or it names a file an in-memory
     /// schema cannot read. Validation of every value fails the same way until
-    /// the schema changes.
+    /// the schema changes. Also a defect the value exposed in the schema's
+    /// defaults: an absent required property whose default breaks its own
+    /// definition, or union arms whose defaults complete the value
+    /// differently (see [`crate::defaults`]).
     Unprepared {
         /// Why preparation failed; shared, so repeated validations report the
         /// one error the schema holds.

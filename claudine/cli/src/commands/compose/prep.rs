@@ -1125,8 +1125,11 @@ fn build_and_run_loop(
         context: Some(prepared_context),
     };
 
-    let lifecycle_mutation_root =
-        effective_repo_root.unwrap_or(prep_context.launch_workspace.child_cwd.as_path());
+    // Lifecycle writes target the project the run was launched in, not the
+    // repository that happens to hold the prompt: a shared prompt library
+    // (e.g. a git-tracked `~/.claudine`) must still be able to write into the
+    // launch repo.
+    let lifecycle_mutation_root = prep_context.launch_workspace.child_cwd.as_path();
     let effect_engine = darkmatter::effects::EffectEngine::builder()
         .mutation_root(lifecycle_mutation_root)
         .auto_rehash(false)

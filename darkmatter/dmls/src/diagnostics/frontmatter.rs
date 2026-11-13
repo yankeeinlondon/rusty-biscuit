@@ -523,7 +523,10 @@ pub(crate) fn schema_problem_diagnostics(
             }
             _ => None,
         };
-        let Some(range) = located.or_else(|| problem_range(ctx.text, ast, ctx.source_map, problem)) else {
+        let Some(range) = located
+            .or_else(|| refused_default_range(ctx, ast, bundle, problem))
+            .or_else(|| problem_range(ctx.text, ast, ctx.source_map, problem))
+        else {
             continue;
         };
         let mut diagnostic = diagnostic(
@@ -779,6 +782,35 @@ fn semantic_problem_range(
         entry.value_span.clone()
     };
     ctx.source_map.byte_range_to_lsp(span)
+}
+
+/// The range of a refused `default(...)`: a constraint violation at a path
+/// with no authored value judged the schema's default, which no frontmatter
+/// text holds. It ranges the property's declaration in the document's inline
+/// `$schema`, or the `$schema` value when the declaration is elsewhere (a
+/// referenced file, a root union). A property the baseline or a trigger
+/// declares keeps the ordinary ranging.
+fn refused_default_range(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    bundle: &SchemaBundle,
+    problem: &ValidationProblem,
+) -> Option<Range> {
+    if problem.code != ValidationProblemCode::ConstraintViolation
+        || problem.path.is_empty()
+        || ast.entry_by_pointer(&problem.path).is_some()
+    {
+        return None;
+    }
+    let key = problem.instance_path.first()?;
+    let origin = bundle.effective.origins.get(key)?;
+    if !matches!(origin.kind, SchemaOriginKind::Document | SchemaOriginKind::ReferencedFile) {
+        return None;
+    }
+    let schema = ast.schema_entry()?;
+    let declaration = format!("/$schema/{}", key.replace('~', "~0").replace('/', "~1"));
+    let span = ast.entry_by_pointer(&declaration).unwrap_or(schema).value_span.clone();
+    ctx.source_map.byte_range_to_lsp(complete_flow_value_span(ctx.text, span))
 }
 
 /// The concrete range for one validation problem (R-5 ranging rules).

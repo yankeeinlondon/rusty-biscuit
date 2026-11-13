@@ -268,7 +268,10 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
         | SchemaError::EmbeddedTriggerLoad { .. }
         | SchemaError::EmbeddedBundle { .. }
         | SchemaError::BareNameSiblingExists { .. }
-        | SchemaError::TriggerSchemaReferenced { .. } => return None,
+        | SchemaError::TriggerSchemaReferenced { .. }
+        | SchemaError::InvalidDefault { .. }
+        | SchemaError::AmbiguousDefaults { .. }
+        | SchemaError::RecursiveDefault { .. } => return None,
     };
     other_file(path, trigger)
 }

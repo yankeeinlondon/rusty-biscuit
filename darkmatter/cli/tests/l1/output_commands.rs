@@ -549,6 +549,15 @@ fn conforms_schema_validate_success() {
 }
 
 #[test]
+fn conforms_schema_validate_reports_the_defaults_it_relied_on() {
+    let fixture = with_document("output-validate-defaults", "---\n$schema:\n  greeting: string(required; default(hello))\n---\n# H\n");
+    let value = conforms(include_str!("../../schemas/output/schema-validate.yaml"), &fixture, &["schema", "validate", "doc.md", "--output", "json"], 0);
+    let record = &value["files"][0];
+    assert_eq!(record["valid"], true, "{value:#}");
+    assert_eq!(record["defaults"], serde_json::json!([{ "path": "greeting", "value": "hello" }]), "{value:#}");
+}
+
+#[test]
 fn conforms_schema_validate_keeps_a_failing_and_an_unopened_file_apart() {
     let fixture = with_document("output-validate-failure", "---\n$schema:\n  name: string(required)\n---\n# H\n");
     fixture.write_file("cwd/good.md", GOOD);

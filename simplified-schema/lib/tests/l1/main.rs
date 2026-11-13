@@ -25,6 +25,7 @@ mod non_null_properties;
 mod path_lookup_guard;
 mod property_paths;
 mod quote_the_slot;
+mod required_defaults;
 mod resolution_unavailable;
 mod root_union_assertions;
 mod schema_file_selection;

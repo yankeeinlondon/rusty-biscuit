@@ -278,6 +278,23 @@ properties, and defaulted properties do not materialize. A compose run with no
 effective schema and all validation-only APIs remain non-mutating. Repeated
 schema passes are idempotent, and present values are preserved exactly.
 
+Required defaults: `EffectiveSchema::validate_instance` judges the candidate
+`simplified_schema::defaults::prepare_defaults` completes (soft paths:
+defaults, conversion, defaults again, as `Prepared::validate_soft`;
+`converted_candidate`/`complete`), with this schema's validators, nested
+templates, and `SHARED_VALIDATOR_CACHE`; never add a second defaulting walk.
+`ValidationReport::defaults` lists them; the caller's value is never touched
+(`data_copy` excludes defaults, so `md set` never writes one). An engine error
+becomes one `ConstraintViolation` problem at the property, `schema_path` = the
+default's pointer, no line/column (`default_problem`). Composition
+(`run_with_registry`) inserts `EffectiveSchema::required_defaults` before
+conversion in every pass (skipping composition-pending, `exclude_keys`, and
+present paths), then loops verdict → insert while a re-matched trigger reports
+more; it returns the inserted paths and the pipeline marks them data in
+`FrontmatterProvenance`. Pass 1 interpolation runs before this, so only pass 2
+and later see a default. Presence typing needed no change: `PropertyDef::is_required`
+already makes a required property non-null whether written or defaulted.
+
 Runtime consumers use `SchemaPhase::Launch` and `SchemaPhase::Completion` on
 an already-resolved `EffectiveSchema`. `required` and `eager` are independent
 axes, derived recursively:
@@ -963,7 +980,8 @@ References; Choosing an Arm: Reporting versus Changing Data).
   default under `[]` fails as `ScalarDefault`. The Rust API can supply an
   actual JSON-array arm default, which hoists to the list; inherited and
   use-site defaults must agree under shared numeric normalization. This adds
-  no list-valued default spelling to the grammar. No default is ever inserted.
+  no list-valued default spelling to the grammar. An optional property's
+  default is never inserted (required ones are; see "Required defaults").
 - Representation: a bare `U` stays `PropertyDef::Union`. A postfixed reference
   is `PropertyDef::Single(atom)` with `atom.ty == TypeExpr::Union(arms)`
   and `atom.is_array` for `U[]`; the parser produces the same atom for the

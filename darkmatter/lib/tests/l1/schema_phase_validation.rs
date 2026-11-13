@@ -662,9 +662,15 @@ fn shipped_inline_schema_uses_normal_resolution_and_phase_path() {
 
     let empty = json!({});
     assert_eq!(missing(&empty, SchemaPhase::Launch), vec!["plan".to_string()]);
+    // `phase` is required with `default(1)`, so its absence passes through
+    // the default at completion.
     assert_eq!(
         missing(&empty, SchemaPhase::Completion),
-        vec!["phase".to_string(), "plan".to_string(), "total_phases".to_string()],
+        vec!["plan".to_string(), "total_phases".to_string()],
+    );
+    assert_eq!(
+        schema.validate_for_phase(&empty, SchemaPhase::Completion).expect("phase schema builds").defaults,
+        [simplified_schema::AppliedDefault { path: simplified_schema::PropertyPath::parse("phase").unwrap(), value: json!(1) }],
     );
 
     // The shipped document's own null-yielding `spec` expression is the input

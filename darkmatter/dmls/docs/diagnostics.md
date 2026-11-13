@@ -574,7 +574,15 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
 - Value problems (type, constraint, file-reference) range the **value** node.
 - `unknown_key` ranges the **offending key**.
 - `missing_required` has no node to point at, so it ranges the **parent mapping**
-  (a visible, non-zero-width range).
+  (a visible, non-zero-width range). A required property with a resolved
+  `default(...)` is never missing: the default answers it.
+- A refused default (`n: number(required; min(5); default(3))` with `n`
+  absent) is a `dm.schema.constraint` whose message names the default's schema
+  location (`/properties/n/default`). No frontmatter text holds the value it
+  judged, so it ranges the property's **declaration** in the inline `$schema`
+  (`number(required; min(5); default(3))`), or the `$schema` value when the
+  inline mapping does not hold it (a referenced schema file, a root union). A property the baseline or a trigger
+  declares ranges as an ordinary value problem.
 - A YAML parse error ranges the parser's reported position; the last-good tree
   keeps completion and hover alive meanwhile.
 - A schema grammar error ranges the **offending token** inside the

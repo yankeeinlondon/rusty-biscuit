@@ -1286,7 +1286,7 @@ fn construct_lifecycle_runtime(
     CompositionPhaseResult::from_result({
         let request = &attempt.request;
         let SelectionPhase {
-            launch_cwd,
+            launch_cwd: _,
             // The epoch snapshot on `request.prepared.compose_context` anchors
             // lifecycle `ctx.*`; the launch workspace itself is read by the
             // runner phase, not here.
@@ -1362,8 +1362,10 @@ fn construct_lifecycle_runtime(
         };
 
         // Build an effect engine for lifecycle side effects / expression functions.
-        // Writes are confined to the repo root when known, otherwise the launch cwd.
-        let lifecycle_mutation_root = effective_repo_root.unwrap_or(launch_cwd.as_path());
+        // Writes are confined to the launch workspace (the launch repo root when
+        // known, otherwise the launch cwd) — never the prompt's own repository,
+        // which differs whenever the prompt lives in a shared library.
+        let lifecycle_mutation_root = env_plan.child_cwd.as_path();
         let lifecycle_effect_engine = EffectEngine::builder()
             .mutation_root(lifecycle_mutation_root)
             .auto_rehash(false)

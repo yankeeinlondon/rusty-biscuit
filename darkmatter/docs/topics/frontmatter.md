@@ -137,6 +137,9 @@ literal top-level keys. A caller that wants paths uses
 `simplified_schema::PropertyPath`, described in
 [Property Paths](../../../simplified-schema/docs/topics/property-paths.md),
 with `darkmatter::markdown::hash::edited_document_text` for the text.
+A plain `.yaml` file is edited with `darkmatter::yaml_edit::edit_yaml_paths`,
+which follows the same in-place rules but refuses instead of falling back; see
+[Editing Plain YAML Files](./yaml-editing.md).
 
 ## Shallow Merges (Library)
 

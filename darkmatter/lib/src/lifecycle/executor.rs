@@ -1204,18 +1204,22 @@ impl<'a> StackExecutor<'a> {
         let request_context = self.inputs.file_resolution_context;
         let reference = FileReference::new(raw).map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
         let document_context = request_context.for_source(self.inputs.source_path);
-        let mutation_context = request_context.for_cwd(self.inputs.effect_engine.mutation_root());
         let resolved = reference
             .resolve_in_context(&document_context)
             .map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
         let path = match resolved {
             Some(path) => path,
+            // A new implicit-relative target is created under the mutation root.
+            // Joined directly rather than through `request_context.for_cwd(..)`:
+            // that context keeps the document's repository boundary, and the
+            // mutation root (the launch workspace) lies outside it whenever the
+            // document comes from a different repository, e.g. a shared prompt
+            // library.
+            None if reference.class().kind == FileReferenceKind::ImplicitRelative => {
+                self.inputs.effect_engine.mutation_root().join(raw)
+            }
             None => reference
-                .candidate_plan(if reference.class().kind == FileReferenceKind::ImplicitRelative {
-                    &mutation_context
-                } else {
-                    &document_context
-                })
+                .candidate_plan(&document_context)
                 .map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?
                 .into_iter()
                 .next()

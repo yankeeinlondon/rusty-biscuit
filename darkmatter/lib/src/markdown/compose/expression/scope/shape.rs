@@ -250,7 +250,10 @@ impl Shape {
 
 impl Shape {
     /// The shape of a property declaration: [`Self::of_type`], plus `null`
-    /// unless the shared presence rule makes the property required.
+    /// unless the shared presence rule makes the property required. A
+    /// required property is present whether written or supplied by its
+    /// `default(...)`, which composition inserts; an optional property's
+    /// default is never inserted, so it keeps `null`.
     pub(super) fn from_definition(def: &PropertyDef) -> Self {
         let shape = Self::of_type(def);
         if def.is_required() { shape } else { shape.with_null() }

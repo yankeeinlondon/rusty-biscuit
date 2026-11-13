@@ -21,6 +21,8 @@
 //! - [`prepared`] and [`outcome`]: a schema compiled once ([`Prepared`]) and
 //!   its strict and soft validation, which return
 //!   `Result<`[`ValidationSuccess`]`, `[`ValidationFailure`]`>`;
+//! - [`defaults`]: the defaults of absent required properties, the one walk
+//!   [`Prepared`] and a host's compiled schema share;
 //! - [`schema`]: the [`SimplifiedSchema`] object, which builds from content
 //!   or a file, validates strictly or softly without a compile step, layers,
 //!   answers type queries, and exports;
@@ -38,6 +40,7 @@ pub mod claims;
 pub mod coerce;
 pub mod coercion;
 pub mod completion;
+pub mod defaults;
 pub mod discriminant;
 pub mod embedded;
 pub mod envelope;
@@ -89,6 +92,7 @@ pub(crate) use note_work;
 
 pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
 pub use claims::{ClaimCause, ClaimProblem, claimed_values};
+pub use defaults::{AppliedDefault, DefaultPreparation};
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::{
     CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError, SlotRelated, SlotResolutionFailure, SlotResultKind, UnresolvedSlots,

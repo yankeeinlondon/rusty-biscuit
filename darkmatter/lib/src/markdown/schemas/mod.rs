@@ -85,7 +85,7 @@ pub use about::{
     trigger_grammar_descriptors,
 };
 use simplified_schema::{
-    JsonPointer, SchemaAdvisory, SchemaError, SchemaOrigin, SchemaOriginMap, SchemaPhase, ValidationProblem, ValidationProblemCode, ValidationProblemKind, authored_node_at,
+    AppliedDefault, JsonPointer, SchemaAdvisory, SchemaError, SchemaOrigin, SchemaOriginMap, SchemaPhase, ValidationProblem, ValidationProblemCode, ValidationProblemKind, authored_node_at,
 };
 pub use completion::{CompletionKind, CompletionSuggestion};
 pub use clean::{
@@ -1782,12 +1782,74 @@ impl EffectiveSchema {
     /// so decoded literal text is never taken for a template.
     fn validate_converted(&self, frontmatter: &Value, stored: &Value, positions: &ProblemPositions<'_>) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
-        if self.accepts_as_is(frontmatter) {
-            return self.validate_instance(frontmatter, frontmatter, stored, positions, &simplified_schema::coerce::NestedTemplates::default());
+        let templates = if self.accepts_as_is(frontmatter) {
+            simplified_schema::coerce::NestedTemplates::default()
+        } else {
+            self.nested_templates(stored)
+        };
+        let candidate = self.converted_candidate(frontmatter, &templates);
+        self.validate_instance(candidate, frontmatter, stored, positions, &templates)
+    }
+
+    /// `instance` completed with the defaults of its absent required
+    /// properties, through the one default engine
+    /// ([`simplified_schema::defaults::prepare_defaults`]); a value the
+    /// validators accept as written comes back borrowed with no defaults.
+    /// Values at or below one of `templates` are pending and never filled.
+    fn complete<'a>(
+        &self,
+        instance: std::borrow::Cow<'a, Value>,
+        templates: &simplified_schema::coerce::NestedTemplates,
+    ) -> Result<simplified_schema::DefaultPreparation<'a>, SchemaError> {
+        simplified_schema::defaults::prepare_defaults(
+            &self.json_schema,
+            instance,
+            templates,
+            &self.validators,
+            &SHARED_VALIDATOR_CACHE,
+        )
+    }
+
+    /// The soft candidate of `instance`, in the order
+    /// [`simplified_schema::Prepared::validate_soft`] builds it: defaults,
+    /// then conversion, then any default the conversion made reachable (a
+    /// union arm the converted value selects). Conversion commits a nested
+    /// value only once the complete schema accepts it, which a missing
+    /// required child would prevent, so defaults go in first.
+    fn converted_candidate<'a>(
+        &self,
+        instance: &'a Value,
+        templates: &simplified_schema::coerce::NestedTemplates,
+    ) -> Result<simplified_schema::DefaultPreparation<'a>, SchemaError> {
+        if self.accepts_as_is(instance) {
+            return Ok(simplified_schema::DefaultPreparation { candidate: std::borrow::Cow::Borrowed(instance), defaults: Vec::new() });
         }
-        let templates = self.nested_templates(stored);
-        let working_copy = simplified_schema::coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, frontmatter, &templates);
-        self.validate_instance(&working_copy, frontmatter, stored, positions, &templates)
+        let before = self.complete(std::borrow::Cow::Borrowed(instance), templates)?;
+        let converted =
+            simplified_schema::coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, &before.candidate, templates);
+        let after = self.complete(std::borrow::Cow::Owned(converted), templates)?;
+        let mut defaults = before.defaults;
+        for late in after.defaults {
+            if !defaults.iter().any(|early| early.path == late.path) {
+                defaults.push(late);
+            }
+        }
+        Ok(simplified_schema::DefaultPreparation { candidate: after.candidate, defaults })
+    }
+
+    /// The defaults of the absent required properties of `instance`, a
+    /// composed frontmatter value, in the order
+    /// [`Self::converted_candidate`] finds them. Templates this schema marks
+    /// `deferred` are pending and nothing below them is filled. Composition
+    /// writes these into its working frontmatter; nothing here mutates.
+    ///
+    /// ## Errors
+    ///
+    /// The default engine's [`SchemaError`]: a default that breaks its own
+    /// definition, ambiguous union defaults, or a recursive default.
+    pub(crate) fn required_defaults(&self, instance: &Value) -> Result<Vec<AppliedDefault>, SchemaError> {
+        let templates = self.nested_templates(instance);
+        self.converted_candidate(instance, &templates).map(|prepared| prepared.defaults)
     }
 
     /// The effective schema of a whole YAML document: `resolved` alone, with
@@ -1838,11 +1900,12 @@ impl EffectiveSchema {
         let _validate = timings::stage(ValidationStage::Validate);
         let templates = simplified_schema::coerce::NestedTemplates::default();
         let positions = ProblemPositions::Built(positions);
-        let working_copy = self.data_copy(instance);
-        self.validate_instance(&working_copy, instance, instance, &positions, &templates)
+        let candidate = self.converted_candidate(instance, &templates);
+        self.validate_instance(candidate, instance, instance, &positions, &templates)
     }
 
-    /// The copy of `instance` [`Self::validate_data`] judges: `instance`
+    /// The copy of `instance` [`Self::validate_data`] judges, without the
+    /// defaults of absent required properties: `instance`
     /// itself when it is accepted as written, the softly converted copy
     /// otherwise. A host that reads a document's meaning after this schema
     /// accepted it (an editor reading a `kind: schema` document with
@@ -1906,7 +1969,9 @@ impl EffectiveSchema {
             // places are deferred as in every phase.
             SchemaPhase::Completion => {
                 let _validate = timings::stage(ValidationStage::Validate);
-                projected.validate_instance(frontmatter, frontmatter, frontmatter, positions, &projected.nested_templates(frontmatter))
+                let templates = projected.nested_templates(frontmatter);
+                let candidate = projected.complete(std::borrow::Cow::Borrowed(frontmatter), &templates);
+                projected.validate_instance(candidate, frontmatter, frontmatter, positions, &templates)
             }
         })
     }
@@ -1950,7 +2015,9 @@ impl EffectiveSchema {
         let decoded = decoded.as_ref().unwrap_or(stored);
         if completion {
             let _validate = timings::stage(ValidationStage::Validate);
-            self.validate_instance(decoded, decoded, stored, positions, &self.nested_templates(stored))
+            let templates = self.nested_templates(stored);
+            let candidate = self.complete(std::borrow::Cow::Borrowed(decoded), &templates);
+            self.validate_instance(candidate, decoded, stored, positions, &templates)
         } else {
             self.validate_converted(decoded, stored, positions)
         }
@@ -2030,13 +2097,9 @@ impl EffectiveSchema {
         positions: &PositionMap,
     ) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
-        self.validate_instance(
-            frontmatter,
-            frontmatter,
-            frontmatter,
-            &ProblemPositions::Built(positions),
-            &simplified_schema::coerce::NestedTemplates::default(),
-        )
+        let templates = simplified_schema::coerce::NestedTemplates::default();
+        let candidate = self.complete(std::borrow::Cow::Borrowed(frontmatter), &templates);
+        self.validate_instance(candidate, frontmatter, frontmatter, &ProblemPositions::Built(positions), &templates)
     }
 
     /// The nested templates of `authored` that this schema marks `deferred`
@@ -2045,11 +2108,13 @@ impl EffectiveSchema {
         coerce::nested_templates(self.conversion(), &self.json_schema, authored)
     }
 
-    /// Shared validation body over an already-prepared instance. Callers
+    /// Shared validation body over an already-prepared candidate. Callers
     /// choose the preparation: [`Self::validate_with_positions`] passes a
     /// coerced working copy, the `validate_raw` pair passes the instance as
-    /// parsed. Problems owed to one of `templates` are left out as they are
-    /// collected.
+    /// parsed; either holds the defaults of absent required properties,
+    /// which the report lists. A candidate the default engine refused is
+    /// reported as one problem at the schema default. Problems owed to one
+    /// of `templates` are left out as they are collected.
     ///
     /// Every value the schema types as a generated lifecycle verb's operands
     /// is bound through that verb's runtime registration, whose verdict
@@ -2067,12 +2132,30 @@ impl EffectiveSchema {
     /// valid instance never asks for a position map.
     fn validate_instance(
         &self,
-        instance: &Value,
+        candidate: Result<simplified_schema::DefaultPreparation<'_>, SchemaError>,
         authored: &Value,
         stored: &Value,
         positions: &ProblemPositions<'_>,
         templates: &simplified_schema::coerce::NestedTemplates,
     ) -> ValidationReport {
+        let simplified_schema::DefaultPreparation { candidate, defaults } = match candidate {
+            Ok(prepared) => prepared,
+            // No authored text holds the default, so the problem is never
+            // located: it names the property and the schema location.
+            Err(error) => {
+                let problems = vec![default_problem(&error)];
+                return ValidationReport {
+                    valid: false,
+                    problems,
+                    pending: Vec::new(),
+                    deferred: templates.pointers(),
+                    advisories: self.advisories.clone(),
+                    trigger_findings: Vec::new(),
+                    defaults: Vec::new(),
+                };
+            }
+        };
+        let instance = candidate.as_ref();
         let bound = self
             .conversion()
             .marks_operands(&self.json_schema)
@@ -2112,6 +2195,7 @@ impl EffectiveSchema {
             deferred: templates.pointers(),
             advisories: self.advisories.clone(),
             trigger_findings: Vec::new(),
+            defaults,
         }
     }
 
@@ -2177,6 +2261,7 @@ impl EffectiveSchema {
             !authored_node_at(frontmatter, &problem.path)
                 .is_some_and(|(pointer, node)| awaits_rendering(problem, node, &pointer, deferred, &holds))
         });
+        report.defaults.retain(|applied| !applied.path.segments().first().is_some_and(|key| options.excluded_keys.contains(key)));
         report.valid = report.problems.is_empty();
         report.pending = pending;
         report
@@ -2307,6 +2392,12 @@ pub struct ValidationReport {
     /// [`DarkmatterSchemas::validate_for_phase`] whether or not an effective
     /// schema exists; empty from an [`EffectiveSchema`]'s own validation.
     pub trigger_findings: Vec<library_triggers::InvalidTriggerFinding>,
+    /// Required properties that were absent and were accepted through their
+    /// `default(...)`, in validator order (parents before children,
+    /// declaration order, ascending array index). Empty for an
+    /// unconditional pass. Validation never inserts them into the caller's
+    /// value; composition writes them into the composed frontmatter.
+    pub defaults: Vec<AppliedDefault>,
 }
 
 /// What preparing a document's effective schema found, returned beside the
@@ -2366,7 +2457,46 @@ impl ValidationReport {
             deferred: Vec::new(),
             advisories: Vec::new(),
             trigger_findings: Vec::new(),
+            defaults: Vec::new(),
         }
+    }
+}
+
+/// The problem a default the engine refused becomes: at the property the
+/// default stands in for (the document root when the error names none),
+/// with the default's JSON Pointer in the lowered schema as its
+/// `schema_path`, and no line or column, since no authored text holds it.
+fn default_problem(error: &SchemaError) -> ValidationProblem {
+    let (property, schema_pointer) = match error {
+        SchemaError::InvalidDefault { path, pointer, .. } => (Some(path), Some(pointer.as_str())),
+        SchemaError::AmbiguousDefaults { path, pointer, .. } => (path.as_ref(), Some(pointer.as_str())),
+        SchemaError::RecursiveDefault { path, .. } => (path.as_ref(), None),
+        _ => (None, None),
+    };
+    let pointer: String = property
+        .map(|path| {
+            path.segments()
+                .iter()
+                .map(|segment| format!("/{}", segment.replace('~', "~0").replace('/', "~1")))
+                .collect()
+        })
+        .unwrap_or_default();
+    ValidationProblem {
+        instance_path: JsonPointer::parse(&pointer),
+        path: pointer,
+        message: error.to_string(),
+        kind: ValidationProblemKind::Invalid,
+        property: property.and_then(|path| path.segments().last().cloned()),
+        line: None,
+        column: None,
+        arm_index: None,
+        description: None,
+        code: ValidationProblemCode::ConstraintViolation,
+        schema_path: schema_pointer.map(JsonPointer::parse),
+        offending_property: None,
+        offending_properties: Vec::new(),
+        file_reference: None,
+        caller_file: None,
     }
 }
 

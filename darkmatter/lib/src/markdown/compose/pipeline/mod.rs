@@ -536,7 +536,7 @@ impl Markdown {
                 .root_path()
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| schema_validation::source_path(self, options));
-            schema_validation::run_with_registry(
+            let defaulted = schema_validation::run_with_registry(
                 self,
                 options,
                 &prepared_schemas,
@@ -549,6 +549,11 @@ impl Markdown {
                 &schema_consumer,
                 report,
             )?;
+            // A schema default is the schema's value, not authored text:
+            // later stages never scan it for `{{ … }}` or `$( … )`.
+            for path in defaulted {
+                provenance.data_mut().mark(path);
+            }
             if let Some(start) = sv_start {
                 perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
             }
@@ -685,7 +690,7 @@ impl Markdown {
                     .root_path()
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| schema_validation::source_path(self, options));
-                schema_validation::run_with_registry(
+                let defaulted = schema_validation::run_with_registry(
                     self,
                     options,
                     &prepared_schemas,
@@ -699,6 +704,9 @@ impl Markdown {
                     &schema_consumer,
                     report,
                 )?;
+                for path in defaulted {
+                    provenance.data_mut().mark(path);
+                }
             } else {
                 schema_validation::verify_projection_stability(
                     self,

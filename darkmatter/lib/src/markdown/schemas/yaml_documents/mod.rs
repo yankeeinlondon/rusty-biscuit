@@ -59,6 +59,9 @@ pub enum Route {
 }
 
 /// The result of validating one YAML document.
+// Returned once per document and matched at once; boxing the validation
+// would only add an allocation to the common case.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum YamlOutcome {
     /// No schema was selected: the root is not a mapping, or it has neither

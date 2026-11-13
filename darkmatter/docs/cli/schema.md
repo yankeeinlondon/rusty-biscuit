@@ -49,7 +49,10 @@ parsed, or a schema cannot be loaded.
 A data output is one object whose `files` array has one record per file argument, in
 order. A failing run has `outcome: "failure"` and an empty run-level `diagnostics`:
 the problems stay in each file's record, and only a problem with the invocation
-itself is a run diagnostic. `-vv` timings are absent from data.
+itself is a run diagnostic. `-vv` timings are absent from data. A validated record whose
+verdict relied on the `default(...)` of an absent required property lists each one
+in `defaults`, as `{ "path": "greeting", "value": "hello" }`; the key is absent when
+there are none.
 
 ```json
 {

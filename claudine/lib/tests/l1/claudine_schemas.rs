@@ -214,6 +214,7 @@ impl Discovered {
                 deferred: Vec::new(),
                 advisories: Vec::new(),
                 trigger_findings: Vec::new(),
+                defaults: Vec::new(),
             },
         };
         let held = match &effective {

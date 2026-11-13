@@ -329,10 +329,9 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
             .prompt_state
             .repository_root_or(run.repo_root)
             .map(Path::to_path_buf);
-        let mutation_root = source_repo_root
-            .as_deref()
-            .unwrap_or(run.child_cwd)
-            .to_path_buf();
+        // Lifecycle writes land in the launch workspace, not the prompt's own
+        // repository (they differ when the prompt comes from a shared library).
+        let mutation_root = run.child_cwd.to_path_buf();
         let effect_engine = EffectEngine::builder()
             .mutation_root(&mutation_root)
             .auto_rehash(false)
