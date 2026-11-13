@@ -83,7 +83,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     lines.push(ReportLine {
                         level: ReportLevel::Success,
                         text: format!(
-                            "Zed's dev-extension registration `{}` already points at it",
+                            "Zed's dev-extension registration `{}` already points at it; restart Zed if it is running, because reloading the extension stops `dmls` in every open window",
                             registration_path(&paths).display()
                         ),
                     });
