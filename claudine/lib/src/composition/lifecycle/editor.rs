@@ -7,22 +7,9 @@
 //! whether an editor may borrow the terminal, needs a display, or must be
 //! refused.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use darkmatter::editor::{
     EditOutcome, EditRequest, EditorHostFacts, EditorOutput, EditorService, EnvironmentProbe, ProcessEditorService,
 };
-
-/// Whether this process reserves stdout and stderr for one structured result
-/// (`--output json` or `--output stream`). Process-wide because the output
-/// format is fixed for the whole invocation, like the interrupt flag.
-static STRUCTURED_OUTPUT: AtomicBool = AtomicBool::new(false);
-
-/// Records whether the invocation's output is structured. The binaries call
-/// this where they resolve the output format, before any event runs.
-pub fn set_structured_output(structured: bool) {
-    STRUCTURED_OUTPUT.store(structured, Ordering::SeqCst);
-}
 
 /// The [`EditorService`] every Claudine stack lends its `edit` actions.
 ///
@@ -47,14 +34,11 @@ pub(super) fn service() -> ProcessEditorService {
 /// The service with an explicit view of the process; tests use it to stand
 /// in for a host they are not running on (no display, no terminal).
 pub(super) fn service_with(probe: EnvironmentProbe) -> ProcessEditorService {
-    let output = if STRUCTURED_OUTPUT.load(Ordering::SeqCst) {
-        EditorOutput::Structured
-    } else {
-        EditorOutput::Terminal
-    };
-    // A piped prompt leaves stdin without a terminal, which the probe already
+    // Claudine has no structured result of its own on stdout, so its streams
+    // are never reserved and eligibility follows only the probe's facts. A
+    // piped prompt leaves stdin without a terminal, which the probe already
     // refuses for a terminal editor, so stdin is never separately reserved.
-    ProcessEditorService { facts: EditorHostFacts { output, stdin_reserved: false }, probe }
+    ProcessEditorService { facts: EditorHostFacts { output: EditorOutput::Terminal, stdin_reserved: false }, probe }
 }
 
 #[cfg(test)]

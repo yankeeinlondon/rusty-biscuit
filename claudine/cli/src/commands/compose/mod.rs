@@ -20,7 +20,7 @@ use std::io::IsTerminal;
 
 use clap::Args;
 use claudine::composition::{
-    CompositionError, CompositionMode, OutputFormat as CompositionOutputFormat, PrepareOptions,
+    CompositionError, CompositionMode, PrepareOptions,
     PreparedComposition, ResolvedCompositionSource, ResolvedSessionInteractivity,
 };
 use claudine::provider::Provider;
@@ -142,9 +142,11 @@ pub struct SharedComposeArgs {
     #[arg(short = 'm', long = "model", value_name = "MODEL")]
     pub model: Option<String>,
 
-    /// Set the output format (json, text, stream).
-    #[arg(short = 'o', long = "output", value_name = "FORMAT")]
-    pub output: Option<CompositionOutputFormat>,
+    /// Not implemented: declared only so the run is refused with Claudine's
+    /// own message ([`crate::args::refuse_output_option`]) rather than
+    /// clap's "unexpected argument". Hidden from help.
+    #[arg(short = 'o', long = "output", value_name = "TARGET", hide = true)]
+    pub output: Option<String>,
 
     /// Append a system prompt from a file.
     #[arg(

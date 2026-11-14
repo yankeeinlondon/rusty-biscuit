@@ -14,6 +14,7 @@ mod claudine_editor_parity;
 mod collection_editor;
 mod claudine_schema_discovery;
 mod content_policy_baseline;
+mod edit_action_editor;
 mod context_construction_guard;
 mod core_schema_types;
 mod entry_point_parity;

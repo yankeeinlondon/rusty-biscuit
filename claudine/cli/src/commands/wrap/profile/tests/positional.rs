@@ -685,13 +685,10 @@ fn run_direct_wrap_pipeline_simulation(
     //    the profile for every provider.
     let _ = profile.apply_model(&mut child_args, &mut env_overrides, "test-model");
 
-    // 5. Output format (simulation of --format stream-json)
-    let _ = profile.apply_output_format(&mut child_args, OutputFormat::Stream);
-
-    // 6. apply_structured_stream
+    // 5. apply_structured_stream
     profile.apply_structured_stream(&mut child_args);
 
-    // 7. prompt_delivery (NEW CORRECT ORDER)
+    // 6. prompt_delivery (NEW CORRECT ORDER)
     let _ = profile
         .prompt_delivery(&child_args, prompt, true)
         .unwrap()

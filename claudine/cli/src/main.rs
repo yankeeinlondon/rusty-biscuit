@@ -463,6 +463,12 @@ async fn dispatch(
     process_start: std::time::Instant,
 ) -> Result<i32> {
     let mut cli = parse_cli_from(&argv);
+    // Ahead of everything that prepares a run, even the launch directory and
+    // configuration, so a refused `--output` creates and launches nothing.
+    if let Some(refusal) = cli.command.as_ref().and_then(args::refuse_output_option) {
+        log::message(&refusal);
+        return Ok(args::EXIT_USAGE);
+    }
     let launch_mode = if matches!(cli.command, Some(Commands::Handle(_))) {
         claudine::child_environment::LaunchDirectoryMode::ProviderHook
     } else {

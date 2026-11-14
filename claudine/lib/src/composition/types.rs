@@ -3,13 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposePerfReport, ComposeWarning};
 use darkmatter::markdown::hash::ComputedHash;
-use serde::{Deserialize, Serialize};
 
 use super::launch_workspace::LaunchWorkspaceContext;
 use super::lifecycle::LifecycleConfig;
@@ -961,40 +959,6 @@ pub struct InlineClosurePlan {
     pub original_hash: ComputedHash,
 }
 
-/// Universal output format for composed provider execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum OutputFormat {
-    Json,
-    Text,
-    Stream,
-}
-
-impl fmt::Display for OutputFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Json => write!(f, "json"),
-            Self::Text => write!(f, "text"),
-            Self::Stream => write!(f, "stream"),
-        }
-    }
-}
-
-impl FromStr for OutputFormat {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.to_ascii_lowercase().as_str() {
-            "json" => Ok(Self::Json),
-            "text" => Ok(Self::Text),
-            "stream" | "stream-json" => Ok(Self::Stream),
-            _ => Err(format!(
-                "unknown output format '{value}'; expected json, text, or stream"
-            )),
-        }
-    }
-}
-
 /// The providers a run's attempts actually spawned, in order, shared by every
 /// document the run executes (retries, resumes, and proxy targets included).
 ///
@@ -1046,8 +1010,6 @@ pub struct CompositionExecutionRequest {
     pub include: Vec<String>,
     /// Override the model used by the provider.
     pub model: Option<String>,
-    /// Set the output format (json, text, stream).
-    pub output: Option<OutputFormat>,
     /// Parsed system prompt CLI args for the session.
     pub system_prompt_args: crate::system_prompt::SystemPromptArgs,
     /// Wall-clock timeout as a duration string (e.g. `30s`, `5m`, `2h`).

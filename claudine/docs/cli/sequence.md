@@ -379,7 +379,7 @@ Flags shared with `compose`:
 | Loops | `--max-iterations <N>` (caps every loop's iterations, overriding `loop.max`; `CLAUDINE_MAX_ITERATIONS` applies when the flag is absent), `--on-rate-limit pause\|abort\|continue` (overrides `loop.on_rate_limit` in a looping prompt document) |
 | Resources | `--mcp`, `--use <ID,…>`, `--strict`, `--repo` |
 | System prompt | `--append-system-prompt`/`--asp <FILE>`, `--replace-system-prompt`/`--rsp <FILE>` |
-| Output | `-o`/`--output <FORMAT>`, `-q`/`--quiet`, `--silent`, `--perf` |
+| Output | `-q`/`--quiet`, `--silent`, `--perf` (`-o`/`--output` is refused; see [What Claudine Writes](../topics/output.md)) |
 | Values | `--set <JSON>`, `--operation`/`--op <OP>` |
 | Rehearsal | `--dry-run`, `--dry-run-shell` |
 

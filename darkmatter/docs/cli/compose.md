@@ -353,6 +353,13 @@ finalize:
   commands, under the same built-in blacklist, `permissions.shell-commands`, approval, and timeout rules,
   before composition. They run only from `composed` on. `--shell` lists them
   without running any stack.
+- **`edit`.** An [`edit`](../topics/lifecycle/index.md#editing-a-file-edit)
+  action opens a file in your editor and waits for it to close. A terminal
+  editor needs stdin, stdout, and stderr to be terminals and is refused under
+  a data output or when the document is read from stdin; its screen output
+  goes to stderr, never into the document. A GUI editor's output goes to
+  stderr, or is discarded under a data output. The file must lie inside the
+  directory that holds the composed document.
 - **Errors.** An error in `initialize` or a preflight failure runs `failed`
   then `finalize`. An error in `composed` or a failed document write runs
   `finalize` only. Either way the exit status is 1.

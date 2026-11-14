@@ -1025,7 +1025,6 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             yolo: shared.yolo,
             include: shared.include.clone(),
             model: shared.model.clone(),
-            output: shared.output,
             system_prompt_args: SystemPromptArgs {
                 append_file: shared.append_system_prompt.clone(),
                 replace_file: shared.replace_system_prompt.clone(),

@@ -38,6 +38,11 @@
 //! only scanned for malformed templates, at exactly the operands the parser
 //! reads as templates ([`template_operands`]): a `set` value written as a
 //! whole-value `$( … )` command, `no_error`, and `break.code` are not.
+//! `edit`'s target and flags are also judged by the parser's own rules
+//! ([`edit_file_problem`](crate::lifecycle::edit_file_problem),
+//! [`edit_flag_problem`](crate::lifecycle::edit_flag_problem)): the
+//! conversion engine reads a YAML number as text and `"yes"` as `true`,
+//! which the parser refuses.
 //!
 //! A value whose spelling the type does not offer (a long form where only
 //! short forms are typed, as in a bundle) and a long form whose keys select no
@@ -55,8 +60,8 @@ use serde_json::{Map, Value};
 use super::simplified::{DARKMATTER_OPERANDS_KEYWORD, OperandForm, operands_verb};
 use super::{JsonPointer, ValidationProblem, ValidationProblemCode, ValidationProblemKind};
 use crate::lifecycle::{
-    ActionCall, OperandLocation, OperandVerdict, action_call, action_value_to_expr, operand_form, template_operands,
-    validate_action_operands_with,
+    ActionCall, OperandLocation, OperandVerdict, action_call, action_value_to_expr, edit_file_problem, edit_flag_problem, operand_form,
+    template_operands, validate_action_operands_with,
 };
 use simplified_schema::coercion::PathSegment;
 use crate::markdown::compose::expression::call_binding::{CallBindingError, CallErrorKind};
@@ -75,6 +80,20 @@ pub(super) struct BoundOperands {
     pub(super) settled: Vec<Vec<PathSegment>>,
     rejected: Vec<Rejection>,
     malformed: Vec<Malformed>,
+    refused_targets: Vec<RefusedTarget>,
+}
+
+/// An `edit` operand the lifecycle parser refuses although the conversion
+/// engine would accept it: a target that is a YAML number or boolean (read as
+/// text) or blank, or a flag that is not a literal boolean (`"yes"` reads as
+/// `true`).
+#[derive(Debug)]
+struct RefusedTarget {
+    at: Vec<PathSegment>,
+    /// The lifecycle parser's own message.
+    message: String,
+    /// Whether the operand has the wrong type rather than a blank value.
+    mistyped: bool,
 }
 
 /// An operand string holding a `{{ … }}` span that does not parse.
@@ -120,6 +139,33 @@ impl BoundOperands {
             let form = operand_form(&site.verb, value);
             if !site.forms.contains(&form) {
                 continue;
+            }
+            if site.verb == "edit"
+                && let Some(location) = edit_target(form, value)
+            {
+                let path = operand_path(&site.path, &location);
+                if let Some(found) = value_at(stored, &path)
+                    && let Ok(target) = action_value_to_expr(found)
+                    && let Some(message) = edit_file_problem(&target)
+                {
+                    bound.refused_targets.push(RefusedTarget {
+                        at: path,
+                        message: message.to_string(),
+                        mistyped: !found.is_string(),
+                    });
+                }
+            }
+            if site.verb == "edit"
+                && form == OperandForm::Long
+                && let Some(Value::Object(entries)) = value_at(stored, &site.path)
+            {
+                for (key, flag) in entries {
+                    if let Some(message) = edit_flag_problem(key, flag) {
+                        let mut at = site.path.clone();
+                        at.push(PathSegment::Key(key.clone()));
+                        bound.refused_targets.push(RefusedTarget { at, message, mistyped: true });
+                    }
+                }
             }
             if let Some(operands) = template_operands(&site.verb, form, value) {
                 for operand in operands {
@@ -185,6 +231,21 @@ impl BoundOperands {
                 ValidationProblemKind::Invalid,
                 ValidationProblemCode::ConstraintViolation,
             ));
+        }
+    }
+
+    /// Adds the lifecycle parser's problem for each refused `edit` operand, in
+    /// place of the problems already reported at or below it.
+    pub(super) fn report_refused_targets(&self, problems: &mut Vec<ValidationProblem>) {
+        for refused in &self.refused_targets {
+            let path = pointer(&refused.at);
+            problems.retain(|problem| !within(&problem_pointer(problem), &path));
+            let (kind, code) = if refused.mistyped {
+                (ValidationProblemKind::Type, ValidationProblemCode::TypeMismatch)
+            } else {
+                (ValidationProblemKind::Invalid, ValidationProblemCode::ConstraintViolation)
+            };
+            problems.push(operand_problem(path, refused.message.clone(), kind, code));
         }
     }
 
@@ -270,6 +331,21 @@ fn collect_stored_data(arg: &Value, stored: &Value, data: &mut HashSet<*const Va
             }
         }
         _ => {}
+    }
+}
+
+/// Where the target of an `edit` action value sits, when the value has the
+/// shape the parser reads one target from: a scalar, a one-item list, or a
+/// long form's `file`. Any other shape is an arity or shape problem the
+/// schema already reports.
+fn edit_target(form: OperandForm, value: &Value) -> Option<OperandLocation> {
+    match (form, value) {
+        (OperandForm::Short, Value::String(_) | Value::Number(_) | Value::Bool(_)) => Some(OperandLocation::Whole),
+        (OperandForm::Short, Value::Array(items)) if items.len() == 1 => Some(OperandLocation::Index(0)),
+        (OperandForm::Long, Value::Object(entries)) if entries.contains_key("file") => {
+            Some(OperandLocation::Key("file".to_string()))
+        }
+        _ => None,
     }
 }
 

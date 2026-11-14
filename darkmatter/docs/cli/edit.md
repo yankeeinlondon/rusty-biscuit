@@ -52,6 +52,10 @@ EDITOR=geany md edit notes.md               # fails: geany cannot wait
 The variable's first word is the program and the rest are its arguments, so the
 program's path cannot contain a space.
 
+A lifecycle [`edit`](../topics/lifecycle/index.md#editing-a-file-edit) action
+chooses its editor the same way, so it never picks a non-blocking editor
+either. It can also require a terminal or a GUI editor with its `gui` option.
+
 ## Creating a file
 
 When the reference matches nothing, the file is created at the first place the

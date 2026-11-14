@@ -110,6 +110,7 @@ types:
         defer: defer-short@darkmatter:lifecycle
         break: break-short@darkmatter:lifecycle
         prep: prep-short@darkmatter:lifecycle
+        edit: edit-short@darkmatter:lifecycle
         shell: shell-short@darkmatter:lifecycle
         set: set-short@darkmatter:lifecycle
         append_frontmatter: append_frontmatter-short@darkmatter:lifecycle
@@ -315,6 +316,9 @@ types:
         prep:
             - prep-short@darkmatter:lifecycle
             - prep-long@darkmatter:lifecycle
+        edit:
+            - edit-short@darkmatter:lifecycle
+            - edit-long@darkmatter:lifecycle
         shell:
             - shell-short@darkmatter:lifecycle
             - shell-long@darkmatter:lifecycle

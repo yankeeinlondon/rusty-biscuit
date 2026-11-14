@@ -123,7 +123,12 @@ bundle expands in a fixed canonical order at parse time. Every retired spelling
 `CompositionError::RemovedGrammar` with a replacement hint. The directive
 verbs live in one list (`signatures.rs::LIFECYCLE_CONTROL_VERBS`); `prep` is
 the one directive that returns (`LifecycleControlAction::returns`), so it is
-exempt from the last-item rule. A loop `gate:` is never `null` or `{}`. The parser,
+exempt from the last-item rule. `edit` (open a file in the user's editor
+and wait) is a parser-owned expression action beside `prep` and
+`ensure_file`, typed in every expression slot, all three bundles, and both
+loop arms; it is never a task side effect, and a parallel group member may
+run only a GUI editor (each member thread enters
+`darkmatter::editor::deny_terminal_in_this_thread()`). A loop `gate:` is never `null` or `{}`. The parser,
 executor, run accounting, catch protocol, and control admission live in
 `darkmatter::lifecycle` (see the `darkmatter` skill's `lifecycle.md`); Claudine
 re-exports them at their old paths and adapts them: `effects.rs`

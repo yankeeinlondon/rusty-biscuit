@@ -176,6 +176,33 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   does. Code that spawns through a Job behaves differently under
   `just cross-check` than in an interactive session; check `IsProcessInJob`
   before blaming the code.
+- **The lifecycle `edit` launcher on Windows** (`darkmatter/lib/src/editor/launch.rs`,
+  `process_tree.rs`) differs from Unix in three ways:
+  - *Job assignment window.* The editor is spawned, then assigned to a
+    kill-on-close Job; a process it starts in that instant escapes the Job
+    and survives cancellation. Accepted and commented at the site. If
+    assignment fails (`ProcessTree::attach` returns `None`) the editor is
+    killed and the edit fails ("could not be placed in its own process
+    tree"); it does not degrade the way `windows_wait_loop` does. A
+    successful edit clears kill-on-close before closing the Job
+    (`ProcessTree::release`), so a GUI window the waiting client started
+    stays open; cancellation calls `TerminateJobObject` (no grace period).
+  - *Shared console.* There is no foreground handoff (`terminal::Handoff`
+    is uninhabited off Unix): a terminal editor shares the host's console
+    and is not given its own process group. A Ctrl-C the console turns into
+    `CTRL_C_EVENT` reaches the host too, so `md compose`'s `ctrlc` handler
+    (or Claudine's console handler) records an interrupt and the launcher's
+    20 ms poll terminates the Job, cancelling the run. On Unix the same
+    press reaches only the editor. An editor that turns off processed input
+    reads Ctrl-C as a key and nobody is interrupted.
+  - *`.cmd` shims.* The resolver looks the configured token up with Sniff's
+    `find_program` (the `which` crate, honoring `PATHEXT`), so `EDITOR=code`
+    becomes the full `...\bin\code.cmd` path and `Editor::identify` strips
+    `.cmd` to add `--wait`. `Command::new` on that path runs it through
+    `cmd.exe` with std's batch quoting; a bare `Command::new("code")` would
+    look only for `code.exe`. The batch-argument limit above applies to the
+    target path. No test launches a real `.cmd` editor; the fake editor is
+    installed as `code.exe`.
 - **`io::Error::from(windows::core::Error)` keeps the HRESULT as the raw OS
   error**, so a missing file reports `0x80070002` with an uncategorized kind,
   never `NotFound`. Before branching on `ErrorKind`, unwrap a `FACILITY_WIN32`

@@ -236,14 +236,6 @@ reason = """
 The signals research corpus reads hand-authored YAML describing external documents. The failure is authoring prose about a research file, not a Claudine operation, and the subcommand is maintainer-facing."""
 
 [[allow]]
-shape = "formatted_report"
-file = "cli/src/commands/wrap/mod.rs"
-symbol = "run_provider_wrapper_inner"
-tag = "retained"
-reason = """
-`impl FromStr for OutputFormat { type Err = String }` (`lib/src/composition/types.rs`) — the error is prose at its origin, so `eyre!(e)` faithfully transports an already-unstructured value rather than collapsing a typed one. Typing `OutputFormat::Err` is the real fix and is a separate, additive change."""
-
-[[allow]]
 shape = "to_string_collapse"
 file = "cli/src/commands/sync.rs"
 symbol = "run"

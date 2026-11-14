@@ -646,8 +646,8 @@ checks, and DMLS's `nested_span.rs` mirrors its path spelling.
   ends the whole event. `edit` is Darkmatter's (`dispatch_edit`); Claudine
   only lends it `lifecycle/editor.rs::EDITOR_SERVICE` through
   `LifecycleHost::editor`, a `ProcessEditorService` built per edit whose
-  output mode is the process-wide `set_structured_output` flag (set by the
-  wrapper and `compose`/`inline-compose` from `--output json|stream`).
+  output is always `EditorOutput::Terminal` (Claudine's stdout carries no
+  structured result of its own, so eligibility follows only the probe).
   Parallel group members enter `deny_terminal_in_this_thread()` in
   `sequence/task/group.rs`, so only GUI editors run there. Failures map to
   `CompositionError::LifecycleEditFailed` (`composition.lifecycle_edit_failed`,

@@ -34,6 +34,11 @@ initialize:
 a lifecycle host do not dispatch these operations. Darkmatter owns the
 engine; the host drives it.
 
+The lifecycle [`edit`](./lifecycle/index.md#editing-a-file-edit) action is not
+one of these verbs, but it can also create a file: it creates a missing target
+(and its parent directories) before opening it in the user's editor, under the
+same mutation root.
+
 This boundary concerns the effects engine. Composition can also execute
 shell directives when enabled; see [the compose command](../cli/compose.md)
 for that separate behavior. Schema validation and editor requests never

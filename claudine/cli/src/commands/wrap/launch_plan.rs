@@ -41,14 +41,11 @@
 //!
 //! ## Invocation intent is stored semantically, never as provider bytes
 //!
-//! `--output` and `--sandbox` are immutable invocation intent, but their
-//! *encoding* belongs to whichever provider ends up running: Goose renders
-//! `--output json` as no argv at all while Gemini needs `--output-format json`,
-//! and Codex implements `--sandbox` where Goose does not. So the recorded inputs
-//! hold [`OutputFormat`] and a requested-sandbox flag, and every rebuild renders
-//! them through its own profile. Recording the rendered bytes instead silently
-//! dropped the requested format on one provider move and leaked an unsupported
-//! flag on the reverse one.
+//! `--sandbox` is immutable invocation intent, but its *encoding* belongs to
+//! whichever provider ends up running: Codex implements it where Goose does
+//! not. So the recorded inputs hold a requested-sandbox flag, and every rebuild
+//! renders it through its own profile. Recording the rendered bytes instead
+//! leaks an unsupported flag onto a provider move.
 //!
 //! ## The environment is a patch, not an overlay
 //!
@@ -84,8 +81,8 @@
 //!
 //! ## Capability warnings are data, not output
 //!
-//! The capability stages a replay re-runs — model validation, `--output`,
-//! `--sandbox`, system-prompt delivery — each answer for the *rebuilt* provider,
+//! The capability stages a replay re-runs — model validation, `--sandbox`,
+//! system-prompt delivery — each answer for the *rebuilt* provider,
 //! so their warnings are as provider-shaped as the argv is. They are collected
 //! into [`LaunchPlan::warnings`] and rendered by the caller under the command's
 //! own `silent`/`quiet` policy, which is the equivalence contract's requirement
@@ -131,7 +128,7 @@ use claudine::provider::Provider;
 use claudine::provider_overlay::OverlayPlan;
 use claudine::system_prompt::ResolvedSystemPrompt;
 
-use super::profile::{OutputFormat, WrapperProfile, profile_for_provider};
+use super::profile::{WrapperProfile, profile_for_provider};
 use super::write_grant::{WriteGrantError, WriteGrantRequest, plan_write_grant};
 
 const OPENCODE_CONFIG: &str = "OPENCODE_CONFIG_CONTENT";
@@ -160,11 +157,10 @@ impl EnvChange {
 /// Which capability stage produced a [`LaunchWarning`].
 ///
 /// Kept as a discriminant rather than folded into the message so a caller can
-/// tell the four stages apart without matching on prose the profiles own.
+/// tell the three stages apart without matching on prose the profiles own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LaunchWarningSource {
     Model,
-    OutputFormat,
     SystemPrompt,
     Sandbox,
 }
@@ -305,12 +301,6 @@ pub(crate) struct LaunchPlanInputs {
     /// entrypoint or append, so the tail stays one contiguous run of the argv;
     /// resume assembly relies on that to tell the tail from the injections.
     pub(crate) provider_tail: claudine::composition::ProviderTail,
-    /// The `--output <format>` the caller asked for, as semantic intent rather
-    /// than as the argv one provider happened to render it into. The intent is
-    /// invocation-fixed; its *encoding* is provider-owned (Goose renders `json`
-    /// as no argv at all, Gemini as `--output-format json`), so every rebuild
-    /// re-renders it through its own profile.
-    pub(crate) output_format: Option<OutputFormat>,
     /// The system-prompt delivery argv `profile::apply_system_prompt` composed,
     /// and the `OPENCODE_CONFIG_CONTENT` overlay it contributed (OpenCode
     /// delivers its system prompt through the same inline config the MCP and
@@ -328,9 +318,9 @@ pub(crate) struct LaunchPlanInputs {
     pub(crate) system_prompt: Option<ResolvedSystemPrompt>,
     pub(crate) system_prompt_cwd: PathBuf,
     pub(crate) system_prompt_scoped_tmp: PathBuf,
-    /// Whether `--sandbox` was requested. Same reasoning as
-    /// [`Self::output_format`]: Codex implements it and Goose does not, so the
-    /// request is invocation-fixed and the rendering is per-rebuild.
+    /// Whether `--sandbox` was requested, as semantic intent rather than argv:
+    /// Codex implements it and Goose does not, so the request is
+    /// invocation-fixed and the rendering is per-rebuild.
     pub(crate) sandbox_requested: bool,
     /// Whether the caller's env plan already carries a `MODEL` entry, which is
     /// the model stage's `has_model_env` input.
@@ -413,7 +403,6 @@ impl LaunchPlanInputs {
         let structured_codex = codex_last_message.is_some();
         Self {
             provider_tail: claudine::composition::ProviderTail::default(),
-            output_format: None,
             system_prompt_args: Vec::new(),
             system_prompt_opencode_config: None,
             system_prompt: None,
@@ -791,21 +780,6 @@ fn replay(
     .map_err(|e| LaunchPlanError::producer_report("model replay failed", e.into_report()))?;
     for (key, value) in model_env {
         env_overlay.push((key.into(), value.into()));
-    }
-
-    // -- invocation-fixed intent, re-encoded for the rebuilt provider -------
-    // The *request* is fixed; the flag shape is not. A rebuild renders it
-    // through its own profile so a Goose-to-Gemini retry gains
-    // `--output-format json` and the reverse does not carry Gemini's bytes to a
-    // provider that rejects them. An unsupported-format warning belongs to the
-    // *rebuilt* provider, so the invocation's own cannot stand in for it.
-    if let Some(format) = inputs.output_format
-        && let Some(warning) = profile.apply_output_format(&mut args, format)
-    {
-        warnings.push(LaunchWarning {
-            source: LaunchWarningSource::OutputFormat,
-            message: warning,
-        });
     }
 
     // System-prompt delivery: replayed verbatim while the provider holds still,

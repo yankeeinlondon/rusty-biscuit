@@ -4,11 +4,14 @@
 //! `setsid`), so the group ID equals its PID and a signal to the negative PID
 //! reaches every member that has not moved to another group. A descendant
 //! that calls `setsid` or `setpgid` itself leaves the group and is not reached.
+//! Signaling the group after the root has been reaped can reach an unrelated
+//! group that reused the ID; that window is accepted (see the sweep in
+//! [`ProcessTree::terminate_gracefully`]).
 //!
 //! Windows: the child is assigned to a kill-on-close Job Object just after
 //! spawn. A descendant created in the instant between spawn and assignment
-//! (before the child has loaded its runtime) escapes the Job; that window is
-//! accepted by every caller.
+//! escapes the Job; that window is accepted by every caller (see
+//! [`ProcessTree::attach`]).
 
 use std::process::Child;
 #[cfg(unix)]
@@ -34,6 +37,10 @@ impl ProcessTree {
     }
 
     /// Kills every member of the group at once.
+    ///
+    /// Called after the root has been reaped (the shell-query launcher does
+    /// this), it carries the group-ID reuse window described on
+    /// [`Self::terminate_gracefully`].
     pub(crate) fn terminate(&self) {
         // SAFETY: `kill` with a negative PID signals a process group and has
         // no memory-safety preconditions. An already-empty group is `ESRCH`.
@@ -51,12 +58,8 @@ impl ProcessTree {
     /// ## Notes
     ///
     /// When the root exits within the grace period it is reaped before the
-    /// sweep, so the group ID is no longer pinned by the root. The kernel
-    /// keeps a PID in use while any group member carries it as its group ID,
-    /// and an empty group's ID can only be reused after every member is gone,
-    /// in which case the sweep has nothing it should reach. That remaining
-    /// window (the group empties and its ID is recycled between the reap and
-    /// the sweep) is accepted.
+    /// sweep, so the root no longer pins the group ID; see the comment at the
+    /// sweep for the reuse window that leaves.
     pub(crate) fn terminate_gracefully(&self, grace: Duration, root: &mut Child) {
         // SAFETY: as in `terminate`; signals only this group.
         unsafe {
@@ -74,13 +77,23 @@ impl ProcessTree {
                 Err(_) => break,
             }
         }
+        // Group-ID reuse window, accepted: once the root is reaped above, its
+        // PID stays reserved only while some member still carries it as a
+        // group ID. If every member has exited and the kernel hands that ID
+        // to a new process group between the reap and this `kill`, the
+        // `SIGKILL` reaches that unrelated group. The window is only the
+        // instructions between `try_wait` returning and this call; closing it
+        // would need an exit check that does not reap (`waitid` with
+        // `WNOWAIT`), which `std::process::Child` does not offer. When the
+        // root was not reaped, its zombie or live process pins the ID and
+        // there is no window.
         self.terminate();
         if !reaped {
             let _ = root.wait();
         }
     }
 
-    /// Lets the tree outlive this handle; nothing is signalled.
+    /// Lets the tree outlive this handle; nothing is signaled.
     pub(crate) fn release(self) {}
 }
 
@@ -100,6 +113,12 @@ impl ProcessTree {
         // or the live child's process handle, both valid for these calls.
         unsafe {
             let job = CreateJobObjectW(None, None).ok()?;
+            // Assignment window, accepted: the child was spawned running, not
+            // `CREATE_SUSPENDED`, so a process it starts before this
+            // assignment is outside the Job and survives `terminate`. Closing
+            // the window would mean spawning suspended and resuming the
+            // primary thread here, which `Child` gives no handle for (it
+            // would have to be found by enumerating the process's threads).
             let assigned = set_kill_on_close(job, true)
                 .and_then(|()| AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())));
             if assigned.is_err() {

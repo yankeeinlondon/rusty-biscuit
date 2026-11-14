@@ -917,23 +917,12 @@ fn construct_argv_and_system_prompt(
             )
             .map_err(crate::commands::exec_prep::ModelStageError::into_report)?;
 
-        // R8 — from here to the MCP fold, no document surface moves `--output`,
-        // the system prompt, or `--sandbox`. What a per-attempt rebuild records
-        // is the *intent* for the two flags (which is what stays fixed) and the
-        // rendered slice only for the system prompt, whose already-composed
-        // content is the immutable part.
-
-        // Universal --output flag
-        if let Some(ref output_str) = request.output {
-            let format: super::super::profile::OutputFormat = (*output_str).into();
-            if let Some(warn) = profile.apply_output_format(&mut child_args, format)
-                && !silent
-                && !quiet
-            {
-                log::warn(&warn);
-            }
-        }
-        let argv_after_output = child_args.len();
+        // R8 — from here to the MCP fold, no document surface moves the system
+        // prompt or `--sandbox`. What a per-attempt rebuild records is the
+        // *intent* for `--sandbox` (which is what stays fixed) and the rendered
+        // slice only for the system prompt, whose already-composed content is
+        // the immutable part.
+        let argv_before_system_prompt = child_args.len();
 
         record_substage(perf_collector, last_checkpoint, "argv assembly");
 
@@ -1040,7 +1029,7 @@ fn construct_argv_and_system_prompt(
                 }
             }
         }
-        let system_prompt_args = child_args[argv_after_output..].to_vec();
+        let system_prompt_args = child_args[argv_before_system_prompt..].to_vec();
 
         // Universal --sandbox flag
         if request.sandbox
@@ -1169,7 +1158,6 @@ fn construct_argv_and_system_prompt(
             }
             lp::LaunchPlanInputs {
                 provider_tail: request.provider_tail.clone(),
-                output_format: request.output.map(Into::into),
                 system_prompt_args,
                 system_prompt_opencode_config,
                 system_prompt: Some(effective_sp.clone()),

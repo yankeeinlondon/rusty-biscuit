@@ -1,6 +1,6 @@
 # Darkmatter's neutral lifecycle action definitions: the shape of every verb
 # Darkmatter's lifecycle parser knows, including the verbs only a host
-# provides a service for (`say`, `retry`, `proxy`, `prep`, `break`, ...), and
+# provides a service for (`say`, `retry`, `proxy`, `prep`, `break`, `edit`, ...), and
 # the four action categories built from them. Types only: this file never
 # applies to a document. Host profiles select from it; the `md` profile is
 # md-lifecycle.yaml, and a host's own schemas reference these types with the
@@ -93,6 +93,10 @@ types:
     break-long: "{ reason: string, code: number(integer; min(0); max(255)), no_error: boolean }(operands(break-long))"
     prep-short: "string(not-empty; operands(prep-short)) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
     prep-long: "{ target: string(not-empty; required), with: object, no_error: boolean }(operands(prep-long))"
+    edit-short:
+        - "string(not-empty; deferred; non-null; operands(edit-short)) -> open this file in the editor and wait for it to close; a missing file is created"
+        - "tuple([string(not-empty; deferred)]; non-null; operands(edit-short))"
+    edit-long: "{ file: string(not-empty; deferred; required), create_new: boolean(non-null), gui: boolean(non-null), no_error: boolean }(non-null; operands(edit-long)) -> open file in the editor and wait for it to close; create_new refuses an existing file, gui chooses a graphical (true) or terminal (false) editor"
     shell-short: "shell(operands(shell-short)) -> run a shell command (never in initialize)"
     shell-long: "{ command: shell(required), on_error: string, no_error: boolean }(operands(shell-long))"
     set-short: "object(operands(set-short)) -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
@@ -961,6 +965,9 @@ types:
             uncounted-keys: [when, no_error]
     expression:
         set: set-short
+        edit:
+            - edit-short
+            - edit-long
         # BEGIN GENERATED expression
         append_frontmatter:
             - append_frontmatter-short
@@ -1378,6 +1385,7 @@ types:
         defer: defer-short
         break: break-short
         prep: prep-short
+        edit: edit-short
         shell: shell-short
         set: set-short
         # BEGIN GENERATED bundle
@@ -1535,6 +1543,7 @@ types:
         defer: defer-short
         break: break-short
         prep: prep-short
+        edit: edit-short
         set: set-short
         # BEGIN GENERATED initialize-bundle
         append_frontmatter: append_frontmatter-short

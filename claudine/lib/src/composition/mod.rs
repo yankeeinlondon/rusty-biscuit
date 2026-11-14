@@ -191,7 +191,7 @@ pub use types::{
     CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan, LaunchLog,
     InstalledProviderSnapshot, LaunchSchema, LoopAction, LoopCondition, LoopConfig, LoopLocation,
     LoopOwner, ModelHint,
-    ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
+    ModelResolutionReason, OnRateLimit, PickerInfluence, PreparedComposition,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,
     SelectedProvider, SelectionReason, SequenceExecutionOptions, SequenceRunSummary,

@@ -106,6 +106,9 @@ types:
             uncounted-keys: [when, no_error]
     expression:
         set: set-short@darkmatter:lifecycle
+        edit:
+            - edit-short@darkmatter:lifecycle
+            - edit-long@darkmatter:lifecycle
         append_frontmatter:
             - append_frontmatter-short@darkmatter:lifecycle
             - append_frontmatter-long@darkmatter:lifecycle
@@ -521,6 +524,7 @@ types:
         defer: defer-short@darkmatter:lifecycle
         break: break-short@darkmatter:lifecycle
         prep: prep-short@darkmatter:lifecycle
+        edit: edit-short@darkmatter:lifecycle
         shell: shell-short@darkmatter:lifecycle
         set: set-short@darkmatter:lifecycle
         append_frontmatter: append_frontmatter-short@darkmatter:lifecycle
@@ -676,6 +680,7 @@ types:
         defer: defer-short@darkmatter:lifecycle
         break: break-short@darkmatter:lifecycle
         prep: prep-short@darkmatter:lifecycle
+        edit: edit-short@darkmatter:lifecycle
         set: set-short@darkmatter:lifecycle
         append_frontmatter: append_frontmatter-short@darkmatter:lifecycle
         append_jsonl: append_jsonl-short@darkmatter:lifecycle
@@ -833,6 +838,7 @@ types:
         warn: warn-short@darkmatter:lifecycle
         success: success-short@darkmatter:lifecycle
         stop: stop-short@darkmatter:lifecycle
+        edit: edit-short@darkmatter:lifecycle
         shell: shell-short@darkmatter:lifecycle
         set: set-short@darkmatter:lifecycle
         append_frontmatter: append_frontmatter-short@darkmatter:lifecycle

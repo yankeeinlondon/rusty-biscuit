@@ -28,7 +28,7 @@ use super::{EditorError, ResolvedEditor};
 use crate::process_tree::ProcessTree;
 
 /// How long a terminated editor's process group gets between `SIGTERM` and
-/// `SIGKILL`.
+/// `SIGKILL`. Unused on Windows, where the Job is terminated at once.
 pub const EDITOR_TERMINATE_GRACE: Duration = Duration::from_secs(2);
 
 /// How often the wait checks for exit and for cancellation.
@@ -159,10 +159,11 @@ impl LaunchPlan {
         })?;
 
         let tree = if options.own_tree {
-            // Windows: a process the editor starts before this assignment
-            // escapes the Job and survives cancellation; that window is
-            // accepted. Unix: the group exists from `exec`, so nothing escapes
-            // except a descendant that changes its own group or session.
+            // Windows: a process the editor starts before `attach` assigns it
+            // to the Job escapes the Job and survives cancellation; that
+            // window is accepted (see `ProcessTree::attach`). Unix: the group
+            // exists before `exec`, so nothing escapes except a descendant
+            // that changes its own group or session.
             match ProcessTree::attach(&child) {
                 Some(tree) => Some(tree),
                 None => {
@@ -190,6 +191,10 @@ impl LaunchPlan {
             }
             Waited::Cancelled | Waited::Failed(_) => {
                 match &tree {
+                    // On Unix this signals the group by ID; if the editor
+                    // exits during the grace period, the final `SIGKILL`
+                    // carries the accepted group-ID reuse window documented
+                    // at the sweep in `ProcessTree::terminate_gracefully`.
                     Some(tree) => tree.terminate_gracefully(EDITOR_TERMINATE_GRACE, &mut child),
                     None => {
                         let _ = child.kill();

@@ -2185,6 +2185,7 @@ impl EffectiveSchema {
         // description found at its place would be an arbitrary arm's.
         if let Some(bound) = &bound {
             bound.report_malformed(&mut problems);
+            bound.report_refused_targets(&mut problems);
             bound.report_rejections(&mut problems);
         }
         positions.locate_all(&mut problems);

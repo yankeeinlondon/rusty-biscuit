@@ -177,6 +177,7 @@ mod layout_snapshots;
 mod lifecycle_boundary;
 mod lifecycle_control_flow_spike;
 mod lifecycle_edit_action;
+mod lifecycle_edit_schema_parity;
 mod lifecycle_event_binding;
 mod lifecycle_generated_operands;
 mod lifecycle_operand_validation;

@@ -59,8 +59,10 @@ pub struct WrapperArgs {
     #[arg(short = 'm', long = "model", value_name = "MODEL")]
     pub model: Option<String>,
 
-    /// Set the output format (json, text, stream).
-    #[arg(short = 'o', long = "output", value_name = "FORMAT")]
+    /// Not implemented: declared only so the run is refused with Claudine's
+    /// own message ([`crate::args::refuse_output_option`]) rather than being
+    /// forwarded to the provider. Hidden from help.
+    #[arg(short = 'o', long = "output", value_name = "TARGET", hide = true)]
     pub output: Option<String>,
 
     /// Append a system prompt from a file.
@@ -264,7 +266,6 @@ pub(crate) fn print_wrapper_help(provider: Provider) {
          \x20 -i, --interactive         Force interactive mode even when a prompt string is provided\n\
          \x20     --edit                Draft the initial prompt in an external editor; combine with -i for an interactive session\n\
          \x20 -m, --model <MODEL>       Override the model used by the provider\n\
-         \x20 -o, --output <FORMAT>     Set the output format (json, text, stream)\n\
           \x20     --asp <FILE>             Append a system prompt from a file\n\
            \x20     --rsp <FILE>             Replace the provider's system prompt with contents from a file\n\
             \x20 -t, --timeout <DURATION>  Wall-clock timeout like 30s, 5m, 2h (non-interactive only)\n\

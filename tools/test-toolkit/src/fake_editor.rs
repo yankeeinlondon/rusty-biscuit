@@ -51,8 +51,9 @@
 //! [`SLEEP_CEILING`], so a test that fails before killing it cannot leak a
 //! process that outlives the test run.
 //!
-//! A spawned child gets null standard streams, but on Windows it still
-//! inherits the editor's own standard handles. A caller that captures the
+//! A spawned child's standard streams are not the editor's (stdin and
+//! stderr are null, stdout is a private pipe for its readiness line), but on
+//! Windows it still inherits the editor's own standard handles. A caller that captures the
 //! editor's output through pipes therefore reads until the child exits or is
 //! killed; capture nothing, or kill the whole tree, when spawning a child.
 

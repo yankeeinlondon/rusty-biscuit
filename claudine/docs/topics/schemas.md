@@ -224,7 +224,7 @@ model: sonnet
 | `communicate` | `say`, `speak`, `effect`, `message`, `notify`, `stderr`, `stdout`, `info`, `warn`, `success` |
 | `flow` | `stop`, `skip`, `error`, `proxy`, `retry`, `resume`, `defer`, `break`, `prep` |
 | `shell` | `shell` |
-| `expression` | `set`, plus every Darkmatter side-effect verb (`set_frontmatter`, `append_line`, …) and expression function |
+| `expression` | `set`, `edit`, plus every Darkmatter side-effect verb (`set_frontmatter`, `append_line`, …) and expression function |
 
 An event's type says which action types it allows:
 
@@ -854,6 +854,44 @@ binding failure; it softens only a failure of the effect itself.
 [Flow Control](flow-control/flow-control.md#break). `defer` parses but is not
 executed yet (**planned**). The schema reads `prep: null` as
 absent, so that spelling is left to the parser, which rejects it.
+
+### `edit`
+
+`edit` opens a file in the caller's editor (see
+[Edit Actions](flow-control/lifecycle.md#edit-actions)). It is a hand-written
+lifecycle verb, not a catalog function, so its shapes are
+`edit-short@darkmatter:lifecycle` and `edit-long@darkmatter:lifecycle`, and
+Claudine lists it by name. It is an `expression` action, so every event
+admits it, `initialize` and `cancelled` included, as do bundles and `loop:`
+verb keys; a bundle takes the short form only. The schema accepts it in
+`cancelled` because the parser does, but it never opens an editor there: an
+`edit` reached after cancellation fails when it runs.
+
+| Form | Shape |
+|---|---|
+| short | a non-blank string, or a one-item array holding one: `edit: "{{ fqn }}"`, `edit: ["{{ fqn }}"]` |
+| long | `{ file, create_new, gui, no_error }`, closed; `file` is a required non-blank string, and `create_new`, `gui`, and `no_error` are booleans |
+
+Unlike other verbs, `edit` is typed strictly. The schema, `md schema validate`,
+and the editor's language server apply the lifecycle parser's own rules to it,
+so they refuse exactly what the parser refuses, with no conversion:
+
+```yaml
+initialize:
+    - edit: "{{ fqn }}"                         # valid
+    - edit: { file: "{{ fqn }}", create_new: true, gui: false }   # valid
+    - edit: 5                                   # invalid: the file must be a string
+    - edit: "   "                               # invalid: blank
+    - edit: null                                # invalid: names no file (also bare `edit` and `edit: []`)
+    - edit: { file: notes.md, gui: "yes" }      # invalid: a literal boolean, not text
+    - edit: { file: notes.md, create_new: null } # invalid: null is not the absent default
+    - edit: { path: notes.md }                  # invalid: unknown parameter
+```
+
+A literal-boolean or `file` error is reported at the parameter itself
+(`initialize[0].edit.gui`); a short-form error at the action. A file name
+computed by a `{{ … }}` template is not known until the event runs, so it is
+checked then.
 
 ### Where each check runs
 

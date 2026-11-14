@@ -703,18 +703,37 @@ fn prep_target(target: Expr, source_file: &Path, property: &str) -> Result<Expr,
 /// literal is kept byte-for-byte. `property` locates the operand itself: the
 /// verb for the short form, its `file` key for the long form.
 fn edit_file(file: Expr, source_file: &Path, property: &str) -> Result<Expr, LifecycleError> {
-    let message = match &file {
-        Expr::StringLiteral(text) if text.trim().is_empty() => "`edit.file` must not be blank".to_string(),
-        Expr::NumberLiteral(_) => "`edit.file` must be a string, got number".to_string(),
-        Expr::BoolLiteral(_) => "`edit.file` must be a string, got boolean".to_string(),
-        _ => return Ok(file),
+    let Some(message) = edit_file_problem(&file) else {
+        return Ok(file);
     };
     Err(LifecycleError::LifecycleInvalidArgs {
         source_path: source_file.to_path_buf(),
         property: property.to_string(),
         action: "edit".to_string(),
-        message,
+        message: message.to_string(),
     })
+}
+
+/// Why the lifecycle parser refuses `file` as an `edit` target, if it does:
+/// a blank literal, a number, or a boolean. Schema validation applies the
+/// same rule to the authored operand, because the conversion engine would
+/// otherwise accept a YAML number where the target's type is a string.
+pub(crate) fn edit_file_problem(file: &Expr) -> Option<&'static str> {
+    match file {
+        Expr::StringLiteral(text) if text.trim().is_empty() => Some("`edit.file` must not be blank"),
+        Expr::NumberLiteral(_) => Some("`edit.file` must be a string, got number"),
+        Expr::BoolLiteral(_) => Some("`edit.file` must be a string, got boolean"),
+        _ => None,
+    }
+}
+
+/// Why the lifecycle parser refuses `value` for `edit`'s long-form `key`, if
+/// it does: `create_new` and `gui` are literal YAML booleans, so a quoted,
+/// interpolated, or `null` value is refused rather than converted (`null`
+/// must not read as the absent default).
+pub(crate) fn edit_flag_problem(key: &str, value: &serde_json::Value) -> Option<String> {
+    (matches!(key, "create_new" | "gui") && !value.is_boolean())
+        .then(|| format!("`edit.{key}` must be a boolean literal, got {}", json_type_name(value)))
 }
 
 /// Collect key/value action arguments in the positional order of the one

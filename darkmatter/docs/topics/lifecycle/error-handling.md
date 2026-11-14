@@ -112,6 +112,61 @@ finalize:
     - info: "{{ err.msg }}"     # prints: cleanup broke
 ```
 
+### When an `edit` fails
+
+An [`edit`](./index.md#editing-a-file-edit) action opens a file in the
+user's editor, so it can fail for reasons no other action has: there may be
+no suitable editor, no terminal to lend it, or the editor may exit with an
+error. A failed `edit` is an error in its event like any other, routed by the
+rules above: in `initialize` it runs `failed` and `finalize`.
+
+These are **execution failures**. `no_error: true` suppresses them, and the
+stack continues with the next action:
+
+| Failure | Example |
+|---|---|
+| No editor matches | every set variable (`$EDITOR`, `$VISUAL`) names a program that is missing or cannot wait for the file to close; with `gui` set, no editor of that kind is configured or installed |
+| The host cannot run the chosen editor | a terminal editor under a data output (`--output json`), with stdin or stdout redirected, with the document read from stdin, in a parallel group member, or while another editor holds the terminal; a GUI editor with no display session |
+| The file reference or filesystem refuses the target | a malformed reference, a URL, a path outside the mutation root, a directory at the path, a parent directory that cannot be created |
+| The name is taken under `create_new: true` | a file, directory, or symlink already holds the name |
+| The editor cannot be started | the resolved program fails to launch |
+| The editor exits with a nonzero status | the user quits Vim with `:cq` |
+| The target is gone after the editor exits | the file was deleted, replaced by a directory, or moved outside the mutation root |
+
+Three kinds of problem are **never suppressed**, even with `no_error`:
+
+- **A malformed action** (`edit: []`, `gui: "yes"`, an unknown field) is a
+  parse error reported before anything runs.
+- **A path that is not a non-blank string at run time**, such as
+  `edit: "{{ count }}"` where `count` is a number, is an evaluation error.
+- **Cancellation.** An `edit` that was open when the run was cancelled, or
+  that is reached after cancellation, ends the stack; see
+  [Cancellation](#cancellation).
+
+```yaml
+initialize:
+    - edit: { file: notes.md, no_error: true }   # optional: a refusal or :cq does not stop the stack
+    - edit: { file: plan.md }                    # required: any failure stops here
+    - info: "both files are ready"
+```
+
+A refusal made before the file would be created (no matching editor, an
+ineligible host, a refused reference) leaves no new file or directory. A
+failure after that point keeps whatever exists: the created file, and any
+bytes the editor saved.
+
+The message names the action's property, then the reason. The target is
+added in parentheses only when the reason does not already name it:
+
+```text
+`initialize[0].else[0].edit` could not edit the file: /work/specs/new-widget/spec.md already exists, and `create_new` requires a new file
+`initialize[1].edit` could not edit the file: `nvim` is a terminal editor and needs an interactive terminal, but stdout is not a terminal (/work/plan.md)
+```
+
+Like every lifecycle failure message, it is folded onto one line of at most
+240 characters, and it is the `msg` that `failed` and `finalize` read in
+`err.msg`.
+
 ## Cancellation
 
 Ctrl-C stops the run wherever it is. No further normal actions run and no
@@ -137,6 +192,11 @@ flowchart LR
   twice.
 - A second Ctrl-C exits immediately, cutting cleanup short.
 - Output already written before the interrupt stays written.
+- An open [`edit`](./index.md#cancellation) is stopped: a terminal editor's
+  whole process tree is terminated, a GUI editor's waiting client only. Bytes
+  it saved and a file it created are kept, and the next action never runs,
+  even with `no_error`. While a terminal editor holds the terminal, Ctrl-C
+  typed at the keyboard goes to the editor rather than to `md`.
 
 `cancelled` can only clean up. Its one flow verb is `stop`; `skip` and
 `error` there are parse errors.

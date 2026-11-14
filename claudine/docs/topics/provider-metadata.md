@@ -490,7 +490,7 @@ mechanism.)
 ### WrapperProfile as a behavior shim
 
 `WrapperProfile` (CLI layer) provides defaults derived from the central catalog
-(`binary`, `agent_env`, `apply_yolo`, `apply_entrypoint`, `apply_output_format`,
+(`binary`, `agent_env`, `apply_yolo`, `apply_entrypoint`,
 `prompt_arg_conventions`, `apply_model`, `supports_resume`, …). After Phase D,
 **static-fact overrides reached zero**: the remaining overrides are genuinely
 behavioral (prompt-delivery mechanics, wire-RPC quirks). Adding a provider is

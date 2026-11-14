@@ -513,7 +513,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
 | `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
 | `--stall-timeout <DURATION>` | OpenCode-only stalled-generation backstop (live-but-dead retry-churn guard); built-in `10m`, `0s` disables. Inert config on non-OpenCode providers. See [Timeouts](topics/timeouts.md#opencode-stalled-generation-backstop) |
-| `-o, --output <FORMAT>` | Set output format (json, text, stream) |
+| `-o, --output <TARGET>` | Hidden and refused: any value exits 2 before anything runs (`cli/src/args.rs::refuse_output_option`, called first in `main.rs::dispatch`). See [Output](topics/output.md) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
 | `--use <ID[,ID...]>` | Add specific MCP catalog IDs or aliases and enable MCP composition |

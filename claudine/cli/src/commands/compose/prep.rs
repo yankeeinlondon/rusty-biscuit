@@ -187,10 +187,6 @@ pub(crate) fn run_composition_inner(
     kind: CompositionKind,
 ) -> Result<i32> {
     let compose_entry = std::time::Instant::now();
-    claudine::composition::lifecycle::editor::set_structured_output(matches!(
-        shared.output,
-        Some(claudine::composition::OutputFormat::Json | claudine::composition::OutputFormat::Stream)
-    ));
     let perf_enabled = shared.perf;
     let mut prep_substages: Vec<crate::perf::SubstageTiming> = Vec::new();
     // The clap positionals hold the file and any setters before it; the
@@ -1459,7 +1455,6 @@ fn build_execution_request(
         yolo: shared.yolo,
         include: shared.include.clone(),
         model: shared.model.clone(),
-        output: shared.output,
         system_prompt_args: system_prompt_args.clone(),
         timeout: shared.timeout.clone(),
         step_timeout: shared.step_timeout.clone(),

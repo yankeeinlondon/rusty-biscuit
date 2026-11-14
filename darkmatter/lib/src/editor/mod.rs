@@ -60,7 +60,8 @@ pub enum EditorError {
     /// No supported editor could be resolved from environment or fallback probes.
     #[error("no editor found; set $EDITOR or $VISUAL, or install one of: nvim, vim, code, nano")]
     NoEditorFound,
-    /// `$EDITOR` or `$VISUAL` is set, and no set one names a program that exists.
+    /// `$EDITOR` or `$VISUAL` is set, none is accepted, and the first set one
+    /// names a program that was not found.
     #[error("{variable} names '{value}', which was not found; fix it or unset it")]
     ConfiguredEditorMissing {
         /// The first variable that is set.
@@ -68,8 +69,8 @@ pub enum EditorError {
         /// What it holds.
         value: String,
     },
-    /// `$EDITOR` or `$VISUAL` is set, and the first set one names an editor
-    /// that returns before the file is closed.
+    /// `$EDITOR` or `$VISUAL` is set, none is accepted, and the first set one
+    /// names an editor that returns before the file is closed.
     #[error("{variable} names '{value}', which cannot wait for the file to close; set it to an editor that blocks or unset it")]
     ConfiguredEditorCannotWait {
         /// The first variable that is set.
@@ -110,7 +111,8 @@ pub enum EditorError {
         #[source]
         source: std::io::Error,
     },
-    /// Generic filesystem or temp-file IO failure.
+    /// A filesystem or temp-file I/O failure, or a failure to contain or wait
+    /// for the editor's process.
     #[error("editor workflow failed during {operation}: {source}")]
     Io {
         operation: &'static str,
@@ -223,7 +225,7 @@ impl biscuit_terminal::errors::BlockError for EditorError {
                     "<dim>Operation:</dim> {operation}\n<dim>Kind:</dim> {:?}\n{source}",
                     source.kind()
                 )).with_line_breaks(LineBreaks::Hard))
-                .hint("Confirm the temp-file location is writable and has space available."),
+                .hint("The operation names the failed step: for a file, confirm its location is writable and has space; for the editor's process, re-run the editor manually."),
         }
     }
 }

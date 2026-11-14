@@ -74,7 +74,7 @@ use claudine::composition::InstalledProviderSnapshot;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use profile::{OutputFormat, WrapperProfile};
+use profile::WrapperProfile;
 use sniff::programs::InstalledAiClients;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -284,12 +284,6 @@ fn run_provider_wrapper_inner(
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
 ) -> Result<WrapperOutcome> {
     let perf_enabled = perf_collector.is_some();
-    // Before any event can run an `edit`; an unparsable format is reported
-    // where the flag is applied, below.
-    claudine::composition::lifecycle::editor::set_structured_output(matches!(
-        args.output.as_deref().map(str::parse::<OutputFormat>),
-        Some(Ok(OutputFormat::Json | OutputFormat::Stream))
-    ));
     // ------------------------------------------------------------------
     // Stage 1: Resolve profile and binary
     // ------------------------------------------------------------------
@@ -489,14 +483,6 @@ fn run_provider_wrapper_inner(
             }
             Err(err) => return Err(err.into_report()),
         };
-
-    // Universal --output flag
-    if let Some(ref output_str) = args.output {
-        let format: OutputFormat = output_str.parse().map_err(|e: String| eyre!(e))?;
-        if let Some(warn) = profile.apply_output_format(&mut child_args, format) {
-            deferred_warnings.push(warn);
-        }
-    }
 
     let prompt_display = prompt_source.as_inline().map(|s| s.to_string());
     let interactive_override = interactive_requested && has_prompt;

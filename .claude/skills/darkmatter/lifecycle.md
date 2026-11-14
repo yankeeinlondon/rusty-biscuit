@@ -75,6 +75,36 @@ pages with the behavior.
   reason before the target. Terminal-editor success is provable only in L2
   (`cli/tests/level2/level2_edit_action.rs`); L1 process tests use the fake
   editor installed as `code` (GUI, `--wait`) with `DISPLAY` set.
+- The editor seam is `darkmatter::editor::EditorService` (`edit(&EditRequest)
+  -> EditOutcome`; `Sync`). A host registers one by overriding
+  `LifecycleHost::editor()`; the stock implementation is
+  `ProcessEditorService::new(EditorHostFacts { output, stdin_reserved })`,
+  which checks in order: cancelled → resolve (`resolve_editor`, never a
+  non-blocking editor; `gui` constrains the surface) → eligibility (a
+  terminal editor needs an interactive terminal no one else holds and is
+  refused on a thread under `editor::deny_terminal_in_this_thread()`, which
+  Claudine's parallel members enter) → containment → `create_new_guarded`
+  → launch → recheck. Errors are `EditError` (cancellation is
+  `EditError::Editor(EditorError::Cancelled)`, test with `is_cancelled()`).
+  `EditOutcome::attempted` turns true at the first create or launch; the
+  executor then calls `host.side_effect_attempted()` once so cached reads
+  are dropped. The service owns the editor's process tree
+  (`process_tree.rs`: own process group on Unix, kill-on-close Job Object on
+  Windows) and polls `EditRequest::cancelled` every 20 ms; cancellation
+  terminates the tree (Unix `SIGTERM`, `EDITOR_TERMINATE_GRACE`, then
+  `SIGKILL`) and reaps it before returning. Windows specifics are in the
+  `os` skill.
+- `edit` is a lifecycle-only verb, never a catalog entry: schema projection
+  (`hand_owner`) fails generation when a catalog function or effect is named
+  `edit`. Its schema types (`edit-short`/`edit-long` in
+  `darkmatter/schemas/partials/lifecycle.yaml`, `non-null` flags) are backed
+  by the parser's own rules: `markdown/schemas/bound_operands.rs::report_refused_targets`
+  applies `action_shape.rs::{edit_file_problem, edit_flag_problem}` (which
+  the parser also calls), so `md schema validate` and DMLS refuse `edit: 5`
+  or `gui: "yes"` exactly as `md compose` does. Passive surfaces (DMLS,
+  `md schema validate`, hover, completion) never run a stack, so they never
+  create a target or launch an editor (`dmls/tests/l1/no_side_effects.rs`,
+  `edit_action_editor.rs`).
 - Never add a hand-maintained list of lifecycle event keys or late roots;
   derive it from the host's `EventRegistry`.
 - Lifecycle operands evaluate lazy functions in

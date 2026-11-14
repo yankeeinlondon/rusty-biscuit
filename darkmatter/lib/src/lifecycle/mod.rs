@@ -100,6 +100,7 @@ mod validate;
 use action_shape::*;
 #[doc(hidden)]
 pub use action_shape::{action_value_to_expr, closest_spelling};
+pub(crate) use action_shape::{edit_file_problem, edit_flag_problem};
 pub use authored_order::AuthoredOrder;
 pub use context::{LifecycleCause, LifecycleErrorInfo, LifecycleEvaluationReason, LifecycleTiming};
 pub use effects::{LifecycleEffects, dispatch_communication, render_prose_line, render_status_line};

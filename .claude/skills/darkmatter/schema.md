@@ -703,7 +703,13 @@ hand-written verb types in `partials/lifecycle.yaml` (communication, `shell`,
 the directives but `stop`/`skip`, `set`) carry the same marker; for them
 `lifecycle::template_operands` names exactly the strings the parser reads as
 templates (every `with:` and `set` value nested, not a `$( … )` `set` value,
-`no_error`, or `break.code`) and the walk only scans those, never binds. So
+`no_error`, or `break.code`) and the walk only scans those, never binds.
+`edit` (lifecycle-only, typed by hand with `non-null` arms) additionally
+gets the parser's own rules from the stored value
+(`BoundOperands::report_refused_targets`, `lifecycle::edit_file_problem` and
+`edit_flag_problem`, shared with the parser): conversion would read
+`edit: 5` as text and `gui: "yes"` as `true`, which the parser refuses;
+`lib/tests/l1/lifecycle_edit_schema_parity.rs` is its parity matrix. So
 `number: [pear, 7]` passes and `length: [true]` fails; never widen a generated
 type to fix a schema/binder disagreement. Bind from the authored value, not
 the converted working copy. `lib/tests/l1/lifecycle_generated_operands.rs`

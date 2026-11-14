@@ -326,7 +326,6 @@ pub(crate) fn prepare_stream_and_prompt(
 
     let use_structured = profile.supports_structured_stream()
         && effective_non_interactive
-        && args.output.is_none()
         && !flags::has_explicit_native_output_request(provider, child_args);
     wrapper_span.record("structured_mode", use_structured);
     let stream_verbosity = structured_verbosity(silent_requested, quiet_requested);

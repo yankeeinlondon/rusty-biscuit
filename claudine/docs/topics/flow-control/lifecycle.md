@@ -521,8 +521,8 @@ order. It always expands, when the document is parsed, into this order:
 2. communication: `stdout`, `stderr`, `info`, `warn`, `success`, `message`,
    `notify`, `effect`, `say`/`speak`
 3. `shell`
-4. every other verb (side effects and expression functions), in ascending
-   ASCII order of the verb name
+4. every other verb (`edit`, side effects, and expression functions), in
+   ascending ASCII order of the verb name
 5. the one flow-control directive, last
 
 ```yaml
@@ -984,6 +984,7 @@ success:
 | `say` / `speak`, `effect`, `message`, `notify`, `stdout`, `stderr`, `info`, `warn`, `success` | the text (an `effect` name for `effect`) | `text` |
 | `shell` | the command | `command` (required), `on_error` (a warning printed when the command fails; not an ignore switch) |
 | `set` | a mapping of properties to values | none: `set` has no long form |
+| `edit` | the file to open, or a one-item array holding it | `file` (required), `create_new`, `gui` (see [Edit Actions](#edit-actions)) |
 | side effects (`set_frontmatter`, `append_line`, `http_post`, …) | an array zipped to the signature | the catalog's parameter names |
 | expression functions (`file_exists`, …) | a scalar, or an array zipped to the signature | the catalog's parameter names |
 | flow-control directives | see [Flow Control](flow-control.md#the-directives) | see [Flow Control](flow-control.md#the-directives) |
@@ -1212,6 +1213,211 @@ Any Darkmatter read-only expression function can be invoked for its result. The 
 start:
   - file_exists: "@docs/plan.md"
 ```
+
+### Edit Actions
+
+`edit` opens a file in your editor and waits until you close it; then the
+next action runs. Use it when a person has to write or review a file in the
+middle of a run: drafting a new spec before an agent picks it up, or filling
+in notes after a review. The action is Darkmatter's, shared with `md compose`;
+[Darkmatter Lifecycle](../../../../darkmatter/docs/topics/lifecycle/index.md)
+is the full reference for how the editor is chosen and which hosts may run
+it. This section covers how to write it and what is different in Claudine.
+
+Two forms open the same file:
+
+```yaml
+start:
+  - edit: "{{ fqn }}"         # short form; edit: ["{{ fqn }}"] is the same
+  - edit:                     # long form
+      file: "{{ fqn }}"
+      create_new: true
+      gui: false
+      no_error: true
+```
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `file` | a non-blank string (required) | the file to open; a missing file is created empty, with any missing parent directories |
+| `create_new` | `true` or `false` (default `false`) | with `true`, the action must create the file: if anything already has that name (a file, directory, or symlink), the action fails before an editor opens and leaves that entry untouched |
+| `gui` | `true` or `false` (omitted: either) | `true` requires a graphical editor that opens its own window, `false` a terminal editor; omitted, the usual editor is used |
+| `no_error` | `true` or `false` (default `false`) | the ordinary [`no_error`](#no_error) |
+
+`create_new` and `gui` must be literal YAML booleans: `gui: "yes"`,
+`gui: null`, and `gui: "{{ fm.gui }}"` are errors, never conversions. The
+target must be a string, so `edit: 5` is an error rather than a file named
+`5`. A bare `edit`, `edit: null`, and `edit: []` name no file and are errors.
+The value is literal text like every action value: `edit: fqn` opens a file
+named `fqn`; write `edit: "{{ fqn }}"` to open the path the `fqn` property
+holds.
+
+#### Creating a spec from `initialize`
+
+The workflow `edit` was built for computes a path, refuses to overwrite a spec
+that already exists, and otherwise opens the new file and ends the run before
+any agent starts:
+
+```yaml
+---
+fqn: "{{ ctx.cwd }}/specs/new-parser/spec.md"
+initialize:
+  - when: file_exists(fqn)
+    then:
+      - warn: "The spec already exists: {{ fqn }}"
+      - skip
+    else:
+      - edit:
+          file: "{{ fqn }}"
+          create_new: true
+      - info: "The spec is ready at {{ fqn }}"
+      - skip
+---
+```
+
+- The path is absolute, built from the launch directory `ctx.cwd`, so the
+  existence check and the edit name the same file even when this prompt lives
+  in a prompt library somewhere else.
+- `file_exists` only chooses the friendly warning. Another process could
+  create the file between the check and the edit; `create_new: true` is what
+  guarantees an existing spec is never opened as if it were new.
+- `skip` ends the document without launching a provider. `edit` itself never
+  stops an event, skips a document, composes the file, or starts an agent.
+
+#### Where `edit` may appear
+
+`edit` is an `expression` action (see
+[Lifecycle events and action types](../schemas.md#lifecycle-events-and-action-types)),
+so it is accepted in every event, `initialize` included, in `then`/`else`
+bodies, in `loop:` verb keys, and in the events of sequence containers and
+group legs. The `initialize` ban on `shell` does not apply, because `edit`
+starts the editor directly rather than through a shell, and it needs no
+shell-command approval. Three places accept it but cannot run it:
+
+- in `cancelled`, or anywhere after the run has been cancelled, the action
+  fails without opening an editor;
+- a sequence `side_effect:` task refuses it (`` `edit` opens an editor and is
+  not a task side effect ``), before anything is created;
+- `--dry-run` fires no lifecycle events, so it never opens an editor or
+  creates a file. Neither does schema validation or the editor's language
+  server.
+
+#### How the action runs
+
+```mermaid
+flowchart TD
+    A["edit reached"] --> B{"run already cancelled?"}
+    B -- yes --> X["fail: no editor opens"]
+    B -- no --> C["choose the editor<br/>($EDITOR, $VISUAL, then known editors; gui filters)"]
+    C --> D{"can this host run<br/>that kind of editor?"}
+    D -- no --> X2["fail: nothing created"]
+    D -- yes --> E["create the file if missing<br/>(create_new: must create it)"]
+    E --> F["open the editor and wait"]
+    F --> G{"editor exit 0 and<br/>the file still a regular file?"}
+    G -- yes --> H["next action"]
+    G -- no --> X3["fail: saved bytes are kept"]
+```
+
+- **The target.** A file that already exists is opened as it is. A missing
+  relative path is created inside the workspace Claudine was launched in, not
+  beside the prompt, and every target must stay inside that workspace, so an
+  absolute path elsewhere is refused. The one exception is a sequence file's
+  own root `initialize`, which writes inside the sequence file's directory,
+  as `ensure_file` and the other file actions there do. `@`-prefixed
+  references work as they do for other file actions; a URL is refused.
+- **Your bytes are kept exactly.** The action never trims, composes, or
+  rewrites the saved file, and never rolls it back or deletes a file it
+  created, even when the action or the run fails afterward. A later
+  `file_exists` or file read in the same run sees what you saved.
+- **Quitting with an error stops the stack.** A nonzero exit (Vim's `:cq`,
+  for example) fails the action, so it is how you abort the rest of the
+  event. With `no_error: true` that gesture is lost; use it only for an
+  optional edit.
+
+#### Which editor, and where it can run
+
+The editor comes from `$EDITOR`, then `$VISUAL`, then a list of known editors,
+the same choice the wrapper's `--edit` makes. Only an editor that can wait for
+the file to close is chosen; a graphical editor is started with its wait flag
+(`code --wait`). Whether the chosen editor runs in the terminal or in its own
+window decides what Claudine must provide:
+
+| | Terminal editor (`vim`, `nvim`, `nano`, …) | Graphical editor (`code`, `zed`, `subl`, …) |
+|---|---|---|
+| Needs | stdin and stdout to be a terminal | a desktop session (on Linux and WSL2, `DISPLAY` or `WAYLAND_DISPLAY`) |
+| Document events and inline `sequence:` container events | allowed | allowed |
+| A group leg (every group runs its tasks concurrently) | refused: the legs share one terminal | allowed |
+
+An editor that runs either way (Emacs) or a command Claudine does not
+recognize, such as a wrapper script, counts as a terminal editor and never
+satisfies an explicit `gui`. With `gui` set, a mismatched `$EDITOR` is passed
+over for `$VISUAL` and then the known editors; if nothing matches, the error
+lists every editor it checked and why. When a group leg must edit a file, set `gui: true` so the choice fails clearly
+instead of depending on `$EDITOR`:
+
+```yaml
+sequence:
+  - name: drafts
+    group:
+      name: drafts
+      tasks:
+        - name: api
+          sequence:
+            - name: api-review
+              prompt: review-api.md
+          start:
+            - edit: { file: "api/notes.md", gui: true }
+```
+
+Every refusal happens before the file or its directory is created.
+
+#### Cancellation while the editor is open
+
+Two things cancel a run while an `edit` waits: an interrupt (Ctrl-C, or
+`SIGINT` sent to Claudine), and, in a group with `fail_fast` (the default), a
+sibling leg's failure. Cancellation stops only the editor process the action
+started, with everything it spawned (on macOS and Linux with `SIGTERM`, then
+`SIGKILL` two seconds later; on Windows at once). An editor that was already
+running before the action is never touched:
+
+- **A terminal editor** is stopped completely, and Claudine takes back the
+  terminal. While a terminal editor is open on macOS and Linux it owns the
+  terminal, so a Ctrl-C you type reaches the editor, not Claudine.
+- **A graphical editor** is only partly stopped: Claudine ends the waiting
+  client (`code --wait`), but the editor window may stay open and you can
+  still save the file after the run has ended. Set `gui: false` when a
+  cancellation must close the editing session.
+
+What you saved before the cancellation is kept, and an unsaved terminal
+buffer may leave a recovery file (Vim's `.swp`). The next action never runs,
+even with `no_error: true`, and the run reports as cancelled (an interrupt
+exits `130` after `cancelled` and `finalize` run).
+
+No timeout covers an open editor. A document's `timeout:` and `--timeout`
+bound only the provider session, and a sequence task's `timeout:` only its
+shell commands, so an `edit` waits as long as you keep the file open.
+
+#### When `edit` fails
+
+A failure stops the event like any action failure unless `no_error: true`
+tolerates it. It reads
+`` `initialize[0].edit` could not edit the file: <reason> ``, and its error
+code is `composition.lifecycle_edit_failed`. The reasons are: no editor
+matches (including one that cannot wait), the host cannot run the chosen
+editor, the target is refused or already exists under `create_new: true`, the
+editor fails to start or exits nonzero, or the file was deleted or replaced
+by a directory while it was open. `no_error` never suppresses a malformed
+`edit` value or a cancellation.
+
+#### `edit` is not `--edit`, `stop`, or `skip`
+
+- **Wrapper `--edit`** (`claudine codex --edit`) opens a temporary buffer
+  whose contents become the prompt. `edit` opens a named file you keep and
+  never sends its contents anywhere.
+- **`stop`** ends the event. `edit` returns to the next action; follow it
+  with `stop` if the event should end there.
+- **`skip`**, valid only in `initialize`, ends the document without launching
+  a provider. Pair `edit` with `skip`, as in the workflow above, when editing
+  the file is the whole point of the run.
 
 ### `no_error`
 

@@ -243,7 +243,6 @@ which do the same thing regardless of the agent you are using:
 -i, --interactive         Force interactive mode even when a prompt string is provided
     --edit                Draft the initial prompt in an external editor; combine with -i for an interactive session
 -m, --model <MODEL>       Override the model used by the provider
--o, --output <FORMAT>     Set the output format (json, text, stream)
     --asp <FILE>             Append a system prompt from a file
     --rsp <FILE>             Replace the providers system prompt with contents from a file
 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)
@@ -255,6 +254,8 @@ which do the same thing regardless of the agent you are using:
 ```
 
 > **Note:** if a more exotic feature that is not found across Agents is used, don't worry, all non-claudine CLI parameters and switches will be forwarded to the underlying agent.
+
+What a run prints to stdout and stderr, and why `-o`/`--output` is refused, is in [What Claudine Writes, and Where](../topics/output.md).
 
 ### Remove Secrets from ENV
 
@@ -331,6 +332,7 @@ As a small creature comfort if you'd rather write your prompt in the editor of y
 A few things worth knowing:
 
 - `--edit` needs a real terminal for the _editor_, whether or not the agent session is interactive; with piped input or output it stops with `--edit requires an interactive terminal`
+- the editor must wait until you close the file: a graphical editor is started with its wait flag (`code --wait`), and one that has no such flag (for example `lapce`) is passed over; if `$EDITOR` names one and `$VISUAL` names no usable editor, Claudine stops with an error saying the configured editor cannot wait
 - if you save an empty prompt, Claudine quits without starting the agent
 - `--timeout` and `--step-timeout` only apply to non-interactive sessions, so combining either with `-i` is rejected before the editor opens
 - a startup prompt with `-i` (typed or edited) reaches each agent through that agent's own "start interactively with this message" option; Pi needs version 0.84.3 or later for this

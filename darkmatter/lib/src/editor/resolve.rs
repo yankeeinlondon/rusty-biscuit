@@ -121,12 +121,12 @@ pub(crate) struct ResolutionInputs<'a> {
 /// `$EDITOR`, then `$VISUAL`, then [`DEFAULT_EDITOR_PRIORITY`]. A blank
 /// variable counts as unset. A candidate is accepted only when it can block:
 /// a known GUI editor without a wait flag is passed over, and an unknown
-/// command is trusted. With [`SurfaceRequest::Any`], a set variable that is
-/// rejected stops resolution with its error rather than falling to the
-/// probes, so a typo never silently becomes another editor. With an explicit
-/// surface, only an editor of exactly that surface is accepted (a
-/// dual-surface or unrecognized command never is), and the probes run even
-/// when a variable was set.
+/// command is trusted. With [`SurfaceRequest::Any`], when a variable is set
+/// but none is accepted, resolution stops with the first set one's error
+/// rather than falling to the probes, so a typo never silently becomes
+/// another editor. With an explicit surface, only an editor of exactly that
+/// surface is accepted (a dual-surface or unrecognized command never is),
+/// and the probes run even when a variable was set.
 ///
 /// ## Errors
 ///

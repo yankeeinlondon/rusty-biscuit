@@ -50,7 +50,8 @@ user's first feedback frame. None of them produce visible output today.
 | A3 | **`argv::normalize`** [M] | Four pre-clap rewrite rules (provider booleans → `--provider`, `--provider` fuzzy match, `--help` hoist, `--` separator insertion before trailing `key=value`). No-op under `COMPLETE`. |
 | A4 | **Tracing/log subsystem init** [M] | `tracing-subscriber` install, OTLP exporter wire-up if enabled. |
 | A5 | **`Cli::parse_from`** [M] | Strict pass for non-wrapper subcommands; lenient pass with `ignore_errors(true)` for wrapper subcommands. |
-| A6 | **Subcommand dispatch** [M] | Reach `run_compose` or `run_inline_compose`. |
+| A6 | **Refuse `-o`/`--output`** [O-flag] | Any value exits 2 with a one-line message before anything else runs; see [What Claudine Writes](topics/output.md#--output-is-refused). |
+| A7 | **Subcommand dispatch** [M] | Reach `run_compose` or `run_inline_compose`. |
 
 ---
 
@@ -227,7 +228,6 @@ the `composition_prepare` span.
 | C4.4 | **OpenCode model resolution** [O-prov] | Provider-specific model wiring (`apply_opencode_model_resolution`). |
 | C4.5 | **Universal `--model` flag** [O-prov] | Non-OpenCode (and OpenCode interactive) fall through to `profile.apply_model`. |
 | C4.6 | **Validate non-interactive requirements** [M, O-prov] | E.g., a prompt is required for non-interactive. |
-| C4.7 | **Universal `--output` flag** [O-flag] | `profile.apply_output_format`. |
 
 ### C5. System prompt
 

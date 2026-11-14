@@ -1,6 +1,7 @@
 //! The lifecycle `edit` action through `claudine compose`, `claudine
 //! sequence`, and the wrapper's `--edit`, with the `claudine-fake-editor`
-//! fixture installed under real editors' names.
+//! fixture installed under real editors' names, and the refusal of
+//! `--output` before any of it can run.
 //!
 //! An L1 spawn has piped standard streams, so a terminal editor (`vim`) is
 //! always refused here; a GUI editor (`code`, launched with `--wait`) opens
@@ -8,17 +9,6 @@
 //! admits it. The provider is the compiled `claudine-fake-goose` in marker
 //! mode, so "the provider never launched" is its marker file's absence, and
 //! "the editor never ran" is the editor's argv record's absence.
-//!
-//! ## Pending contracts
-//!
-//! Claudine schema-validates a document before its `start` event (and a
-//! sequence before any task or nested lifecycle runs), and its lifecycle
-//! schemas do not yet name `edit`. Until they do, an `edit` is only reachable
-//! in an `initialize` stack that ends the run with `skip` or a failure. The
-//! tests that need `edit` anywhere else wrap a body asserting the target
-//! behavior in [`pending_until_the_schema_knows_edit`], which passes only
-//! while the body fails on that schema refusal; once the schemas accept
-//! `edit`, the wrapper fails and must be deleted.
 //!
 //! ## Not covered
 //!
@@ -33,14 +23,9 @@ use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 use test_toolkit::argv_recorder::read_argv_records;
-use test_toolkit::fake_editor::{FAKE_EDITOR_OUT_TEXT, FAKE_EDITOR_RECORD, FAKE_EDITOR_WRITE};
+use test_toolkit::fake_editor::{FAKE_EDITOR_RECORD, FAKE_EDITOR_WRITE};
 
 use crate::common::{CliProcessFixture, strip_ansi};
-
-/// The schema refusal every pending contract below fails on today: the
-/// rejected `edit` dictionary, then the start of the validator's verdict
-/// (the line is clamped, so the rest may be cut).
-const SCHEMA_ORACLE: [&str; 2] = ["{\"edit\"", "is not valid"];
 
 /// The motivating workflow: warn about an existing spec, otherwise create and
 /// open it, then end the run before any provider launches.
@@ -208,33 +193,6 @@ fn markers(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Runs `body`, which asserts behavior that Claudine's lifecycle schemas do
-/// not admit yet, and passes only while it fails on that schema refusal (see
-/// the module docs). Every assertion in a body carries the run's stderr, so
-/// the refusal reaches the panic message.
-fn pending_until_the_schema_knows_edit(body: impl FnOnce() + std::panic::UnwindSafe) {
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let outcome = std::panic::catch_unwind(body);
-    std::panic::set_hook(hook);
-    let payload = match outcome {
-        Ok(()) => panic!(
-            "the contract now holds: Claudine's schemas accept `edit`, so delete the \
-             `pending_until_the_schema_knows_edit` wrapper around this test"
-        ),
-        Err(payload) => payload,
-    };
-    let message = payload
-        .downcast_ref::<String>()
-        .cloned()
-        .or_else(|| payload.downcast_ref::<&str>().map(|text| (*text).to_string()))
-        .unwrap_or_default();
-    assert!(
-        SCHEMA_ORACLE.iter().all(|needle| message.contains(needle)),
-        "the pending contract failed for a reason other than the schema refusal of `edit`:\n{message}"
-    );
-}
-
 #[cfg(unix)]
 fn wait_for_file(path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -392,23 +350,21 @@ sequence:
 /// A prompt task whose document carries the motivating `initialize`.
 #[test]
 fn sequence_prompt_task_runs_the_motivating_workflow_and_launches_no_provider() {
-    pending_until_the_schema_knows_edit(|| {
-        let run = EditRun::new("edit-sequence-prompt-task", "code").writing("spec bytes");
-        run.write_doc("draft.md", MOTIVATING);
-        let document = run.write_doc(
-            "ship.md",
-            "---\nsequence:\n  - name: draft\n    prompt: draft.md\n  - name: after\n    shell: \"echo after > trace.txt\"\n---\n",
-        );
+    let run = EditRun::new("edit-sequence-prompt-task", "code").writing("spec bytes");
+    run.write_doc("draft.md", MOTIVATING);
+    let document = run.write_doc(
+        "ship.md",
+        "---\nsequence:\n  - name: draft\n    prompt: draft.md\n  - name: after\n    shell: \"echo after > trace.txt\"\n---\n",
+    );
 
-        let output = run.sequence(&document);
+    let output = run.sequence(&document);
 
-        let target = run.cwd().join("specs/2026-11-14-example/spec.md");
-        assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-        assert_eq!(fs::read_to_string(&target).unwrap_or_default(), "spec bytes", "{}", stderr(&output));
-        assert_eq!(run.launches().len(), 1, "{}", stderr(&output));
-        assert_eq!(run.provider_launches(), 0, "{}", stderr(&output));
-        assert!(run.cwd().join("trace.txt").exists(), "a skipped task lets the sequence continue: {}", stderr(&output));
-    });
+    let target = run.cwd().join("specs/2026-11-14-example/spec.md");
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(fs::read_to_string(&target).unwrap_or_default(), "spec bytes", "{}", stderr(&output));
+    assert_eq!(run.launches().len(), 1, "{}", stderr(&output));
+    assert_eq!(run.provider_launches(), 0, "{}", stderr(&output));
+    assert!(run.cwd().join("trace.txt").exists(), "a skipped task lets the sequence continue: {}", stderr(&output));
 }
 
 // Item 3: `edit` runs in order with the actions around it.
@@ -435,27 +391,25 @@ fn initialize_runs_each_edit_in_order_with_the_actions_around_it() {
 
 #[test]
 fn compose_runs_edit_in_order_in_start_success_and_finalize() {
-    pending_until_the_schema_knows_edit(|| {
-        let run = EditRun::new("edit-compose-event-order", "code");
-        let document = run.write_doc(
-            "doc.md",
-            "---\nstart:\n  - edit: start.md\n  - info: \"event:start-after\"\n\
-             success:\n  - info: \"event:success-before\"\n  - edit: success.md\n  - info: \"event:success-after\"\n\
-             finalize:\n  - edit: finalize.md\n  - info: \"event:finalize-after\"\n---\nbody\n",
-        );
+    let run = EditRun::new("edit-compose-event-order", "code");
+    let document = run.write_doc(
+        "doc.md",
+        "---\nstart:\n  - edit: start.md\n  - info: \"event:start-after\"\n\
+         success:\n  - info: \"event:success-before\"\n  - edit: success.md\n  - info: \"event:success-after\"\n\
+         finalize:\n  - edit: finalize.md\n  - info: \"event:finalize-after\"\n---\nbody\n",
+    );
 
-        let output = run.compose(&document, &[]);
+    let output = run.compose(&document, &[]);
 
-        assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-        assert_eq!(run.launched_names(), ["start.md", "success.md", "finalize.md"], "{}", stderr(&output));
-        assert_eq!(
-            markers(&stderr(&output)),
-            ["start-after", "success-before", "success-after", "finalize-after"],
-            "{}",
-            stderr(&output)
-        );
-        assert_eq!(run.provider_launches(), 1, "{}", stderr(&output));
-    });
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(run.launched_names(), ["start.md", "success.md", "finalize.md"], "{}", stderr(&output));
+    assert_eq!(
+        markers(&stderr(&output)),
+        ["start-after", "success-before", "success-after", "finalize-after"],
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(run.provider_launches(), 1, "{}", stderr(&output));
 }
 
 /// Task `setup:`/`teardown:` are removed grammar and groups have no serial
@@ -464,21 +418,19 @@ fn compose_runs_edit_in_order_in_start_success_and_finalize() {
 /// and not yet the `finalize` one.
 #[test]
 fn a_sequence_container_runs_edit_in_its_start_and_finalize_around_its_children() {
-    pending_until_the_schema_knows_edit(|| {
-        let run = EditRun::new("edit-container-order", "code");
-        let document = run.write_doc(
-            "ship.md",
-            "---\nsequence:\n  - name: ordered\n    sequence:\n      - name: child\n        \
-             shell: \"test -f start.md && test ! -f finalize.md && echo ordered > trace.txt\"\n    \
-             start:\n      - edit: start.md\n    finalize:\n      - edit: finalize.md\n---\n",
-        );
+    let run = EditRun::new("edit-container-order", "code");
+    let document = run.write_doc(
+        "ship.md",
+        "---\nsequence:\n  - name: ordered\n    sequence:\n      - name: child\n        \
+         shell: \"test -f start.md && test ! -f finalize.md && echo ordered > trace.txt\"\n    \
+         start:\n      - edit: start.md\n    finalize:\n      - edit: finalize.md\n---\n",
+    );
 
-        let output = run.sequence(&document);
+    let output = run.sequence(&document);
 
-        assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-        assert_eq!(run.launched_names(), ["start.md", "finalize.md"], "{}", stderr(&output));
-        assert!(run.cwd().join("trace.txt").exists(), "the child ran between the edits: {}", stderr(&output));
-    });
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(run.launched_names(), ["start.md", "finalize.md"], "{}", stderr(&output));
+    assert!(run.cwd().join("trace.txt").exists(), "the child ran between the edits: {}", stderr(&output));
 }
 
 // Item 4: `edit` is not a task side effect.
@@ -530,91 +482,192 @@ fn parallel_edit_group(run: &EditRun) -> PathBuf {
 
 #[test]
 fn a_parallel_member_refuses_a_terminal_editor_before_creating_anything() {
-    pending_until_the_schema_knows_edit(|| {
-        let run = EditRun::new("edit-parallel-terminal", "vim");
-        let document = parallel_edit_group(&run);
+    let run = EditRun::new("edit-parallel-terminal", "vim");
+    let document = parallel_edit_group(&run);
 
-        let output = run.sequence(&document);
+    let output = run.sequence(&document);
 
-        let text = stderr(&output);
-        assert_eq!(output.status.code(), Some(1), "{text}");
-        assert!(text.contains("`start[0].edit` could not edit the file"), "{text}");
-        assert!(text.contains("a parallel group member has no interactive terminal"), "{text}");
-        assert!(run.launches().is_empty(), "{text}");
-        for leg in ["one", "two"] {
-            assert!(!run.cwd().join(leg).exists(), "{leg}: nothing was created: {text}");
-            assert!(!run.cwd().join(format!("{leg}-ran.txt")).exists(), "{leg}: the failed start stops the leg");
-        }
-    });
+    let text = stderr(&output);
+    assert_eq!(output.status.code(), Some(1), "{text}");
+    assert!(text.contains("`start[0].edit` could not edit the file"), "{text}");
+    assert!(text.contains("a parallel group member has no interactive terminal"), "{text}");
+    assert!(run.launches().is_empty(), "{text}");
+    for leg in ["one", "two"] {
+        assert!(!run.cwd().join(leg).exists(), "{leg}: nothing was created: {text}");
+        assert!(!run.cwd().join(format!("{leg}-ran.txt")).exists(), "{leg}: the failed start stops the leg");
+    }
 }
 
 #[test]
 fn a_parallel_member_runs_a_gui_editor() {
-    pending_until_the_schema_knows_edit(|| {
-        let run = EditRun::new("edit-parallel-gui", "code");
-        let document = parallel_edit_group(&run);
+    let run = EditRun::new("edit-parallel-gui", "code");
+    let document = parallel_edit_group(&run);
 
-        let output = run.sequence(&document);
-
-        let text = stderr(&output);
-        assert_eq!(output.status.code(), Some(0), "{text}");
-        let mut names: Vec<_> = run.launches().iter().map(|launch| PathBuf::from(launch.last().unwrap())).collect();
-        names.sort();
-        let expected: Vec<_> = ["one", "two"].iter().map(|leg| canonical(&run.cwd().join(leg)).join("notes.md")).collect();
-        assert_eq!(names, expected, "{text}");
-        for leg in ["one", "two"] {
-            assert!(run.cwd().join(format!("{leg}-ran.txt")).is_file(), "{leg}: the child ran after the edit: {text}");
-        }
-    });
-}
-
-// Item 6: structured output never lends the terminal.
-
-#[test]
-fn structured_output_refuses_a_terminal_editor_and_no_error_continues() {
-    let run = EditRun::new("edit-structured-terminal", "vim").with(FAKE_EDITOR_OUT_TEXT, "EDITOR-SCREEN");
-    let failing = run.write_doc("fail.md", "---\ninitialize:\n  - edit: a.md\n  - info: \"event:after\"\n---\nbody\n");
-
-    let output = run.compose(&failing, &["--output", "json"]);
+    let output = run.sequence(&document);
 
     let text = stderr(&output);
-    assert_eq!(output.status.code(), Some(1), "{text}");
-    assert!(text.contains("`initialize[0].edit` could not edit the file"), "{text}");
-    assert!(text.contains("structured output cannot lend it the terminal"), "{text}");
-    assert!(markers(&text).is_empty(), "nothing runs after the failure: {text}");
-    assert!(stdout(&output).trim().is_empty(), "the result stream carries nothing: {}", stdout(&output));
-    assert!(!text.contains("EDITOR-SCREEN"));
-    assert!(run.launches().is_empty());
-    assert!(!run.cwd().join("a.md").exists(), "refused before creation");
-    assert_eq!(run.provider_launches(), 0);
-
-    let tolerated = run.write_doc(
-        "tolerated.md",
-        "---\ninitialize:\n  - edit:\n      file: a.md\n      no_error: true\n  - info: \"event:after\"\n  - skip\n---\nbody\n",
-    );
-
-    let output = run.compose(&tolerated, &["--output", "json"]);
-
-    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    assert_eq!(markers(&stderr(&output)), ["after"], "`no_error` continues: {}", stderr(&output));
-    assert!(stdout(&output).trim().is_empty(), "{}", stdout(&output));
-    assert!(run.launches().is_empty());
-    assert!(!run.cwd().join("a.md").exists());
+    assert_eq!(output.status.code(), Some(0), "{text}");
+    let mut names: Vec<_> = run.launches().iter().map(|launch| PathBuf::from(launch.last().unwrap())).collect();
+    names.sort();
+    let expected: Vec<_> = ["one", "two"].iter().map(|leg| canonical(&run.cwd().join(leg)).join("notes.md")).collect();
+    assert_eq!(names, expected, "{text}");
+    for leg in ["one", "two"] {
+        assert!(run.cwd().join(format!("{leg}-ran.txt")).is_file(), "{leg}: the child ran after the edit: {text}");
+    }
 }
 
-/// Structured output still runs a GUI editor, and its own output never
-/// reaches the result stream.
+// Item 6: `--output` is refused before anything runs.
+
+/// A document whose `initialize` would create a file and open the editor,
+/// so a refusal that came too late leaves a trace on disk or in the editor
+/// record.
+const REFUSED_DOCUMENT: &str = "---\ninitialize:\n  - ensure_file: made.md\n  - edit: a.md\n---\nbody\n";
+
+/// [`REFUSED_DOCUMENT`] with the `prompt` that `inline-compose` sends.
+const REFUSED_INLINE_DOCUMENT: &str =
+    "---\nprompt: Rewrite the body.\ninitialize:\n  - ensure_file: made.md\n  - edit: a.md\n---\nbody\n";
+
+/// The same `initialize` on a sequence root, ahead of a task that writes a
+/// file of its own.
+const REFUSED_SEQUENCE: &str = "---\ninitialize:\n  - ensure_file: made.md\n  - edit: a.md\nsequence:\n  - name: work\n    shell: \"echo work > trace.txt\"\n---\n";
+
+/// Every value is refused alike: the three the option once accepted and one
+/// it never did.
+const OUTPUT_VALUES: [&str; 4] = ["json", "text", "stream", "bogus"];
+
+/// How the option and its value are spelled on the command line.
+#[derive(Clone, Copy)]
+enum OutputSpelling {
+    Short,
+    Long,
+    Attached,
+}
+
+impl OutputSpelling {
+    fn words(self, value: &str) -> Vec<String> {
+        match self {
+            Self::Short => vec!["-o".into(), value.into()],
+            Self::Long => vec!["--output".into(), value.into()],
+            Self::Attached => vec![format!("--output={value}")],
+        }
+    }
+}
+
+/// Every file under the fixture's workspace (home, cwd, and tools).
+fn workspace_files(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path.clone());
+            }
+            found.push(path);
+        }
+    }
+    found.sort();
+    found
+}
+
+/// Runs `claudine <before> <spelling> <value> <after>` for every value and
+/// asserts the refusal contract: exit 2, the message alone on stderr, empty
+/// stdout, nothing created, and neither the editor nor the provider launched.
+fn assert_output_refused(prefix: &str, before: &[&str], document: Option<&str>, spelling: OutputSpelling, extra: &[&str]) {
+    let run = EditRun::new(prefix, "code");
+    let document = document.map(|content| run.write_doc("doc.md", content));
+    for value in OUTPUT_VALUES {
+        let mut args: Vec<String> = before.iter().map(|word| (*word).to_string()).collect();
+        args.extend(spelling.words(value));
+        args.extend(extra.iter().map(|word| (*word).to_string()));
+        if let Some(document) = &document {
+            args.push(document.to_string_lossy().into_owned());
+        }
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let files_before = workspace_files(run.fixture.workspace_path());
+
+        let output = run.run(&args);
+
+        let text = stderr(&output);
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {text}");
+        assert_eq!(
+            text.trim(),
+            format!("the --output {value} CLI option has not been implemented yet in Claudine"),
+            "{args:?}"
+        );
+        assert!(output.stdout.is_empty(), "{args:?}: {}", stdout(&output));
+        assert_eq!(workspace_files(run.fixture.workspace_path()), files_before, "{args:?}: nothing was created");
+        assert!(run.launches().is_empty(), "{args:?}: the editor never ran");
+        assert_eq!(run.provider_launches(), 0, "{args:?}: the provider never ran");
+    }
+}
+
+macro_rules! output_refused_tests {
+    ($module:ident, $prefix:literal, $before:expr, $document:expr) => {
+        mod $module {
+            use super::*;
+
+            #[test]
+            fn short_spelling() {
+                assert_output_refused(concat!($prefix, "-short"), &$before, $document, OutputSpelling::Short, &[]);
+            }
+
+            #[test]
+            fn long_spelling() {
+                assert_output_refused(concat!($prefix, "-long"), &$before, $document, OutputSpelling::Long, &[]);
+            }
+
+            #[test]
+            fn attached_spelling() {
+                assert_output_refused(concat!($prefix, "-attached"), &$before, $document, OutputSpelling::Attached, &[]);
+            }
+
+            #[test]
+            fn under_dry_run() {
+                assert_output_refused(concat!($prefix, "-dry-run"), &$before, $document, OutputSpelling::Long, &["--dry-run"]);
+            }
+        }
+    };
+}
+
+output_refused_tests!(wrapper_output_is_refused, "output-wrapper", ["goose"], None);
+output_refused_tests!(compose_output_is_refused, "output-compose", ["compose", "--goose"], Some(REFUSED_DOCUMENT));
+output_refused_tests!(
+    inline_compose_output_is_refused,
+    "output-inline-compose",
+    ["inline-compose", "--goose"],
+    Some(REFUSED_INLINE_DOCUMENT)
+);
+output_refused_tests!(sequence_output_is_refused, "output-sequence", ["sequence", "--goose", "--yolo"], Some(REFUSED_SEQUENCE));
+
+/// A wrapper prompt follows the option, as a caller would write it.
 #[test]
-fn structured_output_runs_a_gui_editor_and_keeps_its_output_off_stdout() {
-    let run = EditRun::new("edit-structured-gui", "code").with(FAKE_EDITOR_OUT_TEXT, "EDITOR-SCREEN");
-    let document = run.write_doc("doc.md", "---\ninitialize:\n  - edit: a.md\n  - skip\n---\nbody\n");
+fn wrapper_output_is_refused_before_a_prompt() {
+    assert_output_refused("output-wrapper-prompt", &["goose"], None, OutputSpelling::Long, &["say hello"]);
+}
 
-    let output = run.compose(&document, &["--output", "json"]);
+/// A loop document is refused before its first iteration.
+#[test]
+fn a_loop_run_output_is_refused() {
+    let document = "---\nloop:\n  until: \"loop.count >= 2\"\ninitialize:\n  - ensure_file: made.md\n  - edit: a.md\n---\nbody\n";
+    assert_output_refused("output-loop", &["compose", "--goose"], Some(document), OutputSpelling::Long, &[]);
+}
 
-    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    assert_eq!(run.launches().len(), 1, "{}", stderr(&output));
-    assert!(run.cwd().join("a.md").is_file());
-    assert!(!stdout(&output).contains("EDITOR-SCREEN"), "{}", stdout(&output));
+/// After the file the option is still Claudine's, so it is refused there too.
+#[test]
+fn compose_output_after_the_file_is_refused() {
+    let run = EditRun::new("output-compose-after-file", "code");
+    let document = run.write_doc("doc.md", REFUSED_DOCUMENT);
+
+    let output = run.run(&["compose", "--goose", document.to_str().unwrap(), "--output", "json"]);
+
+    let text = stderr(&output);
+    assert_eq!(output.status.code(), Some(2), "{text}");
+    assert_eq!(text.trim(), "the --output json CLI option has not been implemented yet in Claudine");
+    assert!(output.stdout.is_empty(), "{}", stdout(&output));
+    assert!(!run.cwd().join("made.md").exists());
+    assert!(run.launches().is_empty());
+    assert_eq!(run.provider_launches(), 0);
 }
 
 // Item 7: cancellation terminates and reaps the editor.
@@ -693,41 +746,39 @@ fn an_interrupt_escalates_to_kill_for_an_editor_that_ignores_term() {
 fn a_failing_sibling_cancels_a_held_editor_in_a_fail_fast_group() {
     use test_toolkit::fake_editor::{FAKE_EDITOR_HOLD, FAKE_EDITOR_PIDS, FAKE_EDITOR_SPAWN_CHILD};
 
-    pending_until_the_schema_knows_edit(|| {
-        let run = EditRun::new("edit-cancel-sibling", "code").writing("saved before cancel");
-        let ready = run.fixture.workspace_path().join("editor-ready");
-        let pids = run.fixture.workspace_path().join("editor-pids");
-        let _cleanup = PidCleanup(pids.clone());
-        let run = run
-            .with(FAKE_EDITOR_HOLD, ready.to_string_lossy())
-            .with(FAKE_EDITOR_SPAWN_CHILD, "1")
-            .with(FAKE_EDITOR_PIDS, pids.to_string_lossy());
-        run.write_doc(
-            "review.md",
-            "---\ninitialize:\n  - edit:\n      file: held.md\n      no_error: true\n  - info: \"event:after-edit\"\n\
-             cancelled: []\nfinalize:\n  - info: \"event:review-finalize\"\n---\nreview\n",
-        );
-        let document = run.write_doc(
-            "ship.md",
-            &format!(
-                "---\nsequence:\n  - name: checks\n    group:\n      name: checks\n      tasks:\n        \
-                 - name: review\n          prompt: review.md\n        \
-                 - name: boom\n          shell: \"n=0; while [ ! -f '{}' ] && [ $n -lt 100 ]; do n=$((n + 1)); sleep 0.01; done; exit 3\"\n---\n",
-                ready.display()
-            ),
-        );
+    let run = EditRun::new("edit-cancel-sibling", "code").writing("saved before cancel");
+    let ready = run.fixture.workspace_path().join("editor-ready");
+    let pids = run.fixture.workspace_path().join("editor-pids");
+    let _cleanup = PidCleanup(pids.clone());
+    let run = run
+        .with(FAKE_EDITOR_HOLD, ready.to_string_lossy())
+        .with(FAKE_EDITOR_SPAWN_CHILD, "1")
+        .with(FAKE_EDITOR_PIDS, pids.to_string_lossy());
+    run.write_doc(
+        "review.md",
+        "---\ninitialize:\n  - edit:\n      file: held.md\n      no_error: true\n  - info: \"event:after-edit\"\n\
+         cancelled: []\nfinalize:\n  - info: \"event:review-finalize\"\n---\nreview\n",
+    );
+    let document = run.write_doc(
+        "ship.md",
+        &format!(
+            "---\nsequence:\n  - name: checks\n    group:\n      name: checks\n      tasks:\n        \
+             - name: review\n          prompt: review.md\n        \
+             - name: boom\n          shell: \"n=0; while [ ! -f '{}' ] && [ $n -lt 100 ]; do n=$((n + 1)); sleep 0.01; done; exit 3\"\n---\n",
+            ready.display()
+        ),
+    );
 
-        let output = run.sequence(&document);
+    let output = run.sequence(&document);
 
-        let text = stderr(&output);
-        assert_eq!(output.status.code(), Some(1), "{text}");
-        for pid in test_toolkit::fake_editor::read_pids(&pids).unwrap_or_default() {
-            wait_until_dead(pid);
-        }
-        assert_eq!(fs::read_to_string(run.cwd().join("held.md")).unwrap_or_default(), "saved before cancel", "{text}");
-        assert_eq!(markers(&text), ["review-finalize"], "{text}");
-        assert!(text.contains("review — interrupted"), "the leg reports as interrupted: {text}");
-    });
+    let text = stderr(&output);
+    assert_eq!(output.status.code(), Some(1), "{text}");
+    for pid in test_toolkit::fake_editor::read_pids(&pids).unwrap_or_default() {
+        wait_until_dead(pid);
+    }
+    assert_eq!(fs::read_to_string(run.cwd().join("held.md")).unwrap_or_default(), "saved before cancel", "{text}");
+    assert_eq!(markers(&text), ["review-finalize"], "{text}");
+    assert!(text.contains("review — interrupted"), "the leg reports as interrupted: {text}");
 }
 
 // Item 8: an editor that cannot wait is refused.

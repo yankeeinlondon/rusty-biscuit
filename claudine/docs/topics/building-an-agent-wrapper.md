@@ -95,7 +95,7 @@ Direct provider wrappers (`claudine claude`, `claudine codex`, …) live behind 
 - `binary()` and `agent_env()` — the executable name and the value injected as the `AGENT` env var.
 - `apply_yolo()` / `apply_yolo_for_mode()` / `has_supported_yolo()` / `reject_direct_yolo()` — Claudine canonicalizes auto-approval to `--yolo` and the wrapper translates it to `--dangerously-skip-permissions` (Claude), `--dangerously-bypass-approvals-and-sandbox` (Codex), `--yolo` (Gemini, Kimi, Qwen), or `--dangerously-skip-permissions` injected only in non-interactive mode (OpenCode).
 - `apply_entrypoint()` / `apply_non_interactive_flags()` / `validate_non_interactive_requirements()` — inject the right subcommand (`exec`, `run`) and reject incompatible flags.
-- `apply_model()` / `apply_output_format()` / `apply_system_prompt()` / `apply_sandbox()` — map the universal CLI surface to provider-specific flags, env vars, and temp artifacts.
+- `apply_model()` / `apply_system_prompt()` / `apply_sandbox()` — map the universal CLI surface to provider-specific flags, env vars, and temp artifacts.
 - `prompt_delivery()` and `prompt_arg_conventions()` (`PromptArgConventions { prompt_flags, entrypoint, value_taking_flags }`) — describe how the prompt sits in argv so the pre-parser can locate and remove it cleanly.
 - `stdout_noise_prefixes()` / `stderr_noise_prefixes()` / `suppress_structured_stderr_on_success()` — silence harmless provider chatter in non-interactive output.
 - `supports_structured_stream()` / `stream_protocol()` / `apply_structured_stream()` — bridge the wrapper to the stream parser.

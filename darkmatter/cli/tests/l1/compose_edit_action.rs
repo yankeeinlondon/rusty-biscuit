@@ -536,3 +536,45 @@ fn library_composition_never_runs_an_edit() {
     assert!(composed.content().contains("body"), "{}", composed.content());
     assert!(!dir.path().join("new").exists(), "nothing was created");
 }
+
+/// `md schema validate` and `md compose` refuse the same malformed `edit`
+/// operands at the same authored place, and neither launches an editor or
+/// creates the target; the unedited motivating workflow validates clean.
+#[test]
+fn schema_validate_and_compose_refuse_malformed_operands_alike_without_launch() {
+    let run = EditRun::new("edit-schema-wiring", "code");
+    let validate = |document: &Path| {
+        let mut command = run.command();
+        command.args(["schema", "validate"]).arg(document);
+        run.editor_env(&mut command);
+        command.output().expect("md runs")
+    };
+
+    let control = run.fixture.write_file("cwd/control.md", MOTIVATING);
+    let output = validate(&control);
+    assert_eq!(output.status.code(), Some(0), "{}{}", stdout(&output), stderr(&output));
+
+    for (name, text, pointer, position, property) in [
+        (
+            "gui.md",
+            "---\ncomposed:\n  - edit:\n      file: notes.md\n      gui: \"yes\"\n---\nbody\n",
+            "composed/0/edit/gui",
+            "line 5, column 12",
+            "composed[0].edit.gui",
+        ),
+        ("empty.md", "---\ncomposed:\n  - edit: []\n---\nbody\n", "composed/0/edit", "line 3, column 11", "composed[0].edit"),
+    ] {
+        let document = run.fixture.write_file(format!("cwd/{name}"), text);
+        let checked = validate(&document);
+        let report = format!("{}{}", stdout(&checked), stderr(&checked));
+        assert_eq!(checked.status.code(), Some(1), "{name}: {report}");
+        assert!(report.contains(pointer) && report.contains(position), "{name}: {report}");
+
+        let composed = run.compose(&document, &[]);
+        assert_eq!(composed.status.code(), Some(1), "{name}: {}", stderr(&composed));
+        assert!(stderr(&composed).contains(property), "{name}: {}", stderr(&composed));
+    }
+    assert!(run.launches().is_empty(), "no editor ran: {:?}", run.launches());
+    assert!(!run.cwd().join("notes.md").exists(), "nothing was created");
+    assert!(!run.cwd().join("features").exists(), "validation created nothing");
+}

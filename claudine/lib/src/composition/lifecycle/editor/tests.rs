@@ -31,17 +31,11 @@ fn install_gui_editor(dir: &Path) -> PathBuf {
 }
 
 #[test]
-fn the_output_mode_follows_the_invocation_and_stdin_is_never_reserved() {
-    set_structured_output(true);
-    let structured = service_with(no_display_probe());
-    assert_eq!(structured.facts.output, EditorOutput::Structured);
-    assert!(!structured.facts.stdin_reserved);
-
-    set_structured_output(false);
-    let text = service_with(no_display_probe());
-    assert_eq!(text.facts.output, EditorOutput::Terminal);
-    assert!(!text.facts.stdin_reserved);
-    assert_eq!(text.probe, no_display_probe(), "the injected probe is the one used");
+fn the_output_is_always_the_terminal_and_stdin_is_never_reserved() {
+    let service = service_with(no_display_probe());
+    assert_eq!(service.facts.output, EditorOutput::Terminal);
+    assert!(!service.facts.stdin_reserved);
+    assert_eq!(service.probe, no_display_probe(), "the injected probe is the one used");
 }
 
 #[test]
@@ -55,7 +49,6 @@ fn a_host_without_a_display_refuses_a_gui_editor_before_creating_the_file() {
         std::env::set_var("EDITOR", &editor);
         std::env::remove_var("VISUAL");
     }
-    set_structured_output(false);
 
     let target = workspace.path().join("specs").join("new-spec.md");
     let cancelled = || false;

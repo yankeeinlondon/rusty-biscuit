@@ -1165,6 +1165,10 @@ group:
 - **No interactivity** — a late required property becomes a task *failure*
   inside a parallel group, never a TTY prompt: N concurrent tasks cannot share
   one terminal. Serial contexts keep the standard interactive collection.
+  For the same reason a lifecycle `edit` in a task's events may open only a
+  graphical editor (`code --wait`); a terminal editor such as `vim` fails the
+  action before the file is created. Write `edit: { file: …, gui: true }` in
+  a leg. See [Lifecycle → Edit Actions](lifecycle.md#edit-actions).
 - **Write-back collisions** — two tasks whose `prompt` documents are
   inline-compose targets of the same file (or of the sequence source itself) is a
   typed **preflight** error. Racing write-backs are never legal.

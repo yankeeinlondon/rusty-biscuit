@@ -9,17 +9,17 @@
 //! ## Scope
 //!
 //! This is the **engine**. It dispatches communication, side-effect, shell,
-//! and expression-function actions through their routes and reports which
-//! lifecycle control action fired (if any) plus whether an unintentional
-//! action error must route the run to `failure`. It does **not** perform the
+//! expression-function, and `edit` actions through their routes and reports
+//! which lifecycle control action fired (if any) plus whether an
+//! unintentional action error must route the run to `failure`. It does **not** perform the
 //! runtime control flow those outcomes imply (`Skip` opt-out, `Proxy`
 //! hand-off, `Retry`/`Resume`/`Defer` re-entry) — that belongs to the host's
 //! runtime.
 //!
 //! What depends on the host's model is asked through seams: [`LifecycleHost`]
-//! (bindings, runtime-state writes, loops, `prep`, shell policy, cancellation,
-//! failure classification), [`ShellRunner`], and the [`LifecycleServices`]
-//! (communication and the diagnostic catalog).
+//! (bindings, runtime-state writes, loops, `prep`, shell policy, the editor
+//! service, cancellation, failure classification), [`ShellRunner`], and the
+//! [`LifecycleServices`] (communication and the diagnostic catalog).
 //!
 //! ## Error propagation
 //!
@@ -189,10 +189,12 @@ enum MutationTargetError {
 /// policy.
 enum ActionFailure {
     /// An expression/binding raise: control-argument evaluation, message/shell
-    /// interpolation, or side-effect argument evaluation.
+    /// interpolation, or side-effect argument evaluation. An `edit` whose
+    /// target is not a non-blank string, or that a cancellation stopped, is
+    /// also one.
     Evaluation(LifecycleErrorInfo),
     /// A side-effect dispatch failure: shell non-zero, an effect-engine error,
-    /// or an invalid resolved effect name.
+    /// an invalid resolved effect name, or a failed `edit`.
     Dispatch(LifecycleErrorInfo),
 }
 
@@ -1289,8 +1291,8 @@ impl<'a> StackExecutor<'a> {
     /// (before the editor starts or while it is open), are evaluation
     /// failures that `no_error` never suppresses. Every other failure
     /// (resolution, eligibility, preparation, the editor itself, a host with
-    /// no editor) is a dispatch failure the host classifies as
-    /// [`LifecycleRunFailure::EditFailed`].
+    /// no editor) is a dispatch failure, reported to the host as
+    /// [`LifecycleRunFailure::EditFailed`] for it to classify.
     ///
     /// The cancellation probe is [`cancellation::cause_with`], not
     /// `requested_with`: terminal events run inside a cleanup scope, where

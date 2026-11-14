@@ -871,7 +871,7 @@ fn stage_launch_recording(doc: &str) -> Staged {
 /// attempt per `begin-attempt`/`end-attempt` pair.
 ///
 /// [`write_launch_recorder`] records only a flag-shaped projection, which cannot
-/// distinguish "the retry dropped the requested `--output`" from "the recorder
+/// distinguish "the retry dropped the requested `--sandbox`" from "the recorder
 /// did not look for it", and says nothing at all about the child environment.
 /// Review-9 finding 2 is about both, so these rows assert on everything the
 /// process actually received.
@@ -920,14 +920,6 @@ struct RecordedAttempt {
 impl RecordedAttempt {
     fn has_flag(&self, flag: &str) -> bool {
         self.argv.iter().any(|arg| arg == flag)
-    }
-
-    /// True when `flag` appears immediately followed by `value` — the shape a
-    /// `FlagValue` selector renders, where the flag alone proves nothing.
-    fn has_pair(&self, flag: &str, value: &str) -> bool {
-        self.argv
-            .windows(2)
-            .any(|pair| pair[0] == flag && pair[1] == value)
     }
 
     fn env_value(&self, key: &str) -> Option<&str> {
@@ -1230,16 +1222,15 @@ fn level2_lifecycle_direct_compose_delivers_a_readable_system_prompt_file() {
     );
 }
 
-/// **Review-9 finding 2 — `--output` and `--sandbox` are intent, not bytes.**
+/// **Review-9 finding 2 — `--sandbox` is intent, not bytes.**
 ///
-/// Goose encodes `--output json` as no argv at all and implements no sandbox;
-/// Codex encodes the same request as `--json` and does implement `--sandbox`. A
-/// retry that switches Goose to Codex therefore has to *re-render* both requests
-/// through the refreshed provider's profile. Replaying the opening provider's
-/// (empty) slices silently dropped both.
+/// Goose implements no sandbox; Codex does. A retry that switches Goose to
+/// Codex therefore has to *re-render* the request through the refreshed
+/// provider's profile. Replaying the opening provider's (empty) slice silently
+/// dropped it.
 #[test]
 #[serial(level2_lifecycle_control)]
-fn level2_lifecycle_retry_re_renders_output_and_sandbox_for_the_refreshed_provider() {
+fn level2_lifecycle_retry_re_renders_sandbox_for_the_refreshed_provider() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let staged = stage_provider_switch(
@@ -1248,21 +1239,13 @@ fn level2_lifecycle_retry_re_renders_output_and_sandbox_for_the_refreshed_provid
         "codex",
     );
 
-    let pane = run_provider_with_flags(&staged, "", "--output json --sandbox", "finalize");
+    let pane = run_provider_with_flags(&staged, "", "--sandbox", "finalize");
     let attempts = switched_attempts(&staged, &pane, "goose", "codex");
 
     assert!(
-        !attempts[0].has_flag("--json")
-            && !attempts[0].has_flag("--output-format")
-            && !attempts[0].has_flag("--sandbox"),
-        "fixture check: Goose renders neither request as argv; got {:?}",
+        !attempts[0].has_flag("--sandbox"),
+        "fixture check: Goose renders no sandbox argv; got {:?}",
         attempts[0].argv,
-    );
-    assert!(
-        attempts[1].has_flag("--json"),
-        "the retried Codex attempt must carry the requested output format in \
-         Codex's own encoding; argv: {:?}\npane:\n{pane}",
-        attempts[1].argv,
     );
     assert!(
         attempts[1].has_flag("--sandbox"),
@@ -1372,43 +1355,6 @@ fn level2_lifecycle_retry_to_an_unavailable_provider_matches_direct_selection() 
         0,
         "fixture check: the direct arm fails during selection, so no provider may \
          launch on it either; pane:\n{direct_pane}"
-    );
-}
-
-/// **Review-9 finding 2, the reverse direction.** Gemini renders `--output json`
-/// as `--output-format json`, which Goose does not accept. A Gemini-to-Goose
-/// retry must not carry those bytes across.
-#[test]
-#[serial(level2_lifecycle_control)]
-fn level2_lifecycle_retry_drops_the_opening_providers_flag_encoding() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-
-    let staged = stage_provider_switch(
-        &provider_switch_retry_doc("gemini", "goose", ""),
-        "gemini",
-        "goose",
-    );
-
-    let pane = run_provider_with_flags(&staged, "", "--output json --sandbox", "finalize");
-    let attempts = switched_attempts(&staged, &pane, "gemini", "goose");
-
-    assert!(
-        attempts[0].has_pair("--output-format", "json"),
-        "fixture check: Gemini renders the requested format as a flag/value pair; \
-         got {:?}",
-        attempts[0].argv,
-    );
-    assert!(
-        !attempts[1].has_flag("--output-format"),
-        "Gemini's output encoding must not reach a provider that rejects it; \
-         argv: {:?}\npane:\n{pane}",
-        attempts[1].argv,
-    );
-    assert!(
-        !attempts[1].has_flag("--sandbox"),
-        "a provider with no sandbox must not inherit another's flag; argv: {:?}\n\
-         pane:\n{pane}",
-        attempts[1].argv,
     );
 }
 

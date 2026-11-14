@@ -770,6 +770,23 @@ fn wrapper_help_renders_wrapper_screen() {
     }
 }
 
+/// `-o`/`--output` stays parseable so it can be refused, but no help screen
+/// advertises it.
+#[test]
+fn help_does_not_advertise_the_output_option() {
+    let cli = CliProcessFixture::named("argv-help-no-output");
+    for args in [
+        &["claude", "--help"][..],
+        &["compose", "--help"],
+        &["inline-compose", "--help"],
+        &["sequence", "--help"],
+    ] {
+        let help = run_help(&cli, args);
+        assert!(!help.stdout.contains("--output"), "{args:?}: {}", help.stdout);
+        assert!(!help.stdout.contains("-o,"), "{args:?}: {}", help.stdout);
+    }
+}
+
 /// Run `args` with color forced on, returning raw (unstripped) stdout.
 ///
 /// clap's renderer honors `CLICOLOR_FORCE`; Claudine's own terminal honors

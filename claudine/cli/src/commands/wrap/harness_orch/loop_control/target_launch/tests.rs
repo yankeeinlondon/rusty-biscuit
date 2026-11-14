@@ -72,7 +72,6 @@ const FIXTURE_MODEL: &str = "fixture/opencode-model";
 fn plan_inputs() -> launch_plan::LaunchPlanInputs {
     launch_plan::LaunchPlanInputs {
         provider_tail: claudine::composition::ProviderTail::default(),
-        output_format: None,
         system_prompt_args: Vec::new(),
         system_prompt_opencode_config: None,
         system_prompt: None,

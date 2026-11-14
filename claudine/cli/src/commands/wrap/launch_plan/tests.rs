@@ -21,7 +21,6 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
     };
     let mut recorded = LaunchPlanInputs {
         provider_tail: claudine::composition::ProviderTail::new(vec!["--tail-flag".to_string()], None),
-        output_format: None,
         system_prompt_args: Vec::new(),
         system_prompt_opencode_config: None,
         system_prompt: None,
@@ -101,16 +100,14 @@ fn unchanged_facets_return_the_recorded_plan_verbatim() {
 }
 
 /// The invocation-fixed material survives a replay, in the command phase's own
-/// order: the forwarded tail first, then the rendered `--output`, then the
-/// system-prompt delivery, then `--sandbox`.
+/// order: the forwarded tail first, then the system-prompt delivery, then
+/// `--sandbox`.
 #[test]
 fn a_replay_keeps_the_invocation_fixed_material_in_order() {
-    // Gemini encodes `--output json` as `--output-format json` and implements no
-    // sandbox; Codex encodes the same request as `--json` and does implement
-    // `--sandbox`. Opening on Gemini and retrying into Codex therefore exercises
-    // both re-encodings at once, and the ordering has to survive them.
+    // Gemini implements no sandbox and Codex does, so opening on Gemini and
+    // retrying into Codex exercises the re-encoding, and the ordering has to
+    // survive it.
     let mut inputs = inputs_for(Provider::Gemini);
-    inputs.output_format = Some(OutputFormat::Json);
     inputs.sandbox_requested = true;
     inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
         .unwrap()
@@ -124,77 +121,10 @@ fn a_replay_keeps_the_invocation_fixed_material_in_order() {
 
     let position = |needle: &str| plan.args.iter().position(|arg| arg == needle);
     let tail = position("--tail-flag").expect("the forwarded tail must survive");
-    let output = position("--json").expect("`--output` must re-render in Codex's encoding");
     let sandbox = position("--sandbox").expect("`--sandbox` must re-render");
     assert!(
-        !plan.args.iter().any(|arg| arg == "--output-format"),
-        "Gemini's output encoding must not travel with the request; got {:?}",
-        plan.args,
-    );
-    assert!(
-        tail < output && output < sandbox,
+        tail < sandbox,
         "invocation-fixed material must keep the command phase's order; got {:?}",
-        plan.args,
-    );
-}
-
-/// Review-9 finding 2 — `--output` is invocation intent, but its encoding
-/// belongs to whichever provider runs.
-///
-/// Goose renders `--output json` as no argv at all; Gemini requires
-/// `--output-format json`. Replaying Goose's (empty) slice into a Gemini retry
-/// silently dropped the format the caller asked for.
-#[test]
-fn a_goose_to_gemini_retry_re_renders_the_requested_output_format() {
-    let mut inputs = inputs();
-    inputs.output_format = Some(OutputFormat::Json);
-    inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
-        .unwrap()
-        .args;
-    assert!(
-        !inputs.invocation.args.iter().any(|arg| arg == "--output-format"),
-        "fixture check: Goose encodes `--output json` as no argv; got {:?}",
-        inputs.invocation.args,
-    );
-
-    let moved = DocumentLaunchFacets {
-        provider: Provider::Gemini,
-        ..inputs.invocation.facets.clone()
-    };
-    let plan = build_launch_plan(&inputs, &moved).unwrap();
-
-    assert!(
-        adjacent_pair(&plan.args, "--output-format", "json"),
-        "the rebuilt Gemini attempt must carry the requested format in Gemini's \
-         own encoding; got {:?}",
-        plan.args,
-    );
-}
-
-/// The reverse: Gemini's `--output-format` bytes must not reach Goose, which
-/// does not accept them.
-#[test]
-fn a_gemini_to_goose_retry_drops_the_gemini_output_encoding() {
-    let mut inputs = inputs_for(Provider::Gemini);
-    inputs.output_format = Some(OutputFormat::Json);
-    inputs.invocation.args = replay(&inputs, &inputs.invocation.facets.clone())
-        .unwrap()
-        .args;
-    assert!(
-        adjacent_pair(&inputs.invocation.args, "--output-format", "json"),
-        "fixture check: the Gemini invocation renders the flag; got {:?}",
-        inputs.invocation.args,
-    );
-
-    let moved = DocumentLaunchFacets {
-        provider: Provider::Goose,
-        ..inputs.invocation.facets.clone()
-    };
-    let plan = build_launch_plan(&inputs, &moved).unwrap();
-
-    assert!(
-        !plan.args.iter().any(|arg| arg == "--output-format"),
-        "one provider's output encoding must never reach another's argv; got {:?}",
         plan.args,
     );
 }
@@ -248,12 +178,6 @@ fn sandbox_intent_re_renders_across_a_goose_codex_switch_in_both_directions() {
             .any(|arg| arg == "--sandbox"),
         "Codex's sandbox flag must not leak into a provider that rejects it",
     );
-}
-
-/// True when `flag` appears immediately followed by `value`.
-fn adjacent_pair(args: &[String], flag: &str, value: &str) -> bool {
-    args.windows(2)
-        .any(|pair| pair[0] == flag && pair[1] == value)
 }
 
 /// Review-9 finding 2 — a provider-shaped environment key the rebuild no longer
@@ -880,32 +804,6 @@ fn a_provider_move_keeps_the_rebuilt_sandbox_warning() {
             .iter()
             .any(|warning| warning.source == LaunchWarningSource::Sandbox),
         "a rebuilt provider that cannot sandbox must say so; got {:?}",
-        plan.warnings,
-    );
-}
-
-/// Review-11 finding 4 — the same rule for an output format the rebuilt provider
-/// has no record for.
-///
-/// Goose renders `--output json`; Kimi's catalog carries no JSON offering at
-/// all, so the flag is skipped and the caller is owed the reason.
-#[test]
-fn a_provider_move_keeps_the_rebuilt_output_format_warning() {
-    let mut inputs = inputs();
-    inputs.output_format = Some(OutputFormat::Json);
-
-    let moved = DocumentLaunchFacets {
-        provider: Provider::KimiCode,
-        ..inputs.invocation.facets.clone()
-    };
-    let plan = build_launch_plan(&inputs, &moved).unwrap();
-
-    assert!(
-        plan.warnings
-            .iter()
-            .any(|warning| warning.source == LaunchWarningSource::OutputFormat),
-        "a rebuilt provider that cannot render the requested format must say so; \
-         got {:?}",
         plan.warnings,
     );
 }

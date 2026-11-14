@@ -1130,15 +1130,16 @@ impl StackParser<'_> {
                     ),
                 });
             }
-            // `edit`'s flags are literal booleans: a quoted, interpolated, or
-            // `null` value would pass the expression rule below, and `null`
-            // must not read as the absent default.
-            if verb == "edit" && matches!(key.as_str(), "create_new" | "gui") && !value.is_boolean() {
+            // Checked before the expression rule below, which a quoted,
+            // interpolated, or `null` flag would pass.
+            if verb == "edit"
+                && let Some(message) = edit_flag_problem(key, value)
+            {
                 return Err(LifecycleError::LifecycleInvalidArgs {
                     source_path: self.source_file.to_path_buf(),
                     property: path.field(key.as_str()).to_string(),
                     action: verb.to_string(),
-                    message: format!("`edit.{key}` must be a boolean literal, got {}", json_type_name(value)),
+                    message,
                 });
             }
             // Direct YAML object literals are not parameter values; object
