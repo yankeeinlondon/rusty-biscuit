@@ -74,6 +74,26 @@ creating a missing file from `initial_text(scope)`. Edits that already hold
 are dropped, so an unchanged save starts no transaction. A user file spelling
 `favorite_agent` has `preferred_agent` edits applied to that key.
 
+**Setup handshake** (`config/setup.rs::setup_with_darkmatter`): first-run
+initialization (`init_wizard::write_with_darkmatter_setup`, used by the
+headless and interactive wizard and the test-only `commands/init`) passes its
+own config write as a closure; the service refuses a missing home or
+repository before calling it, records Claudine's pre-existing `permissions`,
+then moves an inline `~/.darkmatter.yaml` block into Claudine's file (only
+when Claudine had none or a semantically equal one, compared through
+`darkmatter::config::init::effective_permissions`) and rewrites
+`.darkmatter.yaml` to `~/.claudine/config.yaml` (`./.claudine/config.yaml`
+at repository scope) in one two-target transaction with the Darkmatter file
+`published_last`. Differing blocks are `SetupError::Conflict`; a reference
+to Claudine is left, a third-party reference is kept. The CLI turns every
+handshake error except Claudine's own write into a warning, and with no home
+writes only Claudine's file at its old fallback. Tests:
+`lib/tests/l1/darkmatter_setup.rs` (the interrupted-transfer case uses
+darkmatter's `fail_replacement_after`, enabled by the lib dev-dependency
+feature). A first claudine run in a fixture with no Claudine config therefore
+rewrites `~/.darkmatter.yaml` to the reference; read saved rules from
+`~/.claudine/config.yaml` there. Register-entry publication is Phase 7.
+
 **`tts` in `~/.claudine/config.yaml`** (`config/tts.rs::TtsValue`) is `true`,
 `false`, or an object whose keys are all optional: `provider` (absent = default
 provider, as `true`), `voice` (string or `{ male, female }`), `gender`
@@ -564,6 +584,27 @@ builds the whole root once per session. `LoopAmbient.last_output` is an
 
 ## Structured shell authorization
 
+**Shell permissions** come only from Darkmatter's captured configuration:
+`ShellApprovalOptions::permissions` is a `harness::CapturedPermissions`
+(`Policy(Arc<PermissionPolicy>)`, `Invalid(ConfigError)`, or `Absent` for a
+library caller that captured none), built per source document with
+`CapturedPermissions::for_source(invocation, context)` (the invocation's
+`darkmatter_config_for`, so each repository gets its own HEAD ∧ working-copy
+layers) or `for_prepared`/`resolve` where only a prepared `ComposeContext`
+exists. There is no policy root, whitelist/blacklist file, or directory
+fallback. `harness/shell.rs` decides in `md`'s order: built-in blacklist
+(before yolo, cache, or rules) → `Invalid` fails with
+`HarnessError::ShellPermissionsInvalid` (`config.invalid`) → a `!` match asks
+(the request carries `exclusion`) → `ShellPermissions::preapproves` per
+segment → cache → handler. "Always allow" saves through
+`config::permissions::persist::save_user_approval` and into
+`ShellApprovalOptions::run_rules` (the rest of the run); a `NotSaved` keeps the
+approval and warns `dm.config.not_saved`. There is no permanent deny. A
+template fill meets `check_filled_chain` then
+`filled_template_needs_approval` against the exclusions of the graph's
+recorded permissions (sequence) or `StackExecutionContext::shell_exclusions`
+(lifecycle). Parity with `md` is pinned by `lib/tests/l1/shell_permission_parity.rs`.
+
 Document, lifecycle and sequence shells share Darkmatter's typed template
 filler. An exact approval fixes resolved bytes; a template approval permits
 only the authored shape. Never authorize newly filled bytes to bridge modes.
@@ -717,8 +758,8 @@ event placeholders require templates. Membership is checked before filling and
 before policy evaluation, so `--yolo` cannot authorize a command introduced by a
 reread after execution begins. The shell runtime rejection chain omits rejected
 values; earlier document schema validation can disclose them. Approval is
-separate from result caching: current membership, validators, blacklists, and
-direct targets still apply.
+separate from result caching: current membership, validators, the built-in
+blacklist, the `!` entries, and direct targets still apply.
 
 ## Initialization shell boundary
 
@@ -733,7 +774,7 @@ as `null`.
 `initialize` runs before preflight and is shell-free. Reject shell actions and
 `set` values written as a whole-value `$( … )` even in dead branches
 (`parse.rs::runs_a_shell`), and reject bootstrap frontmatter `$(...)` expansion; approval
-flags, whitelists, caches, and handlers cannot grant an exception. Non-shell
+flags, permissions, caches, and handlers cannot grant an exception. Non-shell
 effects keep their existing restrictions. Early blocked/failure/finalize chains
 cannot execute shells either, including catch evaluation-error routes, and
 `no_error` cannot suppress the prohibition. The shared runtime permits lifecycle

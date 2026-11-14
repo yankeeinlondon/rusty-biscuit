@@ -1068,6 +1068,13 @@ plus any other matching trigger schema, under the document's authored
 `loop`, `agent`, `model`, timeout, or linking key with the wrong shape blocks
 the launch.
 
+A template schema (one whose `{{ … }}` slots read files or URLs) resolves
+through the same schema-slot session the document was composed with, so the
+verdict judges the snapshot composition already approved: a read the
+captured `permissions` (or the network permission) allow resolves without
+asking, and one they do not is `dm.schema.slot_approval_required`, exactly
+as `md compose` decides it.
+
 ```yaml
 ---
 prompt: "review the diff"
@@ -1991,7 +1998,7 @@ Resolve → Shell-free bootstrap → Initialize → Stabilized reread → Full a
 
 - **Resolve**: canonical commands use `composition::resolve_composition_source_in_context()` with the invocation's launch `FileResolutionContext`, then derive one `SourceContext` from the resolved path
 - **Bootstrap and initialize**: `prepare_bootstrap()` produces only the effective frontmatter/lifecycle surface. The coordinator rejects initialization shell actions and bootstrap shell expansion, dispatches `initialize` once, and rereads before full body discovery; `skip` exits before reading the body. Provider selection supplies early-binding context before composition.
-- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
+- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks the captured permissions, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
 - **Prepare**: `composition::prepare::service::prepare_document()` — the canonical preparation service every entry reason routes through (direct, proxy target, retry, resume, loop iteration) — composes through Darkmatter via `prepare_direct()` / `prepare_inline()` with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`. There is exactly one composer per mode; see [Document Handoffs](#document-handoffs-and-the-equivalence-contract)
 - **Start**: `LifecycleRunGuard::emit_start_once()` fires the `start` lifecycle event after schema validation and shell audit pass
 - **Select**: `composition::select_provider()` applies the precedence chain

@@ -266,7 +266,7 @@ mod exclusions {
         let refused = dispatch("tool {{ x }}", home.path(), Some(rules));
         let other = dispatch("tool {{ x }} --other", home.path(), None);
 
-        assert!(refused.is_err_and(|message| message.contains("approv")), "an excluded fill needs an approval");
+        assert!(refused.as_ref().is_err_and(|message| message.contains("Approval required")), "an excluded fill needs an approval: {refused:?}");
         assert_eq!(other, Ok(vec![vec!["tool".to_string(), "value".to_string(), "--other".to_string()]]));
     }
 

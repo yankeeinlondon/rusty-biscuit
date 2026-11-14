@@ -90,7 +90,7 @@ fn stage() -> Staged {
 /// frame that first contains it. Panics on timeout.
 ///
 /// The handler renders the whole prompt with a single forward write, so once
-/// the last static option (`Blacklist and stop`) is visible the surface is
+/// the last static option (`Deny for this run`) is visible the surface is
 /// complete and safe to snapshot.
 fn wait_for_pane_marker<H: TerminalHarness>(
     harness: &mut H,
@@ -114,7 +114,7 @@ fn wait_for_pane_marker<H: TerminalHarness>(
 }
 
 /// Extract the approval-prompt block — the lines from the
-/// `Shell Approval Required` header through the final `Blacklist and stop`
+/// `Shell Approval Required` header through the final `Deny for this run`
 /// option — from a captured frame.
 ///
 /// Returns the plain (escape-stripped) lines and the index-aligned raw
@@ -130,7 +130,7 @@ fn prompt_region(frame: &CapturedFrame) -> (Vec<String>, Vec<String>) {
         .position(|l| l.contains("Shell Approval Required"));
     let end = plain_lines
         .iter()
-        .position(|l| l.contains("Blacklist and stop"));
+        .position(|l| l.contains("Deny for this run"));
     match (start, end) {
         (Some(s), Some(e)) if e >= s => {
             let plain = plain_lines[s..=e]
@@ -197,7 +197,7 @@ fn capture_prompt_in_mode(harness: &mut TmuxHarness, staged: &Staged, dry_run: b
         )
         .expect("send compose");
 
-    let frame = wait_for_pane_marker(harness, "Blacklist and stop", Duration::from_secs(15));
+    let frame = wait_for_pane_marker(harness, "Deny for this run", Duration::from_secs(15));
 
     // Deny so the composition aborts before any provider launch and the shell
     // prompt returns, leaving the pane ready for the next run.

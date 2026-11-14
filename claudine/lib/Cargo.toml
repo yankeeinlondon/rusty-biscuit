@@ -138,6 +138,9 @@ windows = { version = "0.62", features = [
 ] }
 
 [dev-dependencies]
+# The setup handshake's interrupted-transfer test fails a replacement through
+# darkmatter's test-only write hooks; dev-dependency features reach tests only.
+darkmatter = { path = "../../darkmatter/lib", features = ["effects-instrumentation"] }
 dunce = "1"
 # `test-util` gives the delivery-tracker tests a paused clock, so deadline
 # assertions cost no wall time.

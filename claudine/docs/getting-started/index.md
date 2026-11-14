@@ -429,12 +429,12 @@ Ya know, I think I need some more cowbell:
 
 Now everyone likes a little cowbell but as the wise will tell you, _too much_ cowbell can lead to disaster. So can allowing a developer (as well intention as they are) to run commands willy nilly. For that reason we take a conservative but safe approach with shell commands:
 
-> no commands are allowed until they are white listed
+> no commands are allowed until they are approved, in your `permissions.shell-commands` or at a prompt
 
 When a user runs `claudine compose <file>`, the first thing that happens is:
 
 - we run what we call "pre-flight checks" to validate that the prompt will be allowed to be executed
-- that includes spanning the entire graph of documents involved in a composition and evaluating all shell commands against the whitelist. 
+- that includes spanning the entire graph of documents involved in a composition and evaluating all shell commands against your `permissions` (see [Configuration](../../../darkmatter/docs/topics/configuration.md)).
     - Note: _transclusion_ is a recursive function; hence the potential for a graph of documents
 - if there are any violations (aka, commands which have not been approved) then the user will be asked to approve/disapprove for each violation
 - the command will only be executed if all shell commands have been approved

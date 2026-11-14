@@ -116,7 +116,7 @@ existing contents are preserved. Every adopted proxy target follows the same
 ordering, and an abandoned source body is never discovered. **Initialization
 is shell-free:** shell actions are rejected even in a branch that can never
 run, and bootstrap frontmatter `$(...)` expansion is forbidden. `-y`,
-whitelists, cached approvals, and interactive approval cannot grant an
+permissions, cached approvals, and interactive approval cannot grant an
 exception. Move shell work to `start` or a later event. After initialization,
 the fresh body and remaining lifecycle commands receive a full, condition-blind
 audit before launch.
@@ -473,7 +473,8 @@ success:
 ```
 
 With no `commit_message`, pre-flight passes once the shape
-`git commit -m {{ string }}` is approved (a `template` whitelist rule or the
+`git commit -m {{ string }}` is approved (a `template` rule in
+`permissions.shell-commands` or the
 approval prompt). When `success` runs:
 
 - a false guard selects `else:`; `commit_message` is never read and
@@ -1095,9 +1096,10 @@ space and `;` passed as data. A template-mode command:
 - **checks each value against its declared type** (constraints included)
   before anything starts. `null` is missing; an array or object, a string
   holding a NUL character, or a value the declaration refuses is rejected.
-- **meets the blacklists again** once every argument is filled: a `template
-  git {{ string }}` approval cannot run `git reset`, and a user `exact`
-  blacklist rule blocks the fill it names.
+- **meets the built-in blacklist and the `!` entries again** once every
+  argument is filled: a `template git {{ string }}` approval cannot run `git
+  reset`, and a `!exact` entry in `permissions.shell-commands` stops the fill
+  it names (it needs an approval of its own).
 - **starts its program directly**, never through a shell, from the same working
   directory and environment as a byte-approved command, with its output on the
   terminal. A program an interpreter would re-parse the arguments for (a
@@ -1106,7 +1108,7 @@ space and `;` passed as data. A template-mode command:
   `&&`/`||` chains are available; a refused segment anywhere in the chain keeps
   every segment from starting.
 
-A missing or rejected value, a blacklisted fill, and a refused program are
+A missing or rejected value, a blacklisted or excluded fill, and a refused program are
 input errors, not command failures: the event halts with
 `LifecycleShellTemplateRefused`, whatever `no_error` says, and the message names
 the placeholder, its declared type, and the authored command, never the value.

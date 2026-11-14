@@ -24,9 +24,10 @@
 //! names complete from the authored template. A value request for a property
 //! whose authored definition holds a slot (a template constraint or a
 //! template type) resolves the whole template through Darkmatter's resolver
-//! with [`SessionMode::ReferenceCheck`]: only the automatic clean-committed
-//! grant and persisted user grants apply, nothing prompts, and nothing is
-//! printed. An ungranted or failed resolution offers no candidates; one slot
+//! with [`SessionMode::ReferenceCheck`]: only the captured
+//! `permissions.file-read` applies (the user's, and the repository's as
+//! committed), nothing prompts, and nothing is printed. An unpermitted or
+//! failed resolution offers no candidates; one slot
 //! elsewhere in the template that cannot resolve leaves the property with
 //! none too, because the template resolves as a whole. See
 //! [`setter_value_candidates`].
@@ -118,8 +119,8 @@ pub(crate) fn load_prompt_schema(file_arg: &str, ctx: &ScopeContext) -> Option<P
 /// A concrete schema answers directly. In a template, a property whose
 /// authored definition reaches no slot completes from that declaration with
 /// nothing evaluated; a property that reaches one resolves the template
-/// first with non-prompting grants only (see the module documentation) and
-/// completes from the resolved schema.
+/// first with the captured `permissions.file-read` only, never prompting (see
+/// the module documentation), and completes from the resolved schema.
 pub(crate) fn setter_value_candidates(
     file_arg: &str,
     property: &str,
@@ -191,8 +192,9 @@ impl LoadedPrompt {
         }
     }
 
-    /// The effective schema with every slot resolved, using only grants that
-    /// never prompt; `None` when a read is ungranted or resolution fails.
+    /// The effective schema with every slot resolved, using only the captured
+    /// permissions, never a prompt; `None` when a read is not permitted or
+    /// resolution fails.
     ///
     /// The session has no approval handler, so `ReferenceCheck` leaves an
     /// undecided read unresolved rather than asking: a Tab must never prompt

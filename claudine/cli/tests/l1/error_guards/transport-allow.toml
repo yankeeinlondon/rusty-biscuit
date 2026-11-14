@@ -94,6 +94,14 @@ The final render boundary for the config TUI. `app.pending_test` now carries a t
 [[allow]]
 shape = "format_context"
 file = "cli/src/commands/init_wizard.rs"
+symbol = "write_with_darkmatter_setup"
+tag = "retained"
+reason = """
+The Darkmatter half of first-run setup (the `permissions` handshake) is deliberately non-fatal: Claudine's own configuration was already written, and a conflict or failed handshake leaves the original Darkmatter block in force. The `SetupError` is rendered once with `log::warn` and the function returns the Claudine path; the typed error is never returned, so this line is the final render."""
+
+[[allow]]
+shape = "format_context"
+file = "cli/src/commands/init_wizard.rs"
 symbol = "register_hooks_all_providers"
 tag = "retained"
 reason = """

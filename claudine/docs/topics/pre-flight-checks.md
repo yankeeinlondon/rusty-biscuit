@@ -4,7 +4,7 @@ kind: canonical-documentation
 
 # Pre-Flight Shell Approval
 
-Before any Claudine wrapper session launches a provider, it needs to know that every shell command the session might execute has been authorized. This is what the pre-flight check does: it scans all possible shell commands, resolves their approval status, and asks the user to approve anything that is not already whitelisted. Once the pre-flight completes, the session runs without further shell-related prompts.
+Before any Claudine wrapper session launches a provider, it needs to know that every shell command the session might execute has been authorized. This is what the pre-flight check does: it scans all possible shell commands, resolves their approval status, and asks the user to approve anything the captured `permissions` do not already pre-approve. Once the pre-flight completes, the session runs without further shell-related prompts.
 
 ## Why This Exists
 
@@ -16,7 +16,7 @@ Shell commands can appear in these places during a Claudine session:
 
 4. **Sequence `shell:` tasks** — primary commands in the root sequence, nested sequences, and group legs, plus their container lifecycle commands. Their approval mode depends on task position and whether they read values produced by the run; see [Sequence Execution](#sequence-execution).
 
-Without pre-flight, a shell command that lacks whitelist coverage would either block the process waiting for interactive approval that will never come (in a non-interactive session) or fail with a confusing error deep inside the composition pipeline. The pre-flight eliminates both problems by resolving all approvals upfront.
+Without pre-flight, a shell command no permission covers would either block the process waiting for interactive approval that will never come (in a non-interactive session) or fail with a confusing error deep inside the composition pipeline. The pre-flight eliminates both problems by resolving all approvals upfront.
 
 ## How It Works
 
@@ -115,7 +115,7 @@ Some values have no knowable bytes until the command runs: a shell probe such as
 
 A retired loop-value read (`_loop_count` and the other four `_loop_*` names) that only a transcluded partial introduces is met first by this discovery walk. It fails with the same `RemovedGrammar` error, naming the `loop.*` replacement, that composition would raise (its `path` is `render`), not with the generic `PreFlightDiscoveryFailed`.
 
-Each command is checked against shell policy (blacklist, whitelist, approval cache) and, if not already approved, the user is prompted. Once all template commands are approved, the approved set is passed to Darkmatter as `pre_approved_commands` on the `ComposeOptions` and composition proceeds.
+Each command is checked against shell policy (the built-in blacklist, the captured `permissions.shell-commands`, the approval cache) and, if not already approved, the user is prompted. Once all template commands are approved, the approved set is passed to Darkmatter as `pre_approved_commands` on the `ComposeOptions` and composition proceeds.
 
 ### Missing Values
 
@@ -144,7 +144,7 @@ start:
 ### Phase 2: Lifecycle Shell Commands
 
 Shell actions in `initialize` are validation errors, including false branches;
-whitelists, cached approvals, and `--yolo` cannot allow them.
+permissions, cached approvals, and `--yolo` cannot allow them.
 
 After composition, Claudine walks every reachable lifecycle stack in the effective frontmatter and discovers its `shell` actions — short-form `shell: "…"` and long-form `shell: { command: "…" }` actions, in every `then` and `else` body, across `start`, `success`, `blocked`, `failure`, `finalize`, and `loop` — and the commands of every `set` value written as a whole-value `$( … )`. Resolved-byte approval fixes early-binding bytes; shape approval retains the template and validator for execution; see [Reading a Command's Result](flow-control/lifecycle.md#reading-a-commands-result).
 
@@ -165,7 +165,7 @@ start:
 ---
 ```
 
-With `template git add {{ string }}` in the whitelist, the action runs `git` with the two arguments `add` and whatever `target` holds when `start` fires, even if an earlier action in the same event changed it, and even if it holds a space or a `;`. With `exact git add src` instead, it runs the pre-flight bytes `git add src`. An exact approval wins when both match. A quoted empty word stays in the bytes: with `commit_message: ""`, `git commit -m "{{ commit_message }}"` is shown and approved as `exact git commit -m ""` and passes `git` an empty argument; `exact git commit -m` approves only the unquoted `git commit -m {{ commit_message }}`.
+With `template git add {{ string }}` in your `permissions.shell-commands`, the action runs `git` with the two arguments `add` and whatever `target` holds when `start` fires, even if an earlier action in the same event changed it, and even if it holds a space or a `;`. With `exact git add src` instead, it runs the pre-flight bytes `git add src`. An exact approval wins when both match. A quoted empty word stays in the bytes: with `commit_message: ""`, `git commit -m "{{ commit_message }}"` is shown and approved as `exact git commit -m ""` and passes `git` an empty argument; `exact git commit -m` approves only the unquoted `git commit -m {{ commit_message }}`.
 
 Approved bytes run through the host's shell: `sh -c` on macOS, Linux, and WSL2, and `cmd.exe /D /C` on native Windows. The exact key is spelled with POSIX quoting either way, so `''` and `""` both appear in it as `""`. `cmd.exe` has no single quotes, though. On native Windows, `git commit -m ''` is approved as `exact git commit -m ""` but passes `git` the two characters `''` rather than an empty argument. Write an empty argument as `""` in a command that must behave the same on Windows; `sh` and `cmd.exe` both pass it as an empty argument.
 
@@ -179,7 +179,7 @@ An approval covers the bytes it was granted for, never a changed command. Every 
 - **A `retry` or `resume`** re-reads the document and audits its template commands with the attempt's state.
 - **A loop iteration** audits the template commands and the lifecycle `shell` commands its own state produces (`loop.*`, carried values, lifecycle `set`). A command such as `::shell echo run-{{ n }}` is a new command on every iteration. Before the first iteration `loop` has no value, so a body command reading it is neither run nor audited until an iteration supplies one, and pre-flight does not report its placeholder as missing.
 
-The approval handler is frozen after the first attempt, so these re-audits never prompt behind a running agent: a command already in the approval cache or the whitelist passes, and a new one is refused with the same "requires approval" error pre-flight gives. The first loop iteration is the exception; nothing has launched yet, so it may still prompt. A `proxy` target reopens the approval window for its own commands.
+The approval handler is frozen after the first attempt, so these re-audits never prompt behind a running agent: a command already in the approval cache or pre-approved by the permissions passes, and a new one is refused with the same "requires approval" error pre-flight gives. The first loop iteration is the exception; nothing has launched yet, so it may still prompt. A `proxy` target reopens the approval window for its own commands.
 
 An approval by shape is what lets a changing command pass a frozen re-audit:
 
@@ -199,24 +199,43 @@ In the passthrough wrapper path (`claudine claude`, `claudine codex`), the harne
 
 ### Approval Policy
 
-Each command is checked against Claudine's shell policy:
+Every command is decided in the same order `md compose` uses, from the
+`permissions` Claudine captured for the document at the start of the
+invocation (see Darkmatter's [Configuration](../../../darkmatter/docs/topics/configuration.md)):
 
-- Built-in blacklist (dangerous commands like `rm`, `dd`, `chmod`)
-- User blacklist (`.darkmatter-shell-blacklist`)
-- User whitelist (`.darkmatter-shell-whitelist`)
+1. **The built-in blacklist refuses first.** Dangerous commands (`rm`, `dd`,
+   `chmod`, …) are refused before anything else is consulted: no rule,
+   cached decision, "allow once", or `--yolo` overrides it.
+2. **An exclusion asks.** A `!` entry in `permissions.shell-commands` that
+   matches the command removes its pre-approval, so it is asked about (or
+   fails without a terminal). An exclusion never refuses on its own.
+3. **An allow pre-approves.** A command is approved without asking when every
+   segment of it is allowed by the user's rules, or by the repository's rules
+   as both committed at `HEAD` and in the working copy.
+4. **Otherwise it is asked about**: a decision already made in this run
+   answers, else the prompt (or `--yolo`) decides.
 
-Commands that match the whitelist are marked as approved. Commands that match a blacklist are rejected immediately with a clear error. Everything else is presented to the user.
+```yaml
+# ~/.darkmatter.yaml
+permissions:
+    shell-commands:
+        - prefix git
+        - "!exact git push --force-with-lease"
+```
 
-The two user files are read at different moments, and neither is cached between reads:
+With this file, `git status` runs without a prompt, `git push
+--force-with-lease` is asked about, and `git reset --hard` is refused by the
+built-in blacklist whatever you answer.
 
-| Moment | Files read | When a file cannot be used |
-| --- | --- | --- |
-| An approval decision (pre-flight, or a re-audit) | the blacklist and the whitelist under the policy root | a missing or unreadable file has no rules; a policy root whose file locations cannot be worked out denies the command |
-| A template-mode command about to start (dispatch) | the blacklist only | a missing or unreadable blacklist, no policy root, or an underivable root gives no user rules; the built-in blacklist still applies |
+The permissions are captured once per document: each document reads the
+configuration of its own repository (a prompt in another repository gets that
+repository's rules), and nothing reloads the file while a session runs.
+**An invalid `permissions` block fails every command** that reaches a policy
+decision with the configuration error (`config.invalid`); Claudine never
+substitutes an empty or default policy. The built-in blacklist still refuses
+first.
 
-Dispatch never opens the whitelist, because a command that reaches dispatch is already approved; only the blacklist can still refuse it. The blacklist is read again for every dispatched command, so a rule added while a session runs refuses the next matching command. In both cases a malformed line is warned about and skipped, and the file's valid rules still apply. The policy root is the one captured for the session; neither read looks up the home directory, the working directory, or the repository again.
-
-A document command with a placeholder is also matched by its shape. When no `exact` rule covers its bytes but a `template` rule covers its shape, the command is approved by that shape: an `exact` rule wins, then a `template` rule, then a `prefix` rule. Its bytes are still checked against both blacklists. A document command (`::shell`, `::shell-block`, or a frontmatter `$( … )`) approved by its shape runs as a template: each placeholder is checked against its declared type and fills exactly one argument, the filled command meets both blacklists again before it starts, and its program must run without a shell. See Darkmatter's [Running a command as a template](../../../darkmatter/docs/inline/preflight-checks.md#running-a-command-as-a-template). A lifecycle `shell` action or `set` value approved by its shape runs as a template the same way (see [Phase 2](#phase-2-lifecycle-shell-commands)). Sequence task commands and container lifecycle commands use the same template validation. Late holes are checked at task entry and retained for dispatch, while ordinary holes read current task state at command entry. Structured task dispatch retains process-tree ownership, output capture, timeout, cancellation, and runaway guards.
+A document command with a placeholder is also matched by its shape. When no `exact` rule covers its bytes but a `template` rule covers its shape, the command is approved by that shape: an `exact` rule wins, then a `template` rule, then a `prefix` rule. Its bytes are still checked against the built-in blacklist, and a `!` entry matching them withholds the rule's approval. A document command (`::shell`, `::shell-block`, or a frontmatter `$( … )`) approved by its shape runs as a template: each placeholder is checked against its declared type and fills exactly one argument, the filled command meets the built-in blacklist and the `!` entries again before it starts, and its program must run without a shell. See Darkmatter's [Running a command as a template](../../../darkmatter/docs/inline/preflight-checks.md#running-a-command-as-a-template). A lifecycle `shell` action or `set` value approved by its shape runs as a template the same way (see [Phase 2](#phase-2-lifecycle-shell-commands)). Sequence task commands and container lifecycle commands use the same template validation. Late holes are checked at task entry and retained for dispatch, while ordinary holes read current task state at command entry. Structured task dispatch retains process-tree ownership, output capture, timeout, cancellation, and runaway guards.
 
 A command whose value is produced later in the run has no bytes at pre-flight and is approved only by its shape: a `template` rule, `prefix` rules for each of its programs, or a decision for that shape. An `exact` rule or an earlier exact decision never covers it. Discovery reports such a command when its host declares the late root to Darkmatter (`ComposeOptions::with_deferred_shell_roots`); a sequence declares `seq.outputs`, `loop`, and `group` this way (see [Sequence Execution](#sequence-execution)).
 
@@ -238,25 +257,29 @@ Template dispatch permits fixed program words, arguments, `&&`/`||`, and the
 four curated redirections. Pipes, semicolons, background execution,
 append/input redirects, and variable programs or redirect targets are refused,
 even with prefix or once approval. Special characters inside values remain
-data. Policy write failures are typed errors and cache no successful decision;
-they do not become an implicit once approval. Blacklists outrank every grant.
+data. The built-in blacklist outranks every approval.
 
 ### User Prompt
 
-Any command not already covered by the whitelist or approval cache is presented to the user one at a time, when stdin and stderr are both terminals. Claudine installs Darkmatter's `md` prompt, so the two look and behave the same (see Darkmatter's [Interactive Approval](../../../darkmatter/docs/inline/preflight-checks.md#interactive-approval)). The user sees the source file and line, the command, and a numbered list of only the choices that command is eligible for:
+Any command not already pre-approved or decided in this run is presented to the user one at a time, when stdin and stderr are both terminals. Claudine installs Darkmatter's `md` prompt, so the two look and behave the same (see Darkmatter's [Interactive Approval](../../../darkmatter/docs/inline/preflight-checks.md#interactive-approval)). The user sees the source file and line, the command, and a numbered list of only the choices that command is eligible for:
 
 | Choice | Listed when | Saves |
 |--------|-------------|-------|
-| **Allow this exact command** | resolved-byte approval is eligible and every value is known at pre-flight | `exact <resolved command>` to the whitelist |
-| **Allow this command shape** | the command has a placeholder and valid template grammar | `template <shape>` to the whitelist |
+| **Allow this exact command** | resolved-byte approval is eligible and every value is known at pre-flight | `exact <resolved command>` to your `permissions.shell-commands` |
+| **Allow this command shape** | the command has a placeholder and valid template grammar | `template <shape>` to your `permissions.shell-commands` |
 | **Allow this program with any arguments** | every program word is fixed | `prefix <program>` for each distinct program of the chain, all listed in the prompt |
 | **Allow once** | always | nothing; this session only (for a command with no exact choice, its shape for this session) |
-| **Deny** | always | nothing; the session aborts |
-| **Blacklist and stop** | always | `exact <resolved command>` to the blacklist, or `template <shape>` when no exact choice is listed; the session aborts |
+| **Deny for this run** | always | nothing; the session aborts, and the command is asked about again next time |
+
+The "always allow" choices save to the user scope: `~/.darkmatter.yaml`, or
+the file its `permissions` reference names (`~/.claudine/config.yaml` once
+Claudine is set up). They never edit a repository's file. The rule also
+applies to the rest of this run. There is no permanent deny: to keep a
+command from running without a prompt, add a `!` entry yourself.
 
 If an authored program contains a placeholder, such as `{{ tool }} probe` or
 `git --version && {{ tool }} probe`, an eligible first-task or standalone
-lifecycle command offers exact, once, deny, and exact blacklist only. It cannot
+lifecycle command offers exact, once, and deny only. It cannot
 save an unrestricted program rule, even when the program resolves to a known
 executable. Fixed programs with argument placeholders retain program approval.
 
@@ -273,11 +296,11 @@ Without a terminal there is no prompt: an unapproved command fails pre-flight as
 
 If the user denies any command, Claudine stops. No provider session is started. The error message states exactly which command was denied and confirms that nothing was executed.
 
-A persistent choice that cannot be written to its policy file fails pre-flight with `io.write_failed`, naming the file. The decision is not cached, so it is neither a persistent approval nor an implicit "allow once".
+A rule that cannot be saved (the file changed shape, a `!` entry still matches the command, there is no home, or the write failed) still approves this run, and Claudine warns with `dm.config.not_saved` naming the file and the reason.
 
 ### Shared Approval Cache
 
-The approval cache is an in-memory `HashMap<ApprovalKey, CachedApprovalDecision>` wrapped in `Arc<Mutex<...>>`. Each key records its execution mode (the command's resolved bytes, or a template shape with its placeholder types) and the policy root it was judged against, so a decision for bytes never answers for a shape, a shape with a different placeholder type is a different key, and a decision under one policy root never answers under another. It serves three purposes:
+The approval cache is an in-memory `HashMap<ApprovalKey, CachedApprovalDecision>` wrapped in `Arc<Mutex<...>>`. Each key records its execution mode (the command's resolved bytes, or a template shape with its placeholder types), so a decision for bytes never answers for a shape and a shape with a different placeholder type is a different key. A decision is one of this run's and answers for every document of the invocation. It serves three purposes:
 
 1. **Cross-phase deduplication**: A command approved during template discovery (phase 1) is not re-prompted during harness discovery (phase 2).
 2. **Cross-step reuse for sequences**: The sequence orchestrator builds a fresh `ShellApprovalOptions` per step but clones the same `Arc` cache into each one. An "allow once" approval from step 1 carries forward to step 5 without re-prompting.
@@ -289,9 +312,9 @@ Claudine and Darkmatter each have shell approval infrastructure, but they serve 
 
 **Darkmatter's role is discovery.** It knows how to walk the document graph — following transclusions, resolving interpolation, parsing `::shell` directives, and scanning top-level frontmatter values for `$(...)` shell expressions. It exposes a function (`collect_shell_commands`) that returns every shell command in the document tree. It does not check any policy files or make any approval decisions during this call.
 
-**Claudine's role is authorization.** It takes the list from Darkmatter, combines it with commands from the harness, checks everything against the whitelist, and prompts the user for anything that is missing. Claudine is the single source of truth for what is allowed.
+**Claudine's role is authorization.** It takes the list from Darkmatter, combines it with commands from the harness, decides everything with Darkmatter's evaluated permissions (the same rules `md` applies), and prompts the user for anything that is missing.
 
-**During composition**, Darkmatter receives the pre-approved set (`ShellPreApprovals`: resolved bytes and template shapes) instead of making another whitelist or interactive approval decision. Each command must first prove membership: its resolved bytes are in the exact set, or its authored shape is in the template set. Execution never adds newly filled bytes to that set. A template member still validates every value, checks the filled chain against the built-in and user blacklists, and verifies every direct target before dispatch or result-cache reuse. Pre-approval supplies authorization, not an exemption from runtime checks.
+**During composition**, Darkmatter receives the pre-approved set (`ShellPreApprovals`: resolved bytes and template shapes) instead of making another policy or interactive approval decision. Each command must first prove membership: its resolved bytes are in the exact set, or its authored shape is in the template set. Execution never adds newly filled bytes to that set. A template member still validates every value, checks the filled chain against the built-in blacklist and the `!` entries, and verifies every direct target before dispatch or result-cache reuse. Pre-approval supplies authorization, not an exemption from runtime checks.
 
 This separation ensures that:
 
@@ -344,9 +367,16 @@ blocked by another process or waiting on a resource.
 
 ## Interaction with Existing Features
 
-### Whitelist Files
+### Saved Approvals
 
-The pre-flight uses the same `.darkmatter-shell-whitelist` and `.darkmatter-shell-blacklist` files that Darkmatter and the harness already use. Commands that the user approves with "this exact command", "this command shape", or "this program with any arguments" during pre-flight are persisted to the whitelist, so they will not require approval again in future sessions.
+The pre-flight reads the same `permissions.shell-commands` that `md` reads.
+Commands the user approves with "this exact command", "this command shape", or
+"this program with any arguments" are saved to the user's
+`permissions.shell-commands`, so they will not require approval again in
+future sessions. The old `.darkmatter-shell-whitelist` and
+`.darkmatter-shell-blacklist` files are migrated into the configuration once
+and are no longer read; a whitelist or blacklist beside a document never was
+part of the configuration and is ignored.
 
 ### Non-Interactive Sessions
 
@@ -418,7 +448,7 @@ sequence:
 ---
 ```
 
-Run with `out=dist`, a whitelist holding `exact just clean --out dist/build` does not approve `clean`: without a terminal, pre-flight fails naming `just clean --out {{ out }}/build` before `build` runs. `template just clean --out {{ string }}/build` approves it without asking.
+Run with `out=dist`, a `permissions.shell-commands` holding `exact just clean --out dist/build` does not approve `clean`: without a terminal, pre-flight fails naming `just clean --out {{ out }}/build` before `build` runs. `template just clean --out {{ string }}/build` approves it without asking.
 
 **Late values.** A placeholder reading a value an earlier step produces — `seq.outputs`, `loop`, or, inside a group, `group` — is late. It is not read at pre-flight, and its command is approved only by its shape, in any task (a `group.*` reader is a template even in a first group). Deferral follows step values and task `with` values derived from a late root: with `latest: "{{ last(seq.outputs) }}"` in the sequence's frontmatter, `{{ latest }}` is late, not missing. A prompt task's document reads such a `with` value as late too; the task's other `with` values are read now and carried into the document's discovery. `err`, `timing`, and `current` are not late values: a sequence command reading one is refused (`SequenceShellLateBinding`), even beside a late root, and so is `group` outside a group.
 

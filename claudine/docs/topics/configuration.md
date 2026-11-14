@@ -100,6 +100,44 @@ another YAML file whose own `permissions` holds the block. Claudine keeps the
 block as written; Darkmatter interprets it. See
 [Darkmatter's configuration](../../../darkmatter/docs/topics/configuration.md).
 
+### Darkmatter's permissions
+
+Once Claudine is set up, its file holds the permissions block and
+Darkmatter's `~/.darkmatter.yaml` points at it, so a Claudine user finds every
+permission in one place:
+
+```yaml
+# ~/.darkmatter.yaml
+permissions: ~/.claudine/config.yaml
+register: []
+```
+
+First-run setup writes Claudine's own file, then Darkmatter's:
+
+| `~/.darkmatter.yaml` before setup | What setup does |
+|---|---|
+| missing, or without `permissions` | writes the reference above (and any other missing Darkmatter setting at its default); Claudine's file gets the default block if it has none |
+| an inline `permissions` block | copies the block into `~/.claudine/config.yaml`, then replaces it in `.darkmatter.yaml` with the reference |
+| an inline block, and Claudine's file already has a different one | changes neither block and warns, naming both files; the inline block stays in force until you keep one of them |
+| a reference to `~/.claudine/config.yaml` | nothing |
+| a reference to another file | nothing; Claudine does not take over another program's block |
+
+Both files are written in one locked transaction, Claudine's first: if the
+second write fails, `.darkmatter.yaml` still holds its original block, and
+the next setup finishes the move. Comments and every other setting in both
+files are kept, and running setup again changes nothing. Repository setup
+does the same with `{repo-root}/.darkmatter.yaml` and
+`{repo-root}/.claudine/config.yaml` (referenced as `./.claudine/config.yaml`),
+and fails before writing anything outside a repository. With no home
+directory, setup writes only Claudine's file and says that Darkmatter's was
+not set up.
+
+The same steps are available to Rust callers as
+`claudine::config::setup::setup_with_darkmatter(context, scope, write)`,
+where `write` is the caller's own write of Claudine's file. To undo the move,
+`md init --inline` writes the block back into `~/.darkmatter.yaml`; see
+[`md init`](../../../darkmatter/docs/cli/init.md).
+
 ## How Claudine writes these files
 
 Claudine writes its configuration in three places: the `claudine config`
@@ -114,7 +152,7 @@ lines, key order, quoting, and every key the writer did not touch, including a
 | `claudine config` (the editor) | each setting you changed during the session, compared with the values it read when it opened |
 | `claudine config set favorite-agent <agent\|none>` | `preferred_agent` only (an older file that spells it `favorite_agent` keeps that spelling) |
 | `claudine config set prompt-for-missing <true\|false>` | `prompt_for_missing` only |
-| first-run setup | the values setup chose that differ from the defaults |
+| first-run setup | the values setup chose that differ from the defaults, then [Darkmatter's permissions](#darkmatters-permissions) |
 
 For example, with this file open in the editor, turning logging off changes
 one line and nothing else:

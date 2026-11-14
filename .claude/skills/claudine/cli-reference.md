@@ -74,6 +74,8 @@ Creates configuration with sensible defaults:
 
 `--repo` creates `.claudine/config.yaml` in the repository root and can add `.claudine/` to `.gitignore`.
 
+After writing its own file, setup completes the handshake with Darkmatter's configuration of the same scope: an absent `.darkmatter.yaml` is created with `permissions: ~/.claudine/config.yaml`, an inline block there moves into Claudine's file first, a differing block in both files is a conflict that changes neither, and any existing reference is left alone. Outside a repository, `--repo` fails before writing. See `claudine/docs/topics/configuration.md`.
+
 ---
 
 ## `claudine hooks`

@@ -43,7 +43,7 @@ fn failing_rustc_shim() -> &'static str {
 /// Shell-expansion failure during `claudine compose`.
 ///
 /// Uses a blacklisted command (`rm -rf /`) so the test works deterministically
-/// without needing a whitelist file or an approval handler: shell expansion
+/// without needing a `permissions` entry or an approval handler: shell expansion
 /// rejects it at pre-flight with a structured `Blacklisted` variant that the
 /// darkmatter `BlockError` renderer turns into a rich report.
 #[cfg(unix)]

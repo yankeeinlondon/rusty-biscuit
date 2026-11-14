@@ -199,13 +199,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("Phase 5: Write Configuration");
     log::message("-----------------------------");
 
-    let config_path = if repo_scope {
-        claudine::dispatch::loader::repo_config_path(&repo_root)
-    } else {
-        claudine::dispatch::loader::user_config_path()
-    };
-
-    write_init_config(repo_scope, &config, &config_path)?;
+    let config_path = write_with_darkmatter_setup(repo_scope, &config)?;
     log::message(&format!(
         "Wrote config to {}",
         biscuit_file::to_portable_string(&config_path)
@@ -290,6 +284,14 @@ fn load_init_defaults(repo_scope: bool, repo_root: &std::path::Path) -> InitDefa
 /// a canonical one; `None` when there is none or it is invalid.
 fn read_config_if_exists(path: &std::path::Path) -> Option<ClaudineConfig> {
     load_claudine_config(Some(path), None).ok()
+}
+
+/// Writes Claudine's configuration of the chosen scope and completes the
+/// setup handshake with Darkmatter's `.darkmatter.yaml` of the same scope
+/// (see `init_wizard::write_with_darkmatter_setup`); the path written.
+fn write_with_darkmatter_setup(repo_scope: bool, config: &ClaudineConfig) -> Result<std::path::PathBuf> {
+    let scope = if repo_scope { ConfigScope::Repository } else { ConfigScope::User };
+    super::init_wizard::write_with_darkmatter_setup(scope, |path| write_init_config(repo_scope, config, path))
 }
 
 /// Writes what setup chose to `path`. The user file gets each value that
@@ -393,16 +395,7 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     // Build default config
     let config = default_config(repo_scope)?;
 
-    // Determine config path
-    let config_path = if repo_scope {
-        let cwd = std::env::current_dir()?;
-        let repo_root = resolve_repo_root(&cwd);
-        claudine::dispatch::loader::repo_config_path(&repo_root)
-    } else {
-        claudine::dispatch::loader::user_config_path()
-    };
-
-    write_init_config(repo_scope, &config, &config_path)?;
+    let config_path = write_with_darkmatter_setup(repo_scope, &config)?;
     log::message(&format!(
         "  Wrote config to {}",
         biscuit_file::to_portable_string(&config_path)

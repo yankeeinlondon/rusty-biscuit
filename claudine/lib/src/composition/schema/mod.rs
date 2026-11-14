@@ -559,6 +559,10 @@ pub fn authored_schema_parameters(
 /// matching trigger. Either way, and when the authored `$schema` then fails,
 /// the triggers discovery skipped as invalid are recorded in
 /// `trigger_findings`; they are warnings, never a [`CompositionError`].
+///
+/// A template schema's `{{ … }}` slots resolve through `slot_session`, the
+/// one the composition ran with, so its approvals and snapshots hold; with
+/// none the template stays unresolved, which is an error.
 pub(super) fn load_effective_schema(
     source: &ResolvedCompositionSource,
     snapshot: Option<&serde_json::Value>,
@@ -566,14 +570,20 @@ pub(super) fn load_effective_schema(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     callers: &darkmatter::markdown::compose::CallerInputRecords,
     trigger_findings: &TriggerFindings,
+    slot_session: Option<&std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession>>,
 ) -> Result<Option<EffectiveSchema>, CompositionError> {
-    let schemas = discover_schema_owner(
+    let mut schemas = discover_schema_owner(
         source,
         file_ref_fallback_dir,
         file_resolution_context,
         trigger_findings,
     )?
     .with_caller_input_records(callers);
+    // Without the composition's session a template schema stays passive
+    // and fails as unresolved.
+    if let Some(session) = slot_session {
+        schemas = schemas.with_slot_session(std::sync::Arc::clone(session));
+    }
     prepare_effective_schema(source, snapshot, &schemas)
 }
 

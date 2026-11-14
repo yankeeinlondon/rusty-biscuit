@@ -1151,7 +1151,7 @@ mod x2_spike;
 /// A prompt whose `$schema` file is a template: `os` holds a template
 /// constraint, `status` a required template type, and `title` and `kind`
 /// are static. Returns the context completion runs in, with a home of its own
-/// outside the repository so no persisted grant of the host applies.
+/// outside the repository so the host's configuration never applies.
 fn seed_template_prompt(root: &Path) -> ScopeContext {
     let repo = root.join("repo");
     write(&repo.join("os.yaml"), "- macOS\n- Linux\n");
@@ -1173,8 +1173,8 @@ fn seed_template_prompt(root: &Path) -> ScopeContext {
     ctx
 }
 
-/// Commits everything under `repo` to a new repository, so the automatic
-/// grant covers the template's reads.
+/// Commits everything under `repo` to a new repository, so the repository
+/// scope's default `file-read` (every YAML file in it) applies.
 fn commit_all(repo: &Path) {
     git_init(repo);
     for args in [&["add", "-A"][..], &["commit", "-q", "-m", "fixture"][..]] {
@@ -1188,8 +1188,9 @@ fn commit_all(repo: &Path) {
     }
 }
 
-fn write_grant_store(home: &Path, lines: &str) {
-    write(&home.join(".config/darkmatter/schema-read-policy"), lines);
+/// Writes `file_read` (a YAML flow value) as the user's `permissions.file-read`.
+fn write_user_file_read(home: &Path, file_read: &str) {
+    write(&home.join(".darkmatter.yaml"), &format!("permissions:\n  file-read: {file_read}\n"));
 }
 
 #[test]
@@ -1198,7 +1199,7 @@ fn template_names_complete_from_the_authored_template_without_resolving_it() {
     let ctx = seed_template_prompt(&root);
     commit_all(&root.join("repo"));
 
-    // Even where every read is granted, a name request leaves the template
+    // Even where every read is permitted, a name request leaves the template
     // pending: had anything resolved it, it would load as concrete.
     let Some(PromptSchema::Pending(pending)) = load_prompt_schema("p.md", &ctx) else {
         panic!("a template schema must load as pending, not as nothing");
@@ -1234,7 +1235,7 @@ fn a_template_type_without_a_required_suffix_orders_with_the_optional_properties
 }
 
 #[test]
-fn a_template_constraint_value_resolves_with_the_automatic_grant() {
+fn a_template_constraint_value_resolves_with_the_repository_default() {
     let (_tmp, root) = canonical_tempdir();
     let ctx = seed_template_prompt(&root);
     commit_all(&root.join("repo"));
@@ -1243,7 +1244,7 @@ fn a_template_constraint_value_resolves_with_the_automatic_grant() {
 }
 
 #[test]
-fn a_template_type_value_resolves_with_the_automatic_grant() {
+fn a_template_type_value_resolves_with_the_repository_default() {
     let (_tmp, root) = canonical_tempdir();
     let ctx = seed_template_prompt(&root);
     commit_all(&root.join("repo"));
@@ -1254,14 +1255,12 @@ fn a_template_type_value_resolves_with_the_automatic_grant() {
 }
 
 #[test]
-fn an_ungranted_read_offers_nothing_while_static_properties_still_complete() {
+fn an_unpermitted_read_offers_nothing_while_static_properties_still_complete() {
     let (_tmp, root) = canonical_tempdir();
     let ctx = seed_template_prompt(&root);
-    let repo = root.join("repo");
-    commit_all(&repo);
-    // A dirty file is outside the automatic grant, and nothing persisted
-    // covers it: the template cannot resolve, and nothing asks.
-    write(&repo.join("os.yaml"), "- macOS\n- Linux\n- Windows\n");
+    // Outside any repository, with a user `file-read` that admits nothing:
+    // the template cannot resolve, and nothing asks.
+    write_user_file_read(&root.join("home"), "[]");
 
     assert!(setter_value_candidates("p.md", "os", "", &ctx).is_empty());
     // The template resolves as a whole, so the other slot's property offers
@@ -1275,14 +1274,13 @@ fn an_ungranted_read_offers_nothing_while_static_properties_still_complete() {
 }
 
 #[test]
-fn a_persisted_user_grant_resolves_a_template_outside_any_repository() {
+fn a_user_file_read_permission_resolves_a_template_outside_any_repository() {
     let (_tmp, root) = canonical_tempdir();
     let ctx = seed_template_prompt(&root);
-    // No repository: no automatic grant.
-    assert!(setter_value_candidates("p.md", "os", "", &ctx).is_empty(), "control: nothing grants the read");
+    write_user_file_read(&root.join("home"), "[]");
+    assert!(setter_value_candidates("p.md", "os", "", &ctx).is_empty(), "control: nothing permits the read");
 
-    let repo = root.join("repo");
-    write_grant_store(&root.join("home"), &format!("allow dir {}\n", repo.display()));
+    write_user_file_read(&root.join("home"), "['./*.yaml']");
     assert_eq!(setter_value_candidates("p.md", "os", "", &ctx), ["os='macOS'", "os='Linux'"]);
     assert_eq!(
         setter_value_candidates("p.md", "status", "pub", &ctx),
@@ -1291,22 +1289,21 @@ fn a_persisted_user_grant_resolves_a_template_outside_any_repository() {
 }
 
 #[test]
-fn a_persisted_deny_wins_over_the_automatic_grant() {
+fn a_user_exclusion_wins_over_the_repository_default() {
     let (_tmp, root) = canonical_tempdir();
     let ctx = seed_template_prompt(&root);
-    let repo = root.join("repo");
-    commit_all(&repo);
-    write_grant_store(&root.join("home"), &format!("deny file {}\n", repo.join("os.yaml").display()));
+    commit_all(&root.join("repo"));
+    write_user_file_read(&root.join("home"), "['!./os.yaml']");
     assert!(setter_value_candidates("p.md", "os", "", &ctx).is_empty());
     assert_eq!(setter_value_candidates("p.md", "kind", "", &ctx), ["kind='a'", "kind='b'"]);
 }
 
 #[test]
-fn an_invalid_grant_store_offers_nothing_for_a_slot_property() {
+fn invalid_permissions_offer_nothing_for_a_slot_property() {
     let (_tmp, root) = canonical_tempdir();
     let ctx = seed_template_prompt(&root);
     commit_all(&root.join("repo"));
-    write_grant_store(&root.join("home"), "allow nonsense\n");
+    write_user_file_read(&root.join("home"), "5");
     assert!(setter_value_candidates("p.md", "os", "", &ctx).is_empty());
     assert_eq!(setter_value_candidates("p.md", "kind", "", &ctx), ["kind='a'", "kind='b'"]);
 }

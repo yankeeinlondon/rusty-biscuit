@@ -33,7 +33,7 @@ fn walks_past_wrapper_error_to_typed_inner() {
     let rendered = try_render_block_report(&report, &width80()).expect("block error found");
     let plain = strip_escape_codes(&rendered);
     assert!(plain.contains("approval required"), "got:\n{plain}");
-    assert!(plain.contains("/tmp/wl"), "got:\n{plain}");
+    assert!(plain.contains("/tmp/home/.darkmatter.yaml"), "got:\n{plain}");
 }
 
 #[test]

@@ -15,6 +15,7 @@ pub mod messaging_block;
 pub mod migration;
 pub mod persist;
 pub mod schema;
+pub mod setup;
 pub(crate) mod opencode;
 pub(crate) mod pi;
 pub(crate) mod qwen;

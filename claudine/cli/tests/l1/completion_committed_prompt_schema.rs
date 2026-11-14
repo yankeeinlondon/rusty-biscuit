@@ -266,7 +266,7 @@ fn committed_prompt_directory_walks_the_launch_directory_first() {
 
 // ---------------------------------------------------------------------
 // Template schemas: names never evaluate; a slot-bearing property's value
-// resolves the template with non-prompting grants only
+// resolves the template with the captured `permissions.file-read` only
 // ---------------------------------------------------------------------
 
 /// The template schema: `os` holds a template constraint, `status` a
@@ -300,7 +300,8 @@ impl TemplatePrompt {
         Self { fixture }
     }
 
-    /// Commits every file, so the automatic grant covers the slots' reads.
+    /// Commits every file, so the repository's default `file-read` (every
+    /// YAML file in it, as committed) covers the slots' reads.
     fn commit(&self) {
         for args in [&["init", "-q"][..], &["add", "-A"][..], &["commit", "-q", "-m", "fixture"][..]] {
             let output = common::helper_command("git")
@@ -314,16 +315,10 @@ impl TemplatePrompt {
         }
     }
 
-    fn write_grants(&self, lines: &str) {
-        write_file(&self.fixture.home().join(".config/darkmatter/schema-read-policy"), lines);
-    }
-
-    /// The canonical spelling of a fixture file, as a grant names it.
-    fn canonical(&self, relative: &str) -> String {
-        biscuit_file::canonicalize_simplified(&self.fixture.cwd().join(relative))
-            .expect("fixture file exists")
-            .display()
-            .to_string()
+    /// Writes `permissions` (a YAML block, indented two spaces) as the
+    /// user's `~/.darkmatter.yaml` permissions.
+    fn write_permissions(&self, permissions: &str) {
+        write_file(&self.fixture.home().join(".darkmatter.yaml"), &format!("permissions:\n{permissions}"));
     }
 
     /// `claudine __complete` with the cursor on the last element of `words`.
@@ -359,7 +354,7 @@ impl TemplatePrompt {
 #[test]
 fn template_names_complete_from_the_authored_template() {
     let prompt = TemplatePrompt::create("template-schema-names", TEMPLATE_SCHEMA);
-    // No repository: no slot could resolve, and names still complete.
+    // Names complete from the authored template without resolving it.
     let completed = prompt.complete(&["compose", "prompt.md", "stat"]);
     assert_eq!(completed.candidates, ["status="]);
     assert_eq!(completed.stderr, "");
@@ -380,12 +375,10 @@ fn template_type_value_resolves_on_a_clean_commit() {
 }
 
 #[test]
-fn an_ungranted_template_offers_nothing_and_prints_nothing() {
+fn an_unpermitted_template_offers_nothing_and_prints_nothing() {
     let prompt = TemplatePrompt::create("template-schema-ungranted", TEMPLATE_SCHEMA);
-    prompt.commit();
-    // Dirty after the commit: outside the automatic grant, and no persisted
-    // grant covers it.
-    write_file(&prompt.fixture.cwd().join("os.yaml"), "- macOS\n- Linux\n- Windows\n");
+    // No repository, and a user `file-read` that admits nothing.
+    prompt.write_permissions("  file-read: []\n");
     assert!(prompt.values("os=").is_empty());
     // The template resolves as a whole: the other slot's property offers
     // nothing either.
@@ -395,26 +388,24 @@ fn an_ungranted_template_offers_nothing_and_prints_nothing() {
 #[test]
 fn a_static_property_of_a_template_completes_without_evaluation() {
     let prompt = TemplatePrompt::create("template-schema-static", TEMPLATE_SCHEMA);
-    // No repository and no grant: resolving would fail, so offered values
-    // prove the static declaration answered alone.
+    // No repository and no permitted read: resolving would fail, so offered
+    // values prove the static declaration answered alone.
+    prompt.write_permissions("  file-read: []\n");
     assert_eq!(prompt.values("kind="), ["kind='a'", "kind='b'"]);
 }
 
 #[test]
-fn a_persisted_user_grant_is_honored() {
+fn a_user_file_read_permission_is_honored() {
     let prompt = TemplatePrompt::create("template-schema-persisted", TEMPLATE_SCHEMA);
-    assert!(prompt.values("os=").is_empty(), "control: nothing grants the reads yet");
-    prompt.write_grants(&format!(
-        "allow file {}\nallow file {}\n",
-        prompt.canonical("os.yaml"),
-        prompt.canonical("status.yaml"),
-    ));
+    prompt.write_permissions("  file-read: []\n");
+    assert!(prompt.values("os=").is_empty(), "control: nothing permits the reads yet");
+    prompt.write_permissions("  file-read: ['./os.yaml', './status.yaml']\n");
     assert_eq!(prompt.values("os=L"), ["os='Linux'"]);
     assert_eq!(prompt.values("status="), ["status='draft'", "status='published'"]);
 }
 
 #[test]
-fn a_url_reading_template_offers_nothing_even_when_its_site_is_granted() {
+fn a_url_reading_template_offers_nothing_even_when_the_network_is_allowed() {
     let schema = concat!(
         "$schema:\n",
         "  os: enum({{ load_data(\"https://schemas.example.invalid/os.yaml\", \"string[]\") }})\n",
@@ -422,7 +413,7 @@ fn a_url_reading_template_offers_nothing_even_when_its_site_is_granted() {
     );
     let prompt = TemplatePrompt::create("template-schema-url", schema);
     prompt.commit();
-    prompt.write_grants("allow site https://schemas.example.invalid\n");
+    prompt.write_permissions("  network: allow\n");
     assert!(prompt.values("os=").is_empty(), "completion has no remote runtime and fetches nothing");
     assert_eq!(prompt.values("kind="), ["kind='a'", "kind='b'"]);
 }

@@ -177,7 +177,7 @@ fn compose_command(staged: &StagedApproval, dry_run: bool) -> Command {
 
 /// Extract the shell-approval prompt's text block from a transcript: the
 /// ANSI-stripped lines from the `Shell Approval Required` header through the
-/// final `Blacklist and stop` option (the last static line the handler writes
+/// final `Deny for this run` option (the last static line the handler writes
 /// before reading input).
 ///
 /// The handler renders the prompt with a single forward write (no cursor
@@ -189,7 +189,7 @@ fn approval_prompt_region(transcript: &str) -> Vec<String> {
     let start = lines
         .iter()
         .position(|l| l.contains("Shell Approval Required"));
-    let end = lines.iter().position(|l| l.contains("Blacklist and stop"));
+    let end = lines.iter().position(|l| l.contains("Deny for this run"));
     match (start, end) {
         (Some(s), Some(e)) if e >= s => lines[s..=e]
             .iter()
@@ -210,13 +210,13 @@ fn capture_approval_prompt(staged: &StagedApproval, dry_run: bool) -> Vec<String
     // The parenthetical is the tail of the last static option written before
     // the handler blocks on input, so its appearance means the whole prompt has
     // been flushed and is safe to snapshot. Waiting on the option's *label*
-    // instead ("Blacklist and stop") returns as soon as the option's first
+    // instead ("Deny for this run") returns as soon as the option's first
     // bytes land: under parallel load the read can split mid-line, and the two
     // captures below then differ by a truncated final row rather than by
     // anything the handler rendered.
     let transcript = wait_for_marker(
         &mut session,
-        "the blacklist; stops the run)",
+        "stops the run; asks again next time)",
         Duration::from_secs(10),
     );
     let region = approval_prompt_region(&transcript);

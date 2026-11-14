@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::config::load::{ConfigError, ConfigLoadMode, ConfigSnapshot};
+use darkmatter::config::load::{ConfigError, ConfigSnapshot};
 use darkmatter::config::permissions::persist::{NotSaved, PersistentApproval, save_user_approval};
 use darkmatter::config::permissions::{PermissionPolicy, PermissionVerdict, PolicyExclusion};
 use darkmatter::markdown::compose::shell_expansion::template::FilledChain;
@@ -66,7 +66,8 @@ impl CapturedPermissions {
 
     /// The policy a request built over `prepared` (its host capture) would
     /// read for `context`; without a host capture, a passive load of
-    /// `context`, which needs no committed tree only outside a repository.
+    /// `context` (the user file, and inside a repository its file at `HEAD`
+    /// and in the working copy), which never migrates or writes anything.
     #[must_use]
     pub fn for_prepared(
         prepared: Option<&darkmatter::markdown::compose::ComposeContext>,
@@ -74,7 +75,7 @@ impl CapturedPermissions {
     ) -> Self {
         match prepared.and_then(|prepared| prepared.config_source()).and_then(|source| source.config_snapshot_for(context)) {
             Some(load) => Self::of_load(load),
-            None => Self::of_load(ConfigSnapshot::load_captured(context, None, ConfigLoadMode::Passive).map(Arc::new)),
+            None => Self::of_load(darkmatter::markdown::schemas::slots::session::load_passively(context).map(Arc::new)),
         }
     }
 

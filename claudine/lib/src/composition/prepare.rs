@@ -524,7 +524,20 @@ fn prepared_request(
         options.invocation_context.as_ref(),
         &options.file_resolution_context,
     )?;
-    Ok(super::compose_request(compose_opts, options.file_resolution_context.clone())?)
+    let request = super::compose_request(compose_opts, options.file_resolution_context.clone())?;
+    if request.options().slot_session().is_some() {
+        return Ok(request);
+    }
+    // One schema-slot session for the composition and the launch schema
+    // after it, so a template resolved (and approved) while composing is the
+    // one the verdict judges by. It reads through the request's data runtime,
+    // attached first so the slots' reads reach the request's read set.
+    let request = request.map_options(|compose_opts| {
+        let data = compose_opts.data_runtime_handle().cloned().unwrap_or_default();
+        compose_opts.with_data_runtime(data)
+    });
+    let session = std::sync::Arc::new(darkmatter::markdown::schemas::slots::SlotSession::for_request(&request));
+    Ok(request.map_options(|compose_opts| compose_opts.with_slot_session(session)))
 }
 
 /// Resolve the document's effective schema (its matching trigger schemas
@@ -540,6 +553,7 @@ fn resolve_launch_schema(
     effective_frontmatter: &serde_json::Value,
     options: &PrepareOptions,
     phase: Option<SchemaPhase>,
+    request: &ComposeRequest,
 ) -> Result<Option<LaunchSchema>, CompositionError> {
     match super::schema::load_effective_schema(
         source,
@@ -548,6 +562,7 @@ fn resolve_launch_schema(
         &options.file_resolution_context,
         &options.schema_caller_records(),
         &options.trigger_findings(),
+        request.options().slot_session(),
     ) {
         Ok(effective) => Ok(effective.map(|effective| LaunchSchema {
             effective,
@@ -1011,7 +1026,7 @@ fn prepare_direct_on(
 
     // Resolved after a successful compose so a schema that cannot be prepared
     // keeps surfacing through the composer's own typed failure.
-    let launch_schema = resolve_launch_schema(source, &effective_frontmatter, &options, None)?;
+    let launch_schema = resolve_launch_schema(source, &effective_frontmatter, &options, None, &compose_request)?;
     let lifecycle_warnings = super::lifecycle::reject_incompatible_calls(
         &effective_frontmatter,
         &lifecycle,
@@ -1150,7 +1165,7 @@ fn prepare_inline_on(
     }
 
     let launch_schema =
-        resolve_launch_schema(source, &effective_frontmatter, &options, Some(SchemaPhase::Launch))?;
+        resolve_launch_schema(source, &effective_frontmatter, &options, Some(SchemaPhase::Launch), &compose_request)?;
     let lifecycle_warnings = super::lifecycle::reject_incompatible_calls(
         &effective_frontmatter,
         &lifecycle,

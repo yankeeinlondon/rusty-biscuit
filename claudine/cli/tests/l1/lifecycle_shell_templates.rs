@@ -400,7 +400,11 @@ fn a_persisted_broad_shape_keeps_the_current_owner_constraints() {
     assert!(!second.success, "{}", second.stderr);
     assert!(second.stderr.contains("refused before it ran"), "{}", second.stderr);
     assert!(document.runs().is_empty(), "the changed constraint blocks the spawn");
-    let saved = std::fs::read_to_string(document.fixture.home().join(".darkmatter.yaml")).unwrap();
+    // Claudine's first-run setup moved the inline block into its own file
+    // and pointed `~/.darkmatter.yaml` at it.
+    let reference = std::fs::read_to_string(document.fixture.home().join(".darkmatter.yaml")).unwrap();
+    assert!(reference.contains("permissions: ~/.claudine/config.yaml"), "{reference}");
+    let saved = std::fs::read_to_string(document.fixture.home().join(".claudine/config.yaml")).unwrap();
     assert!(saved.contains(BROAD_SHAPE_WHITELIST.trim()), "the rule is unchanged: {saved}");
 }
 

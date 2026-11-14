@@ -581,6 +581,7 @@ pub fn build_schema_status_report_for_mode(
         file_resolution_context,
         &callers,
         trigger_findings,
+        None,
     )?;
     let Some(effective) = effective else {
         // Raw JSON Schema (no SimplifiedSchema projection): we can still
