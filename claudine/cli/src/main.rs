@@ -142,7 +142,7 @@ fn print_composition_help(command_name: &str, plain: bool) -> std::io::Result<()
     Ok(())
 }
 
-/// Answer a help request [`argv::select_composition_help`] selected, then
+/// Answer a help request [`argv::select_help`] selected, then
 /// exit 0 before any composition bootstrap.
 ///
 /// `plain` comes from an exact `--plain` before the first literal `--`, on
@@ -158,7 +158,24 @@ fn answer_selected_help(destination: argv::HelpDestination, raw: &[OsString]) ->
         argv::HelpDestination::Composition(command) => {
             Ok(print_composition_help(command, plain)?)
         }
+        argv::HelpDestination::Wrapper(command) => {
+            log::set_plain(plain);
+            let provider = wrapper_provider(command)
+                .ok_or_else(|| color_eyre::eyre::eyre!("`{command}` is not a wrapper command"))?;
+            commands::wrap::flags::print_wrapper_help(provider);
+            Ok(())
+        }
     }
+}
+
+/// The provider a wrapper subcommand name runs, read through the same
+/// [`Commands`] mapping dispatch uses.
+fn wrapper_provider(command: &str) -> Option<Provider> {
+    use clap::FromArgMatches;
+
+    let matches = build_cli_command(true).try_get_matches_from(["claudine", command]).ok()?;
+    let cli = Cli::from_arg_matches(&matches).ok()?;
+    wrapper_command(cli.command?).ok().map(|(provider, _)| provider)
 }
 
 /// CLI parsing over an already-normalized argv.
@@ -309,7 +326,20 @@ fn main() -> Result<()> {
     // other exit goes through `shutdown::finish` inside the runtime.
     let Err(report) = run();
     render_top_level_error(&report);
-    shutdown::exit_before_runtime(1)
+    shutdown::exit_before_runtime(exit_code_before_runtime(&report))
+}
+
+/// The exit status of an error raised before the runtime: a command line
+/// Claudine refused to read is a usage error (2), like clap's own and the
+/// `--output` refusal; anything else is 1.
+fn exit_code_before_runtime(report: &Report) -> i32 {
+    if report.downcast_ref::<argv::PartitionError>().is_some()
+        || report.downcast_ref::<argv::MissingWrapperOptionValue>().is_some()
+    {
+        args::EXIT_USAGE
+    } else {
+        1
+    }
 }
 
 fn run_audio_worker_if_requested() -> Result<Option<i32>> {
@@ -379,11 +409,12 @@ fn run() -> Result<std::convert::Infallible> {
 
     let raw_argv: Vec<OsString> = std::env::args_os().collect();
 
-    // Composition help is selected from the original argv, before
-    // normalization moves the token and before the ownership partition can
-    // reject an incomplete invocation. It reads no input and exits here.
+    // Help for a composition or wrapper command is selected from the original
+    // argv, before normalization moves the token and before the ownership
+    // partitions, the `--output` refusal, or configuration loading can reject
+    // the invocation. It reads no input and exits 0 here.
     if let Some(destination) =
-        argv::select_composition_help(&raw_argv, argv::completion_mode_active())
+        argv::select_help(&raw_argv, argv::completion_mode_active())
     {
         answer_selected_help(destination, &raw_argv)?;
         shutdown::exit_before_runtime(0);
@@ -398,6 +429,9 @@ fn run() -> Result<std::convert::Infallible> {
     // into the Claudine argv handed to clap and the agent tail forwarded to the
     // provider. Non-composition argv passes through unchanged with an empty tail.
     let (argv, caller_arguments) = argv::partition_composition_tail(normalized)?;
+    // A wrapper owns every option it declares wherever it is written before
+    // the first `--`; clap reads them only ahead of the first positional.
+    let argv = argv::hoist_wrapper_options(argv)?;
 
     // Pre-scan the normalized argv for --plain so clap's ANSI styling is
     // disabled before parsing. Uses the same token stream the parse will see.
@@ -802,8 +836,8 @@ mod composition_help {
             // Both spellings reach the same destination, so the printer's
             // single `render_help` call answers both; it is stable across
             // builds and is the compact screen, never a long manual.
-            let short = super::argv::select_composition_help(&os_argv(&["claudine", command, "-h"]), false);
-            let long = super::argv::select_composition_help(&os_argv(&["claudine", command, "--help"]), false);
+            let short = super::argv::select_help(&os_argv(&["claudine", command, "-h"]), false);
+            let long = super::argv::select_help(&os_argv(&["claudine", command, "--help"]), false);
             assert_eq!(short, long, "{command}");
             assert_eq!(rendered(command), rendered(command), "{command}");
             let compact = rendered(command);

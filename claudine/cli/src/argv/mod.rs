@@ -17,8 +17,8 @@
 //! - **Rule 4** — on composition subcommands, hoist a trailing `--help` or
 //!   `-h` token to position 1 so it is never trapped inside clap's greedy
 //!   positional collector. The executable does not rely on this rewrite to
-//!   choose a help screen: [`select_composition_help`] reads the original
-//!   argv first and answers a composition help request before normalization.
+//!   choose a help screen: [`select_help`] reads the original argv first and
+//!   answers a composition or wrapper help request before normalization.
 //!
 //! Composition provider-argument forwarding is **not** a normalization rule.
 //! It is a separate ownership partition ([`partition_composition_tail`]) that
@@ -26,7 +26,9 @@
 //! clap) and the arguments after the file, which type-aware ownership divides
 //! into setters, positionals, and the agent tail once the file is read. It
 //! replaced the former Rule 3, whose synthetic `--` separator collided with
-//! authored provider boundaries.
+//! authored provider boundaries. Wrapper subcommands get the same guarantee
+//! from [`hoist_wrapper_options`]: every option a wrapper declares is
+//! Claudine's wherever it sits before the first `--`.
 //!
 //! ## Pass-through guarantees
 //!
@@ -49,11 +51,13 @@ mod partition;
 mod rule1_provider_bool;
 mod rule2_canonicalize;
 mod rule4_help_hoist;
+mod wrapper_options;
 
-pub(crate) use partition::{OwnedFlags, partition_composition_tail};
+pub(crate) use partition::{OwnedFlags, PartitionError, partition_composition_tail};
 pub(crate) use rule1_provider_bool::provider_for_boolean_flag;
 pub(crate) use rule2_canonicalize::is_fuzzy_provider_value;
-pub(crate) use rule4_help_hoist::{HelpDestination, hoist_composition_help, select_composition_help};
+pub(crate) use rule4_help_hoist::{HelpDestination, hoist_composition_help, select_help};
+pub(crate) use wrapper_options::{MissingWrapperOptionValue, hoist_wrapper_options};
 
 /// Wrapper subcommands that hand off to an external agent CLI.
 pub(crate) const WRAPPER_SUBCOMMANDS: &[&str] = &[

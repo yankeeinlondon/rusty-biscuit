@@ -539,6 +539,7 @@ const OUTPUT_VALUES: [&str; 4] = ["json", "text", "stream", "bogus"];
 #[derive(Clone, Copy)]
 enum OutputSpelling {
     Short,
+    ShortAttached,
     Long,
     Attached,
 }
@@ -547,6 +548,7 @@ impl OutputSpelling {
     fn words(self, value: &str) -> Vec<String> {
         match self {
             Self::Short => vec!["-o".into(), value.into()],
+            Self::ShortAttached => vec![format!("-o{value}")],
             Self::Long => vec!["--output".into(), value.into()],
             Self::Attached => vec![format!("--output={value}")],
         }
@@ -570,18 +572,60 @@ fn workspace_files(root: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// Runs `claudine <before> <spelling> <value> <after>` for every value and
-/// asserts the refusal contract: exit 2, the message alone on stderr, empty
-/// stdout, nothing created, and neither the editor nor the provider launched.
-fn assert_output_refused(prefix: &str, before: &[&str], document: Option<&str>, spelling: OutputSpelling, extra: &[&str]) {
+/// Where the option sits relative to the command's target (the wrapper's
+/// prompt or the composition file) and its other options.
+#[derive(Clone, Copy, Debug)]
+enum OutputPosition {
+    /// `<command> -o v -y --sandbox <target>`
+    BeforeTarget,
+    /// `<command> -y -o v --sandbox <target>`
+    BetweenOptions,
+    /// `<command> -y --sandbox <target> -o v`
+    AfterTarget,
+}
+
+/// What the command acts on: the wrapper's prompt or a document written into
+/// the fixture.
+#[derive(Clone, Copy)]
+enum Target {
+    Prompt,
+    Document(&'static str),
+}
+
+/// Runs the command for every value with the option at `position` and asserts
+/// the refusal contract: exit 2, the message alone on stderr, empty stdout,
+/// nothing created, and neither the editor nor the provider launched.
+fn assert_output_refused(
+    prefix: &str,
+    command: &[&str],
+    target: Target,
+    spelling: OutputSpelling,
+    position: OutputPosition,
+    extra: &[&str],
+) {
     let run = EditRun::new(prefix, "code");
-    let document = document.map(|content| run.write_doc("doc.md", content));
+    let target = match target {
+        Target::Prompt => "say hello".to_string(),
+        Target::Document(content) => run.write_doc("doc.md", content).to_string_lossy().into_owned(),
+    };
     for value in OUTPUT_VALUES {
-        let mut args: Vec<String> = before.iter().map(|word| (*word).to_string()).collect();
-        args.extend(spelling.words(value));
+        let option = spelling.words(value);
+        let mut args: Vec<String> = command.iter().map(|word| (*word).to_string()).collect();
         args.extend(extra.iter().map(|word| (*word).to_string()));
-        if let Some(document) = &document {
-            args.push(document.to_string_lossy().into_owned());
+        match position {
+            OutputPosition::BeforeTarget => {
+                args.extend(option);
+                args.extend(["-y".to_string(), "--sandbox".to_string(), target.clone()]);
+            }
+            OutputPosition::BetweenOptions => {
+                args.push("-y".to_string());
+                args.extend(option);
+                args.extend(["--sandbox".to_string(), target.clone()]);
+            }
+            OutputPosition::AfterTarget => {
+                args.extend(["-y".to_string(), "--sandbox".to_string(), target.clone()]);
+                args.extend(option);
+            }
         }
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let files_before = workspace_files(run.fixture.workspace_path());
@@ -602,71 +646,82 @@ fn assert_output_refused(prefix: &str, before: &[&str], document: Option<&str>, 
     }
 }
 
-macro_rules! output_refused_tests {
-    ($module:ident, $prefix:literal, $before:expr, $document:expr) => {
-        mod $module {
+macro_rules! output_refused_at {
+    ($prefix:expr, $command:expr, $target:expr, $position:ident) => {
+        mod $position {
             use super::*;
 
             #[test]
             fn short_spelling() {
-                assert_output_refused(concat!($prefix, "-short"), &$before, $document, OutputSpelling::Short, &[]);
+                assert_output_refused(&format!("{}-{}-short", $prefix, stringify!($position)), &$command, $target, OutputSpelling::Short, OutputPosition::$position, &[]);
+            }
+
+            #[test]
+            fn short_attached_spelling() {
+                assert_output_refused(&format!("{}-{}-short-attached", $prefix, stringify!($position)), &$command, $target, OutputSpelling::ShortAttached, OutputPosition::$position, &[]);
             }
 
             #[test]
             fn long_spelling() {
-                assert_output_refused(concat!($prefix, "-long"), &$before, $document, OutputSpelling::Long, &[]);
+                assert_output_refused(&format!("{}-{}-long", $prefix, stringify!($position)), &$command, $target, OutputSpelling::Long, OutputPosition::$position, &[]);
             }
 
             #[test]
             fn attached_spelling() {
-                assert_output_refused(concat!($prefix, "-attached"), &$before, $document, OutputSpelling::Attached, &[]);
+                assert_output_refused(&format!("{}-{}-attached", $prefix, stringify!($position)), &$command, $target, OutputSpelling::Attached, OutputPosition::$position, &[]);
             }
 
             #[test]
             fn under_dry_run() {
-                assert_output_refused(concat!($prefix, "-dry-run"), &$before, $document, OutputSpelling::Long, &["--dry-run"]);
+                assert_output_refused(&format!("{}-{}-dry-run", $prefix, stringify!($position)), &$command, $target, OutputSpelling::Long, OutputPosition::$position, &["--dry-run"]);
             }
         }
     };
 }
 
-output_refused_tests!(wrapper_output_is_refused, "output-wrapper", ["goose"], None);
-output_refused_tests!(compose_output_is_refused, "output-compose", ["compose", "--goose"], Some(REFUSED_DOCUMENT));
+macro_rules! output_refused_tests {
+    ($module:ident, $prefix:literal, $command:expr, $target:expr) => {
+        #[allow(non_snake_case)]
+        mod $module {
+            use super::*;
+
+            output_refused_at!($prefix, $command, $target, BeforeTarget);
+            output_refused_at!($prefix, $command, $target, BetweenOptions);
+            output_refused_at!($prefix, $command, $target, AfterTarget);
+        }
+    };
+}
+
+output_refused_tests!(wrapper_output_is_refused, "output-wrapper", ["goose"], Target::Prompt);
+output_refused_tests!(compose_output_is_refused, "output-compose", ["compose", "--goose"], Target::Document(REFUSED_DOCUMENT));
 output_refused_tests!(
     inline_compose_output_is_refused,
     "output-inline-compose",
     ["inline-compose", "--goose"],
-    Some(REFUSED_INLINE_DOCUMENT)
+    Target::Document(REFUSED_INLINE_DOCUMENT)
 );
-output_refused_tests!(sequence_output_is_refused, "output-sequence", ["sequence", "--goose", "--yolo"], Some(REFUSED_SEQUENCE));
-
-/// A wrapper prompt follows the option, as a caller would write it.
-#[test]
-fn wrapper_output_is_refused_before_a_prompt() {
-    assert_output_refused("output-wrapper-prompt", &["goose"], None, OutputSpelling::Long, &["say hello"]);
-}
+output_refused_tests!(sequence_output_is_refused, "output-sequence", ["sequence", "--goose"], Target::Document(REFUSED_SEQUENCE));
 
 /// A loop document is refused before its first iteration.
 #[test]
 fn a_loop_run_output_is_refused() {
     let document = "---\nloop:\n  until: \"loop.count >= 2\"\ninitialize:\n  - ensure_file: made.md\n  - edit: a.md\n---\nbody\n";
-    assert_output_refused("output-loop", &["compose", "--goose"], Some(document), OutputSpelling::Long, &[]);
+    for position in [OutputPosition::BeforeTarget, OutputPosition::AfterTarget] {
+        assert_output_refused(&format!("output-loop-{position:?}"), &["compose", "--goose"], Target::Document(document), OutputSpelling::Long, position, &[]);
+    }
 }
 
-/// After the file the option is still Claudine's, so it is refused there too.
+/// A wrapper without a prompt starts an interactive session; the option is
+/// refused before that too.
 #[test]
-fn compose_output_after_the_file_is_refused() {
-    let run = EditRun::new("output-compose-after-file", "code");
-    let document = run.write_doc("doc.md", REFUSED_DOCUMENT);
+fn an_interactive_wrapper_output_is_refused() {
+    let run = EditRun::new("output-wrapper-interactive", "code");
 
-    let output = run.run(&["compose", "--goose", document.to_str().unwrap(), "--output", "json"]);
+    let output = run.run(&["goose", "-o", "json"]);
 
-    let text = stderr(&output);
-    assert_eq!(output.status.code(), Some(2), "{text}");
-    assert_eq!(text.trim(), "the --output json CLI option has not been implemented yet in Claudine");
-    assert!(output.stdout.is_empty(), "{}", stdout(&output));
-    assert!(!run.cwd().join("made.md").exists());
-    assert!(run.launches().is_empty());
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert_eq!(stderr(&output).trim(), "the --output json CLI option has not been implemented yet in Claudine");
+    assert!(output.stdout.is_empty());
     assert_eq!(run.provider_launches(), 0);
 }
 

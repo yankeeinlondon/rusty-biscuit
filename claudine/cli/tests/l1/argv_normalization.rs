@@ -787,6 +787,128 @@ fn help_does_not_advertise_the_output_option() {
     }
 }
 
+/// Help anywhere before the first `--` wins over the `--output` refusal and
+/// over any other usage error, on wrappers and composition commands alike.
+#[test]
+fn help_before_the_separator_wins_in_every_position() {
+    let cli = CliProcessFixture::named("argv-help-precedence");
+    for command in ["claude", "compose", "inline-compose", "sequence"] {
+        for (label, args) in [
+            ("first", vec![command, "--help", "-o", "json", "x.md"]),
+            ("middle", vec![command, "-o", "json", "-h", "x.md"]),
+            ("last", vec![command, "-o", "json", "x.md", "--help"]),
+            ("attached output", vec![command, "x.md", "--output=json", "--help"]),
+            ("unknown option", vec![command, "--no-such-option", "x.md", "--help"]),
+            ("missing value", vec![command, "x.md", "--help", "-m"]),
+        ] {
+            let help = run_help(&cli, &args);
+            assert!(help.stderr.is_empty(), "{command} {label}: stderr: {}", help.stderr);
+            assert!(help.stdout.contains("Usage"), "{command} {label}: {}", help.stdout);
+        }
+    }
+}
+
+/// After `--` a help token is the provider's, so no Claudine help is shown.
+#[test]
+fn help_after_the_separator_is_not_claudines() {
+    let cli = CliProcessFixture::named("argv-help-after-separator");
+    let output = cli.command().args(["claude", "-o", "json", "hi", "--", "--help"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(2), "the `--output` refusal still applies");
+    assert!(output.stdout.is_empty());
+}
+
+/// A fixture whose user configuration cannot be converted, so any run that
+/// gets as far as loading configuration fails with `config.invalid` instead
+/// of succeeding quietly.
+fn unconvertible_config(name: &str) -> CliProcessFixture {
+    let cli = CliProcessFixture::named(name);
+    let dir = cli.home().join(".claudine");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("config.json"), "{}").unwrap();
+    fs::write(dir.join("config.json.bak"), "{\"other\": true}").unwrap();
+    cli
+}
+
+/// The `--output` refusal comes before configuration: with a configuration
+/// that cannot load, every spelling and position still exits 2 with the
+/// refusal, so a missed refusal cannot hide behind the later error.
+#[test]
+fn the_output_refusal_precedes_configuration_in_every_spelling_and_position() {
+    let cli = unconvertible_config("argv-output-before-config");
+    let file = write_fixture(cli.cwd(), "plan.md");
+    let file = file.to_str().unwrap();
+    let spellings: [&[&str]; 6] =
+        [&["-o", "json"], &["-ojson"], &["--output", "json"], &["--output=json"], &["-yojson"], &["-yo", "json"]];
+    for (command, target) in [("claude", "hi"), ("compose", file), ("inline-compose", file), ("sequence", file)] {
+        for spelling in spellings {
+            for args in [
+                [&[command][..], spelling, &["--dry-run", target]].concat(),
+                [&[command, "--sandbox"][..], spelling, &["--dry-run", target]].concat(),
+                [&[command, "--dry-run", target][..], spelling].concat(),
+            ] {
+                let output = cli.command().args(&args).output().unwrap();
+                let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+                assert_eq!(output.status.code(), Some(2), "{args:?}: {stderr}");
+                assert_eq!(stderr.trim(), "the --output json CLI option has not been implemented yet in Claudine", "{args:?}");
+                assert!(output.stdout.is_empty(), "{args:?}");
+            }
+        }
+    }
+}
+
+/// A Claudine option missing its value is a usage error (exit 2) on every
+/// command, before configuration is read.
+#[test]
+fn an_option_missing_its_value_is_a_usage_error() {
+    let cli = unconvertible_config("argv-missing-value");
+    let file = write_fixture(cli.cwd(), "plan.md");
+    let file = file.to_str().unwrap();
+    for args in [
+        vec!["claude", "-m"],
+        vec!["claude", "hi", "-m"],
+        vec!["claude", "hi", "--operation", "--", "x"],
+        vec!["compose", file, "-m"],
+        vec!["compose", "-m"],
+        vec!["sequence", file, "--timeout"],
+    ] {
+        let output = cli.command().args(&args).output().unwrap();
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {stderr}");
+        assert!(!stderr.contains("config.invalid"), "{args:?}: {stderr}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+    }
+}
+
+/// Help reads no configuration, so a configuration that cannot be converted
+/// does not stop it, and nothing is converted or written.
+#[test]
+fn help_neither_loads_nor_converts_configuration() {
+    let cli = unconvertible_config("argv-help-no-config");
+    let dir = cli.home().join(".claudine");
+    let listing = || {
+        let mut names: Vec<_> = fs::read_dir(&dir).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+        names.sort();
+        names
+    };
+    let refused = cli.command().args(["claude", "--dry-run", "hi"]).output().unwrap();
+    assert_ne!(refused.status.code(), Some(0), "fixture check: this configuration stops a run");
+    assert!(
+        strip_ansi(&String::from_utf8_lossy(&refused.stderr)).contains("config.invalid"),
+        "fixture check: {}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    let before = listing();
+
+    for args in [&["claude", "--help"][..], &["goose", "hi", "-h"], &["compose", "--help"], &["sequence", "x.md", "-h"]] {
+        let help = run_help(&cli, args);
+        assert!(help.stderr.is_empty(), "{args:?}: {}", help.stderr);
+        assert!(help.stdout.contains("Usage"), "{args:?}");
+    }
+    assert_eq!(listing(), before, "help converted or wrote configuration");
+    assert_eq!(fs::read_to_string(dir.join("config.json")).unwrap(), "{}");
+    assert!(!dir.join("config.yaml").exists());
+}
+
 /// Run `args` with color forced on, returning raw (unstripped) stdout.
 ///
 /// clap's renderer honors `CLICOLOR_FORCE`; Claudine's own terminal honors

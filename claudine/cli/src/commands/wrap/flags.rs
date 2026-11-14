@@ -4,20 +4,16 @@ use color_eyre::eyre::{Result, eyre};
 
 /// Shared wrapper args for provider subcommands.
 ///
-/// Boolean flags like `--yolo`, `--interactive`, `--quiet`, `--silent`,
-/// `--verbose`, and `--repo` are declared here for clap to parse AND also
-/// extracted from the passthrough bucket by `extract_wrapper_flags_from_passthrough`.
-/// The two sources are OR-merged so flags work whether placed on either side of
-/// the first positional argument. This avoids bug #2.2 (dual-source truth) by
-/// keeping clap as the primary parser while the passthrough extractor serves as
-/// a fallback for flags that land after `trailing_var_arg` has started capturing.
+/// Every option declared here is Claudine's wherever it is written before the
+/// first `--`: [`crate::argv::hoist_wrapper_options`] moves each one ahead of
+/// the first positional before clap runs, so clap is the only parser and the
+/// position of an option never changes its meaning. The owned surface is read
+/// from this definition ([`crate::argv::OwnedFlags::for_wrapper`]).
 ///
-/// The extractor honors the POSIX `--` convention: anything after the first
-/// `--` separator is opaque to Claudine and is never read as a wrapper flag,
-/// even when it collides with a Claudine flag name. The separator is
-/// Claudine's own boundary and is not forwarded, so the arguments after it
-/// reach the provider as provider options. See
-/// `find_passthrough_dash_boundary_with_raw` for the detection strategy.
+/// Anything after the first `--` is the provider's and is never read as a
+/// wrapper option, even when it collides with a Claudine option name. The
+/// separator is Claudine's own boundary and is not forwarded
+/// ([`consume_passthrough_separator`]).
 ///
 /// Unknown flags (belonging to the underlying agent) flow into `passthrough`
 /// thanks to `ignore_errors(true)` on wrapper subcommands (see `parse_cli`).
@@ -152,22 +148,6 @@ pub struct WrapperArgs {
         allow_hyphen_values = true
     )]
     pub passthrough: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ExtractedWrapperFlags {
-    pub(crate) yolo: bool,
-    pub(crate) interactive: bool,
-    pub(crate) edit: bool,
-    pub(crate) repo: bool,
-    pub(crate) quiet: bool,
-    pub(crate) silent: bool,
-    pub(crate) verbose: bool,
-    pub(crate) operation: Option<String>,
-    pub(crate) perf: bool,
-    /// Where the arguments after the user's consumed `--` start in the
-    /// extracted passthrough; `None` when no `--` was written.
-    pub(crate) dash_boundary: Option<usize>,
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -332,123 +312,33 @@ fn find_passthrough_dash_boundary_with_raw(
         .map(DashBoundary::Literal)
 }
 
-/// Recover wrapper flags that landed in the passthrough and consume the
-/// user's `--` separator.
+/// Consume the user's `--` separator from the passthrough.
 ///
-/// The first `--` is Claudine's boundary, not the provider's: arguments after
-/// it are never read as wrapper flags, and the separator token itself is
-/// removed so those arguments reach the provider as the options they were
-/// written as, ahead of any separator the provider profile adds before a
-/// prompt.
-pub(crate) fn extract_wrapper_flags_from_passthrough(
-    args: &mut Vec<String>,
-) -> Result<ExtractedWrapperFlags> {
+/// The first `--` is Claudine's boundary, not the provider's: the separator
+/// token itself is removed so the arguments after it reach the provider as the
+/// options they were written as, ahead of any separator the provider profile
+/// adds before a prompt.
+///
+/// Returns where the arguments after that `--` start in the passthrough once
+/// it is removed; `None` when no `--` was written.
+pub(crate) fn consume_passthrough_separator(args: &mut Vec<String>) -> Option<usize> {
     let raw: Vec<String> = std::env::args().collect();
-    extract_wrapper_flags_from_passthrough_with_raw(args, &raw)
+    consume_passthrough_separator_with_raw(args, &raw)
 }
 
-/// [`extract_wrapper_flags_from_passthrough`] against explicit raw process
-/// arguments (`argv[0]` included).
-pub(crate) fn extract_wrapper_flags_from_passthrough_with_raw(
-    args: &mut Vec<String>,
-    raw_args: &[String],
-) -> Result<ExtractedWrapperFlags> {
+/// [`consume_passthrough_separator`] against explicit raw process arguments
+/// (`argv[0]` included).
+pub(crate) fn consume_passthrough_separator_with_raw(args: &mut Vec<String>, raw_args: &[String]) -> Option<usize> {
     let boundary = find_passthrough_dash_boundary_with_raw(args, raw_args);
-    extract_wrapper_flags_from_passthrough_with_boundary(args, boundary)
+    consume_passthrough_separator_at(args, boundary)
 }
 
-fn extract_wrapper_flags_from_passthrough_with_boundary(
-    args: &mut Vec<String>,
-    dash_boundary: Option<DashBoundary>,
-) -> Result<ExtractedWrapperFlags> {
-    let boundary = dash_boundary.map_or(args.len(), DashBoundary::protected_from);
-    let boundary = boundary.min(args.len());
-    let mut extracted = ExtractedWrapperFlags::default();
-    let mut skip_next = false;
-    let mut remove_indices = Vec::new();
-
-    for i in 0..boundary {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        let arg = &args[i];
-        match arg.as_str() {
-            "-y" | "--yolo" => {
-                extracted.yolo = true;
-                remove_indices.push(i);
-            }
-            "-i" | "--interactive" => {
-                extracted.interactive = true;
-                remove_indices.push(i);
-            }
-            "--edit" => {
-                extracted.edit = true;
-                remove_indices.push(i);
-            }
-            "--repo" => {
-                extracted.repo = true;
-                remove_indices.push(i);
-            }
-            "-q" | "--quiet" => {
-                extracted.quiet = true;
-                remove_indices.push(i);
-            }
-            "--silent" => {
-                extracted.silent = true;
-                remove_indices.push(i);
-            }
-            "-v" | "--verbose" => {
-                extracted.verbose = true;
-                remove_indices.push(i);
-            }
-            "--perf" => {
-                extracted.perf = true;
-                remove_indices.push(i);
-            }
-            "--operation" | "--op" => {
-                let next = args.get(i + 1);
-                let value_within_boundary = i + 1 < boundary;
-                let next_is_separator = next.map(|v| v == "--").unwrap_or(false);
-
-                if next.is_none() || !value_within_boundary || next_is_separator {
-                    return Err(eyre!(
-                        "missing value for `{arg}`; pass a value like `{arg} <OP>` \
-                         before any `--` separator"
-                    ));
-                }
-
-                extracted.operation = Some(next.unwrap().clone());
-                remove_indices.push(i);
-                remove_indices.push(i + 1);
-                skip_next = true;
-            }
-            _ => {
-                if let Some(value) = arg.strip_prefix("--operation=") {
-                    extracted.operation = Some(value.to_string());
-                    remove_indices.push(i);
-                } else if let Some(value) = arg.strip_prefix("--op=") {
-                    extracted.operation = Some(value.to_string());
-                    remove_indices.push(i);
-                }
-            }
-        }
-    }
-
-    // Every removed flag sits before the boundary, so the protected tail
-    // starts that many places earlier once they are gone.
-    extracted.dash_boundary = dash_boundary.map(|_| boundary - remove_indices.len());
-    // The separator sits past every removed index, so dropping it first
-    // leaves those indices valid.
-    if let Some(DashBoundary::Literal(index)) = dash_boundary {
+fn consume_passthrough_separator_at(args: &mut Vec<String>, dash_boundary: Option<DashBoundary>) -> Option<usize> {
+    let boundary = dash_boundary?;
+    if let DashBoundary::Literal(index) = boundary {
         args.remove(index);
     }
-    // Remove in reverse order to preserve indices.
-    for i in remove_indices.into_iter().rev() {
-        args.remove(i);
-    }
-
-    Ok(extracted)
+    Some(boundary.protected_from())
 }
 
 /// Describe the direct wrapper's forwarded passthrough for reporting.

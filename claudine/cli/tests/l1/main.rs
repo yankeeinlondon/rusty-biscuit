@@ -309,6 +309,8 @@ mod wrap_structured_stream;
 mod wrap_watchdog_startup_stall;
 #[cfg(unix)]
 mod wrap_watchdog_timeout;
+#[cfg(unix)]
+mod wrapper_option_position;
 
 mod sequence_containers;
 mod sequence_frozen_graph;

@@ -37,10 +37,7 @@ pub(crate) mod wrapper_stages;
 
 // Re-exports from split modules
 pub use flags::WrapperArgs;
-pub(crate) use flags::{
-    extract_wrapper_flags_from_passthrough, has_explicit_native_output_request,
-    reject_retired_composition_flags,
-};
+pub(crate) use flags::{has_explicit_native_output_request, reject_retired_composition_flags};
 pub(crate) use harness_orch::{
     AttemptLaunch, CachedHarnessLoopContext, HarnessPromptMode, HarnessPromptState,
     MaterializedHarnessPrompt, apply_composition_shell_overrides, build_harness_launch,
@@ -311,15 +308,15 @@ fn run_provider_wrapper_inner(
     // ------------------------------------------------------------------
     let raw_agent_params: Vec<String> = std::env::args().skip(2).collect();
     let mut child_args = args.passthrough.clone();
-    let extracted = flags::extract_wrapper_flags_from_passthrough(&mut child_args)?;
-    let yolo_requested = args.yolo || extracted.yolo;
+    let dash_boundary = flags::consume_passthrough_separator(&mut child_args);
+    let yolo_requested = args.yolo;
     let mut yolo_enabled = yolo_requested;
-    let interactive_requested = args.interactive || extracted.interactive;
-    let edit_requested = args.edit || extracted.edit;
-    let repo_requested = args.repo || extracted.repo;
-    let quiet_requested = args.quiet || extracted.quiet;
-    let silent_requested = args.silent || extracted.silent;
-    let detail_requested = verbose > 0 || extracted.verbose;
+    let interactive_requested = args.interactive;
+    let edit_requested = args.edit;
+    let repo_requested = args.repo;
+    let quiet_requested = args.quiet;
+    let silent_requested = args.silent;
+    let detail_requested = verbose > 0;
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
@@ -343,7 +340,7 @@ fn run_provider_wrapper_inner(
     // from it.
     let provider_tail = flags::passthrough_provider_tail(
         &child_args,
-        extracted.dash_boundary.map(|at| {
+        dash_boundary.map(|at| {
             at - prompt_indices.iter().filter(|&&index| index < at).count()
         }),
     );
@@ -486,7 +483,7 @@ fn run_provider_wrapper_inner(
 
     let prompt_display = prompt_source.as_inline().map(|s| s.to_string());
     let interactive_override = interactive_requested && has_prompt;
-    let effective_operation = args.operation.clone().or(extracted.operation);
+    let effective_operation = args.operation.clone();
 
     if let Some(ref op) = effective_operation {
         env_overrides.push(("OPERATION".to_string(), op.clone()));

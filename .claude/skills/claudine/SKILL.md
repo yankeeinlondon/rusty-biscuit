@@ -7,6 +7,37 @@ description: Use when working in the claudine/ package area or with the Claudine
 
 Claudine is a universal event handler, shared-resource linker, MCP catalog manager, and composition harness for agentic CLIs. It normalizes **16 lifecycle events** across **10 providers** (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, Kilo, Pi, and Antigravity) into a single configuration model, fires **6 action types** — TTS, sound effects, logging, shell commands, reports, and blocking calls — when those events fire, synchronizes skills/commands/agents/scripts between providers, manages a provider-agnostic MCP catalog plus provider-specific import/sync/runtime behavior, and provides three Markdown composition commands (`compose`, `inline-compose`, `sequence`) that flow through the same wrapper-grade execution pipeline as the provider wrappers.
 
+## Golden rule: CLI arguments are order independent
+
+Claudine parses and consumes **all** of a command line (options, key-value
+setters, switches) and only then acts. Where a Claudine argument sits never
+changes what it means. A command line whose meaning depends on position is a
+bug: fix it, never document it as behavior.
+
+- Every option Claudine declares on a command is Claudine's wherever it
+  appears before the first `--`, before or after the prompt or file, on the
+  provider wrappers (`claudine claude …`) and the composition commands alike.
+  These mean the same thing:
+
+  ```sh
+  claudine claude -m opus --dry-run "fix the bug"
+  claudine claude "fix the bug" --dry-run -m opus
+  ```
+- The first `--` is the only boundary. Everything after it belongs to the
+  provider, verbatim, even a token that matches a Claudine option name
+  (`claudine claude "hi" -- --output-format json`).
+- `--help`/`-h` anywhere before `--` shows help and exits 0, over any other
+  argument or usage error. The remaining arguments only choose which help
+  (for example, the subcommand's). Help never needs configuration.
+- A Claudine option is never forwarded to the provider because of where it
+  was written. In particular `-o`/`--output` is refused in every position and
+  never reaches the provider.
+- Which tokens Claudine owns comes from the clap definitions, never from a
+  hand-maintained list; a drift test keeps the two equal.
+
+Load [argv-normalization](../../../claudine/docs/topics/argv-normalization.md)
+before changing argument parsing.
+
 Lifecycle `say`/`speak`/`effect` and hook `speak`/`sound_effect` audio is
 fire-and-forget after durable publication to Playa's private per-user queue.
 Lifecycle audio is published in stack order: put `effect` before `say` to hear it first.
@@ -798,12 +829,13 @@ The `claudine` library's modules and what each owns are in
 
 The `claudine` binary provides interactive setup, hook inspection, event handling, shared-resource management, MCP management, log reporting, provider wrapping, and Markdown composition. Output flows through a structured logging system that separates pipeable data (stdout) from status messages (stderr), formatted with biscuit-terminal components. Provider names accept fuzzy matching (exact → prefix → contains), so `cl` resolves to `claude`. Full reference: [cli-reference.md](cli-reference.md).
 
-Composition help (`compose`/`inline-compose`/`sequence` `-h`) is selected
-from the original argv in `main.rs::run`, before normalization and the
-ownership partition, and rendered from the same clap model normal parsing
-builds (`build_cli_command`); help before the command is the grouped overview,
-help after `--` is the provider's. Direct wrappers keep their custom help;
-other subcommands use clap's injected help. See
+Composition and wrapper help (`-h`/`--help` anywhere before the first `--`)
+is selected from the original argv in `main.rs::run` by `argv::select_help`,
+before normalization, the ownership passes, the `--output` refusal, and
+configuration loading; composition help is rendered from the same clap model
+normal parsing builds (`build_cli_command`), wrapper help by
+`print_wrapper_help`. Help before the command is the grouped overview, help
+after `--` is the provider's; other subcommands use clap's injected help. See
 [CLI Pre-Parsing](topics/cli-pre-parsing.md#composition-help-is-selected-first).
 
 Every command group and the cross-cutting behaviors (schema validation,

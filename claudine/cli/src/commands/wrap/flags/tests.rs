@@ -114,42 +114,6 @@ fn native_output_detection_source_has_no_provider_branch() {
     );
 }
 
-#[test]
-fn extract_wrapper_flags_lifts_reserved_aliases_from_passthrough() {
-    let mut args = vec![
-        "--json".to_string(),
-        "-i".to_string(),
-        "task".to_string(),
-        "-y".to_string(),
-    ];
-
-    let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
-
-    assert!(extracted.yolo);
-    assert!(extracted.interactive);
-    assert_eq!(args, vec!["--json", "task"]);
-}
-
-#[test]
-fn extract_wrapper_flags_lifts_interactive_long_form() {
-    let mut args = vec!["--interactive".to_string(), "do something".to_string()];
-
-    let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
-
-    assert!(extracted.interactive);
-    assert_eq!(args, vec!["do something"]);
-}
-
-#[test]
-fn extract_wrapper_flags_lifts_edit_long_form() {
-    let mut args = vec!["do something".to_string(), "--edit".to_string()];
-
-    let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
-
-    assert!(extracted.edit);
-    assert_eq!(args, vec!["do something"]);
-}
-
 /// Parse `WrapperArgs` through a clap probe, exactly as the wrapper
 /// subcommands flatten it.
 fn try_parse_wrapper_args(extra: &[&str]) -> Result<WrapperArgs, clap::Error> {
@@ -168,6 +132,20 @@ fn try_parse_wrapper_args(extra: &[&str]) -> Result<WrapperArgs, clap::Error> {
     Probe::try_parse_from(argv).map(|probe| probe.args)
 }
 
+/// `extra` after `claudine claude`, with the wrapper options hoisted as the
+/// executable hoists them, then parsed.
+fn parse_hoisted(extra: &[&str]) -> WrapperArgs {
+    let mut argv: Vec<std::ffi::OsString> = vec!["claudine".into(), "claude".into()];
+    argv.extend(extra.iter().map(std::ffi::OsString::from));
+    let hoisted: Vec<String> = crate::argv::hoist_wrapper_options(argv)
+        .unwrap()
+        .into_iter()
+        .map(|token| token.into_string().unwrap())
+        .collect();
+    let tokens: Vec<&str> = hoisted[2..].iter().map(String::as_str).collect();
+    try_parse_wrapper_args(&tokens).unwrap()
+}
+
 #[test]
 fn wrapper_args_accept_edit_with_interactive_in_every_spelling() {
     for argv in [
@@ -184,175 +162,83 @@ fn wrapper_args_accept_edit_with_interactive_in_every_spelling() {
 }
 
 #[test]
-fn edit_and_interactive_after_a_seed_prompt_are_both_lifted() {
-    // clap stops at the positional seed, so both flags land in passthrough and
-    // only the extractor can recover them.
-    let args = try_parse_wrapper_args(&["review this repository", "--edit", "-i"]).unwrap();
-    assert!(!args.edit && !args.interactive);
-    let mut passthrough = args.passthrough;
+fn options_after_the_prompt_mean_what_they_mean_before_it() {
+    let after = parse_hoisted(&["review this repository", "--edit", "-i", "-m", "opus", "--op=commit", "-o", "json"]);
+    let before = parse_hoisted(&["--edit", "-i", "-m", "opus", "--op=commit", "-o", "json", "review this repository"]);
 
-    let extracted =
-        extract_wrapper_flags_from_passthrough_with_boundary(&mut passthrough, None).unwrap();
-
-    assert!(extracted.edit);
-    assert!(extracted.interactive);
-    assert_eq!(passthrough, vec!["review this repository"]);
+    for args in [&after, &before] {
+        assert!(args.edit && args.interactive);
+        assert_eq!(args.model.as_deref(), Some("opus"));
+        assert_eq!(args.operation.as_deref(), Some("commit"));
+        assert_eq!(args.output.as_deref(), Some("json"));
+        assert_eq!(args.passthrough, vec!["review this repository"]);
+    }
 }
 
 #[test]
 fn old_non_interactive_flags_pass_through_to_provider() {
-    let mut args = vec![
-        "-n".to_string(),
-        "--non-interactive".to_string(),
-        "--ni".to_string(),
-        "task".to_string(),
-    ];
+    let args = parse_hoisted(&["-n", "--non-interactive", "--ni", "task"]);
 
-    let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
-
-    // Old flags should NOT be consumed by Claudine
-    assert!(!extracted.interactive);
-    assert_eq!(args, vec!["-n", "--non-interactive", "--ni", "task"]);
+    assert!(!args.interactive);
+    assert_eq!(args.passthrough, vec!["-n", "--non-interactive", "--ni", "task"]);
 }
 
 #[test]
-fn extract_wrapper_flags_lifts_operation_from_passthrough() {
-    let mut args = vec![
-        "do something".to_string(),
-        "--op".to_string(),
-        "commit".to_string(),
-    ];
-
-    let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
-
-    assert_eq!(extracted.operation.as_deref(), Some("commit"));
-    assert_eq!(args, vec!["do something"]);
-}
-
-#[test]
-fn extract_wrapper_flags_lifts_operation_equals_form() {
-    let mut args = vec!["do something".to_string(), "--operation=deploy".to_string()];
-
-    let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
-
-    assert_eq!(extracted.operation.as_deref(), Some("deploy"));
-    assert_eq!(args, vec!["do something"]);
-}
-
-#[test]
-fn extract_wrapper_flags_lifts_op_equals_form() {
-    let mut args = vec!["do something".to_string(), "--op=review".to_string()];
-
-    let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
-
-    assert_eq!(extracted.operation.as_deref(), Some("review"));
-    assert_eq!(args, vec!["do something"]);
-}
-
-#[test]
-fn extract_wrapper_flags_lifts_perf_from_passthrough() {
-    let mut args = vec!["do something".to_string(), "--perf".to_string()];
-
-    let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
-
-    assert!(extracted.perf);
-    assert_eq!(args, vec!["do something"]);
-}
-
-#[test]
-fn extract_wrapper_flags_respects_double_dash_in_passthrough() {
+fn the_separator_after_the_prompt_is_consumed_and_the_tail_kept() {
     // User typed: claudine claude prompt -- --silent -y
     //
     // clap collects the tail verbatim because `trailing_var_arg` began
     // capturing at `prompt`, so the passthrough literally contains `--`.
-    // Anything after that `--` must be opaque to Claudine, and the `--`
-    // itself is Claudine's boundary, so it is not forwarded.
-    let mut args = vec![
-        "prompt".to_string(),
-        "--".to_string(),
-        "--silent".to_string(),
-        "-y".to_string(),
-    ];
+    // The `--` is Claudine's boundary, so it is not forwarded.
+    let mut args = string_args(&["prompt", "--", "--silent", "-y"]);
 
-    let extracted =
-        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, Some(DashBoundary::Literal(1)))
-            .unwrap();
+    let boundary = consume_passthrough_separator_at(&mut args, Some(DashBoundary::Literal(1)));
 
-    assert!(!extracted.silent);
-    assert!(!extracted.yolo);
+    assert_eq!(boundary, Some(1));
     assert_eq!(args, vec!["prompt", "--silent", "-y"]);
 }
 
 #[test]
-fn extract_wrapper_flags_respects_double_dash_consumed_by_clap() {
+fn a_separator_clap_consumed_leaves_the_passthrough_unchanged() {
     // User typed: claudine claude -- prompt --silent
-    //
-    // clap consumed `--` as the positional separator so it is absent from
-    // the passthrough vector. Boundary detection must recover the tail
-    // count from the raw process arguments.
-    let mut args = vec!["prompt".to_string(), "--silent".to_string()];
+    let mut args = string_args(&["prompt", "--silent"]);
+    let raw = string_args(&["claudine", "claude", "--", "prompt", "--silent"]);
 
-    let raw = vec![
-        "claudine".to_string(),
-        "claude".to_string(),
-        "--".to_string(),
-        "prompt".to_string(),
-        "--silent".to_string(),
-    ];
-    let extracted = extract_wrapper_flags_from_passthrough_with_raw(&mut args, &raw).unwrap();
+    let boundary = consume_passthrough_separator_with_raw(&mut args, &raw);
 
-    assert!(!extracted.silent);
+    assert_eq!(boundary, Some(0));
     assert_eq!(args, vec!["prompt", "--silent"]);
 }
 
 #[test]
-fn extract_wrapper_flags_extracts_before_dash_but_not_after() {
-    // User typed: claudine claude -y prompt -- --yolo
-    //
-    // `-y` BEFORE the prompt is consumed by clap (not present in
-    // passthrough). The trailing `--yolo` after `--` must remain untouched
-    // so it can collide with an agent-owned flag without being stolen.
-    let mut args = vec!["prompt".to_string(), "--".to_string(), "--yolo".to_string()];
+fn a_tail_after_the_separator_is_never_read_as_a_wrapper_option() {
+    // User typed: claudine codex prompt -- --edit --yolo --output json --help
+    let args = parse_hoisted(&["prompt", "--", "--edit", "--yolo", "--output", "json", "--help"]);
+    assert!(!args.edit && !args.yolo && !args.help);
+    assert_eq!(args.output, None);
 
-    let extracted =
-        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, Some(DashBoundary::Literal(1)))
-            .unwrap();
-
-    assert!(!extracted.yolo);
-    assert_eq!(args, vec!["prompt", "--yolo"]);
+    let mut passthrough = args.passthrough;
+    let raw = string_args(&["claudine", "codex", "prompt", "--", "--edit", "--yolo", "--output", "json", "--help"]);
+    consume_passthrough_separator_with_raw(&mut passthrough, &raw);
+    assert_eq!(passthrough, vec!["prompt", "--edit", "--yolo", "--output", "json", "--help"]);
 }
 
 #[test]
-fn extract_wrapper_flags_extracts_edit_before_dash_but_not_after() {
-    // User typed: claudine codex prompt -- --edit
-    let mut args = vec!["prompt".to_string(), "--".to_string(), "--edit".to_string()];
-    let raw = string_args(&["claudine", "codex", "prompt", "--", "--edit"]);
-
-    let extracted = extract_wrapper_flags_from_passthrough_with_raw(&mut args, &raw).unwrap();
-
-    assert!(!extracted.edit, "a provider --edit after -- must not enable Claudine's editor");
-    assert_eq!(args, vec!["prompt", "--edit"]);
-}
-
-#[test]
-fn extract_wrapper_flags_consumes_only_the_user_separator() {
+fn only_the_user_separator_is_consumed() {
     // User typed: claudine pi -i hello -- --offline -- "- item"
     //
     // The first `--` is Claudine's boundary and is dropped; the second belongs
     // to the provider and is forwarded with the rest of the tail.
     let mut args = string_args(&["hello", "--", "--offline", "--", "- item"]);
-    let raw = string_args(&[
-        "claudine", "pi", "-i", "hello", "--", "--offline", "--", "- item",
-    ]);
+    let raw = string_args(&["claudine", "pi", "-i", "hello", "--", "--offline", "--", "- item"]);
 
-    let extracted = extract_wrapper_flags_from_passthrough_with_raw(&mut args, &raw).unwrap();
+    consume_passthrough_separator_with_raw(&mut args, &raw);
 
-    assert!(!extracted.interactive);
     assert_eq!(args, vec!["hello", "--offline", "--", "- item"]);
 }
 
 #[test]
-fn extract_wrapper_flags_keeps_a_provider_separator_after_a_consumed_one() {
+fn a_provider_separator_after_a_consumed_one_is_kept() {
     // User typed: claudine pi -- hello -- --offline
     //
     // clap consumed the first `--`, so the literal one in the passthrough is
@@ -360,7 +246,7 @@ fn extract_wrapper_flags_keeps_a_provider_separator_after_a_consumed_one() {
     let mut args = string_args(&["hello", "--", "--offline"]);
     let raw = string_args(&["claudine", "pi", "--", "hello", "--", "--offline"]);
 
-    extract_wrapper_flags_from_passthrough_with_raw(&mut args, &raw).unwrap();
+    consume_passthrough_separator_with_raw(&mut args, &raw);
 
     assert_eq!(args, vec!["hello", "--", "--offline"]);
 }
@@ -415,56 +301,6 @@ fn find_passthrough_dash_boundary_returns_none_without_dash() {
 }
 
 #[test]
-fn extract_wrapper_flags_errors_on_dangling_operation_flag() {
-    let mut args = vec!["prompt".to_string(), "--operation".to_string()];
-
-    let err = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, None).unwrap_err();
-    let message = err.to_string();
-    assert!(
-        message.contains("--operation"),
-        "expected error to mention --operation, got: {message}"
-    );
-    assert!(
-        message.to_lowercase().contains("missing value"),
-        "expected error to describe the missing value, got: {message}"
-    );
-}
-
-#[test]
-fn extract_wrapper_flags_errors_on_dangling_op_alias() {
-    let mut args = vec!["prompt".to_string(), "--op".to_string()];
-
-    let err = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, None).unwrap_err();
-    let message = err.to_string();
-    assert!(
-        message.contains("--op"),
-        "expected error to mention --op, got: {message}"
-    );
-}
-
-#[test]
-fn extract_wrapper_flags_errors_when_operation_value_is_dash_separator() {
-    // User typed: claudine claude --operation -- prompt
-    //
-    // `--operation` would otherwise greedily consume `--` as its value,
-    // which is nonsensical. Require a real value before the separator.
-    let mut args = vec![
-        "--operation".to_string(),
-        "--".to_string(),
-        "prompt".to_string(),
-    ];
-
-    let err =
-        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, Some(DashBoundary::Literal(1)))
-            .unwrap_err();
-    let message = err.to_string();
-    assert!(
-        message.contains("--operation"),
-        "expected error to mention --operation, got: {message}"
-    );
-}
-
-#[test]
 fn model_value_from_args_supports_short_and_long_forms() {
     let long_inline = vec!["--model=foo".to_string()];
     let short_next = vec!["-m".to_string(), "bar".to_string()];
@@ -484,71 +320,46 @@ mod proptests {
 
     proptest! {
         #[test]
-        fn proptest_extract_wrapper_flags_preserves_others(
-            flags in prop::collection::vec("-y|--yolo|-i|--interactive|--edit|-q|--quiet|--silent", 0..5),
-            others in prop::collection::vec("[a-z0-9]+", 0..10)
+        fn proptest_wrapper_options_anywhere_are_claudine_s_and_others_keep_order(
+            tokens in prop::collection::vec(
+                prop_oneof!["-y|--yolo|-i|--interactive|--edit|-q|--quiet", "[a-z0-9]+"],
+                0..12,
+            )
         ) {
-            let mut args = Vec::new();
-            for o in &others {
-                args.push(o.clone());
-            }
-            for f in &flags {
-                args.push(f.clone());
-            }
+            // clap refuses a repeated option, so each family appears at most once.
+            let family = |token: &str| token.trim_start_matches('-').chars().next();
+            let mut seen = std::collections::HashSet::new();
+            let tokens: Vec<String> = tokens
+                .into_iter()
+                .filter(|token| !token.starts_with('-') || seen.insert(family(token)))
+                .collect();
+            let args = parse_hoisted(&tokens.iter().map(String::as_str).collect::<Vec<_>>());
 
-            // Shuffle manually or just accept order for now
-            // Pass no boundary so std::env::args() is not consulted inside
-            // the proptest runner.
-            let extracted =
-                extract_wrapper_flags_from_passthrough_with_boundary(&mut args, None).unwrap();
-
-            // All 'others' should still be there
-            assert_eq!(args.len(), others.len());
-            for o in others {
-                assert!(args.contains(&o));
-            }
-
-            if flags.iter().any(|f| f == "-y" || f == "--yolo") {
-                assert!(extracted.yolo);
-            }
-            if flags.iter().any(|f| f == "-i" || f == "--interactive") {
-                assert!(extracted.interactive);
-            }
-            let has_edit = flags.iter().any(|f| f == "--edit");
-            let has_interactive = flags.iter().any(|f| f == "-i" || f == "--interactive");
-            if has_edit {
-                assert!(extracted.edit);
-            }
-            // `--edit` and `-i` after the positional coexist: neither
-            // suppresses the other.
-            if has_edit && has_interactive {
-                assert!(extracted.edit && extracted.interactive);
-            }
+            let others: Vec<String> = tokens.iter().filter(|t| !t.starts_with('-')).cloned().collect();
+            prop_assert_eq!(&args.passthrough, &others);
+            prop_assert_eq!(args.yolo, tokens.iter().any(|t| t == "-y" || t == "--yolo"));
+            prop_assert_eq!(args.interactive, tokens.iter().any(|t| t == "-i" || t == "--interactive"));
+            prop_assert_eq!(args.edit, tokens.iter().any(|t| t == "--edit"));
+            prop_assert_eq!(args.quiet, tokens.iter().any(|t| t == "-q" || t == "--quiet"));
         }
     }
 }
 
 #[test]
-fn dash_boundary_counts_the_flags_removed_before_it() {
+fn the_consumed_separator_reports_where_the_tail_starts() {
     // User typed: claudine codex -y -c x=y prompt -- --native z
-    let mut args = string_args(&["-y", "-c", "x=y", "prompt", "--", "--native", "z"]);
-    let extracted =
-        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, Some(DashBoundary::Literal(4)))
-            .unwrap();
+    // (`-y` is clap's; `-c x=y` and the prompt are the passthrough.)
+    let mut args = string_args(&["-c", "x=y", "prompt", "--", "--native", "z"]);
+    assert_eq!(consume_passthrough_separator_at(&mut args, Some(DashBoundary::Literal(3))), Some(3));
     assert_eq!(args, string_args(&["-c", "x=y", "prompt", "--native", "z"]));
-    assert_eq!(extracted.dash_boundary, Some(3));
 
-    // clap consumed the `--` itself: the tail still starts after the flags.
-    let mut args = string_args(&["--quiet", "-c", "x", "--native"]);
-    let extracted =
-        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, Some(DashBoundary::Consumed(3)))
-            .unwrap();
+    // clap consumed the `--` itself.
+    let mut args = string_args(&["-c", "x", "--native"]);
+    assert_eq!(consume_passthrough_separator_at(&mut args, Some(DashBoundary::Consumed(2))), Some(2));
     assert_eq!(args, string_args(&["-c", "x", "--native"]));
-    assert_eq!(extracted.dash_boundary, Some(2));
 
     let mut args = string_args(&["-c", "x"]);
-    let extracted = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, None).unwrap();
-    assert_eq!(extracted.dash_boundary, None);
+    assert_eq!(consume_passthrough_separator_at(&mut args, None), None);
 }
 
 #[test]

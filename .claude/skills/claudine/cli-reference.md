@@ -530,6 +530,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 
 ### Wrapper Behavior
 
+- **Order independence**: every flag above is Claudine's wherever it appears before the first `--`, before or after the prompt (`claudine claude "fix it" -m opus` = `claudine claude -m opus "fix it"`). `argv::hoist_wrapper_options` (`cli/src/argv/wrapper_options.rs`) moves them ahead of the first positional before clap, using `OwnedFlags::for_wrapper` (derived from `WrapperArgs` plus root globals; drift test in `argv/wrapper_options/tests.rs`). There is no hand-written extractor; `flags::consume_passthrough_separator` only removes the user's `--`. Short clusters and attached short values are split (`-yojson` → `-y -o json`) because the lenient wrapper parse (`ignore_errors`) would otherwise drop them into the passthrough. A value option without a value before `--` fails with exit 2 (`missing value for '-m'`); `main.rs::exit_code_before_runtime` maps `PartitionError` and `MissingWrapperOptionValue` to `args::EXIT_USAGE`. `-h`/`--help` anywhere before `--` is answered by `argv::select_help` before configuration loads (`HelpDestination::Wrapper` → `print_wrapper_help`), winning over the `--output` refusal.
 - **Dry-run executable independence**: provider wrappers render the planned
   command using the profile's executable name without resolving it on `PATH`;
   the provider need not be installed. Live runs still validate the executable

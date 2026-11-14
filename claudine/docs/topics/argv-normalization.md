@@ -18,12 +18,39 @@ The implementation lives in [`claudine/cli/src/argv/mod.rs`](../../cli/src/argv/
 and is wired into [`claudine/cli/src/main.rs`](../../cli/src/main.rs) as
 the single pre-clap entry point.
 
+## The golden rule: position never changes meaning
+
+Claudine parses and consumes the whole command line (options, `key=value`
+setters, provider switches) and only then acts. Where a Claudine argument sits
+never changes what it means:
+
+- **Every option Claudine declares on a command is Claudine's anywhere before
+  the first `--`**, before or after the prompt or file, on the provider
+  wrappers (`claudine claude …`) and the composition commands alike.
+- **The first `--` is the only boundary.** Everything after it belongs to the
+  provider, verbatim, even a token spelled like a Claudine option.
+- **`--help` or `-h` anywhere before `--` shows help and exits 0**, over the
+  `--output` refusal and every other usage error. The other arguments only
+  choose which help screen (the command's). Help reads no configuration.
+- **Which tokens Claudine owns comes from the clap definitions**, never from a
+  hand-maintained list; drift tests keep the two equal.
+
+```sh
+claudine claude -m opus --dry-run "fix the bug"   # these two lines
+claudine claude "fix the bug" --dry-run -m opus   # mean the same thing
+claudine claude "fix the bug" -- -m opus          # here -m opus is Claude's own
+claudine claude "fix the bug" -o json --help      # wrapper help, exit 0
+```
+
+A command line whose meaning depends on where a Claudine option sits is a
+bug. The sections below describe how each stage keeps this rule.
+
 ## Pipeline placement
 
 ```mermaid
 flowchart LR
     A["std::env::args_os"] --> CI["completion intercept<br/><i>COMPLETE=&lt;shell&gt; exits here</i>"]
-    CI --> H{"composition help selected?<br/><i>original argv</i>"}
+    CI --> H{"help selected?<br/><i>composition or wrapper, original argv</i>"}
     H -- "yes" --> HE["help screen, exit 0"]
     H -- "no" --> B["argv::normalize"]
     subgraph B["argv::normalize"]
@@ -34,7 +61,8 @@ flowchart LR
         R1 --> R2 --> R4
     end
     B --> P["partition_composition_tail<br/><i>composition subcommands only</i>"]
-    P --> C["Cli::parse_from (Claudine argv)"]
+    P --> W["hoist_wrapper_options<br/><i>wrapper subcommands only</i>"]
+    W --> C["Cli::parse_from (Claudine argv)"]
     P --> T["arguments after the file"]
     T --> O["own_arguments<br/><i>after the file is read</i>"]
     O --> TL["provider tail → execution"]
@@ -49,11 +77,13 @@ flowchart LR
 > partition** (see [Provider-argument partition](#provider-argument-partition)),
 > not by a normalization rule.
 
-`main.rs` collects argv once. A composition help request is selected from that
-original argv and answered before normalization (see
-[Rule 4](#rule-4----help---h-hoisting)); every other argv goes to
-`argv::normalize`, then to `argv::partition_composition_tail`, and the
-resulting Claudine argv serves the `--plain` pre-scan and every parse pass.
+`main.rs` collects argv once. A help request for a composition or wrapper
+command is selected from that original argv and answered before normalization
+(see [Rule 4](#rule-4----help---h-hoisting)); every other argv goes to
+`argv::normalize`, then to `argv::partition_composition_tail`, then to
+`argv::hoist_wrapper_options` (see
+[Wrapper option ownership](#wrapper-option-ownership)), and the resulting
+Claudine argv serves the `--plain` pre-scan and every parse pass.
 Library code never sees argv and therefore never normalizes.
 
 ## Rewrite rules
@@ -133,23 +163,29 @@ Edge cases intentionally left untouched:
 
 ### Rule 4 — `--help` / `-h` hoisting
 
-Composition help has two parts: a selector that the executable runs on the
-original argv, and the hoist rewrite this rule names, which normalization
-keeps for its other callers.
+Help has two parts: a selector that the executable runs on the original argv
+for composition and wrapper commands, and the hoist rewrite this rule names,
+which normalization keeps for its other callers (composition only).
 
 **What the user sees.** Help after the command prints that command's own
-compact clap screen; help before the command prints the grouped overview;
-help after the first literal `--` is the provider's:
+screen; help before the command prints the grouped overview; help after the
+first literal `--` is the provider's. No other argument, not even a refused
+`--output`, stops help:
 
 ```sh
 claudine compose -h                                # Usage: claudine compose [OPTIONS] <ARG>...
 claudine compose file.md --gemini name=Ken --help  # the same compose screen
+claudine compose -o json --help                    # the same compose screen, exit 0
+claudine claude "fix it" -o json --help            # the claude wrapper's screen, exit 0
 claudine --help compose file.md                    # the grouped root overview
 claudine compose file.md -- --help                 # forwarded to the provider
+claudine claude "fix it" -- --help                 # forwarded to Claude
 ```
 
-**Selection comes first.** `argv::select_composition_help` runs in `main.rs`
-right after the completion intercept, before `argv::normalize`. It recognizes
+**Selection comes first.** `argv::select_help` runs in `main.rs`
+right after the completion intercept, before `argv::normalize`, the ownership
+passes, the `--output` refusal, and any configuration loading, so help never
+needs (or converts) `~/.claudine/config.yaml`. It recognizes
 the command like the other rules (`find_subcommand`) and takes the first exact
 `-h` or `--help` before the first literal `--`. It does not validate anything
 else, which is why help still appears beside a missing file, an unknown
@@ -192,12 +228,12 @@ claudine --help compose file.md --provider gemini name=Ken
 claudine -h compose
 ```
 
-The hoist is gated to composition subcommands only. Wrapper subcommands
-(`claudine claude --help`) show Claudine's own wrapper help, and
-non-composition subcommands have clap's own `--help`. To send `--help` to a
+The hoist is gated to composition subcommands only. Wrapper help is answered
+by the selector alone (`print_wrapper_help`), wherever the token sits before
+`--`; other subcommands have clap's own `--help`. To send `--help` to a
 provider, put it after `--` (`claudine claude -- --help`).
 
-Rule 4 does not fire when:
+The hoist (not the selector) does not fire when:
 
 - `--help` / `-h` appears at or after the first literal `--` (it's a
   trailing raw value and belongs to someone else);
@@ -258,6 +294,42 @@ after the file:      -c model_reasoning_effort=low phase=2
 ownership decides:   provider tail  -c model_reasoning_effort=low   (→ codex)
                      setter         phase=2
 ```
+
+## Wrapper option ownership
+
+A wrapper subcommand (`claudine claude …`) collects every token from its first
+positional, normally the prompt, into the arguments it forwards (clap's
+`trailing_var_arg`), so clap alone would read a Claudine option only before
+the prompt. `argv::hoist_wrapper_options` (`cli/src/argv/wrapper_options.rs`)
+runs before clap and moves every option the wrapper declares, with its value,
+ahead of the first positional, keeping the order they were written in. Every
+other token keeps its order, and nothing at or after the first `--` is read or
+moved.
+
+```sh
+claudine claude "fix it" -m opus --dry-run --verbose-x
+# clap sees: claudine claude -m opus --dry-run "fix it" --verbose-x
+```
+
+- **The owned surface comes from clap.** `OwnedFlags::for_wrapper` reads
+  every option `WrapperArgs` declares (hidden ones such as `--output`, and
+  `--help`) plus the root globals (`-v`/`--verbose`, `--debug`, `--plain`),
+  in space, `=`, attached, and short-cluster spellings (`-yq`). A root
+  option that is not global (`--version`) is not a wrapper's and stays with
+  the provider. A unit drift test lists every spelling and fails when the
+  clap surface changes.
+- **Short clusters and attached short values are split.** `-yq` becomes
+  `-y -q` and `-ojson` becomes `-o json` before clap runs, because the
+  wrapper's lenient parse would otherwise hand them to the provider.
+- **A value option needs its value before `--`.** `claudine claude hi -m`
+  fails with `missing value for '-m'` and exit status 2 (a usage error, like
+  clap's own and the composition partition's errors) rather than taking the
+  prompt as the model.
+- **The `--` itself is consumed.** The wrapper removes the first `--` so the
+  arguments after it reach the provider as the options they were written as.
+- **An option means the same as before the prompt.** A repeated boolean
+  (`-y hi -y`) is clap's "cannot be used multiple times" error, as it is
+  when both are written before the prompt.
 
 ## Type-aware ownership
 
@@ -608,12 +680,18 @@ The normalizer never mutates argv when any of the following hold:
    [Non-UTF-8 tokens are refused](#non-utf-8-tokens-are-refused).)
 4. **Argv with fewer than two elements.** Nothing downstream needs
    parsing.
-5. **Non-composition subcommands.** Rule 1 and Rule 4 (and the ownership
-   partition) are gated to the composition trio (`compose`,
-   `inline-compose`, `sequence`); wrapper subcommands (`claude`, `codex`, …)
-   and every other subcommand pass through unchanged. Rule 2 remains
-   flag-driven so `--provider` resolution works regardless of subcommand.
-   Unknown-subcommand handling stays with clap.
+5. **Gated rules.** Rule 1, Rule 4, and the composition ownership partition
+   are gated to the composition trio (`compose`, `inline-compose`,
+   `sequence`). Rule 2 remains flag-driven so `--provider` resolution works
+   regardless of subcommand. Unknown-subcommand handling stays with clap.
+
+These guarantees are about the rewrite rules. They never mean a
+Claudine-looking token before `--` passes through to a provider: on a wrapper
+subcommand every declared option before `--` is Claudine's
+([Wrapper option ownership](#wrapper-option-ownership)), and on a
+composition command the partition owns them
+([Provider-argument partition](#provider-argument-partition)). Other
+subcommands are parsed by clap alone.
 
 Every new rule added to the normalizer MUST land with a matching
 pass-through unit test so the normalizer cannot silently start
@@ -622,7 +700,8 @@ rewriting inputs it should leave alone.
 ## Testing
 
 Unit tests live inside the `argv` module (`#[cfg(test)] mod tests` in
-`mod.rs`, and `partition/tests.rs`) and cover every rewrite rule, each
+`mod.rs`, `partition/tests.rs`, and `wrapper_options/tests.rs`, which holds
+the wrapper surface drift test and every spelling after the prompt) and cover every rewrite rule, each
 boolean-to-slug mapping, every pass-through guarantee, and the partition
 (what reaches clap and what reaches ownership, owned-flag markers, the
 boundary, ordering errors, non-UTF-8 refusal, owned-surface drift), plus the
@@ -653,3 +732,13 @@ The ambiguity question is proved in a real terminal by
 and `sequence` it reads the drawn question and both choices back from tmux,
 answers each way, and checks that choosing Codex forwards `-c foo` while
 choosing Claude leaves the actual Codex launch refused for a missing value.
+
+Wrapper position independence is driven through the binary by
+[`wrapper_option_position.rs`](../../cli/tests/l1/wrapper_option_position.rs)
+(an option after the prompt applied by Claudine, `--dry-run` after the
+prompt, the tail after `--` reaching the provider verbatim), the `--output`
+refusal in every position by
+[`lifecycle_edit_action.rs`](../../cli/tests/l1/lifecycle_edit_action.rs), and
+help precedence (every position, beside `-o json`, an unknown option, a
+missing value, and a configuration that cannot be converted) by
+`argv_normalization.rs`.

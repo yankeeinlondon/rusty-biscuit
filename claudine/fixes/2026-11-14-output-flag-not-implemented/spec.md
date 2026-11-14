@@ -1,7 +1,7 @@
 ---
 kind: fix
 created: 2026-11-14
-status: finalized-spec
+status: implemented
 area: claudine
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -27,6 +27,8 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 reviewed: false
 review_iterations: 0
+implemented: true
+implemented_by: claude/opus-5.5 (rust-developer sub-agent)
 ---
 
 # Refuse Claudine's `--output` option until it is designed
@@ -125,6 +127,42 @@ result value. A future `--output` would need to decide whether to follow
   Darkmatter's `md compose` keeps its own `MarkdownDocument`/`Structured`
   cases, because there stdout really does carry the document or the JSON
   result.
+
+## Author rulings, review round 1 (2026-11-14)
+
+The first implementation refused `--output` only where the wrapper's
+argument parsing happened to read it, and let help lose to the refusal. The
+author ruled:
+
+- **`--output` is never passed to the provider, wherever it is written.**
+  Argument position never changes meaning: Claudine parses and consumes its
+  options, setters, and switches, and only then acts. A command line whose
+  meaning depends on where a Claudine option sits is a bug.
+  - Found during review: wrapper commands (`claudine claude …`) capture every
+    token from the first positional onward
+    (`trailing_var_arg`), and a hand-written list
+    (`wrap/flags.rs::extract_wrapper_flags_from_passthrough`) takes back only
+    `-y`, `-i`, `--edit`, `--repo`, `-q`, `--silent`, `-v`, `--perf`, and
+    `--operation`. Every other Claudine option after the prompt (`-o`, `-m`,
+    `-t`, `--dry-run`, `--sandbox`, `--asp`/`--rsp`, `--include`, `--use`,
+    `--strict`, `--stall-timeout`, `--help`) is forwarded to the provider.
+    `claudine claude --dry-run -o json hi` is refused;
+    `claudine claude --dry-run hi -o json` is not.
+  - Fix: wrapper commands own every option Claudine declares on them,
+    anywhere before the first `--`, using an owned-flag surface derived from
+    the clap definitions (as `OwnedFlags::for_composition` already does for
+    the composition commands), replacing the hand-written list. Only tokens
+    after the first `--` belong to the provider.
+- **Any command line containing `--help` (or `-h`) before the first `--`
+  shows help and exits 0.** Help wins over the `--output` refusal and over
+  every other usage error. The remaining arguments only select which help is
+  shown (for example the subcommand). Showing help never requires loading or
+  converting configuration.
+  - Found during review: `claudine goose -o json --help` was refused (exit 2)
+    in either order; `claudine claude hi --help` forwarded `--help` to the
+    provider; `claudine compose -o json --help` printed help but exited 1;
+    `claudine claude --help` exited 1 with `config.invalid` on a host whose
+    configuration needs conversion.
 
 ## Requirements
 

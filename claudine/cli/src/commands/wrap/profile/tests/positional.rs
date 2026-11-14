@@ -859,7 +859,7 @@ enum FirstMessage<'a> {
 }
 
 /// The child argv the direct wrapper builds for `claudine <provider> … --
-/// <tail>`: clap, the wrapper flag extractor, prompt extraction, the
+/// <tail>`: clap, the separator consumption, prompt extraction, the
 /// entrypoint, non-interactive flags, and prompt delivery, in the order
 /// `run_wrapper` applies them.
 fn direct_wrap_argv_with_tail(
@@ -899,15 +899,8 @@ fn direct_wrap_argv_with_tail(
         .unwrap_or_else(|err| panic!("{provider:?}: {raw:?} must parse: {err}"))
         .args;
     let mut child_args = parsed.passthrough.clone();
-    let extracted = crate::commands::wrap::flags::extract_wrapper_flags_from_passthrough_with_raw(
-        &mut child_args,
-        &raw,
-    )
-    .unwrap();
-    assert!(
-        !extracted.edit && !extracted.interactive,
-        "{provider:?}: {raw:?}: the tail must not yield wrapper flags"
-    );
+    crate::commands::wrap::flags::consume_passthrough_separator_with_raw(&mut child_args, &raw);
+    assert_eq!(parsed.interactive, interactive, "{provider:?}: {raw:?}: the tail must not yield wrapper flags");
     assert_eq!(parsed.edit, matches!(message, FirstMessage::Edited(_)));
 
     let p = profile(provider);

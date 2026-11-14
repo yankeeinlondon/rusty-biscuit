@@ -59,8 +59,8 @@ The caller never sees that raw stream. The table of formats Claudine selects
 for each provider is in
 [Non-Interactive Sessions → Structured JSON Streaming](non-interactive-sessions.md#structured-json-streaming).
 
-A provider option you pass after the provider-argument boundary is the
-provider's, not Claudine's, and reaches it unchanged. If that option itself
+A provider option you pass after the first `--` is the provider's, not
+Claudine's, and reaches it unchanged. If that option itself
 selects an output format, Claudine leaves the provider's format alone and stops
 parsing the stream:
 
@@ -108,12 +108,20 @@ value is refused before anything runs: no lifecycle event, shell approval,
 editor, or provider. The command exits with status `2`, prints one line to
 stderr, and leaves stdout empty. `--dry-run` is refused the same way.
 
+Where you write the option does not matter: before or after the prompt or
+file, between other options, in any spelling (`-o json`, `--output json`,
+`--output=json`). Only after the first `--` is `--output` the provider's.
+
 ```sh
 claudine compose task.md --output json
+claudine claude "fix it" -o json
 # stderr: the --output json CLI option has not been implemented yet in Claudine
 # stdout: nothing
 echo $?   # 2
 ```
+
+`--help` (or `-h`) anywhere before `--` still shows help and exits `0`, even
+beside `--output`.
 
 The refusal names whatever value you passed, including values Claudine never
 accepted (`--output=yaml`). It is deliberate: a caller that asks for JSON must

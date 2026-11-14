@@ -61,6 +61,7 @@ packages:
   entry for `run_provider_wrapper_inner` named the deleted
   `OutputFormat::from_str` transport; the guard reported it as matching no live
   site, so it was deleted.
+- `docs/providers/dispatch-inventory.json` regenerated (see Gate results).
 
 ### Behavior without `--output` (requirement 5)
 
@@ -131,15 +132,174 @@ fail.
 ## Departures and decisions
 
 - No departure from the rulings.
-- Decided here: a wrapper `--output` written after the prompt was never parsed
-  by Claudine (wrapper value options are read only before the first
-  positional); it still reaches the provider, as before. Only a declared
-  Claudine `--output` is refused.
-- Decided here: the refusal runs before `--help` handling of wrappers, so
-  `claudine goose -o json --help` is refused rather than showing help.
+- Round 1 made two decisions that the author reversed in review round 1 (see
+  below): that a wrapper `--output` after the prompt still went to the
+  provider, and that the refusal ran before a wrapper's `--help`.
 - The spec's `PrepareOptions.output` is `CompositionExecutionRequest.output` in
   the code; that field was removed.
 
+## Review round 1 (2026-11-14)
+
+The author's rulings, review round 1, reversed both decisions above: argument
+position never changes meaning, and help before `--` always wins.
+
+### What changed
+
+- **Wrapper option ownership.** New `cli/src/argv/wrapper_options.rs`:
+  `hoist_wrapper_options` runs in `main.rs::run` after the composition
+  partition and before clap. For a wrapper subcommand it moves every option
+  the wrapper declares (space, `=`, attached, and short-cluster spellings),
+  with its value, ahead of the first positional, keeping their written order;
+  every other token keeps its order; nothing at or after the first `--` is
+  read. A value option with no value before `--` is
+  `missing value for '<option>'` (exit 1, as the old `--operation` check was).
+- **Owned surface from clap.** `OwnedFlags::for_wrapper` (in
+  `argv/partition.rs`, beside `for_composition`, sharing its classifier) reads
+  `WrapperArgs` plus the root globals (`-v`, `--debug`, `--plain`); the
+  non-global root `--version` is not included and stays with the provider.
+- **Hand-written extractor removed.** `extract_wrapper_flags_from_passthrough`
+  and `ExtractedWrapperFlags` (the `-y/-i/--edit/--repo/-q/--silent/-v/--perf/
+  --operation` list and its OR-merge in `wrap/mod.rs`) are gone. What remains
+  is `flags::consume_passthrough_separator`, which only removes the user's
+  first `--` and reports where the tail starts
+  (`find_passthrough_dash_boundary_with_raw` is unchanged).
+- **Help precedence.** `argv::select_composition_help` is now
+  `argv::select_help` and also recognizes wrapper subcommands
+  (`HelpDestination::Wrapper`), answered by `main.rs::answer_selected_help`
+  with `print_wrapper_help` before normalization, the `--output` refusal, and
+  any configuration loading. The provider is looked up through the same
+  `Commands` mapping dispatch uses (`main.rs::wrapper_provider`).
+- `claudine compose -o json --help` exited 0 on this host before and after the
+  change; the reported exit 1 did not reproduce. It is now covered by
+  `help_before_the_separator_wins_in_every_position`.
+
+### Tests
+
+- Unit, `argv::wrapper_options::tests`: `the_wrapper_surface_is_the_clap_surface`
+  (drift test: every value and boolean spelling listed and compared with
+  `OwnedFlags::for_wrapper`), every value spelling after the prompt in space
+  and attached form, every boolean spelling, short clusters, ordering,
+  nothing read after `--`, missing value, `--version` left alone, non-wrapper
+  argv unchanged.
+- Unit, `wrap::flags::tests`: extractor tests replaced by
+  `options_after_the_prompt_mean_what_they_mean_before_it`,
+  `a_tail_after_the_separator_is_never_read_as_a_wrapper_option`, the
+  separator tests, a proptest that wrapper options anywhere are Claudine's and
+  other tokens keep their order, and
+  `the_consumed_separator_reports_where_the_tail_starts`.
+- `rule4_help_hoist` tests: `claudine claude compose --help` now selects the
+  claude wrapper's help (it was "no help").
+- L1 `lifecycle_edit_action`: the refusal matrix is now command
+  (wrapper, `compose`, `inline-compose`, `sequence`) × position
+  (`BeforeTarget`, `BetweenOptions`, `AfterTarget`) × spelling (short, long,
+  attached, plus `--dry-run`), each over `json`/`text`/`stream`/`bogus`;
+  plus `a_loop_run_output_is_refused` (before and after the file) and
+  `an_interactive_wrapper_output_is_refused`. The earlier
+  `wrapper_output_is_refused_before_a_prompt` and
+  `compose_output_after_the_file_is_refused` are subsumed.
+- L1 `argv_normalization`: `help_before_the_separator_wins_in_every_position`
+  (first, middle, last; beside `-o json`, `--output=json`, an unknown option,
+  a missing value; claude, compose, inline-compose, sequence),
+  `help_after_the_separator_is_not_claudines`,
+  `help_neither_loads_nor_converts_configuration` (a temp HOME whose legacy
+  `config.json` cannot be converted: a run fails with `config.invalid`, help
+  exits 0 and leaves the files unchanged).
+- L1 new `wrapper_option_position` (Unix, recording stub provider):
+  `a_value_option_after_the_prompt_is_applied_by_claudine` (`-m opus` after the
+  prompt launches with `--model opus`, no `-m`),
+  `dry_run_after_the_prompt_launches_nothing`,
+  `options_after_the_separator_reach_the_provider_verbatim`
+  (`--output json --help -m x` after `--`).
+
+### Behavior a user could have relied on
+
+These change for a token written after the prompt (and before any `--`) that
+used to reach the provider:
+
+- A provider-native flag that shares a Claudine spelling is now Claudine's.
+  Checked against the catalog: Codex `-o <file>` (its `--output-last-message`
+  alias) and Gemini `-o <format>` (its `--output-format` alias) are now
+  refused; Codex `--sandbox <mode>` becomes Claudine's boolean `--sandbox`,
+  leaving `<mode>` as a provider token; Gemini's boolean `--debug` becomes
+  Claudine's value-taking `--debug`, so `claudine gemini hi --debug x` reads
+  `x` as Claudine's tracing level (and `--debug` last is a missing-value
+  error). Any other provider flag spelled like a wrapper option (`-m`, `-y`,
+  `-i`, `-t`, `-q`, `-v`, `--model`, `--include`, `--use`, …) is likewise
+  Claudine's after the prompt.
+- `--help` after the prompt shows Claudine's wrapper help instead of the
+  provider's.
+- A repeated boolean across the prompt (`claudine claude -y hi -y`) used to be
+  OR-merged; it is now clap's "cannot be used multiple times" error (exit 2),
+  as it already was with both copies before the prompt.
+- A value option at the end with no value (`claudine claude hi -m`) is now an
+  error instead of being forwarded.
+
+Each keeps its old meaning when written after `--`.
+
 ## Gate results
 
-GATES_PLACEHOLDER
+All run on macOS (2026-11-14) from `claudine/`:
+
+- `just lint`: pass (clippy for all six claudine packages, including
+  `claudine-contract`, the only other dependent of `claudine`; no other
+  workspace package depends on it).
+- `just test`: 12075 tests run, 12075 passed, 15 skipped. The first run failed
+  one test, `dispatch_inventory::dispatch_inventory_matches_committed_file`,
+  because the removed code and tests dropped 12 provider-dispatch sites;
+  `docs/providers/dispatch-inventory.json` was regenerated with
+  `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` (sites
+  1875 → 1863, line shifts) and the rerun passed. None of the added or changed
+  tests is slow; the refusal tests run in 0.05–0.25 s each.
+- `just test-l2`: 289 passed (plus 3 in the second pass), none failed.
+- Windows and WSL2 were not run; nothing here is OS-specific beyond the
+  existing fixtures.
+
+### Review round 1 gate results (macOS, 2026-11-14)
+
+- `just lint`: pass.
+- `just test`: 12110 tests run, 12110 passed, 15 skipped. No new or changed
+  test is slow (the help tests take 0.16–0.41 s, each refusal test about
+  0.1 s).
+- `just test-l2`: 289 + 3 passed.
+
+## Review round 1, follow-up (2026-11-14)
+
+The coordinator's check of a fresh binary found two defects in the round-1
+change.
+
+- **Attached short spellings on wrappers were not owned.** `-ojson`, `-mopus`,
+  and clusters such as `-yojson` were hoisted as written, but the wrapper's
+  lenient clap pass (`ignore_errors(true)`) drops an attached short value into
+  the passthrough instead of setting the option, so `claudine claude -ojson hi`
+  ran past the refusal in every position. The unit tests only checked the
+  hoisted token order and parsed through a strict probe, and the L1 refusal
+  matrix covered `-o v`, `--output v`, and `--output=v` but not `-ov`, which is
+  why everything was green. Fix: `hoist_wrapper_options` now splits an owned
+  short cluster or attached short value into separate tokens
+  (`split_short_cluster`: `-yq` → `-y -q`, `-yojson` → `-y -o json`).
+- **A missing option value exited 1.** `claudine claude hi -m` reported
+  `missing value for '-m'` with exit 1. `main.rs::exit_code_before_runtime`
+  now exits 2 (`args::EXIT_USAGE`) for `MissingWrapperOptionValue` and for the
+  composition partition's `PartitionError` (a switch or `--` before the file,
+  `--fail-fast`, non-UTF-8 after the file), matching clap's own usage errors
+  (`claudine compose x.md -m` already exited 2). The message text is unchanged.
+
+Tests added or changed:
+
+- Unit: attached short values and clusters expect the split form, before and
+  after the prompt; `a_short_cluster_of_owned_options_is_split_into_its_options`.
+- L1 `lifecycle_edit_action`: a `short_attached_spelling` row (`-o<value>`) in
+  every command and position.
+- L1 `argv_normalization`:
+  `the_output_refusal_precedes_configuration_in_every_spelling_and_position`
+  (a temp HOME whose configuration cannot be converted; claude, compose,
+  inline-compose, sequence; `-o json`, `-ojson`, `--output json`,
+  `--output=json`, `-yojson`, `-yo json`; before, between, after; all exit 2
+  with the exact refusal) and `an_option_missing_its_value_is_a_usage_error`
+  (wrapper and composition, exit 2, no `config.invalid`).
+- L1 `wrapper_option_position::a_value_option_after_the_prompt_is_applied_by_claudine`
+  now covers `-m opus`, `-mopus`, `--model=opus`, and `-ymopus`.
+
+Behavior change to note: composition partition errors (a provider switch or
+`--` before the file, and the others above) now exit 2 instead of 1.
+
