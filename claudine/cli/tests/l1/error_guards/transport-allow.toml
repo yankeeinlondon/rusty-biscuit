@@ -101,6 +101,14 @@ The Darkmatter half of first-run setup (the `permissions` handshake) is delibera
 
 [[allow]]
 shape = "format_context"
+file = "cli/src/main.rs"
+symbol = "refresh_host_registration"
+tag = "retained"
+reason = """
+The launch refresh of Claudine's Darkmatter host registration is deliberately non-fatal: the last published revision stays in use and the command runs on. The `PublishError` is rendered once with `log::warn` and the function returns nothing; the typed error is never returned, so this line is the final render."""
+
+[[allow]]
+shape = "format_context"
 file = "cli/src/commands/init_wizard.rs"
 symbol = "register_hooks_all_providers"
 tag = "retained"

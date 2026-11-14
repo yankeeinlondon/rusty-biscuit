@@ -48,7 +48,7 @@ work-counters = ["darkmatter/work-counters"]
 # Internal
 claudine-catalog-types = { path = "../catalog-types" }
 sniff = { path = "../../sniff/lib" }
-biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash", "blake3"] }
+biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash", "blake3", "json"] }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5", "file-reference"] }
 darkmatter = { path = "../../darkmatter/lib" }
 simplified-schema = { path = "../../simplified-schema/lib" }

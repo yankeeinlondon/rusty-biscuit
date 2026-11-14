@@ -104,7 +104,8 @@ struct Column {
 const ACTION_PROBES: (&str, &str) = ("start: [{ info: hi }]", "start: [{ inf0: hi }]");
 const LIFECYCLE_PROBES: (&str, &str) = (
     "start: [{ when: \"a\", then: [{ when: \"b\", then: [{ when: \"c\", then: [stop] }] }] }]",
-    "initialize: [{ shell: x }]",
+    // `agent` selects claudine.yaml; `initialize` alone is shared with md.
+    "agent: claude\ninitialize: [{ shell: x }]",
 );
 
 /// The field no longer constrains the probes: both are valid.
@@ -260,7 +261,7 @@ const COLUMNS: &[Column] = &[
     Column {
         name: "trigger_condition_operand",
         file: "claudine.yaml",
-        pointer: "/match/group/5/start",
+        pointer: "/match/group/0/start",
         probes: ("start: hi", "start: null"),
         selection: true,
         outcomes: [Error; 8],

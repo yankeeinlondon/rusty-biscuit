@@ -480,7 +480,8 @@ fn embedded_payloads_apply_without_disk_schemas() {
     assert!(effective.dependencies().is_empty(), "{:?}", effective.dependencies());
     for (frontmatter, property) in [
         ("start: [{ inf0: hi }]", "start"),
-        ("initialize: [{ shell: ls }]", "initialize"),
+        // `agent` selects claudine.yaml; `initialize` alone is shared with md.
+        ("agent: claude\ninitialize: [{ shell: ls }]", "initialize"),
         ("loop: { gate: [{ inf0: hi }] }", "loop"),
         ("start: [stop]\nname: { a: 1 }", "name"),
     ] {
@@ -855,7 +856,8 @@ fn disk_bundle_resolves_its_relative_imports_from_disk() {
     let schemas = locations.schemas();
     for (frontmatter, property) in [
         ("start: [{ inf0: hi }]", "start"),
-        ("initialize: [{ shell: ls }]", "initialize"),
+        // `agent` selects claudine.yaml; `initialize` alone is shared with md.
+        ("agent: claude\ninitialize: [{ shell: ls }]", "initialize"),
         ("loop: { gate: [{ inf0: hi }] }", "loop"),
         ("start: [stop]\nname: { a: 1 }", "name"),
         ("prompt: hi\nhash: [1]", "hash"),
@@ -1530,8 +1532,9 @@ fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
             &[("/success/0/then/1", 5, 9, BARE_VERB)],
         ),
         ("start:\n  - say: hi\n    inf0: hi\n", &[("/start/0", 2, 5, BARE_VERB)]),
-        // `cancelled` admits a shell; `initialize` never does.
-        ("initialize:\n  - shell: ls\ncancelled:\n  - shell: ls\n", &[("/initialize/0", 2, 5, BARE_VERB)]),
+        // `cancelled` admits a shell; `initialize` never does. The shared
+        // events select nothing alone, so `agent` selects claudine.yaml.
+        ("initialize:\n  - shell: ls\ncancelled:\n  - shell: ls\nagent: claude\n", &[("/initialize/0", 2, 5, BARE_VERB)]),
         // A loop action missing its required `prop`.
         ("loop:\n  action:\n    op: set\n", &[("/loop/action", 3, 5, "an iteration action such as increment(iteration)")]),
     ];

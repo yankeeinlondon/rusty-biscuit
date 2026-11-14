@@ -257,7 +257,7 @@ fn frozen_lib_review() {
     assert_shipped(&Shipped {
         label: "lib/tests/fixtures/frozen_prompts/prompts/review.md",
         text: include_str!("../fixtures/frozen_prompts/prompts/review.md"),
-        selects: CLAUDINE,
+        selects: NONE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });
@@ -348,7 +348,7 @@ fn frozen_cli_implement() {
     assert_shipped(&Shipped {
         label: "cli/tests/fixtures/frozen_prompts/prompts/implement.md",
         text: include_str!("../../../cli/tests/fixtures/frozen_prompts/prompts/implement.md"),
-        selects: CLAUDINE,
+        selects: NONE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });
@@ -381,7 +381,7 @@ fn frozen_cli_review() {
     assert_shipped(&Shipped {
         label: "cli/tests/fixtures/frozen_prompts/prompts/review.md",
         text: include_str!("../../../cli/tests/fixtures/frozen_prompts/prompts/review.md"),
-        selects: CLAUDINE,
+        selects: NONE,
         schema: Invalid(&[("", "\"spec\" is a required property")]),
         parser: ACCEPTS,
     });

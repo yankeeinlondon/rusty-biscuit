@@ -38,6 +38,7 @@ pub mod mismatch;
 pub mod preflight;
 mod prepare;
 pub mod provider_tail;
+pub mod registration;
 pub mod ownership;
 mod reserved;
 mod resolve;

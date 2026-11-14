@@ -30,6 +30,12 @@ use simplified_schema::embedded::EmbeddedSchemaBundle;
 use simplified_schema::SchemaError;
 use serde_json::{Value, json};
 
+/// A key that selects `claudine.yaml` without adding a lifecycle stack.
+/// `initialize`, `cancelled`, and `finalize` are shared with Darkmatter's
+/// `md` host and select nothing on their own, so a probe of Claudine's types
+/// for them carries this line.
+pub(crate) const CLAUDINE_SELECTOR: &str = "agent: claude";
+
 /// One bundle file: its name in `schemas/` and its text.
 pub(crate) type BundleFile = (&'static str, String);
 
@@ -804,7 +810,7 @@ fn required_long_form_fields_survive_every_reference() {
         ("success", "{ say: { no_error: true } }", "text"),
         ("initialize", "{ info: {} }", "text"),
     ] {
-        let path = repo.write_document("required.md", &format!("---\n{event}:\n    - {item}\n---\n"));
+        let path = repo.write_document("required.md", &format!("---\n{CLAUDINE_SELECTOR}\n{event}:\n    - {item}\n---\n"));
         let judged = discovered.judge(&path, claudine, inline).expect("judged");
         assert!(!judged.report.valid, "`{event}: [{item}]` lacks `{missing}`");
         assert!(
@@ -898,7 +904,7 @@ fn assert_typed_at_every_depth(bundle: &[BundleFile], claudine: &str, inline: &s
     let discovered = repo.discover().expect("the shipped bundle loads");
     let close = if holder.starts_with("loop") { " }" } else { "" };
     let judge = |name: &str, stack: String| {
-        let path = repo.write_document(&format!("{name}.md"), &format!("---\n{holder}{stack}{close}\n---\n"));
+        let path = repo.write_document(&format!("{name}.md"), &format!("---\n{CLAUDINE_SELECTOR}\n{holder}{stack}{close}\n---\n"));
         discovered.judge(&path, claudine, inline).expect("judged").report
     };
     for depth in [1, 3, 5, 6, 8] {
@@ -1956,7 +1962,7 @@ fn sequence_container_schema_contract() {
         ("task-fields", "cancelled: []\nsequence: [{name: review, prompt: './step.md', operation: review, flow: audit, topic: parsing, with: {x: 1}}]", true),
         ("nested", "cancelled: []\nsequence: [{name: child, sequence: [], cancelled: []}, {group: {tasks: [{name: leg, shell: 'echo done'}], fail_fast: false, cancelled: []}}]", true),
     ] {
-        let path = repo.write_document(&format!("container-{name}.md"), &format!("---\n{yaml}\n---\n"));
+        let path = repo.write_document(&format!("container-{name}.md"), &format!("---\n{CLAUDINE_SELECTOR}\n{yaml}\n---\n"));
         let judged = discovered.judge(&path, trigger, inline).unwrap();
         assert!(judged.claudine, "{name}: selects shipped trigger");
         assert_eq!(judged.report.valid, valid, "{name}: {:?}", judged.report);
@@ -1995,7 +2001,7 @@ fn task_when_and_container_loop_schema_shapes() {
         ("deeper-group-loop-gate", "cancelled: []\nsequence: [{name: a, sequence: [{group: {tasks: [{name: leg, shell: x}], loop: {until: 'true', gate: [{inf0: hi}]}}}]}]", false),
         ("root-loop", "loop: {until: 'true'}\nsequence: [{name: a, shell: x, when: ready}]", true),
     ] {
-        let path = repo.write_document(&format!("shape-{name}.md"), &format!("---\n{yaml}\n---\n"));
+        let path = repo.write_document(&format!("shape-{name}.md"), &format!("---\n{CLAUDINE_SELECTOR}\n{yaml}\n---\n"));
         let judged = discovered.judge(&path, trigger, inline).unwrap();
         assert!(judged.claudine, "{name}: selects shipped trigger");
         assert_eq!(judged.report.valid, valid, "{name}: {:?}", judged.report);
@@ -2138,7 +2144,7 @@ fn document_cancelled_rejects_forbidden_actions() {
         include_str!("../../../schemas/inline-compose.yaml"),
         CancelledSite {
             name: "document",
-            frontmatter: "cancelled: ITEMS",
+            frontmatter: "agent: claude\ncancelled: ITEMS",
             pointer: "/cancelled/0",
         },
         &FORBIDDEN_IN_CANCELLED,
@@ -2270,7 +2276,7 @@ struct StackSite {
 
 const DOCUMENT_CANCELLED: StackSite = StackSite {
     name: "document cancelled",
-    frontmatter: "cancelled: ITEMS",
+    frontmatter: "agent: claude\ncancelled: ITEMS",
     stack: "/cancelled",
 };
 const TASK_CANCELLED: StackSite = StackSite {
@@ -2428,7 +2434,7 @@ fn cancelled_dictionaries_reject_forbidden_actions() {
     let repo = SchemaRepo::new(&shipped_bundle!());
     let discovered = repo.discover().expect("the shipped bundle loads");
     let judge = |name: &str, frontmatter: &str| {
-        let path = repo.write_document(&format!("{name}.md"), &format!("---\n{frontmatter}\n---\n"));
+        let path = repo.write_document(&format!("{name}.md"), &format!("---\n{CLAUDINE_SELECTOR}\n{frontmatter}\n---\n"));
         discovered
             .judge(
                 &path,
@@ -2500,7 +2506,7 @@ impl SingleActionJudge {
     }
 
     fn verdicts(&self, frontmatter: &str) -> (bool, Vec<(String, String)>, Result<(), String>) {
-        let path = self.repo.write_document("single.md", &format!("---\n{frontmatter}\n---\n"));
+        let path = self.repo.write_document("single.md", &format!("---\n{CLAUDINE_SELECTOR}\n{frontmatter}\n---\n"));
         let judged = self
             .discovered
             .judge(&path, include_str!("../../../schemas/claudine.yaml"), include_str!("../../../schemas/inline-compose.yaml"))

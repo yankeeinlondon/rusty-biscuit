@@ -478,7 +478,15 @@ The sequence trigger is `schemas/sequence.yaml` (matches any non-null
 `sequence`; payload `sequence`, `template`, and `fail_fast: null` so a root
 `fail_fast` is reported by name), and it is the only declaration of
 `sequence`: `claudine.yaml` no longer declares it, and a sequence document's
-events and `loop` are typed by `claudine.yaml`, which they select. The
+events and `loop` are typed by `claudine.yaml` when it is selected. The
+shared Darkmatter events `initialize`, `cancelled`, and `finalize` never
+select `claudine.yaml` alone (it still types them once selected), so a probe
+of their Claudine types adds a Claudine key (`claudine_schemas.rs::CLAUDINE_SELECTOR`,
+`agent: claude`). `schemas/claudine-document.yaml` is the identifying trigger
+(the nine keys `sequence`/`start`/`blocked`/`success`/`failure`/`loop`/`prompt`/`agent`/`model`,
+empty payload) named only by the published `darkmatter-host` manifest; it is
+not in `CLAUDINE_SCHEMA_FILES`, so Claudine's runtime never applies it
+(`lib/tests/l1/claudine_identification.rs`). The
 container types live in `schemas/sequence-types.yaml`, not `lifecycle.yaml`.
 The lifecycle families (`stack`/`item`/`conditional`, `initialize-*`,
 `cancelled-*`, literal `then`/`else` keys) and the containers (`task`

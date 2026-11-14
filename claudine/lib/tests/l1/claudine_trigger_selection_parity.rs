@@ -5,7 +5,10 @@
 //!
 //! The expected table was recorded from the public scan at the revision
 //! before the migration (when the files declared `kind: trigger-schema` and
-//! used `any:`) and is not edited by it. The bundle is the one Claudine ships,
+//! used `any:`) and is not edited by it, with one later, deliberate change:
+//! `initialize`, `cancelled`, and `finalize` are events Claudine shares with
+//! Darkmatter's `md` host, so they no longer select `claudine.yaml` on their
+//! own and their rows select nothing. The bundle is the one Claudine ships,
 //! registered as the last-resort location of a temporary repository whose
 //! `schemas/` folder is empty, and each document is judged through
 //! [`evaluate_registry`].
@@ -116,12 +119,12 @@ const RECORDED: &[(&str, &[&str])] = &[
     ("blocked=text", &["claudine.yaml"]),
     ("blocked=true", &["claudine.yaml"]),
     ("blocked={ a: 1 }", &["claudine.yaml"]),
-    ("cancelled=1", &["claudine.yaml"]),
-    ("cancelled=[1]", &["claudine.yaml"]),
+    ("cancelled=1", &[]),
+    ("cancelled=[1]", &[]),
     ("cancelled=null", &[]),
-    ("cancelled=text", &["claudine.yaml"]),
-    ("cancelled=true", &["claudine.yaml"]),
-    ("cancelled={ a: 1 }", &["claudine.yaml"]),
+    ("cancelled=text", &[]),
+    ("cancelled=true", &[]),
+    ("cancelled={ a: 1 }", &[]),
     ("empty", &[]),
     ("failure=1", &["claudine.yaml"]),
     ("failure=[1]", &["claudine.yaml"]),
@@ -129,18 +132,18 @@ const RECORDED: &[(&str, &[&str])] = &[
     ("failure=text", &["claudine.yaml"]),
     ("failure=true", &["claudine.yaml"]),
     ("failure={ a: 1 }", &["claudine.yaml"]),
-    ("finalize=1", &["claudine.yaml"]),
-    ("finalize=[1]", &["claudine.yaml"]),
+    ("finalize=1", &[]),
+    ("finalize=[1]", &[]),
     ("finalize=null", &[]),
-    ("finalize=text", &["claudine.yaml"]),
-    ("finalize=true", &["claudine.yaml"]),
-    ("finalize={ a: 1 }", &["claudine.yaml"]),
-    ("initialize=1", &["claudine.yaml"]),
-    ("initialize=[1]", &["claudine.yaml"]),
+    ("finalize=text", &[]),
+    ("finalize=true", &[]),
+    ("finalize={ a: 1 }", &[]),
+    ("initialize=1", &[]),
+    ("initialize=[1]", &[]),
     ("initialize=null", &[]),
-    ("initialize=text", &["claudine.yaml"]),
-    ("initialize=true", &["claudine.yaml"]),
-    ("initialize={ a: 1 }", &["claudine.yaml"]),
+    ("initialize=text", &[]),
+    ("initialize=true", &[]),
+    ("initialize={ a: 1 }", &[]),
     ("loop=1", &["claudine.yaml"]),
     ("loop=[1]", &["claudine.yaml"]),
     ("loop=null", &[]),

@@ -109,8 +109,14 @@ permission in one place:
 ```yaml
 # ~/.darkmatter.yaml
 permissions: ~/.claudine/config.yaml
-register: []
+register:
+    - ~/.claudine/darkmatter-host.yaml
 ```
+
+The `register` entry is Claudine's host registration: setup publishes it
+before writing either file and adds the entry last, so `md` and DMLS
+recognize Claudine documents anywhere (see
+[The published host registration](schemas.md#the-published-host-registration)).
 
 First-run setup writes Claudine's own file, then Darkmatter's:
 

@@ -1543,7 +1543,9 @@ fn schema_validate_shipped_claudine_schema_accepts_reused_lifecycle_and_loop_typ
 #[test]
 fn schema_validate_shipped_claudine_schema_rejects_an_unknown_lifecycle_verb() {
     let process = CliProcessFixture::new();
-    let doc = shipped_claudine_document(&process, "initialize:\n  - bogus: 1\n");
+    // `initialize` alone is shared with the `md` host and selects no Claudine
+    // trigger; `agent` makes this a Claudine document.
+    let doc = shipped_claudine_document(&process, "initialize:\n  - bogus: 1\nagent: claude\n");
 
     let (code, report) = validate_triggered_json(&process, &doc);
 

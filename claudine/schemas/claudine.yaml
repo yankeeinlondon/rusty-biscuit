@@ -1,9 +1,13 @@
-# Claudine's frontmatter catalog, applied to any document that sets a
-# lifecycle event, `loop`, `prompt`, `agent`, or `model` to a non-null value.
-# Hand-maintained; see README.md.
+# Claudine's frontmatter catalog, applied to any document that sets `start`,
+# `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model` to a
+# non-null value. Hand-maintained; see README.md.
 #
-# Each identifying key is matched once per non-null YAML type, so a value of
+# Each selecting key is matched once per non-null YAML type, so a value of
 # the wrong type still selects this schema and the payload then rejects it.
+# `initialize`, `cancelled`, and `finalize` are Darkmatter events shared with
+# the `md` host, so they never select this schema on their own; a selected
+# document still gets Claudine's types for them from the payload below, and
+# an unselected one is judged by Darkmatter's baseline types for them.
 # The payload declares no required property and leaves the document open, so
 # application data beside Claudine's controls is kept. `sequence` is declared
 # only by sequence.yaml, which every document with a non-null `sequence`
@@ -16,11 +20,6 @@
 kind: schema-trigger
 match:
     group:
-        - initialize: string(required)
-        - initialize: number(required)
-        - initialize: boolean(required)
-        - initialize: object(required)
-        - initialize: "unknown[](required)"
         - start: string(required)
         - start: number(required)
         - start: boolean(required)
@@ -41,16 +40,6 @@ match:
         - failure: boolean(required)
         - failure: object(required)
         - failure: "unknown[](required)"
-        - cancelled: string(required)
-        - cancelled: number(required)
-        - cancelled: boolean(required)
-        - cancelled: object(required)
-        - cancelled: "unknown[](required)"
-        - finalize: string(required)
-        - finalize: number(required)
-        - finalize: boolean(required)
-        - finalize: object(required)
-        - finalize: "unknown[](required)"
         - loop: string(required)
         - loop: number(required)
         - loop: boolean(required)
