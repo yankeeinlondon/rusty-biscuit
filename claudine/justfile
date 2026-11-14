@@ -14,6 +14,7 @@ import "../just/notify.just"
 import "../just/ai.just"
 import "../just/devops.just"
 import "../just/spec.just"
+import "../just/skills.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -495,16 +496,22 @@ git-conflict:
 readme:
     _readme_files claudine
 
-# publish summary research to the claudine skill
-publish-summary-research:
+# Publish Claudine's skills: the composed research summaries into the repo's
+# `claudine` skill, and the caller skill (`docs/use-skills/use-claudine`) into
+# this host's user skill directory (`dest` overrides `~/.claude/skills`).
+publish-skills dest="": _publish-summary-research
+    @just _publish_use_skills "{{ dest }}"
+
+_publish-summary-research:
     #!/usr/bin/env bash
     set -euo pipefail
     echo
     dest="../.claude/skills/claudine/summaries"
     mkdir -p "${dest}"
+    md="$(just _repo_md)"
     for src in ./docs/research/summary/*.md; do
         name="$(basename "${src}")"
-        out="$(md compose "${src}")"
+        out="$("${md}" compose "${src}")"
         # a summary whose sequence has not run yet composes to an empty body
         if [ -z "${out//[[:space:]]/}" ]; then
             echo -e "{{ DIM }}skipped ${name} (no generated body yet){{ RESET }}"

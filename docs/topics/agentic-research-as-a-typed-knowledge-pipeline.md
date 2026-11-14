@@ -91,7 +91,7 @@ In Claudine, for example:
 - [`docs/research/skills/_schema.yaml`](../research/skills/_schema.yaml) defines the topic's metadata contract.
 - Each provider receives its own document, such as [`docs/research/skills/codex.md`](../research/skills/codex.md).
 - [`docs/research/summary/agent-skills.md`](../research/summary/agent-skills.md) synthesizes the provider documents.
-- `just publish-summary-research` publishes the composed summaries into the Claudine Agent Skill.
+- `just publish-skills` (in `claudine/`) publishes the composed summaries into the Claudine Agent Skill, along with Claudine's caller skill.
 
 These are Claudine-specific artifacts, but their roles are reusable.
 
