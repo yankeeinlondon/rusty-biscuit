@@ -85,13 +85,23 @@ decisions_for_review:
     `composition.lifecycle_edit_failed` is cataloged with origin `environment` and disposition `correctable`: most causes are the host (no editor, no terminal or display, an editor that failed or cannot wait), though a refused target (outside the workspace, a URL, `create_new` on an existing file) is the author's. The typed cause is stored as `Box<EditError>`, not the plan's `Arc`, because Claudine's errors are not cloned. Alternative: origin `author`, or split the code by cause. Redoing: one registry field (and the `err.origin` a lifecycle handler sees).
   - |-
     Two plan items were proved with the closest current grammar: task `setup:`/`teardown:` and `execution: serial` groups were removed from Claudine's grammar and every group is concurrent, so the serial-stack ordering test uses an inline `sequence:` container's `start`/`finalize` stacks around its children. And "structured output keeps one valid result" has no Claudine counterpart: `--output json` sets the provider's output format and Claudine prints no envelope for an `initialize` failure, so the test asserts stdout stays empty and the refusal reaches stderr. Nothing to redo unless a reviewer wants a Claudine-level JSON result for lifecycle failures.
+  - |-
+    Schema validation now applies the lifecycle parser's own rules to `edit`'s target and flags (`BoundOperands::report_refused_targets`, using `edit_file_problem` and `edit_flag_problem`, which the parser now calls too). The plan expected the schema types alone to agree with the parser, but the shared conversion engine reads `edit: 5` and `edit: [1]` as text and `gui: "yes"` as `true`, so `md schema validate` and DMLS reported documents valid that `md compose` refuses ("`edit.file` must be a string, got number"). Alternatives: accept the disagreement and document it; add a schema-language marker that turns conversion off for one value (a change to the simplified-schema crate and every consumer of conversion); or apply the parser to every hand-written verb (wider behavior change: `say: 5` and similar are accepted today). Reversing means removing the `edit` branch and `report_refused_targets` in `darkmatter/lib/src/markdown/schemas/bound_operands.rs`, its one call in `schemas/mod.rs`, and the number, boolean, and quoted-flag rows of `lib/tests/l1/lifecycle_edit_schema_parity.rs`.
+  - |-
+    `edit`'s schema arms and its `create_new`/`gui` flags are marked `non-null`, which plan rule R24 did not list. Without it an optional property accepts `null`, so the schema admitted `edit: null`, `gui: null`, and `create_new: null`, all of which the parser refuses (`null` must not read as the absent default). Alternative: leave `null` admitted by the schema and rely on the parser. Reversing means deleting the three `non-null` markers in `darkmatter/schemas/partials/lifecycle.yaml`, regenerating the shipped artifacts and goldens, and dropping the null rows of the parity test.
+  - |-
+    `edit` is typed in every Claudine place that accepts an expression action, which is more than the sites the plan listed (beside `prep` and `ensure_file`): also `cancelled-bundle` and both loop arms (`loop-bundle`, `loop-single`). Claudine's parser accepts `edit` in all of them, and its schemas promise to hold exactly the parser's verbs. In `cancelled` (and after any cancellation) the action is refused at run time, so typing it there only lets an author write it. Alternative: leave it out of `cancelled-bundle`, making the schema refuse what the parser accepts. Reversing is one line in `claudine/schemas/action.yaml` plus regeneration.
+  - |-
+    `edit-long` carries `operands(edit-long)` like `edit-short`, although R24's prose said the types carry no `operands(...)` marker. The marker is how schema validation finds a parser-owned verb's value at all (malformed `{{ … }}` spans and the parser rules above); R24's own `edit-short` definition already had it. Nothing to redo unless a reviewer wants templates in `edit`'s long form left unscanned.
+  - |-
+    In DMLS, a quoted `gui: "yes"` shows two diagnostics: the parser's located one at `gui` and the schema's union summary ("not valid under any of the schemas") on the enclosing `edit`, because the editor's passive validation does not convert the value first. `md schema validate` shows only the located one. I left the summary: dropping a union failure at the action could hide an unrelated problem in the same action (an unknown key beside the bad flag). Alternative: suppress the action-level union summary whenever a parser rule located a problem inside it. Redoing is a filter in `report_refused_targets` and a tighter assertion in `darkmatter/dmls/tests/l1/edit_action_editor.rs`.
 message_to_agent: |-
-  Phase 5 wired Claudine: `claudine/lib/src/composition/lifecycle/editor.rs` (service + `set_structured_output`), `CompositionError::LifecycleEditFailed` / `composition.lifecycle_edit_failed`, parallel members deny terminal editors. Things Phase 6 must do because of it:
-  - Claudine's schemas (`claudine/schemas/action.yaml`, `lifecycle.yaml`) still reject `edit`, so seven tests in `claudine/cli/tests/l1/lifecycle_edit_action.rs` are wrapped in `pending_until_the_schema_knows_edit`. Once the schema entries land they FAIL with "the contract now holds ... delete the wrapper": remove each wrapper call (and the helper and `SCHEMA_ORACLE` when none remain), then rerun `cargo nextest run -p claudine-cli --features test-fixtures --test l1 -E 'test(/lifecycle_edit_action::/)'`. The bodies were verified against a temporary schema entry, so a body failure then is a real defect.
-  - Phase 3's exemptions also fail when a schema types `edit` (`lifecycle_schema_parity.rs`, `claudine_schemas.rs::hand_verbs_equal_the_parser_inventory`): drop them in the same change.
-  - Claudine's `just test-l2` now builds with `test-fixtures` (L2 `edit` tests use `claudine-fake-editor`).
-  - Open for review, not for you to fix: no Claudine timeout cancels an open editor, and a failing sequence-root `initialize` exits 1 silently (see decisions).
-  - Disk: `/Volumes/coding` was full this phase; check `df -h /Volumes/coding` before a full build, and run `bash scripts/sweep.sh` (this worktree only) if it is low.
+  Phase 6 landed the schemas and the parity tests. What Phase 7 should know:
+  - Schema descriptions an author sees on hover: `edit-short` "open this file in the editor and wait for it to close; a missing file is created"; `edit-long` adds that `create_new` refuses an existing file and `gui` chooses a graphical (true) or terminal (false) editor. Keep docs consistent with them (`darkmatter/schemas/partials/lifecycle.yaml`).
+  - Schema validation (`md schema validate`, DMLS) now refuses exactly what the parser refuses for `edit`, including `edit: 5`, `gui: "yes"`, and `null` flags, through `edit_file_problem`/`edit_flag_problem` in `darkmatter/lib/src/lifecycle/action_shape.rs` (see the decisions list). The darkmatter skill's `schema.md` already describes this; `lifecycle.md` and the user docs do not yet.
+  - Claudine types `edit` in its expression category, all three bundles (including `cancelled-bundle`), and both loop arms.
+  - The Claudine `pending_until_the_schema_knows_edit` wrapper and both Phase 3 exemptions are gone; Claudine's `bundle_values_are_the_category_short_forms` now counts 21 hand long forms.
+  - Disk: this worktree's `target/debug/incremental.kache-auto` grew to 64 GB and filled the volume mid-phase (`scripts/sweep.sh`'s incremental pass does not match that directory name); I deleted it. Check `df -h /Volumes/coding` before the closing full gates.
 source_files_during_phase_2:
   - darkmatter/lib/src/process_tree.rs
   - darkmatter/lib/src/lib.rs
@@ -189,6 +199,64 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/claudine/architecture.md
   - .claude/skills/darkmatter/lifecycle.md
+source_files_during_phase_6:
+  - darkmatter/schemas/partials/lifecycle.yaml
+  - darkmatter/schemas/partials/md-lifecycle.yaml
+  - claudine/schemas/action.yaml
+  - claudine/schemas/lifecycle.yaml
+  - darkmatter/lib/generated/shipped.json
+  - claudine/lib/generated/shipped.json
+  - darkmatter/lib/src/lifecycle/action_shape.rs
+  - darkmatter/lib/src/lifecycle/mod.rs
+  - darkmatter/lib/src/lifecycle/parse.rs
+  - darkmatter/lib/src/markdown/schemas/bound_operands.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/tests/l1/lifecycle_edit_schema_parity.rs
+  - darkmatter/lib/tests/l1/lifecycle_schema_parity.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+  - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+  - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+  - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+  - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+  - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+  - darkmatter/cli/tests/l1/compose_edit_action.rs
+  - darkmatter/dmls/tests/l1/edit_action_editor.rs
+  - darkmatter/dmls/tests/l1/main.rs
+  - claudine/lib/tests/l1/claudine_schemas.rs
+  - claudine/cli/tests/l1/lifecycle_edit_action.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/darkmatter/schema.md
+source_files_during_phase_7:
+  - darkmatter/lib/src/editor/launch.rs
+  - darkmatter/lib/src/editor/mod.rs
+  - darkmatter/lib/src/editor/resolve.rs
+  - darkmatter/lib/src/lifecycle/executor.rs
+  - darkmatter/lib/src/process_tree.rs
+  - tools/test-toolkit/src/fake_editor.rs
+docs_updated_during_phase_7:
+  - darkmatter/README.md
+  - darkmatter/docs/cli/compose.md
+  - darkmatter/docs/cli/edit.md
+  - darkmatter/docs/topics/caching.md
+  - darkmatter/docs/topics/lifecycle/index.md
+  - darkmatter/docs/topics/lifecycle/error-handling.md
+  - darkmatter/docs/topics/loading-data.md
+  - darkmatter/docs/topics/side-effects.md
+  - claudine/docs/getting-started/index.md
+  - claudine/docs/topics/flow-control/lifecycle.md
+  - claudine/docs/topics/flow-control/sequences.md
+  - claudine/docs/topics/schemas.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/darkmatter/lifecycle.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/windows.md
+  - ~/.claude/skills/use-darkmatter/authoring.md (user scope, outside the repository)
+  - ~/.claude/skills/use-claudine/lifecycle.md (user scope, outside the repository)
 ---
 
 # Implementation Log for 2026-11-14-edit-action (7 phases)
@@ -779,3 +847,97 @@ findings). The input-robustness matrix does not apply: no file-format or configu
 - Cross-OS (process spawns, editor identification by file name, paths):
   `just cross-check claudine-cli --os windows lifecycle_edit_action` 13/13 passed (the four
   interrupt/PTY tests are Unix-only by design).
+
+## Phase 6
+
+### What was built
+
+- **Schema definition (R24).** `darkmatter/schemas/partials/lifecycle.yaml` gains hand-written `edit-short` (a non-blank string, or a one-item list of one) and `edit-long` (`file` required and non-blank; `create_new`, `gui`, `no_error` booleans), outside every generated region, with hover descriptions, and references `edit` in `expression`, `bundle`, and `initialize-bundle`. `md-lifecycle.yaml` adds `edit` to `md-expression`, `md-bundle`, `md-initialize-bundle`, and the `md-unknown-action` exclusion list. Claudine's `action.yaml` types it in `expression` and all three bundles (`bundle`, `initialize-bundle`, `cancelled-bundle`); `lifecycle.yaml` in `loop-bundle` and `loop-single`.
+- **`non-null` arms and flags** (a departure from R24, see decisions): without it the schema admitted `edit: null`, `gui: null`, and `create_new: null`.
+- **Schema validation applies the parser's own `edit` rules** (a departure, see decisions). The conversion engine read `edit: 5`/`edit: [1]` as text and `gui: "yes"` as `true`; `md compose` refused all three while `md schema validate` reported them valid (reproduced with the built `md` before the fix). The rules now live once, in `lifecycle/action_shape.rs::{edit_file_problem, edit_flag_problem}`; the parser (`edit_file`, `parse.rs`'s flag check) and `markdown/schemas/bound_operands.rs::report_refused_targets` both call them, so the schema problem carries the parser's message at the operand's own pointer.
+- **Generator and projection.** `schema_projection.rs` already treated `LIFECYCLE_ONLY_VERBS` as hand-owned (Phase 3's `hand_owner` branch); `just regen-lifecycle-schema` left every generated region unchanged, and the generator example needed no edit.
+- **Artifacts.** Root `just shipped-schemas` regenerated Darkmatter's and Claudine's `shipped.json`; `just regen-lifecycle-artifact` (claudine) produced no byte change to `globals.lifecycle.json`, as expected; a second `just shipped-schemas` reported "every shipped artifact is current" and the bytes were compared equal. `PREPARATION_REVISION` not bumped (no preparation code changed).
+- **Goldens.** The recursive-schema goldens that embed the live baseline (`darkmatter-schemas-partials-fm`, `darkmatter-schemas-darkmatter-schema-body`, `effective-baseline-*`, `embedded-darkmatter-base`) were re-blessed with the README's command; the diffs are only the new `edit` properties and `edit` in the patterns' exclusion lists.
+- **Exemptions removed.** `lifecycle_schema_parity.rs` (md open arm) and `claudine_schemas.rs::hand_verbs_equal_the_parser_inventory` no longer exempt `LIFECYCLE_ONLY_VERBS`; the parity test now also asserts `edit` is among md's provided verbs. `claudine_schemas.rs::bundle_values_are_the_category_short_forms` counts 21 hand long forms (was 20). The six `pending_until_the_schema_knows_edit` call sites in `claudine/cli/tests/l1/lifecycle_edit_action.rs` (the log said seven tests; there were six call sites) are unwrapped, and the helper, `SCHEMA_ORACLE`, and the module doc's "Pending contracts" section are deleted; all 17 tests in the file pass unwrapped.
+
+### Requirement-to-test mapping
+
+| Requirement | Test | Boundary / rung |
+|---|---|---|
+| The same malformed shapes are refused by schema validation and the runtime parser, at the action | `darkmatter/lib/tests/l1/lifecycle_edit_schema_parity.rs::every_refused_cell_fails_schema_validation_at_the_action_and_the_parser` (28 shapes × `initialize` and an untaken `composed` `else` branch) | library public API (F2) |
+| Valid shapes and the unedited motivating workflow are accepted by both | `…::every_accepted_cell_passes_schema_validation_and_the_parser`, `…::the_motivating_workflow_passes_schema_validation_and_the_parser` | F2 |
+| `md schema validate` and `md compose` wiring: non-boolean `gui` and `edit: []` refused at the authored line/column and property, control validates clean, no editor launch, nothing created | `darkmatter/cli/tests/l1/compose_edit_action.rs::schema_validate_and_compose_refuse_malformed_operands_alike_without_launch` | spawned CLI (F3) |
+| DMLS completion offers `edit` in `initialize` and `composed` (md) / `start` (Claudine); hover shows the schema description | `darkmatter/dmls/tests/l1/edit_action_editor.rs::{md,claudine}_completion_offers_edit_…_and_hover_describes_it` | LSP session (F3) |
+| DMLS diagnoses malformed `gui` (untaken branch) and blank `file` (taken branch) at the authored location, md and Claudine (host artifact loaded) | `…::{md,claudine}_malformed_operands_are_diagnosed_where_written_in_both_branches` | F3 |
+| Control: the motivating workflow has no schema diagnostic in either host | `…::{md,claudine}_motivating_workflow_raises_no_schema_diagnostic` | F3 |
+| No analysis path launches an editor or writes a file | every `edit_action_editor.rs` session runs with `EDITOR`/`VISUAL` naming a recorder script and compares the repository tree before and after | F3 |
+| Shipped artifacts and host profile are fresh | `darkmatter/lib/tests/l1/shipped_artifacts.rs`, `claudine/lib/tests/l1/shipped_artifacts.rs`, `claudine/lib/tests/l1/host_catalog.rs` | F2 |
+| Claudine's schemas accept `edit` everywhere its parser does | the unwrapped `claudine/cli/tests/l1/lifecycle_edit_action.rs` tests; `claudine_schemas.rs::{hand_verbs_equal_the_parser_inventory, bundle_values_are_the_category_short_forms}` | F3 / F2 |
+
+Input robustness: no new loader (R25). The two validators (`file`; the shared `create_new`/`gui` boolean) are walked through every applicable field shape in the parity matrix: absent, null, wrong type whole field, wrong type one element, every element, empty/blank, object; each flag has a control (accepted cells) and invalid shapes. Smell grep over the new and changed code (`serde(default)`, `unwrap_or_default()`, `filter_map(.. as_str())`, `.ok()`) found nothing that parses a load-bearing field; the `unwrap_or_default` in `edit_action_editor.rs` reads a test response, and `bound_operands.rs` uses `if let Ok` only to skip a value whose template fails to parse, which `report_malformed` already reports.
+
+### Storage incident
+
+Mid-phase the APFS container hit 134 MiB free and commands could not start. This worktree's `target/debug/incremental.kache-auto` held 64 GB; `scripts/sweep.sh` (run at phase start, cleaning 8.4 GB) does not cap it because its incremental pass does not match that directory name. I deleted that directory (this worktree's own rebuildable cache); free space went to 64 GB.
+
+### Gates and verification (macOS host)
+
+- `cd darkmatter && just lint`: green (one `needless_borrows_for_generic_args` in the new CLI test fixed first).
+- `cd darkmatter && just test`: 16,597 passed, 10 skipped; "L1 run recorded: … none at or above 5.0s"; `just slow-tests fresh` confirms `target/slow-tests/current.md` describes this tree (0 slow).
+- `cd claudine && just lint`: green. `cd claudine && just test`: 12,070 passed, 15 skipped, none at or above 5.0 s. (Three `claudine_schemas` tests took 5.5–6.5 s in an earlier targeted run while the host's load average was about 25; they were under 5 s in the full run on a quiet host.)
+- Dependent package: `messenger`'s research tests validate documents through `DarkmatterSchemas` (`cargo nextest run -p messenger --features desktop,research -E 'binary(/research/)'`): 166 passed. No other dependent package reads lifecycle schemas or schema validation.
+- Root `just shipped-schemas` run twice: the second run reported every artifact current and the bytes compared equal; `claudine/schemas/globals.lifecycle.json` unchanged by `just regen-lifecycle-artifact`.
+- Cross-OS: not run on the rigs. The change is schema text, validation logic with no path or process handling, and tests; the one OS-specific piece is the DMLS test's never-launched recorder script (`.cmd` on Windows, `/bin/sh` elsewhere), which CI's Windows and WSL2 legs will compile and run.
+- `scripts/ci/affected_scope.py` over this phase's files selects claudine, claudine-cli, darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit, and simplified-schema (`change_class: package`). The last two only for tests that read the shipped schema chain: `simplified-schema` `shipped_corpus`/`shipped_artifacts`/`scanner_corpus` (104 passed) and `test-toolkit` `shipped_schemas_coordinator_contracts` (5 passed).
+- No pre-existing failures were seen.
+
+## Phase 7
+
+### What was built
+
+- **Docs (Wave 14).** Darkmatter's canonical lifecycle page (`docs/topics/lifecycle/index.md`) documents `edit`: both forms, `create_new`, `gui`, the host requirements, file creation, blocking, failures, cancellation (including GUI editors that stay open and the `gui: false` guarantee), and how it differs from wrapper `--edit`, `stop`, and initialize-time `skip`. It includes a Mermaid diagram of the edit lifecycle (resolve → eligibility → create → launch → wait or cancel → recheck). `error-handling.md` covers the failure classes; `side-effects.md`, `caching.md`, `loading-data.md`, `cli/compose.md`, `cli/edit.md`, and the README cross-link to it. Claudine's `flow-control/lifecycle.md`, `flow-control/sequences.md` (parallel-group and structured-output behavior), `schemas.md` (authoring reference), and `getting-started/index.md` describe it from Claudine's side. No doc names this feature directory.
+- **Skills.** The repo skills `darkmatter/lifecycle.md` (`LifecycleHost::editor`, `EditorService`, `LIFECYCLE_ONLY_VERBS`), `claudine/SKILL.md` (verb list), and `os/SKILL.md` plus `os/windows.md` (Job-object assignment window, shared-console Ctrl-C, `.cmd` shim launch through `find_program`). The user-scope `use-darkmatter` and `use-claudine` skills live outside the repository and were updated in place.
+- **Drift pass (Wave 15).** Comment-only corrections in `editor/{launch,mod,resolve}.rs`, `process_tree.rs`, `lifecycle/executor.rs`, and `fake_editor.rs`, with one behavior change: the hint on `EditorError::Io` (`editor/mod.rs`) named only the temp-file location, but that variant now also reports failures to contain or wait for the editor's process, so the hint names both. That string is user-visible and belongs in its own commit, apart from the comment-only changes.
+- **Smell grep** over the new files found nothing beyond what Phase 6 recorded.
+
+### Acceptance criteria to tests
+
+Earlier phases' tables give full file paths; the names below are the anchor tests for each criterion.
+
+| AC | Tests (host proven on) |
+|---|---|
+| AC1 motivating workflow, outside-prompt, race, occupied `create_new` | md: `compose_edit_action::{the_motivating_workflow_creates_and_opens_the_spec_then_skips, a_prompt_outside_the_launch_directory_edits_the_absolute_target_inside_its_root, a_name_taken_after_the_check_fails_create_new_and_opens_without_it, a_create_new_name_held_by_a_directory_or_symlink_fails_without_launch}`; Claudine: `lifecycle_edit_action::{compose_motivating_workflow_creates_and_opens_the_spec_then_skips_the_provider…, compose_edits_inside_the_launch_workspace_from_a_prompt_kept_elsewhere, sequence_root_initialize_runs_the_motivating_workflow_before_any_task, sequence_prompt_task_runs_the_motivating_workflow_and_launches_no_provider}` (macOS) |
+| AC2 forms, literal/interpolated paths, located diagnostics, bare `fqn` literal | `darkmatter l1 lifecycle_edit_action::*` (Phase 3 table), `lifecycle_edit_schema_parity::*`, `edit_action_editor::{md,claudine}_malformed_operands_are_diagnosed_where_written_in_both_branches` (macOS) |
+| AC3 fake editor, path forms, byte preservation, creation, containment, URL refusal | `test-toolkit fake_editor::*`; `editor_launcher::the_path_is_one_argument_after_the_editor_arguments`; `editor_service::{an_existing_regular_file_is_opened_with_its_bytes_preserved, an_eligible_terminal_editor_creates_missing_parents_and_succeeds, a_name_created_concurrently_is_opened_not_replaced, a_target_outside_the_mutation_root_is_refused_before_creation}`; `fs_write::tests` race; `compose_edit_action::a_symlink_escaping_the_root_is_refused_before_anything_is_created` (Unix); `executor tests::a_url_is_refused_without_reaching_the_editor` (macOS) |
+| AC4 shared precedence, Sniff surfaces and wait flags, `gui` resolution, non-blocking never selected | `sniff editor_traits::tests::*`; `darkmatter editor::resolve::tests::*`; `editor_resolution::*`; Claudine `lifecycle_edit_action::{an_edit_refuses_a_configured_editor_that_cannot_wait, wrapper_edit_refuses_a_configured_editor_that_cannot_wait}` (macOS) |
+| AC5 defined failures, `no_error` continuation, nothing created on refusal, post-exit recheck, atomic save | `editor_service::*` (Phase 2 table); `compose_edit_action::{editor_failures_name_the_action_property_and_target_and_stop_the_stack, a_terminal_editor_without_an_interactive_terminal_is_refused_before_creation}`; `executor tests::an_editor_failure_is_a_located_dispatch_failure_that_no_error_suppresses` (macOS) |
+| AC6 passive surfaces and untaken branches never launch or create | `compose_edit_action::{passive_surfaces_and_untaken_branches_never_launch_or_create, library_composition_never_runs_an_edit}`; `darkmatter-lsp no_side_effects::expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers`; every `edit_action_editor.rs` session (recorder `EDITOR`, tree compared) (macOS) |
+| AC7 ordering in every event and container, parallel members, no-display refusal, terminal handoff, post-edit reads | `compose_edit_action::{edit_runs_in_order_in_composed_failed_and_finalize, a_read_after_the_edit_sees_changed_and_deleted_data}`; Claudine `lifecycle_edit_action::{initialize_runs_each_edit_in_order_with_the_actions_around_it, compose_runs_edit_in_order_in_start_success_and_finalize, a_parallel_member_refuses_a_terminal_editor_before_creating_anything, a_parallel_member_runs_a_gui_editor}`; `claudine editor::tests::a_host_without_a_display_refuses_a_gui_editor_before_creating_the_file`; L2 `level2_edit_action_a_terminal_editor_reads_the_pane_then_the_stack_continues` (md and Claudine) (macOS) |
+| AC8 all four OSes, Test Toolkit, package recipes, no focus | Gates below on macOS; Linux, native Windows, and WSL2 by CI only (see Cross-OS) |
+| AC9 Markdown-mode isolation, structured output, terminal restoration | `compose_edit_action::{a_gui_editors_output_never_reaches_the_composed_document, structured_output_refuses_a_terminal_editor_and_silences_a_gui_editor}`; Claudine `lifecycle_edit_action::{structured_output_refuses_a_terminal_editor_and_no_error_continues, structured_output_runs_a_gui_editor_and_keeps_its_output_off_stdout}`; both L2 tests (restoration) (macOS) |
+| AC10 tree termination, SIGTERM escalation, sibling cancellation, kept bytes, GUI client only | `editor_launcher::{cancellation_terminates_the_whole_tree_and_reaps_it, an_editor_ignoring_sigterm_is_killed_after_the_grace_period, cancelling_a_gui_client_leaves_an_already_running_editor_alone}`; Claudine `lifecycle_edit_action::{an_interrupt_terminates_a_held_editor_tree_and_keeps_what_…, a_failing_sibling_cancels_a_held_editor_in_a_fail_fast_group}`; L2 `level2_edit_action_an_interrupt_reaps_the_open_editor_and_returns_the_terminal` (macOS). **Sequence timeout not covered**, see departures |
+| AC11 runtime, `md schema validate`, and DMLS agree; artifact freshness | `lifecycle_edit_schema_parity::*`; `compose_edit_action::schema_validate_and_compose_refuse_malformed_operands_alike_without_launch`; `edit_action_editor::*`; `shipped_artifacts.rs` (both), `host_catalog.rs` (macOS) |
+
+### Departures from the spec
+
+Each is recorded with alternatives in `decisions_for_review` above; the ones that change what the spec promised:
+
+- **AC10 sequence timeout.** No Claudine timeout cancels an open editor: document `timeout:`/`--timeout` bound only the provider session, and a task's `timeout:` only its shell commands. Cancellation is proven with an interrupt and a fail-fast sibling instead. **Accepted by the author (2026-11-14)**; documented in `claudine/docs/topics/flow-control/lifecycle.md`.
+- **AC9 structured output in Claudine.** Claudine prints no result envelope for an `initialize` failure, so "one valid result" is asserted as empty stdout with the refusal on stderr.
+- **`md compose` mutation root** is the prompt's own directory, so a prompt in a sibling library cannot edit `{{ ctx.cwd }}/…` (Claudine confines writes to the launch workspace, matching the spec's example).
+- **Schema validation applies the parser's `edit` rules** (`edit: 5`, `gui: "yes"`, `null` flags are refused by `md schema validate` and DMLS, not only at run time), and `edit`'s arms and flags are `non-null`.
+- **Failure message order** is "`<property>` could not edit the file: <reason>" (target appended only when the reason omits it), so the 240-character clamp does not cut off the reason.
+
+### Gates and verification (macOS host)
+
+- `just lint`: green in `sniff/`, `darkmatter/`, `claudine/`. `tools/test-toolkit/` has no `lint` or `test` recipe; `cargo clippy -p test-toolkit --all-targets --all-features -- -D warnings` is green and root `just test test-toolkit` passed 499, 4 skipped.
+- `just test`: `sniff/` 3,590 passed, 33 skipped (the first run failed `sniff-detection-cli::l1 cli::test_recent_commits_hash_period_walks_back_to_the_hash`, which then passed three isolated runs and the full rerun; no `sniff` source changed after Phase 1; load average was about 27). `darkmatter/` 16,597 passed, 10 skipped. Four DMLS tests crossed 5 s in that run while the host was deleting an 837 GB worktree; rerun on their own they took 1.2–1.7 s. `claudine/` 12,070 passed, 15 skipped, none at or above 5 s.
+- `just test-l2`: `darkmatter/` and `claudine/` green, including both `level2_edit_action` tests in each; no window took focus.
+- Root `just shipped-schemas`: reported every shipped artifact current (Phase 6 had already regenerated them). One run is sufficient: the script regenerates the whole chain in dependency order and publishes all or nothing, and `shipped_artifacts::shipped_artifact_is_fresh` in each `just test` is the standing byte-for-byte check. The plan's "run twice" step was redundant with that test and was not repeated as evidence (author ruling, 2026-11-14).
+- `just ci-local --plan` schedules L1 and lint for every package this feature touches on Linux, macOS, native Windows, and WSL2, plus L2 for `claudine-cli`/`darkmatter-cli` on the hosts that have an L2 backend. The plan is branch-wide and also lists the untracked root `.darkmatter.yaml` (Darkmatter's own migration from `.darkmatter-shell-whitelist`, not part of this feature).
+- Cross-OS: Linux, native Windows, and WSL2 are proven only by CI. The Windows paths (Job object with kill-on-close cleared after success, `.cmd` launcher shims, recorder scripts) were never run on a Windows host during this feature.
+- Storage: the first Phase 7 gate attempt failed with ENOSPC; this run started at 66 GB free and the author freed more by deleting another worktree.
+
+### Status
+
+Implementation complete, ready for review. Not moved to `_completed`, and not committed.

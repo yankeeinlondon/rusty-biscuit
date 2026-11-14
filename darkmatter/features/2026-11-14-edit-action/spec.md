@@ -1,6 +1,6 @@
 ---
 area: darkmatter
-status: spec-reviewed
+status: implemented
 created: 2026-11-14
 owner: Ken Snyder <ken@ken.net>
 canonical_docs:
@@ -35,6 +35,8 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-13
 review_iterations: 0
 needs_rulings: false
+implemented: true
+implemented_by: claude/opus
 ---
 
 # Edit Action

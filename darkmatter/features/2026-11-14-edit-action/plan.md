@@ -2,7 +2,8 @@
 kind: plan
 created: 2026-11-13
 total_phases: 7
-phase: 6
+phase: 7
+implemented: true
 agent: claude/sonnet
 yolo: 'true'
 source_files_during_phase_1:
@@ -137,6 +138,36 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
 - .claude/skills/claudine/architecture.md
 - .claude/skills/darkmatter/lifecycle.md
+source_files_during_phase_6:
+- darkmatter/schemas/partials/lifecycle.yaml
+- darkmatter/schemas/partials/md-lifecycle.yaml
+- claudine/schemas/action.yaml
+- claudine/schemas/lifecycle.yaml
+- darkmatter/lib/generated/shipped.json
+- claudine/lib/generated/shipped.json
+- darkmatter/lib/src/lifecycle/action_shape.rs
+- darkmatter/lib/src/lifecycle/mod.rs
+- darkmatter/lib/src/lifecycle/parse.rs
+- darkmatter/lib/src/markdown/schemas/bound_operands.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/tests/l1/lifecycle_edit_schema_parity.rs
+- darkmatter/lib/tests/l1/lifecycle_schema_parity.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+- darkmatter/cli/tests/l1/compose_edit_action.rs
+- darkmatter/dmls/tests/l1/edit_action_editor.rs
+- darkmatter/dmls/tests/l1/main.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+- claudine/cli/tests/l1/lifecycle_edit_action.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/darkmatter/schema.md
 ---
 
 # Edit Action — Implementation Plan
@@ -1062,7 +1093,7 @@ must mirror).
 
 #### Wave 12 — Schema definition (sequential)
 
-- [ ] **Define and reference the verb**
+- [x] **Define and reference the verb**
     - implement R24 in `darkmatter/schemas/partials/lifecycle.yaml`,
       `darkmatter/schemas/partials/md-lifecycle.yaml`, `claudine/schemas/action.yaml`,
       and `claudine/schemas/lifecycle.yaml`
@@ -1071,7 +1102,7 @@ must mirror).
       catalog verb; the equality tests were updated in Phase 3
     - run `just regen-lifecycle-schema` (darkmatter) and confirm the generated
       regions did not change
-- [ ] **Regenerate artifacts**
+- [x] **Regenerate artifacts**
     - root `just shipped-schemas`, then regenerate
       `claudine/schemas/globals.lifecycle.json` with the host-artifact recipe in
       `darkmatter/docs/topics/lifecycle/host-artifact.md` (the host's accepted verbs
@@ -1082,14 +1113,14 @@ must mirror).
 
 #### Wave 13 — Parity tests (parallel, after Wave 12)
 
-- [ ] **Schema validation parity**
+- [x] **Schema validation parity**
     - the same malformed shapes and strict operand types are rejected by `md schema
       validate`, runtime parsing, and DMLS: one test file in
       `darkmatter/lib/tests/l1/` iterating the matrix cells through the library
       schema validator and the parser and asserting agreement, plus one CLI wiring
       case for `md schema validate`
     - freshness tests for the shipped artifacts and any changed host profile pass
-- [ ] **DMLS**
+- [x] **DMLS**
     - `darkmatter/dmls/src/providers/lifecycle_host_tests.rs` and the completion,
       hover, and diagnostics tests: completion offers `edit` in `initialize` and in
       `composed`, hover on `edit` shows the schema description, a malformed `gui` and
@@ -1113,16 +1144,16 @@ Phase 7 depends on all earlier phases.
 
 #### Wave 14 — Documentation (parallel)
 
-- [ ] **Darkmatter lifecycle docs** — `darkmatter/docs/topics/lifecycle/index.md`
+- [x] **Darkmatter lifecycle docs** — `darkmatter/docs/topics/lifecycle/index.md`
       (the action, both forms, `create_new`, `gui`, host requirements table, file
       creation, blocking, failures, cancellation behavior including GUI editors that
       stay open and the `gui: false` guarantee, and the distinction from wrapper
       `--edit`, `stop`, and initialize-time `skip`), `error-handling.md` for the
       failure classes, `side-effects.md` cross-link only, and an overview link
-- [ ] **Claudine docs** — `claudine/docs/topics/flow-control/lifecycle.md`,
+- [x] **Claudine docs** — `claudine/docs/topics/flow-control/lifecycle.md`,
       `claudine/docs/topics/schemas.md` (authoring reference), parallel-group and
       structured-output behavior
-- [ ] **Skills** — `.claude/skills/darkmatter/lifecycle.md` (the service/registration
+- [x] **Skills** — `.claude/skills/darkmatter/lifecycle.md` (the service/registration
       contract: `LifecycleHost::editor`, `EditorService`, `LIFECYCLE_ONLY_VERBS`),
       `.claude/skills/claudine/SKILL.md` (the lifecycle verb list),
       `.claude/skills/use-darkmatter` and `.claude/skills/use-claudine` (their
@@ -1130,26 +1161,26 @@ Phase 7 depends on all earlier phases.
       the Windows editor facts (Job-object assignment window, shared-console
       Ctrl-C, `.cmd` shim launch through the `find_program` path); the Sniff skill
       page was updated in Phase 1
-- [ ] Docs rules: explain what each section covers before its rules, one compact
+- [x] Docs rules: explain what each section covers before its rules, one compact
       example per rule, a Mermaid diagram for the edit lifecycle (resolve → eligibility
       → create → launch → wait/cancel → recheck), no link to or mention of the dated
       feature directory, US English
 
 #### Wave 15 — Closing verification (sequential)
 
-- [ ] **Drift pass** over every changed symbol's `///`/`//!` docs and inline
+- [x] **Drift pass** over every changed symbol's `///`/`//!` docs and inline
       comments (comment-quality rules: no HOW-narration, WHY at surprising lines, the
       accepted Job-assignment window and pgid-reuse window documented where they
       occur)
-- [ ] **Full package-area gates** — `just test` and `just lint` in `sniff/`,
+- [x] **Full package-area gates** — `just test` and `just lint` in `sniff/`,
       `darkmatter/`, `claudine/`, `tools/test-toolkit/`; `just test-l2` in
       `darkmatter/` and `claudine/`; root `just shipped-schemas` twice; run
       `just ci-local --plan` and review that the new test binaries are scheduled
-- [ ] **Smell grep** from the robustness section over the new files
-- [ ] **Implementation log** — write `implementation-log.md` in this directory:
+- [x] **Smell grep** from the robustness section over the new files
+- [x] **Implementation log** — write `implementation-log.md` in this directory:
       the AC1–AC11 to test mapping, every departure from the spec (if none, say
       so), the host(s) each test ran on, and the OSes proven only by CI
-- [ ] Do not move this feature to `_completed`, run `just complete`, or commit; the
+- [x] Do not move this feature to `_completed`, run `just complete`, or commit; the
       terminal state is "implementation complete, ready for review"
 
 ### Validation checkpoint (final)
