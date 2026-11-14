@@ -303,3 +303,21 @@ Tests added or changed:
 Behavior change to note: composition partition errors (a provider switch or
 `--` before the file, and the others above) now exit 2 instead of 1.
 
+
+### Follow-up gate results (macOS, 2026-11-14)
+
+The full `just test` after the follow-up found one stale assertion:
+`sequence_errors_cli::the_removed_ledger_option_is_an_unknown_option` expected
+exit 1 for an unknown `sequence` option, which is now a usage error (exit 2).
+The assertion was updated. Because that was the only change after the full
+run (test-only, one line), it was verified with a targeted run rather than a
+second full run:
+
+- `cargo nextest run -p claudine-cli` over that test, `wrapper_options::`,
+  and the L1 `wrapper_option_position::`, `argv_normalization::`, and
+  `--output` refusal tests: 64 passed.
+- `cargo clippy -p claudine-cli --all-targets -- -D warnings`: clean.
+- Built binary: `claudine claude -ojson hi`, `claude hi -ojson`, and
+  `claude --dry-run hi -ojson` exit 2 with the refusal; `claude hi -m`,
+  `claude -m`, `compose x.md -m`, and `sequence x.md --model` exit 2;
+  `claude hi -- -o json --help` passes both tokens to the provider.

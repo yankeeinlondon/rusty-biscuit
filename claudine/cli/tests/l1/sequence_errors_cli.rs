@@ -646,7 +646,7 @@ fn the_removed_ledger_option_is_an_unknown_option() {
         .command()
         .args(["sequence", removed_option, "ledger.json", file_arg])
         .assert()
-        .code(1)
+        .code(2)
         .get_output()
         .clone();
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
