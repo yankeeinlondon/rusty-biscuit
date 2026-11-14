@@ -12,8 +12,10 @@ Initialization runs these stages in order:
    repository's portable shell-utility baseline are available.
 2. Ensures the CI/CD command-line tools applicable to the host are available.
 3. Ensures Cargo artifact maintenance and GitNexus are usable.
-4. Builds and installs `sniff`, reports whether the runtime is native, WSL 1,
-   or WSL 2, and installs the core Rusty Biscuit developer CLIs.
+4. Ensures `sniff`, reports whether the runtime is native, WSL 1, or WSL 2,
+   and ensures the core Rusty Biscuit developer CLIs. A CLI already on PATH
+   is kept unless it is more than 30 days old; see
+   [Installed Developer Tools](#installed-developer-tools).
 
 The recipe is idempotent. Running it again repairs missing tools.
 
@@ -329,16 +331,46 @@ and prefetching require a running daemon or an explicit `kache sync`.
 
 ## Installed Developer Tools
 
-After the prerequisites are ready, initialization installs these monorepo
+After the prerequisites are ready, initialization ensures these monorepo
 CLIs:
 
 - `sniff`
 - Biscuit Hash (`bh`)
-- Biscuit Terminal CLI tools
+- Biscuit Terminal (`bt`)
 - Darkmatter (`md`)
-- Playa
+- Playa (`playa`)
 - Biscuit Speaks (`so-you-say`)
-- Claudine
+- Claudine (`claudine`)
+
+Each one is built from source only when needed, because a release build of
+these CLIs takes minutes and gigabytes of `target/`, and because a host may
+already carry a newer build than the branch you are initializing from. For each
+binary name, init looks it up on PATH and decides:
+
+| What init finds | What it does |
+|---|---|
+| No binary of that name | builds and installs it from its package area |
+| A binary built 30 days ago or less | keeps it, whoever built it |
+| A binary built more than 30 days ago | reinstalls it from its package area |
+
+Every decision is printed to stderr with the binary's path and build date
+(its file modification time), so you can see what you are running:
+
+```text
+claudine: keeping /Users/you/.cargo/bin/claudine (built 2026-11-13 11:43, 1 day ago); run 'just init --rebuild' to replace it
+playa: /Users/you/.cargo/bin/playa was built 2026-09-23 19:22 (52 days ago), older than 30 days; reinstalling from playa/
+```
+
+To replace every kept binary with a build of the current checkout, run:
+
+```sh
+just init --rebuild            # macOS, Linux, WSL
+powershell -ExecutionPolicy Bypass -File scripts\init.ps1 --rebuild   # native Windows
+```
+
+To rebuild just one CLI, run `just install` in its package area instead, for
+example `cd claudine && just install`. The rule lives in
+`scripts/ensure-repo-cli.sh`; `just init-test` runs its tests.
 
 Initialization also guarantees the shell utilities used by shared recipes,
 including `find`, `du`, `awk`, `jq`, `fd`, `rg`, and `fzf`, and installs

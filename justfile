@@ -182,6 +182,10 @@ cross-check *args:
 cross-check-refresh *args:
     @./scripts/cross-check-refresh.sh {{ args }}
 
+# run Level 1 tests for the rule `just init` uses to keep or reinstall monorepo CLIs
+init-test:
+    @./scripts/ensure-repo-cli-tests.sh
+
 # run Level 1 tests for the clone-pruning rules cross-check and cross-check-refresh share
 cross-check-test:
     @./scripts/cross-check-hosts-tests.sh
@@ -560,9 +564,18 @@ cp:
 # On native Windows, run scripts\init.ps1 instead of invoking this recipe
 # directly: just needs bash AND cygpath on PATH before it can run any recipe,
 # so the "no shell environment" check has to happen outside just.
-init: _ensure-native-bash
+#
+# Monorepo CLIs already on PATH and built within the last 30 days are kept
+# (scripts/ensure-repo-cli.sh); `just init --rebuild` reinstalls them all.
+init *args="": _ensure-native-bash
     #!/usr/bin/env bash
     set -euo pipefail
+    for arg in {{ args }}; do
+        if [[ "$arg" != "--rebuild" ]]; then
+            echo "just init: unknown argument '$arg' (supported: --rebuild)" >&2
+            exit 2
+        fi
+    done
     echo -e "Initializing the {{ RED }}rusty-biscuit{{ RESET }} monorepo"
     echo
 
@@ -583,14 +596,17 @@ init: _ensure-native-bash
     just _ensure-gitnexus
     just _ensure-git-hooks
     echo
-    (cd sniff && just install)
+
+    echo -e "{{ BOLD }}Monorepo CLIs{{ RESET }}"
+    ensure=(bash scripts/ensure-repo-cli.sh {{ args }})
+    "${ensure[@]}" sniff sniff
     sniff runtime
-    (cd biscuit-hash && just install)
-    (cd biscuit-terminal && just install)
-    (cd darkmatter && just install)
-    (cd playa && just install)
-    (cd biscuit-speaks && just install)
-    (cd claudine && just install)
+    "${ensure[@]}" bh biscuit-hash
+    "${ensure[@]}" bt biscuit-terminal
+    "${ensure[@]}" md darkmatter
+    "${ensure[@]}" playa playa
+    "${ensure[@]}" so-you-say biscuit-speaks
+    "${ensure[@]}" claudine claudine
 
 # "Accidental WSL" guard. Must be a LINEWISE recipe: just runs shebang recipes
 # through the cygpath-translated interpreter (Cygwin/Git Bash), but linewise
