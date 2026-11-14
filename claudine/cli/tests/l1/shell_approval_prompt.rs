@@ -60,6 +60,10 @@ fn without_a_terminal_a_command_shape_is_not_prompted_for_and_nothing_runs() {
         "{text}"
     );
     assert!(!text.contains("Shell Approval Required"), "no prompt without a terminal: {text}");
-    assert!(!fixture.cwd().join(".darkmatter-shell-whitelist").exists());
+    assert_eq!(
+        std::fs::read_to_string(fixture.home().join(".darkmatter.yaml")).unwrap(),
+        "{}\n",
+        "nothing was saved"
+    );
     assert!(!marker.exists(), "the provider must not launch");
 }

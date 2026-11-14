@@ -23,7 +23,9 @@ struct Run {
     commands_ran: bool,
 }
 
-fn run(fixture: &CliProcessFixture) -> Run {
+/// Composes the document with `args` before the file; the user's permissions
+/// approve its command where the fixture keeps a user configuration.
+fn run(fixture: &CliProcessFixture, args: &[&str]) -> Run {
     let suffix = std::env::consts::EXE_SUFFIX;
     for (binary, name) in [
         (biscuit_test_harness::bin_exe!("claudine-fake-goose"), "goose"),
@@ -32,7 +34,6 @@ fn run(fixture: &CliProcessFixture) -> Run {
         fs::copy(binary, fixture.bin_dir().join(format!("{name}{suffix}")))
             .expect("fixture binaries are built with `test-fixtures`");
     }
-    fs::write(fixture.cwd().join(".darkmatter-shell-whitelist"), "exact argv-recorder ran\n").unwrap();
     let document = fixture.cwd().join("hello.md");
     fs::write(&document, DOCUMENT).unwrap();
     let marker = fixture.cwd().join("provider-runs.log");
@@ -42,6 +43,7 @@ fn run(fixture: &CliProcessFixture) -> Run {
         .env("PROVIDER_MARKER", &marker)
         .env(ARGV_RECORDER_FILE, &records)
         .args(["compose", "--goose"])
+        .args(args)
         .arg(&document)
         .output()
         .unwrap();
@@ -60,7 +62,7 @@ fn a_user_file_that_does_not_load_stops_before_anything_is_dispatched() {
     let config = fixture.home().join(".darkmatter.yaml");
     fs::write(&config, "register: []\nnot-a-setting: 1\n").unwrap();
 
-    let run = run(&fixture);
+    let run = run(&fixture, &[]);
 
     assert!(!run.success, "{}", run.stderr);
     assert_eq!(run.launches, 0, "no provider launched");
@@ -76,7 +78,8 @@ fn a_missing_user_file_is_reported_once_naming_claudine_init() {
     fixture.seed_user_config();
     let fixture = fixture.without_darkmatter_config();
 
-    let run = run(&fixture);
+    // A missing file pre-approves no command, so `--yolo` approves this one.
+    let run = run(&fixture, &["--yolo"]);
 
     assert!(run.success, "{}", run.stderr);
     assert_eq!(run.launches, 1);

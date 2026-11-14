@@ -48,7 +48,7 @@ fn compose(name: &str, document: &str) -> Run {
     fixture.seed_user_config();
     write_succeeding_claude(fixture.bin_dir());
     write(&fixture.cwd().join("doc.md"), document);
-    write(&fixture.cwd().join(".darkmatter-shell-whitelist"), "prefix git\nprefix ls\n");
+    crate::common::write_shell_permissions(fixture.home(), "prefix git\nprefix ls\n");
     let output = fixture
         .command_builder()
         // `git` is the marker command; Git for Windows is outside the minimal
