@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-13
 total_phases: 9
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -166,6 +166,8 @@ packages:
 - claudine
 - sniff
 - messenger
+- biscuit-file
+- claudine-cli
 source_files_during_phase_2:
 - claudine/lib/src/composition/schema/classify.rs
 - claudine/lib/src/composition/schema/defaults_tests.rs
@@ -260,6 +262,213 @@ skills_files_updated_during_phase_2:
 - .claude/skills/simplified-schema/SKILL.md
 - .claude/skills/sniff/remote-and-repository.md
 - .claude/skills/sniff/SKILL.md
+source_files_during_phase_3:
+- biscuit-file/lib/src/file_reference/context.rs
+- biscuit-file/lib/src/file_reference/mod.rs
+- biscuit-file/lib/src/file_reference/portable/mod.rs
+- claudine/cli/src/commands/actions.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/src/commands/config_tui/app.rs
+- claudine/cli/src/commands/config_tui/mod.rs
+- claudine/cli/src/commands/config_tui/persistence.rs
+- claudine/cli/src/commands/config_tui/persistence_tests.rs
+- claudine/cli/src/commands/config_tui/tabs/tts.rs
+- claudine/cli/src/commands/hooks/list.rs
+- claudine/cli/src/commands/init/mod.rs
+- claudine/cli/src/commands/init/prompts.rs
+- claudine/cli/src/commands/init_wizard.rs
+- claudine/cli/src/commands/link_display.rs
+- claudine/cli/src/commands/sequence.rs
+- claudine/cli/src/commands/uninstall.rs
+- claudine/cli/src/commands/wrap/composition/tests.rs
+- claudine/cli/src/commands/wrap/env/mod.rs
+- claudine/cli/src/commands/wrap/runaway_guard.rs
+- claudine/cli/src/completion/engine/mod.rs
+- claudine/cli/src/completion/engine/tests.rs
+- claudine/cli/src/main.rs
+- claudine/cli/src/request.rs
+- claudine/cli/tests/common/mod.rs
+- claudine/cli/tests/common/pty.rs
+- claudine/cli/tests/common/review_screen.rs
+- claudine/cli/tests/common/webhook_listener.rs
+- claudine/cli/tests/common/wrap.rs
+- claudine/cli/tests/l1/agent_cwd.rs
+- claudine/cli/tests/l1/argv_normalization.rs
+- claudine/cli/tests/l1/command_routing.rs
+- claudine/cli/tests/l1/completion_ownership.rs
+- claudine/cli/tests/l1/completion_perf.rs
+- claudine/cli/tests/l1/config_yaml_wiring.rs
+- claudine/cli/tests/l1/contamination_probes.rs
+- claudine/cli/tests/l1/darkmatter_config_gate.rs
+- claudine/cli/tests/l1/detached_audio.rs
+- claudine/cli/tests/l1/handle_blocking_output.rs
+- claudine/cli/tests/l1/handle_repo_config.rs
+- claudine/cli/tests/l1/home_lookup_round_trip.rs
+- claudine/cli/tests/l1/level1_compose_autocomplete_failure_pty.rs
+- claudine/cli/tests/l1/level1_dry_run_pty.rs
+- claudine/cli/tests/l1/level1_inline_compose_mismatch_pty.rs
+- claudine/cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/pi_managed_rpc.rs
+- claudine/cli/tests/l1/protect_cli.rs
+- claudine/cli/tests/l1/skills_integration.rs
+- claudine/cli/tests/l1/tts_prewarm.rs
+- claudine/cli/tests/l1/wrap_compose_agent.rs
+- claudine/cli/tests/l1/wrap_compose_preflight.rs
+- claudine/cli/tests/l1/wrap_ctrl_c_windows.rs
+- claudine/cli/tests/level2/level2_auto_complete_chooser.rs
+- claudine/cli/tests/level2/level2_auto_complete_operation_file.rs
+- claudine/cli/tests/level2/level2_dry_run_approval_capture.rs
+- claudine/cli/tests/level2/level2_dry_run_metadata_capture.rs
+- claudine/cli/tests/level2/level2_explicit_operation_file_miss.rs
+- claudine/cli/tests/level2/level2_file_resolution_capture.rs
+- claudine/cli/tests/level2/level2_inline_compose_mismatch_capture.rs
+- claudine/cli/tests/level2/level2_invalid_file_reference_capture.rs
+- claudine/cli/tests/level2/level2_lifecycle_control.rs
+- claudine/cli/tests/level2/level2_malformed_frontmatter_capture.rs
+- claudine/cli/tests/level2/level2_perf_capture.rs
+- claudine/cli/tests/level2/level2_prompt_reporting_capture.rs
+- claudine/cli/tests/level2/level2_removed_validation_key_capture.rs
+- claudine/cli/tests/level2/level2_schema_parse_capture.rs
+- claudine/cli/tests/level2/level2_sequence_container_ctrl_c.rs
+- claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs
+- claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+- claudine/docs/providers/dispatch-inventory.json
+- claudine/lib/benches/runtime_hot_paths.rs
+- claudine/lib/generated/shipped.json
+- claudine/lib/src/composition/error/tests.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/lifecycle/prewarm/worker.rs
+- claudine/lib/src/composition/lifecycle/tests/tts_settings.rs
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/prepare.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/config/claudine_config.rs
+- claudine/lib/src/config/claudine_config/tests.rs
+- claudine/lib/src/config/json_conversion.rs
+- claudine/lib/src/config/load.rs
+- claudine/lib/src/config/messaging_block/tests.rs
+- claudine/lib/src/config/mod.rs
+- claudine/lib/src/config/persist.rs
+- claudine/lib/src/config/persist_tests.rs
+- claudine/lib/src/config/schema.rs
+- claudine/lib/src/config/schema_tests.rs
+- claudine/lib/src/config/tts.rs
+- claudine/lib/src/dispatch/deps.rs
+- claudine/lib/src/dispatch/loader.rs
+- claudine/lib/src/dispatch/loader/tests.rs
+- claudine/lib/src/dispatch/runner/speak.rs
+- claudine/lib/src/dispatch/runner/tests.rs
+- claudine/lib/src/dispatch/tests.rs
+- claudine/lib/src/error.rs
+- claudine/lib/src/events/config.rs
+- claudine/lib/src/invocation_context.rs
+- claudine/lib/src/messaging/config.rs
+- claudine/lib/src/signals/harvest.rs
+- claudine/lib/src/steering/automatic.rs
+- claudine/lib/src/steering/automatic/tests.rs
+- claudine/lib/src/system_prompt/prepare.rs
+- claudine/lib/tests/config/repository-control.yaml
+- claudine/lib/tests/config/user-control.json5
+- claudine/lib/tests/config/user-control.yaml
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- claudine/lib/tests/l1/config_json_conversion.rs
+- claudine/lib/tests/l1/config_schema_matrix.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/lib/tests/l1/path_lookup_guard.rs
+- claudine/schemas/claudine-config.yaml
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/graph.rs
+- darkmatter/cli/src/commands/validate.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/output/command.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/cli/src/request.rs
+- darkmatter/cli/tests/common/fixture.rs
+- darkmatter/cli/tests/l1/config_notices.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/lib/generated/shipped.json
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/config/load/entries.rs
+- darkmatter/lib/src/config/load/error.rs
+- darkmatter/lib/src/config/mod.rs
+- darkmatter/lib/src/config/schema.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/shell.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+- darkmatter/lib/src/markdown/compose/context/capture/observations.rs
+- darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/repository_scope.rs
+- darkmatter/lib/src/markdown/compose/context/request.rs
+- darkmatter/lib/src/markdown/compose/context/runtime.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/store.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/lib/src/markdown/schemas/shipped.rs
+- darkmatter/lib/src/yaml_edit.rs
+- darkmatter/lib/tests/l1/config_fields.rs
+- darkmatter/lib/tests/l1/config_load.rs
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/empty_package_area.rs
+- darkmatter/lib/tests/l1/expression_recovery.rs
+- darkmatter/lib/tests/l1/file_tree_roots.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/path_function_contracts.rs
+- darkmatter/lib/tests/l1/reference_integration.rs
+- darkmatter/lib/tests/l1/request_config.rs
+- darkmatter/lib/tests/l1/request_context_builder.rs
+- darkmatter/lib/tests/l1/schemas_union_postfix.rs
+- darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+- darkmatter/lib/tests/l1/yaml_edit.rs
+- darkmatter/lib/tests/request_support/mod.rs
+- darkmatter/schemas/darkmatter-config.yaml
+- simplified-schema/lib/src/embedded.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/triggers/assemble.rs
+- simplified-schema/lib/src/triggers/discovery.rs
+- sniff/lib/src/filesystem/mod.rs
+docs_updated_during_phase_3:
+- biscuit-file/docs/topics/file-references.md
+- claudine/README.md
+- claudine/docs/pipeline.md
+- claudine/docs/topics/automatic-steering.md
+- claudine/docs/topics/completions/shell-completions.md
+- claudine/docs/topics/composition.md
+- claudine/docs/topics/configuring-actions.md
+- claudine/docs/topics/execution-flow.md
+- claudine/docs/topics/file-referencing.md
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/protect-service.md
+- claudine/schemas/README.md
+- darkmatter/README.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/output-and-width.md
+- darkmatter/docs/topics/compose-requests.md
+- darkmatter/docs/topics/yaml-editing.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/language/objects-and-named-types.md
+- simplified-schema/docs/topics/language/types.md
+- simplified-schema/docs/topics/language/unions.md
+docs_created_during_phase_3:
+- claudine/docs/topics/configuration.md
+- darkmatter/docs/topics/configuration.md
+skills_files_updated_during_phase_3:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/architecture.md
+- .claude/skills/claudine/cli-reference.md
+- .claude/skills/claudine/hook-actions.md
+- .claude/skills/claudine/unified-hooks.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/frontmatter.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/darkmatter/requests.md
+- .claude/skills/simplified-schema/SKILL.md
 ---
 
 # Configuration, permissions, and host registration implementation plan
@@ -1009,7 +1218,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
 
 ### Validation checkpoint
 
-- [ ] **Verify foundations**
+- [x] **Verify foundations**
   - Coordinator checkpoint after Wave 4: run focused public default/parity,
     YAML edit, Sniff snapshot, and transaction tests. Run `just test` in
     Simplified Schema and Sniff, plus affected Darkmatter/Claudine L1 filters.
@@ -1020,7 +1229,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
 
 ### Wave 5 — Configuration contracts (parallel)
 
-- [ ] **Load Darkmatter config**
+- [x] **Load Darkmatter config**
   - Own the shipped Darkmatter configuration schema/namespace alias and new
     `config/{schema,load}.rs`. Use the moved admitted-YAML loader and
     schema-only validation; never use repo triggers, slots, network, or the
@@ -1032,7 +1241,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
     permission evaluation lands in Phase 4. Invalid references stay errors
     rather than being represented as an empty policy.
 
-- [ ] **Type Claudine config**
+- [x] **Type Claudine config**
   - Own `claudine/schemas/claudine-config.yaml`, config schema embedding, and
     typed user/repository validation in `dispatch/loader.rs` and config types.
     Add permissions as shared Darkmatter data, never a second grammar.
@@ -1049,7 +1258,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
 
 ### Wave 6 — Reader and writer integration (parallel)
 
-- [ ] **Migrate Claudine YAML**
+- [x] **Migrate Claudine YAML**
   - Own the temporary JSON5 converter and all concrete path readers listed
     in Rule 22. Run `biscuit_file::json5_scan` before conversion to reject
     duplicate decoded keys/numeric admission failures, then parse with the
@@ -1068,7 +1277,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
   - Completion and passive tooling do not migrate. Stop invalid loads before
     dispatching any hook, agent, provider, or composition command.
 
-- [ ] **Preserve host edits**
+- [x] **Preserve host edits**
   - Own Claudine config editor/init save paths. Replace whole-struct saves
     with Rule 22's explicit per-key edits through `ConfigTransaction`.
   - Record original TUI user/repository values and compute changed leaves at
@@ -1077,7 +1286,7 @@ new paths are explicitly called new. The dated specification remains a snapshot.
   - Update non-interactive setters, init_wizard, and all old save-function
     callers; retain existing field coverage and interaction behavior.
 
-- [ ] **Bind request config**
+- [x] **Bind request config**
   - Coordinator owns `RepositoryObservation`, capture/evidence plumbing,
     `ComposeOptions`, `ComposeRequest`, `MdRequest`, and Claudine invocation
     snapshot adapters. Implement Rules 12–13, and update all supplied-context
@@ -1164,7 +1373,7 @@ never count a private parser assertion as the matrix result.
 
 ### Validation checkpoint
 
-- [ ] **Verify config matrices**
+- [x] **Verify config matrices**
   - Coordinator checkpoint after Wave 6: execute the Darkmatter/Claudine
     configuration and JSON5 matrix through public APIs, conversion
     interruption tests, writer concurrency tests, and hermetic CLI wiring.

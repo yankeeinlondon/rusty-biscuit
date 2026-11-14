@@ -164,6 +164,8 @@ packages:
     - "claudine"
     - "sniff"
     - "messenger"
+    - "biscuit-file"
+    - "claudine-cli"
 source_files_during_phase_2:
     - "claudine/lib/src/composition/schema/classify.rs"
     - "claudine/lib/src/composition/schema/defaults_tests.rs"
@@ -287,8 +289,233 @@ decisions_for_review:
       Sniff's committed-tree snapshot takes `/`-separated repository-relative paths only and rejects `\\` on every OS (Windows included), returns ids as hex strings, errors on non-UTF-8 names in `paths()` instead of returning lossy names, and lists only files and symlinks (not directories or submodules). Alternatives: accept `\\` on Windows, use byte paths, or include submodules for the CI checker. Each is local to `sniff/lib/src/filesystem/git/committed_tree.rs`.
     - |-
       Claudine shows an absent required property with a default as a new status state `Defaulted`. At launch it runs one extra validation without phase rules, only when some non-eager required property is absent and has a default, so a refused default blocks before the agent runs instead of surfacing at the completion check. A refused default nested under a present non-eager parent is still found only at completion. Alternatives: reuse `Valid`/`Missing` for the status, or always/never run the extra validation. Reversing is local to `claudine/lib/src/composition/schema/{classify,mod,status_render}.rs`.
+    - |-
+      Phase 3 extended the SimplifiedSchema grammar: a `default(...)` argument starting with `[` or `{` (and not a `{{` slot) is now read as strict JSON, so schemas can declare list and mapping defaults (`default(["a"])`, `default({"k": 1})`). Before, `default([a])` was the text "[a]" and a comma split the argument, which a test pinned. The plan requires every config default (including the file-read lists, `[]`, and the `permissions` mapping) to live in the schema, which was impossible without this. `default([a])` (not valid JSON) is now a schema error; the text is still writable quoted (`default('[a]')`). Alternative: a separate list/mapping default syntax, or keep those defaults in code (forbidden by the plan). Reverting means undoing `simplified-schema/lib/src/simplified/{grammar,serialize}.rs`, the pinned test in `schemas_union_postfix.rs`, the language docs, and every config schema default.
+    - |-
+      Each scope's `permissions` default in `darkmatter-config.yaml` spells out all of its children's values, because the default engine judges a parent default as a whole and does not fill its children's defaults inside it (so `default({})` was refused). A unit test keeps the parent default equal to the children's defaults. Alternative: teach the engine to fill nested defaults inside a parent default (shared engine change, closer to the spec's "an empty mapping whose omitted children receive their scope's defaults"). Reverting means an engine change in `simplified-schema/lib/src/defaults.rs` and simplifying the two schema defaults.
+    - |-
+      Configuration-loading choices the plan left open: `@x` and `vault:x` patterns are rejected in `file-read`; at repository scope a relative pattern may not climb above its starting folder with `..` (judged lexically, no disk); unknown root keys come from the schema's closed root rather than a hard-coded list; `registrations()` covers the user file plus the repository working copy (the HEAD copy's entries are available through `repository()`); a committed `.darkmatter.yaml` that is a symlink, directory, or submodule is an error. Two small biscuit-file accessors were added so the loader does not parse references itself (`FileReference::env_variables`, `FileResolutionContext::portable_variables`). Each is local to `darkmatter/lib/src/config/load/entries.rs` or `load.rs`.
+    - |-
+      Claudine supplies its configuration snapshot to Darkmatter requests through a weak handle attached to each context it captures (a new `ConfigSnapshotSource` trait, following the existing context-extension pattern); `ComposeRequest::with_context` uses an explicit snapshot first, then that handle, then a passive load or the typed `ConfigSnapshotRequired` error. Threading the snapshot explicitly through every Claudine `file_resolution_context` path would have touched about 20 call sites. Claudine's local-only expression contexts (no network/shell/slots) build no request and read no config (`ComposeRequest::local_expression_context`). Reverting means explicit plumbing in `claudine/lib/src/invocation_context.rs` and its callers.
+    - |-
+      `md` and Claudine CLI test fixtures now write a `{}` `~/.darkmatter.yaml` into their fixture home by default (opt-out: `without_user_config()` / `without_darkmatter_config()`), so the new `dm.config.missing` warning does not change hundreds of existing stderr assertions. Claudine prints that warning for every command a person reads but not for `handle`/`steer` (machine-facing streams); completion reads no config. Alternative: update every affected assertion, or suppress the warning under a test-only switch. Reverting is local to `darkmatter/cli/tests/common/fixture.rs`, `claudine/cli/tests/common/{mod,wrap}.rs`, and `claudine/cli/src/main.rs`.
+    - |-
+      Claudine configuration loading choices: event and provider maps in `claudine-config.yaml` list their keys explicitly (the default engine skips values under pattern-keyed maps, so pattern keys left action/model defaults unfilled); `tts.prewarm` and `steering.automatic.enabled` default to on but are never inserted (so saving never writes them); nested serde defaults remain (only top-level ones were removed; the schema always fills values first); custom Protect patterns now require `name` and `pattern` (previously `{}` silently matched everything); duplicate keys are now errors (two old matrix cells expected last-wins); writing both `preferred_agent` and `favorite_agent` is an error; the schema is not in Claudine's shipped artifact (about 38 ms debug-build preparation once per process). Alternatives and redo cost: walking pattern keys in `simplified_schema::defaults` (moderate, shared), adding the schema to the shipped artifact (preparation revision bump), or removing nested serde defaults (about 35 tests).
+    - |-
+      Claudine's JSON-to-YAML conversion triggers by location: any path shaped `<dir>/.claudine/config.yaml` converts a sibling `config.json`; any other explicit path is read as YAML exactly where it is. A receipt whose cleanup fails stops the load and tells the user to remove it, rather than warning and continuing. Alternatives: trigger only for the two captured scope paths, or warn on a stuck receipt. Local to `claudine/lib/src/config/json_conversion.rs`.
+    - |-
+      Claudine's writers use `SourceExpectation::Current` (take whatever the file holds under the lock) rather than failing when the file changed since it was opened; this is what lets two sessions changing different keys both succeed, as the plan requires. The config TUI no longer deletes an empty repository file (that would destroy `permissions` and comments); removing the last override leaves `{}`. A cleared key that the file never wrote (its value was a default) is written as `null`. Setup manages "values that differ from the defaults", so re-running it overwrites a managed value the user changed since. An edited key loses its original quoting. Darkmatter's `yaml_edit` now turns a `{}` root into a block on `Set` and leaves `{}` after removing the last top-level key (previously refused / left an empty file). Alternatives: exact-byte expectation with retry, deleting empty repository files, refusing flow roots on the Claudine side. Local to `claudine/lib/src/config/persist.rs`, `claudine/cli/src/commands/config_tui/`, and `darkmatter/lib/src/yaml_edit.rs`.
+    - |-
+      With no usable home, Claudine's long-standing fallback configuration path is the relative `~/.claudine/config.yaml`; the locked writer only accepts absolute targets, so Claudine's persist module now makes a relative target absolute against the working directory (`std::path::absolute`) before writing, keeping the existing pinned behavior (`home_lookup_round_trip::a_relative_home_is_no_home_and_does_not_reach_the_real_profile`). Alternative: refuse to save without a home (a behavior change). Local to `absolute_target` in `claudine/lib/src/config/persist.rs`.
 message_to_agent: |-
-    Phase 2 landed the foundations Phase 3 builds on. Defaults: `simplified_schema::defaults::{prepare_defaults, AppliedDefault}`; `ValidationSuccess::defaults` and `is_modified` (renamed from `is_converted`); Darkmatter `ValidationReport::defaults`; composition inserts absent required defaults (never edits the source file). YAML edits: `darkmatter::yaml_edit::{YamlEdit, edit_yaml_paths, YamlEditError}` (no whole-file serialization fallback; append = Set at index == len). Locked writes: `darkmatter::config::write::{ConfigTransaction, TargetChange, SourceExpectation, ConfigWriteError}` (lock `<name>.darkmatter-lock`, 2 s deadline, validator callback, missing parent dir refused) and `darkmatter::config::migration_receipt::{MigrationSource, complete_cleanup, read_receipt, MigrationError}` (receipt `<name>.darkmatter-migration.json`, written inside `commit` via `TargetChange::with_migration`; cleanup takes the caller's exact known legacy paths). `darkmatter::config` currently holds only `write` and `migration_receipt`; Phase 3 adds schema/load/etc. The crate-private `crate::strict_json::parse` is the one strict JSON reader. Sniff: `GitRepo::committed_tree() -> CommittedTreeSnapshot` (`commit_id()`, `tree_id()`, `read_file(&str) -> CommittedEntry::{Absent, Blob, Symlink, Directory, Submodule}`, `paths()`), not yet retained in Darkmatter's `RepositoryObservation`/`ContextCapture` (Rule 12's wiring is still to do when configuration loading needs it). Shipped artifacts did not change in Phase 2 (preparation revisions still Simplified Schema 2, Darkmatter 3, Claudine 3). Unrelated local edits under `prompts/` appeared during Phase 2 and are not part of this work.
+    Phase 3 landed configuration loading. Darkmatter: shipped `darkmatter/schemas/darkmatter-config.yaml` (served as `Name@darkmatter:config`; use `permissions@darkmatter:config`, `user-permissions@…`, `repository-permissions@…`); `darkmatter::config::{schema, load}` with `ConfigSnapshot::load(context, Option<&CommittedTreeSnapshot>, ConfigLoadMode)`, `permissions() -> Result<&EffectivePermissions, ConfigError>` (typed user / repository HEAD / repository worktree projections; `PermissionsSetting::{Inline, Reference}`; `FileReadEntry`, `ShellCommandEntry`, `NetworkAccess`), `registrations()` (valid entries + findings), `dependencies()`, `user_config_missing()`, and code constants `dm.config.{invalid,reference,not_saved,migration,missing}`. NOT done yet (Phase 4): following a `permissions` reference to its target and evaluating it, permission verdicts and enforcement, and the legacy-policy migration — `ConfigLoadMode::MigrateLegacy` is passed by `md` (`MdRequest::user_config`) and Claudine (`claudine/cli/src/request.rs::darkmatter_config`) at startup but currently behaves exactly like `Passive`; hook the migration there. Requests: every `ComposeRequest` holds one `Arc<ConfigSnapshot>` (`request.config_snapshot()`), shared by derived/child requests; the HEAD committed tree is retained in the request's repository observation; `with_context` on a repository context needs a snapshot (Claudine supplies it through a `ConfigSnapshotSource` handle on captured contexts). The snapshot is deliberately left out of the compose-cache fingerprint (the `config_snapshot: _` arm in `context/options.rs`): add it once anything reads the policy. Claudine's local-only expression contexts (`ComposeRequest::local_expression_context`) read no config; revisit if they ever fetch. DMLS builds no compose requests yet, so it has no snapshot and no missing-config notification (Phase 6). Claudine: config is YAML (`claudine/schemas/claudine-config.yaml`, `claudine::config::{schema, load, json_conversion, persist}`); all writes go through `claudine::config::persist` (per-key edits on `ConfigTransaction`) — use it for `claudine init`'s setup handshake. Host programs prepare their compiled-in config schemas with `darkmatter::config::schema::prepare_host_config_type` (the context-construction guard refuses building a context outside Darkmatter). SimplifiedSchema `default(...)` now accepts strict JSON lists/mappings. CLI test fixtures (`md` and Claudine) seed a `{}` `~/.darkmatter.yaml`; opt out with `without_user_config()` / `without_darkmatter_config()` to test the missing-config warning. The host was intermittently loaded by unrelated applications (load 100–400); measure slow tests alone before treating them as regressions.
+source_files_during_phase_3:
+    - "biscuit-file/lib/src/file_reference/context.rs"
+    - "biscuit-file/lib/src/file_reference/mod.rs"
+    - "biscuit-file/lib/src/file_reference/portable/mod.rs"
+    - "claudine/cli/src/commands/actions.rs"
+    - "claudine/cli/src/commands/compose/prep.rs"
+    - "claudine/cli/src/commands/config_tui/app.rs"
+    - "claudine/cli/src/commands/config_tui/mod.rs"
+    - "claudine/cli/src/commands/config_tui/persistence.rs"
+    - "claudine/cli/src/commands/config_tui/persistence_tests.rs"
+    - "claudine/cli/src/commands/config_tui/tabs/tts.rs"
+    - "claudine/cli/src/commands/hooks/list.rs"
+    - "claudine/cli/src/commands/init/mod.rs"
+    - "claudine/cli/src/commands/init/prompts.rs"
+    - "claudine/cli/src/commands/init_wizard.rs"
+    - "claudine/cli/src/commands/link_display.rs"
+    - "claudine/cli/src/commands/sequence.rs"
+    - "claudine/cli/src/commands/uninstall.rs"
+    - "claudine/cli/src/commands/wrap/composition/tests.rs"
+    - "claudine/cli/src/commands/wrap/env/mod.rs"
+    - "claudine/cli/src/commands/wrap/runaway_guard.rs"
+    - "claudine/cli/src/completion/engine/mod.rs"
+    - "claudine/cli/src/completion/engine/tests.rs"
+    - "claudine/cli/src/main.rs"
+    - "claudine/cli/src/request.rs"
+    - "claudine/cli/tests/common/mod.rs"
+    - "claudine/cli/tests/common/pty.rs"
+    - "claudine/cli/tests/common/review_screen.rs"
+    - "claudine/cli/tests/common/webhook_listener.rs"
+    - "claudine/cli/tests/common/wrap.rs"
+    - "claudine/cli/tests/l1/agent_cwd.rs"
+    - "claudine/cli/tests/l1/argv_normalization.rs"
+    - "claudine/cli/tests/l1/command_routing.rs"
+    - "claudine/cli/tests/l1/completion_ownership.rs"
+    - "claudine/cli/tests/l1/completion_perf.rs"
+    - "claudine/cli/tests/l1/config_yaml_wiring.rs"
+    - "claudine/cli/tests/l1/contamination_probes.rs"
+    - "claudine/cli/tests/l1/darkmatter_config_gate.rs"
+    - "claudine/cli/tests/l1/detached_audio.rs"
+    - "claudine/cli/tests/l1/handle_blocking_output.rs"
+    - "claudine/cli/tests/l1/handle_repo_config.rs"
+    - "claudine/cli/tests/l1/home_lookup_round_trip.rs"
+    - "claudine/cli/tests/l1/level1_compose_autocomplete_failure_pty.rs"
+    - "claudine/cli/tests/l1/level1_dry_run_pty.rs"
+    - "claudine/cli/tests/l1/level1_inline_compose_mismatch_pty.rs"
+    - "claudine/cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs"
+    - "claudine/cli/tests/l1/main.rs"
+    - "claudine/cli/tests/l1/pi_managed_rpc.rs"
+    - "claudine/cli/tests/l1/protect_cli.rs"
+    - "claudine/cli/tests/l1/skills_integration.rs"
+    - "claudine/cli/tests/l1/tts_prewarm.rs"
+    - "claudine/cli/tests/l1/wrap_compose_agent.rs"
+    - "claudine/cli/tests/l1/wrap_compose_preflight.rs"
+    - "claudine/cli/tests/l1/wrap_ctrl_c_windows.rs"
+    - "claudine/cli/tests/level2/level2_auto_complete_chooser.rs"
+    - "claudine/cli/tests/level2/level2_auto_complete_operation_file.rs"
+    - "claudine/cli/tests/level2/level2_dry_run_approval_capture.rs"
+    - "claudine/cli/tests/level2/level2_dry_run_metadata_capture.rs"
+    - "claudine/cli/tests/level2/level2_explicit_operation_file_miss.rs"
+    - "claudine/cli/tests/level2/level2_file_resolution_capture.rs"
+    - "claudine/cli/tests/level2/level2_inline_compose_mismatch_capture.rs"
+    - "claudine/cli/tests/level2/level2_invalid_file_reference_capture.rs"
+    - "claudine/cli/tests/level2/level2_lifecycle_control.rs"
+    - "claudine/cli/tests/level2/level2_malformed_frontmatter_capture.rs"
+    - "claudine/cli/tests/level2/level2_perf_capture.rs"
+    - "claudine/cli/tests/level2/level2_prompt_reporting_capture.rs"
+    - "claudine/cli/tests/level2/level2_removed_validation_key_capture.rs"
+    - "claudine/cli/tests/level2/level2_schema_parse_capture.rs"
+    - "claudine/cli/tests/level2/level2_sequence_container_ctrl_c.rs"
+    - "claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs"
+    - "claudine/cli/tests/level2/level2_typed_error_render_capture.rs"
+    - "claudine/docs/providers/dispatch-inventory.json"
+    - "claudine/lib/benches/runtime_hot_paths.rs"
+    - "claudine/lib/generated/shipped.json"
+    - "claudine/lib/src/composition/error/tests.rs"
+    - "claudine/lib/src/composition/lifecycle/executor.rs"
+    - "claudine/lib/src/composition/lifecycle/prewarm/worker.rs"
+    - "claudine/lib/src/composition/lifecycle/tests/tts_settings.rs"
+    - "claudine/lib/src/composition/mod.rs"
+    - "claudine/lib/src/composition/prepare.rs"
+    - "claudine/lib/src/composition/sequence/task/mod.rs"
+    - "claudine/lib/src/config/claudine_config.rs"
+    - "claudine/lib/src/config/claudine_config/tests.rs"
+    - "claudine/lib/src/config/json_conversion.rs"
+    - "claudine/lib/src/config/load.rs"
+    - "claudine/lib/src/config/messaging_block/tests.rs"
+    - "claudine/lib/src/config/mod.rs"
+    - "claudine/lib/src/config/persist.rs"
+    - "claudine/lib/src/config/persist_tests.rs"
+    - "claudine/lib/src/config/schema.rs"
+    - "claudine/lib/src/config/schema_tests.rs"
+    - "claudine/lib/src/config/tts.rs"
+    - "claudine/lib/src/dispatch/deps.rs"
+    - "claudine/lib/src/dispatch/loader.rs"
+    - "claudine/lib/src/dispatch/loader/tests.rs"
+    - "claudine/lib/src/dispatch/runner/speak.rs"
+    - "claudine/lib/src/dispatch/runner/tests.rs"
+    - "claudine/lib/src/dispatch/tests.rs"
+    - "claudine/lib/src/error.rs"
+    - "claudine/lib/src/events/config.rs"
+    - "claudine/lib/src/invocation_context.rs"
+    - "claudine/lib/src/messaging/config.rs"
+    - "claudine/lib/src/signals/harvest.rs"
+    - "claudine/lib/src/steering/automatic.rs"
+    - "claudine/lib/src/steering/automatic/tests.rs"
+    - "claudine/lib/src/system_prompt/prepare.rs"
+    - "claudine/lib/tests/config/repository-control.yaml"
+    - "claudine/lib/tests/config/user-control.json5"
+    - "claudine/lib/tests/config/user-control.yaml"
+    - "claudine/lib/tests/l1/claudine_schemas_embedded.rs"
+    - "claudine/lib/tests/l1/config_json_conversion.rs"
+    - "claudine/lib/tests/l1/config_schema_matrix.rs"
+    - "claudine/lib/tests/l1/main.rs"
+    - "claudine/lib/tests/l1/path_lookup_guard.rs"
+    - "claudine/schemas/claudine-config.yaml"
+    - "darkmatter/cli/src/commands/compose.rs"
+    - "darkmatter/cli/src/commands/graph.rs"
+    - "darkmatter/cli/src/commands/validate.rs"
+    - "darkmatter/cli/src/main.rs"
+    - "darkmatter/cli/src/output/command.rs"
+    - "darkmatter/cli/src/output/mod.rs"
+    - "darkmatter/cli/src/output/report.rs"
+    - "darkmatter/cli/src/request.rs"
+    - "darkmatter/cli/tests/common/fixture.rs"
+    - "darkmatter/cli/tests/l1/config_notices.rs"
+    - "darkmatter/cli/tests/l1/main.rs"
+    - "darkmatter/lib/generated/shipped.json"
+    - "darkmatter/lib/src/config/load.rs"
+    - "darkmatter/lib/src/config/load/entries.rs"
+    - "darkmatter/lib/src/config/load/error.rs"
+    - "darkmatter/lib/src/config/mod.rs"
+    - "darkmatter/lib/src/config/schema.rs"
+    - "darkmatter/lib/src/lifecycle/executor.rs"
+    - "darkmatter/lib/src/lifecycle/executor/shell.rs"
+    - "darkmatter/lib/src/lifecycle/executor/tests.rs"
+    - "darkmatter/lib/src/lifecycle/md_host.rs"
+    - "darkmatter/lib/src/markdown/compose/context/capture/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/context/capture/observations.rs"
+    - "darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs"
+    - "darkmatter/lib/src/markdown/compose/context/options.rs"
+    - "darkmatter/lib/src/markdown/compose/context/repository_scope.rs"
+    - "darkmatter/lib/src/markdown/compose/context/request.rs"
+    - "darkmatter/lib/src/markdown/compose/context/runtime.rs"
+    - "darkmatter/lib/src/markdown/compose/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/report_diagnostics.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_expansion/store.rs"
+    - "darkmatter/lib/src/markdown/schemas/embedded.rs"
+    - "darkmatter/lib/src/markdown/schemas/shipped.rs"
+    - "darkmatter/lib/src/yaml_edit.rs"
+    - "darkmatter/lib/tests/l1/config_fields.rs"
+    - "darkmatter/lib/tests/l1/config_load.rs"
+    - "darkmatter/lib/tests/l1/context_construction_guard.rs"
+    - "darkmatter/lib/tests/l1/empty_package_area.rs"
+    - "darkmatter/lib/tests/l1/expression_recovery.rs"
+    - "darkmatter/lib/tests/l1/file_tree_roots.rs"
+    - "darkmatter/lib/tests/l1/main.rs"
+    - "darkmatter/lib/tests/l1/path_function_contracts.rs"
+    - "darkmatter/lib/tests/l1/reference_integration.rs"
+    - "darkmatter/lib/tests/l1/request_config.rs"
+    - "darkmatter/lib/tests/l1/request_context_builder.rs"
+    - "darkmatter/lib/tests/l1/schemas_union_postfix.rs"
+    - "darkmatter/lib/tests/l1/unknown_identifier_warning.rs"
+    - "darkmatter/lib/tests/l1/yaml_edit.rs"
+    - "darkmatter/lib/tests/request_support/mod.rs"
+    - "darkmatter/schemas/darkmatter-config.yaml"
+    - "simplified-schema/lib/src/embedded.rs"
+    - "simplified-schema/lib/src/simplified/grammar.rs"
+    - "simplified-schema/lib/src/simplified/serialize.rs"
+    - "simplified-schema/lib/src/triggers/assemble.rs"
+    - "simplified-schema/lib/src/triggers/discovery.rs"
+    - "sniff/lib/src/filesystem/mod.rs"
+docs_updated_during_phase_3:
+    - "biscuit-file/docs/topics/file-references.md"
+    - "claudine/README.md"
+    - "claudine/docs/pipeline.md"
+    - "claudine/docs/topics/automatic-steering.md"
+    - "claudine/docs/topics/completions/shell-completions.md"
+    - "claudine/docs/topics/composition.md"
+    - "claudine/docs/topics/configuring-actions.md"
+    - "claudine/docs/topics/execution-flow.md"
+    - "claudine/docs/topics/file-referencing.md"
+    - "claudine/docs/topics/flow-control/lifecycle.md"
+    - "claudine/docs/topics/protect-service.md"
+    - "claudine/schemas/README.md"
+    - "darkmatter/README.md"
+    - "darkmatter/docs/cli/data-contracts.md"
+    - "darkmatter/docs/cli/output-and-width.md"
+    - "darkmatter/docs/topics/compose-requests.md"
+    - "darkmatter/docs/topics/yaml-editing.md"
+    - "simplified-schema/docs/topics/language-core.md"
+    - "simplified-schema/docs/topics/language/objects-and-named-types.md"
+    - "simplified-schema/docs/topics/language/types.md"
+    - "simplified-schema/docs/topics/language/unions.md"
+docs_created_during_phase_3:
+    - "claudine/docs/topics/configuration.md"
+    - "darkmatter/docs/topics/configuration.md"
+skills_files_updated_during_phase_3:
+    - ".claude/skills/claudine/SKILL.md"
+    - ".claude/skills/claudine/architecture.md"
+    - ".claude/skills/claudine/cli-reference.md"
+    - ".claude/skills/claudine/hook-actions.md"
+    - ".claude/skills/claudine/unified-hooks.md"
+    - ".claude/skills/darkmatter/SKILL.md"
+    - ".claude/skills/darkmatter/frontmatter.md"
+    - ".claude/skills/darkmatter/library-surfaces.md"
+    - ".claude/skills/darkmatter/requests.md"
+    - ".claude/skills/simplified-schema/SKILL.md"
 ---
 
 # Implementation Log for 2026-11-12-registration (9 phases)
@@ -405,3 +632,62 @@ Input robustness: the receipt reader is the one new configuration-format loader;
 - `darkmatter`: `just test` — 16377 passed, 10 skipped, none ≥ 5 s; `just lint` clean; `just check-tier-coverage darkmatter` — 0 stranded; `just slow-tests fresh` — fresh.
 - `claudine`: `just test` — 11955 passed, 15 skipped, none ≥ 5 s (after the placement fix above); `just lint` clean.
 - Dependents: `cargo check --workspace --all-targets` clean (after the `messenger` fix); `messenger` `--features research` check, research tests (40 passed), and `just lint` clean.
+- Cross-OS (the phase adds file locking, atomic replacement, symlink and permission handling, and Git path handling): `just cross-check sniff --os windows` — 2508 passed, none ≥ 5 s. `just cross-check darkmatter --os windows` — all 11889 passed, but the archive-mode run recorded 112 tests ≥ 5 s (mostly `expression_*` and `schemas_literal_expression` cases). Diagnosis on `build-win` against the identical tree: two of them alone take 0.03 s; the four heaviest suites run together (242 tests) have none ≥ 5 s; and a plain `cargo nextest run -p darkmatter` of the whole package has exactly one slow test, `current_root_migration_guard::the_removed_nesting_appears_only_where_the_allowlist_expects` (> 10 s). That source-scan guard has been slow on Windows since at least 2026-11-08 (9.3–27.8 s in the host's slow-test history, and it was the only slow record on 2026-11-10), so it predates this phase; the other 111 were specific to that archive run's host conditions, not to this phase's code. (The plain run's one failure, `fs_tests::fn_filesystem::has_command_found_on_path_returns_true`, depends on the SSH shell's `PATH` and passes under the cross-check recipe.) No Windows test fails, so `os_failing` is not set; the pre-existing Windows-slow guard is left for a dedicated fix.
+- The `prompts/` edits, Linux, and WSL2 were not exercised here; CI covers Linux/macOS on the pull request and the nightly covers Windows/WSL2.
+
+## Phase 3
+
+Phase 3 ran as foreground subagents: Wave 5's Darkmatter loader first (Claudine's schema imports its types), then the Claudine schema/loader/JSON5 converter and the request binding in parallel, then the per-key Claudine writers alone. Each subagent verified only its slice with nextest filters; the coordinator fixed the cross-agent leftovers and ran the area gates once afterwards.
+
+### Wave 5 — Configuration contracts
+
+- **Darkmatter configuration (Rules 10, 11).** New shipped `darkmatter/schemas/darkmatter-config.yaml` with `user-config`, `repository-config`, `permissions`, `user-permissions`, `repository-permissions` (closed roots; all lists required-with-default and non-null; scope file-read defaults live only in the schema). `ShippedSources::with_aliases` (simplified-schema `embedded.rs`; aliases count in `PartialEq` and preparation identity) maps `darkmatter:config` to that document, so `permissions@darkmatter:config` resolves. New `darkmatter::config::{schema, load}` (`load/entries.rs`, `load/error.rs`): `ConfigSnapshot::load(context, Option<&CommittedTreeSnapshot>, ConfigLoadMode)` reads the user file (home from the context), the repository working copy, and the HEAD copy from the committed tree; strict admitted-YAML loading, schema-only validation, defaults through the shared engine with authored presence kept (`Setting<T> { value, authored }`), dependency records (path, revision, BLAKE3 or absent), located `ConfigError`/`ConfigProblem` (file, revision, pointer, line, column), per-setting outcomes (`permissions()` is a `Result`; invalid `register` entries become findings and only they are omitted), and code constants `dm.config.{invalid,reference,not_saved,migration,missing}`. File-read entries are validated as `GlobReference`s against the portable-variable catalog (new `FileReference::env_variables()` and `FileResolutionContext::portable_variables()` in biscuit-file); shell entries through the single-entry parser extracted from `shell_expansion/store.rs` (`parse_rule_entry`, same behavior). `ConfigLoadMode::MigrateLegacy` currently behaves exactly like `Passive`; the legacy-policy migration is Phase 4's.
+- **SimplifiedSchema grammar.** `default(...)` could not spell a list or mapping, which the config schemas need. An argument that starts with `[` or `{` (not a `{{` slot) is now strict JSON; the serializer quotes a text default starting with a bracket so it round-trips. The pinned case in `schemas_union_postfix.rs` changed accordingly; no shipped schema used the old spelling.
+- **Claudine configuration (Rule 21).** New `claudine/schemas/claudine-config.yaml` (closed `user-config`/`repository-config` covering every existing field and nested variant; `permissions` imported from Darkmatter, never redeclared), compiled in by `claudine/lib/src/config/schema.rs`, prepared through the new `darkmatter::config::schema::prepare_host_config_type`. New `config/load.rs`: strict YAML, schema validation without coercion, defaults from the schema, then serde over the projection; new `ClaudineError::{ConfigInvalid, ConfigConversion}` with file/line/column/pointer. Top-level serde defaults were removed; repository inheritance fields stay optional (absent `active_messenger` inherits, `null` disables; `steering: null` is an error). `ClaudineConfig::validate` still runs after the merge.
+
+### Wave 6 — Reader and writer integration
+
+- **JSON5 conversion (temporary).** New `claudine/lib/src/config/json_conversion.rs`: `json5_scan` then `Json5`, schema validation, publish through `ConfigTransaction` with a migration receipt, re-read, rename to `config.json.bak`, one `dm.config.migration` notice. Both files → YAML wins with a warning; an identical existing backup allows removing the unchanged source, a differing one is an error keeping both; an interrupted conversion is completed by the next load from the receipt. Only `<dir>/.claudine/config.yaml` paths convert a sibling `config.json`; other explicit paths are read as YAML. Completion never converts and lost the `config.json5` candidate. Every reader (loader, runaway guard, init, init wizard, config TUI, link display, uninstall, main's init check, completion) moved to `config.yaml`.
+- **Request binding (Rules 12, 13, 30).** The HEAD committed tree is pinned during the request's one repository discovery and retained in `RepositoryObservation`/`ContextCaptureEvidence`. `ComposeOptions::with_config_snapshot`; `ComposeRequest::config_snapshot()`; `prepare` loads passively when none was supplied; `with_context` on a repository context without a snapshot is `ContextBuildError::ConfigSnapshotRequired`; derived/child requests share the `Arc`. `MdRequest` loads with `MigrateLegacy` and caches per source repository from the same user bytes. Claudine attaches its invocation snapshot to captured contexts through a `ConfigSnapshotSource` handle. A missing `~/.darkmatter.yaml` gives one `dm.config.missing` per `md` invocation (stderr, or data-output `diagnostics` with stderr empty; none for help/usage) and one Claudine warning naming `claudine init` (not for `handle`/`steer`); a broken file stops `md compose`/`graph`/`validate refs` and every Claudine dispatch with a located error. CLI fixtures now seed `~/.darkmatter.yaml` (`{}`) with an opt-out.
+- **Per-key writers (Rule 22).** New `claudine::config::persist` (`edit_config`, `save_changes`, `initialize_config`, `validate_config_text`) applies only explicit edits through `ConfigTransaction` with schema + semantic validation under the lock; the TUI keeps an opening baseline per scope and saves the recursive leaf diff; init and the init wizard supply only their managed paths; `save_claudine_config`/`save_repo_override_config` were removed. Fixed pre-existing bugs: `init --repo` wrote a user-shaped file to the repository path, and init read the repository file as user scope. Darkmatter's `yaml_edit` now turns a `{}` root into a block on `Set` and leaves `{}` when the last top-level key is removed.
+
+### Coordinator fixes
+
+- Two Claudine lib guards failed between agents: `context_construction_guard` (a `FileResolutionContext::from_snapshot` in `claudine/lib/src/config/schema.rs`; the Construction gate takes no Claudine allowance) and `path_lookup_guard` (an allowlist entry named the renamed `load_claudine_config`). Moved the schema preparation into Darkmatter's `config::schema::prepare_host_config_type` (one allowlisted construction with a reason, alongside `ConfigSnapshot::load_user`'s) and renamed the allowlist entry. Both guards pass in darkmatter and claudine.
+- A subagent also edited the global (outside-repo) `~/.claude/skills/use-claudine/` skill to say `config.yaml`; it is not part of this repository's change set.
+- During the gate run, `claudine-cli::l1 dispatch_inventory::dispatch_inventory_matches_committed_file` reported intentional drift (1869 → 1875 dispatch sites from the new config call sites); regenerated `claudine/docs/providers/dispatch-inventory.json` with `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::`.
+- `claudine-cli::l1 home_lookup_round_trip::a_relative_home_is_no_home_and_does_not_reach_the_real_profile` failed: with no usable home, Claudine's long-standing config path is the relative `~/.claudine/config.yaml`, and `ConfigTransaction` refuses relative targets (`the path is not absolute`). Fixed in `claudine/lib/src/config/persist.rs` (`absolute_target`), keeping the pinned behavior; the test and the 47 `persist` unit tests pass.
+- Coordinator frontmatter repair: my first insertion of the Phase 3 keys clipped four characters from the preceding key in the plan and log and left a duplicated `---`; fixed and verified with `md get` and a diff showing only additions.
+
+### Requirement → test mapping
+
+| Behavior | Tests |
+| --- | --- |
+| Shipped config schema; `darkmatter:config` alias resolves; parent defaults equal children's | unit `config::schema::tests::*`; simplified-schema `embedded` unit tests; `shipped_artifact_is_fresh` in all three packages |
+| Darkmatter loader: control (real generated default config), missing user file, dependency hashes, `{}` valid, empty file invalid | `darkmatter::l1 config_load::*` (14) |
+| Document loader cells: duplicate keys at three depths, trailing garbage, multiple documents, non-string keys, inadmissible number, malformed YAML, invalid UTF-8, unknown root key, BOM/CRLF/comments/markers, `k:` null | `config_load::*` |
+| HEAD vs working-copy projections, unborn HEAD, invalid committed file, repository context without snapshot | `config_load::*`, `darkmatter::l1 request_config::*` (8) |
+| Field shapes: `file-read` full walk (absent → scope default, null, wrong whole/one/all elements, `[]`, exclusions only, blanks, portability, repo containment); `shell-commands`, `network`, `permissions` (`{}`, reference, blank/remote/null/wrong/unknown/leaving), `register` (default, invalid entries omitted, independence from `permissions`) | `darkmatter::l1 config_fields::*` (17) |
+| List/mapping defaults in the grammar; serializer round trip | simplified-schema grammar/serialize unit tests; `darkmatter::l1 schemas_union_postfix::*` |
+| Request capture: one discovery, snapshot shared by derived/child requests (pointer-equal), source in another repository gets its own projection from the same user bytes, snapshot source handle | `request_config::*`, unit test in `context/request.rs` |
+| `md` diagnostics: one `dm.config.missing` (formatted stderr and data `diagnostics` with empty stderr; composing and non-composing commands), none for help/usage or a repo without config, located `dm.config.invalid` with exit 1 | `darkmatter-cli::l1 config_notices::*` (6) |
+| Claudine stops before dispatch on a broken Darkmatter config; one missing-config warning | `claudine-cli::l1 darkmatter_config_gate::*` (2) |
+| Claudine config schema: every top-level field and nested variant (control + located invalid wiring), shared validator shape walks, active_messenger absent/null, `steering: null` invalid, user-vs-repo key sets, semantic errors | `claudine::l1 config_schema_matrix::*` (16), `claudine` unit `config::schema::tests`, `config::load` tests |
+| Fixtures describe the same values after the syntax change | `config_schema_matrix` (JSON5 control vs YAML control: `claudine/lib/tests/config/user-control.{json5,yaml}`) |
+| JSON5 conversion: duplicate decoded keys, trailing garbage, non-finite numbers, wrong root, comments/trailing commas, both-files warning, identical/differing backup, publish-before-rename interruption, idempotence, changed source retained | `claudine::l1 config_json_conversion::*` (12) |
+| CLI wiring (control, field-shape failure, syntax failure, nothing launched) | `claudine-cli::l1 config_yaml_wiring::*` (4) |
+| Per-key writes: byte preservation, read/write/read twice, concurrency with a Darkmatter `permissions` write, sequence replaced whole, removal, no-op writes nothing, invalid refused untouched, repository scope, setup creation/idempotence | `claudine` unit `config::persist::tests::*` (19+), `claudine-cli` `config_tui::persistence::tests::*` (7), `init_wizard` (2) and `init` (3) tests |
+| `{}` root edits and last-key removal | `darkmatter::l1 yaml_edit::*` |
+| No-home fallback path still saves | `claudine-cli::l1 home_lookup_round_trip::*` |
+
+Input-robustness smell audit (by the loader agents): the Darkmatter loader reads fields explicitly from the schema-judged value (no `#[serde(default)]`, `unwrap_or_default`, or `.ok()` on load-bearing fields). In Claudine, top-level serde defaults were removed; nested serde defaults remain only behind the schema projection (the schema fills those values before serde) and are recorded as a review decision; `Option<Option<String>>` remains for `active_messenger` (absent vs null).
+
+### Gates
+
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` → `change_class: package`, `packages: [biscuit-file, claudine, claudine-cli, darkmatter, darkmatter-cli, simplified-schema, sniff, test-toolkit]`; gates were not skipped.
+- `darkmatter`: `just test` — 16430 passed, 10 skipped; one slow, `glob_implementation_guard::file_references_have_one_glob_implementation` at 5.23 s with load average 77 on 16 cores, 1.37 s alone (cleared under the loaded-host allowance). `just lint` clean; `just check-tier-coverage darkmatter` — 0 stranded.
+- `simplified-schema`: `just test` — 2164 + 1808 (minimal) passed, none ≥ 5 s; `just lint` clean.
+- `claudine`: the first two `just test` runs stopped at the two failures above (fixed). The host was heavily loaded by unrelated applications (load averages 150–427 on 16 cores: ImageMagick, Metal compiler services, Chrome, Lightroom), and the third run (all 12024 passed) recorded 186 tests ≥ 5 s; all 186 were re-measured alone (`-j 1`, load ~7): none ≥ 5 s, the slowest 3.4 s. A fourth `just test` at lower load: 12024 passed, 2 slow (5.35 s and 5.86 s, peak load 133), 2.17 s and 2.30 s alone, cleared. `just lint` clean.
+- `sniff`: `just test` — 3570 passed, 4 slow (5.7–6.9 s: three macOS hardware/audio detection tests and one `sniff-detection-cli` test), 0.97–3.03 s alone; `just lint` clean. `biscuit-file`: `just test` — 1286 + 6 passed, none slow; `just lint` clean.
+- Dependents: `cargo check --workspace --all-targets` clean; `messenger --features research` tests (40) pass. DMLS is inside the darkmatter area gate.
+- Cross-OS (config paths under home and repository, committed-tree capture per request, locked writes): `just cross-check darkmatter --os windows` — 11936 passed; 7 ≥ 5 s: six `expression_recovery_data` tests (5.1–7.6 s) that run under 5 s in a narrow rerun (max 4.4 s), and `current_root_migration_guard::the_removed_nesting_appears_only_where_the_allowlist_expects` (11.7 s; 7.4 s in the narrow rerun), the Windows-only slow source-scan guard Phase 2 already recorded (9.3–27.8 s since 2026-11-08), untouched by this phase. `just cross-check claudine --os windows` — 6587 passed, none slow; `just cross-check claudine-cli --os windows` — 3968 passed, none slow. No Windows failure, so `os_failing` is not set. Linux and WSL2 are left to CI.
