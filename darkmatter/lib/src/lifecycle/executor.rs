@@ -91,7 +91,7 @@ pub(crate) use shell::execute_set_shell_values_sharing;
 pub use host::{LifecycleHost, LifecycleRunFailure, PrepError, PrepRequest};
 pub use outcome::{ActionLocation, LifecycleEventOutcome, StackControl};
 pub use shell::{
-    DisabledShellRunner, ShellRunError, ShellRunner, ShellValueRequest, compose_request,
+    DisabledShellRunner, ShellRunError, ShellRunner, ShellValueRequest, compose_request, local_expression_context,
     execute_set_shell_values,
 };
 
@@ -134,6 +134,10 @@ pub struct StackInputs<'a> {
     /// The request's file-resolution context, used by document-authored file
     /// expressions.
     pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
+    /// The request's configuration snapshot, handed to every request a
+    /// lifecycle action builds over [`Self::file_resolution_context`]. `None`
+    /// is valid only when that context names no repository.
+    pub config_snapshot: Option<&'a std::sync::Arc<crate::config::load::ConfigSnapshot>>,
     /// Darkmatter side-effect engine.
     pub effect_engine: &'a EffectEngine,
     /// Approved-shell runner.
@@ -1153,6 +1157,7 @@ impl<'a> StackExecutor<'a> {
                 source_path: self.inputs.source_path,
                 context: self.early_binding_context(&authored),
                 file_resolution_context: self.inputs.file_resolution_context,
+                config_snapshot: self.inputs.config_snapshot,
                 holes,
                 policy_root: policy_root.as_deref(),
             };

@@ -473,6 +473,9 @@ impl StackExecutionContext<'_> {
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: self.prepared_context,
             file_resolution_context: self.file_resolution_context,
+            // The prepared context carries the invocation's configuration
+            // capture, which a request built over it consults.
+            config_snapshot: None,
             effect_engine: self.effect_engine,
             shell_runner: self.shell_runner,
             source_path: self.source_path,

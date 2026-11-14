@@ -266,7 +266,7 @@ fn run_sequence_inner(
     // One TTS pre-warm worker for the whole sequence, shared by every step and
     // task; dropping it on return cancels unfinished preparation.
     let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(shared.dry_run);
-    let invocation = claudine::invocation_context::InvocationContext::capture(request)?
+    let invocation = crate::request::with_darkmatter_config(claudine::invocation_context::InvocationContext::capture(request)?)
         .with_environment_source(documents)
         .with_prewarm(prewarm.handle());
     // Dropped on every return, so a skipped schema trigger recorded before a

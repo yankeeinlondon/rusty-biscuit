@@ -34,6 +34,7 @@ fn handle_json_includes_protect_decisions() {
         }
     });
     write(
+        // A pre-2026 per-provider file: the legacy name, backed up and ignored.
         &fixture.home().join(".claudine/config.json"),
         &serde_json::to_string_pretty(&config).unwrap(),
     );

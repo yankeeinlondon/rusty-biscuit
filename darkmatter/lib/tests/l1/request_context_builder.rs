@@ -287,9 +287,15 @@ fn an_environment_only_replacement_enters_a_document_under_another_map() {
     assert_eq!(context_b.home_dir(), Some(home.as_path()));
     assert_eq!(context_b.repository_root(), Some(repo.as_path()));
     assert_eq!(context_b.launch_magic_scope(), first.resolution_context().launch_magic_scope());
-    let second =
-        ComposeRequest::with_context(ComposeOptions::new().with_source_file(work.join("second.md")), context_b)
-            .unwrap();
+    // The same repository, so the second document keeps the request's
+    // configuration snapshot.
+    let second = ComposeRequest::with_context(
+        ComposeOptions::new()
+            .with_source_file(work.join("second.md"))
+            .with_config_snapshot(std::sync::Arc::clone(first.config_snapshot())),
+        context_b,
+    )
+    .unwrap();
     let (composed, _) = Markdown::try_from(work.join("second.md").as_path()).unwrap().compose_with(&second).unwrap();
     let b = biscuit_file::to_portable_string(&root.join("fixtures-b"));
     assert!(composed.content().contains(&format!("value=[{b}] title=[Title B]")), "{}", composed.content());

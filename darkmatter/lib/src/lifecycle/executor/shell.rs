@@ -139,6 +139,9 @@ pub struct ShellValueRequest<'a> {
     pub context: ComposeContext,
     /// The request's file-resolution context.
     pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
+    /// The request's configuration snapshot; `None` only when
+    /// [`Self::file_resolution_context`] names no repository.
+    pub config_snapshot: Option<&'a std::sync::Arc<crate::config::load::ConfigSnapshot>>,
     /// Reads a template-mode value's placeholders against [`Self::state`]
     /// with the event's globals, exactly as the action's other values read.
     pub holes: Option<&'a dyn HoleEvaluator>,
@@ -164,7 +167,8 @@ pub struct ShellValueRequest<'a> {
 /// ## Errors
 ///
 /// [`ShellRunError::Value`] carrying the first value's Darkmatter failure, or
-/// [`ShellRunError::Context`] when the request's context fails validation.
+/// [`ShellRunError::Context`] when the request's context fails validation or
+/// names a repository without [`ShellValueRequest::config_snapshot`].
 pub fn execute_set_shell_values(
     request: &ShellValueRequest<'_>,
     child_environment: Option<&ShellChildEnvironment>,
@@ -202,6 +206,9 @@ pub(crate) fn execute_set_shell_values_sharing(
     if let Some(data) = data {
         options = options.with_data_runtime(data.clone());
     }
+    if let Some(snapshot) = request.config_snapshot {
+        options = options.with_config_snapshot(std::sync::Arc::clone(snapshot));
+    }
     let compose_request = compose_request(options, request.file_resolution_context.clone())
         .map_err(|source| ShellRunError::Context { source })?;
     // Cloning the view shares its base (an inline `sequence:` list included)
@@ -223,13 +230,40 @@ pub(crate) fn execute_set_shell_values_sharing(
 /// ## Errors
 ///
 /// Returns the [`ContextBuildError`] when `file_resolution_context` fails
-/// validation.
+/// validation, or names a repository while `options` holds no configuration
+/// snapshot ([`ComposeOptions::with_config_snapshot`]).
 pub fn compose_request(
     options: ComposeOptions,
     file_resolution_context: biscuit_file::FileResolutionContext,
 ) -> Result<ComposeRequest, ContextBuildError> {
+    let context = with_layered_environment(&options, file_resolution_context);
+    ComposeRequest::with_context(options, context)
+}
+
+/// The local-only expression context `options`' source evaluates in, over
+/// the request's `file_resolution_context` with the run's variables layered on
+/// as [`compose_request`] layers them
+/// ([`ComposeRequest::local_expression_context`]: no request, so no
+/// configuration snapshot is needed).
+///
+/// ## Errors
+///
+/// Returns the [`ContextBuildError`] when `file_resolution_context` fails
+/// validation.
+pub fn local_expression_context(
+    options: ComposeOptions,
+    file_resolution_context: biscuit_file::FileResolutionContext,
+) -> Result<crate::markdown::compose::expression::ResolutionContext, ContextBuildError> {
+    let context = with_layered_environment(&options, file_resolution_context);
+    ComposeRequest::local_expression_context(options, &context)
+}
+
+fn with_layered_environment(
+    options: &ComposeOptions,
+    file_resolution_context: biscuit_file::FileResolutionContext,
+) -> biscuit_file::FileResolutionContext {
     let layered = options.context().env();
-    let context = if layered
+    if layered
         .iter()
         .all(|(key, value)| file_resolution_context.env().get(key) == Some(value))
     {
@@ -238,8 +272,7 @@ pub fn compose_request(
         let mut env = file_resolution_context.env().clone();
         env.extend(layered.iter().map(|(key, value)| (key.clone(), value.clone())));
         file_resolution_context.with_env(env)
-    };
-    ComposeRequest::with_context(options, context)
+    }
 }
 
 /// Runner for initialization and its early catch handlers. Approvals cannot

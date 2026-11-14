@@ -59,7 +59,13 @@ fn scope_at(root: &Path, dir: &Path) -> HashMap<String, String> {
     );
     let (composed, _) = Markdown::try_from(document.as_path())
         .unwrap()
-        .compose_with(&crate::request_support::request(ComposeOptions::new_with_context(context).with_source_file(&document)))
+        .compose_with(&crate::request_support::request(
+            ComposeOptions::new_with_context(context)
+                .with_source_file(&document)
+                // The evidence names a repository with no committed tree
+                // (the fixture has no Git), so it has no committed policy.
+                .with_config_snapshot(crate::request_support::user_config(dir, None, HashMap::new())),
+        ))
         .unwrap();
     composed
         .content()

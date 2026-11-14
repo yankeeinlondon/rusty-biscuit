@@ -213,7 +213,7 @@ pub(crate) fn run_composition_inner(
     // One TTS pre-warm worker for the whole command, shared by every document
     // a handoff adopts; dropping it on return cancels unfinished preparation.
     let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(shared.dry_run);
-    let mut invocation = InvocationContext::capture(crate::request::snapshot())?
+    let mut invocation = crate::request::with_darkmatter_config(InvocationContext::capture(crate::request::snapshot())?)
         .with_environment_source(crate::request::document_environment_source())
         .with_prewarm(prewarm.handle());
     // Dropped on every return, so a skipped schema trigger recorded before a
@@ -1603,6 +1603,8 @@ fn execute_loop_or_single(
         prepared_context: Some(prepared_context.clone()),
         file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
         file_resolution_context: file_resolution_context.clone(),
+        // The invocation's capture on the prepared context supplies it.
+        config_snapshot: None,
         name_coercion_keys: Vec::new(),
         allow_empty_body: false,
         // R4 applies to a looping document exactly as it does to a single one.

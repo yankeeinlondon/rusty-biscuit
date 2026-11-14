@@ -49,11 +49,12 @@ pub struct ReportSink {
 
 impl ReportSink {
     /// A collector for `output`, with `file` as the command line gave it and
-    /// the width warning already recorded. `perf` makes the envelope carry
+    /// the run-level notices and width warning already recorded. `perf` makes the envelope carry
     /// timings; `show` also opens the serialized value.
     #[must_use]
     pub fn new(output: &ResolvedOutput, file: Option<String>, show: bool, perf: bool) -> Self {
-        let diagnostics = output.width_warning.as_deref().map(width_warning_diagnostic).into_iter().collect();
+        let mut diagnostics = super::take_run_notices();
+        diagnostics.extend(output.width_warning.as_deref().map(width_warning_diagnostic));
         Self {
             target: output.target,
             options: output.options.clone(),

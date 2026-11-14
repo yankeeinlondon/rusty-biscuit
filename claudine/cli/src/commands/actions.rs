@@ -227,7 +227,8 @@ mod tests {
 
     #[test]
     fn configured_actions_render_session_start_report() {
-        let config: ClaudineConfig = serde_json::from_str(
+        let config = ClaudineConfig::from_user_document(
+            serde_json::from_str(
             r#"{
   "actions": {
     "session_start": [
@@ -235,6 +236,8 @@ mod tests {
     ]
   }
 }"#,
+            )
+            .unwrap(),
         )
         .unwrap();
         assert!(config.actions.contains_key(&AgenticEvent::SessionStart));

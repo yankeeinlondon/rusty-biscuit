@@ -15,7 +15,7 @@ use darkmatter::markdown::compose::shell_expansion::{
 };
 use darkmatter::markdown::compose::policy::BlockingPolicy;
 use darkmatter::markdown::compose::{
-    ComposeContext, ComposeFailure, ComposeOptions, ComposeReport, ComposeRequest, ContextGroup, DataRuntime,
+    ComposeContext, ComposeFailure, ComposeOptions, ComposeReport, ContextGroup, DataRuntime,
 };
 use tempfile::TempDir;
 
@@ -515,7 +515,7 @@ fn tree_escape_is_fatal() {
     let compose = |content: &str| {
         std::fs::write(&doc, content.replace("SENTINEL", SENTINEL)).unwrap();
         let context = FileResolutionContext::from_snapshot(&repo, None, HashMap::new()).with_repository_root(&repo);
-        let request = ComposeRequest::with_context(ComposeOptions::new().with_source_file(&doc), context).unwrap();
+        let request = crate::request_support::request_in(ComposeOptions::new().with_source_file(&doc), context);
         Markdown::try_from(doc.as_path()).unwrap().compose_with_warnings(&request)
     };
     let (control, report) = compose("{{ try(load_data('missing.yaml', 'string[]'), SENTINEL) }}\n").expect("an in-tree miss recovers");

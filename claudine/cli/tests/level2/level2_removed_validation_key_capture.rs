@@ -64,7 +64,7 @@ fn stage() -> Staged {
     // Minimal config so the first-run setup wizard does not intercept.
     let claudine_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 
     // Provider stub: present for resolution, never launched — the removed-key
     // scan fires during prepare, before the provider spawns.

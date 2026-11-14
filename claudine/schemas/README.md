@@ -33,6 +33,7 @@ and commit the regenerated artifacts (see
 | `claudine.yaml` | trigger (`kind: schema-trigger`) | applies Claudine's frontmatter catalog to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model`; types Darkmatter's `composed` and `failed` as errors that name `start` and `blocked` |
 | `inline-compose.yaml` | trigger (`kind: schema-trigger`) | applies inline-compose's document metadata to a document with a non-null `prompt` and no non-null `sequence` |
 | `sequence.yaml` | trigger (`kind: schema-trigger`) | applies the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`) to a document with a non-null `sequence` |
+| `claudine-config.yaml` | library (`kind: schema`) | the user (`user-config`) and repository (`repository-config`) configuration files, `~/.claudine/config.yaml` and `{repo-root}/.claudine/config.yaml`; imports Darkmatter's `permissions` type. Compiled into Claudine's loader on its own, not part of the trigger bundle; see [Configuration files](../docs/topics/configuration.md) |
 | `review.yaml` | standalone schema (`$schema`) | the schema of a specification review document |
 | `globals.yaml` | host catalog (`kind: schema` + `$schema`) | the shapes of Claudine's host globals `seq`, `loop`, and `group` |
 | `globals.lifecycle.json` | generated host lifecycle artifact | Claudine's event registry and lifecycle parse options, for DMLS; regenerate with `just regen-lifecycle-artifact` |

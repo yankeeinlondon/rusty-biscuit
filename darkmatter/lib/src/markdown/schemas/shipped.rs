@@ -74,7 +74,8 @@ pub const REGENERATE_COMMAND: &str = "just shipped-schemas";
 pub const ARTIFACT: &[u8] = include_bytes!("../../../generated/shipped.json");
 
 /// Where the reserved namespace's partials live; a shipped document under
-/// this folder is served as `Name@darkmatter:<stem>`.
+/// this folder is served as `Name@darkmatter:<stem>`, and one outside it only
+/// through an alias (`embedded::SHIPPED_ALIASES`).
 const PARTIALS: &str = "darkmatter/schemas/partials/";
 
 /// Every compiled-in text Darkmatter's preparation reads, by virtual path:
@@ -109,8 +110,16 @@ pub fn descriptor_over<'a>(sources: &'a [EmbeddedDocument<'a>], lower: &'a [Lowe
         preparation_revision: PREPARATION_REVISION,
         sources,
         dependencies: lower,
-        configuration: &[],
+        // The reserved namespace's aliases decide which document a stem
+        // names, so they are part of what the artifact was prepared over.
+        configuration: embedded::SHIPPED_ALIASES,
     }
+}
+
+/// Whether a reserved-namespace alias names the shipped document at `path`;
+/// its named types are served like a partial's.
+fn is_alias_target(path: &str) -> bool {
+    embedded::SHIPPED_ALIASES.iter().any(|(_, target)| *target == path)
 }
 
 /// The artifact payload. Members keep authored order (catalog globals,
@@ -548,7 +557,7 @@ pub fn prepare_payload(fresh: &FreshLower) -> Result<DarkmatterPayload, String> 
 
     let tables = SHIPPED
         .iter()
-        .filter(|document| document.path.starts_with(PARTIALS))
+        .filter(|document| document.path.starts_with(PARTIALS) || is_alias_target(document.path))
         .map(|document| {
             NamedTypeTableRecord::prepare(document, mode).map_err(|error| format!("`{}`: {error}", document.path))
         })

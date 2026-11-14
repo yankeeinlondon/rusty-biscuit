@@ -130,8 +130,14 @@ fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
         preferred_agent: Some(Provider::Goose),
         ..claudine::config::claudine_config::ClaudineConfig::default()
     };
-    let config_path = claudine_dir.join("config.json");
-    claudine::dispatch::loader::save_claudine_config(&config, &config_path).unwrap();
+    let config_path = claudine_dir.join("config.yaml");
+    claudine::config::persist::initialize_config(
+        &config_path,
+        claudine::config::schema::ConfigScope::User,
+        &claudine::config::claudine_config::ClaudineConfig::default(),
+        &config,
+    )
+    .unwrap();
 
     // Create a source file outside any git repo.
     let source_dir = fixture.cwd().join("source");

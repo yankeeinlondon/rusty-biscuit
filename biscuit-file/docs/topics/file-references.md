@@ -1804,6 +1804,21 @@ CONFIG_DIR=../shared                                →  not eligible (NotAbsolu
 CONFIG_DIR=/opt/conf                                →  not eligible (NotAPrefix)
 ```
 
+To check a reference against the declared names yourself, compare
+`FileReference::env_variables()` (the `{{NAME}}` names a reference
+interpolates, in authored order) with
+`FileResolutionContext::portable_variables()` (the valid names the context's
+`PORTABLE_ENV_VARIABLES` declares). Darkmatter's configuration loader does
+this for `file-read` patterns.
+
+```rust
+use biscuit_file::FileReference;
+
+let reference = FileReference::new("{{NOTES}}/*.md")?;
+assert_eq!(reference.env_variables(), ["NOTES"]);
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
 ### Builders and captured state
 
 - `with_ctx(&ctx)` evaluates against a clone of the context: no discovery and

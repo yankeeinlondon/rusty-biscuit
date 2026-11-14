@@ -81,7 +81,7 @@ output is emitted before B-end.
 | B2.3 | **`CompositionPrepContext::new`** [M] | One-shot prep context: `compose_prep.prep_context` span. Owns the next four steps. |
 | B2.3.a | **Shared `sniff::detect_with_plan` scan** [M] | `compose_prep.shared_sniff`. Single rooted scan at launch CWD covering git summary + repo structure (no os/hw/net). Replaces what used to be two redundant scans (`LaunchContext::from_cwd` and `detect_environment_fast`). Yields a cached `LaunchContext` and a cached `EnvironmentContext`. |
 | B2.3.b | **Resolve source repo root** [M] | `compose_prep.source_repo_root`. Fast path when source's parent dir is inside the launch repo (reuse launch root). Slow path: `detect_git` probe on the source's parent dir. |
-| B2.3.c | **Load selection config** [M] | `compose_prep.selection_config`. Reads `~/.claudine/config.json` and (when present) `<repo>/.claudine/config.json` for `preferred_agent` (alias `favorite_agent`) and the `models` overrides (`model_overrides`). |
+| B2.3.c | **Load selection config** [M] | `compose_prep.selection_config`. Reads `~/.claudine/config.yaml` and (when present) `<repo>/.claudine/config.yaml` for `preferred_agent` (alias `favorite_agent`) and the `models` overrides (`model_overrides`). |
 | B2.3.d | **Build installed-provider snapshot** [M] | `compose_prep.installed_clients`. PATH scan via `sniff::programs::InstalledAiClients` for the supported provider CLIs, filtered by `--exclude`. Supports automatic selection and the dry-run resolution breakdown; a dry-run never treats the selected executable's absence as an error. Also populates `binary_paths` used by live execution at C1.4 (W2). |
 
 ### B3. Eager target resolution

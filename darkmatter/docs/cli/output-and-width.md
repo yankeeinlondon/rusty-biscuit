@@ -382,6 +382,8 @@ flowchart TD
 | `md compose broken.md --output json` | the value, with `outcome: "failure"` | nothing |
 | `md render doc.md --output html` | the HTML | style warnings |
 | `md validate refs doc.md --output markdown` | the report, as Markdown | nothing |
+| `md hash doc.md` with no `~/.darkmatter.yaml` | the hash | one `dm.config.missing` warning |
+| `md hash doc.md --output json` with no `~/.darkmatter.yaml` | the value, with the `dm.config.missing` diagnostic | nothing |
 
 ## Exit status
 

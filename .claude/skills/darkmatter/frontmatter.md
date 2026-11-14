@@ -422,7 +422,9 @@ caller's source (1-based line/column, byte offset counting a BOM). Beyond the
 Markdown editor it appends (`Set` at index == sequence length), turns a `null`
 parent into a mapping, preserves BOM/CRLF/no final newline, and refuses any path
 reaching an alias, anchor, or tag, or walking into a non-empty flow collection,
-before editing. User docs: `darkmatter/docs/topics/yaml-editing.md`.
+before editing. A file that is only `{}` is an empty root a `Set` turns into a
+block, and removing every top-level key leaves `{}` after the kept comments,
+so a host loader that refuses an empty file (Claudine's) can still read it. User docs: `darkmatter/docs/topics/yaml-editing.md`.
 
 ## `style:` Frontmatter
 

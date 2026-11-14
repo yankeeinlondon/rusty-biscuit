@@ -35,6 +35,26 @@ behavior.
   `strict_json`); `complete_cleanup` acts only on caller-listed known
   sources. Test seams: `config::write::test_hooks` under
   `effects-instrumentation`. User docs: `docs/topics/config-writes.md`.
+- `config::schema` holds the shipped configuration schema
+  (`darkmatter/schemas/darkmatter-config.yaml`, in `embedded::SHIPPED`,
+  served as `Name@darkmatter:config` through `SHIPPED_ALIASES`; the alias
+  pairs are the artifact's preparation `configuration`). A host program
+  prepares its own compiled-in config schema (Claudine's
+  `claudine-config.yaml`, which imports `permissions@darkmatter:config`)
+  through `config::schema::prepare_host_config_type(source, path, name)`,
+  never by building a context itself (the context-construction guard
+  refuses that outside Darkmatter). `config::load`'s
+  `ConfigSnapshot::load(context, Option<&CommittedTreeSnapshot>, mode)`
+  reads the user file (home from the context) and the repository file at
+  HEAD and in the working copy, with the admitted-YAML loader, judging one
+  setting at a time against the scope's selected type (`user-config` /
+  `repository-config`): whole-file failures are syntax, non-mapping, and
+  unknown keys; `permissions()` returns one merged error; `register`
+  findings omit only their entries. Typed entries reuse
+  `shell_expansion::store::parse_rule_entry` and biscuit-file's
+  `GlobReference`/`FileReference`. Permission evaluation, reference
+  following, and legacy migration are later work. User docs:
+  `docs/topics/configuration.md`.
 
 ## Composition and expressions
 

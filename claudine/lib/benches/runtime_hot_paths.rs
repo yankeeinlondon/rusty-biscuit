@@ -127,7 +127,7 @@ struct RuntimeConfigFixture {
 impl RuntimeConfigFixture {
     fn new() -> Self {
         let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join(".claudine/config.json");
+        let config_path = temp_dir.path().join(".claudine/config.yaml");
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
 
         let config = serde_json::json!({

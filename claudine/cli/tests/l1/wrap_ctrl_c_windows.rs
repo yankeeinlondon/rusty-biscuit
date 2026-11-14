@@ -108,7 +108,7 @@ fn ctrl_c_terminates_wrapped_child_on_windows() {
     // Minimal config so the wrapper's startup config load succeeds.
     let claudine_dir = fixture.home().join(".claudine");
     fs::create_dir_all(&claudine_dir).expect("create .claudine");
-    fs::write(claudine_dir.join("config.json"), "{}").expect("seed config");
+    fs::write(claudine_dir.join("config.yaml"), "{}").expect("seed config");
 
     let md_file = fixture.cwd().join("run.md");
     fs::write(&md_file, "---\ntitle: win\nmodel: test-model\n---\nBody\n").expect("write md");

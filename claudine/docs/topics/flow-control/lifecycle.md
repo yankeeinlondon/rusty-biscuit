@@ -857,8 +857,8 @@ captured `NAME` when the prompt is prepared. Lexical runtime roots,
 #### Configuration and when it is off
 
 Document lifecycle phrases use the `tts` setting in
-`~/.claudine/config.json`, including prompt documents reached by a sequence.
-Under `{ "tts": { "provider": "kokoro", "voice": "af_heart" } }`, a
+`~/.claudine/config.yaml`, including prompt documents reached by a sequence.
+Under `tts: { provider: kokoro, voice: af_heart }`, a
 prompt's `say: done` is prepared with Kokoro and `af_heart`.
 
 The on/off switch always comes from the user's `tts` setting, whichever phrase
@@ -989,7 +989,7 @@ success:
 
 `no_error` is accepted by every long form except `set`'s (see
 [`no_error`](#no_error)). `say`/`speak` take no `voice` or `provider`: TTS
-configuration lives in `~/.claudine/config.json`.
+configuration lives in `~/.claudine/config.yaml`.
 
 #### Typed argument values
 
@@ -1788,7 +1788,7 @@ If the frontmatter is not an object (e.g., a bare string or list), lifecycle par
 
 ## Integration Notes
 
-- **TTS**: Uses the global TTS configuration from `~/.claudine/config.json` (voice, rate, provider). If no TTS settings are configured, uses system defaults.
+- **TTS**: Uses the global TTS configuration from `~/.claudine/config.yaml` (voice, rate, provider). If no TTS settings are configured, uses system defaults.
 - **Messaging**: Requires a configured messaging route. See [Configuring Actions](../configuring-actions.md).
 - **Desktop notifications**: Zero-config. Emitted via `notify` independently of messaging routes. Failures are non-fatal.
 - **stderr/info/warn**: Rendered as styled status badges using the terminal's capability detection (circular theme with color-coded state).

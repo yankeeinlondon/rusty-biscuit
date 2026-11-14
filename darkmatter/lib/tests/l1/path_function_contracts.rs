@@ -19,7 +19,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::{
     EvaluationLookup, ExpressionError, ResolutionContext, evaluate, parse,
 };
-use darkmatter::markdown::compose::{ComposeOperation, ComposeOptions, ComposeRequest};
+use darkmatter::markdown::compose::{ComposeOperation, ComposeOptions};
 use serde_json::{Value, json};
 
 struct Fixture {
@@ -515,7 +515,7 @@ fn caller_file_siblings_stay_beside_the_caller_file() {
             .with_file_ref_fallback_dir(&launch)
             .with_set_overrides(json!({ "spec": "fixes/c/spec.md" }))
             .only(&[ComposeOperation::FrontmatterInterpolation, ComposeOperation::Interpolation]);
-        let request = ComposeRequest::with_context(options, context).unwrap();
+        let request = crate::request_support::request_in(options, context);
         Markdown::try_from(prompt).unwrap().compose_with(&request).unwrap().0.content().to_string()
     };
 

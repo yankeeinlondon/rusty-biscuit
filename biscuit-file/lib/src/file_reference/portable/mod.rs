@@ -35,3 +35,9 @@ pub(crate) use path_identity::normalize_native;
 #[cfg(feature = "file-reference")]
 pub(crate) use path_identity::first_seen_by_identity;
 pub use strategy::{IntentForms, PortabilityPreference};
+
+/// The valid portable variable names `env` declares.
+#[cfg(feature = "file-reference")]
+pub(crate) fn declared_portable_names(env: &std::collections::HashMap<String, String>) -> std::collections::BTreeSet<String> {
+    env_anchor::portable_names(env, &[]).names
+}

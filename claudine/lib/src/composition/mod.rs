@@ -205,6 +205,32 @@ pub use types::{
 // also use.
 pub use darkmatter::lifecycle::executor::compose_request;
 
+/// `options` with `invocation`'s Darkmatter configuration for `context`,
+/// when neither the options nor their captured `ctx` supply one already (a
+/// context captured outside the invocation carries no configuration capture).
+///
+/// ## Errors
+///
+/// [`ContextBuildError::Config`](darkmatter::markdown::compose::ContextBuildError::Config)
+/// when the configuration does not load.
+pub fn with_invocation_config(
+    options: darkmatter::markdown::compose::ComposeOptions,
+    invocation: Option<&crate::invocation_context::InvocationContext>,
+    context: &biscuit_file::FileResolutionContext,
+) -> Result<darkmatter::markdown::compose::ComposeOptions, darkmatter::markdown::compose::ContextBuildError> {
+    let Some(invocation) = invocation else { return Ok(options) };
+    if options.config_snapshot().is_some() || options.context().config_source().is_some() {
+        return Ok(options);
+    }
+    invocation
+        .darkmatter_config_for(context)
+        .map(|snapshot| options.with_config_snapshot(snapshot))
+        .map_err(|source| darkmatter::markdown::compose::ContextBuildError::Config {
+            dir: context.request_cwd().to_path_buf(),
+            source,
+        })
+}
+
 /// Builds Darkmatter's local expression context from the request's
 /// file-resolution context for the document that authored the expression.
 ///
@@ -239,6 +265,7 @@ pub fn document_expression_resolution_context(
     if let Some(fallback) = file_ref_fallback_dir {
         options = options.with_file_ref_fallback_dir(fallback);
     }
-    let request = compose_request(options, file_resolution_context.clone())?;
-    Ok(request.local_expression_resolution_context())
+    // A local-only context consults no configuration, so no request (and no
+    // configuration snapshot) is built for it.
+    darkmatter::lifecycle::executor::local_expression_context(options, file_resolution_context.clone())
 }

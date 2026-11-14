@@ -167,6 +167,12 @@ pub struct PrepareOptions {
     /// The request's file-resolution context, shared with Darkmatter and
     /// retained across harness re-materialization.
     pub file_resolution_context: biscuit_file::FileResolutionContext,
+    /// Darkmatter's configuration for [`Self::file_resolution_context`], as
+    /// the caller captured it. Without it, the configuration comes from the
+    /// captured `ctx`'s invocation capture or from
+    /// [`Self::invocation_context`]; a context that names a repository with
+    /// none of the three fails preparation with a typed context error.
+    pub config_snapshot: Option<std::sync::Arc<darkmatter::config::load::ConfigSnapshot>>,
     /// Frontmatter keys whose object values render their `name` field in inline
     /// string context. Preparation also includes the lexical sequence paths
     /// (`seq`, `seq.previous`, `seq.next`) so these render their names in text
@@ -272,6 +278,7 @@ impl PrepareOptions {
             prepared_context: None,
             file_ref_fallback_dir: None,
             file_resolution_context,
+            config_snapshot: None,
             name_coercion_keys: Vec::new(),
             allow_empty_body: false,
             defer_schema_verdict: false,
@@ -506,6 +513,17 @@ fn prepared_request(
     compose_opts: ComposeOptions,
     options: &PrepareOptions,
 ) -> Result<ComposeRequest, CompositionError> {
+    let compose_opts = match &options.config_snapshot {
+        Some(snapshot) if compose_opts.config_snapshot().is_none() => {
+            compose_opts.with_config_snapshot(std::sync::Arc::clone(snapshot))
+        }
+        _ => compose_opts,
+    };
+    let compose_opts = super::with_invocation_config(
+        compose_opts,
+        options.invocation_context.as_ref(),
+        &options.file_resolution_context,
+    )?;
     Ok(super::compose_request(compose_opts, options.file_resolution_context.clone())?)
 }
 

@@ -766,6 +766,7 @@ pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &
         ctx_base_dir: None,
         prepared_context: Some(options.context()),
         file_resolution_context: context.request.resolution_context(),
+        config_snapshot: Some(context.request.config_snapshot()),
         effect_engine: context.effect_engine,
         shell_runner: &shell_runner,
         source_path: context.source_path,

@@ -684,11 +684,28 @@ impl Locations {
     /// The launch context: the documents' folder, the fixture home, and
     /// `SCHEMAS_DIR` naming `{dir}/defs`.
     fn context(&self) -> FileResolutionContext {
+        build_resolution_context(&self.snapshot()).expect("fixture context")
+    }
+
+    fn snapshot(&self) -> RequestSnapshot {
         let env = HashMap::from([("SCHEMAS_DIR".to_string(), self.folder(Root::SchemasDir).display().to_string())]);
-        let snapshot = RequestSnapshot::new(self.root.join("repo/area/pkg/docs"))
-            .with_home(Some(self.root.join("home")))
-            .with_env(env);
-        build_resolution_context(&snapshot).expect("fixture context")
+        RequestSnapshot::new(self.root.join("repo/area/pkg/docs")).with_home(Some(self.root.join("home"))).with_env(env)
+    }
+
+    /// Options preparing against `context` with the fixture repository's
+    /// configuration, which a library caller with no invocation supplies.
+    fn prepare_options(&self, context: &FileResolutionContext) -> claudine::composition::PrepareOptions {
+        let (_, tree) = darkmatter::markdown::compose::capture_resolution_context(&self.snapshot()).expect("fixture context");
+        let snapshot = darkmatter::config::load::ConfigSnapshot::load_captured(
+            context,
+            tree.as_ref(),
+            darkmatter::config::load::ConfigLoadMode::Passive,
+        )
+        .expect("fixture configuration");
+        claudine::composition::PrepareOptions {
+            config_snapshot: Some(std::sync::Arc::new(snapshot)),
+            ..claudine::composition::PrepareOptions::new(context.clone())
+        }
     }
 
     /// Claudine's launch verdict for a document holding `frontmatter`.
@@ -1194,7 +1211,7 @@ fn longhand_hash_kind_default_is_declared_and_never_inserted() {
     let prepared_hash = |name: &str, frontmatter: &str, inline: bool| {
         let path = both.document(name, frontmatter);
         let source = resolve_composition_source_in_context(path.to_str().expect("UTF-8 path"), &context).expect("resolves");
-        let options = claudine::composition::PrepareOptions::new(context.clone());
+        let options = both.prepare_options(&context);
         let prepared = if inline {
             claudine::composition::prepare_inline_with_schema(&source, options)
         } else {
@@ -1206,7 +1223,7 @@ fn longhand_hash_kind_default_is_declared_and_never_inserted() {
     // longhand without `kind` is refused there rather than after the agent runs.
     let inline_longhand = both.document("prepared", "prompt: hi\nhash: { value: 42 }");
     let source = resolve_composition_source_in_context(inline_longhand.to_str().expect("UTF-8 path"), &context).expect("resolves");
-    let refused = claudine::composition::prepare_inline_with_schema(&source, claudine::composition::PrepareOptions::new(context.clone()));
+    let refused = claudine::composition::prepare_inline_with_schema(&source, both.prepare_options(&context));
     assert!(
         matches!(refused, Err(claudine::composition::CompositionError::InlineBaselineUnstampable { .. })),
         "inline longhand without `kind` is refused at launch: {refused:?}"

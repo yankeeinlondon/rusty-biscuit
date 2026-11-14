@@ -32,7 +32,7 @@ const CANCEL_ACKNOWLEDGEMENT: Duration = Duration::from_millis(250);
 pub(crate) enum Disabled {
     /// The command runs with `--dry-run`.
     DryRun,
-    /// `config.json` sets `tts: { prewarm: false }`.
+    /// `config.yaml` sets `tts: { prewarm: false }`.
     Setting,
     /// `PLAYA_DRY_RUN` is set to one of Playa's accepted spellings.
     PlayaDryRun,

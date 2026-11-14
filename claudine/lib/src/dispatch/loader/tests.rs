@@ -6,6 +6,13 @@ use crate::provider::Provider;
 
 use std::collections::HashMap;
 
+use crate::config::persist::initialize_config;
+
+/// Writes `config` as a new user file: the schema defaults plus its values.
+fn save_claudine_config(config: &ClaudineConfig, path: &std::path::Path) -> Result<()> {
+    initialize_config(path, ConfigScope::User, &ClaudineConfig::default(), config).map(|_| ())
+}
+
 #[test]
 fn user_config_path_returns_default_when_none_exists() {
     let path = user_config_path();
@@ -16,8 +23,10 @@ fn user_config_path_returns_default_when_none_exists() {
 // ClaudineConfig loading / saving / merging tests
 // =====================================================================
 
+/// A legacy JSON5 `config.json` beside the canonical `config.yaml` is
+/// converted on the first load and read as the same values.
 #[test]
-fn load_claudine_config_from_json5() {
+fn load_claudine_config_converts_a_legacy_json5_user_file() {
     let dir = tempfile::tempdir().unwrap();
     let config_dir = dir.path().join(".claudine");
     std::fs::create_dir_all(&config_dir).unwrap();
@@ -36,7 +45,10 @@ fn load_claudine_config_from_json5() {
     }"#;
     std::fs::write(config_dir.join("config.json"), json5_content).unwrap();
 
-    let config = load_claudine_config(Some(&config_dir.join("config.json")), None).unwrap();
+    let config = load_claudine_config(Some(&config_dir.join("config.yaml")), None).unwrap();
+    assert!(config_dir.join("config.yaml").is_file());
+    assert!(config_dir.join("config.json.bak").is_file());
+    assert!(!config_dir.join("config.json").exists());
     assert!(config.logging);
     assert!(
         config
@@ -51,20 +63,9 @@ fn load_claudine_config_accepts_hyphenated_discord_webhook_provider() {
     let config_dir = dir.path().join(".claudine");
     std::fs::create_dir_all(&config_dir).unwrap();
 
-    let json5_content = r#"{
-        preferred_agent: "claude",
-        messenger: {
-            active_config: "alerts",
-            configurations: {
-                alerts: {
-                    provider: "discord-webhook",
-                    webhook_url_env: "MY_DISCORD_URL",
-                },
-            },
-        },
-    }"#;
-    let path = config_dir.join("config.json");
-    std::fs::write(&path, json5_content).unwrap();
+    let yaml_content = "preferred_agent: claude\nmessenger:\n  active_config: alerts\n  configurations:\n    alerts:\n      provider: discord-webhook\n      webhook_url_env: MY_DISCORD_URL\n";
+    let path = config_dir.join("config.yaml");
+    std::fs::write(&path, yaml_content).unwrap();
 
     let config = load_claudine_config(Some(&path), None).unwrap();
     let messenger = config.messenger.unwrap();
@@ -82,10 +83,9 @@ fn load_claudine_config_detects_old_format() {
     std::fs::create_dir_all(&config_dir).unwrap();
 
     let old = r#"{"version":"1.0","settings":{},"providers":{}}"#;
-    let path = config_dir.join("config.json");
-    std::fs::write(&path, old).unwrap();
+    std::fs::write(config_dir.join("config.json"), old).unwrap();
 
-    let result = load_claudine_config(Some(&path), None);
+    let result = load_claudine_config(Some(&config_dir.join("config.yaml")), None);
     assert!(result.is_err());
     assert!(config_dir.join("config.json.bak").exists());
 }
@@ -93,7 +93,7 @@ fn load_claudine_config_detects_old_format() {
 #[test]
 fn save_and_reload_claudine_config() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join(".claudine/config.json");
+    let path = dir.path().join(".claudine/config.yaml");
 
     let config = ClaudineConfig::default();
     save_claudine_config(&config, &path).unwrap();
@@ -554,7 +554,7 @@ fn canonical_runtime_exposes_config() {
 fn repo_old_format_config_backed_up_and_ignored() {
     let dir = tempfile::tempdir().unwrap();
 
-    let user_path = dir.path().join("user-config.json");
+    let user_path = dir.path().join("user-config.yaml");
     let user_config = ClaudineConfig {
         preferred_agent: Some(Provider::Claude),
         ..ClaudineConfig::default()
@@ -595,7 +595,8 @@ fn repo_old_format_config_backed_up_and_ignored() {
 #[test]
 fn load_repo_override_config_old_format_returns_none() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
+    std::fs::create_dir_all(dir.path().join(".claudine")).unwrap();
+    let path = dir.path().join(".claudine/config.json");
 
     let old_format = serde_json::json!({
         "version": "1.0",
@@ -608,12 +609,12 @@ fn load_repo_override_config_old_format_returns_none() {
     });
     std::fs::write(&path, serde_json::to_string(&old_format).unwrap()).unwrap();
 
-    let result = load_repo_override_config(&path).unwrap();
+    let result = load_repo_override_config(&dir.path().join(".claudine/config.yaml")).unwrap();
     assert!(result.is_none(), "old-format config should return Ok(None)");
 
     assert!(!path.exists(), "old-format config should have been renamed");
     assert!(
-        dir.path().join("config.json.bak").exists(),
+        dir.path().join(".claudine/config.json.bak").exists(),
         "backup should exist"
     );
 }
@@ -625,7 +626,7 @@ fn load_repo_override_config_old_format_returns_none() {
 #[test]
 fn load_claudine_config_honors_preferred_agent() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config.yaml");
 
     let config = ClaudineConfig {
         preferred_agent: Some(Provider::Codex),
@@ -655,7 +656,7 @@ fn load_claudine_config_preferred_agent_all_providers() {
 
     let dir = tempfile::tempdir().unwrap();
     for provider in providers {
-        let path = dir.path().join(format!("{provider:?}.json"));
+        let path = dir.path().join(format!("{provider:?}.yaml"));
         let config = ClaudineConfig {
             preferred_agent: Some(provider),
             ..ClaudineConfig::default()
@@ -673,8 +674,8 @@ fn load_claudine_config_preferred_agent_all_providers() {
 #[test]
 fn load_claudine_config_preferred_agent_absent_loads_as_none() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
-    std::fs::write(&path, "{}").unwrap();
+    let path = dir.path().join("config.yaml");
+    std::fs::write(&path, "{}\n").unwrap();
 
     let loaded = load_claudine_config(Some(&path), None).unwrap();
     assert!(loaded.preferred_agent.is_none());
@@ -684,7 +685,7 @@ fn load_claudine_config_preferred_agent_absent_loads_as_none() {
 fn load_claudine_config_preferred_agent_not_overridden_by_repo() {
     let dir = tempfile::tempdir().unwrap();
 
-    let user_path = dir.path().join("user.json");
+    let user_path = dir.path().join("user.yaml");
     let user_config = ClaudineConfig {
         preferred_agent: Some(Provider::Codex),
         ..ClaudineConfig::default()
@@ -697,7 +698,13 @@ fn load_claudine_config_preferred_agent_not_overridden_by_repo() {
         canonical_provider: Some(Provider::Gemini),
         ..RepoOverrideConfig::default()
     };
-    save_repo_override_config(&repo_override, &repo_dir.join(".claudine/config.json")).unwrap();
+    initialize_config(
+        &repo_dir.join(".claudine/config.yaml"),
+        ConfigScope::Repository,
+        &RepoOverrideConfig::default(),
+        &repo_override,
+    )
+    .unwrap();
 
     let loaded = load_claudine_config(Some(&user_path), Some(&repo_dir)).unwrap();
     assert_eq!(
@@ -748,7 +755,7 @@ fn load_claudine_config_old_format_creates_backup_and_returns_error() {
     )
     .unwrap();
 
-    let result = load_claudine_config(Some(&config_path), None);
+    let result = load_claudine_config(Some(&config_dir.join("config.yaml")), None);
     assert!(result.is_err(), "old format should produce an error");
     assert!(
         matches!(result.unwrap_err(), ClaudineError::ConfigNotFound(_)),
@@ -779,9 +786,10 @@ fn load_claudine_config_after_old_format_backup_returns_config_not_found() {
     let config_path = config_dir.join("config.json");
     std::fs::write(&config_path, serde_json::to_string(&old_config).unwrap()).unwrap();
 
-    let _ = load_claudine_config(Some(&config_path), None);
+    let yaml_path = config_dir.join("config.yaml");
+    let _ = load_claudine_config(Some(&yaml_path), None);
 
-    let result = load_claudine_config(Some(&config_path), None);
+    let result = load_claudine_config(Some(&yaml_path), None);
     assert!(
         matches!(result.unwrap_err(), ClaudineError::ConfigNotFound(_)),
         "second load should also return ConfigNotFound"
@@ -791,7 +799,8 @@ fn load_claudine_config_after_old_format_backup_returns_config_not_found() {
 #[test]
 fn load_claudine_config_detects_old_provider_keys_format() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
+    std::fs::create_dir_all(dir.path().join(".claudine")).unwrap();
+    let path = dir.path().join(".claudine/config.json");
 
     let old_config = serde_json::json!({
         "claude": { "events": {} },
@@ -799,13 +808,13 @@ fn load_claudine_config_detects_old_provider_keys_format() {
     });
     std::fs::write(&path, serde_json::to_string(&old_config).unwrap()).unwrap();
 
-    let result = load_claudine_config(Some(&path), None);
+    let result = load_claudine_config(Some(&dir.path().join(".claudine/config.yaml")), None);
     assert!(
         matches!(result.unwrap_err(), ClaudineError::ConfigNotFound(_)),
         "root-level provider keys should be detected as old format"
     );
     assert!(
-        dir.path().join("config.json.bak").exists(),
+        dir.path().join(".claudine/config.json.bak").exists(),
         "backup should be created for root-level provider key format"
     );
 }
@@ -813,7 +822,7 @@ fn load_claudine_config_detects_old_provider_keys_format() {
 #[test]
 fn load_claudine_config_does_not_backup_new_format() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config.yaml");
 
     let new_config = ClaudineConfig {
         preferred_agent: Some(Provider::Claude),
@@ -830,17 +839,12 @@ fn load_claudine_config_does_not_backup_new_format() {
 }
 
 // =====================================================================
-// `tts` input robustness matrix (config.json, JSON5)
+// `tts` input robustness matrix (config.yaml)
 // =====================================================================
 
-/// The real `config.json` shape with the `tts` entry left as a slot, so each
+/// The real `config.yaml` shape with the `tts` entry left as a slot, so each
 /// matrix cell is exactly one edit to the same document.
-const TTS_MATRIX_FIXTURE: &str = r#"{
-    // written by `claudine init`
-    preferred_agent: "claude",
-    logging: true,
-    TTS_ENTRY
-}"#;
+const TTS_MATRIX_FIXTURE: &str = "# written by `claudine init`\npreferred_agent: claude\nlogging: true\nTTS_ENTRY\n";
 
 /// What the rest of Claudine sees after loading: the bridged playback
 /// settings `(provider, voice)` (or `None` for no hook speech settings) and
@@ -849,7 +853,7 @@ type BridgedTts = (Option<(Option<String>, Option<String>)>, bool);
 
 fn load_tts_cell(tts_entry: &str) -> Result<BridgedTts> {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config.yaml");
     std::fs::write(&path, TTS_MATRIX_FIXTURE.replace("TTS_ENTRY", tts_entry)).unwrap();
     let config = load_claudine_config(Some(&path), None)?;
     let settings = bridge_tts_settings(&config);
@@ -888,19 +892,18 @@ fn tts_config_input_robustness_matrix() {
     // Control row: the unedited fixture loads with its provider and pre-warm on.
     assert_tts_cell(
         "control",
-        r#"tts: { provider: "kokoro", voice: "af_heart" },"#,
+        r#"tts: { provider: "kokoro", voice: "af_heart" }"#,
         bridged(Some("kokoro"), Some("af_heart"), true),
     );
 
     // Column `tts`.
     assert_tts_cell("tts absent", "", (None, true));
-    assert_tts_cell_rejected("tts null", "tts: null,");
-    assert_tts_cell_rejected("tts wrong type", r#"tts: "say","#);
-    assert_tts_cell("tts empty object", "tts: {},", bridged(None, None, true));
-    assert_tts_cell(
-        "tts duplicate key (JSON5 is last-wins)",
-        r#"tts: false, tts: { provider: "kokoro", voice: "af_heart" },"#,
-        bridged(Some("kokoro"), Some("af_heart"), true),
+    assert_tts_cell_rejected("tts null", "tts: null");
+    assert_tts_cell_rejected("tts wrong type", r#"tts: "say""#);
+    assert_tts_cell("tts empty object", "tts: {}", bridged(None, None, true));
+    assert_tts_cell_rejected(
+        "tts duplicate key",
+        "tts: false\ntts: { provider: \"kokoro\", voice: \"af_heart\" }",
     );
     assert_tts_cell_rejected(
         "tts trailing content",
@@ -910,82 +913,80 @@ fn tts_config_input_robustness_matrix() {
     // Column `provider`.
     assert_tts_cell(
         "provider absent",
-        r#"tts: { voice: "af_heart" },"#,
+        r#"tts: { voice: "af_heart" }"#,
         bridged(None, Some("af_heart"), true),
     );
     assert_tts_cell_rejected(
         "provider null",
-        r#"tts: { provider: null, voice: "af_heart" },"#,
+        r#"tts: { provider: null, voice: "af_heart" }"#,
     );
     assert_tts_cell_rejected(
         "provider wrong type",
-        r#"tts: { provider: 1, voice: "af_heart" },"#,
+        r#"tts: { provider: 1, voice: "af_heart" }"#,
     );
     // An empty name loads as before; playback treats it as an unknown
     // provider and falls back to automatic selection.
     assert_tts_cell(
         "provider empty",
-        r#"tts: { provider: "", voice: "af_heart" },"#,
+        r#"tts: { provider: "", voice: "af_heart" }"#,
         bridged(Some(""), Some("af_heart"), true),
     );
-    assert_tts_cell(
-        "provider duplicate key (JSON5 is last-wins)",
-        r#"tts: { provider: "say", provider: "kokoro", voice: "af_heart" },"#,
-        bridged(Some("kokoro"), Some("af_heart"), true),
+    assert_tts_cell_rejected(
+        "provider duplicate key",
+        r#"tts: { provider: "say", provider: "kokoro", voice: "af_heart" }"#,
     );
 
     // Column `prewarm`.
     assert_tts_cell(
         "prewarm false",
-        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: false },"#,
+        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: false }"#,
         bridged(Some("kokoro"), Some("af_heart"), false),
     );
     assert_tts_cell(
         "prewarm true",
-        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: true },"#,
+        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: true }"#,
         bridged(Some("kokoro"), Some("af_heart"), true),
     );
     assert_tts_cell_rejected(
         "prewarm null",
-        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: null },"#,
+        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: null }"#,
     );
     assert_tts_cell_rejected(
         "prewarm wrong type",
-        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: "no" },"#,
+        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: "no" }"#,
     );
-    assert_tts_cell(
-        "prewarm duplicate key (JSON5 is last-wins)",
-        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: true, prewarm: false },"#,
-        bridged(Some("kokoro"), Some("af_heart"), false),
+    assert_tts_cell_rejected(
+        "prewarm duplicate key",
+        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: true, prewarm: false }"#,
     );
 
     // Unknown keys stay rejected, including near-misses for the new switch.
     assert_tts_cell_rejected(
         "unknown key",
-        r#"tts: { provider: "kokoro", enabled: true },"#,
+        r#"tts: { provider: "kokoro", enabled: true }"#,
     );
-    assert_tts_cell_rejected("misspelled prewarm", "tts: { pre_warm: false },");
+    assert_tts_cell_rejected("misspelled prewarm", "tts: { pre_warm: false }");
 }
 
 #[test]
 fn tts_shapes_bridge_to_the_documented_prewarm_and_playback_settings() {
     // One row per shape in the configuration's shape table.
     assert_tts_cell("absent", "", (None, true));
-    assert_tts_cell("true", "tts: true,", bridged(None, None, true));
-    assert_tts_cell("false", "tts: false,", (None, true));
+    assert_tts_cell("true", "tts: true", bridged(None, None, true));
+    assert_tts_cell("false", "tts: false", (None, true));
     assert_tts_cell(
         "object without prewarm",
-        r#"tts: { provider: "say", voice: "Samantha" },"#,
+        r#"tts: { provider: "say", voice: "Samantha" }"#,
         bridged(Some("say"), Some("Samantha"), true),
     );
     assert_tts_cell(
         "object with prewarm false",
-        r#"tts: { provider: "say", voice: "Samantha", prewarm: false },"#,
+        r#"tts: { provider: "say", voice: "Samantha", prewarm: false }"#,
         bridged(Some("say"), Some("Samantha"), false),
     );
     assert_tts_cell(
         "object without provider",
-        "tts: { prewarm: false },",
+        "tts: { prewarm: false }",
         bridged(None, None, false),
     );
 }
@@ -993,26 +994,21 @@ fn tts_shapes_bridge_to_the_documented_prewarm_and_playback_settings() {
 #[test]
 fn tts_object_round_trips_without_materializing_defaults() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
-    std::fs::write(&path, r#"{ preferred_agent: "claude", tts: { prewarm: false } }"#).unwrap();
+    let path = dir.path().join("config.yaml");
 
-    for pass in 0..2 {
-        let config = load_claudine_config(Some(&path), None).unwrap();
-        assert!(!config.tts.prewarm_enabled(), "pass {pass}");
-        save_claudine_config(&config, &path).unwrap();
-        let saved: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved["tts"]["prewarm"], serde_json::json!(false), "pass {pass}");
-        assert!(saved["tts"].get("provider").is_none(), "pass {pass}: {saved}");
+    for (text, prewarm) in [
+        ("preferred_agent: claude\ntts: { prewarm: false }\n", false),
+        ("preferred_agent: claude\ntts: { provider: say }\n", true),
+    ] {
+        std::fs::write(&path, text).unwrap();
+        for pass in 0..2 {
+            let opened = load_claudine_config(Some(&path), None).unwrap();
+            assert_eq!(opened.tts.prewarm_enabled(), prewarm, "{text} pass {pass}");
+            let mut edited = opened.clone();
+            edited.logging = !edited.logging;
+            crate::config::persist::save_changes(&path, ConfigScope::User, &opened, &edited).unwrap();
+            let saved = std::fs::read_to_string(&path).unwrap();
+            assert!(saved.starts_with(text), "{text} pass {pass}: {saved}");
+        }
     }
-
-    // An object that never wrote `prewarm` must not gain it on save.
-    std::fs::write(&path, r#"{ preferred_agent: "claude", tts: { provider: "say" } }"#).unwrap();
-    let config = load_claudine_config(Some(&path), None).unwrap();
-    save_claudine_config(&config, &path).unwrap();
-    let saved: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(saved["tts"].get("prewarm").is_none(), "{saved}");
-    let reloaded = load_claudine_config(Some(&path), None).unwrap();
-    assert!(reloaded.tts.prewarm_enabled());
 }

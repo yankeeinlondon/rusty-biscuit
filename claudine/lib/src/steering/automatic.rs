@@ -35,8 +35,8 @@ Please check whether you are making progress toward the user's task. \
 If you are repeating the same approach, change your approach or stop and explain what is preventing progress. \
 Claudine's existing runaway limits still apply.";
 
-/// The `steering` section of user (`~/.claudine/config.json`) and repo
-/// (`<repo>/.claudine/config.json`) configuration.
+/// The `steering` section of user (`~/.claudine/config.yaml`) and repo
+/// (`<repo>/.claudine/config.yaml`) configuration.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SteeringConfig {

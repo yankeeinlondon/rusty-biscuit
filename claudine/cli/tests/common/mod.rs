@@ -337,12 +337,22 @@ impl CliProcessFixture {
         for path in [&cwd, &home, &bin_dir] {
             fs::create_dir_all(path).unwrap();
         }
+        // Darkmatter's user configuration, so a run reports no missing-file
+        // warning unless its test asks for one (`without_darkmatter_config`).
+        fs::write(home.join(".darkmatter.yaml"), "{}\n").unwrap();
         Self {
             workspace,
             cwd,
             home,
             bin_dir,
         }
+    }
+
+    /// Removes the fixture home's Darkmatter user configuration.
+    #[must_use]
+    pub fn without_darkmatter_config(self) -> Self {
+        fs::remove_file(self.home.join(".darkmatter.yaml")).unwrap();
+        self
     }
 
     pub fn cwd(&self) -> &Path {

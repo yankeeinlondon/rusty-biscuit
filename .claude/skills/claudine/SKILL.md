@@ -44,7 +44,37 @@ task `with` keys wait for their event. A lifecycle `set` changes runtime state,
 not the reread, so a phrase reading a `set` key misses the cache (never wrong
 audio). User docs: [Lifecycle → pre-warm](topics/flow-control/lifecycle.md#speech-is-prepared-ahead-of-time-pre-warm).
 
-**`tts` in `~/.claudine/config.json`** (`config/tts.rs::TtsValue`) is `true`,
+**Configuration loading** (`config/{schema,load,json_conversion}.rs`,
+`dispatch/loader.rs`): both files are YAML judged strictly by
+`claudine/schemas/claudine-config.yaml` (`include_str!`, prepared with
+Darkmatter's shipped sources so `permissions@darkmatter:config` resolves; not
+part of the trigger bundle or shipped artifact). Schema defaults are inserted
+before serde reads `ClaudineConfig` (no top-level serde defaults;
+`ClaudineConfig::default()` is the projection of `{}`); `RepoOverrideConfig`
+keeps presence-sensitive serde defaults and gets nothing inserted. Errors are
+`ClaudineError::ConfigInvalid`/`ConfigConversion` with file:line:column and
+JSON pointer. A legacy `config.json` beside a canonical
+`<base>/.claudine/config.yaml` is converted by the temporary
+`json_conversion` module through Darkmatter's `ConfigTransaction` and
+migration receipt. The default engine never fills values under
+`patternProperties`, so event and provider maps list their keys explicitly.
+
+**Configuration writes** (`config/persist.rs`): nothing serializes a whole
+config any more. Every writer hands `persist` per-path `YamlEdit`s, applied
+under Darkmatter's `ConfigTransaction` lock to the re-read file and judged by
+the scope's schema plus `ClaudineConfig::validate` before replacement
+(`ConfigEditRefused` / `ConfigWrite` on failure; the file is untouched).
+`edit_config` takes explicit edits (setters); `save_changes(path, scope,
+opened, edited)` diffs two serialized values (`changed_edits`: mappings
+recurse while the file holds a mapping, sequences/scalars are replaced whole,
+a lost key is removed or set `null` when it came from a default) — the config
+TUI keeps `App::opening_config`/`opening_repo_config` for this;
+`initialize_config(path, scope, defaults, chosen)` is setup's form, always
+creating a missing file from `initial_text(scope)`. Edits that already hold
+are dropped, so an unchanged save starts no transaction. A user file spelling
+`favorite_agent` has `preferred_agent` edits applied to that key.
+
+**`tts` in `~/.claudine/config.yaml`** (`config/tts.rs::TtsValue`) is `true`,
 `false`, or an object whose keys are all optional: `provider` (absent = default
 provider, as `true`), `voice` (string or `{ male, female }`), `gender`
 (`female` default), `prewarm` (default `true`). Explicit `null` is rejected
@@ -771,6 +801,7 @@ authoritative docs, not copies. Edit them there; never add a skill-local copy
 of a topic doc.
 
 - [Error Architecture](topics/error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
+- [Configuration](topics/configuration.md) — the YAML `~/.claudine/config.yaml` and `{repo-root}/.claudine/config.yaml`, validated against `claudine/schemas/claudine-config.yaml`, and the automatic conversion of a legacy JSON5 `config.json`
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
 - [Schemas](topics/schemas.md) — the seven `claudine/schemas/` files (including the `sequence.yaml` trigger and the `sequence-types.yaml` container types), event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
 - [Lifecycle](topics/flow-control/lifecycle.md) — Claudine as a host of Darkmatter's lifecycle (renames, registrations, how failures route, the `finalize` exceptions), the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors. The host-neutral model (Darkmatter's five events, host registration, the `md` host, recovery modes) is `darkmatter/docs/topics/lifecycle/index.md` and `error-handling.md`

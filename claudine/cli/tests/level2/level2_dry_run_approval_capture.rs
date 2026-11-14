@@ -72,7 +72,7 @@ fn stage() -> Staged {
 
     let claudine_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 
     write_executable(&bin_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 

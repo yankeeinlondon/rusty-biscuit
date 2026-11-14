@@ -70,6 +70,11 @@ pub struct App {
     pub selected_tab: Option<Tab>,
     pub actions_view: ActionView,
     pub config: ClaudineConfig,
+    /// The user configuration as it was read when the session opened. Saving
+    /// writes only what differs from it.
+    pub opening_config: ClaudineConfig,
+    /// The repository configuration as it was read when the session opened.
+    pub opening_repo_config: Option<RepoOverrideConfig>,
     pub is_in_repo: bool,
     pub should_quit: bool,
     pub dirty: bool,
@@ -221,6 +226,8 @@ impl App {
             } else {
                 ActionView::User
             },
+            opening_config: config.clone(),
+            opening_repo_config: repo_config.clone(),
             config,
             is_in_repo,
             should_quit: false,

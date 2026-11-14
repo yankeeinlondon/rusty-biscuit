@@ -386,7 +386,7 @@ pub(crate) fn wait_for_raw_mode_termios(session: &mut OsSession, deadline: Durat
     panic!("child did not leave canonical mode within {deadline:?}");
 }
 
-/// Pre-stage a minimal claudine config at `$HOME/.claudine/config.json`.
+/// Pre-stage a minimal claudine config at `$HOME/.claudine/config.yaml`.
 ///
 /// Under a PTY, claudine detects an interactive stdin and runs the
 /// first-run setup wizard when no user config exists. The wizard would
@@ -397,7 +397,7 @@ pub(crate) fn wait_for_raw_mode_termios(session: &mut OsSession, deadline: Durat
 pub(crate) fn stage_default_config(home_dir: &std::path::Path) {
     let claudine_dir = home_dir.join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 }
 
 /// Stage a stub `goose` binary that records that the provider was

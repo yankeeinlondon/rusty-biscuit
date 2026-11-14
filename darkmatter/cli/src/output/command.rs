@@ -128,7 +128,8 @@ pub struct CommandRun {
 
 impl CommandRun {
     /// Resolves `target` and `width`. A width warning goes to stderr now for a
-    /// formatted output, and into the payload for a data output.
+    /// formatted output, and into the payload for a data output, after the
+    /// invocation's held run-level notices ([`super::report_run_notices`]).
     ///
     /// ## Errors
     ///
@@ -142,7 +143,7 @@ impl CommandRun {
         shape: DataShape,
     ) -> Result<Self> {
         let output = resolve_output(target, width, default_width, verbosity, &OutputEnvironment::detect())?;
-        let mut diagnostics = Vec::new();
+        let mut diagnostics = if target.is_data() { super::take_run_notices() } else { Vec::new() };
         if let Some(warning) = &output.width_warning {
             if target.is_data() {
                 diagnostics.push(width_warning_diagnostic(warning));

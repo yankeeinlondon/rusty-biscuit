@@ -414,8 +414,9 @@ impl TriggerRegistry {
 /// document that does not claim `kind: schema-trigger`.
 pub(super) type EmbeddedTriggerLoad = Option<(TriggerEnvelope, super::assemble::ResolvedPayload)>;
 
-/// `(bundle name, document name, document text, shipped namespace)`.
-type EmbeddedKey = (&'static str, String, &'static str, &'static str);
+/// `(bundle name, document name, document text, shipped namespace, shipped
+/// aliases)`.
+type EmbeddedKey = (&'static str, String, &'static str, &'static str, &'static [(&'static str, &'static str)]);
 /// The `(virtual path, text)` of each bundle document a payload read.
 type EmbeddedReads = Vec<(PathBuf, &'static str)>;
 type EmbeddedMemo = std::sync::Mutex<HashMap<EmbeddedKey, Vec<(EmbeddedReads, EmbeddedTriggerLoad)>>>;
@@ -456,7 +457,7 @@ fn load_embedded_trigger(
     let current_text = |path: &Path| {
         bundle.files().iter().find(|(file, _)| Path::new(&bundle.virtual_path(file)) == path).map(|(_, text)| *text)
     };
-    let key: EmbeddedKey = (bundle.name(), name.to_string(), text, sources.namespace());
+    let key: EmbeddedKey = (bundle.name(), name.to_string(), text, sources.namespace(), sources.aliases());
     if let Some(entries) = memo.lock().expect("embedded trigger memo poisoned").get(&key)
         && let Some((_, hit)) = entries
             .iter()

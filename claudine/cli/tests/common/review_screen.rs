@@ -153,7 +153,7 @@ impl ReviewFixture {
             ModelEditor::FreeText => String::new(),
         };
         write(
-            &fixture.home().join(".claudine/config.json"),
+            &fixture.home().join(".claudine/config.yaml"),
             &format!(
                 "{{\"models\": {{\"claude\": {{\"mode\": \"replace\", \"values\": [{claude_models}]}}}}}}\n"
             ),

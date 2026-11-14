@@ -597,25 +597,22 @@ fn classify_root_partial(token: &str) -> RootPartial {
     }
 }
 
-/// Return `true` when a user-scope Claudine config exists under `$HOME`.
-///
-/// Both the canonical `.claudine/config.json` path and the JSON5 variant
-/// (`.claudine/config.json5`) are accepted — JSON5 is a common hand-edited
-/// form in the wild even though `user_config_path()` in the library only
-/// probes `.json`.
+/// Return `true` when a user-scope Claudine config exists under `$HOME`:
+/// `.claudine/config.yaml`, or a legacy `.claudine/config.json` that the next
+/// configuration load converts. Completion only looks; it never converts.
 fn user_config_exists(home: Option<&Path>) -> bool {
     let Some(home) = home else {
         return false;
     };
     let candidates = [
+        home.join(".claudine").join("config.yaml"),
         home.join(".claudine").join("config.json"),
-        home.join(".claudine").join("config.json5"),
     ];
     candidates.iter().any(|p| p.is_file())
 }
 
 /// Look upward from `cwd` for a git repo root and check for a repo-scope
-/// config.
+/// config (`.claudine/config.yaml`, or a legacy `.claudine/config.json`).
 ///
 /// Returns `(repo_config_exists, in_repo)`. `in_repo` is `true` as soon as
 /// a `.git` directory or worktree pointer is found.
@@ -623,8 +620,9 @@ fn detect_repo_config(cwd: &Path) -> (bool, bool) {
     for ancestor in cwd.ancestors() {
         let dot_git = ancestor.join(".git");
         if dot_git.is_dir() || dot_git.is_file() {
-            let cfg = ancestor.join(".claudine").join("config.json");
-            return (cfg.is_file(), true);
+            let dir = ancestor.join(".claudine");
+            let exists = dir.join("config.yaml").is_file() || dir.join("config.json").is_file();
+            return (exists, true);
         }
     }
     (false, false)

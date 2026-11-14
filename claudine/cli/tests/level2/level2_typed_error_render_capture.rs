@@ -209,7 +209,7 @@ fn stage(name: &str, doc_body: &str, provider_exit: i32) -> Staged {
 
     let claudine_dir = root.join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    write(&claudine_dir.join("config.json"), "{}");
+    write(&claudine_dir.join("config.yaml"), "{}");
 
     let doc = root.join("route.md");
     write(&doc, doc_body);

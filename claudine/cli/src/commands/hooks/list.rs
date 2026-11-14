@@ -172,7 +172,7 @@ fn render_invalid_sound_effects(config: &ClaudineConfig) -> Vec<String> {
     lines.push(String::new());
     if has_fixable {
         let hint = Prose::new(
-            "<dim>Edit <blue>~/.claudine/config.json</blue> to apply suggested fixes</dim>",
+            "<dim>Edit <blue>~/.claudine/config.yaml</blue> to apply suggested fixes</dim>",
         );
         lines.push(format!(
             " {}",
@@ -777,7 +777,8 @@ mod tests {
 
     #[test]
     fn invalid_sound_effect_warning_renders_escaped_name() {
-        let config: ClaudineConfig = serde_json::from_str(
+        let config = ClaudineConfig::from_user_document(
+            serde_json::from_str(
             r#"{
   "actions": {
     "human_in_the_loop": [
@@ -785,6 +786,8 @@ mod tests {
     ]
   }
 }"#,
+            )
+            .unwrap(),
         )
         .unwrap();
 

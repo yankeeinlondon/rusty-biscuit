@@ -127,6 +127,40 @@ pub(crate) fn snapshot() -> &'static RequestSnapshot {
         .expect("the request snapshot is captured in `dispatch` before any command runs")
 }
 
+/// Darkmatter's user configuration, read once per invocation from the launch
+/// snapshot's home with [`ConfigLoadMode::MigrateLegacy`] (Claudine is a
+/// writing CLI). `dispatch` reads it before any command runs; every
+/// invocation context then projects this one snapshot
+/// ([`with_darkmatter_config`]).
+///
+/// [`ConfigLoadMode::MigrateLegacy`]: darkmatter::config::load::ConfigLoadMode::MigrateLegacy
+pub(crate) fn darkmatter_config()
+-> Result<&'static std::sync::Arc<darkmatter::config::load::ConfigSnapshot>, &'static darkmatter::config::load::ConfigError> {
+    static CONFIG: OnceLock<
+        Result<std::sync::Arc<darkmatter::config::load::ConfigSnapshot>, darkmatter::config::load::ConfigError>,
+    > = OnceLock::new();
+    CONFIG
+        .get_or_init(|| {
+            darkmatter::config::load::ConfigSnapshot::load_user(
+                snapshot(),
+                darkmatter::config::load::ConfigLoadMode::MigrateLegacy,
+            )
+            .map(std::sync::Arc::new)
+        })
+        .as_ref()
+}
+
+/// `invocation` projecting the configuration [`darkmatter_config`] read,
+/// instead of reading the user file again.
+pub(crate) fn with_darkmatter_config(
+    invocation: claudine::invocation_context::InvocationContext,
+) -> claudine::invocation_context::InvocationContext {
+    match darkmatter_config() {
+        Ok(snapshot) => invocation.with_darkmatter_config(std::sync::Arc::clone(snapshot)),
+        Err(_) => invocation,
+    }
+}
+
 /// Unit tests reach routes without `dispatch`, so they capture the test
 /// process on first use.
 #[cfg(test)]

@@ -59,6 +59,9 @@ struct ComposeContextInner {
     /// Structured observations behind the captured `Repo` and `Network`
     /// groups, read by parameterized expression functions.
     observations: super::capture::CapturedObservations,
+    /// The embedder's configuration capture, which projects its snapshot for
+    /// each request context built over this context.
+    config_source: Option<std::sync::Arc<dyn crate::config::load::ConfigSnapshotSource>>,
 }
 
 impl PartialEq for ComposeContext {
@@ -297,6 +300,25 @@ impl ComposeContext {
         Self::capture_with_evidence_seeded(base_dir, &requirements, evidence, Some(root))
     }
 
+    /// Attaches the host's configuration capture, so a request built over
+    /// this context with [`ComposeRequest::with_context`] receives the host's
+    /// snapshot for the repository its file-resolution context names. A
+    /// snapshot supplied with [`ComposeOptions::with_config_snapshot`] takes
+    /// precedence. Kept through extension and every clone.
+    ///
+    /// [`ComposeRequest::with_context`]: super::request::ComposeRequest::with_context
+    /// [`ComposeOptions::with_config_snapshot`]: super::options::ComposeOptions::with_config_snapshot
+    #[must_use]
+    pub fn with_config_source(mut self, source: std::sync::Arc<dyn crate::config::load::ConfigSnapshotSource>) -> Self {
+        std::sync::Arc::make_mut(&mut self.inner).config_source = Some(source);
+        self
+    }
+
+    /// The host's configuration capture, if one is attached.
+    pub fn config_source(&self) -> Option<&std::sync::Arc<dyn crate::config::load::ConfigSnapshotSource>> {
+        self.inner.config_source.as_ref()
+    }
+
     fn with_observations(mut self, observations: super::capture::CapturedObservations) -> Self {
         std::sync::Arc::make_mut(&mut self.inner).observations = observations;
         self
@@ -366,6 +388,7 @@ impl ComposeContext {
                 capture_diagnostics,
                 capture_timings,
                 observations: super::capture::CapturedObservations::default(),
+                config_source: None,
             }),
         }
     }
@@ -687,6 +710,7 @@ impl ComposeContext {
                 capture_diagnostics: Vec::new(),
                 capture_timings: Vec::new(),
                 observations: super::capture::CapturedObservations::default(),
+                config_source: None,
             }),
         }
     }

@@ -75,9 +75,9 @@ list:                             list:
 | Append to a list | `Set` with the index equal to the list's length (`list.2` on a two-item list) adds a new `- ` line after the last item |
 | Replace a whole list or mapping | `Set` on the list's own path writes the new value in block style |
 | Write an empty list or mapping | `Set` with `json!([])` or `json!({})` writes `[]` or `{}` |
-| Add to an empty `[]` or `{}` | the empty collection becomes a block holding the new value |
+| Add to an empty `[]` or `{}` | the empty collection becomes a block holding the new value; a file that is only `{}` becomes a block mapping |
 | Remove a value | its own lines go; a comment on the line above stays |
-| Remove the last child | the parent stays, written `{}` or `[]` |
+| Remove the last child | the parent stays, written `{}` or `[]`; removing every top-level key leaves the file's comments and `{}` |
 
 An index beyond the length is not an append; it is refused as an invalid path.
 

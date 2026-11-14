@@ -11,7 +11,7 @@ fn lifecycle_config_for(tts: Option<serde_json::Value>) -> (TtsConfig, bool) {
     if let Some(tts) = tts {
         document["tts"] = tts;
     }
-    let config: ClaudineConfig = serde_json::from_value(document).unwrap();
+    let config: ClaudineConfig = ClaudineConfig::from_user_document(document).unwrap();
     let settings = bridge_tts_settings(&config);
     (
         tts_config_from_settings(settings.tts.as_ref()),
@@ -59,7 +59,7 @@ fn prewarm_false_object_plays_as_the_same_object_without_it() {
 }
 
 /// Lifecycle runs fall back to `GlobalSettings::default()` when
-/// `config.json` cannot be loaded; pre-warm follows the auto-detected
+/// `config.yaml` cannot be loaded; pre-warm follows the auto-detected
 /// playback configuration used there.
 #[test]
 fn default_settings_keep_prewarm_on() {

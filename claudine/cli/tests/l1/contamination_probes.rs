@@ -377,7 +377,7 @@ fn exported_git_plumbing_pointed_at_a_throwaway_repo_does_not_change_the_result(
     let _ = std::fs::remove_dir_all(&decoy);
 }
 
-/// Home and cache relocation. The user's real `~/.claudine/config.json` is the
+/// Home and cache relocation. The user's real `~/.claudine/config.yaml` is the
 /// classic contaminant: a `preferred_agent` there changes which provider a run
 /// with no explicit flag selects.
 #[test]
@@ -387,7 +387,7 @@ fn exported_home_and_cache_relocation_does_not_change_the_result() {
     // A `preferred_agent` the fixture never staged: if this config were read,
     // provider selection would pick `claude` and find nothing to run.
     write(
-        &elsewhere.join(".claudine/config.json"),
+        &elsewhere.join(".claudine/config.yaml"),
         "{\"preferred_agent\": \"claude\", \"tts\": true}\n",
     );
     unsafe {

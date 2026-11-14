@@ -2098,7 +2098,7 @@ fn seed_dispatch_recorder_config(staged: &Staged) {
         recorder = recorder.display(),
     );
     fs::write(
-        staged.workspace.path().join(".claudine/config.json"),
+        staged.workspace.path().join(".claudine/config.yaml"),
         config,
     )
     .unwrap();
@@ -4995,7 +4995,7 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
     // then used — so this keeps the derivation under test instead of masking it
     // with a caller override.
     fs::write(
-        root.join(".claudine/config.json"),
+        root.join(".claudine/config.yaml"),
         "{\"prompt_for_missing\": false}",
     )
     .unwrap();
@@ -5056,7 +5056,7 @@ fn stage_shipped_optional_commit_message() -> Staged {
     fs::create_dir_all(root.join("src")).unwrap();
     seed_minimal_config(&root);
     fs::write(
-        root.join(".claudine/config.json"),
+        root.join(".claudine/config.yaml"),
         "{\"prompt_for_missing\": false}",
     )
     .unwrap();

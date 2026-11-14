@@ -224,8 +224,17 @@ fn removing_the_last_child_leaves_an_empty_collection() {
 }
 
 #[test]
-fn removing_the_last_top_level_key_leaves_the_comments() {
-    assert_eq!(edited("# about\na: 1\n", &[remove("a")]), "# about\n");
+fn removing_the_last_top_level_key_leaves_the_comments_and_an_empty_root() {
+    assert_eq!(edited("# about\na: 1\n", &[remove("a")]), "# about\n{}\n");
+    assert_eq!(edited("a: 1", &[remove("a")]), "{}");
+    assert_eq!(edited("a: 1\r\n", &[remove("a")]), "{}\r\n");
+}
+
+#[test]
+fn an_empty_flow_root_becomes_a_block_on_its_first_key() {
+    assert_eq!(edited("{}\n", &[set("a.b", json!(1))]), "a:\n  b: 1\n");
+    assert_eq!(edited("# keep\n{ }  # defaults\n", &[set("a", json!(1))]), "# keep\n# defaults\na: 1\n");
+    assert_eq!(edited("{}", &[set("a", json!(1))]), "a: 1");
 }
 
 #[test]

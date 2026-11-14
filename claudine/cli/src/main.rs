@@ -64,16 +64,26 @@ fn inject_caller_arguments(cli: &mut Cli, arguments: claudine::composition::Argu
 /// old-format that was backed up), run the initialization process so a
 /// config is available for the command about to run.
 async fn ensure_config_exists() -> Result<()> {
-    let config_path = claudine::dispatch::loader::user_config_path();
-    if !config_path.exists() {
+    // A legacy `config.json` counts: the load below converts it.
+    if !claudine::dispatch::loader::user_config_exists() {
         commands::init_wizard::run_initialization().await?;
         return Ok(());
     }
 
-    // The file exists, but it may be old-format. Attempt a load —
-    // load_claudine_config backs up stale configs and returns ConfigNotFound.
-    match claudine::dispatch::loader::load_claudine_config(Some(&config_path), None) {
-        Ok(_) => Ok(()),
+    // The file exists, but it may be a legacy or pre-2026 file. The load
+    // converts a legacy `config.json`, and backs up a pre-2026 one and
+    // returns ConfigNotFound.
+    match claudine::dispatch::loader::load_claudine_config_with_notices(None, None) {
+        Ok(loaded) => {
+            for notice in &loaded.notices {
+                let text = format!("{} ({})", notice.message, notice.code);
+                match notice.level {
+                    claudine::config::json_conversion::NoticeLevel::Warning => log::warn(&text),
+                    _ => log::message(&text),
+                }
+            }
+            Ok(())
+        }
         Err(claudine::error::ClaudineError::ConfigNotFound(_)) => {
             // Old-format was detected and backed up; re-run initialization.
             commands::init_wizard::run_initialization().await?;
@@ -474,6 +484,23 @@ async fn dispatch(
 
     if cli.help || cli.command.is_none() {
         return commands::help::run().map(|()| 0);
+    }
+
+    // Darkmatter's configuration is read once, before any hook, agent,
+    // provider, or composition is dispatched; one that does not load stops
+    // the run. Completion stays passive and reads none.
+    if !matches!(cli.command, Some(Commands::Completions(_) | Commands::Complete(_))) {
+        let config = request::darkmatter_config().map_err(|error| Report::new(error.clone()))?;
+        // A provider hook and `steer` answer a machine on their streams, so
+        // only a run a person reads hears about the missing file.
+        if !matches!(cli.command, Some(Commands::Handle(_) | Commands::Steer(_)))
+            && let Some(path) = config.user_config_missing()
+        {
+            log::warn(&format!(
+                "`{}` does not exist, so every Darkmatter setting takes its default; `claudine init` creates it",
+                path.display()
+            ));
+        }
     }
 
     let perf_enabled = perf_bootstrap.enabled;

@@ -76,7 +76,7 @@ fn compose_parent(
         .with_source_file(&parent)
         .with_fail_fast(fail_fast)
         .only(&[ComposeOperation::BlockTransclusion]);
-    let request = darkmatter::markdown::compose::ComposeRequest::with_context(options, snapshot).unwrap();
+    let request = crate::request_support::request_in(options, snapshot);
     Markdown::try_from(parent.as_path()).unwrap().compose_with(&request)
 }
 

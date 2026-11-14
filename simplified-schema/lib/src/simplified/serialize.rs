@@ -35,9 +35,9 @@ impl Constraint {
     /// `alphanumeric(allow-dashes,allow-periods)` in canonical option order,
     /// or bare `alphanumeric` for the empty set. A default keeps its JSON
     /// type visible (`default(3)` versus `default('3')`, `default(null)`
-    /// versus `default('null')`); an object or array default, which only Rust
-    /// can construct, is written as `default(<compact JSON>)`, a diagnostic
-    /// spelling the grammar does not parse.
+    /// versus `default('null')`); an object or array default is written as
+    /// `default(<compact JSON>)`, which the grammar reads back, and a text
+    /// default that starts with a bracket is quoted.
     ///
     /// ## Examples
     ///
@@ -610,8 +610,8 @@ fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: Option<
                 out.push_str(s);
             }
         }
-        // The grammar has no compound default; only Rust can build one, and
-        // it is shown as compact JSON so diagnostics still carry the value.
+        // A list or mapping is written as compact JSON, the spelling the
+        // grammar reads back (`default(["a"])`, `default({})`).
         other => {
             let _ = write!(out, "{other}");
         }
@@ -619,10 +619,12 @@ fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: Option<
 }
 
 /// Whether bare `value` re-parses as the same string `default(...)`: not a
-/// `true`/`false`/`null` keyword and not any number spelling, which the
-/// grammar either reads as a number or rejects as inadmissible.
+/// `true`/`false`/`null` keyword, not any number spelling, which the
+/// grammar either reads as a number or rejects as inadmissible, and not
+/// bracket-led, which the grammar reads as a JSON list or mapping.
 fn bare_default_round_trips_as_string(value: &str) -> bool {
     !matches!(value, "true" | "false" | "null")
+        && !value.starts_with(['[', '{'])
         && matches!(admit_number_spelling(value), Err(NumberTextError::NotANumber))
 }
 
@@ -1022,6 +1024,19 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_compound_defaults() {
+        for value in [serde_json::json!([]), serde_json::json!(["./*.md", "a, b"]), serde_json::json!({"k": [1, "x"]})] {
+            round_trip(PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::String),
+                is_array: true,
+                constraints: vec![],
+                array_constraints: vec![Constraint::Default(value)],
+                description: None,
+            });
+        }
+    }
+
+    #[test]
     fn round_trip_default_number() {
         round_trip(PropertyAtom {
             ty: TypeExpr::Primitive(SimplifiedType::Number),
@@ -1172,6 +1187,8 @@ mod tests {
             (serde_json::json!("false"), "string(default('false'))"),
             (serde_json::json!("draft"), "string(default(draft))"),
             (serde_json::json!("v1.2"), "string(default(v1.2))"),
+            (serde_json::json!("[a]"), "string(default('[a]'))"),
+            (serde_json::json!("{}"), "string(default('{}'))"),
         ] {
             let atom = default_atom(SimplifiedType::String, value);
             assert_eq!(serialize_property_atom(&atom), written);

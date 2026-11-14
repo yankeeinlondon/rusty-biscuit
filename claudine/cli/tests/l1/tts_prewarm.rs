@@ -144,7 +144,7 @@ fn dry_run_prepares_nothing() {
 fn prewarm_false_in_config_prepares_nothing_and_still_launches() {
     let fixture = CliProcessFixture::named("prewarm-setting-off");
     common::write(
-        &fixture.home().join(".claudine/config.json"),
+        &fixture.home().join(".claudine/config.yaml"),
         r#"{ "tts": { "prewarm": false } }"#,
     );
     let launches = common::launch_recorder::install(&fixture, "goose", "exit 0");
@@ -459,7 +459,7 @@ Work on {{ title }}.
 #[test]
 fn a_mixed_sequence_prepares_prompts_with_their_playback_configuration() {
     let fixture = CliProcessFixture::named("prewarm-mixed-config");
-    common::write(&fixture.home().join(".claudine/config.json"),
+    common::write(&fixture.home().join(".claudine/config.yaml"),
         r#"{ "tts": { "provider": "kokoro", "voice": "af_heart" } }"#);
     let launches = common::launch_recorder::install(&fixture, "goose", "exit 0");
     for name in ["a.md", "m.md", "p.md"] {

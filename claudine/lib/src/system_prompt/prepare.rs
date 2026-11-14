@@ -175,9 +175,11 @@ fn compose_prompt_markdown(
     } else {
         options
     };
-    let request = crate::composition::compose_request(options, file_resolution_context).map_err(|error| {
-        crate::error::ClaudineError::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, error))
-    })?;
+    let as_error =
+        |error| crate::error::ClaudineError::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, error));
+    let options = crate::composition::with_invocation_config(options, Some(invocation), &file_resolution_context)
+        .map_err(as_error)?;
+    let request = crate::composition::compose_request(options, file_resolution_context).map_err(as_error)?;
 
     let (composed, _report) = md.compose_with(&request)?;
 

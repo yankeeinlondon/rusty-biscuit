@@ -413,7 +413,7 @@ fn a_matched_trigger_schema_property_is_known() {
             .with_repository_root(repo.path())
             .with_source_path(&path);
         let options = options(repo.path(), &path).with_trigger_schemas(triggers);
-        let request = darkmatter::markdown::compose::ComposeRequest::with_context(options, context).unwrap();
+        let request = crate::request_support::request_in(options, context);
 
         let (content, report) = compose_request(&path, &request);
 

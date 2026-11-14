@@ -381,7 +381,7 @@ pub enum GitignoreChoice {
 pub fn prompt_gitignore_choice() -> Result<GitignoreChoice> {
     let options = vec![
         "Add .claudine/ to .gitignore",
-        "Commit .claudine/config.json",
+        "Commit .claudine/config.yaml",
         "Do nothing",
     ];
 
@@ -389,7 +389,7 @@ pub fn prompt_gitignore_choice() -> Result<GitignoreChoice> {
 
     Ok(match selected {
         "Add .claudine/ to .gitignore" => GitignoreChoice::AddToGitignore,
-        "Commit .claudine/config.json" => GitignoreChoice::CommitIt,
+        "Commit .claudine/config.yaml" => GitignoreChoice::CommitIt,
         _ => GitignoreChoice::DoNothing,
     })
 }

@@ -19,6 +19,9 @@ mod characterization_error_routes;
 mod cli_process_fixture;
 mod codex_app_server;
 mod command_routing;
+#[cfg(unix)]
+mod config_yaml_wiring;
+mod darkmatter_config_gate;
 mod completion_cli;
 mod completion_delayed;
 mod completion_committed_prompt_schema;

@@ -112,7 +112,7 @@ fn wait_for_marker(session: &mut OsSession, marker: &str, deadline: Duration) ->
 fn stage_default_config(home_dir: &Path) {
     let claudine_dir = home_dir.join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 }
 
 /// A staged workspace with a document whose body holds one unapproved

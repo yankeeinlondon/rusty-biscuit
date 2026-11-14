@@ -110,8 +110,7 @@ impl LifecycleHost for FakeHost {
     ) -> Result<ResolutionContext, ContextBuildError> {
         let context = prepared_context.cloned().unwrap_or_else(ComposeContext::capture_minimal);
         let options = ComposeOptions::new_with_context(context).with_source_file(source_path);
-        ComposeRequest::with_context(options, file_resolution_context.clone())
-            .map(|request| request.local_expression_resolution_context())
+        ComposeRequest::local_expression_context(options, file_resolution_context)
     }
     fn capture_overlay_context(&self, _: &Path, _: &str) -> ComposeContext {
         ComposeContext::capture_minimal()
@@ -205,6 +204,7 @@ impl Fixture {
             ctx_base_dir: None,
             prepared_context: Some(&self.context),
             file_resolution_context: &self.files,
+            config_snapshot: None,
             effect_engine: &self.engine,
             shell_runner: &self.shell,
             source_path: Path::new("doc.md"),

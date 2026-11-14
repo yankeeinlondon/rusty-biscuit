@@ -26,7 +26,7 @@ fn handle_human_in_the_loop_leaves_durable_doorbell_job_after_exit() {
         }
     });
     write(
-        &home.join(".claudine/config.json"),
+        &home.join(".claudine/config.yaml"),
         &serde_json::to_string_pretty(&config).unwrap(),
     );
 

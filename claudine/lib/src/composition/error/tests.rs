@@ -1073,6 +1073,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         ),
         file_ref_fallback_dir: None,
         file_resolution_context: crate::test_support::context(),
+        config_snapshot: None,
         name_coercion_keys: Vec::new(),
         allow_empty_body: false,
         invocation_context: None,

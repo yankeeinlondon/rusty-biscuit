@@ -176,8 +176,14 @@ fn load_selection_config_returns_both_favorite_and_overrides() {
         },
         ..ClaudineConfig::default()
     };
-    let config_path = claudine_dir.join("config.json");
-    claudine::dispatch::loader::save_claudine_config(&config, &config_path).unwrap();
+    let config_path = claudine_dir.join("config.yaml");
+    claudine::config::persist::initialize_config(
+        &config_path,
+        claudine::config::schema::ConfigScope::User,
+        &ClaudineConfig::default(),
+        &config,
+    )
+    .unwrap();
 
     let result = selection::load_selection_config_from_paths(Some(&config_path), None);
 
@@ -190,7 +196,7 @@ fn load_selection_config_returns_both_favorite_and_overrides() {
 #[test]
 fn load_selection_config_handles_missing_config() {
     let dir = tempfile::tempdir().unwrap();
-    let nonexistent = dir.path().join("no-such-config.json");
+    let nonexistent = dir.path().join("no-such-config.yaml");
     let result = claudine::dispatch::loader::load_claudine_config(Some(&nonexistent), None);
     assert!(result.is_err(), "expected error for missing config file");
 }

@@ -172,7 +172,8 @@ fn populate_capture(
 
     if requirements.contains(ContextGroup::Repo) {
         repo::populate_repo(&cap, &mut values);
-        observations = observations.with_packages(cap.repo_root.as_deref(), cap.repo_info.as_ref());
+        observations =
+            observations.with_packages(cap.repo_root.as_deref(), cap.repo_info.as_ref(), cap.committed_tree.clone());
     }
 
     if requirements.contains(ContextGroup::FileChanges) {

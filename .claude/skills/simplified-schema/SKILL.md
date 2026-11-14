@@ -156,7 +156,10 @@ ownership line with Darkmatter's `KindRegistry` are in
 (`shipped::registry`; a refused artifact silently falls back to the text).
 `simplified_schema::shipped` is the mechanism Darkmatter and Claudine share
 (`accept`, `generate`, `check_fresh`, `PreparationMode::Uncached`, the
-`*_with_mode` entry points, `ShippedSources::with_prepared`). After editing
+`*_with_mode` entry points, `ShippedSources::with_prepared`). `ShippedSources::with_aliases(&[(stem, path)])`
+lets a stem name a shipped document outside the partials folder
+(Darkmatter's `config` → `darkmatter-config.yaml`); aliases are part of
+equality, memo keys, and the owner's artifact `configuration`. After editing
 shipped YAML or its preparation code, run the root `just shipped-schemas`
 (it regenerates all three artifacts, all or nothing). A code-only change
 bumps `PREPARATION_REVISION` of every owner whose payload it changes (a

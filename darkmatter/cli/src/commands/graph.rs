@@ -44,9 +44,12 @@ fn graph_value(
     let resolved = opened.path();
     let md = Markdown::try_from(resolved)
         .wrap_err_with(|| format!("Failed to read file: {:?}", resolved))?;
+    let config_snapshot = request.config_snapshot(&context)?;
     let graph_request = ComposeRequest::with_context(
         // Every document the graph prepares shares one data memo and read set.
-        ComposeOptions::for_document(request.launch_dir(), &md).with_shared_data_runtime(),
+        ComposeOptions::for_document(request.launch_dir(), &md)
+            .with_shared_data_runtime()
+            .with_config_snapshot(config_snapshot),
         context,
     )
     .wrap_err("Failed to prepare the reference graph request")?;

@@ -1,0 +1,18 @@
+# A repository configuration that writes every override, for the input
+# robustness matrix (`tests/l1/config_schema_matrix.rs`).
+canonical_provider: gemini
+actions:
+  session_end:
+    - type: sound_effect
+      effect: doorbell
+matchers:
+  session_end: "true"
+active_messenger: team
+exit_expressions:
+  - pattern: REPO-STOP
+guard_settings:
+  repetition:
+    enabled: false
+permissions:
+  file-read:
+    - "&docs/**/*.md"

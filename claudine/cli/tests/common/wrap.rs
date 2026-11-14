@@ -197,5 +197,8 @@ pub(crate) fn seed_empty_provider_state(home: &Path) {
 pub(crate) fn seed_minimal_config(home: &Path) {
     let dir = home.join(".claudine");
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("config.json"), "{}").unwrap();
+    fs::write(dir.join("config.yaml"), "{}").unwrap();
+    // Darkmatter's user configuration too, so a run reports no missing-file
+    // warning unless its test removes it.
+    fs::write(home.join(".darkmatter.yaml"), "{}\n").unwrap();
 }

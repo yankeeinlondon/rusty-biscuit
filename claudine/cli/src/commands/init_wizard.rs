@@ -35,7 +35,7 @@ pub async fn run_initialization() -> Result<()> {
 async fn run_headless_initialization() -> Result<()> {
     let config = build_headless_config();
     let path = claudine::dispatch::loader::user_config_path();
-    claudine::dispatch::loader::save_claudine_config(&config, &path)?;
+    write_initial_config(&path, &config)?;
     Ok(())
 }
 
@@ -74,7 +74,7 @@ async fn run_interactive_initialization() -> Result<()> {
 
     let config = build_config(tts, preferred_agent, messenger);
     let path = claudine::dispatch::loader::user_config_path();
-    claudine::dispatch::loader::save_claudine_config(&config, &path)?;
+    write_initial_config(&path, &config)?;
 
     register_hooks_all_providers().await?;
 
@@ -249,6 +249,21 @@ fn configure_messenger() -> Result<Option<ClaudineMessengerConfig>> {
     }))
 }
 
+/// Writes the values setup chose, the ones that differ from the schema's
+/// defaults, to the user file at `path`: a new file starts from the defaults,
+/// and an existing one keeps every comment and every other key.
+fn write_initial_config(
+    path: &std::path::Path,
+    config: &ClaudineConfig,
+) -> claudine::error::Result<claudine::config::persist::SaveOutcome> {
+    claudine::config::persist::initialize_config(
+        path,
+        claudine::config::schema::ConfigScope::User,
+        &ClaudineConfig::default(),
+        config,
+    )
+}
+
 fn build_config(
     tts: TtsValue,
     preferred_agent: Option<Provider>,
@@ -285,6 +300,7 @@ fn build_config(
         exit_expressions: None,
         guard_settings: Default::default(),
         steering: Default::default(),
+        permissions: None,
     }
 }
 
@@ -492,6 +508,45 @@ fn provider_hook_events(provider: Provider) -> Vec<AgenticEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn initialized() -> ClaudineConfig {
+        build_config(TtsValue::Boolean(true), Some(Provider::Codex), None)
+    }
+
+    fn values(config: &ClaudineConfig) -> serde_json::Value {
+        serde_json::to_value(config).unwrap()
+    }
+
+    #[test]
+    fn a_new_user_file_is_the_defaults_plus_the_setup_values_and_rerunning_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claudine/config.yaml");
+
+        assert!(write_initial_config(&path, &initialized()).unwrap().created);
+        let loaded = claudine::dispatch::loader::load_claudine_config(Some(&path), None).unwrap();
+        assert_eq!(values(&loaded), values(&initialized()));
+
+        let first = std::fs::read(&path).unwrap();
+        assert!(!write_initial_config(&path, &initialized()).unwrap().written);
+        assert_eq!(std::fs::read(&path).unwrap(), first);
+    }
+
+    #[test]
+    fn setup_over_an_existing_file_keeps_what_it_does_not_manage() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let original = "# mine\nlogging: false   # quiet\n\npermissions:\n  network: deny\n";
+        std::fs::write(&path, original).unwrap();
+
+        write_initial_config(&path, &initialized()).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with(original), "{text}");
+        let loaded = claudine::dispatch::loader::load_claudine_config(Some(&path), None).unwrap();
+        assert!(!loaded.logging, "an unmanaged value is kept");
+        assert_eq!(loaded.preferred_agent, Some(Provider::Codex));
+        assert_eq!(loaded.default_sounds.attention.as_deref(), Some("doorbell"));
+    }
 
     #[test]
     fn macos_with_brew_uses_auto_install() {

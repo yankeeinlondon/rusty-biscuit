@@ -286,7 +286,7 @@ option maps exactly to it (same output, final answer, and exit code as
 
 ## Configuration
 
-Hook configuration is stored in `~/.claudine/config.json` (user-scoped) or `<repo>/.claudine/config.json` (project-scoped).
+Hook configuration is stored in `~/.claudine/config.yaml` (user-scoped) or `<repo>/.claudine/config.yaml` (project-scoped). See [Configuration](./docs/topics/configuration.md) for how these files are read, validated, and converted from an older `config.json`.
 
 MCP state is stored separately in `~/.claudine/mcp/`:
 

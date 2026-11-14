@@ -13,8 +13,8 @@
 //!
 //! Resolution fails closed on a declared-but-broken safety rule: the
 //! contract is **absent = built-in defaults; present-but-invalid = abort**.
-//! A genuinely-absent layer (no `~/.claudine/config.json`, a repo with no
-//! `.claudine/config.json`, or a document without frontmatter
+//! A genuinely-absent layer (no `~/.claudine/config.yaml`, a repo with no
+//! `.claudine/config.yaml`, or a document without frontmatter
 //! `exit_expressions`/`guard_settings`) still falls back to the built-in
 //! defaults (guards enabled with conservative thresholds, empty
 //! exit-expression set). But a layer that is *present* yet unreadable,
@@ -220,7 +220,7 @@ impl ResolvedGuardInputs {
 /// ## Errors
 ///
 /// Returns [`ClaudineError`] when any *present* config layer is broken: a
-/// repo `.claudine/config.json` that exists but is unreadable/malformed, a
+/// repo `.claudine/config.yaml` that exists but is unreadable/malformed, a
 /// repo or frontmatter `exit_expressions` whose `scope` references an
 /// unknown agent or whose regex is invalid, malformed frontmatter
 /// `guard_settings`, or an in-scope set that fails to compile. A
@@ -264,7 +264,7 @@ pub(crate) fn resolve_guard_inputs(
     let repo_root = env_context.git.as_ref().map(|g| g.repo_root.as_path());
 
     // User layer — load the user config only (no repo merge). A genuinely
-    // absent `~/.claudine/config.json` is not an error (fall back to the
+    // absent `~/.claudine/config.yaml` is not an error (fall back to the
     // built-in guards), but a present-but-broken one aborts:
     // `load_claudine_config` already runs `ClaudineConfig::validate()`, so
     // an unknown scope agent or invalid regex here fails the run.
@@ -287,7 +287,7 @@ pub(crate) fn resolve_guard_inputs(
     // `load_claudine_config`'s repo merge.
     let repo = match repo_root {
         Some(root) => {
-            let repo_path = root.join(".claudine/config.json");
+            let repo_path = loader::repo_config_path(root);
             let same_file = repo_path
                 .canonicalize()
                 .ok()
@@ -463,7 +463,7 @@ mod tests {
     use claudine::events::{EnvironmentContext, GitContext};
 
     /// An `EnvironmentContext` whose git repo root is `repo_root`, so the
-    /// resolver loads `<repo_root>/.claudine/config.json` as the repo layer.
+    /// resolver loads `<repo_root>/.claudine/config.yaml` as the repo layer.
     /// `GitContext` has one required field (`repo_root`); the rest fill from
     /// their serde defaults.
     fn env_with_repo(repo_root: &std::path::Path) -> EnvironmentContext {
@@ -480,13 +480,13 @@ mod tests {
     fn write_repo_config(repo_root: &std::path::Path, body: &str) {
         let dir = repo_root.join(".claudine");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("config.json"), body).unwrap();
+        std::fs::write(dir.join("config.yaml"), body).unwrap();
     }
 
     /// Point `HOME` at an empty dir so the user layer is genuinely absent
     /// (`ConfigNotFound` → built-in defaults) and the test exercises only
     /// the repo / frontmatter layer regardless of the host's real
-    /// `~/.claudine/config.json`. Caller must hold the guard for the test's
+    /// `~/.claudine/config.yaml`. Caller must hold the guard for the test's
     /// lifetime and be `#[serial]`.
     fn isolate_empty_home() -> (tempfile::TempDir, test_toolkit::EnvGuard) {
         let home = tempfile::tempdir().unwrap();
@@ -527,7 +527,7 @@ mod tests {
     fn resolve_repo_unreadable_config_aborts() {
         let (_home, _guard) = isolate_empty_home();
         let tmp = tempfile::tempdir().unwrap();
-        // Present but not valid JSON5 → load_repo_override_config errors.
+        // Present but not valid YAML → load_repo_override_config errors.
         write_repo_config(tmp.path(), "{ not valid json ");
         let env = env_with_repo(tmp.path());
         let result = resolve_runaway_guards(Provider::OpenCode, Some("k2"), &env, None);

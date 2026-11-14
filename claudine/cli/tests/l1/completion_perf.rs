@@ -326,7 +326,7 @@ fn run_enter_once(fixture: &CliProcessFixture, partial: &str) -> Duration {
     // an empty config so the default `prompt_for_missing = true` applies.
     let config_dir = fixture.home().join(".claudine");
     fs::create_dir_all(&config_dir).unwrap();
-    fs::write(config_dir.join("config.json"), "{}").unwrap();
+    fs::write(config_dir.join("config.yaml"), "{}").unwrap();
 
     // `expectrl` needs a live `std::process::Command`; the builder's raw
     // surface hands one over carrying the same policy.

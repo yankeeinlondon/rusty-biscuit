@@ -1,17 +1,13 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::Json5;
 use regex::Regex;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use super::deps::*;
-
-/// Candidate file names for user-level configuration.
-const USER_CONFIG_NAMES: &[&str] = &[".claudine/config.json"];
-
-/// Repo-level config file name.
-const REPO_CONFIG_NAME: &str = ".claudine/config.json";
+use crate::config::json_conversion::{self, ConfigNotice, ScopeState};
+use crate::config::load::read_document;
+use crate::config::schema::{CONFIG_DIR, CONFIG_FILE_NAME, ConfigScope};
 
 /// Event binding ready for dispatch without per-event regex compilation.
 #[derive(Debug, Clone)]
@@ -351,165 +347,160 @@ fn bridge_provider_config(cfg: &MessengerProviderConfig) -> MessagingRouteConfig
     }
 }
 
-/// Get the path to the user config file.
-///
-/// Returns the first existing config file path, or the default path if none exists.
+/// The user configuration file, `~/.claudine/config.yaml`, whether or not
+/// it exists.
 pub fn user_config_path() -> PathBuf {
     let home = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+    ConfigScope::file_under(&home)
+}
 
-    for name in USER_CONFIG_NAMES {
-        let path = home.join(name);
-        if path.is_file() {
-            return path;
-        }
-    }
+/// The repository configuration file, `{repo_root}/.claudine/config.yaml`.
+pub fn repo_config_path(repo_root: &Path) -> PathBuf {
+    ConfigScope::file_under(repo_root)
+}
 
-    // Return default path
-    home.join(USER_CONFIG_NAMES[0])
+/// Whether a user configuration exists: `config.yaml`, or a legacy
+/// `config.json` the next load converts.
+pub fn user_config_exists() -> bool {
+    let path = user_config_path();
+    path.is_file() || legacy_path(&path).is_some_and(|legacy| legacy.is_file())
+}
+
+/// Whether `path` is a canonical configuration location
+/// (`<base>/.claudine/config.yaml`), the only kind whose legacy
+/// `config.json` sibling is converted. Any other path is read as YAML,
+/// exactly where it is.
+fn is_canonical(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == CONFIG_FILE_NAME)
+        && path.parent().and_then(Path::file_name).is_some_and(|dir| dir == CONFIG_DIR)
+}
+
+fn legacy_path(path: &Path) -> Option<PathBuf> {
+    is_canonical(path).then(|| path.with_file_name(json_conversion::LEGACY_FILE_NAME))
 }
 
 // ==========================================================================
-// ClaudineConfig (new flat format) loading, merging, and saving
+// ClaudineConfig loading and merging
 // ==========================================================================
 
-/// Load and validate a [`ClaudineConfig`].
+/// A loaded configuration and the conversion notices the load produced,
+/// which the caller reports once.
+#[derive(Debug, Clone)]
+pub struct LoadedClaudineConfig {
+    /// The merged, validated configuration.
+    pub config: ClaudineConfig,
+    /// What converting a legacy `config.json` did or found (code
+    /// `dm.config.migration`).
+    pub notices: Vec<ConfigNotice>,
+}
+
+/// Load and validate a [`ClaudineConfig`], logging conversion notices.
 ///
-/// If `user_path` is `Some`, it is used directly; otherwise the default
-/// user config path is resolved via [`user_config_path()`].
-///
-/// When the file contains the old per-provider format, it is backed up to
-/// `<path>.bak` and [`ClaudineError::ConfigNotFound`] is returned so that
-/// the caller can run the interactive migration wizard.
-///
-/// If `repo_root` is provided, the repo-level config at
-/// `{repo_root}/.claudine/config.json` is loaded and merged on top of the
-/// user config.
+/// See [`load_claudine_config_with_notices`].
 ///
 /// ## Errors
 ///
-/// Returns [`ClaudineError::ConfigNotFound`] when the config file does not
-/// exist or was detected as the old format and backed up.
-/// Returns other errors for I/O failures, parse errors, or validation
-/// failures.
-pub fn load_claudine_config(
+/// As [`load_claudine_config_with_notices`].
+pub fn load_claudine_config(user_path: Option<&Path>, repo_root: Option<&Path>) -> Result<ClaudineConfig> {
+    let loaded = load_claudine_config_with_notices(user_path, repo_root)?;
+    for notice in &loaded.notices {
+        warn!(code = notice.code, "{}", notice.message);
+    }
+    Ok(loaded.config)
+}
+
+/// Load and validate a [`ClaudineConfig`].
+///
+/// If `user_path` is `Some`, it is read exactly there as YAML; otherwise the
+/// user file is [`user_config_path()`]. If `repo_root` is provided,
+/// `{repo_root}/.claudine/config.yaml` is merged on top of it. Each file is
+/// judged by its scope's schema before it is read, and the merged result by
+/// [`ClaudineConfig::validate`].
+///
+/// At a canonical location, a legacy `config.json` beside the YAML file is
+/// converted first (see [`crate::config::json_conversion`]); a pre-2026
+/// per-provider `config.json` is backed up to `<path>.bak` and ignored, so
+/// the caller can run the setup wizard.
+///
+/// ## Errors
+///
+/// - [`ClaudineError::ConfigNotFound`] when the user file does not exist or
+///   was a pre-2026 file that was backed up;
+/// - [`ClaudineError::ConfigInvalid`] when a file is not valid, located by
+///   file, line, column, and JSON pointer;
+/// - [`ClaudineError::ConfigConversion`] when a legacy file cannot be
+///   converted (it is kept);
+/// - the semantic errors of [`ClaudineConfig::validate`], and I/O errors.
+pub fn load_claudine_config_with_notices(
     user_path: Option<&Path>,
     repo_root: Option<&Path>,
-) -> Result<ClaudineConfig> {
-    let path = user_path
-        .map(PathBuf::from)
-        .unwrap_or_else(user_config_path);
+) -> Result<LoadedClaudineConfig> {
+    let path = user_path.map(PathBuf::from).unwrap_or_else(user_config_path);
+    let mut notices = Vec::new();
 
+    if is_canonical(&path)
+        && json_conversion::prepare_scope(&path, ConfigScope::User, &mut notices)? == ScopeState::LegacyFormatIgnored
+    {
+        return Err(ClaudineError::ConfigNotFound(path));
+    }
     if !path.is_file() {
         return Err(ClaudineError::ConfigNotFound(path));
     }
-
-    let raw = std::fs::read_to_string(&path)?;
-    let value = parse_json5_to_value(&raw)?;
-
-    if migration::is_old_format(&value) {
-        migration::backup_old_config(&path)?;
-        return Err(ClaudineError::ConfigNotFound(path));
-    }
-
-    let mut config: ClaudineConfig =
-        serde_json::from_value(value).map_err(ClaudineError::JsonParse)?;
+    let document = read_document(&path, ConfigScope::User)?;
+    let mut config = ClaudineConfig::from_effective(document.effective, Some(&path))?;
     debug!(?path, "Loaded ClaudineConfig (user)");
 
-    // Merge repo-level config if present.
-    // Skip when the repo config resolves to the same file as the user config
-    // (e.g., HOME points at the repo root) to avoid re-parsing the same file
-    // as a different type.
+    // Skip the repo file when it resolves to the user file (HOME at the repo
+    // root), so one file is never read as both scopes.
     if let Some(root) = repo_root {
-        let repo_path = root.join(REPO_CONFIG_NAME);
+        let repo_path = repo_config_path(root);
         let same_file = repo_path
             .canonicalize()
             .ok()
             .zip(path.canonicalize().ok())
             .is_some_and(|(r, u)| r == u);
-        if repo_path.is_file() && !same_file {
-            let repo_raw = std::fs::read_to_string(&repo_path)?;
-            let repo_value = parse_json5_to_value(&repo_raw)?;
-            if migration::is_old_format(&repo_value) {
-                migration::backup_old_config(&repo_path)?;
-                warn!(
-                    ?repo_path,
-                    "Repo config was old format; backed up and ignored"
-                );
-            } else {
-                let repo_override: RepoOverrideConfig =
-                    serde_json::from_value(repo_value).map_err(ClaudineError::JsonParse)?;
-                debug!(?repo_path, "Loaded RepoOverrideConfig");
-                merge_repo_override(&mut config, &repo_override);
-            }
+        if !same_file && let Some(repo_override) = read_repo_override(&repo_path, &mut notices)? {
+            debug!(?repo_path, "Loaded RepoOverrideConfig");
+            merge_repo_override(&mut config, &repo_override);
         }
     }
 
     config.validate()?;
-    Ok(config)
+    Ok(LoadedClaudineConfig { config, notices })
 }
 
-/// Save a [`ClaudineConfig`] to disk as pretty-printed JSON.
-///
-/// Creates parent directories if they do not exist and writes atomically.
-///
-/// ## Errors
-///
-/// Returns errors if serialization fails or the file cannot be written.
-pub fn save_claudine_config(config: &ClaudineConfig, path: &Path) -> Result<()> {
-    let json = serde_json::to_string_pretty(config)?;
-    atomic_write(path, json.as_bytes())?;
-    info!(?path, "Saved ClaudineConfig");
-    Ok(())
-}
-
-/// Load a repo-scoped [`RepoOverrideConfig`] from the given path.
+/// Load a repo-scoped [`RepoOverrideConfig`] from the given path, read as
+/// YAML. At a canonical location a legacy `config.json` beside it is
+/// converted first.
 ///
 /// Returns `Ok(None)` if the file does not exist.
 ///
 /// ## Errors
 ///
-/// Returns errors for I/O failures or parse errors.
+/// [`ClaudineError::ConfigInvalid`] for an invalid file,
+/// [`ClaudineError::ConfigConversion`] for a legacy file that cannot be
+/// converted, and I/O errors.
 pub fn load_repo_override_config(path: &Path) -> Result<Option<RepoOverrideConfig>> {
+    let mut notices = Vec::new();
+    let config = read_repo_override(path, &mut notices)?;
+    for notice in &notices {
+        warn!(code = notice.code, "{}", notice.message);
+    }
+    Ok(config)
+}
+
+fn read_repo_override(path: &Path, notices: &mut Vec<ConfigNotice>) -> Result<Option<RepoOverrideConfig>> {
+    if is_canonical(path)
+        && json_conversion::prepare_scope(path, ConfigScope::Repository, notices)? == ScopeState::LegacyFormatIgnored
+    {
+        warn!(?path, "Repo config was old format; backed up and ignored");
+        return Ok(None);
+    }
     if !path.is_file() {
         return Ok(None);
     }
-    let raw = std::fs::read_to_string(path)?;
-    let value = parse_json5_to_value(&raw)?;
-    if migration::is_old_format(&value) {
-        migration::backup_old_config(path)?;
-        warn!(
-            ?path,
-            "Repo override config was old format; backed up and ignored"
-        );
-        return Ok(None);
-    }
-    let config: RepoOverrideConfig =
-        serde_json::from_value(value).map_err(ClaudineError::JsonParse)?;
-    debug!(?path, "Loaded RepoOverrideConfig");
-    Ok(Some(config))
-}
-
-/// Save a [`RepoOverrideConfig`] to disk as pretty-printed JSON.
-///
-/// Creates parent directories if they do not exist and writes atomically.
-///
-/// ## Errors
-///
-/// Returns errors if serialization fails or the file cannot be written.
-pub fn save_repo_override_config(config: &RepoOverrideConfig, path: &Path) -> Result<()> {
-    let json = serde_json::to_string_pretty(config)?;
-    atomic_write(path, json.as_bytes())?;
-    info!(?path, "Saved RepoOverrideConfig");
-    Ok(())
-}
-
-/// Parse a raw string as JSON5 and return a [`serde_json::Value`].
-fn parse_json5_to_value(raw: &str) -> Result<serde_json::Value> {
-    let json5 = Json5::from_str(raw).map_err(|error| ClaudineError::ConfigValidationWithCause {
-        message: format!("JSON5 parse error: {error}"),
-        source: ConfigCause::Json5(error),
-    })?;
-    Ok(json5.as_json_value().clone())
+    let document = read_document(path, ConfigScope::Repository)?;
+    RepoOverrideConfig::from_effective(document.effective, Some(path)).map(Some)
 }
 
 #[cfg(test)]

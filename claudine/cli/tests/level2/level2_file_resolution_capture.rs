@@ -130,7 +130,7 @@ fn stage(name: &str, router_body: &str) -> Staged {
 
     let claudine_dir = root.join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    write(&claudine_dir.join("config.json"), "{}");
+    write(&claudine_dir.join("config.yaml"), "{}");
 
     let router = root.join("prompts/router.md");
     write(&router, router_body);
@@ -403,7 +403,7 @@ fn stage_surface(name: &str) -> SurfaceStaged {
 
     let home = root.to_path_buf();
     fs::create_dir_all(root.join(".claudine")).unwrap();
-    write(&root.join(".claudine/config.json"), "{}");
+    write(&root.join(".claudine/config.yaml"), "{}");
 
     SurfaceStaged {
         workspace,

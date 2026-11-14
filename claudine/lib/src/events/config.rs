@@ -23,7 +23,7 @@ pub struct GlobalSettings {
     ///
     /// Kept apart from `tts` because `tts` is `None` for `"tts": false`
     /// while pre-warm stays on there. Defaults to `true`, including when
-    /// `config.json` cannot be loaded, matching the auto-detected playback
+    /// `config.yaml` cannot be loaded, matching the auto-detected playback
     /// configuration lifecycle `say` uses in that case.
     #[serde(default = "default_tts_prewarm")]
     pub tts_prewarm: bool,

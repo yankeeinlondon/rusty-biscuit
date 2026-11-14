@@ -914,7 +914,7 @@ When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict c
 1. **Explicit flag** (`--provider <slug>`, or the catalog-derived shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`, `--kilo`, `--pi`, `--antigravity`) — highest priority
 2. **Singular frontmatter `agent`** — a single provider name in the effective (composed) frontmatter, fuzzy-matched against known providers
 3. **List-valued frontmatter `agent`** — an ordered list of provider names; the first installed provider in the list is chosen
-4. **Config favorite** — `preferred_agent` from `~/.claudine/config.json` (the older key `favorite_agent` is still read; set it with `claudine config set favorite-agent <slug>`)
+4. **Config favorite** — `preferred_agent` from `~/.claudine/config.yaml` (the older key `favorite_agent` is still read; set it with `claudine config set favorite-agent <slug>`)
 5. **Hard error** — if none of the above resolve, the command fails with a structured error
 
 The old "single installed" auto-selection shortcut has been removed. Even when only one provider is installed, non-TTY sessions still require an explicit signal (flag, frontmatter, or favorite).
@@ -1461,10 +1461,10 @@ Documents without an `initialize` are unaffected: nothing can change their front
 
 ### User Config
 
-The user-scoped Claudine config (`~/.claudine/config.json` or `.json5`) exposes a single switch:
+The user-scoped Claudine config (`~/.claudine/config.yaml`) exposes a single switch:
 
-```json
-{ "prompt_for_missing": true }
+```yaml
+prompt_for_missing: true
 ```
 
 The default is `true`. The field is scoped to the user config only — the repo-scoped config rejects it. The interactive `claudine config` TUI offers a boolean toggle, and the non-interactive setter accepts `claudine config set prompt-for-missing true|false`.

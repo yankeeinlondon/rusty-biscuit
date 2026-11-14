@@ -320,7 +320,7 @@ The core event processing pipeline runs in 6 steps:
 
 1. **Select adapter** — `adapter_for(provider)`
 2. **Parse event** — adapter normalizes raw JSON into `(AgenticEvent, EventMeta)`
-3. **Load config** — merges user (`~/.claudine/config.json`) and repo (`.claudine/config.json`) configs, precompiling matcher and mapper regexes
+3. **Load config** — merges user (`~/.claudine/config.yaml`) and repo (`.claudine/config.yaml`) configs, precompiling matcher and mapper regexes
 4. **Look up binding** — finds `RuntimeEventBinding` for the canonical event (provider-agnostic), checks enabled and non-empty actions
 5. **Check matcher** — precompiled regex match against event metadata (filters actions)
 6. **Execute actions** — runs each action via `runner::execute_actions()`, collecting blocking responses from `Call` actions
@@ -371,7 +371,7 @@ User config (`ClaudineConfig`) is the full source of truth; repo config (`RepoOv
 ## Configuration Schema
 
 ```rust
-// User scope: ~/.claudine/config.json
+// User scope: ~/.claudine/config.yaml
 pub struct ClaudineConfig {
     pub tts: TtsValue,
     pub messenger: Option<ClaudineMessengerConfig>,
@@ -384,7 +384,7 @@ pub struct ClaudineConfig {
     pub default_sounds: DefaultSounds,
 }
 
-// Repo scope: <repo>/.claudine/config.json (all fields optional)
+// Repo scope: <repo>/.claudine/config.yaml (all fields optional)
 pub struct RepoOverrideConfig {
     pub canonical_provider: Option<Provider>,
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,

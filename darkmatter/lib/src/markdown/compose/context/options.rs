@@ -690,6 +690,13 @@ pub struct ComposeOptions {
     /// [`expression_resolution_context`]: Self::expression_resolution_context
     /// [`frontmatter_resolution_context`]: Self::frontmatter_resolution_context
     pub(crate) file_ref_fallback_dir: Option<PathBuf>,
+
+    // ── Configuration ─────────────────────────────────────────────
+    /// The configuration snapshot the request was captured with. A
+    /// [`ComposeRequest`](super::request::ComposeRequest) always holds one:
+    /// supplied here, or loaded passively when the request is prepared. Every
+    /// clone and derivation shares the one `Arc`.
+    pub(crate) config_snapshot: Option<Arc<crate::config::load::ConfigSnapshot>>,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -1072,6 +1079,7 @@ impl ComposeOptions {
             remote_fetch: None,
             data_runtime: None,
             slot_session: None,
+            config_snapshot: None,
             exclude_keys: std::collections::HashSet::new(),
             host_globals: None,
             deferred_shell_roots: Default::default(),
@@ -2453,6 +2461,26 @@ impl ComposeOptions {
         self.slot_session.as_ref()
     }
 
+    /// Supplies the configuration snapshot the caller captured for the
+    /// request's repository, so preparing the request loads nothing.
+    ///
+    /// Required by [`ComposeRequest::with_context`](super::request::ComposeRequest::with_context)
+    /// when its context names a repository. The snapshot must be the
+    /// projection of the repository that context names
+    /// ([`ConfigSnapshot::with_repository_projection`](crate::config::load::ConfigSnapshot::with_repository_projection)
+    /// for a source in another repository).
+    #[must_use]
+    pub fn with_config_snapshot(mut self, snapshot: Arc<crate::config::load::ConfigSnapshot>) -> Self {
+        self.config_snapshot = Some(snapshot);
+        self
+    }
+
+    /// The supplied (or, once a request holds these options, captured)
+    /// configuration snapshot.
+    pub fn config_snapshot(&self) -> Option<&Arc<crate::config::load::ConfigSnapshot>> {
+        self.config_snapshot.as_ref()
+    }
+
     /// The attached `load_data` runtime, if any.
     pub fn data_runtime_handle(&self) -> Option<&crate::markdown::compose::DataRuntime> {
         self.data_runtime.as_ref()
@@ -3182,6 +3210,9 @@ impl ComposeOptions {
             // Grants and pinned snapshots: they decide whether a template
             // resolves, and the resolved schema is judged by its content.
             slot_session: _,
+            // Read by no stage that shapes a composed result yet; permission
+            // enforcement must add its policy here when it starts reading it.
+            config_snapshot: _,
             file_ref_fallback_dir,
         } = self;
 

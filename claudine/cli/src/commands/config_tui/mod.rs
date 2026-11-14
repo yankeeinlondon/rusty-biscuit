@@ -1,4 +1,5 @@
 pub mod app;
+pub mod persistence;
 pub mod reducers;
 pub mod tabs;
 pub mod widgets;
@@ -87,7 +88,6 @@ async fn run_setter(command: ConfigCommand) -> color_eyre::Result<()> {
 
 async fn run_set_favorite_agent(value: &str) -> color_eyre::Result<()> {
     let config_path = claudine::dispatch::loader::user_config_path();
-    let mut config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)?;
 
     let trimmed = value.trim();
     let new_favorite = match trimmed.to_ascii_lowercase().as_str() {
@@ -102,7 +102,7 @@ async fn run_set_favorite_agent(value: &str) -> color_eyre::Result<()> {
         },
     };
 
-    if config.preferred_agent == new_favorite {
+    if persistence::set_favorite_agent(&config_path, new_favorite)? == persistence::SetOutcome::Unchanged {
         log::message(&match new_favorite {
             Some(provider) => format!("Favorite agent already set to {provider}; no change."),
             None => "Favorite agent already cleared; no change.".to_string(),
@@ -110,8 +110,6 @@ async fn run_set_favorite_agent(value: &str) -> color_eyre::Result<()> {
         return Ok(());
     }
 
-    config.preferred_agent = new_favorite;
-    claudine::dispatch::loader::save_claudine_config(&config, &config_path)?;
     log::message(&match new_favorite {
         Some(provider) => format!("Set favorite agent to {provider}."),
         None => "Cleared favorite agent.".to_string(),
@@ -135,17 +133,13 @@ async fn run_set_prompt_for_missing(value: &str) -> color_eyre::Result<()> {
     };
 
     let config_path = claudine::dispatch::loader::user_config_path();
-    let mut config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)?;
-
-    if config.prompt_for_missing == new_value {
+    if persistence::set_prompt_for_missing(&config_path, new_value)? == persistence::SetOutcome::Unchanged {
         log::message(&format!(
             "prompt_for_missing is already {new_value}; no change."
         ));
         return Ok(());
     }
 
-    config.prompt_for_missing = new_value;
-    claudine::dispatch::loader::save_claudine_config(&config, &config_path)?;
     log::message(&format!("Set prompt_for_missing to {new_value}."));
     log::message(&format!(
         "Updated {}.",
@@ -166,7 +160,7 @@ async fn run_tui() -> color_eyre::Result<()> {
 
     let (repo_config, repo_config_path) = if let Some(ref git) = git_info {
         let repo_root = &git.repo_root;
-        let repo_cfg_path = repo_root.join(".claudine").join("config.json");
+        let repo_cfg_path = claudine::dispatch::loader::repo_config_path(repo_root);
         let repo_cfg = claudine::dispatch::loader::load_repo_override_config(&repo_cfg_path)
             .ok()
             .flatten();
@@ -235,55 +229,50 @@ async fn run_tui() -> color_eyre::Result<()> {
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
 
-    if app.dirty || app.repo_dirty {
-        if app.dirty {
-            claudine::dispatch::loader::save_claudine_config(&app.config, &config_path)?;
-        }
-        if app.repo_dirty
-            && let Some(ref path) = app.repo_config_path
-            && let Some(ref repo_cfg) = app.repo_config
-        {
-            if repo_cfg.is_empty() {
-                if path.exists() {
-                    std::fs::remove_file(path)?;
-                }
-            } else {
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
-            }
-        }
+    // Each scope saves only what this session changed, so an unsaved scope's
+    // failure never hides the other's outcome.
+    let user_saved = if app.dirty {
+        Some(persistence::save_user(&app, &config_path))
+    } else {
+        None
+    };
+    let repo_saved = if app.repo_dirty { persistence::save_repo(&app) } else { None };
+    let user_written = matches!(user_saved, Some(Ok(outcome)) if outcome.written);
+    let repo_written = matches!(repo_saved, Some(Ok(outcome)) if outcome.written);
 
+    if user_written || repo_written {
         eprintln!();
         eprintln!("\x1b[1mClaudine\x1b[0m configuration was updated:");
-        if app.dirty {
+        if user_written {
             eprintln!(
-                "- The \x1b[1mUser\x1b[0m configuration was saved to \x1b[34m~/.claudine/config.json\x1b[0m"
+                "- The \x1b[1mUser\x1b[0m configuration was saved to \x1b[34m~/.claudine/config.yaml\x1b[0m"
             );
         }
-        if app.repo_dirty
+        if repo_written
             && let (Some(name), Some(branch)) = (&app.repo_name, &app.branch_name)
         {
             eprintln!(
-                "- The \x1b[33m{name}\x1b[0m(\x1b[2m{branch}\x1b[0m) \x1b[3mrepo configuration\x1b[0m was saved to \x1b[34m./.claudine/config.json\x1b[0m"
+                "- The \x1b[33m{name}\x1b[0m(\x1b[2m{branch}\x1b[0m) \x1b[3mrepo configuration\x1b[0m was saved to \x1b[34m./.claudine/config.yaml\x1b[0m"
             );
         }
         eprintln!();
-    } else {
+    } else if matches!(
+        (&user_saved, &repo_saved),
+        (None | Some(Ok(_)), None | Some(Ok(_)))
+    ) {
         eprintln!();
         eprintln!("No changes were made to the \x1b[1mClaudine\x1b[0m configuration.");
         eprintln!("If you want to view the configuration, they are located at:");
         eprintln!(
-            "    - \x1b[1mUser\x1b[0m configuration is found in \x1b[34m~/.claudine/config.json\x1b[0m"
+            "    - \x1b[1mUser\x1b[0m configuration is found in \x1b[34m~/.claudine/config.yaml\x1b[0m"
         );
         if app.is_in_repo {
             eprintln!(
-                "    - \x1b[1mRepo\x1b[0m config is found at \x1b[34m./.claudine/config.json\x1b[0m off the repo's root directory"
+                "    - \x1b[1mRepo\x1b[0m config is found at \x1b[34m./.claudine/config.yaml\x1b[0m off the repo's root directory"
             );
         } else {
             eprintln!(
-                "    \x1b[2m\x1b[3m- \x1b[1mRepo\x1b[0m\x1b[2m\x1b[3m config is found at \x1b[34m./.claudine/config.json\x1b[0m\x1b[2m\x1b[3m off the repo's root directory\x1b[0m"
+                "    \x1b[2m\x1b[3m- \x1b[1mRepo\x1b[0m\x1b[2m\x1b[3m config is found at \x1b[34m./.claudine/config.yaml\x1b[0m\x1b[2m\x1b[3m off the repo's root directory\x1b[0m"
             );
             eprintln!(
                 "    \x1b[2m\x1b[3m- because you are not in a repo currently no repo based configuration options were presented\x1b[0m"
@@ -291,18 +280,16 @@ async fn run_tui() -> color_eyre::Result<()> {
         }
         eprintln!();
     }
-    if app.repo_dirty
-        && let Some(ref path) = app.repo_config_path
-        && let Some(ref repo_cfg) = app.repo_config
-    {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
-        eprintln!(
-            "Repo configuration saved to {}",
-            biscuit_file::to_portable_string(path)
-        );
+
+    let mut failures = Vec::new();
+    if let Some(Err(error)) = user_saved {
+        failures.push(format!("The user configuration was not saved: {error}"));
+    }
+    if let Some(Err(error)) = repo_saved {
+        failures.push(format!("The repository configuration was not saved: {error}"));
+    }
+    if !failures.is_empty() {
+        return Err(color_eyre::eyre::eyre!(failures.join("\n")));
     }
 
     Ok(())

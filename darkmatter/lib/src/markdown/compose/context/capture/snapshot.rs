@@ -53,6 +53,7 @@ impl<T> EvidenceSlot<T> {
 struct RepositoryEvidence {
     root: Option<PathBuf>,
     info: Option<RepoInfo>,
+    committed: Option<crate::config::load::CommittedTreeCapture>,
 }
 
 /// Request-owned facts used by fail-closed runtime-context capture.
@@ -67,6 +68,8 @@ pub struct ContextCaptureEvidence {
     git: EvidenceSlot<Option<GitInfo>>,
     merge_conflicts: EvidenceSlot<Vec<PathBuf>>,
     repository: EvidenceSlot<RepositoryEvidence>,
+    /// A committed tree supplied before the repository it belongs to.
+    pending_committed: Option<crate::config::load::CommittedTreeCapture>,
     file_changes: EvidenceSlot<Vec<FileChange>>,
     languages: EvidenceSlot<Option<LanguageBreakdown>>,
     documents: EvidenceSlot<Option<Vec<MarkdownMeta>>>,
@@ -88,6 +91,7 @@ impl ContextCaptureEvidence {
             git: EvidenceSlot::Missing,
             merge_conflicts: EvidenceSlot::Missing,
             repository: EvidenceSlot::Missing,
+            pending_committed: None,
             file_changes: EvidenceSlot::Missing,
             languages: EvidenceSlot::Missing,
             documents: EvidenceSlot::Missing,
@@ -127,7 +131,8 @@ impl ContextCaptureEvidence {
     /// Supplies topology evidence, deriving its root from `RepoInfo` when present.
     pub fn with_repo(mut self, repo: Option<RepoInfo>) -> Self {
         let root = repo.as_ref().map(|repo| repo.root.clone());
-        self.repository = EvidenceSlot::Supplied(RepositoryEvidence { root, info: repo });
+        let committed = self.supplied_committed_tree();
+        self.repository = EvidenceSlot::Supplied(RepositoryEvidence { root, info: repo, committed });
         self
     }
 
@@ -140,8 +145,31 @@ impl ContextCaptureEvidence {
         root: Option<PathBuf>,
         repo: Option<RepoInfo>,
     ) -> Self {
-        self.repository = EvidenceSlot::Supplied(RepositoryEvidence { root, info: repo });
+        let committed = self.supplied_committed_tree();
+        self.repository = EvidenceSlot::Supplied(RepositoryEvidence { root, info: repo, committed });
         self
+    }
+
+    /// Supplies the tree committed at `HEAD` of the repository
+    /// [`Self::with_repository`] names, taken from the same discovery handle
+    /// (or the Git error that stopped it). Without it, a request built on this
+    /// evidence holds no committed policy, and loading its configuration is a
+    /// typed error rather than a second discovery.
+    ///
+    /// Order-independent with the repository builders.
+    pub fn with_committed_tree(mut self, committed: crate::config::load::CommittedTreeCapture) -> Self {
+        match &mut self.repository {
+            EvidenceSlot::Supplied(repository) => repository.committed = Some(committed),
+            EvidenceSlot::Missing => self.pending_committed = Some(committed),
+        }
+        self
+    }
+
+    fn supplied_committed_tree(&mut self) -> Option<crate::config::load::CommittedTreeCapture> {
+        match &mut self.repository {
+            EvidenceSlot::Supplied(repository) => repository.committed.take(),
+            EvidenceSlot::Missing => self.pending_committed.take(),
+        }
     }
 
     /// Supplies the file-change facts requested from Sniff.
@@ -252,6 +280,10 @@ pub(super) struct ContextCapture {
     pub(super) base_dir: PathBuf,
     /// Repository root path (cheap: from `GitRepo::discover`).
     pub(super) repo_root: Option<PathBuf>,
+    /// The tree committed at `HEAD`, pinned with the discovery handle while
+    /// the capture still holds it; `None` when no `Repo` group was captured or
+    /// no non-bare repository was found.
+    pub(super) committed_tree: Option<crate::config::load::CommittedTreeCapture>,
     /// Repo name parsed from preferred remote URL (cheap: reads git config).
     pub(super) repo_name: Option<String>,
     /// Whether a git repo was found at all.
@@ -402,6 +434,17 @@ impl ContextCapture {
                 }),
             }
         }
+
+        // The configuration snapshot's committed policy is read from this
+        // tree, so it is pinned now, from the one discovery handle, rather
+        // than by a later discovery.
+        let committed_tree = if need_repo && repo_root.is_some() {
+            git_handle.as_ref().map(|repo| {
+                repo.committed_tree().map(std::sync::Arc::new).map_err(std::sync::Arc::new)
+            })
+        } else {
+            None
+        };
 
         // `GitRepo` deliberately owns a non-Sync gix handle. Query file changes
         // from that same handle before spawning the independent probes so the
@@ -670,6 +713,7 @@ impl ContextCapture {
             invocation_cwd,
             base_dir: base_dir.to_path_buf(),
             repo_root,
+            committed_tree,
             repo_name,
             has_git,
             git_branch,
@@ -828,6 +872,7 @@ impl ContextCapture {
         let repository = evidence.repository.as_ref();
         let repo_info = repository.and_then(|repository| repository.info.clone());
         let repo_root = repository.and_then(|repository| repository.root.clone());
+        let committed_tree = repository.and_then(|repository| repository.committed.clone());
         let file_changes = evidence
             .file_changes
             .as_ref()
@@ -870,6 +915,7 @@ impl ContextCapture {
             invocation_cwd,
             base_dir: base_dir.to_path_buf(),
             repo_root,
+            committed_tree,
             repo_name: git_info.and_then(|info| info.repo.clone()),
             has_git: git_info.is_some(),
             git_branch: git_info.and_then(|info| info.current_branch.clone()),
@@ -975,6 +1021,7 @@ impl ContextCapture {
             invocation_cwd: None,
             base_dir: repo_root.clone(),
             repo_root: Some(repo_root),
+            committed_tree: None,
             repo_name: None,
             has_git: true,
             git_branch: None,

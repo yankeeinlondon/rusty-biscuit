@@ -243,6 +243,9 @@ pub fn run_compose(
         Some(opened) => opened.document_context(request)?,
         None => request.launch_context()?.clone(),
     };
+    // The invocation's configuration for the document's repository, loaded
+    // before anything runs; every request below shares it.
+    let config_snapshot = request.config_snapshot(&file_resolution_context)?;
 
     // The request boundary (D3): one demand-driven context capture for the
     // document plus the request's repository observation, both anchored on the
@@ -339,7 +342,10 @@ pub fn run_compose(
     }
     options = options.with_data_runtime(data_runtime);
     let prepare_request = |options: ComposeOptions| -> Result<ComposeRequest> {
-        ComposeRequest::with_context(options, file_resolution_context.clone())
+        ComposeRequest::with_context(
+            options.with_config_snapshot(std::sync::Arc::clone(&config_snapshot)),
+            file_resolution_context.clone(),
+        )
             .wrap_err("Failed to prepare the compose request")
     };
 

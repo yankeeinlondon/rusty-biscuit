@@ -116,7 +116,7 @@ fn write_config(home: &Path, action: Option<(&str, &str)>) {
         },
     );
     fs::write(
-        directory.join("config.json"),
+        directory.join("config.yaml"),
         serde_json::to_vec_pretty(&serde_json::json!({
             "tts": false,
             "logging": false,

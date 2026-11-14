@@ -489,11 +489,10 @@ fn contradictory_container_bounds_fail_with_their_origins() {
 #[test]
 fn container_defaults_match_plain_arrays_and_arm_defaults_are_rejected() {
     let (_dir, root) = temp_root();
-    // The grammar reads a bracketed default as a string, so a use-site
-    // default on `U[]` lowers exactly as one on any other array.
+    // A use-site default on `U[]` lowers exactly as one on any other array.
     let resolved = resolve_inline(
         &root,
-        "choice: [string, number]\np: \"choice[](default([a]))\"\nplain: \"string[](default([a]))\"\n",
+        "choice: [string, number]\np: 'choice[](default([\"a\"]))'\nplain: 'string[](default([\"a\"]))'\n",
     )
     .expect("a use-site default applies to the container");
     assert_eq!(property(&resolved, "p")["default"], property(&resolved, "plain")["default"]);
@@ -502,7 +501,7 @@ fn container_defaults_match_plain_arrays_and_arm_defaults_are_rejected() {
 
     for (choice, arm, value) in [
         ("[string, \"number(default(3))\"]", 1, json!(3)),
-        ("[\"string(default([a]))\", number]", 0, json!("[a]")),
+        ("[\"string(default('[a]'))\", number]", 0, json!("[a]")),
     ] {
         let schema = format!("choice: {choice}\np: choice[]\n");
         let err = resolve_inline(&root, &schema).expect_err("an arm default cannot default an array");
@@ -514,6 +513,11 @@ fn container_defaults_match_plain_arrays_and_arm_defaults_are_rejected() {
         assert_eq!(definition, SchemaSourcePath::root().property("choice"));
         assert!(message.starts_with("p: cannot apply `[]`"), "{message}");
     }
+
+    // An authored list default on an arm becomes the list's default.
+    let listed = resolve_inline(&root, "choice: ['string(default([\"a\"]))', number]\np: choice[]\n")
+        .expect("a list-valued arm default defaults the array");
+    assert_eq!(property(&listed, "p")["default"], json!(["a"]));
 
     // Without `[]`, arm defaults keep the property-union hoisting rule.
     let single = resolve_inline(&root, "choice: [string, \"number(default(3))\"]\np: choice(eager)\n")

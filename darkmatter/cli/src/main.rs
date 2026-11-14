@@ -205,6 +205,9 @@ fn run() -> Result<()> {
         validate_subcommand_usage(&cli)?;
     }
 
+    // Once per invocation, after help, completion, and usage errors returned.
+    darkmatter_cli::output::report_run_notices(request.config_notices(), cli.requests_data_output());
+
     run_subcommand(cli.command_or_render(), &cli, &request)?;
 
     Ok(())

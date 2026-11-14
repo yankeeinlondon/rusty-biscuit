@@ -93,10 +93,10 @@ typically run once per project.
 
 `init` is elided from the root menu when **either**:
 
-- a user-scope Claudine config exists at `~/.claudine/config.json`
-  (also accepted: `config.json5`), **or**
-- a repo-scope Claudine config exists at `<repo>/.claudine/config.json`
-  when cwd is inside a detected git repo.
+- a user-scope Claudine config exists at `~/.claudine/config.yaml`
+  (also accepted: a legacy `config.json`, which the next load converts), **or**
+- a repo-scope Claudine config exists at `<repo>/.claudine/config.yaml`
+  (or a legacy `config.json`) when cwd is inside a detected git repo.
 
 **Why.** `init` is a one-time wizard. Surfacing it in the root menu
 after Claudine is already configured crowds the menu with a command the

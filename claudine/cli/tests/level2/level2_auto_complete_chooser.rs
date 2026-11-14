@@ -110,7 +110,7 @@ fn prompt_dump_path(ws: &TestWorkspace) -> PathBuf {
 fn stage_default_config(home_dir: &Path) {
     let claudine_dir = home_dir.join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
+    fs::write(claudine_dir.join("config.yaml"), "{}").unwrap();
 }
 
 fn stage_goose_stub(bin_dir: &Path, marker_file: &Path, prompt_file: &Path) {

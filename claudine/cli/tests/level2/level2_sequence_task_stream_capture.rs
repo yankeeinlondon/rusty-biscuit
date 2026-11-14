@@ -320,7 +320,7 @@ struct Staged {
 
 /// Stage a workspace holding `doc_body` at `seq.md` plus a `goose` stub.
 ///
-/// `.claudine/config.json` is written because a pane is a real TTY: without an
+/// `.claudine/config.yaml` is written because a pane is a real TTY: without an
 /// existing config the first-run onboarding wizard takes the terminal and the
 /// sequence never runs.
 fn stage(name: &str, doc_body: &str) -> Staged {
@@ -334,7 +334,7 @@ fn stage(name: &str, doc_body: &str) -> Staged {
         "#!/bin/sh\nprintf 'agent-said\\n'\nexit 0\n",
     );
 
-    write(&root.join(".claudine/config.json"), "{}");
+    write(&root.join(".claudine/config.yaml"), "{}");
     let doc = root.join("seq.md");
     write(&doc, doc_body);
 

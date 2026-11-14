@@ -8,14 +8,22 @@
 //! built from this one snapshot. See `darkmatter/docs/topics/compose-requests.md`.
 //! Shell completion returns before `main` reaches that read, and takes its own
 //! through [`completion_request`].
+//!
+//! The request also owns the invocation's configuration: the user file is
+//! read once ([`MdRequest::user_config`]), and each repository a document
+//! resolves in gets one projection of it ([`MdRequest::config_snapshot`]),
+//! built from the committed tree the context builder's own discovery pinned.
 
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use biscuit_file::{FileReference, FileResolutionContext, PathPosition};
 use color_eyre::eyre::{Context, Result};
-use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
+use darkmatter::config::load::{CommittedTreeCapture, ConfigError, ConfigLoadMode, ConfigSnapshot};
+use darkmatter::markdown::compose::{RequestSnapshot, capture_resolution_context};
 
 /// A `--magic-root` directory that is not a directory on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,12 +93,88 @@ pub fn completion_request(magic_roots: &[PathBuf]) -> Option<MdRequest> {
 pub struct MdRequest {
     snapshot: RequestSnapshot,
     launch: OnceCell<FileResolutionContext>,
+    /// The committed tree each built context's discovery pinned, by the
+    /// repository root that context names.
+    trees: RefCell<HashMap<PathBuf, CommittedTreeCapture>>,
+    /// The user file, loaded once with no repository.
+    user: OnceCell<Result<Arc<ConfigSnapshot>, ConfigError>>,
+    /// One projection per repository root (`None`: no repository).
+    configs: RefCell<HashMap<Option<PathBuf>, Arc<ConfigSnapshot>>>,
 }
 
 impl MdRequest {
     /// Wraps the invocation's snapshot.
     pub fn new(snapshot: RequestSnapshot) -> Self {
-        Self { snapshot, launch: OnceCell::new() }
+        Self {
+            snapshot,
+            launch: OnceCell::new(),
+            trees: RefCell::default(),
+            user: OnceCell::new(),
+            configs: RefCell::default(),
+        }
+    }
+
+    /// The user configuration file, loaded once per invocation with
+    /// [`ConfigLoadMode::MigrateLegacy`] (`md` is a writing CLI) and no
+    /// repository: what the missing-file notice is judged from, and the
+    /// bytes every [`Self::config_snapshot`] projection shares.
+    ///
+    /// ## Errors
+    ///
+    /// The load's [`ConfigError`], kept for every later caller.
+    pub fn user_config(&self) -> Result<&Arc<ConfigSnapshot>, &ConfigError> {
+        self.user
+            .get_or_init(|| ConfigSnapshot::load_user(&self.snapshot, ConfigLoadMode::MigrateLegacy).map(Arc::new))
+            .as_ref()
+    }
+
+    /// The configuration snapshot for a request resolving through `context`:
+    /// the user file's shared bytes projected onto the repository `context`
+    /// names, cached per repository. `context` must come from this request
+    /// ([`Self::launch_context`] or [`Self::document_context`]), whose
+    /// discovery pinned that repository's committed tree; nothing is
+    /// discovered again here.
+    ///
+    /// ## Errors
+    ///
+    /// The configuration's located [`ConfigError`] when the user or
+    /// repository file cannot be loaded.
+    pub fn config_snapshot(&self, context: &FileResolutionContext) -> Result<Arc<ConfigSnapshot>> {
+        let key = context.repository_root().map(Path::to_path_buf);
+        if let Some(snapshot) = self.configs.borrow().get(&key) {
+            return Ok(Arc::clone(snapshot));
+        }
+        let user = self.user_config().map_err(|error| color_eyre::Report::new(error.clone()))?;
+        let trees = self.trees.borrow();
+        let tree = key.as_ref().and_then(|root| trees.get(root));
+        let snapshot = Arc::new(user.with_repository_projection(context, tree)?);
+        drop(trees);
+        self.configs.borrow_mut().insert(key, Arc::clone(&snapshot));
+        Ok(snapshot)
+    }
+
+    /// The run-level notices of the invocation's configuration: the missing
+    /// user file's `dm.config.missing` warning, or none. A user file that
+    /// fails to load is reported by the commands that read it, not here.
+    pub fn config_notices(&self) -> Vec<darkmatter::markdown::compose::expression::Diagnostic> {
+        let Ok(user) = self.user_config() else {
+            return Vec::new();
+        };
+        user.diagnostics()
+            .iter()
+            .filter(|notice| notice.code == darkmatter::config::load::CONFIG_MISSING_CODE)
+            .flat_map(darkmatter::markdown::compose::report_diagnostics::config_notice_diagnostics)
+            .collect()
+    }
+
+    /// Builds a context for `snapshot`, keeping the committed tree its
+    /// discovery pinned for [`Self::config_snapshot`].
+    fn build_context(&self, snapshot: &RequestSnapshot) -> Result<FileResolutionContext, darkmatter::markdown::compose::ContextBuildError> {
+        let (context, tree) = capture_resolution_context(snapshot)?;
+        if let (Some(root), Some(tree)) = (context.repository_root(), tree) {
+            self.trees.borrow_mut().entry(root.to_path_buf()).or_insert(tree);
+        }
+        Ok(context)
     }
 
     /// The snapshot `main` captured.
@@ -113,7 +197,7 @@ impl MdRequest {
         if let Some(context) = self.launch.get() {
             return Ok(context);
         }
-        let context = build_resolution_context(&self.snapshot).wrap_err_with(|| {
+        let context = self.build_context(&self.snapshot).wrap_err_with(|| {
             format!(
                 "Failed to prepare file resolution at the launch directory {}",
                 self.launch_dir().display()
@@ -157,7 +241,8 @@ impl MdRequest {
             return Ok(derived);
         }
         let source_dir = resolved.parent().unwrap_or(self.launch_dir());
-        let external = build_resolution_context(&self.snapshot.at_request_dir(source_dir))
+        let external = self
+            .build_context(&self.snapshot.at_request_dir(source_dir))
             .wrap_err_with(|| {
                 format!("Failed to prepare file resolution for {}", resolved.display())
             })?;

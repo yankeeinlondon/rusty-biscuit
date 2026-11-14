@@ -1258,9 +1258,20 @@ $schema:
 | `non-null`        | Array property may be omitted but is never `null` (not items). Also read from the item parens: `string(non-null)[]` is the same. | no `null` wrapper |
 | `default(value)`  | Default for the array property.              | `default`        |
 
-The `default(...)` argument is read as a scalar, like every other constraint
-argument, so `default([a])` stores the string `"[a]"`, not a one-item list. A
-list-valued default cannot be written in the type-expression grammar today.
+A `default(...)` argument that starts with `[` or `{` is a JSON list or
+mapping, and must be the whole argument:
+
+```yaml
+$schema:
+    globs: 'string[](required; default(["./*.md", "./*.txt"]))'
+    nothing: 'string[](required; default([]))'
+    options: '{ verbose: boolean }(required; default({}))'
+```
+
+JSON strings use double quotes, so quote the whole type with single quotes in
+YAML. A bracketed argument is never text: `default([a])` is a schema error
+(`a` is not JSON), and a text default that starts with a bracket is quoted
+(`default('[a]')`). Duplicate mapping keys are an error.
 
 To make a list whose items may each take one of several shapes, group the
 options and add `[]` (`steps: "(string | number)[](min(1))"`), or name the

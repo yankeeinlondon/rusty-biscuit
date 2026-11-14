@@ -12,7 +12,7 @@ use common::{CliProcessFixture, strip_ansi, write_executable};
 #[test]
 #[serial_test::serial]
 fn repo_scoped_config_favorite_selects_provider() {
-    // Verifies that a repo-level .claudine/config.json with a linking
+    // Verifies that a repo-level .claudine/config.yaml with a linking
     // preference is consulted during composition selection so the
     // favorite provider wins over interactive selection.
     let fixture = CliProcessFixture::named("compose-repo-favorite");
@@ -26,7 +26,7 @@ fn repo_scoped_config_favorite_selects_provider() {
     let config_dir = fixture.cwd().join(".claudine");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
-        config_dir.join("config.json"),
+        config_dir.join("config.yaml"),
         r#"{"preferred_agent":"goose"}"#,
     )
     .unwrap();

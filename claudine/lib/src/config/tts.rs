@@ -141,14 +141,14 @@ mod tests {
     #[test]
     fn tts_boolean_true_deserializes() {
         let config: ClaudineConfig =
-            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude", "tts": true }))
+            ClaudineConfig::from_user_document(serde_json::json!({ "preferred_agent": "claude", "tts": true }))
                 .unwrap();
         assert!(matches!(config.tts, TtsValue::Boolean(true)));
     }
 
     #[test]
     fn tts_boolean_false_deserializes() {
-        let config: ClaudineConfig = serde_json::from_value(
+        let config: ClaudineConfig = ClaudineConfig::from_user_document(
             serde_json::json!({ "preferred_agent": "claude", "tts": false }),
         )
         .unwrap();
@@ -164,7 +164,7 @@ mod tests {
                 "gender": "male"
             }
         });
-        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
         match &config.tts {
             TtsValue::Config(settings) => {
                 assert_eq!(settings.provider.as_deref(), Some("say"));
@@ -184,7 +184,7 @@ mod tests {
                 "voice": "Samantha"
             }
         });
-        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
         match &config.tts {
             TtsValue::Config(settings) => match &settings.voice {
                 Some(VoiceSelection::Single(v)) => assert_eq!(v, "Samantha"),
@@ -203,7 +203,7 @@ mod tests {
                 "voice": { "male": "Alex", "female": "Samantha" }
             }
         });
-        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let config: ClaudineConfig = ClaudineConfig::from_user_document(json).unwrap();
         match &config.tts {
             TtsValue::Config(settings) => match &settings.voice {
                 Some(VoiceSelection::Gendered { male, female }) => {

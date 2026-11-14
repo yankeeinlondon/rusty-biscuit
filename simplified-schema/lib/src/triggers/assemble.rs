@@ -484,9 +484,11 @@ mod file_payload_memo {
         tree_origin: BaseDirOrigin,
         folder_context: FileResolutionContext,
         root_contexts: Vec<FileResolutionContext>,
-        /// The host's reserved namespace: the shipped documents a
-        /// `Name@<namespace><stem>` reference in the payload reaches.
+        /// The host's reserved namespace and its aliases: the shipped
+        /// documents a `Name@<namespace><stem>` reference in the payload
+        /// reaches.
         namespace: &'static str,
+        aliases: &'static [(&'static str, &'static str)],
     }
 
     impl Key {
@@ -510,6 +512,7 @@ mod file_payload_memo {
                 folder_context: original.for_cwd(folder),
                 root_contexts: schema_roots.iter().map(|root| original.for_trusted_external_cwd(root)).collect(),
                 namespace: sources.namespace(),
+                aliases: sources.aliases(),
             }
         }
     }

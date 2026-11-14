@@ -15,7 +15,7 @@ use std::process::Output;
 use crate::common;
 use common::CliProcessFixture;
 
-const CONFIG: &str = ".claudine/config.json";
+const CONFIG: &str = ".claudine/config.yaml";
 
 fn set_favorite(command: &mut assert_cmd::Command, agent: &str) -> String {
     let output: Output = command
@@ -33,7 +33,7 @@ fn set_favorite(command: &mut assert_cmd::Command, agent: &str) -> String {
 
 fn favorite_in(config: &Path) -> String {
     let saved: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(config).expect("config was saved")).expect("config is JSON");
+        biscuit_file::serde_yaml_ng::from_str(&fs::read_to_string(config).expect("config was saved")).expect("config is YAML");
     saved["preferred_agent"].as_str().unwrap_or_default().to_string()
 }
 

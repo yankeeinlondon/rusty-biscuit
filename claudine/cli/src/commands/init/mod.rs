@@ -21,7 +21,10 @@ use claudine::config::{
     AgentInfo, ProviderHookPlan, RegistrationResult, SkipReason, discover_agents_full,
     get_configurator,
 };
-use claudine::dispatch::loader::{load_claudine_config, save_claudine_config};
+use claudine::config::claudine_config::RepoOverrideConfig;
+use claudine::config::persist::{self, SaveOutcome};
+use claudine::config::schema::ConfigScope;
+use claudine::dispatch::loader::{load_claudine_config, load_repo_override_config};
 use claudine::events::{AgenticEvent, CanonicalProviderSettings, EventBinding, recommended_sound};
 use claudine::linking::{
     CanonicalSelection, LinkableResource, ResourceScope, ranked_provider_preferences,
@@ -67,18 +70,12 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     let defaults = load_init_defaults(repo_scope, &repo_root);
 
     // Phase 0: Check for existing global config in repo mode
-    if repo_scope {
-        let global_config = biscuit_file::home_dir()
-            .map(|h| h.join(".claudine").join("config.json"))
-            .unwrap_or_else(|| PathBuf::from("~/.claudine/config.json"));
-
-        if !global_config.exists() {
-            log::warn("No global ~/.claudine/config.json found.");
-            log::message(
-                "Run any claudine command to trigger initialization, or run `claudine config`.",
-            );
-            log::message("");
-        }
+    if repo_scope && !claudine::dispatch::loader::user_config_exists() {
+        log::warn("No global ~/.claudine/config.yaml found.");
+        log::message(
+            "Run any claudine command to trigger initialization, or run `claudine config`.",
+        );
+        log::message("");
     }
 
     // Phase 1: Agent Discovery
@@ -194,6 +191,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         exit_expressions: None,
         guard_settings: Default::default(),
         steering: Default::default(),
+        permissions: None,
     };
 
     // Phase 5: Write and Register
@@ -202,15 +200,12 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("-----------------------------");
 
     let config_path = if repo_scope {
-        repo_root.join(".claudine").join("config.json")
+        claudine::dispatch::loader::repo_config_path(&repo_root)
     } else {
-        biscuit_file::home_dir()
-            .unwrap_or_else(|| PathBuf::from("~"))
-            .join(".claudine")
-            .join("config.json")
+        claudine::dispatch::loader::user_config_path()
     };
 
-    save_claudine_config(&config, &config_path)?;
+    write_init_config(repo_scope, &config, &config_path)?;
     log::message(&format!(
         "Wrote config to {}",
         biscuit_file::to_portable_string(&config_path)
@@ -267,44 +262,63 @@ struct InitDefaults {
 }
 
 fn load_init_defaults(repo_scope: bool, repo_root: &std::path::Path) -> InitDefaults {
-    let Some(config) = load_existing_init_config(repo_scope, repo_root) else {
+    let user = biscuit_file::home_dir()
+        .and_then(|home| read_config_if_exists(&ConfigScope::file_under(&home)));
+    // A repository file holds only overrides, so it is read as one; its
+    // actions, when it sets any, are the ones this scope's setup revisits.
+    let repo_actions = if repo_scope {
+        load_repo_override_config(&claudine::dispatch::loader::repo_config_path(repo_root))
+            .ok()
+            .flatten()
+            .map(|repo| repo.actions)
+            .filter(|actions| !actions.is_empty())
+    } else {
+        None
+    };
+    let Some(actions) = repo_actions.or_else(|| user.as_ref().map(|config| config.actions.clone())) else {
         return InitDefaults::default();
     };
 
     InitDefaults {
         provider_preferences: vec![],
-        action_profile: infer_action_profile(&config),
-        protect_enabled: Some(config.protect.enabled),
+        action_profile: infer_action_profile(&actions),
+        protect_enabled: user.map(|config| config.protect.enabled),
     }
 }
 
-fn load_existing_init_config(
-    repo_scope: bool,
-    repo_root: &std::path::Path,
-) -> Option<ClaudineConfig> {
-    let home = biscuit_file::home_dir()?;
-    let user_config = home.join(".claudine").join("config.json");
-    let repo_config = repo_root.join(".claudine").join("config.json");
-
-    if repo_scope {
-        read_config_if_exists(&repo_config).or_else(|| read_config_if_exists(&user_config))
-    } else {
-        read_config_if_exists(&user_config)
-    }
-}
-
+/// The user configuration at `path`, converting a legacy `config.json` beside
+/// a canonical one; `None` when there is none or it is invalid.
 fn read_config_if_exists(path: &std::path::Path) -> Option<ClaudineConfig> {
-    if !path.is_file() {
-        return None;
-    }
     load_claudine_config(Some(path), None).ok()
 }
 
-fn infer_action_profile(config: &ClaudineConfig) -> Option<prompts::InitActionProfile> {
+/// Writes what setup chose to `path`. The user file gets each value that
+/// differs from the schema's defaults; a repository file gets only the
+/// repository overrides setup manages (its actions). Either keeps every other
+/// key and comment of an existing file.
+fn write_init_config(
+    repo_scope: bool,
+    config: &ClaudineConfig,
+    path: &std::path::Path,
+) -> claudine::error::Result<SaveOutcome> {
+    if repo_scope {
+        let overrides = RepoOverrideConfig {
+            actions: config.actions.clone(),
+            ..RepoOverrideConfig::default()
+        };
+        persist::initialize_config(path, ConfigScope::Repository, &RepoOverrideConfig::default(), &overrides)
+    } else {
+        persist::initialize_config(path, ConfigScope::User, &ClaudineConfig::default(), config)
+    }
+}
+
+fn infer_action_profile(
+    configured: &HashMap<AgenticEvent, Vec<HookAction>>,
+) -> Option<prompts::InitActionProfile> {
     let mut configured_events = HashSet::new();
     let mut input_required_actions = Vec::new();
 
-    for (event, actions) in &config.actions {
+    for (event, actions) in configured {
         if actions.is_empty() {
             continue;
         }
@@ -361,7 +375,7 @@ fn handle_repo_gitignore(repo_root: &std::path::Path) -> Result<()> {
             }
         }
         prompts::GitignoreChoice::CommitIt => {
-            log::message(".claudine/config.json will be committed to the repository");
+            log::message(".claudine/config.yaml will be committed to the repository");
         }
         prompts::GitignoreChoice::DoNothing => {
             log::message("No .gitignore changes made");
@@ -383,15 +397,12 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     let config_path = if repo_scope {
         let cwd = std::env::current_dir()?;
         let repo_root = resolve_repo_root(&cwd);
-        repo_root.join(".claudine").join("config.json")
+        claudine::dispatch::loader::repo_config_path(&repo_root)
     } else {
-        biscuit_file::home_dir()
-            .unwrap_or_else(|| PathBuf::from("~"))
-            .join(".claudine")
-            .join("config.json")
+        claudine::dispatch::loader::user_config_path()
     };
 
-    save_claudine_config(&config, &config_path)?;
+    write_init_config(repo_scope, &config, &config_path)?;
     log::message(&format!(
         "  Wrote config to {}",
         biscuit_file::to_portable_string(&config_path)
@@ -518,6 +529,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         exit_expressions: None,
         guard_settings: Default::default(),
         steering: Default::default(),
+        permissions: None,
     })
 }
 
@@ -631,6 +643,7 @@ mod tests {
             exit_expressions: None,
             guard_settings: Default::default(),
             steering: Default::default(),
+            permissions: None,
         }
     }
 
@@ -745,6 +758,60 @@ mod tests {
     }
 
     #[test]
+    fn repo_init_writes_only_repository_keys_and_reruns_change_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claudine/config.yaml");
+        let config = config_with_actions(vec![(
+            AgenticEvent::HumanInTheLoop,
+            vec![HookAction::SoundEffect {
+                effect: "doorbell".into(),
+                volume: 1.0,
+                speed: 1.0,
+                when: None,
+            }],
+        )]);
+
+        write_init_config(true, &config, &path).unwrap();
+
+        let written: serde_json::Value =
+            biscuit_file::serde_yaml_ng::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let keys: Vec<&String> = written.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["actions"], "{written}");
+        let repo = load_repo_override_config(&path).unwrap().unwrap();
+        assert_eq!(repo.actions, config.actions);
+
+        let first = std::fs::read(&path).unwrap();
+        assert!(!write_init_config(true, &config, &path).unwrap().written);
+        assert_eq!(std::fs::read(&path).unwrap(), first);
+    }
+
+    #[test]
+    fn repo_init_over_an_existing_file_keeps_its_other_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let original = "# team\ncanonical_provider: codex\npermissions:\n  network: deny\n";
+        std::fs::write(&path, original).unwrap();
+
+        write_init_config(true, &config_with_actions(vec![(AgenticEvent::SessionStart, vec![])]), &path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with(original), "{text}");
+        assert!(load_repo_override_config(&path).unwrap().unwrap().actions.contains_key(&AgenticEvent::SessionStart));
+    }
+
+    #[test]
+    fn user_init_loads_back_as_the_defaults_plus_its_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let config = config_with_actions(vec![(AgenticEvent::SessionStart, vec![])]);
+
+        write_init_config(false, &config, &path).unwrap();
+
+        let loaded = load_claudine_config(Some(&path), None).unwrap();
+        assert_eq!(serde_json::to_value(&loaded).unwrap(), serde_json::to_value(&config).unwrap());
+    }
+
+    #[test]
     fn infer_action_profile_restores_input_actions() {
         let sound = HookAction::SoundEffect {
             effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
@@ -757,7 +824,7 @@ mod tests {
             (AgenticEvent::HumanInTheLoop, vec![sound.clone()]),
         ]);
 
-        let profile = infer_action_profile(&config).expect("profile should be inferred");
+        let profile = infer_action_profile(&config.actions).expect("profile should be inferred");
         assert!(matches!(profile.logging, prompts::LoggingProfile::None));
         assert_eq!(profile.input_required_actions, vec![sound]);
     }

@@ -16,6 +16,8 @@ mod claudine_schemas_embedded;
 mod claudine_schemas_matrix;
 mod claudine_trigger_selection_parity;
 mod collection_host_compat;
+mod config_json_conversion;
+mod config_schema_matrix;
 mod container_schema_recursion;
 mod context_construction_guard;
 mod deprecated_compatibility;

@@ -138,13 +138,22 @@ pub fn edit_yaml_paths(source: &str, edits: &[YamlEdit]) -> Result<String, YamlE
     } else {
         body.to_string()
     };
+    let original = load_values(&working).map_err(|failure| {
+        Locator { source, bom: bom.len(), working: &working }.load_failure(failure, None)
+    })?;
+    // An empty `{}` root is an empty mapping: a `Set` turns it into a block,
+    // as it does a nested `{}`. Nothing follows it but comments, so no
+    // offset an error could report moves.
+    let sets_any = edits.iter().any(|edit| matches!(edit, YamlEdit::Set { .. }));
+    let working = match empty_flow_root(&working) {
+        Some(token) if original.is_empty() && sets_any => format!("{}{}", &working[..token.start], &working[token.end..]),
+        _ => working,
+    };
     let at = Locator {
         source,
         bom: bom.len(),
         working: &working,
     };
-
-    let original = load_values(&working).map_err(|failure| at.load_failure(failure, None))?;
     let content = content_start(&working);
     if working[content..].starts_with(['{', '[']) {
         return Err(at.error(
@@ -202,7 +211,13 @@ pub fn edit_yaml_paths(source: &str, edits: &[YamlEdit]) -> Result<String, YamlE
         refuse_unsupported_nodes(&at, edit)?;
     }
     let text = apply_phase(&at, &working, &after_sets, &sets)?;
-    let text = apply_phase(&at, &text, &expected, &removes)?;
+    let mut text = apply_phase(&at, &text, &expected, &removes)?;
+    // Removing every top-level key leaves the root written `{}`, as removing
+    // a collection's last child does, so the file still holds one mapping.
+    if expected.is_empty() && !original.is_empty() && content_start(&text) >= text.len() {
+        text.push_str("{}");
+        text.push_str(newline);
+    }
 
     let text = match text.strip_suffix(newline) {
         Some(stripped) if unterminated => stripped.to_string(),
@@ -458,6 +473,21 @@ fn property_path(steps: &[PathStep<'_>]) -> Option<PropertyPath> {
         FrontmatterPathSegment::Index(index) => index.to_string(),
     }))
     .ok()
+}
+
+/// The span of an empty `{}` root, with the blanks after it and, when nothing
+/// else is on its line, the line's terminator.
+fn empty_flow_root(text: &str) -> Option<Range<usize>> {
+    let start = content_start(text);
+    let rest = text[start..].strip_prefix('{')?.trim_start_matches([' ', '\t']).strip_prefix('}')?;
+    let after = rest.trim_start_matches([' ', '\t']);
+    let mut end = text.len() - after.len();
+    if after.starts_with("\r\n") {
+        end += 2;
+    } else if after.starts_with(['\n', '\r']) {
+        end += 1;
+    }
+    Some(start..end)
 }
 
 /// The document's first line terminator, or LF when it has none.

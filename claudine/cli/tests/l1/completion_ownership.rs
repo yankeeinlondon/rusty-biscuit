@@ -461,7 +461,7 @@ fn a_help_token_in_a_complete_payload_completes_instead_of_printing_help() {
             assert!(candidates.contains(&"--claude"), "{context}");
         }
     }
-    assert!(!fixture.home().join(".claudine").join("config.json").exists());
+    assert!(!fixture.home().join(".claudine").join("config.yaml").exists());
 }
 
 /// The legacy `COMPLETE=bash` bootstrap answers before composition help
@@ -492,5 +492,5 @@ fn complete_env_bootstrap_with_composition_help_tokens_registers_without_help() 
         assert!(stderr.trim().is_empty(), "{context}");
         assert!(!stdout.contains("Usage:"), "{context}");
     }
-    assert!(!fixture.home().join(".claudine").join("config.json").exists());
+    assert!(!fixture.home().join(".claudine").join("config.yaml").exists());
 }

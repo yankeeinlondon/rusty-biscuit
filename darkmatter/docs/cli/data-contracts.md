@@ -355,6 +355,7 @@ classified by what failed:
 | `dm.schema.baseline` | `md schema validate --schema` could not load the baseline schema |
 | `dm.output.serialization_failed` | the value cannot be written in the requested format; see [TOML](#toml) |
 | `dm.output.open_failed` | `--show` could not open the file |
+| `dm.config.invalid`, `dm.config.reference` | `~/.darkmatter.yaml` or the repository's `.darkmatter.yaml` does not load, for a command that reads the configuration (`md compose`, `md graph`, `md validate refs`); one record per problem, with the file, line, and column. See [Configuration Files](../topics/configuration.md#how-md-and-claudine-report-configuration) |
 | `dm.style.*`, and `dm.schema.*` for a style | `md render` could not use a style setter, a `--style` file, or the merged style; see [Style input errors](#style-input-errors) |
 | `dm.compose.failure` | anything else, on any command |
 
@@ -364,6 +365,7 @@ warnings belong to the run's output rather than to composition:
 | Code | Warning |
 |---|---|
 | `dm.output.fractional_width` | `--width` was fractional and was rounded down |
+| `dm.config.missing` | `~/.darkmatter.yaml` does not exist, so every setting takes its default; names the file and `md init`. Reported once per run by every command (a repository without `.darkmatter.yaml` is not reported) |
 | `dm.link.malformed_structured_title` | a link title starts with `{` but is not a JSON5 object, so it is read as plain text |
 | `dm.link.legacy_structured_title` | a link title uses the removed `key=value` syntax; [`md clean`](./clean.md#migrating-link-titles) migrates it |
 | `dm.style.unknown_key` | `md render` found an unknown `style:` key |

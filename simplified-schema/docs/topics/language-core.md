@@ -143,6 +143,17 @@ const HOST: ShippedSources = ShippedSources::new("host:", "host/partials", DOCUM
 // resolve_yaml_schema(&value, base_dir, &context, HOST)
 ```
 
+A stem normally names `<partials>/<stem>.yaml`. To serve a shipped document
+from outside the partials folder, name it with an alias:
+`ShippedSources::with_aliases(&[("config", "host/schemas/host-config.yaml")])`
+makes `settings@host:config` name `settings` in that document, which must be
+one of the shipped documents. Every other stem keeps its partial meaning.
+Aliases take part in equality and in every memo keyed on the sources, and a
+host that prepares an artifact over them records them in the artifact's
+preparation configuration, so a changed alias makes the artifact stale.
+Darkmatter serves its configuration schema this way
+(`permissions@darkmatter:config`).
+
 Every entry point that resolves a trigger payload or prepares a kind
 definition takes the host's `ShippedSources` the same way, so a trigger or a
 `kind: yaml-schema` file may import from the host's namespace:

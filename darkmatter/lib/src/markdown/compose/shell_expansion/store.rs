@@ -150,19 +150,7 @@ pub fn load_ruleset_with_warnings(
             continue;
         }
 
-        let entry = if let Some(command) = trimmed.strip_prefix("exact ") {
-            Ok(ShellRuleEntry::Exact(command.to_string()))
-        } else if let Some(command) = trimmed.strip_prefix("prefix ") {
-            Ok(ShellRuleEntry::Prefix(command.to_string()))
-        } else if let Some(shape) = trimmed.strip_prefix("template ") {
-            TemplateShape::parse_rule(shape.trim())
-                .map(ShellRuleEntry::Template)
-                .map_err(|error| error.to_string())
-        } else {
-            Err("expected 'exact <command>', 'prefix <executable>', or 'template <shape>'".to_string())
-        };
-
-        match entry {
+        match parse_rule_entry(trimmed) {
             Ok(entry) => {
                 if seen.insert(entry.clone()) {
                     entries.push(entry);
@@ -178,6 +166,27 @@ pub fn load_ruleset_with_warnings(
     }
 
     Ok((ShellRuleSet { entries }, warnings))
+}
+
+/// Parses one rule, already trimmed: `exact <command>`, `prefix
+/// <executable>`, or `template <shape>`.
+///
+/// ## Errors
+///
+/// The reason the rule is not one of those forms, or why its template shape
+/// is rejected.
+pub fn parse_rule_entry(trimmed: &str) -> Result<ShellRuleEntry, String> {
+    if let Some(command) = trimmed.strip_prefix("exact ") {
+        Ok(ShellRuleEntry::Exact(command.to_string()))
+    } else if let Some(command) = trimmed.strip_prefix("prefix ") {
+        Ok(ShellRuleEntry::Prefix(command.to_string()))
+    } else if let Some(shape) = trimmed.strip_prefix("template ") {
+        TemplateShape::parse_rule(shape.trim())
+            .map(ShellRuleEntry::Template)
+            .map_err(|error| error.to_string())
+    } else {
+        Err("expected 'exact <command>', 'prefix <executable>', or 'template <shape>'".to_string())
+    }
 }
 
 /// Appends an exact-match rule to the whitelist file.
