@@ -376,7 +376,9 @@ rule, including cycles across files and definition-versus-use-site behavior.
 
 The effective schema combines the baseline, matching triggers in their
 established order, and the document's own schema. Later declarations win for
-the same property. See [Merge Semantics](./definition.md#merge-semantics-baseline--document)
+the same property. A document a [registered host](../host-registration.md#layering)
+identifies also gets that host's matching triggers, between the baseline and
+the schema roots' triggers. See [Merge Semantics](./definition.md#merge-semantics-baseline--document)
 for the complete precedence rules.
 
 The order also decides when a compiled validator is reused. Two documents

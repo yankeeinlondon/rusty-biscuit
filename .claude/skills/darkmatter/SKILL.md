@@ -66,6 +66,7 @@ definitions away from their references or replace them with placeholders.
 | Terminal rendering options | [terminal.md](terminal.md) |
 | Frontmatter model, shared views, literal tokens, in-place leaf edits, plain-YAML edits (`yaml_edit`) | [frontmatter.md](frontmatter.md) |
 | `.darkmatter.yaml` schema, `ConfigSnapshot` loading, locked config writes | [library-surfaces.md](library-surfaces.md), `docs/topics/configuration.md` |
+| Host registration: `darkmatter-host` manifests, `config::registration` profiles, host selection (`RegisteredHosts`, `select`, `HostSelection`), the registered trigger layer, `md compose` of a foreign document (`ComposeOptions::with_selected_host`, `RegisteredHostProfile::analysis_globals`, `md_host::{shared_event_keys, execution_projection, foreign_deferred_keys}`), `dm.host.*` codes | `docs/topics/host-registration.md` |
 | Error/status block conventions | [errors.md](errors.md) |
 | `md clean`/DMLS formatting rules and frontmatter repair | [cleanup.md](cleanup.md) |
 | Document comparison | [comparison.md](comparison.md) |

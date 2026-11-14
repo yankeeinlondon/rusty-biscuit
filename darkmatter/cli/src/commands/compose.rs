@@ -255,7 +255,38 @@ pub fn run_compose(
     // Its stacks are parsed now, before anything can run, and stay deferred
     // through every interpolation pass.
     let lifecycle_source = resolved_input.clone().unwrap_or_else(|| launch_dir.join("<stdin>"));
-    let lifecycle = lifecycle::root_lifecycle(&md, &lifecycle_source)?;
+    // The invocation's registered hosts, loaded once from the configuration
+    // snapshot; the root document's selection warnings are reported once. A
+    // root a registered host identifies is a foreign document: `md` analyzes
+    // it with that host's passive profile and runs only the events it shares
+    // with the host.
+    let registered_hosts =
+        if policy.disables("schema-triggers") { None } else { request.registered_hosts(&file_resolution_context) };
+    let foreign = registered_hosts.as_ref().and_then(|hosts| {
+        let document = md.source().as_ref().and_then(|source| match source {
+            darkmatter::markdown::compose::ComposeSource::File(path) => Some(path),
+            _ => None,
+        });
+        let identified = hosts.identify(
+            &darkmatter::markdown::schemas::frontmatter_as_json(&md),
+            document.map(std::path::PathBuf::as_path),
+            &file_resolution_context,
+        );
+        request.report_host_diagnostics(&identified.diagnostics);
+        identified.selection.registered().cloned()
+    });
+    if let Some(profile) = &foreign {
+        let shared = darkmatter::lifecycle::md_host::shared_event_keys(profile.lifecycle().registry());
+        request.report_host_diagnostics(&[profile.foreign_document_notice(&lifecycle_source, &shared)]);
+    }
+    // The host's functions are declared for this thread's analysis and
+    // typing only: an analysis-only set has no handler, so a call fails when
+    // evaluated, as any failing function does.
+    let _host_functions: Vec<_> = foreign
+        .iter()
+        .flat_map(|profile| profile.functions().iter().map(|set| set.functions.enter()))
+        .collect();
+    let lifecycle = lifecycle::root_lifecycle(&md, &lifecycle_source, foreign.as_deref())?;
 
     let ctx_start = perf.then(Instant::now);
     let mut options = ComposeOptions::for_document(&launch_dir, &md);
@@ -264,8 +295,8 @@ pub fn run_compose(
     if let Some(width) = output_width.0 {
         options = options.with_output_width(width);
     }
-    if lifecycle.is_some() {
-        options = options.with_exclude_keys(lifecycle::event_keys());
+    if let Some(keys) = lifecycle::deferred_keys(lifecycle.is_some(), foreign.as_deref()) {
+        options = options.with_exclude_keys(keys);
     }
     // Keep a cheap Arc clone for perf report context timings
     let options_ctx_ref = options.context().clone();
@@ -277,6 +308,12 @@ pub fn run_compose(
     let opts_start = perf.then(Instant::now);
     options = apply_compose_baseline_schema(options, baseline_schema, policy.disables("baseline-schema"), request)?;
     options = options.with_trigger_schemas(!policy.disables("schema-triggers"));
+    if let Some(hosts) = registered_hosts {
+        options = options.with_registered_hosts(hosts);
+    }
+    if let Some(profile) = &foreign {
+        options = options.with_selected_host(std::sync::Arc::clone(profile));
+    }
     let blocking = policy.blocking_policy();
     options = options.with_blocking_policy(blocking.clone());
     // Collection controls must be in force before reference validation,

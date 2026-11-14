@@ -471,6 +471,14 @@ pub(crate) fn prepare_schemas(
             *trigger_registry = Some(registry.clone());
         }
     }
+    // Registration is its own trigger source, judged in the source's own
+    // context; `--disable schema-triggers` turns it off with the roots, and a
+    // caller's own host options are never replaced.
+    if options.trigger_schemas
+        && let Some(hosts) = options.applied_registered_hosts()
+    {
+        schemas = schemas.with_registered_hosts(std::sync::Arc::clone(hosts));
+    }
 
     Ok(PreparedSchemas {
         schemas: Some(schemas),

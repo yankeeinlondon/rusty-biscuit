@@ -1001,7 +1001,7 @@ outcome, depending on whether its shape was published before `outcome` existed:
 | [`md validate refs`](./validate.md) | [`validate-refs.yaml`](../../cli/schemas/output/validate-refs.yaml) | `valid`, `references_scanned`, `references_valid`, `issues`, `warnings`, and with `--show-all`, `references`; with `--graph`, `{ "graph": { "format", "source" } }` alone |
 | [`md schema validate`](./schema.md#md-schema-validate) | [`schema-validate.yaml`](../../cli/schemas/output/schema-validate.yaml) | `{ "files": [...] }`, one record per file argument |
 | [`md schema detect`](./schema.md#md-schema-detect) | [`schema-detect.yaml`](../../cli/schemas/output/schema-detect.yaml) | the inferred schema; for several files without `--merge`, `{ "files": [{ "file", "schema" }] }` |
-| [`md schema triggers`](./schema.md#md-schema-triggers) | [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml) | `file`, `roots`, `shadowed`, `skipped`, `triggers`, plus outcome |
+| [`md schema triggers`](./schema.md#md-schema-triggers) | [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml) | `file`, `roots`, `shadowed`, `skipped`, `triggers`, `registered`, plus outcome |
 | [`md schema about`](./schema.md#md-schema-about) | [`schema-about.yaml`](../../cli/schemas/output/schema-about.yaml) | `sections`, the whole catalog at any verbosity, plus outcome |
 
 A malformed [property path](./index.md#property-paths) given to `md get`, `md set`, or `md rm` is a usage error: exit status 2, nothing read, and no value printed. A path that is well formed but cannot be edited, or a value the schema refuses, is a failure with exit status 1 and a diagnostic.

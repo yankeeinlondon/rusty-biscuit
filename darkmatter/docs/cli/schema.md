@@ -191,8 +191,10 @@ with a warning or a failure wraps it, as `{ "outcome", "diagnostics", "value" }`
 ## `md schema triggers`
 
 Explains schema-trigger discovery for a document: the roots searched, in order,
-envelopes shadowed by a nearer root, triggers skipped as invalid, and which triggers
-matched. See [Schema Triggers](../topics/schemas/schema-triggers.md).
+envelopes shadowed by a nearer root, triggers skipped as invalid, the registered
+host that identifies the document, and which triggers matched. See
+[Schema Triggers](../topics/schemas/schema-triggers.md) and
+[Host Registration](../topics/host-registration.md).
 
 ```text
 $ md schema triggers notes.md
@@ -207,8 +209,24 @@ Shadowed envelopes:
 - none
 Skipped invalid triggers:
 - none
+Registered host:
+- none
 Triggers:
 - none
+```
+
+When a [registered host](../topics/host-registration.md) identifies the document,
+the "Registered host" section names it, its version, the manifest it was loaded
+from, and its content revision, then lists each of the host's triggers in manifest
+order. Those triggers layer below the schema roots' triggers:
+
+```text
+Registered host:
+- acme 1.2.0 (manifest /Users/me/.acme/darkmatter-host.yaml, revision 5b1c…)
+- /Users/me/.acme/schemas/widget.yaml — matched
+  - condition 1 — matched
+- /Users/me/.acme/schemas/gadget.yaml — not matched
+  - condition 1 — defeated: `gadget` is required but absent
 ```
 
 A trigger whose payload holds `{{ … }}` slots is listed with
@@ -224,7 +242,9 @@ Triggers:
 
 A document outside every repository fails with status 1. A data output has `file`,
 `roots`, `shadowed`, `skipped`, `triggers`, `outcome`, and `diagnostics` on every
-run; see [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml).
+run, and `registered` (`host`, `version`, `manifest`, `revision`, and the host's
+`triggers`), which is `null` when no single registered host identifies the
+document; see [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml).
 
 ## `md schema about`
 

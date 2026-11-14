@@ -447,14 +447,19 @@ pub(crate) fn request_schemas(request: &MdRequest) -> Result<DarkmatterSchemas, 
 }
 
 /// [`request_schemas`] for a document in `context`: its own resolution context,
-/// with trigger discovery when it is inside a repository. The caller decides how
-/// to report what discovery skipped.
+/// with trigger discovery when it is inside a repository and the request's
+/// registered hosts. The caller decides how to report what discovery skipped.
 ///
 /// ## Errors
 ///
 /// As [`load_api`], or when trigger discovery fails.
 pub(crate) fn document_schemas(request: &MdRequest, context: biscuit_file::FileResolutionContext) -> Result<DarkmatterSchemas, SchemaError> {
-    discover_document_triggers(request_schemas(request)?.with_file_resolution_context(context))
+    let hosts = request.registered_hosts(&context);
+    let schemas = discover_document_triggers(request_schemas(request)?.with_file_resolution_context(context))?;
+    Ok(match hosts {
+        Some(hosts) => schemas.with_registered_hosts(hosts),
+        None => schemas,
+    })
 }
 
 /// `schemas` with trigger discovery when its context is inside a repository.
@@ -568,7 +573,12 @@ fn validate_one(
         Err(err) => return early(FileOutcome::ParseError(format!("{err:#}")), None),
     };
     let in_repository = document_context.repository_root().is_some();
-    let api = api.clone().with_file_resolution_context(document_context);
+    let hosts = (!no_schema_triggers).then(|| request.registered_hosts(&document_context)).flatten();
+    let mut api = api.clone().with_file_resolution_context(document_context);
+    if let Some(hosts) = hosts {
+        api = api.with_registered_hosts(hosts);
+        request.report_host_diagnostics(&api.registered_selection_for(&md).diagnostics);
+    }
     let (api, mut timings) = if in_repository && !no_schema_triggers {
         match ValidationTimings::record(|| api.with_trigger_discovery()) {
             (Ok(api), discovery) => (api, discovery),

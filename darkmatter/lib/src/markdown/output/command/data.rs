@@ -334,6 +334,57 @@ pub struct TriggersData {
     pub skipped: Vec<TriggerFindingData>,
     /// Every discovered trigger.
     pub triggers: Vec<TriggerTraceData>,
+    /// The registered host that identifies the document, with its triggers'
+    /// results; `null` when no single registered host does.
+    pub registered: Option<TriggerRegisteredData>,
+}
+
+/// The registered host `md schema triggers` reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TriggerRegisteredData {
+    /// The manifest's `host`.
+    pub host: String,
+    /// The manifest's `version`.
+    pub version: String,
+    /// The manifest file.
+    pub manifest: PathBuf,
+    /// The host's content revision.
+    pub revision: String,
+    /// Its triggers, in manifest order; they layer below the roots'.
+    pub triggers: Vec<TriggerTraceData>,
+}
+
+impl TriggerRegisteredData {
+    /// The value for a registered trace.
+    #[must_use]
+    pub fn new(trace: &crate::markdown::schemas::RegisteredTrace) -> Self {
+        Self {
+            host: trace.origin.host.clone(),
+            version: trace.origin.version.clone(),
+            manifest: trace.origin.manifest.clone(),
+            revision: trace.origin.revision.clone(),
+            triggers: trace.triggers.iter().map(TriggerTraceData::from).collect(),
+        }
+    }
+}
+
+impl From<&simplified_schema::triggers::TriggerTraceEntry> for TriggerTraceData {
+    fn from(trigger: &simplified_schema::triggers::TriggerTraceEntry) -> Self {
+        Self {
+            source: trigger.source.to_string(),
+            matched: trigger.matched,
+            pending: trigger.pending,
+            conditions: trigger
+                .conditions
+                .iter()
+                .map(|condition| TriggerConditionData {
+                    index: condition.index,
+                    matched: condition.matched,
+                    defeat: condition.defeat.clone(),
+                })
+                .collect(),
+        }
+    }
 }
 
 impl TriggersData {
@@ -356,24 +407,8 @@ impl TriggersData {
                     message: finding.message(),
                 })
                 .collect(),
-            triggers: trace
-                .triggers
-                .iter()
-                .map(|trigger| TriggerTraceData {
-                    source: trigger.source.to_string(),
-                    matched: trigger.matched,
-                    pending: trigger.pending,
-                    conditions: trigger
-                        .conditions
-                        .iter()
-                        .map(|condition| TriggerConditionData {
-                            index: condition.index,
-                            matched: condition.matched,
-                            defeat: condition.defeat.clone(),
-                        })
-                        .collect(),
-                })
-                .collect(),
+            triggers: trace.triggers.iter().map(TriggerTraceData::from).collect(),
+            registered: None,
         }
     }
 }

@@ -257,7 +257,24 @@ impl HostLifecycleProfile {
         catalog_text: &str,
         artifact: FactsArtifact<'_>,
     ) -> Result<Self, String> {
-        let file = format!("the lifecycle artifact `{}`", lifecycle_artifact_path(catalog_path).display());
+        Self::from_artifact_at(catalog, catalog_text, &lifecycle_artifact_path(catalog_path), artifact)
+    }
+
+    /// [`Self::from_artifact`] for an artifact that a caller located itself
+    /// (a host registration manifest names it) rather than beside the
+    /// catalog: `artifact_path` is where `artifact` was read, and errors name
+    /// it. The artifact must still record the hash of `catalog_text`.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::from_artifact`].
+    pub fn from_artifact_at(
+        catalog: impl Into<CatalogHandle>,
+        catalog_text: &str,
+        artifact_path: &Path,
+        artifact: FactsArtifact<'_>,
+    ) -> Result<Self, String> {
+        let file = format!("the lifecycle artifact `{}`", artifact_path.display());
         read(catalog.into(), catalog_text, artifact).map_err(|reason| format!("{file} {reason}"))
     }
 }

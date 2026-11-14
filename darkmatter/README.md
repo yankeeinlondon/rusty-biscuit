@@ -95,6 +95,7 @@ host OS input and take focus.
     - [Frontmatter](./docs/topics/frontmatter.md) and [Frontmatter and Recursion](./docs/topics/frontmatter-recursion.md) — parsing, key order, merges, and what a transcluded child inherits
     - [Editing Plain YAML Files](./docs/topics/yaml-editing.md) — the library's in-place, comment-preserving edits of a whole `.yaml` file
     - [Configuration Files](./docs/topics/configuration.md) — `~/.darkmatter.yaml` and the repository's `.darkmatter.yaml`: settings, schema defaults, and loading a `ConfigSnapshot`
+    - [Host Registration](./docs/topics/host-registration.md) — `darkmatter-host` manifests a `register` entry names, and loading them into host profiles
     - [Writing Configuration Files Safely](./docs/topics/config-writes.md) — locked, validated, atomic configuration saves shared by every writer, and the receipts that let a migration finish its cleanup
     - [Lifecycle Events](./docs/topics/lifecycle/index.md) and [Lifecycle Error Handling](./docs/topics/lifecycle/error-handling.md) — the frontmatter stacks `md compose` runs before and after composition, and how failures, cleanup, and Ctrl-C route
     - [Rendering Output Formats](./docs/topics/output-formats.md)

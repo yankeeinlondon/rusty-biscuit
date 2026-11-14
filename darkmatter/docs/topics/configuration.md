@@ -21,7 +21,9 @@ This page covers:
 - [the repository's two revisions](#the-repository-file-at-head-and-in-the-working-copy).
 
 To change a file safely from code, see
-[Writing Configuration Files Safely](./config-writes.md).
+[Writing Configuration Files Safely](./config-writes.md). What a `register`
+entry names, and how a registered host loads, is
+[Host Registration](./host-registration.md).
 
 ## The File
 
@@ -44,6 +46,9 @@ register:
 
 Any other key is an error, and so is a second YAML document, a duplicate key,
 or an empty file. Write `{}` for a file that keeps every default.
+
+Each `register` entry names a host manifest (`kind: darkmatter-host`); see
+[Host Registration](./host-registration.md) for its format and loading.
 
 The shape and every default come from one shipped schema,
 `darkmatter/schemas/darkmatter-config.yaml`. Darkmatter, DMLS, and Claudine

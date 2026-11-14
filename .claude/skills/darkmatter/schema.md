@@ -1088,7 +1088,11 @@ References; Choosing an Arm: Reporting versus Changing Data).
   provenance (root-union arms, `for_yaml_document`, `rewrite.rs`) takes the
   canonical route. A layer's digest must describe its JSON exactly: a new
   post-merge transformation either extends the identity or drops to `None`
-  (canonical). Changing what a merge or projection produces bumps
+  (canonical). A registered host's trigger layer
+  (`DarkmatterSchemas::with_registered_hosts`) uses `registered_digest`: the
+  payload digest with the manifest path, hash, and host revision folded in,
+  so one payload `Arc` can stand under two identities; the `MERGES` memo
+  therefore also compares layer digests. Changing what a merge or projection produces bumps
   `resolve::MERGE_ALGORITHM_REVISION` or `phase::PROJECTION_REVISION`;
   changing the canonical encoding bumps `CANONICAL_IDENTITY_REVISION` and
   Darkmatter's and Claudine's preparation revisions (both store digests). Tests:

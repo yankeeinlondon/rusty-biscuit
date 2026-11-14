@@ -23,6 +23,7 @@ use std::sync::Arc;
 use biscuit_file::{FileReference, FileResolutionContext, PathPosition};
 use color_eyre::eyre::{Context, Result};
 use darkmatter::config::load::{CommittedTreeCapture, ConfigError, ConfigLoadMode, ConfigSnapshot};
+use darkmatter::config::registration::RegisteredHosts;
 use darkmatter::markdown::compose::{RequestSnapshot, capture_resolution_context};
 
 /// A `--magic-root` directory that is not a directory on disk.
@@ -104,6 +105,12 @@ pub struct MdRequest {
     /// `main` with [`Self::report_config_notices`]); a repository
     /// projection's migration notices follow the same route.
     data_output: std::cell::Cell<bool>,
+    /// The registered hosts of each configuration projection, by repository
+    /// root, loaded once each.
+    hosts: RefCell<HashMap<Option<PathBuf>, Arc<RegisteredHosts>>>,
+    /// Every host-registration record already reported, so each reaches the
+    /// output once per invocation.
+    reported_hosts: RefCell<Vec<darkmatter::markdown::compose::expression::Diagnostic>>,
 }
 
 impl MdRequest {
@@ -116,6 +123,8 @@ impl MdRequest {
             user: OnceCell::new(),
             configs: RefCell::default(),
             data_output: std::cell::Cell::new(false),
+            hosts: RefCell::default(),
+            reported_hosts: RefCell::default(),
         }
     }
 
@@ -167,6 +176,50 @@ impl MdRequest {
         }
         self.configs.borrow_mut().insert(key, Arc::clone(&snapshot));
         Ok(snapshot)
+    }
+
+    /// The registered hosts of the configuration `context` projects, loaded
+    /// once per repository for the invocation; their load and conflict
+    /// warnings are reported once, on stderr or in a data output's
+    /// `diagnostics`. `None` when the configuration cannot be loaded: that
+    /// error is reported by the commands that read it.
+    ///
+    /// Passive: it reuses a projection the command already loaded
+    /// ([`Self::config_snapshot`]) and otherwise projects the repository read
+    /// only, so selecting a host never migrates a legacy policy file.
+    pub fn registered_hosts(&self, context: &FileResolutionContext) -> Option<Arc<RegisteredHosts>> {
+        let key = context.repository_root().map(Path::to_path_buf);
+        if let Some(hosts) = self.hosts.borrow().get(&key) {
+            return Some(Arc::clone(hosts));
+        }
+        let loaded = self.configs.borrow().get(&key).cloned();
+        let snapshot = match loaded {
+            Some(snapshot) => snapshot,
+            None => {
+                let user = self.user_config().ok()?;
+                let trees = self.trees.borrow();
+                let tree = key.as_ref().and_then(|root| trees.get(root));
+                Arc::new(user.with_passive_repository_projection(context, tree).ok()?)
+            }
+        };
+        let hosts = Arc::new(RegisteredHosts::load(&snapshot, context));
+        self.report_host_diagnostics(&hosts.diagnostics());
+        self.hosts.borrow_mut().insert(key, Arc::clone(&hosts));
+        Some(hosts)
+    }
+
+    /// Reports host-registration and selection warnings (`dm.host.*`) as
+    /// run notices, each distinct record once per invocation.
+    pub fn report_host_diagnostics(&self, diagnostics: &[darkmatter::config::registration::RegistrationDiagnostic]) {
+        let mut reported = self.reported_hosts.borrow_mut();
+        let fresh: Vec<_> = diagnostics
+            .iter()
+            .map(darkmatter::markdown::compose::report_diagnostics::registration_diagnostic)
+            .filter(|diagnostic| !reported.contains(diagnostic))
+            .collect();
+        reported.extend(fresh.iter().cloned());
+        drop(reported);
+        crate::output::report_run_notices(fresh, self.data_output.get());
     }
 
     /// Reports [`Self::config_notices`] once, on stderr or (for a data

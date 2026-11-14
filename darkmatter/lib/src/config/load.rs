@@ -347,6 +347,23 @@ impl ConfigSnapshot {
         Ok(projected)
     }
 
+    /// [`Self::with_repository_projection`] read only, whatever this
+    /// snapshot's mode: no legacy file is migrated, and one is reported
+    /// instead. For a passive reader inside a writing CLI (host selection),
+    /// which must not write.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::load_captured`].
+    pub fn with_passive_repository_projection(
+        &self,
+        context: &FileResolutionContext,
+        repository: Option<&CommittedTreeCapture>,
+    ) -> Result<Self, ConfigError> {
+        let tree = captured_tree(context, repository)?;
+        Self::assemble(context, tree, ConfigLoadMode::Passive, self.user_bytes.clone())
+    }
+
     fn assemble(
         context: &FileResolutionContext,
         repository: Option<&CommittedTreeSnapshot>,
@@ -1095,7 +1112,7 @@ fn byte_range(loaded: &LoadedYaml, segments: &[String]) -> Option<Range<usize>> 
 }
 
 /// The 1-based line and character column of byte `offset` in `text`.
-fn line_column(text: &str, offset: usize) -> (usize, usize) {
+pub(super) fn line_column(text: &str, offset: usize) -> (usize, usize) {
     let offset = offset.min(text.len());
     let before = &text[..text.floor_char_boundary(offset)];
     let line = before.matches('\n').count() + 1;

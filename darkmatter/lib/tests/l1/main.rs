@@ -77,6 +77,11 @@ mod union_fixtures;
 mod content_policy_fixtures;
 #[path = "../dynamic_slots_fixtures/mod.rs"]
 mod dynamic_slots_fixtures;
+#[path = "../host_fixtures/mod.rs"]
+mod host_fixtures;
+// The in-process `md` lifecycle recorder; only this suite drives a run.
+#[path = "../host_fixtures/recorder.rs"]
+mod host_recorder;
 
 mod absent_property_contract;
 mod plain_corpus;
@@ -139,6 +144,9 @@ mod expression_regression;
 mod expression_strict_equality;
 mod expression_type_scope;
 mod host_functions;
+mod host_registration;
+mod host_selection;
+mod foreign_document_compose;
 #[cfg(feature = "effects-instrumentation")]
 mod design_time_call_check;
 #[cfg(feature = "effects-instrumentation")]

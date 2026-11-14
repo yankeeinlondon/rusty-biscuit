@@ -25,14 +25,19 @@ use simplified_schema::embedded::ShippedSources;
 /// `Name@darkmatter:config` ([`SHIPPED_ALIASES`]).
 pub(crate) const CONFIG_SCHEMA_PATH: &str = "darkmatter/schemas/darkmatter-config.yaml";
 
+/// Virtual path of Darkmatter's host registration manifest schema, served as
+/// `Name@darkmatter:host` ([`SHIPPED_ALIASES`]).
+pub(crate) const HOST_MANIFEST_SCHEMA_PATH: &str = "darkmatter/schemas/darkmatter-host.yaml";
+
 /// Virtual path of Content Policy's editor schema.
 pub(crate) const CONTENT_POLICY_PATH: &str = "content-policy/schemas/content-policy.yaml";
 
 /// The shipped documents: Darkmatter's global catalog, its partials
 /// (including the neutral lifecycle action definitions, the `md` profile's
 /// stacks, and the expression-function catalog, whose `recent-commits` helper
-/// type the context partial imports), the configuration schema, and the
-/// Content Policy editor schema the `fm` partial imports.
+/// type the context partial imports), the configuration schema, the host
+/// registration manifest schema, and the Content Policy editor schema the
+/// `fm` partial imports.
 /// The runtime baseline is the catalog's resolved `fm` definition.
 pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
     EmbeddedDocument {
@@ -76,6 +81,10 @@ pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
         text: include_str!("../../../../schemas/darkmatter-config.yaml"),
     },
     EmbeddedDocument {
+        path: HOST_MANIFEST_SCHEMA_PATH,
+        text: include_str!("../../../../schemas/darkmatter-host.yaml"),
+    },
+    EmbeddedDocument {
         path: CONTENT_POLICY_PATH,
         text: content_policy::EDITOR_SCHEMA,
     },
@@ -83,8 +92,10 @@ pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
 
 /// Stems of the reserved namespace that name a shipped document outside the
 /// partials folder: `permissions@darkmatter:config` names `permissions` in
-/// the configuration schema. Every other stem names its partial.
-pub(crate) const SHIPPED_ALIASES: &[(&str, &str)] = &[("config", CONFIG_SCHEMA_PATH)];
+/// the configuration schema, `darkmatter-host@darkmatter:host` the manifest
+/// envelope. Every other stem names its partial.
+pub(crate) const SHIPPED_ALIASES: &[(&str, &str)] =
+    &[("config", CONFIG_SCHEMA_PATH), ("host", HOST_MANIFEST_SCHEMA_PATH)];
 
 /// The reserved namespace of a named-type reference to one of Darkmatter's
 /// shipped partials: `Name@darkmatter:<stem>` names the type `Name` in the
@@ -140,7 +151,8 @@ mod tests {
             assert_eq!(document.path, format!("darkmatter/schemas/partials/{stem}.yaml"));
         }
         assert_eq!(shipped_partial("config").map(|document| document.path), Some(CONFIG_SCHEMA_PATH));
-        for stem in ["", "bogus", "darkmatter-config", "lifecycle.yaml", "../darkmatter", "partials/fm", ".", "..", "darkmatter"] {
+        assert_eq!(shipped_partial("host").map(|document| document.path), Some(HOST_MANIFEST_SCHEMA_PATH));
+        for stem in ["", "bogus", "darkmatter-config", "darkmatter-host", "lifecycle.yaml", "../darkmatter", "partials/fm", ".", "..", "darkmatter"] {
             assert!(shipped_partial(stem).is_none(), "`{stem}` names no shipped partial");
         }
     }
@@ -161,6 +173,7 @@ mod tests {
                 "darkmatter/schemas/partials/md-lifecycle.yaml",
                 "darkmatter/schemas/partials/functions.yaml",
                 CONFIG_SCHEMA_PATH,
+                HOST_MANIFEST_SCHEMA_PATH,
                 CONTENT_POLICY_PATH,
             ]
         );

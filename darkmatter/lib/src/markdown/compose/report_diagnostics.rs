@@ -264,6 +264,18 @@ pub fn config_notice_diagnostics(notice: &crate::config::load::ConfigDiagnostic)
         .collect()
 }
 
+/// A refused host registration or a same-host conflict
+/// ([`crate::config::registration`]) as one record at the file, line, and
+/// column the problem is in.
+pub fn registration_diagnostic(diagnostic: &crate::config::registration::RegistrationDiagnostic) -> Diagnostic {
+    let file = Some(diagnostic.file.clone());
+    let source = match (diagnostic.line, diagnostic.column) {
+        (Some(line), Some(column)) => DiagnosticSource::at(file, line, column),
+        _ => DiagnosticSource::file_only(file),
+    };
+    Diagnostic { source: Some(source), ..unlocated(diagnostic.code, diagnostic.severity, diagnostic.message.clone()) }
+}
+
 fn config_problem_source(problem: &crate::config::load::ConfigProblem) -> DiagnosticSource {
     match (problem.line, problem.column) {
         (Some(line), Some(column)) => DiagnosticSource::at(Some(problem.file.clone()), line, column),

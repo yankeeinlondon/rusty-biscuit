@@ -4,6 +4,7 @@ $schema:
     shadowed: shadowed[](required)
     skipped: skipped[](required) -> triggers discovery skipped as invalid
     triggers: trigger[](required)
+    registered: registered -> the registered host that identifies the document; null when no single one does
     outcome: enum(success,failure;required)
     diagnostics: diagnostic[](required)
 types:
@@ -14,6 +15,12 @@ types:
         duplicate_of: string -> the earlier root searching the same folder
         value: string -> an invalid root's raw value
         reason: enum(empty,relative)
+    registered:
+        host: string(required)
+        version: string(required) -> the host release
+        manifest: string(required) -> the host manifest file
+        revision: string(required) -> the host's content revision
+        triggers: trigger[](required) -> in manifest order; they layer below the schema roots' triggers
     shadowed:
         path: string(required)
         winner: string(required)

@@ -228,7 +228,10 @@ These rules hold whatever a host declares; no host can relax them.
 
 `md compose` fires Darkmatter's five events under their own names, and only
 for the **root** document. A transcluded child never fires an event, even when
-its frontmatter authors one.
+its frontmatter authors one. On a root document a
+[registered host](../host-registration.md#md-compose-of-a-hosts-document)
+identifies, `md` runs only the events it shares with that host under the same
+name (`initialize`, `cancelled`, and `finalize` for Claudine).
 
 ### What `md` runs and what it skips
 
