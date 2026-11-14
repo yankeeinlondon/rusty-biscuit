@@ -941,3 +941,57 @@ Each is recorded with alternatives in `decisions_for_review` above; the ones tha
 ### Status
 
 Implementation complete, ready for review. Not moved to `_completed`, and not committed.
+
+## Review rulings (2026-11-14)
+
+Author rulings from the review of this feature. Items marked **pending** are
+decided but not yet implemented.
+
+- **Shipped schemas: one run is sufficient.** See the Phase 7 gate notes.
+- **AC10 sequence timeout: gap accepted.** No timeout covers an open editor;
+  documented in `claudine/docs/topics/flow-control/lifecycle.md`.
+- **AC9 Claudine structured output: superseded.** Claudine's `--output` was
+  a pass-through of the provider's native format, not a Claudine result.
+  It is now refused in every position (`2026-11-14-output-flag-not-implemented`),
+  and `edit` eligibility no longer reads it. Claudine's arguments are order
+  independent.
+- **Mutation root (pending, `2026-11-14-lifecycle-mutation-root`).** Every
+  host uses the caller's repository root (the caller's working directory
+  outside a repository) as the write boundary, and relative targets resolve
+  from the document's directory. Replaces `md compose`'s document-directory
+  root and Claudine's launch-workspace root.
+- **`edit` follows coercion (pending).** Overrides the spec's strict-string
+  rule (spec "deliberately requires a string"): `edit` operands go through the
+  same conversion engine as every other lifecycle action's, so `edit: 5` is
+  the file `5` and `gui: "yes"` is `true`. For `null`, see the correction
+  below. Blank paths, unknown keys, and arity errors stay refused. Remove the number and boolean rows of
+  `action_shape.rs::edit_file_problem`, the text check in `edit_flag_problem`,
+  and the `edit`-specific `BoundOperands::report_refused_targets` hook; shrink
+  `lifecycle_edit_schema_parity.rs` to the shapes still refused.
+- **Failure message order: built version accepted.** Reason first, the
+  target appended only when the reason does not name it, is better than
+  R19's "could not edit <target>: <reason>". The 240-character clamp that
+  motivated it is under separate review.
+- **Correction to "`edit` follows coercion": `null` handling.** A missing key
+  and an explicit `null` are the same value; only `required` distinguishes
+  them, and only for its contract (`2026-11-14-absent-equals-null`). So
+  `edit`'s `non-null` markers are removed, `create_new` is
+  `boolean(default(false))`, and `gui: null` means no preference, like
+  omitting it. **(pending)**
+- **`no_error` follows the same rules on every action (pending).**
+  `no_error: boolean(default(false))`: absent or `null` is `false`, and
+  boolean-like text coerces. The lifecycle parser's refusal of `null` and of
+  `"yes"` goes away. Implemented with `2026-11-14-absent-equals-null`.
+- **`EditorError::Io` hint commit split: dropped.** The change landed in
+  `060488c9f`; rewriting history for one hint is not worth it.
+- **Windows Job assignment window: closed (pending,
+  `2026-11-14-shared-process-tree`).** Three process-tree implementations
+  (Darkmatter's, which accepted the window, plus race-free copies in Claudine's
+  sequence shell task and Sniff) become one public, race-free implementation
+  in `sniff`, documented canonically in `sniff/docs/topics/process-trees.md`.
+- **Caller skills are versioned in the repo (done).** The canonical
+  `use-claudine` lives in `claudine/docs/use-skills/`, and `use-darkmatter`
+  and `use-dmls` in `darkmatter/docs/use-skills/`. `just publish-skills` in
+  each area composes them with the repository's own `md` and installs them in
+  `~/.claude/skills/` (shared recipe: `just/skills.just`). Claudine's former
+  `publish-summary-research` is now part of its `publish-skills`.
