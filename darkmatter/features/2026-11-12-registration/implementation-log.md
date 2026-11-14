@@ -323,8 +323,22 @@ decisions_for_review:
       Claudine permissions: `CapturedPermissions::Absent` exists for library callers that capture no configuration (pre-approves and saves nothing); every CLI route supplies a policy or its error. Claudine's shell approval cache is keyed by mode only, so a decision in one document answers for the rest of the invocation (it was per policy root). DMLS's passive shell classification judges exact and prefix rules but not `template` rules, so a `{{ }}` command shows "unknown" where `md` pre-approves it by shape (the parity table records this). Alternatives: require a captured policy (type change plus test churn), per-document caching, template matching in DMLS (small). Local to `claudine/lib/src/harness/shell*` and `darkmatter/dmls/src/overlay/shell.rs`.
     - |-
       Setup handshake: there is no production `claudine init` command any more (replaced by the configuration editor earlier), so the handshake runs in Claudine's first-run setup, which any Claudine command triggers when no Claudine configuration exists (help included). Pointing a `.darkmatter.yaml` with no block of its own at Claudine's file is silent there; moving an authored inline block is reported; a conflict, an invalid `.darkmatter.yaml`, or a failed write is a warning and the run continues with the original block in force. Claudine's block as it was before its own first write decides "equal or absent" (a fresh Claudine file always holds the default block). `md init` adds only missing top-level settings (a partial `permissions` block is not filled child by child), `--inline` copies the target's block exactly as written, an invalid existing file is reported and left alone, and `md init` does not report `dm.config.missing` for the file it creates. Setup errors use a new `InitError` type (`dm.config.not_saved` except an invalid file's own code). Alternatives: run the handshake only from an explicit command, fill partial blocks, fail Claudine on a handshake conflict. Local to `darkmatter/lib/src/config/init.rs`, `claudine/lib/src/config/setup.rs`, and `claudine/cli/src/commands/init_wizard.rs`.
+    - |-
+      Host identity (Phase 5): the identifying-trigger proof refuses an expression it cannot prove instead of attempting satisfiability, as the spec asks. Two readings were mine: (1) `none:` conditions keep ordinary matching inside identification, and a condition under an even number of `none:` counts as positive again; (2) a guard (no `required`) keeps ordinary matching, so a wrongly typed guard value defeats identification while a wrongly typed required host key still identifies. The library's refusal text says the key is owned by "the caller" rather than naming Darkmatter. Alternative: treat every property under identification as presence-only. Reversing is local to `simplified-schema/lib/src/triggers/identify.rs` and its 15 tests.
+    - |-
+      Same-host legacy suppression (Phase 5, plan Rule 26): a registered host whose identifying trigger did not match is removed from the legacy root-catalog fallback. A root catalog is excluded when its lifecycle artifact names a registered host or when it is a registered profile's own catalog file, and function catalogs in the same folder as an excluded catalog are excluded too, because function catalogs carry no host name. A root catalog without a usable lifecycle artifact cannot be tied to a host and is kept. This reads the spec's broad "compatibility fallback" wording narrowly so that registered globals and events apply only to identified documents; it is tested outside and inside a package area that holds the host's catalog. Alternative: keep every root catalog as fallback (spec wording read literally), which makes shared-event-only documents in `claudine/` foreign again. Building the legacy view now reads every lifecycle artifact in the roots instead of stopping at the first usable one. Reversing touches `config/registration/selection.rs` and two `host_selection` tests.
+    - |-
+      Registration scope switches (Phase 5): `--disable schema-triggers` also turns off the registered layer (registration is a trigger source), and registration applies outside a repository too, whereas root trigger discovery does not. Alternatives: a separate switch for registration, or no registration outside a repository. Reversing is a condition in the md CLI's compose/validate/clean wiring and `schema_validation.rs`.
+    - |-
+      Registered-layer cache identity (Phase 5): each registered trigger layer's identity is its payload digest combined with the manifest path, content hash, and host revision, built from existing Simplified Schema identity APIs; no new `LayerRole` was added. The trigger merge memo used to match by `Arc` identity alone and returned a stale merge when the payload memo shared one `Arc` across host revisions; it now also compares layer digests (merge output unchanged, so no revision bump). A root trigger counts as identical to a registered one when its canonical path, envelope, and payload JSON are equal (parsed values, not bytes). Alternative: a distinct layer role and byte-level identity; more library churn for the same verdicts.
+    - |-
+      Passive repository configuration for inspection commands (Phase 5): loading registrations for `md schema validate`, `md clean`, and `md schema triggers` loaded the repository configuration in migrating mode, and a CLI test run inside the checkout migrated the real repository root (restored immediately). These commands now read the repository projection passively (`ConfigSnapshot::with_passive_repository_projection`); `md compose` keeps its existing migrating load. Alternative: let every md command migrate as compose does. A regression test guards it.
+    - |-
+      Foreign-document compose (Phase 5, plan Rule 27): only host event keys (every event in the host's lifecycle registry) are withheld from compose-time interpolation and execution; host data keys such as `sequence` are still interpolated, because the manifest and lifecycle artifact carry no list of host-owned data keys. A Claudine document whose `sequence` or body reads `{{ seq.… }}` therefore fails normally under `md compose`, as the spec allows for unavailable host values. `composed`/`failed` are not withheld, so the host schema rejects them; because problems under withheld keys are dropped before reporting, a wrongly typed host event (`start: 5`) is not reported by `md compose` (DMLS and `md schema validate` still judge it). Alternatives: a "deferred keys" field in the manifest or lifecycle artifact (format change, moderate work), or keeping withheld-key problems in the report.
+    - |-
+      Foreign-document notice (Phase 5): `dm.host.foreign_document` depends on the root document only: a foreign child adds no second notice, and an md root that transcludes a foreign child gets none. Host globals are declared to analysis as unavailable with reason `dm.host.runtime_only`, so a shared stack reading `seq.name` fails with md's ordinary unavailable-global error. Host function sets are installed for typing on the composing thread only; a child evaluated on another thread reports an unknown function instead of a missing implementation. Info-severity run notices now print as info rows rather than warning rows on stderr, and `CommandRun`/`ReportSink` also collect notices raised during a run (previously only at its start). Alternatives: a notice per foreign document in the request; propagating host functions to worker threads.
 message_to_agent: |-
-    Phase 4 landed permissions. `ConfigSnapshot::policy() -> Result<&Arc<PermissionPolicy>, ConfigError>` is the one evaluator (references followed; user ∨ (HEAD ∧ worktree), exclusions from any layer; `file_read(target, reading_ctx)`, `shell()`, `network()`); `permissions()` still returns the raw per-file settings. Persistence: `config::permissions::persist::save_user_approval`. Network consent: `config::network::NetworkPermission::from_snapshot`. Setup: `config::init` (`md init [--repo] [--inline]`) and `claudine::config::setup::setup_with_darkmatter` (run from Claudine's first-run setup; there is no production `claudine init` command). Legacy policy files migrate in `ConfigLoadMode::MigrateLegacy` (user scope at startup, repository scope in `with_repository_projection`); the whitelist/blacklist files, the grant store, the automatic grant, `policy_root`, and DMLS's `shell.policy_path` are gone. Passive loads with committed-tree discovery go through `markdown::schemas::slots::session::load_passively` (DMLS and Claudine use it). The shared permission parity table is `darkmatter/lib/tests/fixtures/permission_parity/cases.json` (md, Claudine, DMLS read it with `include_str!`). For Phase 5 registration: `ConfigSnapshot::registrations()` is unchanged and `dependencies()` now also lists followed permission targets (`ConfigDependency::referenced_from`). IMPORTANT: three signed commits appeared on the branch during Phase 4 (ea84a2b02, 31516c4bc, 3e4cf53f3) that this phase's coordinator did not make; one of them also changed `darkmatter/dmls/zed-dmls/extension.toml` to serve YAML. Expect the branch to have commits mid-phase and scope gates from the previous phase-close commit. The host is frequently loaded by unrelated applications (ImageMagick, Contacts; load 100–250); re-measure slow tests alone.
+    Phase 5 landed registration in the library and md CLI; DMLS is untouched (Phase 6). Read `darkmatter/docs/topics/host-registration.md` first. API: `darkmatter::config::registration::{load_registrations, load_entries, md_owned_names, agreement, RegisteredHosts, select, HostSelection { Md, Registered, Legacy, Ambiguous }, Selected, LegacyHost, RegisteredHostProfile}`; `LegacyHost` is the ONE central legacy view (root `host_catalogs`/`host_function_catalogs`/lifecycle profiles with registered hosts suppressed) and should replace DMLS's `LifecycleHost::first_usable` and the independent `providers/dsl.rs::host_catalogs` rescans. `DarkmatterSchemas::{with_registered_hosts, host_selection_for, registered_selection_for (reads nothing), registered_trace}`; `ComposeOptions::{with_registered_hosts, host_selection_for, with_selected_host}`; `RegisteredHostProfile::{dependencies, revision, analysis_globals}` give the files to watch and the revision for `AnalysisIdentity`. `ConfigSnapshot::with_passive_repository_projection` reads the repository config without migrating: DMLS must use passive loads only. Test fixtures: `darkmatter/lib/tests/host_fixtures/{mod.rs,recorder.rs}` (acme host, Claudine-like `relay` host with renames, in-process lifecycle recorder); the CLI suite includes them and lists them in `source-inputs`. Caution: never run md in a test with the real checkout as its repository; compose migrates legacy repository policy files. No mid-phase commits appeared during Phase 5; the host load average was 8-60 from unrelated work.
 source_files_during_phase_3:
     - "biscuit-file/lib/src/file_reference/context.rs"
     - "biscuit-file/lib/src/file_reference/mod.rs"
@@ -897,6 +911,68 @@ skills_files_updated_during_phase_4:
     - ".claude/skills/darkmatter/SKILL.md"
     - ".claude/skills/darkmatter/testing.md"
     - ".claude/skills/sniff/remote-and-repository.md"
+source_files_during_phase_5:
+    - "claudine/lib/generated/shipped.json"
+    - "darkmatter/cli/Cargo.toml"
+    - "darkmatter/cli/schemas/output/schema-triggers.yaml"
+    - "darkmatter/cli/src/commands/clean.rs"
+    - "darkmatter/cli/src/commands/compose.rs"
+    - "darkmatter/cli/src/commands/compose/lifecycle.rs"
+    - "darkmatter/cli/src/commands/schema/triggers.rs"
+    - "darkmatter/cli/src/commands/schema/validate.rs"
+    - "darkmatter/cli/src/output/command.rs"
+    - "darkmatter/cli/src/output/mod.rs"
+    - "darkmatter/cli/src/output/report.rs"
+    - "darkmatter/cli/src/request.rs"
+    - "darkmatter/cli/tests/l1/compose_foreign_documents.rs"
+    - "darkmatter/cli/tests/l1/host_registration.rs"
+    - "darkmatter/cli/tests/l1/main.rs"
+    - "darkmatter/lib/generated/shipped.json"
+    - "darkmatter/lib/src/config/load.rs"
+    - "darkmatter/lib/src/config/mod.rs"
+    - "darkmatter/lib/src/config/registration.rs"
+    - "darkmatter/lib/src/config/registration/manifest.rs"
+    - "darkmatter/lib/src/config/registration/selection.rs"
+    - "darkmatter/lib/src/lifecycle/host_profile.rs"
+    - "darkmatter/lib/src/lifecycle/md_host.rs"
+    - "darkmatter/lib/src/markdown/compose/context/options.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/host/artifact.rs"
+    - "darkmatter/lib/src/markdown/compose/report_diagnostics.rs"
+    - "darkmatter/lib/src/markdown/compose/schema_validation.rs"
+    - "darkmatter/lib/src/markdown/output/command/data.rs"
+    - "darkmatter/lib/src/markdown/output/command/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/catalog.rs"
+    - "darkmatter/lib/src/markdown/schemas/clean.rs"
+    - "darkmatter/lib/src/markdown/schemas/embedded.rs"
+    - "darkmatter/lib/src/markdown/schemas/mod.rs"
+    - "darkmatter/lib/tests/host_fixtures/mod.rs"
+    - "darkmatter/lib/tests/host_fixtures/recorder.rs"
+    - "darkmatter/lib/tests/l1/foreign_document_compose.rs"
+    - "darkmatter/lib/tests/l1/host_registration.rs"
+    - "darkmatter/lib/tests/l1/host_selection.rs"
+    - "darkmatter/lib/tests/l1/main.rs"
+    - "darkmatter/schemas/darkmatter-host.yaml"
+    - "simplified-schema/lib/src/triggers/discovery.rs"
+    - "simplified-schema/lib/src/triggers/identify.rs"
+    - "simplified-schema/lib/src/triggers/matcher.rs"
+    - "simplified-schema/lib/src/triggers/mod.rs"
+    - "simplified-schema/lib/tests/l1/identifying_triggers.rs"
+    - "simplified-schema/lib/tests/l1/main.rs"
+docs_updated_during_phase_5:
+    - "darkmatter/README.md"
+    - "darkmatter/docs/cli/compose.md"
+    - "darkmatter/docs/cli/data-contracts.md"
+    - "darkmatter/docs/cli/schema.md"
+    - "darkmatter/docs/topics/configuration.md"
+    - "darkmatter/docs/topics/lifecycle/index.md"
+    - "darkmatter/docs/topics/schemas/schema-triggers.md"
+    - "simplified-schema/docs/topics/language-core.md"
+docs_created_during_phase_5:
+    - "darkmatter/docs/topics/host-registration.md"
+skills_files_updated_during_phase_5:
+    - ".claude/skills/darkmatter/SKILL.md"
+    - ".claude/skills/darkmatter/lifecycle.md"
+    - ".claude/skills/darkmatter/schema.md"
 ---
 
 # Implementation Log for 2026-11-12-registration (9 phases)
@@ -1072,3 +1148,131 @@ Input-robustness smell audit (by the loader agents): the Darkmatter loader reads
 - `sniff`: `just test` — 3570 passed, 4 slow (5.7–6.9 s: three macOS hardware/audio detection tests and one `sniff-detection-cli` test), 0.97–3.03 s alone; `just lint` clean. `biscuit-file`: `just test` — 1286 + 6 passed, none slow; `just lint` clean.
 - Dependents: `cargo check --workspace --all-targets` clean; `messenger --features research` tests (40) pass. DMLS is inside the darkmatter area gate.
 - Cross-OS (config paths under home and repository, committed-tree capture per request, locked writes): `just cross-check darkmatter --os windows` — 11936 passed; 7 ≥ 5 s: six `expression_recovery_data` tests (5.1–7.6 s) that run under 5 s in a narrow rerun (max 4.4 s), and `current_root_migration_guard::the_removed_nesting_appears_only_where_the_allowlist_expects` (11.7 s; 7.4 s in the narrow rerun), the Windows-only slow source-scan guard Phase 2 already recorded (9.3–27.8 s since 2026-11-08), untouched by this phase. `just cross-check claudine --os windows` — 6587 passed, none slow; `just cross-check claudine-cli --os windows` — 3968 passed, none slow. No Windows failure, so `os_failing` is not set. Linux and WSL2 are left to CI.
+
+## Phase 4
+
+Phase 4 ran as foreground subagents in three waves, each verifying only its slice with nextest filters; the coordinator integrated between waves and ran the area gates once at the end. Wave 7: the permission evaluator, network consent, and legacy migration in parallel. Wave 8: shell and schema-slot enforcement in parallel, then the Claudine/DMLS port (which needed the new shell API). Wave 9: setup (`md init`, Claudine handshake) in parallel with parity tests and cross-agent leftovers.
+
+### Wave 7 — Permission mechanisms
+
+- **Evaluator (Rules 14, 15).** New `darkmatter::config::permissions` (`PermissionPolicy`, `PermissionVerdict`, `PolicyLayer`, `ShellPermissions`) built once per snapshot and exposed as `ConfigSnapshot::policy()`; `permissions()` keeps returning the raw per-file settings (setup repair reads them). New `config/load/reference.rs` follows a `permissions` reference one hop: user scope on disk, repository working copy on disk with canonical containment, repository HEAD only through the pinned committed tree (`FileReference::candidate_plan`, committed symlinks followed with cycle detection and a 40-link limit). Missing/invalid targets, a target without a `permissions` mapping, and chains are `dm.config.reference` errors naming both files and suggesting `md init --inline`. Followed targets join `dependencies()` (`ConfigDependency::referenced_from`). Verdict rule: pre-approved iff (user ∨ (HEAD ∧ worktree)) positive and no `!` in any layer; network is the AND of every applicable layer.
+- **Persistence (Rule 19).** New `config/permissions/persist.rs::save_user_approval` saves an exact shell rule or an escaped `~/…` file entry to the user block (following its reference), materializing an omitted list's schema defaults first, deduplicating, refusing when an exclusion matches, and validating before the locked replace; `NotSaved` carries `dm.config.not_saved`.
+- **Network consent (Rule 17).** `biscuit_file::FetchPolicy::allow_all()` (explicit flag, not a wildcard; default stays deny-all) and new `darkmatter::config::network::NetworkPermission::from_snapshot`, the one projection both composition (`RemoteFetchRuntime::with_store_and_network`) and slot reads use; an invalid block denies and reports why. Coordinator: switched the projection from raw inline settings to `policy().network()` (so a referenced block's `allow` counts) and added `network_permission::a_referenced_user_block_that_allows_composes_a_remote_file`.
+- **Legacy migration (Rules 20, 34).** New `config/migration.rs`: in `ConfigLoadMode::MigrateLegacy` the user scope's `~/.darkmatter-shell-{whitelist,blacklist}` (one shell unit, blacklist rules become `!` entries) and `~/.config/darkmatter/schema-read-policy` (under-home `allow file/dir` → escaped `~/` entries, `deny` → `!`, url/site/outside-home lines dropped with notices) migrate into missing properties only, through the locked writer with a receipt, then delete only sources whose bytes still match. Passive loads report a hint and never write. Coordinator: repository-scope migration runs in `ConfigSnapshot::with_repository_projection` (the path `md` and Claudine use per source repository), and `md` reports `dm.config.migration` notices (user scope at startup; repository scope as each projection happens, on stderr or in data-output `diagnostics`) via new `MdRequest::report_config_notices`.
+
+### Wave 8 — Enforcement adapters
+
+- **Shell (Rule 18).** Removed `policy_root`, `ShellPolicyPaths`, `resolve_policy_paths`, the policy-file loaders/appenders, user-blacklist refusal, and `BlacklistPersist`/"always deny". Every site (inline, `::shell`, shell blocks, frontmatter, templates, preflight, lifecycle, md host) decides: built-in blacklist refuses first (before yolo, caches, approvals) → any segment matching an exclusion requires approval → pre-approved when every segment is allowed → else approval. An invalid block fails commands with `ShellExpansionError::Config` (`dm.config.invalid`). "Always allow" saves and also applies for the rest of the run; a failed save warns `dm.config.not_saved` (added once to `COMPOSE_DIAGNOSTIC_CODES`). The compose-cache identities include the shell rules.
+- **Schema slots (Rules 16, 19).** Removed the automatic grant (`grants/auto.rs`), the grant store, folder/site/any-query grants, and persistent denies (`grants/legacy.rs` keeps only what the migration parses). The gate decides each read before the file or any memo is touched: invalid permissions refuse; this run's deny/allow; `policy.file_read(target, reading)`; else the handler (allow once / always allow / deny for this run; URLs offer only per-run choices). `ReadGate::admits_listed` filters listings (`find_files`, `find_*_index`) to files admitted without a prompt; no directory prompt. Not-saved approvals surface through `SlotSession::take_not_saved_warnings`.
+- **Claudine and DMLS.** Claudine's harness takes `CapturedPermissions` from the invocation's snapshot with md's decision order; its policy-root/document-directory fallback, "always deny", and `ShellPolicyWriteFailed` are gone. DMLS's shell overlay classifies passively from a loaded snapshot (Denied for the built-in blacklist, Approved only when all segments are pre-approved, Unknown otherwise or for an invalid block) and warns once when `.dmls.toml` still sets the retired `shell.policy_path`. `markdown::schemas::slots::session::load_passively` became public as the shared passive loader.
+
+### Wave 9 — Setup and parity
+
+- **Setup (Rule 23).** New `darkmatter::config::init` and `md init [--repo] [--inline]` (`cli/src/commands/init.rs`, output schema `cli/schemas/output/init.yaml`, `COMMAND_LEAVES` row, conformance tests, `docs/cli/init.md`): writes every property at its default, preserves authored text and references, adds only missing top-level settings, `--repo` fails before writing outside a repository, `--inline` replaces a reference with its target's block (or reported defaults when the target is broken). New `claudine::config::setup::setup_with_darkmatter` implements the 2.9 handshake (reference, transfer with Claudine written first and the reference published last via new `TargetChange::published_last`, conflict stop, third-party reference left alone). There is no production `claudine init` command any more, so the handshake runs from Claudine's first-run setup (see decisions). Without a home, loads now warn once that no home is available.
+- **Parity and leftovers.** One shared table `darkmatter/lib/tests/fixtures/permission_parity/cases.json` (commands, templates, files, URLs, exclusions) drives `darkmatter::l1 permission_parity`, Claudine's `shell_permission_parity::shared_fixture`, and DMLS's `shell_permission_classification` parity test. Fixed: two context-construction guard hits (slot session field, DMLS save path, which now judges exclusions from the document's own context); DMLS slot watches now include `.git/index`/`HEAD` for any in-repository document (a refused-only document previously got no watch); retired `GrantStoreError`/`ShellExpansionError::SlotGrantStore`; `md schema validate`/`md clean` report not-saved slot warnings; a real Claudine defect — launch-schema checks had no slot session, so any templated schema failed as "unresolved slot" — fixed in `composition/prepare.rs`.
+- **Audit.** Remaining references to `.darkmatter-shell-whitelist/blacklist`, `schema-read-policy`, `policy_root`, `shell.policy_path`, and "always deny" are only the temporary migration code/tests/docs and statements or tests asserting retirement.
+
+### Coordinator fixes and findings
+
+- Three signed commits (`ea84a2b02`, `31516c4bc`, `3e4cf53f3`, 18:25–18:32) appeared on the branch during Wave 9 that the coordinator did not make (every subagent was told not to commit). They are left in place; this phase's change set is those commits plus the working tree, and the gate scope was computed from `f00f3efa3` (the Phase 3 close). One of them changed `darkmatter/dmls/zed-dmls/extension.toml` to serve YAML too; `zed_extension_contract::zed_extension_manifest_and_crate_shape_are_loadable` was updated to that manifest.
+- `md init` built a raw user-only context (`MdRequest::user_context`), which the md CLI context guard refuses; it now uses the launch context (the user scope reads only the home). The same in Claudine's `init_wizard.rs::write_with_darkmatter_setup` (now `capture_file_resolution_context`).
+- `argv_normalization::wrapper_help_renders_wrapper_screen` failed: the first-run handshake printed "now points at" on `claude --help`; pointing an unblocked `.darkmatter.yaml` at Claudine's file is now silent (a transfer is still reported).
+
+### Requirement → test mapping
+
+| Behavior | Tests |
+| --- | --- |
+| Scope defaults, omitted vs `[]`, HEAD∧worktree per command, exclusions in each layer, uncommitted additions/removals, network AND, Git capture error | `darkmatter::l1 config_permissions::*` |
+| References: user/worktree/HEAD following, seven bad-target cases located at both files, `..`/symlink escape, inline↔reference conversion, redirection, target edit/deletion per revision, committed symlink chain/cycle/escape/limit, unborn HEAD | `config_permissions::*` |
+| File-read matching: `~/`, portable `{{VAR}}`, escaped globs, `..`, missing probes, symlink escape | `config_permissions::*` |
+| Approval persistence: byte-preserving save through a reference, idempotence, default materialization, creation, exclusion refusal, outside-home/dir/no-home not saved, refused edits leave files untouched, repo file never edited | `darkmatter::l1 config_permission_persist::*` |
+| Network consent: allow/deny/default, repo vs user, uncommitted widening, exact host, referenced block, invalid block, redirects, cached body, slot/composition parity | `darkmatter::l1 network_permission::*`, biscuit-file `fetch` unit + `fetch_integration` |
+| Migration: mixed shell unit, authored `[]`, grant-store conversion, dropped lines, invalid lines, passive, repeat, crash window, changed source, failed write, document-dir files, references, no home, repository scope | `darkmatter::l1 config_migration::*` (16) |
+| Migration notice in `md` data output with empty stderr | `darkmatter-cli::l1 init_command::*` |
+| Shell: built-in refusal over allows/yolo/caches/templates/lifecycle; exclusions per layer; noninteractive approval-required; chains; save + run reuse; not-saved; invalid block | `darkmatter::l1 shell_permissions::*` (15), `darkmatter-cli::l1 compose_shell::*`, `approval_prompt::*` |
+| Slots: reads decided before memo (content, probe, import, `validate_schema`), listings filtered without prompts, run override of exclusions, not-saved for excluded files, portable save round trip, repository default under the commit rule, URLs, invalid permissions | `darkmatter::l1 slot_permissions::*`, ported `dynamic_schema_slot*`, CLI `dynamic_schema_slots::*` |
+| Claudine host decisions equal md's | `claudine::l1 shell_permission_parity::*`, harness/preflight unit tests |
+| DMLS passive classification, no writes, `shell.policy_path` retirement warning | `darkmatter-lsp::l1 shell_permission_classification::*` |
+| Shared parity table through md / Claudine / DMLS | `darkmatter::l1 permission_parity::*`, `shell_permission_parity::shared_fixture::*`, DMLS parity test |
+| `md init` / setup: creation, idempotence, preservation, references, `--inline` (readable/broken), invalid file, `--repo` outside a repository, no home, publication order | `darkmatter::l1 config_init::*` (13), `darkmatter-cli::l1 init_command::*`, `output_commands` init rows |
+| Claudine handshake: both orders, repeat, conflict, equal blocks, third-party reference, broken-reference repair, interrupted transfer, repository scope, no home | `claudine::l1 darkmatter_setup::*` (12) |
+
+Input-robustness smell audit: the new loaders read references and migrated lines explicitly; no `#[serde(default)]`, `unwrap_or_default()`, or `.ok()` on a load-bearing parse was added (the agents grepped their files).
+
+### Gates
+
+- Scope: `git status`-based `affected_scope.py` no longer covers the phase (three mid-phase commits), so it was run over `git diff --name-only f00f3efa3` plus untracked files: `change_class: package`, `packages: [biscuit-file, claudine, claudine-cli, darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit]`; gates were not skipped.
+- `darkmatter`: `just test` — first run 16451 passed, 1 failed (`zed_extension_contract`, above); after the fix 16483 passed, 10 skipped, none ≥ 5 s. `just lint` clean. `just check-tier-coverage darkmatter` — 0 stranded.
+- `claudine`: first run stopped at `argv_normalization::wrapper_help_renders_wrapper_screen` (fixed); a load-sensitive `wrap_perf::composition_setup_and_provider_handoff_order_matches_phase_1_baseline` failure passed alone; then `context_construction_guard` (fixed). The third run (12048 passed) was taken at load 120–250 caused by another worktree's test suite and ImageMagick: 99 tests ≥ 5 s, one at 13.3 s; re-measured alone, the library ones were ≤ 4.6 s (load ~137) and the CLI ones 0.8–1.4 s (load ~35). A fourth `just test` at load ~30–55: 12048 passed, none ≥ 5 s. `just lint` clean (only the existing `__eh_frame` linker warning).
+- `biscuit-file`: `just test` — 1292 + 6 passed, none slow; `just lint` clean.
+- Dependents: `cargo check --workspace --all-targets` clean; `messenger --features research` tests (40) pass. Sniff uses only `FetchPolicy::deny_all().allow_host` (unchanged).
+- Cross-OS (permission targets under home and repository, committed symlinks, locked writes, setup transfers): `just cross-check darkmatter --os windows` — 11969 passed; 4 ≥ 5 s, all pre-existing Windows-only slow tests in code this phase did not touch: `current_root_migration_guard::the_removed_nesting_appears_only_where_the_allowlist_expects` (10.7 s; recorded at 9.3–27.8 s since 2026-11-08), `expression_recovery_data::allowed_transport_failure_recovers::connection_refused` (7.1 s) and two `expression_regression::regression_division_by_zero_*` (5.3–5.6 s), the same group Phase 3 recorded. `just cross-check claudine --os windows` — 6612 passed, none slow; `just cross-check claudine-cli --os windows` — 3967 passed, none slow. No Windows failure, so `os_failing` is not set. Linux and WSL2 are left to CI.
+- At 20:30, after this log's Phase 4 frontmatter was written but before the gates finished, three more signed commits appeared that the coordinator did not make (`3f1c173f5`, `ad6e24d34`, `5c8d29e71` "record Phase 4 close"); they hold this phase's remaining working-tree changes. The edits made after them (this Gates section and the last two plan checkboxes) are uncommitted.
+
+## Phase 5
+
+Phase 5 ran as four foreground subagents. The coordinator first wrote the Rule 25 proof (`simplified_schema::triggers::identify`) so that the two Wave 10 tasks could proceed in parallel: identity tests, and the manifest schema plus profile loader. Wave 11 then ran sequentially, because both of its tasks edit compose preparation: first layering and selection, then the foreign-document runtime. The coordinator ran the area gates once, after all subagents had finished. No mid-phase commits appeared.
+
+### Wave 10 — Registration core
+
+- **Identity proof (Rule 25).** New `simplified-schema/lib/src/triggers/identify.rs`: `admit_identifying_trigger(&MatchConditions, &BTreeSet<String>) -> Result<IdentifyingTrigger, IdentifyTooBroad>` (`dm.host.identify_too_broad`, located field such as `match[0].group[2]`, plus a repair hint) and `identifies`. In `identifies`, a positive required atom tests non-null presence; guards, `none:` children, and `$path` keep their ordinary meaning. Ordinary `matches` is unchanged; only `property_matches` and `PathSubject::admits` became `pub(crate)`. The subagent fixed field naming (an implicit single-child `all` no longer adds a segment), library-neutral wording, and a doc that disagreed with the code under double `none:`.
+- **Manifest and profiles (Rule 24).** The new shipped schema `darkmatter/schemas/darkmatter-host.yaml` is the closed v1 envelope, with every field required and alias `darkmatter-host@darkmatter:host`. `just shipped-schemas` regenerated the Darkmatter and Claudine artifacts.
+  - New module `darkmatter::config::registration` (`registration.rs`, `registration/manifest.rs`) provides `load_registrations`/`load_entries` → `LoadedRegistrations { profiles, diagnostics }`, all-or-nothing `RegisteredHostProfile`s, `md_owned_names()`, `agreement()` (same-host claims collapse or conflict), typed `RegistrationDiagnostic`s, and `report_diagnostics::registration_diagnostic`.
+  - The manifest is validated before any member is read. Every member and transitive import is read once in one retained read set. That read set becomes `dependencies()`, and `revision()` is a BLAKE3 digest over manifest meaning plus dependency digests, so comments do not change it.
+  - New explicit companion-path loaders: `HostLifecycleProfile::from_artifact_at`, `HostFunctions::analysis_only_at`, and `catalog::host_function_set_at`. Discovery by stem is unchanged.
+  - `LoadedTrigger::from_file` was added in Simplified Schema because the trigger's fields are crate-private.
+  - Registered trigger payloads resolve from their own file without schema roots, and their `pattern_cwd` is the document's tree root.
+
+### Wave 11 — Registration consumers
+
+- **Selection and layering (Rule 26).** New `config/registration/selection.rs` adds `HostSelection { Md, Registered, Legacy, Ambiguous }`, `Selected`, `RegisteredHosts`, `select`, and the one central `LegacyHost` view.
+  - `DarkmatterSchemas::with_registered_hosts` layers, from lowest to highest: baseline, the selected host's matching triggers in manifest order, root triggers, then `$schema`. A same-basename root file does not shadow a registered trigger. An identical registered and root trigger applies once.
+  - Origins carry the manifest identity and revision. Cache identities include them, and the merge memo now compares layer digests (see decisions).
+  - Selection is wired into compose, `md schema validate`, `md clean`, and `md schema triggers` (new `registered` field in `cli/schemas/output/schema-triggers.yaml`).
+  - The md CLI loads registrations once per repository (`MdRequest::registered_hosts`) and reports each distinct record once (`report_host_diagnostics`).
+  - A caller that supplies its own host globals (Claudine) gets `Md` and no registered layer.
+  - Departure found while testing: the inspection commands had started loading the repository configuration in migrating mode, and one test migrated the real checkout's root. The checkout was restored, and these commands now use the new `ConfigSnapshot::with_passive_repository_projection`, with a regression test.
+- **Foreign documents (Rule 27).**
+  - Library: `ComposeOptions::with_selected_host(profile)` declares the host's globals for analysis as unavailable (`dm.host.runtime_only`), via `RegisteredHostProfile::analysis_globals()`.
+  - `md_host::{shared_event_keys, execution_projection, foreign_deferred_keys}` derive everything from the host's event registry.
+  - md CLI: the host is identified before the lifecycle is parsed. Only `initialize`/`cancelled`/`finalize` are parsed and run, from the execution projection, with md bindings. Host event keys are withheld from compose-time interpolation. Host functions are known for typing but have no handlers.
+  - `dm.host.foreign_document` is reported once per root request: an info row on stderr for formatted output, or one `diagnostics` entry with empty stderr for data output.
+  - New in-process recorder `darkmatter/lib/tests/host_fixtures/recorder.rs` drives `md_host::drive` through the real `evaluate` and records events and effects.
+  - The Claudine-like `relay` fixture host has renames, host-only events, a `seq` global, and a trigger that types `composed`/`failed` as `null`.
+  - Departure: the motivating document's `say: "{{ seq.name }}"` alone cannot fail, because md skips `say` without evaluating it. The test adds an `info:` reading `seq.name` to show the normal runtime failure.
+
+### Validation checkpoint — coordinator
+
+- Added `host_selection::loading_selecting_and_composing_with_a_registration_writes_nothing`. It snapshots every file under the fixture's home, work tree, and host install, then loads, selects, builds the effective schema, and composes an identified document. No file is written, created, or removed; no approval handler, network host, or executable host is configured. `a_remote_member_is_refused_without_fetching` covers the network side.
+
+### Requirement → test mapping
+
+| Behavior | Tests |
+| --- | --- |
+| Witness proof: all/group/none/min-match bounds, nested, shared-only, optional-only, path-only, empty, nullable/unknown atoms | `simplified-schema::l1 identifying_triggers::identify_*` (15) |
+| Presence-only identification for wrong-typed host keys vs ordinary matching; guard/`none:` semantics; `$path` still constrains; no I/O | `identifying_triggers::identify_tests_non_null_presence_where_ordinary_matching_tests_type`, `identify_keeps_guard_and_none_semantics`, `identify_path_*` |
+| Claudine's nine keys identify at every non-null YAML type; shared events alone do not | `identifying_triggers::identify_admits_and_recognizes_a_claudine_style_host` |
+| Manifest input matrix (control, absent, null, wrong type, element types, empty, closed keys, `format_version` 2/"1"/1.0, wrong kind, duplicate key, trailing document), remote member, missing member, stale lifecycle artifact, host mismatch, identify too broad, duplicate manifests, agreement/conflict; no partial profile | `darkmatter::l1 host_registration::*` (32) + unit tests in `config/registration*` |
+| md-owned names exclude Claudine's identifying keys | `host_registration` unit/L1 owned-name test |
+| Layering order, same-basename non-shadowing, identical dedup, authored override, import anchors, legacy fallback, suppression inside/outside a package area, conflicts, ambiguity, isolation, cache identity, registered trace, compose application, Claudine opt-out, passivity | `darkmatter::l1 host_selection::*` (15) |
+| CLI: validate/compose/clean/triggers apply the registered schema; one warning in formatted and data outputs; no repository migration | `darkmatter-cli::l1 host_registration::*` (8) |
+| Foreign compose: shared stacks only with md bindings, recorder (no speech/notify/effects), `seq` fails normally, `composed`/`failed` rejected by host schema, host functions not invoked, projection and deferred keys | `darkmatter::l1 foreign_document_compose::*` (10), `darkmatter-cli::l1 compose_foreign_documents::*` (8) |
+| Notice once per root request (formatted/data, with a foreign child); md-only document gets none | `compose_foreign_documents::*` |
+| Shipped artifact chain current | `darkmatter` / `claudine` / `simplified-schema` shipped-artifact tests |
+
+Input-robustness smell audit: the manifest loader validates the whole document against the closed shipped schema before reading any field. The subagents grepped their new files for `#[serde(default)]`, `unwrap_or_default()`, and `.ok()` on load-bearing parses, and none remain. The pre-existing `from_host_text` probe is permissive on purpose; it only lists declared names, and `load` re-validates them.
+
+### Gates
+
+- `darkmatter`: `just test` — 16558 passed, 10 skipped, none ≥ 5 s (load 8–63). `just lint` clean (including the zed-dmls wasm check). `just check-tier-coverage darkmatter` — 0 stranded.
+- `simplified-schema`: `just test` — 2179 + 1822 passed, none ≥ 5 s; `just lint` clean; `cargo check -p simplified-schema --no-default-features` clean.
+- Dependents: `cargo check --workspace --all-targets` clean.
+  - Claudine filtered by the changed surfaces (`shipped | schema | trigger | host | lifecycle | compose | guard | registry`): `claudine` + `claudine-cli` 2971 passed.
+  - In that run, `claudine-cli lifecycle_message_drain::stalled_deliveries_share_one_drain_budget_and_are_reported_as_unknown` failed because it was run without `--features test-fixtures`: its 2 s budget override is compiled only with that feature. Rerun with the feature: claudine-cli 1358 passed.
+  - Two `claudine_schemas` tests were at 5.0–5.2 s in the loaded run (load ≈ 60) and passed alone in 1.7 s and 2.1 s; they are load-sensitive, not slow.
+- Repository root checked after every CLI slice: no `.darkmatter.yaml`, lock file, or deleted whitelist.
+- Cross-OS: registration resolves manifest and member paths, canonical manifest identities, and `$path` subjects, so a Windows check was run. `just cross-check darkmatter --os windows` passed all 12028 tests with no failures. Four tests took 5 s or more, all on Windows only and all in code this phase did not change:
+  - `current_root_migration_guard::the_removed_nesting_appears_only_where_the_allowlist_expects` (12.6 s) and `expression_recovery_data::allowed_transport_failure_recovers::connection_refused` (6.0 s), both already recorded in Phase 4;
+  - `shipped_schema_corpus::shipped_markdown_named_type_references_resolve` (9.0 s) and `shipped_markdown_inline_schemas_parse_passively` (9.3 s). These two scan the repository's documentation, skill, and feature trees, take 0.8 s each on macOS, and reflect Windows file I/O under full-suite load; this phase added only one documentation page to what they scan.
+  - With no Windows failure, `os_failing` is not set. Linux and WSL2 are left to CI.
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gives `change_class: package` and `packages: [claudine, darkmatter, darkmatter-cli, simplified-schema, test-toolkit, claudine-cli]`. `test-toolkit` comes from the unrelated, already-present `prompts/plan.md` edit. The gates were not skipped.
