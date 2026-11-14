@@ -129,10 +129,19 @@ Darkmatter's **SimplifiedSchema**:
 
 Host support is data-driven. A document selects its schemas through discovered
 triggers, its own `$schema`, or an explicit `[schema.extensions.*]` mapping.
+Each document is analyzed as one host: a host registered in its
+configuration that identifies it (its manifest supplies the schemas, global
+types, functions, and lifecycle), else a legacy host catalog in its schema
+roots, else `md`; see [Host Registration](../../docs/topics/host-registration.md)
+and [The document's host is selected once](./diagnostics.md#the-documents-host-is-selected-once).
+Every file a registration reads (both configuration files, manifests,
+members, JSON artifacts, and the repository's `HEAD`) is watched, so a change
+takes effect without a restart. A missing `~/.darkmatter.yaml` is one
+message per session naming `md init`; DMLS never creates it.
 The host catalog supplies global types, and its lifecycle artifact supplies
-event names and action rules. For Claudine, make the files under
-`claudine/schemas/` available in the document's schema roots; an installed
-Claudine executable alone does not install those editor files. See
+event names and action rules. For Claudine without a registration, make the
+files under `claudine/schemas/` available in the document's schema roots; an
+installed Claudine executable alone does not install those editor files. See
 [Editor Setup](./editors/README.md) for deployment. DMLS interprets these files
 through Darkmatter's library and does not execute Claudine or its actions.
 

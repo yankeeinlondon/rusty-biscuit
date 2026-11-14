@@ -290,65 +290,39 @@ fn interpolation_candidates(
     lower_candidates(expressions::completion_candidates(partial, frontmatter_keys))
 }
 
-/// The host catalogs in the document's schema roots; none without a
-/// resolution context. A catalog that fails to load contributes no globals
-/// here; [`diagnostics`] reports it ([`host_catalog_diagnostics`]).
-pub(crate) fn host_catalogs(ctx: &DocumentContext) -> Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog> {
-    host_catalog_results(ctx).0
+/// The host global catalogs of the document's selected host view
+/// ([`DocumentContext::host_view`]); none for an `md` document. A legacy
+/// catalog that failed to load contributes no globals here; [`diagnostics`]
+/// reports it ([`host_catalog_diagnostics`]).
+pub(crate) fn host_catalogs(ctx: &DocumentContext) -> HostCatalogs {
+    HostCatalogs(ctx.host_view())
 }
 
-/// The host catalogs in the document's schema roots that loaded, and the
-/// load failures of the others.
-fn host_catalog_results(
-    ctx: &DocumentContext,
-) -> (
-    Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
-    Vec<darkmatter::markdown::schemas::catalog::CatalogError>,
-) {
-    let mut loaded = Vec::new();
-    let mut failed = Vec::new();
-    if let Ok(context) = ctx.file_context() {
-        for result in darkmatter::markdown::schemas::catalog::host_catalogs(context) {
-            match result {
-                Ok(catalog) => loaded.push(catalog),
-                Err(error) => failed.push(error),
-            }
-        }
+/// The selected view's host global catalogs, borrowed as a slice.
+pub(crate) struct HostCatalogs(std::sync::Arc<crate::overlay::hosts::HostView>);
+
+impl std::ops::Deref for HostCatalogs {
+    type Target = [darkmatter::markdown::schemas::catalog::GlobalCatalog];
+
+    fn deref(&self) -> &Self::Target {
+        self.0.catalogs()
     }
-    (loaded, failed)
 }
 
-/// The analysis-only host function sets of the function catalogs in the
-/// document's schema roots
-/// ([`darkmatter::markdown::schemas::catalog::host_function_catalogs`]), and
-/// the load failures of the others; none without a resolution context.
-fn host_function_results(
-    ctx: &DocumentContext,
-) -> (
-    Vec<darkmatter::markdown::compose::expression::HostFunctions>,
-    Vec<darkmatter::markdown::schemas::catalog::HostFunctionCatalogError>,
-) {
-    let mut loaded = Vec::new();
-    let mut failed = Vec::new();
-    if let Ok(context) = ctx.file_context() {
-        for result in darkmatter::markdown::schemas::catalog::host_function_catalogs(context) {
-            match result {
-                Ok(functions) => loaded.push(functions),
-                Err(error) => failed.push(error),
-            }
-        }
-    }
-    (loaded, failed)
-}
-
-/// Makes the document's host functions visible to Darkmatter's analysis on
-/// this thread while the guards live, so its call checks type, narrow, and
-/// report host calls by the document's own schema roots. Each set has no
-/// handler; nothing is ever invoked. An earlier schema root wins a name.
+/// Makes the document's host functions (its selected view's) visible to
+/// Darkmatter's analysis on this thread while the guards live, so its call
+/// checks type, narrow, and report host calls. Each set has no handler;
+/// nothing is ever invoked. An earlier set wins a name.
 pub(crate) fn enter_host_functions(
     ctx: &DocumentContext,
 ) -> Vec<darkmatter::markdown::compose::expression::HostFunctionScope> {
-    host_function_results(ctx).0.iter().rev().map(|functions| functions.enter()).collect()
+    enter_view_functions(&ctx.host_view())
+}
+
+fn enter_view_functions(
+    view: &crate::overlay::hosts::HostView,
+) -> Vec<darkmatter::markdown::compose::expression::HostFunctionScope> {
+    view.functions().iter().rev().map(|functions| functions.enter()).collect()
 }
 
 /// One `dm.schema.host_catalog` warning per host function catalog that
@@ -393,7 +367,7 @@ fn host_catalog_diagnostics(
 /// frontmatter, when no other catalog's could: the document's lifecycle
 /// stacks are then analyzed as the `md` host's, so a host-only event, verb,
 /// or rename is not seen. The message is the artifact's reason.
-/// Without a supplied `host`, the document's is discovered.
+/// Without a supplied `host`, the document's selected one is read.
 fn lifecycle_host_diagnostics(
     ctx: &DocumentContext,
     host: Option<&crate::overlay::event_views::LifecycleHost>,
@@ -826,7 +800,7 @@ pub fn folding_ranges(ctx: &DocumentContext) -> Vec<FoldingRange> {
 
 // ── Diagnostics ─────────────────────────────────────────────────────────────
 
-/// All Layer-3 DSL diagnostics for the document, discovering its lifecycle
+/// All Layer-3 DSL diagnostics for the document, reading its lifecycle
 /// host for the incomplete-analysis check.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     diagnostics_under(ctx, None)
@@ -840,11 +814,11 @@ pub fn diagnostics_with_host(ctx: &DocumentContext, host: &crate::overlay::event
 
 fn diagnostics_under(ctx: &DocumentContext, host: Option<&crate::overlay::event_views::LifecycleHost>) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    let (functions, failed_functions) = host_function_results(ctx);
-    let _host_functions: Vec<_> = functions.iter().rev().map(|functions| functions.enter()).collect();
-    let (catalogs, failed_catalogs) = host_catalog_results(ctx);
-    host_catalog_diagnostics(&failed_catalogs, &mut out);
-    host_function_catalog_diagnostics(&failed_functions, &mut out);
+    let view = ctx.host_view();
+    let _host_functions = enter_view_functions(&view);
+    host_catalog_diagnostics(view.catalog_errors(), &mut out);
+    host_function_catalog_diagnostics(view.function_errors(), &mut out);
+    let catalogs = HostCatalogs(view);
     lifecycle_host_diagnostics(ctx, host, &mut out);
     unknown_directive_diagnostics(ctx, &mut out);
     malformed_option_diagnostics(ctx, &mut out);
@@ -1084,7 +1058,7 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
 /// the enclosing `::block when` guards.
 fn expression_diagnostics(
     ctx: &DocumentContext,
-    catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
+    catalogs: HostCatalogs,
     out: &mut Vec<Diagnostic>,
 ) {
     let body_base = body_base(ctx.text);
@@ -1212,7 +1186,7 @@ fn expression_diagnostics(
 ///
 /// [`BindingView`]: darkmatter::markdown::compose::expression::BindingView
 pub(crate) struct KnownRoots<'a> {
-    catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
+    catalogs: HostCatalogs,
     ast: &'a crate::overlay::FrontmatterAst,
     shape: &'a simplified_schema::SchemaShape,
 }
@@ -1225,7 +1199,7 @@ impl<'a> KnownRoots<'a> {
     /// [`Self::for_document`] with the document's already-loaded host catalogs.
     fn with_catalogs(
         ctx: &DocumentContext<'a>,
-        catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
+        catalogs: HostCatalogs,
     ) -> Option<Self> {
         let ast = ctx.overlay.and_then(|overlay| overlay.ast.as_ref())?;
         Some(Self { catalogs, ast, shape: frontmatter::known_shape(ctx) })
@@ -2204,6 +2178,7 @@ mod tests {
             profile: &profile,
             overlay: None,
             resolution: &crate::context::test_support::resolution_for(path),
+            host: None,
         };
         let registry = ProviderRegistry::with_substrate();
 
@@ -2292,6 +2267,7 @@ mod tests {
             profile: &profile,
             overlay: None,
             resolution: &crate::context::test_support::resolution_for(path),
+            host: None,
         };
         let registry = ProviderRegistry::with_substrate();
         let hover_value = |literal: &str| {
@@ -2386,6 +2362,7 @@ mod tests {
             profile: &profile,
             overlay: None,
             resolution: &crate::context::test_support::resolution_for("/t.md"),
+            host: None,
         };
         let token_start = text.find("ctx.pa").unwrap();
         let item = text_edit_item(

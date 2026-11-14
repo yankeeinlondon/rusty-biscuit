@@ -66,7 +66,7 @@ definitions away from their references or replace them with placeholders.
 | Terminal rendering options | [terminal.md](terminal.md) |
 | Frontmatter model, shared views, literal tokens, in-place leaf edits, plain-YAML edits (`yaml_edit`) | [frontmatter.md](frontmatter.md) |
 | `.darkmatter.yaml` schema, `ConfigSnapshot` loading, locked config writes | [library-surfaces.md](library-surfaces.md), `docs/topics/configuration.md` |
-| Host registration: `darkmatter-host` manifests, `config::registration` profiles, host selection (`RegisteredHosts`, `select`, `HostSelection`), the registered trigger layer, `md compose` of a foreign document (`ComposeOptions::with_selected_host`, `RegisteredHostProfile::analysis_globals`, `md_host::{shared_event_keys, execution_projection, foreign_deferred_keys}`), `dm.host.*` codes | `docs/topics/host-registration.md` |
+| Host registration: `darkmatter-host` manifests, `config::registration` profiles, host selection (`RegisteredHosts`, `select`, `HostSelection`), the registered trigger layer, `md compose` of a foreign document (`ComposeOptions::with_selected_host`, `RegisteredHostProfile::analysis_globals`, `md_host::{shared_event_keys, execution_projection, foreign_deferred_keys}`), `dm.host.*` codes, a host's setup adding its own `register` entry (`config::init::register_manifest`, deduplicated by `config::registration::manifest_identity`; Claudine publishes its revision with `claudine::composition::registration` first), DMLS's per-document host view (`dmls/src/overlay/hosts.rs`, see [dmls.md](dmls.md)) | `docs/topics/host-registration.md` |
 | Error/status block conventions | [errors.md](errors.md) |
 | `md clean`/DMLS formatting rules and frontmatter repair | [cleanup.md](cleanup.md) |
 | Document comparison | [comparison.md](comparison.md) |
@@ -145,6 +145,13 @@ A whole `.yaml`/`.yml` document is validated by
 `DarkmatterSchemas::validate_yaml_document` (claimed `kind` > root `$schema` >
 none, no baseline or triggers) over a per-context `KindRegistry`; read
 [schema.md](schema.md#whole-yaml-documents) first.
+DMLS routes the four configuration paths (`.darkmatter.yaml`,
+`.claudine/config.yaml` under the captured home or repo root, by
+`PathIdentity`) before that selection: `dmls/src/config_contracts.rs`
+resolves the scope type (`config::schema::resolve_host_config_type`; Claudine's
+schema is `include_str!`'d, never the claudine crate) and
+`DarkmatterSchemas::prepare_configuration_contract` makes a
+`Route::Configuration` contract whose `kind`/`$schema` are data.
 Ownership: the `simplified-schema` crate owns all three shipped definitions
 (`simplified-schema/schemas/{schema,yaml-schema,schema-trigger}.yaml`),
 envelope admission, triggers (`simplified_schema::triggers`), schema roots

@@ -3498,6 +3498,7 @@ mod tests {
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &crate::context::test_support::resolution_for(path),
+            host: None,
         };
         f(&ctx)
     }

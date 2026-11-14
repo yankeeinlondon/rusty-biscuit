@@ -8,10 +8,15 @@
 //! for the same path are coalesced to one change so a single save doesn't
 //! trigger repeated re-indexing.
 //!
-//! A second registration ([`SLOT_WATCH_REGISTRATION_ID`]) watches exactly the
-//! paths schema-slot resolutions read (whatever their extension, plus a
-//! repository's `.git/index` and `HEAD`), so a change to one refreshes the
-//! documents whose templates read it.
+//! A schema-location registration ([`SCHEMA_WATCH_REGISTRATION_ID`]) watches
+//! the folders trigger registries and host registrations read, wherever they
+//! live: schema roots, payloads, both configuration files (present or not),
+//! host manifests, members, imports, and artifacts, whatever their
+//! extension. A path-level registration ([`SLOT_WATCH_REGISTRATION_ID`])
+//! watches exactly the paths schema-slot resolutions read (plus a
+//! repository's `.git/index` and `HEAD`) and each repository `HEAD` and
+//! branch ref the host registrations depend on, so a change to one
+//! refreshes the documents that read it.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -184,9 +189,10 @@ pub fn schema_watch_registration<'a>(
 pub const SLOT_WATCH_REGISTRATION_ID: &str = "dmls-schema-slot-watchers";
 
 /// One watcher per path a schema-slot resolution depended on (a data file,
-/// a missing probe, a listed folder, a repository's index and `HEAD`), by
-/// path and whatever its extension. A path whose folder does not exist yet
-/// is watched from its nearest existing ancestor, so its creation is seen.
+/// a missing probe, a listed folder, a repository's index and `HEAD`) or a
+/// host registration's repository `HEAD` and branch ref, by path and
+/// whatever its extension. A path whose folder does not exist yet is
+/// watched from its nearest existing ancestor, so its creation is seen.
 /// Requires the client's `relativePatternSupport`.
 ///
 /// ## Returns
@@ -500,6 +506,58 @@ mod tests {
         )
         .unwrap();
         assert_eq!(relative_patterns(&options), vec![(base, "shared/*".to_string())]);
+    }
+
+    /// A host registration's inputs, from a home with no configuration and
+    /// a repository with an unborn branch: the absent configuration files
+    /// are watched through their folders' entries, and `HEAD` and the
+    /// branch ref it names (absent until the first commit) by path, from
+    /// their nearest existing folders.
+    #[test]
+    fn host_registrations_watch_missing_configurations_and_the_repository_head() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(temp.path()).unwrap();
+        let (home, repo) = (root.join("home"), root.join("repo"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(repo.join(".git/refs/heads")).unwrap();
+        std::fs::write(repo.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        let context = biscuit_file::FileResolutionContext::from_snapshot(&repo, Some(home.clone()), HashMap::new())
+            .with_repository_root(&repo);
+        let mut registrations = crate::overlay::hosts::HostRegistrations::default();
+        registrations.prepare(&context);
+
+        let folders = registrations.watch_folders();
+        let options: DidChangeWatchedFilesRegistrationOptions =
+            serde_json::from_value(schema_watch_registration(&folders).unwrap().register_options.unwrap()).unwrap();
+        let base = crate::workspace::file_path_to_uri(&root).unwrap().as_str().to_string();
+        let patterns = relative_patterns(&options);
+        for folder in ["home/*", "repo/*"] {
+            assert!(patterns.contains(&(base.clone(), folder.to_string())), "{folder}: {patterns:?}");
+        }
+
+        let heads = registrations.head_paths();
+        let options: DidChangeWatchedFilesRegistrationOptions =
+            serde_json::from_value(slot_watch_registration(&heads).unwrap().register_options.unwrap()).unwrap();
+        let uri = |path: &Path| crate::workspace::file_path_to_uri(path).unwrap().as_str().to_string();
+        assert_eq!(
+            relative_patterns(&options),
+            vec![(uri(&repo.join(".git")), "HEAD".to_string()), (uri(&repo.join(".git/refs/heads")), "main".to_string())]
+        );
+    }
+
+    /// A folder watch names no extension, so a host's JSON artifacts beside
+    /// its YAML members are seen like them.
+    #[test]
+    fn a_folder_watch_covers_json_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let folders = [WatchedFolder::present(temp.path().join("schemas"))];
+        let options: DidChangeWatchedFilesRegistrationOptions =
+            serde_json::from_value(schema_watch_registration(&folders).unwrap().register_options.unwrap()).unwrap();
+        let (_, pattern) = relative_patterns(&options).remove(0);
+        let glob = globset::Glob::new(&pattern).unwrap().compile_matcher();
+        for name in ["schemas/globals.lifecycle.json", "schemas/functions.facts.json", "schemas/globals.yaml"] {
+            assert!(glob.is_match(name), "{name} against {pattern}");
+        }
     }
 
     fn relative_patterns(options: &DidChangeWatchedFilesRegistrationOptions) -> Vec<(String, String)> {

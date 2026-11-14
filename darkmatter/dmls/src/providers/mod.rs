@@ -33,6 +33,7 @@ pub mod wiki;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
+use std::sync::Arc;
 
 use lsp_types::{
     CompletionItem, Diagnostic, DocumentHighlight, DocumentLink, DocumentSymbol, FoldingRange,
@@ -80,6 +81,11 @@ pub struct DocumentContext<'a> {
     /// The document's file-resolution context, or why it has none. Every
     /// file reference resolves through it; with a failure, none resolves.
     pub resolution: &'a DocumentResolution,
+    /// The host view of a document whose overlay carries none (no
+    /// frontmatter), selected by the server under its configuration's
+    /// installed registrations ([`OverlayState::unframed_host`](crate::overlay::OverlayState::unframed_host)).
+    /// `None` outside a server, where [`Self::host_view`] falls back.
+    pub host: Option<Arc<crate::overlay::hosts::HostView>>,
 }
 
 impl DocumentContext<'_> {
@@ -92,6 +98,21 @@ impl DocumentContext<'_> {
     /// filesystem; `None` when the document has no context.
     pub fn resolve_reference(&self, raw: &str) -> Option<ReferenceTarget> {
         self.file_context().ok().map(|context| resolve_reference(context, raw))
+    }
+
+    /// The host this document is analyzed as: the view its overlay's schema
+    /// preparation selected, else the one the server selected for a
+    /// document without frontmatter ([`Self::host`]). With neither (a
+    /// context built outside a server) a document is given its schema
+    /// roots' legacy view, read now; one with no context, the `md` host.
+    pub fn host_view(&self) -> Arc<crate::overlay::hosts::HostView> {
+        if let Some(view) = self.overlay.and_then(|overlay| overlay.host.as_ref()).or(self.host.as_ref()) {
+            return Arc::clone(view);
+        }
+        Arc::new(match self.file_context() {
+            Ok(context) => crate::overlay::hosts::HostView::unregistered(context),
+            Err(_) => crate::overlay::hosts::HostView::md(),
+        })
     }
 }
 
@@ -527,9 +548,9 @@ impl ProviderRegistry {
 
     /// Diagnostics: union (namespaced sources prevent collisions).
     ///
-    /// The lifecycle host is discovered once for the pass and shared by every
-    /// provider that [reads it](Provider::reads_lifecycle_host); each request
-    /// discovers afresh.
+    /// The lifecycle host is read once for the pass from the document's
+    /// selected host view ([`DocumentContext::host_view`]) and shared by
+    /// every provider that [reads it](Provider::reads_lifecycle_host).
     pub fn diagnostics(&self, ctx: &DocumentContext) -> Vec<Diagnostic> {
         self.diagnostics_discovering(ctx, pass_lifecycle_host)
     }
@@ -558,7 +579,7 @@ impl ProviderRegistry {
 
 /// The lifecycle host of one diagnostics pass. Only a document with
 /// frontmatter has lifecycle stacks to check, so one without is given the
-/// `md` host and no discovery runs, as none ran before discovery was shared.
+/// `md` host and no legacy view is read for it.
 fn pass_lifecycle_host(ctx: &DocumentContext) -> LifecycleHost {
     if ctx.overlay.is_none() {
         return LifecycleHost::md();

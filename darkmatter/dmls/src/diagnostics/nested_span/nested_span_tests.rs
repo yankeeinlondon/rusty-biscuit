@@ -65,6 +65,7 @@ fn with_ctx<R>(text: &str, version: i32, f: impl FnOnce(&DocumentContext) -> R) 
         profile: &profile,
         overlay: overlay.as_ref(),
         resolution: &crate::context::test_support::resolution_for(path),
+        host: None,
     };
     f(&ctx)
 }

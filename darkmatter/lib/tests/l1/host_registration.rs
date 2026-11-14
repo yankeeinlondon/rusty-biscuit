@@ -417,6 +417,7 @@ fn entries_naming_one_manifest_load_it_once() {
             index: 0,
             declared_in: fixture.path("repo/.darkmatter.yaml"),
             revision: ConfigRevision::RepositoryWorktree,
+            at: None,
         },
     ];
     let loaded = load_entries(&entries, &fixture.context(), md_owned_names());

@@ -5,6 +5,8 @@
 //! definition, otherwise a root `$schema` is the contract, and a document
 //! with neither is not validated
 //! ([`DarkmatterSchemas::prepare_yaml_contract`](darkmatter::markdown::schemas::DarkmatterSchemas::prepare_yaml_contract)).
+//! A configuration file is judged by its location's contract instead
+//! ([`crate::config_contracts`]), whatever its `kind` or `$schema`.
 //! Selection, schema resolution, validator compilation, and every other step
 //! that reads a file run on the registry worker, beside the document's kind
 //! registry ([`super::yaml_contract`]); this module only looks the prepared
@@ -81,10 +83,11 @@ impl YamlDocumentOverlay {
         }
     }
 
-    /// Whether the document's `kind` selected its schema, so its root
-    /// `$schema` (if any) is data rather than a reference.
+    /// Whether the document's `kind` or its location as a configuration
+    /// file selected its schema, so its root `$schema` (if any) is data
+    /// rather than a reference.
     pub fn kind_route(&self) -> bool {
-        matches!(self.validation().map(|validation| &validation.route), Some(Route::Kind(_)))
+        matches!(self.validation().map(|validation| &validation.route), Some(Route::Kind(_) | Route::Configuration))
             || matches!(&self.outcome, YamlDocumentOutcome::Failed(error) if matches!(**error, SchemaError::KindSelection { .. }))
     }
 }
@@ -266,6 +269,10 @@ fn bundle(validation: &YamlValidation) -> SchemaBundle {
         && let serde_json::Value::Object(map) = &mut document
     {
         map.shift_remove("$schema");
+    }
+    // An empty configuration file is judged as an empty mapping.
+    if validation.route == Route::Configuration && document.is_null() {
+        document = serde_json::Value::Object(serde_json::Map::new());
     }
     SchemaBundle {
         advisories: effective.advisories().to_vec(),

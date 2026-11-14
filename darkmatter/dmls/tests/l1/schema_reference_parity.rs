@@ -303,6 +303,7 @@ impl NavigationFixture {
             profile: &self.profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
         let start = case
             .text

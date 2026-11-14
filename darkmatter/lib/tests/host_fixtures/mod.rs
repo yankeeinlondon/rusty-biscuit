@@ -281,6 +281,7 @@ impl Fixture {
             index,
             declared_in: self.path("home/.darkmatter.yaml"),
             revision: ConfigRevision::User,
+            at: None,
         }
     }
 

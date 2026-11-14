@@ -188,6 +188,9 @@ pub struct Registration {
     pub declared_in: PathBuf,
     #[allow(missing_docs)]
     pub revision: ConfigRevision,
+    /// The 1-based line and character column of the entry in
+    /// [`Self::declared_in`], when known.
+    pub at: Option<(usize, usize)>,
 }
 
 /// The valid registrations of the user file and the repository working
@@ -986,6 +989,7 @@ fn registrations(
                 index,
                 declared_in: context.path.to_path_buf(),
                 revision: context.revision,
+                at: (context.locate)(&entry_path("register", index)),
             }),
         }
     }

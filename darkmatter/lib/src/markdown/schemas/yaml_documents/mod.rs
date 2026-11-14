@@ -17,6 +17,11 @@
 //! `yaml-schema`) then get the checks their definitions cannot state, in the
 //! same report.
 //!
+//! A configuration file has no mandatory `kind`, so a caller that knows a
+//! document is one (DMLS, by its exact location) prepares the configuration
+//! schema it chose with [`DarkmatterSchemas::prepare_configuration_contract`]
+//! instead, and that document's `kind` and `$schema` select nothing.
+//!
 //! The user-facing contract is the "YAML documents" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
 
@@ -56,6 +61,11 @@ pub enum Route {
     Kind(String),
     /// No claimed `kind`; its root `$schema` was the contract.
     RootSchema,
+    /// The document is a configuration file, selected by its path before
+    /// any `kind` or `$schema` was consulted
+    /// ([`DarkmatterSchemas::prepare_configuration_contract`]). Its `kind`
+    /// and `$schema`, if authored, are data the contract judges.
+    Configuration,
 }
 
 /// The result of validating one YAML document.
@@ -250,6 +260,40 @@ impl DarkmatterSchemas {
     }
 }
 
+impl DarkmatterSchemas {
+    /// Prepares `resolved`, the configuration schema the caller selected for
+    /// the YAML document at `path` by its location, as that document's
+    /// contract ([`Route::Configuration`]). `definition` names the schema in
+    /// reports. No kind registry, `kind`, or `$schema` is consulted, and an
+    /// empty document is judged as an empty mapping.
+    ///
+    /// ## Errors
+    ///
+    /// Validator-construction errors.
+    pub fn prepare_configuration_contract(
+        &self,
+        resolved: simplified_schema::resolve::ResolvedSchema,
+        definition: impl Into<String>,
+        path: &Path,
+    ) -> Result<YamlContract, SchemaError> {
+        let context = &self.file_resolution_context;
+        let base_dir = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map_or_else(|| context.cwd().to_path_buf(), Path::to_path_buf);
+        crate::note_work!(YamlContractPreparation);
+        let effective = EffectiveSchema::for_yaml_document(resolved, base_dir, self)?;
+        effective.prepare_conversion();
+        Ok(YamlContract {
+            route: Route::Configuration,
+            definition: definition.into(),
+            effective: Arc::new(effective),
+            schema_roots: Vec::new(),
+            context: context.clone(),
+        })
+    }
+}
+
 /// The schema a whole YAML document selected, prepared and compiled
 /// ([`DarkmatterSchemas::prepare_yaml_contract`]), ready to judge the
 /// document's text.
@@ -303,6 +347,10 @@ impl YamlContract {
     pub fn validate(&self, document: &LoadedYamlDocument) -> YamlValidation {
         let loaded = document.loaded();
         let mut instance = loaded.json.clone();
+        // A newly created, still empty configuration file keeps every default.
+        if self.route == Route::Configuration && instance.is_null() {
+            instance = serde_json::Value::Object(serde_json::Map::new());
+        }
         if self.route == Route::RootSchema
             && let serde_json::Value::Object(map) = &mut instance
         {

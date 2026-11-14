@@ -17,7 +17,8 @@ This page covers:
 - [which host a document belongs to](#selecting-a-documents-host),
 - [how the host's schemas layer](#layering) into the document's schema,
 - [what `md compose` does](#md-compose-of-a-hosts-document) with a document
-  a registered host identifies, and
+  a registered host identifies,
+- [what the editor shows](#in-the-editor-dmls) for one, and
 - [what is reported](#diagnostics) when something cannot be used.
 
 ## Registering a host
@@ -41,6 +42,13 @@ only: it never writes a file, fetches a URL, prompts, runs a command, or
 installs a function handler, and it grants no permission. A repository may
 register a host (a team's in-house tool) because it gains nothing a
 repository's own `schemas/` folder could not already do.
+
+A host program usually adds its own entry during its setup, through
+`darkmatter::config::init::register_manifest`. That call keeps every
+existing entry, value, and comment. It adds nothing when an entry already
+names the same manifest file, however it is spelled (`~/…` or an absolute
+path). The manifest must already exist. Claudine's setup works this way:
+it publishes `~/.claudine/darkmatter-host.yaml`, then registers it.
 
 ## The manifest
 
@@ -174,7 +182,10 @@ The rules a load follows:
   artifact records.
 - **Each file once.** Every member and every file it imports is read once
   for the whole load and listed in `dependencies()` with the BLAKE3 hash of
-  its bytes, so a caller (DMLS) knows what to watch.
+  its bytes, so a caller (DMLS) knows what to watch. A refused profile has
+  none; `manifest_member_candidates(manifest, context)` lists every location
+  its manifest's members are looked for, existing or not, so a caller can
+  watch for the missing member to appear.
 - **One manifest, one load.** Entries that resolve to the same canonical
   manifest, from the user file and the repository file, or spelled two ways,
   load it once; `entries()` lists every entry that named it.
@@ -201,11 +212,12 @@ Every diagnostic but `dm.host.foreign_document` (a notice, below) is a
 warning. It names the entry (the declaring file and
 its index in `register`), the failing manifest field when one failed
 (`lifecycle`, `triggers[1]`, `functions[0].facts`), and the file, line, and
-column of the problem when known: the configuration file when the manifest
-cannot be found, the manifest for its own shape or a member it cannot
-resolve, and the member file for a member that does not load.
+column of the problem when known: the configuration file, at the entry, when
+the manifest cannot be found, the manifest for its own shape or a member it
+cannot resolve, and the member file for a member that does not load.
 `markdown::compose::report_diagnostics::registration_diagnostic` turns one
-into the record `md` reports. DMLS reporting is **planned**.
+into the record `md` reports. DMLS reports them on the documents they affect;
+see [In the editor (DMLS)](#in-the-editor-dmls).
 
 `md` loads the registrations once per run (per repository a run's documents
 resolve in) and reports each distinct warning once: on stderr for a formatted
@@ -219,6 +231,7 @@ also report the selection warnings of the documents they judge.
 | `dm.host.identify_too_broad` | the identifying trigger could match on keys `md` owns alone |
 | `dm.host.ambiguous` | two or more hosts identify the same document; it is analyzed as an `md` document |
 | `dm.host.foreign_document` | `md compose` composes a document a registered host identifies; an `info` notice, once per run, naming the host's own command (see [below](#md-compose-of-a-hosts-document)) |
+| `dm.lifecycle.unknown_host` | DMLS only: a root key of a document no registered host identifies is a lifecycle event only a registered host has (see [below](#in-the-editor-dmls)) |
 
 ## Selecting a document's host
 
@@ -417,3 +430,132 @@ foreign_deferred_keys}` give the shared events, the frontmatter `md` parses a
 lifecycle from, and the deferred keys. A caller with its own host globals
 (`with_host_globals`, Claudine) is unaffected: `with_selected_host` leaves
 its options unchanged.
+
+## In the editor (DMLS)
+
+DMLS, the Darkmatter language server, analyzes each Markdown document under
+the one host [selection](#selecting-a-documents-host) chooses for it, and
+every editor feature reads that same choice: schema validation (with the
+registered host's triggers [layered](#layering) in), completion and hover of
+the host's globals, the host's lifecycle stacks (its events, renames, and
+verbs), and the typing of calls to the host's functions. No feature looks
+for host catalogs or registrations on its own.
+
+For the Claudine-shaped `relay` host registered in `~/.darkmatter.yaml`, a
+document anywhere (inside the host's package area or not) that writes
+`sequence:` is a `relay` document:
+
+```yaml
+---
+sequence:
+    - name: one
+      prompt: hi
+start:
+    - info: "{{ err.message }}"   # error: `err` is unavailable in `start`
+---
+{{ seq.name }}                     # completes and hovers from the relay's catalog
+```
+
+- **Registrations load once per configuration.** DMLS reads the home's and
+  the repository's configuration files read-only, the way `md` does, and
+  loads their `register` entries off the request thread: it never migrates a
+  legacy file, writes, prompts, or fetches. Every document whose context
+  projects the same configuration shares the result. Startup loads the
+  configuration of every workspace folder; a document with frontmatter
+  elsewhere loads its own before it is analyzed.
+- **A document without frontmatter gets the same choice.** It is analyzed
+  as if its frontmatter were empty, under the installed registrations, so a
+  registered host's root catalog is never its legacy catalog. It never waits
+  for a load: until its configuration's registrations are loaded it is an
+  `md` document, and it is refreshed when they are.
+- **The choice is made once per schema preparation** and kept with the
+  document's schema until the text, the schema inputs, the context, or the
+  registrations change. Its revision is part of the schema's cache identity
+  and of the document's analysis snapshot, so a changed host install is
+  never answered from facts prepared for another.
+- **A broken replacement is not hidden.** When a manifest or a member
+  changes so that the registration no longer loads, the host's view is
+  dropped at once: the document is analyzed as `md` (or its legacy catalog,
+  when one applies), and the new `dm.host.registration` warning appears on
+  the file that is wrong. A file that is saved with the same bytes changes
+  nothing.
+- **Ambiguity never falls back.** A document two registered hosts identify
+  gets one `dm.host.ambiguous` warning and `md` analysis, never a legacy
+  catalog's.
+
+### Where the warnings appear
+
+A warning about a registration is published on the file that has the
+problem, at its line and column, whether that file is open or not. A warning
+about how one document was analyzed is published on that document:
+
+| Code | Where |
+| --- | --- |
+| `dm.host.registration`, `dm.host.identify_too_broad` for a refused entry | on the file the problem is in: the configuration file, at the `register` entry naming a manifest that cannot be found, the manifest for its own shape or a member it cannot resolve, otherwise the member |
+| `dm.host.registration` for two manifests claiming one host | on each manifest, and again at the top of every document such a host identifies |
+| `dm.host.ambiguous` | at the top of a document two or more hosts identify |
+| `dm.lifecycle.unknown_host` | at a root key that is a host-only lifecycle event of a registered host which did not identify the document |
+
+An open file keeps its own diagnostics beside these. For example, an open
+`~/.darkmatter.yaml` with an unsaved `network: sometimes` and an entry naming
+a manifest that is not there shows both the configuration's own
+`dm.schema.constraint` error and the entry's `dm.host.registration` warning.
+When the problem is fixed, the warning is cleared from the file.
+
+### Changes are followed without a restart
+
+DMLS watches everything a registration is loaded from, wherever it lives:
+
+- both configuration files, `~/.darkmatter.yaml` and
+  `<repo-root>/.darkmatter.yaml`, whether or not they exist;
+- every manifest, member, imported file, and companion artifact, YAML and
+  JSON alike, and the folders they are in, so a member that is missing
+  is seen when it is created;
+- the place a `register` entry points at when no manifest is there yet;
+- the repository's `HEAD` and the branch it names, because the repository
+  file's permissions count only as committed (see
+  [configuration](./configuration.md#the-repository-file-at-head-and-in-the-working-copy)),
+  so a commit or a checkout can change what loads.
+
+A watched change reloads the registrations of every configuration that read
+the file and refreshes every open document they serve. A file the watch
+reports with the same bytes keeps everything as it was. The same handling
+covers every way an editor or a tool changes a file:
+
+```mermaid
+flowchart LR
+    A[file created, changed, deleted,<br/>or replaced by a rename] --> B{bytes differ from<br/>what the load read?}
+    B -- no --> C[nothing changes]
+    B -- yes --> D[reload the configuration's registrations]
+    D --> E[refresh every open document;<br/>publish or clear warnings on the files they name]
+```
+
+For example, deleting `globals.lifecycle.json` of a registered host drops
+the host from its documents and puts a `dm.host.registration` warning on the
+manifest; restoring the file brings the host back and clears the warning.
+Adding a `register` entry to `~/.darkmatter.yaml` registers the host for
+every open document of that configuration, and removing it unregisters it.
+
+An editor that cannot watch folders outside the workspace makes DMLS reload
+the registrations on every save instead.
+
+DMLS shows a missing `~/.darkmatter.yaml` once per session as a message
+naming `md init`; it never creates the file (see
+[configuration](./configuration.md#how-dmls-reports-configuration)).
+
+`dm.lifecycle.unknown_host` explains a stack that does nothing. With the
+`relay` host registered, a document without `sequence:` or `start:` is not a
+relay document, so its `success:` is ordinary data:
+
+```yaml
+---
+title: notes
+success:          # warning: `success` is a lifecycle event of `relay`, which
+    - info: done  # does not identify this document
+my_data: 1        # no warning: no registered host uses `my_data`
+---
+```
+
+Keys `md` shares with every host (`initialize`, `cancelled`, `finalize`) and
+keys no registered host uses as an event are never reported.
+

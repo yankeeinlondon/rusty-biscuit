@@ -115,8 +115,10 @@ pub(crate) struct AnalysisIdentity {
     /// the tree is fresh).
     pub tree_text_hash: u64,
     /// The schema-cache key overlay preparation computed (text,
-    /// configuration, trigger-registry version, and context identity), or
-    /// `None` when assembly was skipped.
+    /// configuration, trigger-registry version, registered-hosts version, and
+    /// context identity), or `None` when assembly was skipped. A replaced
+    /// host registration changes it, so a snapshot never outlives the host
+    /// view it was analyzed under.
     pub schema_key: Option<u64>,
     pub bundle: Option<Arc<SchemaBundle>>,
     pub named_types: Arc<NamedTypeCatalog>,

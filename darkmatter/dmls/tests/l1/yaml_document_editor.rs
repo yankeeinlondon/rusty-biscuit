@@ -113,6 +113,7 @@ impl Probe {
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
         inspect(&ctx)
     }

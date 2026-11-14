@@ -12,6 +12,10 @@
 //! files its named types import. Building the document's overlay only looks it up and
 //! judges the current data against it, passively.
 //!
+//! A configuration file ([`ConfigurationFile::select`]) is prepared against
+//! its location's compiled-in contract before, and instead of, kind or
+//! `$schema` selection; it reads no file.
+//!
 //! An entry is keyed on what it was prepared from: the document's
 //! declaration (its authored `kind` and root `$schema`,
 //! [`LoadedYamlDocument::declaration_key`]), its context, and its kind
@@ -52,6 +56,7 @@ use simplified_schema::resolve::observed;
 use simplified_schema::{SchemaError, parse_selected_standalone_schema_document};
 
 use super::references::SchemaReferenceFacts;
+use crate::config_contracts::ConfigurationFile;
 use crate::context::DocumentResolution;
 use super::registry::InstalledKinds;
 use super::yaml_document::{hash_files, present, source_hash};
@@ -455,6 +460,19 @@ fn prepare(
     };
     let outer_context = context;
     let context = context.for_source(path);
+    // A configuration file's contract is fixed by its location; its `kind`
+    // and `$schema` are data, and no registry is consulted.
+    if let Some(file) = ConfigurationFile::select(path, outer_context) {
+        prepared.contract = file
+            .resolved()
+            .and_then(|resolved| {
+                DarkmatterSchemas::new(context.clone())
+                    .prepare_configuration_contract(resolved.clone(), file.definition(), path)
+                    .map_err(Arc::new)
+            })
+            .map(Some);
+        return prepared;
+    }
     let registry = kinds.map_or_else(darkmatter::markdown::schemas::shipped_kind_registry, |kinds| kinds.registry);
     let schema_roots = registry.roots().search_paths().to_vec();
     let schemas = DarkmatterSchemas::new(context.clone()).with_kind_registry(registry);

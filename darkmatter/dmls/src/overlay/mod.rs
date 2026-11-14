@@ -21,6 +21,7 @@ pub mod doc_links;
 pub mod event_views;
 pub mod expressions;
 pub mod frontmatter;
+pub mod hosts;
 pub mod named_types;
 pub mod references;
 pub mod registry;
@@ -231,6 +232,12 @@ pub struct DocumentOverlay {
     /// Set when the document's schema is a template (its `$schema` or a
     /// matched trigger payload holds `{{ … }}` slots); see [`SlotStatus`].
     pub slots: Option<SlotStatus>,
+    /// The host the Markdown document is analyzed as, selected once when
+    /// its schema was prepared; `None` for every other document and for a
+    /// document with no context, which
+    /// [`DocumentContext::host_view`](crate::providers::DocumentContext::host_view)
+    /// serves without selection.
+    pub host: Option<Arc<hosts::HostView>>,
 }
 
 /// How a template schema is being served to a request.
@@ -308,6 +315,7 @@ impl DocumentOverlay {
             analysis: Arc::new(FrontmatterAnalysis::detached()),
             yaml_document: None,
             slots: None,
+            host: None,
         }
         .with_yaml(yaml)
     }
@@ -381,6 +389,23 @@ struct OverlayCache {
     /// Each open YAML document's prepared contract, by path (see
     /// [`yaml_contract`]).
     contracts: yaml_contract::YamlContracts,
+    /// The registered hosts of every configuration the documents' contexts
+    /// project, prepared off the dispatch thread beside the trigger
+    /// registries.
+    hosts: hosts::HostRegistrations,
+    /// The host view of each document whose overlay carries none, by path
+    /// ([`OverlayState::unframed_host`]).
+    unframed_hosts: HashMap<PathBuf, CachedUnframedHost>,
+}
+
+/// A cached [`OverlayState::unframed_host`] view, valid while its key (the
+/// context and the installed registrations) and the legacy catalogs it read
+/// are unchanged.
+struct CachedUnframedHost {
+    key: u64,
+    deps: Vec<(PathBuf, u64)>,
+    probes: Vec<(PathBuf, bool)>,
+    view: Arc<hosts::HostView>,
 }
 
 /// A document's trigger registry that is not fresh: what
@@ -441,6 +466,7 @@ struct CachedSchema {
     reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
     file_failures: FileFailures,
     slots: Option<SlotStatus>,
+    host: Option<Arc<hosts::HostView>>,
 }
 
 /// What [`OverlayCache::schema_for`] assembled for a Markdown document.
@@ -454,6 +480,9 @@ struct FrontmatterSchema {
     /// assembly was skipped.
     key: Option<u64>,
     slots: Option<SlotStatus>,
+    /// The document's selected host, chosen with the outcome; `None` with
+    /// no context.
+    host: Option<Arc<hosts::HostView>>,
 }
 
 impl FrontmatterSchema {
@@ -466,6 +495,7 @@ impl FrontmatterSchema {
             file_failures: FileFailures::default(),
             key: None,
             slots: None,
+            host: None,
         }
     }
 }
@@ -601,6 +631,7 @@ impl OverlayState {
                 file_failures,
                 key: schema_key,
                 slots: slot_status,
+                host,
             } =
                 timings.time(Stage::SchemaAssembly, || {
                     cache.schema_for(
@@ -667,6 +698,7 @@ impl OverlayState {
                 analysis,
                 yaml_document: None,
                 slots: slot_status,
+                host,
             });
         }
 
@@ -731,6 +763,7 @@ impl OverlayState {
                         analysis: Arc::new(FrontmatterAnalysis::detached()),
                         yaml_document: None,
                         slots: None,
+                        host: None,
                     });
                 }
                 // The selected definition's report owns the shape of a
@@ -762,6 +795,7 @@ impl OverlayState {
                             analysis: Arc::new(FrontmatterAnalysis::detached()),
                             yaml_document: None,
                             slots: None,
+                            host: None,
                         });
                     }
                 }
@@ -824,6 +858,7 @@ impl OverlayState {
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
                     yaml_document: None,
                     slots: None,
+                    host: None,
                 });
             }
             Ok(None) if claim.is_none() => {}
@@ -879,6 +914,7 @@ impl OverlayState {
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
                     yaml_document: None,
                     slots: None,
+                    host: None,
                 });
             }
         }
@@ -897,6 +933,7 @@ impl OverlayState {
         cache.analysis.remove(uri.as_str());
         cache.yaml_documents.remove(uri.as_str());
         if let Some(path) = crate::workspace::uri_to_file_path(uri) {
+            cache.unframed_hosts.remove(&path);
             cache.contracts.forget(&path);
             self.slots.forget(&path);
         }
@@ -942,6 +979,7 @@ impl OverlayState {
     pub fn invalidate_trigger_inputs(&self, paths: &[PathBuf]) {
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.invalidate_paths(paths);
+        cache.hosts.invalidate_paths(paths);
         let OverlayCache { triggers, contracts, .. } = &mut *cache;
         contracts.invalidate_paths(paths, triggers.source_buffers());
     }
@@ -951,6 +989,7 @@ impl OverlayState {
     pub fn invalidate_all_trigger_registries(&self) {
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.invalidate_all();
+        cache.hosts.invalidate_all();
         cache.contracts.invalidate_all();
     }
 
@@ -961,6 +1000,123 @@ impl OverlayState {
         let mut folders = cache.triggers.watch_folders();
         folders.extend(cache.contracts.watch_folders());
         folders
+    }
+
+    /// Marks stale every host registration a change at one of `paths` can
+    /// affect: a configuration file, a manifest, or a file a manifest names
+    /// or imports. Each recorded file is re-read and compared with its
+    /// recorded BLAKE3 hash, so an unchanged file keeps the installed
+    /// registrations (and every document's selected host). Also done by
+    /// [`invalidate_trigger_inputs`](Self::invalidate_trigger_inputs).
+    pub fn invalidate_host_inputs(&self, paths: &[PathBuf]) {
+        self.inner.lock().expect("overlay lock poisoned").hosts.invalidate_paths(paths);
+    }
+
+    /// Marks every host registration stale. Also done by
+    /// [`invalidate_all_trigger_registries`](Self::invalidate_all_trigger_registries).
+    pub fn invalidate_all_hosts(&self) {
+        self.inner.lock().expect("overlay lock poisoned").hosts.invalidate_all();
+    }
+
+    /// The folders the installed host registrations read from or searched
+    /// (configuration files, manifests, members, imports, and a refused
+    /// entry's candidate manifests), for registration watches. A lookup only.
+    pub fn host_watch_folders(&self) -> std::collections::BTreeSet<crate::workspace::watch::WatchedFolder> {
+        self.inner.lock().expect("overlay lock poisoned").hosts.watch_folders()
+    }
+
+    /// Every file the installed host registrations read or searched for.
+    pub fn host_dependencies(&self) -> std::collections::BTreeSet<PathBuf> {
+        self.inner.lock().expect("overlay lock poisoned").hosts.dependencies()
+    }
+
+    /// Each repository's `HEAD` and the branch ref it names, which the
+    /// installed registrations depend on and which are watched by path.
+    pub fn host_head_paths(&self) -> std::collections::BTreeSet<PathBuf> {
+        self.inner.lock().expect("overlay lock poisoned").hosts.head_paths()
+    }
+
+    /// The configuration-level registration warnings (refused entries and
+    /// same-host conflicts) of every installed configuration, each distinct
+    /// record once. The server publishes each on the file it names.
+    pub fn host_registration_diagnostics(&self) -> Vec<darkmatter::config::registration::RegistrationDiagnostic> {
+        self.inner.lock().expect("overlay lock poisoned").hosts.diagnostics()
+    }
+
+    /// Advances whenever an install changes any configuration's
+    /// registrations, so the server can refresh every open document once.
+    pub fn hosts_generation(&self) -> u64 {
+        self.inner.lock().expect("overlay lock poisoned").hosts.generation()
+    }
+
+    /// The session-level notices of the installed configurations' passive
+    /// loads (a missing user file, a legacy policy file awaiting migration).
+    pub fn host_config_notices(&self) -> std::collections::BTreeSet<hosts::ConfigNotice> {
+        self.inner.lock().expect("overlay lock poisoned").hosts.notices()
+    }
+
+    /// The host a document whose overlay carries none is analyzed as: the
+    /// same selection a document with frontmatter gets, over an empty
+    /// frontmatter, under its configuration's installed registrations (so a
+    /// registered host's catalog is never its legacy catalog). Until those
+    /// registrations are installed it is `md`, never an unfiltered legacy
+    /// view; the install refreshes it. A whole YAML document has no body
+    /// for a host to apply to, and gets `md`. A lookup that never waits:
+    /// cached per path until the context, the registrations, or a legacy
+    /// catalog it read changes.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when the document has no context.
+    pub fn unframed_host(&self, path: &Path, resolution: &DocumentResolution) -> Option<Arc<hosts::HostView>> {
+        let context = resolution.context().ok()?;
+        if is_yaml_path(path) {
+            return Some(Arc::new(hosts::HostView::md()));
+        }
+        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        let Some(installed) = cache.hosts.lookup(context) else {
+            return Some(Arc::new(hosts::HostView::md()));
+        };
+        let installed = Some(installed);
+        let key = file_resolution_context_identity(context)
+            ^ xx_hash_bytes(resolution.generation().to_string().as_bytes())
+            ^ installed.as_ref().map_or(0, |installed| hosts_key_part(installed.version));
+        if let Some(cached) = cache.unframed_hosts.get(path)
+            && cached.key == key
+            && deps_unchanged(&cached.deps)
+            && probes_unchanged(&cached.probes)
+        {
+            return Some(Arc::clone(&cached.view));
+        }
+        let empty = serde_json::Value::Object(serde_json::Map::new());
+        let view = Arc::new(hosts::HostView::select(installed.as_ref(), &empty, path, context));
+        let (files, probes) = view.legacy_inputs();
+        let entry = CachedUnframedHost {
+            key,
+            deps: hash_files(files.iter()),
+            probes: probes.iter().map(|probe| (probe.clone(), probe.is_file())).collect(),
+            view: Arc::clone(&view),
+        };
+        cache.unframed_hosts.insert(path.to_path_buf(), entry);
+        Some(view)
+    }
+
+    /// Loads the registered hosts of `context`'s configuration unless they
+    /// are fresh. Passive: never migrates, writes, prompts, or fetches. The
+    /// overlay lock is held only to begin and to install, never across the
+    /// load.
+    ///
+    /// ## Returns
+    ///
+    /// Whether the registrations are fresh afterwards; `false` when a change
+    /// arrived during the load and touched what it read.
+    pub fn prepare_hosts(&self, context: &FileResolutionContext) -> bool {
+        let preparation = self.inner.lock().expect("overlay lock poisoned").hosts.begin(context);
+        let Some(preparation) = preparation else {
+            return true;
+        };
+        let prepared = preparation.run();
+        self.inner.lock().expect("overlay lock poisoned").hosts.install(prepared)
     }
 
     /// The probe documents of the workspace scopes (see [`workspace_probes`]),
@@ -990,9 +1146,12 @@ impl OverlayState {
 
     /// Prepares one of the [`workspace_probes`](Self::workspace_probes) in
     /// its folder's current context, through
-    /// [`prepare_registry_held`](Self::prepare_registry_held) with `hold`. A
-    /// registry that is still fresh is not prepared again, and a folder
-    /// whose context cannot be built is skipped (and reported
+    /// [`prepare_registry_held`](Self::prepare_registry_held) with `hold`,
+    /// after its configuration's host registrations (so a document without
+    /// frontmatter there, which never waits for them, finds them installed,
+    /// and a changed manifest's warnings are published with no document
+    /// open). A registry that is still fresh is not prepared again, and a
+    /// folder whose context cannot be built is skipped (and reported
     /// [`Failed`](ProbeOutcome::Failed)), since its documents report the
     /// context failure.
     pub fn prepare_workspace_probe(
@@ -1004,7 +1163,10 @@ impl OverlayState {
     ) -> ProbeOutcome {
         let resolution = contexts.for_document(probe);
         match resolution.context() {
-            Ok(context) => self.run_preparation(probe, workspace_roots, context, hold).0,
+            Ok(context) => {
+                self.prepare_hosts(context);
+                self.run_preparation(probe, workspace_roots, context, hold).0
+            }
             Err(_) => ProbeOutcome::Failed,
         }
     }
@@ -1051,16 +1213,23 @@ impl OverlayState {
         self.workspace_repositories.lock().expect("repository list lock poisoned").clone()
     }
 
-    /// The trigger registry, and for a whole YAML document the contract,
-    /// the document at `path` with source `text` needs prepared, or `None`
-    /// when it needs neither or both are fresh. A lookup only: it reads
-    /// nothing from disk.
+    /// The trigger registry, the host registrations, and for a whole YAML
+    /// document the contract, the document at `path` with source `text`
+    /// needs prepared, or `None` when it needs none or all are fresh. A
+    /// lookup only: it reads nothing from disk.
     ///
     /// A document needs a registry when [`for_document_timed`](Self::for_document_timed)
     /// would look one up: it has a frontmatter block or is a YAML document,
-    /// and it lies in a workspace folder and has a context. A YAML document
+    /// and it lies in a workspace folder and has a context. A Markdown
+    /// document with frontmatter and a context needs its configuration's
+    /// host registrations, inside a workspace folder or not. A YAML document
     /// with a context needs its contract prepared for its current
     /// declaration ([`yaml_contract`]), inside a workspace folder or not.
+    ///
+    /// A document without frontmatter never waits: it is analyzed under
+    /// the registrations installed for its configuration
+    /// ([`unframed_host`](Self::unframed_host)), which the workspace
+    /// preparation loads for every workspace scope.
     pub fn registry_demand(
         &self,
         text: &str,
@@ -1076,10 +1245,13 @@ impl OverlayState {
         }
         let context = resolution.context().ok()?;
         let bounded = schema::trigger_boundary(path, workspace_roots).is_some();
-        if !bounded && !yaml {
+        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        // Every Markdown document with frontmatter and a context selects its
+        // host, inside a workspace folder or not.
+        let hosts_stale = !yaml && !cache.hosts.is_fresh(context);
+        if !bounded && !yaml && !hosts_stale {
             return None;
         }
-        let mut cache = self.inner.lock().expect("overlay lock poisoned");
         let registry_stale = bounded && !cache.triggers.is_fresh(path, context);
         // A stale registry is prepared first, and the contract after it.
         let contract_stale = yaml && !registry_stale && {
@@ -1089,18 +1261,22 @@ impl OverlayState {
                 .key(text, path, context, resolution.generation(), kinds.as_ref())
                 .is_some_and(|key| !cache.contracts.is_fresh(path, key))
         };
-        (registry_stale || contract_stale).then(|| RegistryNeed {
+        (registry_stale || contract_stale || hosts_stale).then(|| RegistryNeed {
             path: path.to_path_buf(),
             context: context.clone(),
             yaml: yaml.then(|| YamlNeed { text: Arc::from(text), generation: resolution.generation() }),
         })
     }
 
-    /// Prepares what `need` names: the document's trigger registry unless
-    /// it is fresh, then a YAML document's contract unless it is fresh. Does
+    /// Prepares what `need` names: a Markdown document's host registrations
+    /// and the document's trigger registry unless they are fresh, then a
+    /// YAML document's contract unless it is fresh. Does
     /// I/O, without holding the overlay lock across it: the server calls it
     /// only off its dispatch thread.
     pub fn prepare_need(&self, need: &RegistryNeed, workspace_roots: &[PathBuf]) {
+        if need.yaml.is_none() {
+            self.prepare_hosts(&need.context);
+        }
         self.prepare_registry(&need.path, workspace_roots, &need.context);
         if let Some(yaml) = &need.yaml {
             self.prepare_yaml_contract(&need.path, yaml, workspace_roots, &need.context);
@@ -1246,6 +1422,7 @@ impl OverlayCache {
             self.schema.remove(uri_key);
             return FrontmatterSchema::new(SchemaOutcome::Ready(None));
         };
+        let installed_hosts = self.hosts.lookup(context);
         let registry = match timings.time(Stage::TriggerRegistry, || {
             validation_timing::part(|| {
                 ValidationStage::Discover.time(|| self.trigger_registry(path, workspace_roots))
@@ -1258,6 +1435,7 @@ impl OverlayCache {
                     Arc::new(SchemaReferenceFacts::select(text, path, Err(&error), context, false));
                 return FrontmatterSchema {
                     schema_references,
+                    host: Some(select_host(text, path, context, installed_hosts.as_ref())),
                     ..FrontmatterSchema::new(SchemaOutcome::Failed(error))
                 };
             }
@@ -1271,7 +1449,10 @@ impl OverlayCache {
         // whose package catalog changed.
         let context_key = file_resolution_context_identity(context)
             ^ xx_hash_bytes(resolution.generation().to_string().as_bytes());
-        let base_key = schema_cache_key(text, config) ^ registry_key ^ context_key;
+        // A replaced registration installs a new version, so the document's
+        // host is selected again and never served from the replaced one.
+        let hosts_key = installed_hosts.as_ref().map_or(0, |installed| hosts_key_part(installed.version));
+        let base_key = schema_cache_key(text, config) ^ registry_key ^ context_key ^ hosts_key;
         // A template is served from the slot worker's installed snapshot, so
         // the key also carries the snapshot's state.
         let view = slots.view(path);
@@ -1292,6 +1473,7 @@ impl OverlayCache {
                 file_failures: Arc::clone(&cached.file_failures),
                 key: Some(key),
                 slots: cached.slots.clone(),
+                host: cached.host.clone(),
             };
         }
         let schema_roots: Vec<PathBuf> = registry
@@ -1307,8 +1489,12 @@ impl OverlayCache {
             Some(session) => schema::SlotUse::Pins(session),
             None => schema::SlotUse::None,
         };
+        let registered = installed_hosts
+            .as_ref()
+            .map(|installed| &installed.hosts)
+            .filter(|hosts| !hosts.is_empty());
         let assembled = validation_timing::part(|| {
-            schema::assemble(path, text, config, workspace_roots, registry, context, slot_use)
+            schema::assemble(path, text, config, workspace_roots, registry, registered, context, slot_use)
         });
         let (outcome, pins_missed, template_shape, template) = match assembled {
             Ok(bundle) => (SchemaOutcome::Ready(bundle.map(Arc::new)), false, None, None),
@@ -1329,7 +1515,7 @@ impl OverlayCache {
                 // a passive assembly that evaluates nothing.
                 None if crate::slot_jobs::is_slot_failure(&error) => {
                     let passive = validation_timing::part(|| {
-                        schema::assemble(path, text, config, workspace_roots, job_registry.clone(), context, schema::SlotUse::None)
+                        schema::assemble(path, text, config, workspace_roots, job_registry.clone(), registered, context, schema::SlotUse::None)
                     });
                     let (shape, template) = match passive {
                         Err(schema::AssemblyError { error: passive, template }) => {
@@ -1378,7 +1564,10 @@ impl OverlayCache {
                 context,
                 matches!(outcome, SchemaOutcome::Ready(_)),
             ));
-        let probes = schema_references.probes();
+        let host = select_host(text, path, context, installed_hosts.as_ref());
+        let (host_files, host_probes) = host.legacy_inputs();
+        let mut probes = schema_references.probes();
+        probes.extend(host_probes.iter().map(|probe| (probe.clone(), probe.is_file())));
         let reference_suggestions = Arc::new(
             FrontmatterAst::parse(text)
                 .and_then(|parse| parse.ast)
@@ -1393,7 +1582,14 @@ impl OverlayCache {
         // them.
         let registry_files: std::collections::HashSet<&Path> =
             registry_files.iter().map(PathBuf::as_path).collect();
-        let deps = collect_dep_hashes(&outcome, &named_types, &schema_references, &registry_files);
+        let mut deps = collect_dep_hashes(&outcome, &named_types, &schema_references, &registry_files);
+        // A YAML file directly in a schema root is the trigger registry's to
+        // track; its change installs a new registry version.
+        let host_files: Vec<PathBuf> = host_files
+            .into_iter()
+            .filter(|file| !(is_yaml_path(file) && file.parent().is_some_and(|folder| schema_roots.iter().any(|root| root == folder))))
+            .collect();
+        deps.extend(hash_files(host_files.iter().chain(&host_probes)));
         let file_failures = match &outcome {
             SchemaOutcome::Failed(error) => file_failures(error),
             SchemaOutcome::Ready(_) => FileFailures::default(),
@@ -1406,6 +1602,7 @@ impl OverlayCache {
             file_failures,
             key: Some(key),
             slots: slot_status,
+            host: Some(host),
         };
         self.schema.insert(
             uri_key.to_string(),
@@ -1419,6 +1616,7 @@ impl OverlayCache {
                 reference_suggestions: Arc::clone(&schema.reference_suggestions),
                 file_failures: Arc::clone(&schema.file_failures),
                 slots: schema.slots.clone(),
+                host: schema.host.clone(),
             },
         );
         schema
@@ -1812,6 +2010,26 @@ fn probes_unchanged(probes: &[(PathBuf, bool)]) -> bool {
 }
 
 
+/// The part of a schema cache key an installed registration's version
+/// contributes.
+fn hosts_key_part(version: u64) -> u64 {
+    xx_hash_bytes(format!("registered-hosts:{version}").as_bytes())
+}
+
+/// The host the document with source `text` at `path` is analyzed as, in its
+/// own `context`, under the configuration's installed registrations.
+fn select_host(
+    text: &str,
+    path: &Path,
+    context: &FileResolutionContext,
+    installed: Option<&hosts::InstalledHosts>,
+) -> Arc<hosts::HostView> {
+    let markdown: darkmatter::markdown::Markdown = text.into();
+    let markdown = markdown.with_source(darkmatter::markdown::compose::ComposeSource::File(path.to_path_buf()));
+    let frontmatter = darkmatter::markdown::schemas::frontmatter_as_json(&markdown);
+    Arc::new(hosts::HostView::select(installed, &frontmatter, path, context))
+}
+
 /// The part of a schema cache key a slot snapshot's state contributes.
 fn slot_key_part(generation: u64) -> u64 {
     generation.wrapping_mul(0x9E37_79B9_7F4A_7C15)
@@ -1830,7 +2048,9 @@ pub(crate) fn resolve_slot_templates(
     context: &FileResolutionContext,
     session: &Arc<darkmatter::markdown::schemas::slots::SlotSession>,
 ) -> Result<(), SchemaError> {
-    schema::assemble(path, text, config, workspace_roots, registry, context, schema::SlotUse::Resolve(session))
+    // The slot worker's job carries no registrations: a registered host's
+    // trigger layer is pinned through the request path's own assembly.
+    schema::assemble(path, text, config, workspace_roots, registry, None, context, schema::SlotUse::Resolve(session))
         .map(|_| ())
         .map_err(|failure| failure.error)
 }
@@ -2852,6 +3072,7 @@ mod tests {
         let need = state.registry_demand(text, &path, &roots, &resolution).expect("not prepared");
         assert_eq!(need.path, path);
         assert!(state.prepare_registry(&need.path, &roots, &need.context));
+        assert!(state.prepare_hosts(&need.context), "the configuration's registrations load");
         assert!(state.registry_demand(text, &path, &roots, &resolution).is_none(), "fresh");
         assert!(triggered(&build()), "the installed registry's trigger applies");
     }

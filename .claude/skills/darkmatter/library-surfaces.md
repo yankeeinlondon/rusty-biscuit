@@ -41,8 +41,9 @@ behavior.
   pairs are the artifact's preparation `configuration`). A host program
   prepares its own compiled-in config schema (Claudine's
   `claudine-config.yaml`, which imports `permissions@darkmatter:config`)
-  through `config::schema::prepare_host_config_type(source, path, name)`,
-  never by building a context itself (the context-construction guard
+  through `config::schema::prepare_host_config_type(source, path, name)`
+  (or `resolve_host_config_type` for the uncompiled `ResolvedSchema` an
+  editor describes, as DMLS's `config_contracts` does), never by building a context itself (the context-construction guard
   refuses that outside Darkmatter). `config::load`'s
   `ConfigSnapshot::load(context, Option<&CommittedTreeSnapshot>, mode)`
   reads the user file (home from the context) and the repository file at

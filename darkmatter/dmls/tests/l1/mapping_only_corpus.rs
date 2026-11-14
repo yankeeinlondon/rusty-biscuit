@@ -77,6 +77,7 @@ fn diagnostics_json(path: &Path, config: &DmlsConfig, contexts: &RepositoryConte
         profile: &profile,
         overlay: overlay.as_ref(),
         resolution: &resolution,
+        host: None,
     };
     let diagnostics = ProviderRegistry::with_substrate().diagnostics(&ctx);
     let mut json = serde_json::to_value(diagnostics).expect("serialize diagnostics");

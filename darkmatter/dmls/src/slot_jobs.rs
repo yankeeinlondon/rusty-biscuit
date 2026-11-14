@@ -493,6 +493,31 @@ fn slot_reads(data: &DataRuntime, repository: Option<&Path>) -> Vec<WatchedRead>
     paths.into_iter().map(WatchedRead::now).collect()
 }
 
+/// The repository at `root`'s `HEAD` and the ref it names (a branch's ref
+/// file, which a commit rewrites while `HEAD` stays the same), in the
+/// common Git directory for a linked worktree. Empty outside a repository.
+pub(crate) fn head_files(root: &Path) -> Vec<PathBuf> {
+    let Some(git_dir) = git_dir(root) else {
+        return Vec::new();
+    };
+    let head = git_dir.join("HEAD");
+    let mut files = vec![SourceBuffers::key(&head)];
+    let named = std::fs::read_to_string(&head).ok().and_then(|text| {
+        text.lines().next().and_then(|line| line.strip_prefix("ref:")).map(|name| name.trim().to_string())
+    });
+    if let Some(name) = named.filter(|name| !name.is_empty()) {
+        let common = std::fs::read_to_string(git_dir.join("commondir"))
+            .ok()
+            .map(|text| {
+                let named = Path::new(text.trim());
+                if named.is_absolute() { named.to_path_buf() } else { git_dir.join(named) }
+            })
+            .unwrap_or_else(|| git_dir.clone());
+        files.push(SourceBuffers::key(&common.join(name)));
+    }
+    files
+}
+
 /// The Git directory of the repository at `root`: `.git` itself, or the
 /// folder a linked worktree's `.git` file names.
 fn git_dir(root: &Path) -> Option<PathBuf> {

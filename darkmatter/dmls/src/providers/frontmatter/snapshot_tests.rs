@@ -133,6 +133,7 @@ fn answer(workspace: &Workspace, overlay: &DocumentOverlay, inputs: Inputs<'_>) 
         profile: &workspace.profile,
         overlay: Some(overlay),
         resolution: inputs.resolution,
+        host: None,
     };
     let hover_at = text.find("guard: ").expect("guard") + "guard: ".len() + 1;
     let complete_at = text.find("\n\n---").expect("blank line") + 1;
@@ -348,6 +349,7 @@ fn item_hover(state: &OverlayState, workspace: &Workspace, inputs: Inputs<'_>) -
         profile: &workspace.profile,
         overlay: Some(&overlay),
         resolution: inputs.resolution,
+        host: None,
     };
     let at = inputs.text.find("say: hi").expect("an item") + 1;
     let darkmatter = darkmatter::work_counters::snapshot();

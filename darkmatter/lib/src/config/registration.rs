@@ -340,6 +340,7 @@ impl RegisteredHostProfile {
                 index: 0,
                 declared_in: self.manifest.path.clone(),
                 revision: super::load::ConfigRevision::User,
+                at: None,
             }),
             member: None,
         }
@@ -571,17 +572,63 @@ fn anchored_at(context: &FileResolutionContext, file: &Path) -> FileResolutionCo
     context.for_trusted_external_source(file).allow_external_relative()
 }
 
+/// Every location the members of the manifest at `path` are probed at,
+/// whether or not a file is there now: what a caller watching a refused
+/// registration (a member missing, unreadable, or invalid) must observe so
+/// the member's creation or repair loads it. Reads only the manifest; empty
+/// when the manifest cannot be read or is not a valid manifest (its own
+/// refusal names it).
+#[must_use]
+pub fn manifest_member_candidates(path: &Path, context: &FileResolutionContext) -> Vec<PathBuf> {
+    let Ok(bytes) = buffers::read(path) else {
+        return Vec::new();
+    };
+    let Ok(read) = manifest::read(path, bytes) else {
+        return Vec::new();
+    };
+    let anchor = anchored_at(context, path);
+    let manifest = &read.manifest;
+    [&manifest.identify, &manifest.globals, &manifest.lifecycle]
+        .into_iter()
+        .chain(&manifest.triggers)
+        .chain(manifest.functions.iter().flat_map(|pair| [&pair.catalog, &pair.facts]))
+        .filter_map(|reference| FileReference::new(reference).ok())
+        .flat_map(|reference| reference.resolve_detailed(&anchor).probed_paths().collect::<Vec<_>>())
+        .collect()
+}
+
 /// The canonical path of the manifest `entry` names.
 fn locate_manifest(entry: &Registration, context: &FileResolutionContext) -> Result<PathBuf, Refusal> {
     let refuse = |message: String| Refusal {
         code: HOST_REGISTRATION_CODE,
         file: entry.declared_in.clone(),
-        at: None,
+        at: entry.at,
         member: None,
         message,
     };
     let path = resolve_local(&entry.reference, &anchored_at(context, &entry.declared_in)).map_err(refuse)?;
     canonicalize_simplified(&path).map_err(|error| refuse(format!("the manifest `{}` cannot be resolved: {error}", path.display())))
+}
+
+/// The identity of the existing manifest the `register` entry `reference`
+/// names when written in `declared_in`: the canonical file the loader would
+/// open for it. Two entries naming one manifest (`~/…` and an absolute path,
+/// or entries in the user and repository files) share an identity and load
+/// once.
+///
+/// ## Errors
+///
+/// Why the entry names no existing local file: a malformed or remote
+/// reference, or a missing file.
+pub fn manifest_identity(
+    reference: &str,
+    declared_in: &Path,
+    context: &FileResolutionContext,
+) -> Result<PathIdentity, String> {
+    let path = resolve_local(reference, &anchored_at(context, declared_in))?;
+    let canonical = canonicalize_simplified(&path)
+        .map_err(|error| format!("the manifest `{}` cannot be resolved: {error}", path.display()))?;
+    Ok(PathIdentity::new(&canonical))
 }
 
 /// The existing local file `reference` names in `context`.

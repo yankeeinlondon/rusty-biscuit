@@ -65,6 +65,16 @@ types:
         permissions: user-permissions@darkmatter:config
 ```
 
+### Editing a configuration file
+
+DMLS checks `~/.darkmatter.yaml` and `<repo-root>/.darkmatter.yaml` (and
+Claudine's `.claudine/config.yaml` in the same two places) against the same
+scope contract as `md`, with completion, hover showing each setting's
+description and default, and located diagnostics. A newly created, still
+empty buffer already offers every key, even before its folder exists (a
+`~/.claudine/config.yaml` buffer opened before `~/.claudine/` is created).
+See [Configuration files](./schemas/dmls-schema-support.md#configuration-files).
+
 ## Defaults
 
 An absent setting takes its scope's default. A list you write **replaces**
@@ -371,7 +381,8 @@ the code `dm.config.reference`; every other problem `dm.config.invalid`.
 file is normal and never reported), the permissions error, and each
 registration finding. `md` and Claudine report the missing file as described
 in [How `md` and Claudine report configuration](#how-md-and-claudine-report-configuration);
-reporting in DMLS is **planned**. The same module defines the codes
+DMLS reports it as described in [How DMLS reports configuration](#how-dmls-reports-configuration).
+The same module defines the codes
 `dm.config.not_saved` and `dm.config.migration` for saving approvals and
 migrating legacy files.
 
@@ -468,7 +479,9 @@ flowchart TD
 Each migrated file, each dropped line, and each blacklist rule is one
 `dm.config.migration` notice in `diagnostics()`. A `Passive` load (DMLS,
 validators) writes nothing; it reports each legacy file a writing run would
-migrate.
+migrate. DMLS shows each such notice once per session (see
+[How DMLS reports configuration](#how-dmls-reports-configuration)) and leaves
+the file where it is.
 
 ## One Snapshot per Request
 
@@ -574,6 +587,28 @@ another repository is judged by that repository's rules, in the same order as
 `permissions` block fails every command instead of falling back to an empty
 policy. DMLS shows the same verdict on a shell command's hover from a
 `Passive` load; it never prompts or saves.
+
+### How DMLS reports configuration
+
+DMLS, the language server, loads the configuration passively: it never
+creates, migrates, or writes a file, and never prompts. It shows these as
+editor messages (`window/showMessage`), each once per editor session:
+
+| Situation | Message |
+| --- | --- |
+| `~/.darkmatter.yaml` does not exist | one `dm.config.missing` warning naming the file and `md init`, however many documents load the configuration. A repository without `.darkmatter.yaml` shows nothing |
+| a legacy policy file is waiting to be migrated | one `dm.config.migration` information message per file, saying the next `md` or Claudine run migrates it |
+
+For example, with no user file:
+
+```text
+dmls: dm.config.missing: `/home/me/.darkmatter.yaml` does not exist, so every setting takes its default; `md init` creates it
+```
+
+Creating the file needs no restart: DMLS watches both configuration files,
+present or absent, and reloads them when they change. A problem inside an
+open configuration file is reported on that file (see
+[Editing a configuration file](#editing-a-configuration-file)).
 
 ## The Repository File at HEAD and in the Working Copy
 

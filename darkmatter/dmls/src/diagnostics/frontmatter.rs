@@ -43,8 +43,8 @@ use crate::providers::frontmatter::ExpressionValue;
 use crate::source_map::SourceMap;
 use crate::workspace::file_path_to_uri;
 
-/// All frontmatter/schema diagnostics for the current document, discovering
-/// its lifecycle host when a lifecycle check needs it.
+/// All frontmatter/schema diagnostics for the current document, reading
+/// its selected lifecycle host when a lifecycle check needs it.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     diagnostics_under(ctx, None)
 }
@@ -76,6 +76,10 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
             code::FM_YAML_PARSE,
             error.message.clone(),
         ));
+    }
+
+    if let Some(view) = overlay.host.as_deref() {
+        host_diagnostics(ctx, overlay.ast.as_deref().filter(|_| !overlay.stale), view, &mut out);
     }
 
     // A whole YAML document is judged by its selected schema alone: the
@@ -184,6 +188,83 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
     }
 
     out
+}
+
+/// A configuration-level host registration warning (a refused entry, a
+/// same-host conflict), published on the file it names at its line and
+/// column, or at the top when it has none.
+pub(crate) fn registration_diagnostic(found: &darkmatter::config::registration::RegistrationDiagnostic) -> Diagnostic {
+    let range = match found.line {
+        Some(line) => {
+            let start = lsp_types::Position {
+                line: u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX),
+                character: u32::try_from(found.column.unwrap_or(1).saturating_sub(1)).unwrap_or(u32::MAX),
+            };
+            Range { start, end: start }
+        }
+        None => zero_range(),
+    };
+    diagnostic(range, registration_severity(found), source::SCHEMA, found.code, found.message.clone())
+}
+
+fn registration_severity(found: &darkmatter::config::registration::RegistrationDiagnostic) -> DiagnosticSeverity {
+    match found.severity {
+        darkmatter::markdown::compose::expression::Severity::Info => DiagnosticSeverity::INFORMATION,
+        _ => DiagnosticSeverity::WARNING,
+    }
+}
+
+/// The document's host-selection warnings: each `dm.host.*` warning of its
+/// selection (the configuration's own are published on the files they
+/// name), and one `dm.lifecycle.unknown_host` warning at each root key that
+/// is a host-only event of a registered host that did not identify it (none
+/// on a stale tree, whose spans are another buffer's).
+fn host_diagnostics(
+    ctx: &DocumentContext,
+    ast: Option<&FrontmatterAst>,
+    view: &crate::overlay::hosts::HostView,
+    out: &mut Vec<Diagnostic>,
+) {
+    for found in view.diagnostics() {
+        let severity = registration_severity(found);
+        let here = found.file == ctx.path;
+        let range = match (here, found.line) {
+            (true, Some(line)) => {
+                let start = lsp_types::Position {
+                    line: u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX),
+                    character: u32::try_from(found.column.unwrap_or(1).saturating_sub(1)).unwrap_or(u32::MAX),
+                };
+                Range { start, end: start }
+            }
+            _ => zero_range(),
+        };
+        let message = match (here, found.line) {
+            (true, _) => found.message.clone(),
+            (false, Some(line)) => format!("{} ({}:{line})", found.message, found.file.display()),
+            (false, None) => format!("{} ({})", found.message, found.file.display()),
+        };
+        out.push(diagnostic(range, severity, source::SCHEMA, found.code, message));
+    }
+    let Some(ast) = ast else {
+        return;
+    };
+    for event in view.unknown_events() {
+        let Some(span) = ast.top_level().find(|entry| entry.key == event.key).and_then(|entry| entry.key_span.clone()) else {
+            continue;
+        };
+        let range = ctx.source_map.byte_range_to_lsp(span).unwrap_or_else(zero_range);
+        out.push(diagnostic(
+            range,
+            DiagnosticSeverity::WARNING,
+            source::SCHEMA,
+            code::LIFECYCLE_UNKNOWN_HOST,
+            format!(
+                "`{key}` is a lifecycle event of the registered host `{host}`, but `{host}` does not identify this document, so `{key}` is ordinary data here",
+                key = event.key,
+                host = event.host,
+            ),
+        ));
+    }
 }
 
 pub(crate) fn schema_advisory_diagnostics(
@@ -1847,6 +1928,7 @@ mod tests {
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &crate::context::test_support::resolution_for(path),
+            host: None,
         };
         f(&diagnostics(&ctx), &source_map)
     }
@@ -2767,6 +2849,7 @@ mod tests {
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &resolution,
+            host: None,
         };
         let diagnostics = diagnostics(&ctx);
         f(&ctx, &diagnostics)
