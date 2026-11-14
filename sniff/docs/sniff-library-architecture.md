@@ -548,6 +548,11 @@ match snapshot.read_file("config/policy.yaml")? {
 - **Pinned at capture.** The snapshot records the commit and tree ids when it is created. A new
   commit, a branch switch, or a ref update afterwards does not change what it reads. In a linked
   worktree it captures that worktree's own `HEAD`.
+- **Another commit.** `GitRepo::committed_tree_at(commit_id)` gives the same view of a commit
+  you name, whatever `HEAD` is: for example a pull request's base and head, to compare the two.
+  It takes only a full 40-character hex id, never a branch name, an abbreviation, or an
+  expression such as `HEAD~1`, so the view cannot move under you; anything else, or an id that
+  is absent or is not a commit, fails with `SniffError::Git`.
 - **No commits yet.** A repository whose `HEAD` is unborn (fresh `git init`) is a valid, empty
   view: `commit_id()` and `tree_id()` are `None`, `paths()` is empty, and every read is `Absent`.
 - **Read results.** `read_file(path)` returns one `CommittedEntry`:

@@ -122,7 +122,12 @@ fail with `BareRepository`. Code: `filesystem/git/tracked_state.rs`; tests:
 `GitRepo::committed_tree()` returns a `Send + Sync` `CommittedTreeSnapshot`
 that pins `HEAD`'s commit and tree ids from the already-open gix handle
 (`into_sync`; each read calls `to_thread_local`). Ref moves after capture do
-not change it; a linked worktree pins its own `HEAD`. Unborn `HEAD` is an
+not change it; a linked worktree pins its own `HEAD`.
+`committed_tree_at(commit_id)` pins a commit the caller names (a full hex id
+only, parsed with `ObjectId::from_hex`, so no revision parsing runs; an
+absent or non-commit object is `SniffError::Git` tagged `"committed tree
+at"`); Darkmatter's permission-widening check pins base and head with it.
+Unborn `HEAD` is an
 empty view (`commit_id()`/`tree_id()` `None`). `read_file("a/b")` returns
 `CommittedEntry::{Absent, Blob { bytes, executable }, Symlink { target },
 Directory, Submodule { commit_id }}` (non-exhaustive; never follows links;
