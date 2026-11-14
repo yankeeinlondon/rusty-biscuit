@@ -45,6 +45,7 @@ mod config_migration;
 mod config_migration_receipt;
 mod config_permission_persist;
 mod config_permissions;
+mod config_widening;
 mod config_write;
 mod path_candidates;
 mod compose_expression_failure_contract;

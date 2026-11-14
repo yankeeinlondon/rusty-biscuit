@@ -5,7 +5,9 @@
 //! effective `network` permission remote reads take their consent from, and
 //! the evaluated permission policy with its approval persistence, setup
 //! (`md init` and a host's setup handshake), and host registration (the
-//! manifests `register` entries name, loaded into passive host profiles).
+//! manifests `register` entries name, loaded into passive host profiles),
+//! and the trusted CI comparison that reports a change which may widen a
+//! repository's permissions (`widening`).
 //!
 //! User-facing guides: `darkmatter/docs/topics/configuration.md`,
 //! `darkmatter/docs/topics/config-writes.md`, and
@@ -19,4 +21,5 @@ pub mod network;
 pub mod permissions;
 pub mod registration;
 pub mod schema;
+pub mod widening;
 pub mod write;

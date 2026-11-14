@@ -18,7 +18,7 @@
 //! built-in blacklist first and may let a current-run approval override an
 //! exclusion.
 //!
-//! User-facing guide: `darkmatter/docs/topics/configuration.md`.
+//! User-facing guide: `darkmatter/docs/topics/permissions.md`.
 //!
 //! [`ConfigSnapshot`]: super::load::ConfigSnapshot
 
