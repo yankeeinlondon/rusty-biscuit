@@ -283,6 +283,10 @@ Required defaults: `EffectiveSchema::validate_instance` judges the candidate
 defaults, conversion, defaults again, as `Prepared::validate_soft`;
 `converted_candidate`/`complete`), with this schema's validators, nested
 templates, and `SHARED_VALIDATOR_CACHE`; never add a second defaulting walk.
+An `accepts_as_is` value still goes through `complete` (which keeps the fast
+path only when `alternatives_supply_defaults` is false): a union arm that
+accepts it as written and another that accepts it completed is
+`AmbiguousDefaults`, never an early pass.
 `ValidationReport::defaults` lists them; the caller's value is never touched
 (`data_copy` excludes defaults, so `md set` never writes one). An engine error
 becomes one `ConstraintViolation` problem at the property, `schema_path` = the
@@ -294,6 +298,17 @@ more; it returns the inserted paths and the pipeline marks them data in
 `FrontmatterProvenance`. Pass 1 interpolation runs before this, so only pass 2
 and later see a default. Presence typing needed no change: `PropertyDef::is_required`
 already makes a required property non-null whether written or defaulted.
+Provenance of an inserted default: `complete` fills each `AppliedDefault::origin`
+from `origins` (top-level key), `validate_instance` calls
+`defaults::attribute_problems` after `locate_all`, and composition, whose
+verdicts see defaults already inserted, keeps every default it inserted across
+both passes (`applied_defaults` in the pipeline) and attributes the final
+problems with it. `report_diagnostics` projects `ValidationProblem::default`
+as `Diagnostic::schema_default` (`SchemaDefaultOrigin`, in every output
+schema); DMLS ranges such a problem at the declaration
+(`refused_default_range`) and adds `data.schema_default`. A default declared
+through a `Name@file` import inside a schema reports the declaring layer's
+file, not the import's: the lowered schema keeps no per-definition source.
 
 Runtime consumers use `SchemaPhase::Launch` and `SchemaPhase::Completion` on
 an already-resolved `EffectiveSchema`. `required` and `eager` are independent

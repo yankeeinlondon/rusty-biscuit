@@ -172,6 +172,43 @@ fn the_host_schema_rejects_composed_and_failed() {
     assert_eq!(paths, ["/composed", "/failed"], "{problems:#?}");
 }
 
+#[test]
+fn the_host_schema_rejects_a_host_only_event_md_never_runs() {
+    let (fixture, hosts, _profile) = relay();
+    let (markdown, request) = foreign_request(&fixture, &hosts, "---\nsequence: []\nstart: 5\nsuccess: 5\n---\nBody.\n");
+
+    let error = markdown.compose_with_warnings(&request).expect_err("rejected").error;
+
+    let MarkdownError::SchemaValidationFailed { problems, .. } = &error else { panic!("a schema failure: {error:?}") };
+    let paths: Vec<&str> = problems.iter().map(|problem| problem.path.as_str()).collect();
+    assert_eq!(paths, ["/start", "/success"], "{problems:#?}");
+}
+
+#[test]
+fn a_host_event_template_awaiting_its_host_is_set_aside_as_validation_does() {
+    let (fixture, hosts, _profile) = relay();
+    let (markdown, request) = foreign_request(&fixture, &hosts, "---\nsequence: []\nstart: \"{{ seq.steps }}\"\n---\nBody.\n");
+
+    let (composed, _report) = markdown.compose_with_warnings(&request).expect("the template is the host's to render");
+
+    assert_eq!(composed.frontmatter().as_map()["start"], json!("{{ seq.steps }}"), "never rendered");
+}
+
+#[test]
+fn a_caller_that_runs_the_events_still_owns_their_verdict() {
+    let (fixture, hosts, profile) = relay();
+    let (markdown, context) = fixture.document(&fixture.context(), "work/doc.md", "---\nsequence: []\nstart: 5\n---\nBody.\n");
+    // The relay's trigger still types `start`; only the selected view is absent.
+    let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(&fixture.path("work"), ""))
+        .with_source_file(fixture.path("work/doc.md"))
+        .with_trigger_schemas(true)
+        .with_exclude_keys(md_host::foreign_deferred_keys(profile.lifecycle().registry()))
+        .with_registered_hosts(hosts);
+    let request = ComposeRequest::with_context(options, context).expect("a request");
+
+    markdown.compose_with_warnings(&request).expect("no selected host: the caller judges `start` when it runs it");
+}
+
 // ── the shared stacks, in-process ───────────────────────────────────────────
 
 #[test]

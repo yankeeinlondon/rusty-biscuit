@@ -1822,3 +1822,27 @@ fn schema_validate_still_rejects_a_missing_eager_file() {
                 .and(predicate::str::contains("nope-too.md").not()),
         );
 }
+
+/// A missing eager-file target that a schema default supplied is reported as
+/// the default's problem: the formatted line names the default's schema
+/// location and no authored position, and a present target passes.
+#[test]
+fn schema_validate_attributes_a_missing_eager_default_target_to_the_default() {
+    let process = CliProcessFixture::new();
+    let doc = write_file(process.cwd(), "doc.md", "---\n$schema:\n  doc: file(required; eager; default(./note.md))\n---\nBody\n");
+
+    process
+        .command()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(
+            predicate::str::contains("schema default at schema location `/properties/doc/default`")
+                .and(predicate::str::contains("hint: Repair the schema default"))
+                .and(predicate::str::contains("(at line").not()),
+        );
+
+    write_file(process.cwd(), "note.md", "note\n");
+    process.command().args(["schema", "validate"]).arg(&doc).assert().success();
+}

@@ -78,6 +78,9 @@ mod ctx_per_run;
 mod detached_audio;
 mod diagnostic_discovery;
 mod dispatch_inventory;
+// Reads the `CLAUDINE_TEST_DOCUMENT_ENVIRONMENTS` seam, which only
+// `test-fixtures` builds compile into the binary.
+#[cfg(feature = "test-fixtures")]
 mod document_environment_routes;
 mod effective_diagnostic_render;
 mod entry_point_parity;
@@ -111,6 +114,9 @@ mod inline_compose_hash;
 #[cfg(feature = "test-fixtures")]
 mod inline_compose_indented_frontmatter;
 mod inline_compose_sequence_mismatch;
+// Agent stubs are `/bin/sh` scripts (`InlineAgentStub`).
+#[cfg(unix)]
+mod inline_prompt_shell_preflight;
 // Installs the `claudine-fake-goose` fixture binary, which only
 // `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]

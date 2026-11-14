@@ -631,7 +631,9 @@ pub(crate) fn schema_problem_diagnostics(
 
 /// The `data` payload of a schema-problem diagnostic:
 /// `{"instance_path": "/content_policy/1/rule"}`, plus `resolution_failure`
-/// for a file-reference failure.
+/// for a file-reference failure and `schema_default` (`path`,
+/// `schema_location`, and `schema_file` when a file declares it) for a
+/// problem with a value a schema default supplied.
 ///
 /// The range already marks the node, but a missing key ranges its parent
 /// mapping and a list item shares its line with its fields, so the validator's
@@ -640,6 +642,15 @@ pub(crate) fn schema_problem_diagnostics(
 fn schema_problem_data(problem: &ValidationProblem) -> serde_json::Value {
     let mut data = serde_json::Map::new();
     data.insert("instance_path".to_string(), problem.path.clone().into());
+    if let Some(applied) = &problem.default {
+        data.insert(
+            "schema_default".to_string(),
+            serde_json::json!({ "path": applied.path.to_string(), "schema_location": applied.pointer }),
+        );
+        if let Some(file) = applied.origin.as_ref().and_then(simplified_schema::SchemaOrigin::file) {
+            data["schema_default"]["schema_file"] = file.to_string_lossy().into_owned().into();
+        }
+    }
     if let Some(reference) = &problem.file_reference
         && let serde_json::Value::Object(failure) =
             resolution_failure_data(reference.resolution_failure())
@@ -865,22 +876,24 @@ fn semantic_problem_range(
     ctx.source_map.byte_range_to_lsp(span)
 }
 
-/// The range of a refused `default(...)`: a constraint violation at a path
-/// with no authored value judged the schema's default, which no frontmatter
-/// text holds. It ranges the property's declaration in the document's inline
-/// `$schema`, or the `$schema` value when the declaration is elsewhere (a
-/// referenced file, a root union). A property the baseline or a trigger
-/// declares keeps the ordinary ranging.
+/// The range of a problem with a schema default, which no frontmatter text
+/// holds: a refused `default(...)` (a constraint violation at a path with no
+/// authored value) or any problem validation attributed to the default it
+/// inserted ([`ValidationProblem::default`], such as an eager file default
+/// whose target is refused). It ranges the property's declaration in the
+/// document's inline `$schema`, or the `$schema` value when the declaration
+/// is elsewhere (a referenced file, a root union). A property the baseline
+/// or a trigger declares keeps the ordinary ranging.
 fn refused_default_range(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
     bundle: &SchemaBundle,
     problem: &ValidationProblem,
 ) -> Option<Range> {
-    if problem.code != ValidationProblemCode::ConstraintViolation
-        || problem.path.is_empty()
-        || ast.entry_by_pointer(&problem.path).is_some()
-    {
+    let refused = problem.code == ValidationProblemCode::ConstraintViolation
+        && !problem.path.is_empty()
+        && ast.entry_by_pointer(&problem.path).is_none();
+    if !refused && problem.default.is_none() {
         return None;
     }
     let key = problem.instance_path.first()?;

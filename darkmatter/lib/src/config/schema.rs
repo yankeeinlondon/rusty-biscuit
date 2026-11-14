@@ -158,6 +158,7 @@ pub fn resolve_host_config_type(
         referenced_files: Vec::new(),
         searched: Vec::new(),
         advisories: Vec::new(),
+        default_files: simplified_schema::resolve::DefaultFiles::new(),
     })
 }
 

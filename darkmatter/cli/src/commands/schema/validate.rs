@@ -993,6 +993,15 @@ fn push_problem_bullet(out: &mut String, problem: &ValidationProblem, terminal: 
         );
         push_row(out, &Prose::new(sub_line).render(terminal));
     }
+    // A value a schema default supplied is repaired in the schema, not in
+    // the frontmatter that never held it.
+    if let Some(applied) = problem.default.as_ref() {
+        let sub_line = format!(
+            "        <dim>hint:</dim> {}",
+            Prose::escape_text_outside_code_spans(&darkmatter::markdown::errors::schema_default_repair(applied))
+        );
+        push_row(out, &Prose::new(sub_line).render(terminal));
+    }
 }
 
 /// When `jsonschema` reports a `Required` failure, the message already starts
@@ -1053,7 +1062,7 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
             let problems_json: Vec<serde_json::Value> = problems
                 .iter()
                 .map(|p| {
-                    json!({
+                    let mut problem = json!({
                         "path": p.path,
                         "property": p.property,
                         "message": p.message,
@@ -1062,7 +1071,11 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                         "column": p.column,
                         "arm_index": p.arm_index,
                         "description": p.description,
-                    })
+                    });
+                    if let Some(applied) = &p.default {
+                        problem["default"] = applied_default_record(applied);
+                    }
+                    problem
                 })
                 .collect();
             warnings_json.extend(advisories.iter().map(|advisory| {
@@ -1081,10 +1094,7 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                 "problems": problems_json,
             });
             if !defaults.is_empty() {
-                record["defaults"] = defaults
-                    .iter()
-                    .map(|applied| json!({ "path": applied.path.to_string(), "value": applied.value }))
-                    .collect();
+                record["defaults"] = defaults.iter().map(applied_default_record).collect();
             }
             record
         }
@@ -1163,6 +1173,20 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
     // `serde_json/preserve_order`.
     value.sort_all_objects();
     value
+}
+
+/// One default's data record: where it stands in, its value, and where the
+/// schema declares it.
+fn applied_default_record(applied: &AppliedDefault) -> serde_json::Value {
+    let mut record = serde_json::json!({
+        "path": applied.path.to_string(),
+        "value": applied.value,
+        "schema_location": applied.pointer,
+    });
+    if let Some(file) = applied.origin.as_ref().and_then(simplified_schema::SchemaOrigin::file) {
+        record["schema_file"] = file.to_string_lossy().into_owned().into();
+    }
+    record
 }
 
 /// Stable lowercase token for a problem's kind, used in a data output; a YAML

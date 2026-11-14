@@ -29,7 +29,9 @@ extension.
 - Keep network access deny-all by default. Route every allowed remote read or
   write through `biscuit_file::FetchPolicy`: exact-host consent, or the
   configured `network: allow` projected by `config::network::NetworkPermission`
-  (`FetchPolicy::allow_all()`, never a wildcard host).
+  (`FetchPolicy::allow_all()`, never a wildcard host). An invalid
+  `permissions` block (`NetworkPermission::Invalid`) refuses every URL with
+  its configuration error before any per-run host or approval is consulted.
 - Keep schema `{{ … }}` slots passive by default. Only an explicit resolution
   through a `SlotSession` (`DarkmatterSchemas::resolve_template`) evaluates
   them, after every slot is admitted; nothing ever validates against a

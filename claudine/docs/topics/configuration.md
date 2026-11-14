@@ -103,6 +103,18 @@ block allows and
 [Darkmatter's configuration](../../../darkmatter/docs/topics/configuration.md)
 for the files that hold it.
 
+In Claudine, `network` decides only what composition may fetch: a `::file` or
+`::code` URL, a `prologue` or `epilogue` URL, and a URL given to a read-side
+function such as `load_data`. With `network: allow` in effect, this prompt
+includes the remote file; with the default `deny`, preparation fails and the
+host is never contacted:
+
+```markdown
+::file https://example.com/guidelines.md
+```
+
+It does not limit the agent's own network access once it runs.
+
 ### Darkmatter's permissions
 
 Once Claudine is set up, its file holds the permissions block and

@@ -57,6 +57,7 @@ mod dasherized_identifier_compose;
 mod data_origin;
 mod deferred_positions;
 mod dependency_direction_guard;
+mod directive_error_document;
 mod directive_target_analysis;
 mod empty_package_area;
 mod entry_point_parity;

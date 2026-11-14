@@ -22,6 +22,7 @@ use claudine::config::setup::{ClaudineSetup, PermissionsHandoff, SetupError, set
 use darkmatter::config::init::{InitAction, InitError, InitOptions, init_user};
 use darkmatter::config::load::{ConfigLoadMode, ConfigSnapshot};
 use darkmatter::config::registration::{HostSelection, RegisteredHosts, select};
+use darkmatter::lifecycle::md_host;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest, RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::{Markdown, MarkdownError};
 use serde_json::{Value, json};
@@ -353,6 +354,111 @@ fn installed_registration_identifies_claudine_documents_outside_claudine() {
     assert_eq!(schema_problem_paths(&error), ["/model"]);
     if let Err(error) = fixture.compose(MAPPING_MODEL, None) {
         panic!("without a registration nothing types `model`: {error:?}");
+    }
+}
+
+#[test]
+fn installed_registration_md_compose_judges_an_event_it_never_runs() {
+    let fixture = Fixture::new();
+    fixture.setup().unwrap();
+    let hosts = fixture.hosts(&fixture.context());
+    let text = "---\nagent: claude\nloop: [1, 2]\n---\nBody\n";
+    let HostSelection::Registered(profile) = fixture.selection(&hosts, "work/doc.md", text) else {
+        panic!("`agent` identifies Claudine")
+    };
+    let path = fixture.work().join("doc.md");
+    let markdown = Markdown::try_from(path.as_path()).unwrap();
+    // As `md compose` prepares a Claudine document: Claudine's event keys
+    // (`loop` among them) deferred, the registered layer, the selected view.
+    let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(&fixture.work(), ""))
+        .with_source_file(&path)
+        .with_trigger_schemas(true)
+        .with_exclude_keys(md_host::foreign_deferred_keys(profile.lifecycle().registry()))
+        .with_registered_hosts(Arc::clone(&hosts))
+        .with_selected_host(profile);
+    let request = ComposeRequest::with_context(options, fixture.context().for_source(&path)).expect("a request");
+
+    let error = markdown.compose_with(&request).expect_err("Claudine's schema rejects `loop: [1, 2]`");
+
+    assert!(schema_problem_paths(&error).iter().any(|path| path == "/loop"), "{error:?}");
+}
+
+/// The problem paths of `text`, written as `work/doc.md`, as the passive
+/// reader (`md schema validate`, DMLS) judges it with `hosts` registered.
+fn passive_problem_paths(fixture: &Fixture, hosts: &Arc<RegisteredHosts>, text: &str) -> Vec<String> {
+    let path = fixture.work().join("doc.md");
+    fixture.write(&path, text);
+    let markdown = Markdown::try_from(path.as_path()).unwrap();
+    let schemas = darkmatter::markdown::schemas::DarkmatterSchemas::new(fixture.context().for_source(&path))
+        .with_registered_hosts(Arc::clone(hosts));
+    let report = schemas.validate(&markdown).expect("the schema prepares");
+    report.problems.iter().map(|problem| problem.path.clone()).collect()
+}
+
+/// `{selector}` identifies Claudine, and both readers judge the document by
+/// Claudine's main schema: `pointer` is rejected passively and in composition.
+fn assert_main_schema_rejects(selector: &str, invalid: &str, pointer: &str) {
+    let fixture = Fixture::new();
+    fixture.setup().unwrap();
+    let hosts = fixture.hosts(&fixture.context());
+    let text = format!("---\n{selector}\n{invalid}\n---\nBody\n");
+    let HostSelection::Registered(profile) = fixture.selection(&hosts, "work/doc.md", &text) else {
+        panic!("`{selector}` identifies Claudine")
+    };
+    assert_eq!(profile.host(), "claudine");
+
+    let passive = passive_problem_paths(&fixture, &hosts, &text);
+    assert!(passive.iter().any(|path| path == pointer), "passive reader, `{selector}`: {passive:?}");
+
+    let error = fixture.compose(&text, Some(Arc::clone(&hosts))).expect_err("composition rejects it");
+    let composed = schema_problem_paths(&error);
+    assert!(composed.iter().any(|path| path == pointer), "composition, `{selector}`: {composed:?}");
+}
+
+/// One test per identifying key: each selects Claudine's main schema, which
+/// types `timeout` as a string.
+macro_rules! main_schema_rejects_timeout {
+    ($($name:ident: $selector:literal,)+) => {$(
+        #[test]
+        fn $name() {
+            assert_main_schema_rejects($selector, "timeout: [1, 2]", "/timeout");
+        }
+    )+};
+}
+
+main_schema_rejects_timeout! {
+    installed_registration_sequence_selects_the_main_schema: "sequence: []",
+    installed_registration_start_selects_the_main_schema: "start: []",
+    installed_registration_blocked_selects_the_main_schema: "blocked: []",
+    installed_registration_success_selects_the_main_schema: "success: []",
+    installed_registration_failure_selects_the_main_schema: "failure: []",
+    installed_registration_loop_selects_the_main_schema: "loop: { max: 1 }",
+    installed_registration_prompt_selects_the_main_schema: "prompt: hi",
+    installed_registration_agent_selects_the_main_schema: "agent: claude",
+    installed_registration_model_selects_the_main_schema: "model: sonnet",
+}
+
+#[test]
+fn installed_registration_sequence_document_rejects_the_md_event_spelling() {
+    assert_main_schema_rejects("sequence: []", "composed: [stop]", "/composed");
+}
+
+#[test]
+fn installed_registration_agent_document_rejects_the_md_event_spelling() {
+    assert_main_schema_rejects("agent: claude", "composed: [stop]", "/composed");
+}
+
+#[test]
+fn installed_registration_shared_events_alone_keep_the_md_contract() {
+    let fixture = Fixture::new();
+    fixture.setup().unwrap();
+    let hosts = fixture.hosts(&fixture.context());
+    let text = "---\nfinalize: [stop]\ntimeout: [1, 2]\n---\nBody\n";
+    assert!(matches!(fixture.selection(&hosts, "work/doc.md", text), HostSelection::Md), "an md document");
+    let passive = passive_problem_paths(&fixture, &hosts, text);
+    assert!(passive.is_empty(), "no Claudine schema types `timeout`: {passive:?}");
+    if let Err(error) = fixture.compose(text, Some(hosts)) {
+        panic!("no Claudine schema types `timeout`: {error:?}");
     }
 }
 

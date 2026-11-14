@@ -78,7 +78,7 @@ pub fn discover(
 fn require_source_file(source: &ComposeSource, line: usize) -> Result<PathBuf, FileLinksError> {
     match source {
         ComposeSource::File(path) => Ok(path.clone()),
-        _ => Err(FileLinksError::MissingSourceContext { line }),
+        _ => Err(FileLinksError::MissingSourceContext { line, document: None }),
     }
 }
 
@@ -101,7 +101,7 @@ fn discover_glob(
     source_canonical: &Path,
     line: usize,
 ) -> Result<(Vec<PathBuf>, PathBuf, Vec<biscuit_file::SkippedEntry>), FileLinksError> {
-    let glob_error = |source| FileLinksError::GlobReference { line, source: Arc::new(source) };
+    let glob_error = |source| FileLinksError::GlobReference { line, source: Arc::new(source), document: None };
     let listing = GlobReference::new([glob])
         .and_then(|globs| globs.list_files(document_context))
         .map_err(glob_error)?;
@@ -140,6 +140,7 @@ fn discover_dir(
         return Err(FileLinksError::TargetNotFound {
             path: path.to_string(),
             line,
+            document: None,
         });
     }
     // `--dir` requires a directory. Without this guard a regular-file target
@@ -149,13 +150,14 @@ fn discover_dir(
         return Err(FileLinksError::TargetNotDirectory {
             path: path.to_string(),
             line,
+            document: None,
         });
     }
     let component_root = canonicalize(&target);
 
     let mut candidates = BTreeMap::new();
     walk_recursive(&target, 0, depth, boundary, source_canonical, &mut candidates)
-        .map_err(|(path, source)| FileLinksError::Unreadable { path, line, source })?;
+        .map_err(|(path, source)| FileLinksError::Unreadable { path, line, source, document: None })?;
 
     Ok((candidates.into_values().collect(), component_root))
 }

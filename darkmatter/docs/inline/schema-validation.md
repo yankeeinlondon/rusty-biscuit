@@ -501,6 +501,17 @@ Rules:
 - A default is never inserted into a value a later stage still resolves (a
   whole-value `$(...)`, a value holding a `{{ }}` template) or into a key the
   caller owns.
+- In a union, each alternative completes the value with its own defaults.
+  Alternatives that succeed with the same result count as one; alternatives
+  that succeed with different results are an ambiguity reported at the union
+  (the document root, or the property holding it), never a choice of the
+  first. A value one alternative accepts as written is included: under
+  `$schema: ./either.yaml` with the root alternatives
+  `- a: number(required; default(1))` and `- b: string(required; default(z))`,
+  the document `b: y` fails with
+  `required defaults are ambiguous at the document root`, because the first
+  alternative also accepts it as `{ b: y, a: 1 }`. A `kind`-style literal
+  that only one alternative accepts settles the choice.
 - A trigger whose match a default satisfies is applied, and its own required
   defaults are inserted too.
 - The source file is never edited. The inserted value is data: its text is
@@ -512,6 +523,19 @@ Rules:
   is a schema problem at the default. Its message names the property and the
   schema location (`/properties/n/default`); it has no line or column in the
   document, because no document text holds it.
+- An inserted default is judged with the rest of the frontmatter, in every
+  pass, so a check that needs the file system can still fail on it: with
+  `doc: file(required; eager; default(./note.md))` and no `note.md`, the
+  document fails with `dm.schema.invalid_file_reference`. That problem is the
+  default's too. Its message ends with
+  `(the value is the schema default at schema location `/properties/doc/default`)`,
+  adding `in `<schema file>`` when a schema file declares the default (a
+  referenced schema file, a trigger file, or the file a `Name@file` import
+  read the type from), and it has no line or column. The error's hint names
+  that default to repair instead of asking for a frontmatter correction. In a
+  data output the diagnostic's `schema_default` gives the same path, schema
+  location, and schema file. A problem with a value the document wrote keeps
+  its own position.
 
 ### Optional parameter bindings
 

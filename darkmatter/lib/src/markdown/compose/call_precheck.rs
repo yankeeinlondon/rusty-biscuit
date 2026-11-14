@@ -673,8 +673,8 @@ fn check_body(
             binding_view: options.host_globals.as_ref().map(|globals| globals.view()),
             allow_untyped_map_variables: options.allow_untyped_map_variables(),
             allow_untyped_filter_variables: options.allow_untyped_filter_variables(),
-            // The error is re-anchored to the loaded file below; this names
-            // the span in the body.
+            // The error is re-anchored to the loaded file (or a file-less
+            // document's identity) below; this names the span in the body.
             source_path: Some(std::path::Path::new("document")),
         };
         // A waived source authored before a static rejection is still an
@@ -950,7 +950,8 @@ fn collection_offset(error: &CollectionError) -> usize {
 
 /// A collection failure as the composition error, located in the loaded
 /// file the way body interpolation locates its own: analysis located it in
-/// the body text it was given.
+/// the body text it was given. A document with no loaded file keeps that
+/// location, named by its context identity when it has one.
 fn collection_rejection(markdown: &Markdown, error: CollectionError) -> MarkdownError {
     let span = match error.site().map(|site| site.source.as_ref()) {
         Some(SourceRef::OnDiskSpan { span, .. }) => Some(span.range()),
@@ -963,6 +964,7 @@ fn collection_rejection(markdown: &Markdown, error: CollectionError) -> Markdown
             .map(|authored| SourceRef::OnDiskSpan { context, span: authored }),
         _ => None,
     };
+    let located = located.or_else(|| error.site().and_then(|site| markdown.identified_unfiled(&site.source)));
     match located {
         Some(source) => error.with_source(source).into(),
         None => error.into(),

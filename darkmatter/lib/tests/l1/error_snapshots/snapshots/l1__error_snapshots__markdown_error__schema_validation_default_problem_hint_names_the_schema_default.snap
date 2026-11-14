@@ -1,0 +1,13 @@
+---
+source: darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+expression: only_default
+---
+⤫ MarkdownError: schema validation failed
+┃ 
+┃ /tmp/test/doc.md
+┃ invalid doc: file not found: ./note.md (the value is the schema default
+┃ at schema location /properties/doc/default in /tmp/test/types.yaml)
+┃ 
+┃ Repair the schema default at schema location /properties/doc/default in
+┃ /tmp/test/types.yaml, or set doc in the frontmatter so the default is
+┃ not used.

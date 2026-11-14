@@ -206,6 +206,21 @@ pub use types::{
 // also use.
 pub use darkmatter::lifecycle::executor::compose_request;
 
+/// The `ComposeOptions` every Claudine composition of a document starts from.
+///
+/// Remote transclusion (`::file`/`::code` URL targets and `prologue`/
+/// `epilogue` URLs) is switched on, as `md compose` switches it on: whether a
+/// URL is fetched is decided by the request's captured `network` permission
+/// (deny unless every layer allows), which also governs read-side URL
+/// functions. Left off, those targets fail even under `network: allow`. A
+/// caller may still turn it, or any operation, off for one preparation.
+#[must_use]
+pub fn compose_options_with_context(
+    context: darkmatter::markdown::compose::ComposeContext,
+) -> darkmatter::markdown::compose::ComposeOptions {
+    darkmatter::markdown::compose::ComposeOptions::new_with_context(context).with_allow_remote_transclusion(true)
+}
+
 /// `options` with `invocation`'s Darkmatter configuration for `context`,
 /// when neither the options nor their captured `ctx` supply one already (a
 /// context captured outside the invocation carries no configuration capture).

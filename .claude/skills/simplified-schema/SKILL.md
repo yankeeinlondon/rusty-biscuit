@@ -61,9 +61,23 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   `Prepared` and Darkmatter's `EffectiveSchema` both judge that candidate.
   Strict success stays `Cow::Borrowed` and lists `defaults`; soft inserts
   them (defaults, then conversion, then any default the conversion made
-  reachable). Invalid or ambiguous defaults are `SchemaError::InvalidDefault`
+  reachable). A union compares every arm's complete candidate, the value as
+  written included, so a value one arm accepts as written and another
+  accepts completed is ambiguous; only a schema with no union arm that can
+  add a default (`defaults::alternatives_supply_defaults`, memoized by `Arc`)
+  keeps the as-written fast path. Invalid or ambiguous defaults are `SchemaError::InvalidDefault`
   / `AmbiguousDefaults` (JSON Pointer into the lowered schema, no source
-  span) inside `ValidationFailure::Unprepared`. Exported JSON Schema keeps
+  span) inside `ValidationFailure::Unprepared`. A problem the completed
+  value still has at or below an inserted path (an eager file default with
+  no target) is the default's: `defaults::attribute_problems` sets
+  `ValidationProblem::default` (the `AppliedDefault`, whose `pointer` names
+  the `default` keyword and whose `origin` a host fills), names it in the
+  message, and clears line/column; a host judging its own completed
+  candidate calls it too. Expansion inlines `Name@file` types without their
+  file, so resolution records each imported default's declaring file in
+  `ResolvedSchema::default_files` (walked over the authored schema after
+  expansion, `ImportEngine::default_files`); Darkmatter's `EffectiveSchema`
+  prefers it over the layer origin. Exported JSON Schema keeps
   `required`. Never write a second defaulting walk in a host. Tests:
   `tests/l1/required_defaults.rs`.
 - **One failure flattening.** `ConversionError::located_failures()` /

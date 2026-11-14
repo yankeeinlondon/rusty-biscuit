@@ -86,12 +86,13 @@ impl GrantBook {
     }
 
     /// Whether a host value or `network: allow` allows the `http`/`https`
-    /// URL at `location`.
+    /// URL at `location`; never under an invalid network permission.
     pub fn network_allows(&self, location: &ReadLocation) -> bool {
         let ReadLocation::Remote(url) = location else {
             return false;
         };
-        matches!(url.scheme(), "http" | "https")
+        self.network.config_error().is_none()
+            && matches!(url.scheme(), "http" | "https")
             && (self.network.allows_every_host()
                 || url.host_str().is_some_and(|host| self.hosts.iter().any(|allowed| allowed.eq_ignore_ascii_case(host))))
     }

@@ -1067,8 +1067,12 @@ fn collect_document(
     // alternative wins, a trailing `false` suppresses, and otherwise the
     // first alternative's failure class is the error.
     if options.is_enabled(ComposeOperation::TocLinking) {
-        for directive in
-            crate::markdown::compose::toc_linking::parse_directives_in(prepared.content(), Some(&body_data))?
+        // Each failure names this document, as the compose pass does.
+        let in_document = |error: crate::markdown::compose::TocLinkingError| {
+            error.with_document(prepared.error_document())
+        };
+        for directive in crate::markdown::compose::toc_linking::parse_directives_in(prepared.content(), Some(&body_data))
+            .map_err(in_document)?
         {
             if let Some((raw_target, path)) = crate::markdown::compose::toc_linking::resolve_target_chain(
                 &directive,
@@ -1076,7 +1080,9 @@ fn collect_document(
                 &transclusion_opts,
                 // Body-relative, as the compose pass reports this directive.
                 prepared.source_context_for_errors(),
-            )? {
+            )
+            .map_err(in_document)?
+            {
                 targets.push(super::PreflightTargetEdge {
                     site: None,
                     kind: super::PreflightTargetKind::TocLinking,

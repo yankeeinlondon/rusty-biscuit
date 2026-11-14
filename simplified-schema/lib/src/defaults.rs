@@ -17,7 +17,12 @@
 //! - A child is filled only inside a parent that exists. A parent filled from
 //!   its own default is not descended into: its default was validated
 //!   against the complete contract, nested required children included.
-//! - Object properties are visited in declaration order and array items in
+//! - An existing object value is descended into under every schema JSON
+//!   Schema applies to it: its literal `properties` entry and every
+//!   `patternProperties` entry whose pattern matches the key, or
+//!   `additionalProperties` when neither covers the key.
+//! - Object properties are visited in declaration order (then each existing
+//!   key under its patterns or `additionalProperties`) and array items in
 //!   ascending index order, depth first, so a parent always comes before its
 //!   children; a path is filled once, by its first occurrence.
 //! - Every default used is validated strictly, without I/O or conversion,
@@ -26,26 +31,34 @@
 //! - A union (a root union's arms, or a nested `anyOf`/`oneOf` with more than
 //!   one arm that could hold the value) is judged per arm on the complete
 //!   candidate that arm produces, discriminants and sibling assertions
-//!   included. A value some arm accepts as written needs no default. Equal
-//!   successful candidates count as one; different ones are
-//!   [`SchemaError::AmbiguousDefaults`].
+//!   included; an arm that accepts the value as written offers the unchanged
+//!   value as its candidate. Equal successful candidates count as one;
+//!   different ones are [`SchemaError::AmbiguousDefaults`], so a value one
+//!   arm accepts as written and another arm accepts once completed with a
+//!   default is ambiguous.
 //! - A value at or below one of the caller's nested templates
 //!   ([`NestedTemplates`]) is pending and is not filled.
+//! - The completed value is still judged as a whole, so a check the
+//!   structural one above cannot run (an eager file's existence) can fail
+//!   on an inserted value. [`attribute_problems`] gives such a problem to
+//!   its default, never to an authored position.
 //!
 //! A `{{ … }}` slot in a `default(...)` never reaches this walk: every
 //! lowering entry refuses an unresolved slot, so a pending default stays
 //! pending until the host resolves it.
 
 use std::borrow::Cow;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use jsonschema::Validator;
 use serde_json::Value;
 
 use crate::coerce::NestedTemplates;
+use crate::coercion::TextPattern;
 use crate::prepared::CompiledValidators;
 use crate::validate::ValidatorCache;
-use crate::{PropertyPath, SchemaError, discriminant, scope, simplified};
+use crate::{JsonPointer, PropertyPath, SchemaError, SchemaOrigin, ValidationProblem, discriminant, scope, simplified};
 
 /// A default that stands in for an absent required property.
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +67,59 @@ pub struct AppliedDefault {
     pub path: PropertyPath,
     /// The property's resolved default.
     pub value: Value,
+    /// JSON Pointer of the `default` keyword in the lowered JSON Schema, as
+    /// [`SchemaError::InvalidDefault`] names it (`/properties/doc/default`).
+    pub pointer: String,
+    /// Where the default is declared, when a host knows it: Darkmatter
+    /// names the file a `Name@file` import read it from
+    /// ([`crate::resolve::ResolvedSchema::default_files`]), else the layer
+    /// that declared its top-level property. `None` from this crate, whose
+    /// caller holds the whole schema's source.
+    pub origin: Option<SchemaOrigin>,
+}
+
+impl AppliedDefault {
+    /// Whether the value at `instance_path` is this default or lies inside
+    /// it.
+    pub fn holds(&self, instance_path: &JsonPointer) -> bool {
+        instance_path.segments().starts_with(self.path.segments())
+    }
+}
+
+/// Attributes each of `problems` about a value one of `defaults` inserted
+/// to that default (the deepest one holding it): the problem records the
+/// default in [`ValidationProblem::default`], its message names the
+/// default's schema location (and schema file, when known), and any line
+/// or column is cleared, since no authored text holds the value.
+///
+/// A problem already attributed is left alone, so a host may call this
+/// again over the same problems.
+pub fn attribute_problems(problems: &mut [ValidationProblem], defaults: &[AppliedDefault]) {
+    if defaults.is_empty() {
+        return;
+    }
+    for problem in problems.iter_mut().filter(|problem| problem.default.is_none()) {
+        let Some(applied) = defaults
+            .iter()
+            .filter(|applied| applied.holds(&problem.instance_path))
+            .max_by_key(|applied| applied.path.segments().len())
+        else {
+            continue;
+        };
+        let file = applied.origin.as_ref().and_then(SchemaOrigin::file);
+        problem.message = match file {
+            Some(file) => format!(
+                "{} (the value is the schema default at schema location `{}` in `{}`)",
+                problem.message,
+                applied.pointer,
+                file.display()
+            ),
+            None => format!("{} (the value is the schema default at schema location `{}`)", problem.message, applied.pointer),
+        };
+        problem.line = None;
+        problem.column = None;
+        problem.default = Some(applied.clone());
+    }
 }
 
 /// The value to judge once absent required properties hold their defaults.
@@ -75,8 +141,12 @@ pub struct DefaultPreparation<'input> {
 /// process or the file system beyond what `validators` already does.
 ///
 /// An instance `validators` accepts as written is returned borrowed with no
-/// defaults. The candidate is not judged as a whole here; the caller
-/// validates it as it validates any value.
+/// defaults, unless the schema has alternatives that can supply defaults
+/// ([`alternatives_supply_defaults`]): their complete candidates, the
+/// unchanged one included, are then compared, so such an instance comes back
+/// borrowed with no defaults or is [`SchemaError::AmbiguousDefaults`]. The
+/// candidate is not judged as a whole here; the caller validates it as it
+/// validates any value.
 ///
 /// ## Errors
 ///
@@ -92,14 +162,15 @@ pub fn prepare_defaults<'input>(
     validators: &CompiledValidators,
     cache: &ValidatorCache,
 ) -> Result<DefaultPreparation<'input>, SchemaError> {
-    if validators.accepts(&instance) {
+    if validators.accepts(&instance) && !alternatives_supply_defaults(json_schema) {
         return Ok(DefaultPreparation { candidate: instance, defaults: Vec::new() });
     }
     prepare_unaccepted(json_schema, instance, templates, validators, cache)
 }
 
-/// [`prepare_defaults`] for an instance the caller already knows
-/// `validators` rejects as written.
+/// [`prepare_defaults`] without its as-written check: every union's
+/// complete candidates are compared whether or not `validators` accepts
+/// `instance` as written.
 pub(crate) fn prepare_unaccepted<'input>(
     json_schema: &Arc<Value>,
     instance: Cow<'input, Value>,
@@ -107,7 +178,7 @@ pub(crate) fn prepare_unaccepted<'input>(
     validators: &CompiledValidators,
     cache: &ValidatorCache,
 ) -> Result<DefaultPreparation<'input>, SchemaError> {
-    let mut walk = Walk { root: json_schema.as_ref(), templates, cache, references: Vec::new() };
+    let mut walk = Walk { root: json_schema.as_ref(), templates, cache, references: Vec::new(), patterns: HashMap::new() };
     let insertions = match validators {
         CompiledValidators::Object(_) => {
             let mut out = Vec::new();
@@ -117,6 +188,88 @@ pub(crate) fn prepare_unaccepted<'input>(
         CompiledValidators::RootUnion(arm_validators) => walk.root_union(json_schema, &instance, arm_validators)?,
     };
     Ok(finish(instance, insertions))
+}
+
+/// Whether some union in `json_schema` (a root union's arms, or an
+/// `anyOf`/`oneOf` with more than one arm that could hold a value) has an arm
+/// that can complete a value with a default: an arm that reaches, directly or
+/// through local `$ref`s, a `required` property declaring a `default`.
+///
+/// Only such a schema can accept a value as written through one arm while
+/// another arm accepts it completed, so only such a schema compares
+/// candidates for a value its validators already accept. The answer is
+/// conservative (a `default` inside an annotation's data can count) and
+/// memoized for the process over a few recent schemas, keyed by `Arc`
+/// identity as [`crate::prepared::wrapped_root_arms`] is.
+pub fn alternatives_supply_defaults(json_schema: &Arc<Value>) -> bool {
+    let mut memo = SUPPLIERS.lock().expect("default supplier memo poisoned");
+    if let Some((_, hit)) = memo.iter().find(|(held, _)| Arc::ptr_eq(held, json_schema)) {
+        return *hit;
+    }
+    let answer = unions_supply_defaults(json_schema, json_schema);
+    if memo.len() == RECENT_SCHEMAS {
+        memo.remove(0);
+    }
+    memo.push((Arc::clone(json_schema), answer));
+    answer
+}
+
+const RECENT_SCHEMAS: usize = 8;
+/// [`alternatives_supply_defaults`]'s memo; module-level so
+/// [`reset_process_caches`] can clear it.
+static SUPPLIERS: Mutex<Vec<(Arc<Value>, bool)>> = Mutex::new(Vec::new());
+
+pub(crate) fn reset_process_caches() {
+    SUPPLIERS.lock().expect("default supplier memo poisoned").clear();
+}
+
+/// Whether a union at or below `node` has an arm that can supply a default.
+fn unions_supply_defaults(node: &Value, root: &Value) -> bool {
+    match node {
+        Value::Object(map) => {
+            let union_supplies = ["anyOf", "oneOf"].into_iter().any(|keyword| {
+                let Some(Value::Array(arms)) = map.get(keyword) else {
+                    return false;
+                };
+                let holders: Vec<&Value> = arms.iter().filter(|arm| !is_null_only(arm)).collect();
+                holders.len() > 1 && holders.iter().any(|arm| supplies_default(arm, root, &mut Vec::new()))
+            });
+            union_supplies || map.values().any(|child| unions_supply_defaults(child, root))
+        }
+        Value::Array(items) => items.iter().any(|item| unions_supply_defaults(item, root)),
+        _ => false,
+    }
+}
+
+/// Whether `node`, or anything it holds or names by local `$ref`, lists a
+/// `required` property that declares a default. `followed` holds the
+/// references already followed.
+fn supplies_default<'s>(node: &'s Value, root: &'s Value, followed: &mut Vec<&'s str>) -> bool {
+    match node {
+        Value::Object(map) => {
+            if let (Some(Value::Array(required)), Some(Value::Object(properties))) =
+                (map.get("required"), map.get("properties"))
+                && required.iter().filter_map(Value::as_str).any(|name| {
+                    properties.get(name).is_some_and(|schema| declared_default(root, schema, "").is_some())
+                })
+            {
+                return true;
+            }
+            if let Some(Value::String(reference)) = map.get("$ref")
+                && let Some(target_pointer) = reference.strip_prefix('#')
+                && !followed.contains(&reference.as_str())
+                && let Some(target) = root.pointer(target_pointer)
+            {
+                followed.push(reference);
+                if supplies_default(target, root, followed) {
+                    return true;
+                }
+            }
+            map.values().any(|child| supplies_default(child, root, followed))
+        }
+        Value::Array(items) => items.iter().any(|item| supplies_default(item, root, followed)),
+        _ => false,
+    }
 }
 
 /// One step from a value to a child.
@@ -131,6 +284,8 @@ enum Step {
 struct Insertion {
     steps: Vec<Step>,
     value: Value,
+    /// The JSON Pointer of the `default` keyword the value came from.
+    pointer: String,
 }
 
 struct Walk<'a> {
@@ -140,6 +295,8 @@ struct Walk<'a> {
     /// The `$ref`s being followed, each with the instance depth it was
     /// followed at: meeting one again at the same depth is a loop.
     references: Vec<(String, usize)>,
+    /// `patternProperties` keys compiled so far.
+    patterns: HashMap<String, TextPattern>,
 }
 
 impl Walk<'_> {
@@ -218,16 +375,29 @@ impl Walk<'_> {
             steps.pop();
             result?;
         }
-        // A key a pattern matches is not judged by `additionalProperties`;
-        // without a regex engine here, such objects are left alone.
-        if map.get("patternProperties").is_none()
-            && let Some(additional @ Value::Object(_)) = map.get("additionalProperties")
-        {
-            let at = format!("{pointer}/additionalProperties");
-            for (key, child) in object {
-                if properties.is_some_and(|declared| declared.contains_key(key)) {
+        let patterns = map.get("patternProperties").and_then(Value::as_object);
+        let additional = map.get("additionalProperties").filter(|schema| schema.is_object());
+        if patterns.is_none() && additional.is_none() {
+            return Ok(());
+        }
+        // JSON Schema: every pattern a key matches applies to it, a literal
+        // property included; `additionalProperties` applies only to a key
+        // that no property and no pattern covers.
+        for (key, child) in object {
+            let mut covered = properties.is_some_and(|declared| declared.contains_key(key));
+            for (source, schema) in patterns.into_iter().flatten() {
+                if !self.pattern(source)?.is_match(key) {
                     continue;
                 }
+                covered = true;
+                let at = format!("{pointer}/patternProperties/{}", escape(source));
+                steps.push(Step::Key(key.clone()));
+                let result = self.visit(schema, &at, child, steps, out, false);
+                steps.pop();
+                result?;
+            }
+            if !covered && let Some(additional) = additional {
+                let at = format!("{pointer}/additionalProperties");
                 steps.push(Step::Key(key.clone()));
                 let result = self.visit(additional, &at, child, steps, out, false);
                 steps.pop();
@@ -235,6 +405,19 @@ impl Walk<'_> {
             }
         }
         Ok(())
+    }
+
+    /// The compiled `patternProperties` key `source`, matched as conversion
+    /// matches it ([`crate::coercion::KeyMatcher::Pattern`]). A pattern that does not compile
+    /// is the [`SchemaError::BuildValidator`] the schema's validator reports.
+    fn pattern(&mut self, source: &str) -> Result<&TextPattern, SchemaError> {
+        if !self.patterns.contains_key(source) {
+            let pattern = TextPattern::new(source).map_err(|error| SchemaError::BuildValidator {
+                message: format!("invalid `patternProperties` pattern `{source}`: {error}"),
+            })?;
+            self.patterns.insert(source.to_string(), pattern);
+        }
+        Ok(&self.patterns[source])
     }
 
     fn array(
@@ -279,12 +462,13 @@ impl Walk<'_> {
         if !messages.is_empty() {
             return Err(SchemaError::InvalidDefault { path, pointer: default_pointer, message: messages.join("; ") });
         }
-        out.push(Insertion { steps: steps.to_vec(), value: default.clone() });
+        out.push(Insertion { steps: steps.to_vec(), value: default.clone(), pointer: default_pointer });
         Ok(())
     }
 
     /// A nested union: each arm that could hold `value` is judged on the
-    /// candidate its own defaults produce.
+    /// candidate its own defaults produce (`value` as written for an arm
+    /// with none to add).
     fn union(
         &mut self,
         node: &Value,
@@ -307,6 +491,8 @@ impl Walk<'_> {
             self.visit(&arms[index], &format!("{pointer}/{index}"), value, steps, &mut arm_out, false)?;
             per_arm.push((index, arm_out));
         }
+        // No arm can complete the value, so every candidate is the value as
+        // written and the union needs no comparison.
         if per_arm.iter().all(|(_, arm_out)| arm_out.is_empty()) {
             return Ok(());
         }
@@ -317,14 +503,10 @@ impl Walk<'_> {
             let wrapped = crate::validate::wrap_arm_as_root_schema(&arms[*index], &holder);
             judges.push(self.cache.structural_validator_for(&wrapped)?);
         }
-        if judges.iter().any(|judge| self.accepts(judge, value, &base)) {
-            return Ok(());
-        }
         let depth = steps.len();
         let successes: Vec<(usize, Value, Vec<Insertion>)> = per_arm
             .into_iter()
             .zip(&judges)
-            .filter(|((_, arm_out), _)| !arm_out.is_empty())
             .filter_map(|((index, arm_out), judge)| {
                 let candidate = apply(value.clone(), &arm_out, depth);
                 self.accepts(judge, &candidate, &base).then_some((index, candidate, arm_out))
@@ -343,7 +525,8 @@ impl Walk<'_> {
     }
 
     /// The root union's arms, each judged by its compiled validator on the
-    /// complete candidate it produces. With no successful arm, the arm a
+    /// complete candidate it produces (the instance as written for an arm
+    /// with no defaults to add). With no successful arm, the arm a
     /// literal discriminant selects keeps its defaults, so the report that
     /// follows names that arm's real problems.
     fn root_union(&mut self, root: &Value, instance: &Value, validators: &[Arc<Validator>]) -> Result<Vec<Insertion>, SchemaError> {
@@ -360,7 +543,6 @@ impl Walk<'_> {
         }
         let successes: Vec<(usize, Value, Vec<Insertion>)> = per_arm
             .iter()
-            .filter(|(_, arm_out)| !arm_out.is_empty())
             .filter_map(|(index, arm_out)| {
                 let candidate = apply(instance.clone(), arm_out, 0);
                 let judge = validators.get(*index)?;
@@ -438,7 +620,14 @@ fn finish(instance: Cow<'_, Value>, insertions: Vec<Insertion>) -> DefaultPrepar
     let candidate = apply(instance.into_owned(), &unique, 0);
     let defaults = unique
         .into_iter()
-        .filter_map(|insertion| Some(AppliedDefault { path: property_path(&insertion.steps)?, value: insertion.value }))
+        .filter_map(|insertion| {
+            Some(AppliedDefault {
+                path: property_path(&insertion.steps)?,
+                value: insertion.value,
+                pointer: insertion.pointer,
+                origin: None,
+            })
+        })
         .collect();
     DefaultPreparation { candidate: Cow::Owned(candidate), defaults }
 }
@@ -532,7 +721,7 @@ mod tests {
     fn walk(schema: &Value, instance: &Value) -> Result<Vec<Insertion>, SchemaError> {
         let cache = ValidatorCache::new();
         let templates = NestedTemplates::default();
-        let mut walk = Walk { root: schema, templates: &templates, cache: &cache, references: Vec::new() };
+        let mut walk = Walk { root: schema, templates: &templates, cache: &cache, references: Vec::new(), patterns: HashMap::new() };
         let mut out = Vec::new();
         walk.visit(schema, "", instance, &mut Vec::new(), &mut out, false)?;
         Ok(out)
@@ -570,7 +759,11 @@ mod tests {
 
     #[test]
     fn an_insertion_below_a_missing_parent_is_dropped() {
-        let insertion = Insertion { steps: vec![Step::Key("gone".into()), Step::Key("a".into())], value: json!(1) };
+        let insertion = Insertion {
+            steps: vec![Step::Key("gone".into()), Step::Key("a".into())],
+            value: json!(1),
+            pointer: "/properties/gone/properties/a/default".into(),
+        };
 
         let value = apply(json!({ "kept": true }), &[insertion], 0);
 
@@ -579,8 +772,8 @@ mod tests {
 
     #[test]
     fn the_first_occurrence_of_a_path_wins() {
-        let first = Insertion { steps: vec![Step::Key("a".into())], value: json!(1) };
-        let second = Insertion { steps: vec![Step::Key("a".into())], value: json!(2) };
+        let first = Insertion { steps: vec![Step::Key("a".into())], value: json!(1), pointer: "/anyOf/0/properties/a/default".into() };
+        let second = Insertion { steps: vec![Step::Key("a".into())], value: json!(2), pointer: "/anyOf/1/properties/a/default".into() };
 
         let prepared = finish(Cow::Owned(json!({})), vec![first, second]);
 

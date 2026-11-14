@@ -16,6 +16,8 @@ use darkmatter::markdown::compose::expression::{BindingView, ExpressionError, Ru
 use darkmatter::markdown::compose::{ComposeContext, ComposeRequest};
 
 use crate::composition::error::{CompositionError, ShellApprovalFailure};
+use crate::composition::prepare::PromptOrigin;
+use darkmatter::markdown::compose::ShellCommandOrigin;
 use crate::composition::lifecycle::{LifecycleConfig, LifecycleSignal};
 use crate::composition::lifecycle::bindings::{
     EnclosingLoop, LifecycleScope, LifecycleValues, approval_diagnostics, runtime_bindings_enclosed,
@@ -82,29 +84,48 @@ pub fn resolve_shell_approvals(
     lifecycle: Option<&LifecycleConfig>,
     lifecycle_source_path: Option<&std::path::Path>,
 ) -> Result<PreFlightResult, CompositionError> {
-    let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
+    resolve_approvals(markdown.zip(compose_request), approval_options, lifecycle, lifecycle_source_path, None)
+}
+
+/// [`resolve_shell_approvals`] for one document's template surface, whose
+/// discovered sites in an inline run's generated body are published at
+/// `prompt` (see [`PromptOrigin`]).
+pub(crate) fn resolve_document_shell_approvals(
+    document: &Markdown,
+    compose_request: &ComposeRequest,
+    approval_options: &ShellApprovalOptions,
+    prompt: Option<&PromptOrigin<'_>>,
+) -> Result<PreFlightResult, CompositionError> {
+    resolve_approvals(Some((document, compose_request)), approval_options, None, None, prompt)
+}
+
+fn resolve_approvals(
+    document: Option<(&Markdown, &ComposeRequest)>,
+    approval_options: &ShellApprovalOptions,
+    lifecycle: Option<&LifecycleConfig>,
+    lifecycle_source_path: Option<&std::path::Path>,
+    prompt: Option<&PromptOrigin<'_>>,
+) -> Result<PreFlightResult, CompositionError> {
+    let mut all_commands: Vec<DiscoveredCommand> = Vec::new();
     let mut candidates: Vec<ShellCandidate> = Vec::new();
 
     // -- Source 1: Template ::shell directives ---------------------------------
     // Darkmatter discovers condition-blind: every command that could run under
     // any document state (including dead branches). Claudine authorizes the
     // union of these plus lifecycle stack commands below.
-    if let (Some(md), Some(opts)) = (markdown, compose_request) {
+    if let Some((md, opts)) = document {
         let preflight = md.compose_preflight(opts).map_err(|error| {
             let source_path = match md.source() {
                 Some(darkmatter::markdown::compose::ComposeSource::File(path)) => path.as_path(),
                 _ => lifecycle_source_path.unwrap_or(Path::new("")),
             };
-            discovery_failed(source_path, error)
+            let error = discovery_failed(source_path, error);
+            match prompt {
+                Some(prompt) => prompt.composition_error(error),
+                None => error,
+            }
         })?;
-        for entry in &preflight.entries {
-            all_commands.push((
-                entry.normalized.clone(),
-                entry.source_file.clone(),
-                entry.origin.line_number(),
-            ));
-        }
-        candidates.extend(preflight.candidates);
+        publish_discovered(preflight, prompt, &mut all_commands, &mut candidates);
     }
 
     // -- Source 2: Lifecycle stack shell commands ------------------------------
@@ -118,7 +139,7 @@ pub fn resolve_shell_approvals(
             .unwrap_or_else(|| std::path::PathBuf::from("<lifecycle-stack>"));
         let audit = collect_lifecycle_shell_audit(lifecycle_config, &LifecycleSignal::ALL, &source_file);
         for (command, _property_path) in audit.commands {
-            all_commands.push((command, source_file.clone(), 0));
+            all_commands.push((command, source_file.clone(), CommandLocation::default()));
         }
         candidates.extend(audit.candidates);
     }
@@ -163,11 +184,11 @@ pub fn resolve_graph_shell_approvals(
     ) -> Result<ComposeRequest, CompositionError>,
 ) -> Result<PreFlightResult, CompositionError> {
     graph.record_shell_authorization(ShellPreApprovals::new(), approval_options.permissions.clone());
-    let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
+    let mut all_commands: Vec<DiscoveredCommand> = Vec::new();
     let mut candidates: Vec<ShellCandidate> = graph.template_candidates.clone();
 
     for command in &graph.shell_commands {
-        all_commands.push((command.command.clone(), command.source_file.clone(), 0));
+        all_commands.push((command.command.clone(), command.source_file.clone(), CommandLocation::default()));
     }
 
     for reference in &graph.prompt_references {
@@ -175,18 +196,26 @@ pub fn resolve_graph_shell_approvals(
             continue;
         };
         let options = prompt_compose_request(reference)?;
-        let preflight = document
-            .markdown
+        // An inline document's run composes its `prompt`, not its body.
+        let mode = if document.inline_compose {
+            super::CompositionMode::InlineFrontmatterPrompt
+        } else {
+            super::CompositionMode::ChainedDocument
+        };
+        let with = serde_json::Value::Object(reference.with.clone());
+        let original_text = document.markdown.as_string();
+        let generated = super::prepare::document_for_mode(&document.markdown, &document.path, mode, Some(&with))?;
+        let prompt = PromptOrigin::for_mode(mode, &document.path, &original_text);
+        let preflight = generated
             .compose_preflight(&options)
-            .map_err(|error| discovery_failed(&document.path, error))?;
-        for entry in &preflight.entries {
-            all_commands.push((
-                entry.normalized.clone(),
-                entry.source_file.clone(),
-                entry.origin.line_number(),
-            ));
-        }
-        candidates.extend(preflight.candidates);
+            .map_err(|error| {
+                let error = discovery_failed(&document.path, error);
+                match &prompt {
+                    Some(prompt) => prompt.composition_error(error),
+                    None => error,
+                }
+            })?;
+        publish_discovered(preflight, prompt.as_ref(), &mut all_commands, &mut candidates);
         // Resolve only frontmatter data; discovery never executes document shells.
         let roots = lifecycle_document_roots(&document.markdown, &reference.deferred_shell_roots());
         let excluded: Vec<String> = super::lifecycle::claudine_registry().authored_event_keys().into_iter().map(str::to_string)
@@ -209,13 +238,63 @@ pub fn resolve_graph_shell_approvals(
             options.resolution_context(), None, enclosing, schema.as_ref(), Some(&lifecycle_options),
         )?;
         let audit = collect_lifecycle_shell_audit(&lifecycle, &LifecycleSignal::ALL, &document.path);
-        all_commands.extend(audit.commands.into_iter().map(|(command, _)| (command, document.path.clone(), 0)));
+        all_commands.extend(audit.commands.into_iter().map(|(command, _)| (command, document.path.clone(), CommandLocation::default())));
         candidates.extend(audit.candidates);
     }
 
     let result = approve_commands(all_commands, &candidates, approval_options)?;
     graph.record_shell_authorization(result.approved_commands.clone(), approval_options.permissions.clone());
     Ok(result)
+}
+
+/// A command to approve by its bytes, with the file and place it was
+/// authored in.
+type DiscoveredCommand = (String, std::path::PathBuf, CommandLocation);
+
+/// Where an approval prompt or failure says a command was authored; `None`
+/// for a lifecycle command, which has no document origin.
+#[derive(Debug, Clone, Default)]
+struct CommandLocation(Option<ShellCommandOrigin>);
+
+impl CommandLocation {
+    fn of(origin: &ShellCommandOrigin) -> Self {
+        Self(Some(origin.clone()))
+    }
+
+    /// 1-based line; `0` when no line is proven.
+    fn line(&self) -> usize {
+        self.0.as_ref().map_or(0, ShellCommandOrigin::line_number)
+    }
+
+    /// The frontmatter property holding the command.
+    fn property(&self) -> Option<String> {
+        match &self.0 {
+            Some(ShellCommandOrigin::Frontmatter { key, .. }) => Some(key.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// Add a discovery report's commands and sites to the approval inputs,
+/// published at `prompt` when they are an inline run's generated body.
+fn publish_discovered(
+    preflight: darkmatter::markdown::compose::ComposePreflightReport,
+    prompt: Option<&PromptOrigin<'_>>,
+    all_commands: &mut Vec<DiscoveredCommand>,
+    candidates: &mut Vec<ShellCandidate>,
+) {
+    for mut entry in preflight.entries {
+        if let Some(prompt) = prompt {
+            prompt.site(&entry.source_file, &mut entry.origin);
+        }
+        all_commands.push((entry.normalized, entry.source_file, CommandLocation::of(&entry.origin)));
+    }
+    for mut candidate in preflight.candidates {
+        if let Some(prompt) = prompt {
+            prompt.site(&candidate.site.source_file, &mut candidate.site.origin);
+        }
+        candidates.push(candidate);
+    }
 }
 
 /// Approve every document command site, then the remaining resolved bytes.
@@ -229,7 +308,7 @@ pub fn resolve_graph_shell_approvals(
 /// its shape are still checked against the built-in blacklist; they join the exact
 /// set only when another site needs them as bytes.
 fn approve_commands(
-    all_commands: Vec<(String, std::path::PathBuf, usize)>,
+    all_commands: Vec<DiscoveredCommand>,
     candidates: &[ShellCandidate],
     approval_options: &ShellApprovalOptions,
 ) -> Result<PreFlightResult, CompositionError> {
@@ -255,9 +334,9 @@ fn approve_commands(
     let mut by_bytes: HashSet<String> = HashSet::new();
     let mut prompted_bytes: HashSet<String> = HashSet::new();
     for candidate in candidates {
-        let line = candidate.site.origin.line_number();
+        let location = CommandLocation::of(&candidate.site.origin);
         let source_file = &candidate.site.source_file;
-        let audit = |error| audit_failure(error, candidate.display_command(), source_file, line, approval_options);
+        let audit = |error| audit_failure(error, candidate.display_command(), source_file, &location, approval_options);
         if candidate.requirement == ModeRequirement::TemplateRequired {
             let shape = crate::harness::shell::validate_and_approve_template_site(candidate, approval_options)
                 .map_err(audit)?;
@@ -326,7 +405,7 @@ pub fn resolve_lifecycle_shell_approvals(
     let commands = audit
         .commands
         .into_iter()
-        .map(|(command, _property)| (command, lifecycle_source_path.to_path_buf(), 0))
+        .map(|(command, _property)| (command, lifecycle_source_path.to_path_buf(), CommandLocation::default()))
         .collect();
     let result = approve_commands(commands, &audit.candidates, approval_options)?;
     settle_lifecycle_shell_modes(
@@ -353,12 +432,12 @@ pub(crate) fn settle_lifecycle_shell_modes(
 /// shape: they are checked against the built-in blacklist and neither prompted for
 /// nor added to the exact set.
 fn approve_discovered_commands_with(
-    all_commands: Vec<(String, std::path::PathBuf, usize)>,
+    all_commands: Vec<DiscoveredCommand>,
     shape_only: &HashSet<String>,
     approval_options: &ShellApprovalOptions,
 ) -> Result<PreFlightResult, CompositionError> {
     // -- Deduplicate -----------------------------------------------------------
-    let unique: Vec<(String, std::path::PathBuf, usize)> = {
+    let unique: Vec<DiscoveredCommand> = {
         let mut seen = HashSet::new();
         all_commands
             .into_iter()
@@ -378,23 +457,23 @@ fn approve_discovered_commands_with(
         .unwrap_or(0);
 
     // -- Check each command against policy -------------------------------------
-    for (normalized, source_file, line) in &unique {
+    for (normalized, source_file, location) in &unique {
         // Split normalized command back into parts for the existing validator.
         let parts: Vec<String> =
             tokenize_words_strict(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
 
         if shape_only.contains(normalized) {
             crate::harness::shell::check_command_builtin_blacklist(&parts).map_err(|error| {
-                audit_failure(error, normalized.clone(), source_file, *line, approval_options)
+                audit_failure(error, normalized.clone(), source_file, location, approval_options)
             })?;
             continue;
         }
 
-        match crate::harness::shell::validate_and_approve_command_parts(
+        match crate::harness::shell::validate_and_approve_command_at(
             &parts,
             approval_options,
             Some(source_file.as_path()),
-            Some(*line),
+            location.0.clone().unwrap_or(ShellCommandOrigin::Body { line: 0 }),
         ) {
             Ok(_) => {
                 approved.insert_exact(normalized.clone());
@@ -405,7 +484,8 @@ fn approve_discovered_commands_with(
                     return Err(CompositionError::ShellCommandDenied {
                         command,
                         source_file: source_file.clone(),
-                        line: *line,
+                        line: location.line(),
+                        property: location.property(),
                     });
                 }
                 // No handler -- cannot get approval. Under `--dry-run` the
@@ -419,7 +499,8 @@ fn approve_discovered_commands_with(
                 return Err(CompositionError::ShellApprovalUnavailable {
                     command,
                     source_file: source_file.clone(),
-                    line: *line,
+                    line: location.line(),
+                    property: location.property(),
                     failure,
                 });
             }
@@ -430,7 +511,8 @@ fn approve_discovered_commands_with(
                 return Err(CompositionError::ShellApprovalUnavailable {
                     command,
                     source_file: source_file.clone(),
-                    line: *line,
+                    line: location.line(),
+                    property: location.property(),
                     failure: ShellApprovalFailure::Blacklisted(reason),
                 });
             }
@@ -462,22 +544,25 @@ fn audit_failure(
     error: crate::harness::error::HarnessError,
     command: String,
     source_file: &Path,
-    line: usize,
+    location: &CommandLocation,
     approval_options: &ShellApprovalOptions,
 ) -> CompositionError {
     use crate::harness::error::HarnessError;
+    let (line, property) = (location.line(), location.property());
     match error {
         HarnessError::ShellCommandDenied { .. } if approval_options.approval_handler.is_some() => {
             CompositionError::ShellCommandDenied {
                 command,
                 source_file: source_file.to_path_buf(),
                 line,
+                property,
             }
         }
         HarnessError::ShellCommandDenied { .. } => CompositionError::ShellApprovalUnavailable {
             command,
             source_file: source_file.to_path_buf(),
             line,
+            property,
             failure: if approval_options.dry_run {
                 ShellApprovalFailure::DryRun
             } else {
@@ -488,6 +573,7 @@ fn audit_failure(
             command,
             source_file: source_file.to_path_buf(),
             line,
+            property,
             failure: ShellApprovalFailure::Blacklisted(reason),
         },
         other => CompositionError::PreFlightShellAuditFailed { source: other },

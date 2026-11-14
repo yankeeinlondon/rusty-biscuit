@@ -1,8 +1,8 @@
 //! The configured `network` permission decides which URLs a composition and
 //! a schema slot may fetch: `allow` in the user file and, inside a
 //! repository, in both its committed and working-copy files permits every
-//! HTTP(S) host; anything else permits only the run's `--allow host=HOST`
-//! hosts. Consent never relaxes the transport rules: redirects stay
+//! HTTP(S) host; a valid `deny` permits only the run's `--allow host=HOST`
+//! hosts; an invalid `permissions` block permits nothing. Consent never relaxes the transport rules: redirects stay
 //! refused, and a denied host's cached body is never served.
 //!
 //! Every case works in its own temp folder with a temp home, prepares its
@@ -363,4 +363,103 @@ async fn slot_and_composition_reads_decide_alike() {
             assert!(slot_refused(&slot), "{:?}", slot.as_ref().err().map(|f| chain(f)));
         }
     }
+}
+
+// ── Invalid configuration outranks a per-run host ───────────────────────
+//
+// Every URL surface (`::file`, `::code`, a read-side expression, a schema
+// slot) under one configuration and the exact per-run host `127.0.0.1`.
+// An invalid `permissions` block (any shape of `network`, or any other
+// invalid part of the block) is a located configuration error and no
+// request; a valid `allow`/`deny`, or an omitted block, fetches.
+
+/// The four URL surfaces, each reading `server`'s `/rows.json`.
+fn url_surfaces(server: &MockServer) -> [(&'static str, String); 4] {
+    let url = format!("{}/rows.json", server.uri());
+    [
+        ("::file", format!("::file {url}\n")),
+        ("::code", format!("::code {url}\n")),
+        ("expression", body_document(&url)),
+        ("schema slot", slot_document(&url)),
+    ]
+}
+
+/// Composes every URL surface under the user file `config` with the exact
+/// per-run host, in its own case, returning each surface's result and the
+/// requests the run made.
+async fn under_exact_host(config: &str) -> (Vec<(&'static str, Composed)>, usize, PathBuf) {
+    let server = server().await;
+    let case = Case::new();
+    let user_file = case.home.join(".darkmatter.yaml");
+    std::fs::write(&user_file, config).unwrap();
+    let mut results = Vec::new();
+    for (surface, body) in url_surfaces(&server) {
+        results.push((surface, compose(&case, "doc.md", &body, exact_loopback()).await));
+    }
+    (results, requests_to(&server, "/rows.json").await, user_file)
+}
+
+/// Asserts every surface refused with the configuration error naming
+/// `user_file` (and each of `also_named`) and that nothing was requested.
+async fn assert_config_error(config: &str, also_named: &[&str]) {
+    let (results, requests, user_file) = under_exact_host(config).await;
+    let location = user_file.display().to_string();
+    for (surface, result) in results {
+        let failure = match result {
+            Ok(text) => panic!("{surface} under {config:?} fetched with an invalid configuration: {text}"),
+            Err(failure) => chain(&failure),
+        };
+        assert!(failure.contains(&location), "{surface} under {config:?} does not name {location}: {failure}");
+        for name in also_named {
+            assert!(failure.contains(name), "{surface} under {config:?} does not name {name}: {failure}");
+        }
+    }
+    assert_eq!(requests, 0, "{config:?}: an invalid configuration requests nothing");
+}
+
+/// Asserts every surface fetched the allowed host.
+async fn assert_fetches(config: &str) {
+    let (results, requests, _) = under_exact_host(config).await;
+    for (surface, result) in results {
+        if let Err(failure) = result {
+            panic!("{surface} under {config:?} refused the allowed host: {}", chain(&failure));
+        }
+    }
+    assert!(requests > 0, "{config:?}: the allowed host was fetched");
+}
+
+macro_rules! invalid_configuration_rows {
+    ($($name:ident: $config:expr, $named:expr;)*) => {$(
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn $name() {
+            assert_config_error($config, $named).await;
+        }
+    )*};
+}
+
+invalid_configuration_rows! {
+    network_null_outranks_an_exact_host: "permissions:\n  network: null\n", &["/permissions/network"];
+    network_number_outranks_an_exact_host: "permissions:\n  network: 123\n", &["/permissions/network"];
+    network_list_outranks_an_exact_host: "permissions:\n  network: []\n", &["/permissions/network"];
+    network_empty_string_outranks_an_exact_host: "permissions:\n  network: \"\"\n", &["/permissions/network"];
+    network_unknown_word_outranks_an_exact_host: "permissions:\n  network: sometimes\n", &["/permissions/network"];
+    null_permissions_outrank_an_exact_host: "permissions: null\n", &["/permissions"];
+    an_invalid_file_read_entry_outranks_an_exact_host: "permissions:\n  file-read: [123]\n", &["/permissions/file-read"];
+    an_invalid_shell_rule_outranks_an_exact_host: "permissions:\n  shell-commands: [frobnicate echo]\n", &["/permissions/shell-commands"];
+    a_missing_permissions_reference_outranks_an_exact_host: "permissions: ./missing.yaml\n", &["missing.yaml"];
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn valid_allow_fetches_every_surface_for_an_exact_host() {
+    assert_fetches(&network_yaml("allow")).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn valid_deny_fetches_every_surface_for_an_exact_host() {
+    assert_fetches(&network_yaml("deny")).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn omitted_permissions_fetch_every_surface_for_an_exact_host() {
+    assert_fetches("{}\n").await;
 }

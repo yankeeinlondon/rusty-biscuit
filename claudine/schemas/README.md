@@ -31,7 +31,7 @@ and commit the regenerated artifacts (see
 | `sequence-types.yaml` | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`); `task` and `group` recurse, so containers are typed at every depth |
 | `linking.yaml` | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
 | `document.yaml` | library (`kind: schema`) | the document metadata (`prompt`, `hash`, `last_updated`) that `claudine.yaml` and `inline-compose.yaml` both import |
-| `claudine.yaml` | trigger (`kind: schema-trigger`) | applies Claudine's frontmatter catalog to a document with a non-null `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model`; types `initialize`, `cancelled`, and `finalize` for those documents, but never selects on them alone because the `md` host owns them too; types Darkmatter's `composed` and `failed` as errors that name `start` and `blocked` |
+| `claudine.yaml` | trigger (`kind: schema-trigger`) | applies Claudine's frontmatter catalog to a document with a non-null `sequence`, `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model` (the keys `claudine-document.yaml` identifies); types `initialize`, `cancelled`, and `finalize` for those documents, but never selects on them alone because the `md` host owns them too; types Darkmatter's `composed` and `failed` as errors that name `start` and `blocked` |
 | `inline-compose.yaml` | trigger (`kind: schema-trigger`) | applies inline-compose's document metadata to a document with a non-null `prompt` and no non-null `sequence` |
 | `sequence.yaml` | trigger (`kind: schema-trigger`) | applies the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`) to a document with a non-null `sequence` |
 | `claudine-document.yaml` | identifying trigger (`kind: schema-trigger`) | matches a document with a non-null `sequence`, `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model`, which makes it a Claudine document; its payload is empty. The `darkmatter-host` manifest Claudine publishes names it as `identify`. It is not part of the embedded trigger bundle, so Claudine's own launch never uses it |
@@ -92,5 +92,5 @@ by the shared `loop` type. A group object is closed, so a removed key such as
 `execution` is a schema error; a task object is open, so an undeclared key is
 step data. Executable exclusivity, unique leg names, container-event
 placement, and removed task keys remain parser-validated. The document
-catalog (`claudine.yaml`) does not declare `sequence`; `sequence.yaml` is its
-only declaration.
+catalog (`claudine.yaml`) is selected by a non-null `sequence` but does not
+declare it; `sequence.yaml` is its only declaration.

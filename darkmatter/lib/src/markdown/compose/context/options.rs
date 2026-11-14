@@ -266,10 +266,12 @@ pub struct ComposeOptions {
     /// Default: 16.
     pub(crate) max_transclusion_depth: usize,
 
-    /// Whether `::url` remote transclusion is allowed.
+    /// Whether URL targets of `::file`/`::code` and of frontmatter
+    /// `prologue`/`epilogue` may be transcluded.
     ///
-    /// Disabled by default for security. When false, `::url` directives
-    /// are skipped (or error if `fail_fast` is true).
+    /// Off by default; such a target then fails as disabled. On, each fetch
+    /// is still decided by the request's network policy (`network` and the
+    /// run's allowed hosts).
     pub(crate) allow_remote_transclusion: bool,
 
     /// Whether `::file` can include local markdown documents.
@@ -2243,6 +2245,11 @@ impl ComposeOptions {
     /// dependency analysis so a raw lifecycle subtree cannot leak into an
     /// early-bound value.
     ///
+    /// Schema problems on a deferred key are left to the caller, which
+    /// judges them when it runs the events. Under
+    /// [`with_selected_host`](Self::with_selected_host) no caller runs the
+    /// host's events, so the composition verdict keeps them.
+    ///
     /// Default: empty (no behavior change).
     ///
     /// ## Examples
@@ -2539,7 +2546,11 @@ impl ComposeOptions {
     /// and typing ([`RegisteredHostProfile::analysis_globals`](crate::config::registration::RegisteredHostProfile::analysis_globals)),
     /// so a read of one is no undeclared property, and fail as unavailable
     /// when read; the registered layer keeps applying. Registration supplies
-    /// types, never values or handlers.
+    /// types, never values or handlers. Keys deferred with
+    /// [`with_exclude_keys`](Self::with_exclude_keys) are still never
+    /// rendered, but their schema problems stay in this composition's
+    /// verdict, as `md schema validate` reports them: nothing later judges a
+    /// host event `md` does not run.
     ///
     /// Options that already carry a caller's own host globals
     /// ([`Self::with_host_globals`], Claudine's executable host) are returned

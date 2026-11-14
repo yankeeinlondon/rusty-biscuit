@@ -91,6 +91,13 @@ Here's a non-exhaustive list of the kinds of errors we could expect from this op
     - if the `service={service}` parameter is found with a service that is invalid then this is an error
     - similarly if a list of services is provided and any one of these services is invalid this is an error
 
+Every error except a read failure names its `document`, the file whose body
+holds the directive (a transcluded file's directive names that file), and
+`reason()` gives its message without the line. A document composed from
+generated text with an identity (`Markdown::with_context_identity`) is named by
+that identity instead, and a warning for a failure composition tolerates in it
+names no line, as in `` invalid `::toc-linking` glob pattern '[a': … ``.
+
 ## Examples
 
 ### Basics

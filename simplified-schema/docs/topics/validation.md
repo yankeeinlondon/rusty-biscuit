@@ -131,8 +131,20 @@ is rejected.
 
 A `required` property whose definition has a `default(...)` satisfies its
 contract when it is absent. Validation judges the value with the default in
-place and reports each default it used as an `AppliedDefault { path, value }`
-in `ValidationSuccess::defaults`.
+place and reports each default it used as an `AppliedDefault` in
+`ValidationSuccess::defaults`: its `path`, its `value`, its `pointer` (the
+JSON Pointer of the `default` keyword in the lowered JSON Schema, such as
+`/properties/retries/default`), and an `origin` a host may fill with where
+the default is declared (always `None` from this crate).
+
+Expansion inlines a `Name@file` named type, so the lowered schema no longer
+shows which file a default inside it came from. Resolution records that in
+`ResolvedSchema::default_files`: for each default a type imported from
+another schema file supplies, the property path it stands in for and the
+file that declares it. With `doc: Thing@./types.yaml` and `Thing` declaring
+`own: number(required; default(1))`, the entry is `["doc", "own"]` →
+`types.yaml`. A default the resolved schema declares itself is not listed,
+nor is one inside a list's items or below a pattern key.
 
 ```rust
 use serde_json::json;
@@ -166,12 +178,20 @@ Which absent properties are filled:
 | `meta: "{ a: number(required; default(1)) }"` | `{ "meta": {} }` | passes; `meta.a = 1` reported |
 | the same | `{}` | passes; `meta` is optional, so nothing below it is filled |
 | `rows: "{ on: boolean(required; default(true)) }[]"` | `{ "rows": [{}, { "on": false }, {}] }` | passes; `rows.0.on`, then `rows.2.on` |
+| `"<starting::x->": "{ retries: number(required; default(3)) }"` | `{ "x-build": {} }` | passes; `x-build.retries = 3` reported (also for `<ending::…>`, `<pattern::…>`, and `<string>`) |
 
 The rules behind the table:
 
 - **A child needs its parent.** A default inside an object applies only when
   the object exists. A missing parent is the parent's own question: it is
   reported missing, or filled from its own default when it has one.
+- **Dictionary entries count as parents.** An existing entry is completed
+  under every schema JSON Schema applies to its key in the lowered schema:
+  its literal property, each pattern key (`patternProperties`) whose pattern
+  matches it, and the `<string>` catch-all (`additionalProperties`) only
+  when neither a literal property nor a pattern covers the key. A pattern
+  that does not compile fails the schema's preparation
+  (`SchemaError::BuildValidator`) before any default is considered.
 - **Order is stable.** Properties are visited in declaration order and list
   items by ascending index, parents before their children. Each path is
   reported once. A key containing `.` is spelled with `\.` in the path's
@@ -186,11 +206,13 @@ The rules behind the table:
   needed is not judged.
 - **Unions are judged per arm.** For a union, each arm completes the value
   with its own defaults and the complete result is judged against that arm,
-  discriminants and the root's sibling assertions included. A value some
-  arm accepts as written uses no default. When several arms succeed, equal
-  results count as one; different results fail with
+  discriminants and the root's sibling assertions included; an arm with no
+  default to add offers the value as written. When several arms succeed,
+  equal results count as one; different results fail with
   `SchemaError::AmbiguousDefaults`, which names the union's pointer and the
-  arms, rather than picking whichever arm comes first.
+  arms, rather than picking whichever arm comes first. This holds for a value
+  one arm accepts as written, too: if another arm accepts it once completed
+  with a default, the two results differ and the value is ambiguous.
 
   ```yaml
   $schema:
@@ -203,6 +225,34 @@ The rules behind the table:
   `{ kind: page }` passes with `slug = home`: the `post` arm's result is
   rejected by its `kind`. Without the `kind` properties, `{}` would be
   ambiguous.
+
+  ```yaml
+  $schema:
+    - a: number(required; default(1))
+    - b: string(required; default(z))
+  ```
+
+  `{ b: y }` is ambiguous: the second arm accepts it as written, and the
+  first, whose root object admits other keys, accepts `{ b: y, a: 1 }`. A
+  nested union of SimplifiedSchema objects does not meet this, because
+  nested objects are closed: under
+  `shape: "{ a: number(required; default(1)) } | { b: string(required; default(z)) }"`,
+  `shape: { b: y }` passes unchanged, since the first arm's result
+  `{ b: y, a: 1 }` is rejected for its unknown `b`. A union whose arms
+  cannot add a default (or that has no union at all) accepts a value its
+  validators accept as written without building any candidate.
+- **A used default is still judged with the whole value.** The check above
+  runs without file access, so an eager file default whose target does not
+  exist (`doc: file(required; eager; default(./note.md))` with no
+  `note.md`) passes it and fails when the completed value is judged. Such a
+  problem belongs to the default, not to anything the author wrote: its
+  `ValidationProblem::default` holds the `AppliedDefault` that supplied the
+  value, its message ends with
+  `(the value is the schema default at schema location `/properties/doc/default`)`,
+  and its `line` and `column` are `None`. A problem with an authored value
+  has no `default`. A host that judges a completed value with its own
+  validators attributes its problems the same way with
+  `simplified_schema::defaults::attribute_problems(problems, defaults)`.
 - **A pending default stays pending.** `default({{ n }})` is a
   [slot](./language/slots.md); until it is resolved, validation fails with
   `SchemaError::UnresolvedSlots` as for any template.

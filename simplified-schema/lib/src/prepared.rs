@@ -281,7 +281,7 @@ impl Prepared {
     /// [`ValidationFailure::Unprepared`] for a default that breaks its own
     /// definition or is ambiguous.
     pub fn validate_strict<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
-        if self.validators.accepts(value) {
+        if self.accepted_as_written(value)? {
             return Ok(self.accepted(Cow::Borrowed(value), Vec::new()));
         }
         let prepared = self.complete(Cow::Borrowed(value), false)?;
@@ -301,7 +301,7 @@ impl Prepared {
     /// [`ValidationFailure::Unprepared`] for a default that breaks its own
     /// definition or is ambiguous.
     pub fn validate_soft<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
-        if self.validators.accepts(value) {
+        if self.accepted_as_written(value)? {
             return Ok(self.accepted(Cow::Borrowed(value), Vec::new()));
         }
         // Defaults go in before conversion too: conversion commits a nested
@@ -329,6 +329,25 @@ impl Prepared {
         self.judge(DefaultPreparation { candidate: after.candidate, defaults })
     }
 
+    /// Whether `value` is accepted as written with no default: the
+    /// validators accept it and no union arm completes it differently.
+    ///
+    /// ## Errors
+    ///
+    /// [`ValidationFailure::Unprepared`] when one arm accepts `value` as
+    /// written and another accepts it completed with a default.
+    fn accepted_as_written(&self, value: &Value) -> Result<bool, ValidationFailure> {
+        if !self.validators.accepts(value) {
+            return Ok(false);
+        }
+        if !defaults::alternatives_supply_defaults(&self.json_schema) {
+            return Ok(true);
+        }
+        // An accepted value's union arms settle on the value as written or
+        // are ambiguous; `false` for anything else keeps the full path.
+        Ok(self.complete(Cow::Borrowed(value), false)?.defaults.is_empty())
+    }
+
     /// `instance` completed with the defaults of its absent required
     /// properties; `check` first returns an instance the validators accept
     /// unchanged.
@@ -346,9 +365,11 @@ impl Prepared {
         prepared.map_err(|error| ValidationFailure::Unprepared { error: Arc::new(error) })
     }
 
-    /// Accepts the completed candidate when it has no problems.
+    /// Accepts the completed candidate when it has no problems; a problem
+    /// about an inserted value is attributed to its default.
     fn judge<'input>(&self, prepared: DefaultPreparation<'input>) -> Result<ValidationSuccess<'input>, ValidationFailure> {
-        let problems = self.problems(&prepared.candidate);
+        let mut problems = self.problems(&prepared.candidate);
+        defaults::attribute_problems(&mut problems, &prepared.defaults);
         if problems.is_empty() {
             Ok(self.accepted(prepared.candidate, prepared.defaults))
         } else {

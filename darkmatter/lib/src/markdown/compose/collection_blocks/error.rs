@@ -28,12 +28,15 @@ pub struct CollectionSite {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CollectionError {
     /// Invalid region, header, or options.
-    #[error("{message}")]
+    #[error("{message}{}", super::super::block_pairs::note_suffix(note))]
     Malformed {
         /// Where.
         site: CollectionSite,
-        /// What is wrong.
+        /// What is wrong, without a line.
         message: String,
+        /// Another line a pairing reason refers to, counted in the scanned
+        /// body (such as where a region a closer misses was opened).
+        note: Option<String>,
     },
 
     /// The source has no iterable declaration.

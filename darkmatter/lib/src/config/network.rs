@@ -18,8 +18,9 @@ pub enum NetworkPermission {
     /// Only the per-run `--allow host=HOST` hosts may be fetched.
     #[default]
     Deny,
-    /// The `permissions` block is invalid, so no blanket consent exists;
-    /// a read of a host no `--allow host=HOST` names reports this error.
+    /// The `permissions` block is invalid: no URL may be fetched, not even
+    /// a per-run `--allow host=HOST` host, and every refused read reports
+    /// this error.
     Invalid(ConfigError),
 }
 
@@ -53,16 +54,20 @@ impl NetworkPermission {
     }
 
     /// The fetch policy for this permission plus the exact `hosts` a run
-    /// allows on top: [`FetchPolicy::allow_all`] under [`Self::Allow`], else
-    /// deny-all widened by each host.
+    /// allows on top: [`FetchPolicy::allow_all`] under [`Self::Allow`],
+    /// deny-all widened by each host under [`Self::Deny`], and deny-all under
+    /// [`Self::Invalid`], whose configuration error outranks every per-run
+    /// host.
     #[must_use]
     pub fn fetch_policy<I, S>(&self, hosts: I) -> FetchPolicy
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        if self.allows_every_host() {
-            return FetchPolicy::allow_all();
+        match self {
+            Self::Allow => return FetchPolicy::allow_all(),
+            Self::Invalid(_) => return FetchPolicy::deny_all(),
+            Self::Deny => {}
         }
         hosts
             .into_iter()
@@ -88,5 +93,19 @@ mod tests {
         assert!(!deny.allows_every_host());
         assert!(deny.is_allowed("A.test"));
         assert!(!deny.is_allowed("b.test"));
+    }
+
+    #[test]
+    fn invalid_projects_to_deny_all_whatever_the_run_allows() {
+        use crate::config::load::{ConfigErrorKind, ConfigRevision};
+        let error = ConfigError::unlocated(
+            ConfigErrorKind::InvalidSetting,
+            std::path::Path::new(".darkmatter.yaml"),
+            ConfigRevision::User,
+            "network: invalid".to_string(),
+        );
+        let invalid = NetworkPermission::Invalid(error).fetch_policy(["a.test"]);
+        assert!(!invalid.allows_every_host());
+        assert!(!invalid.is_allowed("a.test"));
     }
 }

@@ -5,12 +5,14 @@
 //!
 //! The expected table was recorded from the public scan at the revision
 //! before the migration (when the files declared `kind: trigger-schema` and
-//! used `any:`) and is not edited by it, with one later, deliberate change:
+//! used `any:`) and is not edited by it, with two later, deliberate changes.
 //! `initialize`, `cancelled`, and `finalize` are events Claudine shares with
 //! Darkmatter's `md` host, so they no longer select `claudine.yaml` on their
-//! own and their rows select nothing. The bundle is the one Claudine ships,
-//! registered as the last-resort location of a temporary repository whose
-//! `schemas/` folder is empty, and each document is judged through
+//! own and their rows select nothing. A non-null `sequence` identifies a
+//! Claudine document, so it now selects `claudine.yaml` beside
+//! `sequence.yaml`. The bundle is the one Claudine ships, registered as the
+//! last-resort location of a temporary repository whose `schemas/` folder is
+//! empty, and each document is judged through
 //! [`evaluate_registry`].
 
 use std::collections::BTreeMap;
@@ -171,12 +173,12 @@ const RECORDED: &[(&str, &[&str])] = &[
     ("prompt=[1] sequence=true", &["claudine.yaml", "sequence.yaml"]),
     ("prompt=[1] sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
     ("prompt=null", &[]),
-    ("prompt=null sequence=1", &["sequence.yaml"]),
-    ("prompt=null sequence=[1]", &["sequence.yaml"]),
+    ("prompt=null sequence=1", &["claudine.yaml", "sequence.yaml"]),
+    ("prompt=null sequence=[1]", &["claudine.yaml", "sequence.yaml"]),
     ("prompt=null sequence=null", &[]),
-    ("prompt=null sequence=text", &["sequence.yaml"]),
-    ("prompt=null sequence=true", &["sequence.yaml"]),
-    ("prompt=null sequence={ a: 1 }", &["sequence.yaml"]),
+    ("prompt=null sequence=text", &["claudine.yaml", "sequence.yaml"]),
+    ("prompt=null sequence=true", &["claudine.yaml", "sequence.yaml"]),
+    ("prompt=null sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
     ("prompt=text", &["claudine.yaml", "inline-compose.yaml"]),
     ("prompt=text sequence=1", &["claudine.yaml", "sequence.yaml"]),
     ("prompt=text sequence=[1]", &["claudine.yaml", "sequence.yaml"]),
@@ -198,12 +200,12 @@ const RECORDED: &[(&str, &[&str])] = &[
     ("prompt={ a: 1 } sequence=text", &["claudine.yaml", "sequence.yaml"]),
     ("prompt={ a: 1 } sequence=true", &["claudine.yaml", "sequence.yaml"]),
     ("prompt={ a: 1 } sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
-    ("sequence=1", &["sequence.yaml"]),
-    ("sequence=[1]", &["sequence.yaml"]),
+    ("sequence=1", &["claudine.yaml", "sequence.yaml"]),
+    ("sequence=[1]", &["claudine.yaml", "sequence.yaml"]),
     ("sequence=null", &[]),
-    ("sequence=text", &["sequence.yaml"]),
-    ("sequence=true", &["sequence.yaml"]),
-    ("sequence={ a: 1 }", &["sequence.yaml"]),
+    ("sequence=text", &["claudine.yaml", "sequence.yaml"]),
+    ("sequence=true", &["claudine.yaml", "sequence.yaml"]),
+    ("sequence={ a: 1 }", &["claudine.yaml", "sequence.yaml"]),
     ("start=1", &["claudine.yaml"]),
     ("start=[1]", &["claudine.yaml"]),
     ("start=null", &[]),

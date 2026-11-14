@@ -2,13 +2,15 @@
 //! file is one `dm.config.missing` warning per run (stderr for a formatted
 //! output, the envelope's `diagnostics` for a data output), never for help or a
 //! usage error; a repository without `.darkmatter.yaml` is normal; a user file
-//! that does not load stops a command that reads it with a located error.
+//! that does not load stops a command that reads it with a located error; an
+//! invalid `permissions` block refuses even a `--allow host=HOST` URL.
 
 use crate::common;
 
 use common::CliProcessFixture;
 use serde_json::Value;
 use simplified_schema::SimplifiedSchema;
+use std::path::Path;
 use std::process::Output;
 
 const DOCUMENT: &str = "---\ntitle: T\n---\n# Head\n\nbody\n";
@@ -142,4 +144,72 @@ fn a_user_file_that_does_not_load_stops_a_command_that_reads_it() {
     assert_eq!(error["source"]["line"], 2, "{value:#}");
     assert!(error["source"]["column"].is_u64(), "{value:#}");
     assert!(unread.status.success(), "a command that reads no configuration runs: {}", stderr_of(&unread));
+}
+
+// ── An invalid policy outranks `--allow host=HOST` ──────────────────────
+
+/// `md compose doc.md --allow host=127.0.0.1 --output json` over a loopback
+/// `::file`, with the user file `config`: the run's output and how many
+/// requests reached the loopback server.
+fn compose_with_exact_host(name: &str, config: &str) -> (CliProcessFixture, Output, usize) {
+    let fixture = CliProcessFixture::named(name);
+    std::fs::write(fixture.home().join(".darkmatter.yaml"), config).unwrap();
+    let server = common::mock_http_server(vec![common::MockHttpResponse {
+        status: 200,
+        body: "Remote child.\n",
+        cache_control: None,
+    }]);
+    fixture.write_file("cwd/doc.md", &format!("# Doc\n\n::file {}\n", server.url("/child.md")));
+    let output = run(&fixture, &["compose", "doc.md", "--allow", "host=127.0.0.1", "--output", "json"]);
+    let requests = server.request_count();
+    server.shutdown();
+    (fixture, output, requests)
+}
+
+/// The run failed without a request, and an error diagnostic names the
+/// user file and each of `also_named` (given the fixture home).
+fn assert_refused_naming(name: &str, config: &str, also_named: fn(&Path) -> Vec<String>) {
+    let (fixture, output, requests) = compose_with_exact_host(name, config);
+    let also_named = also_named(fixture.home());
+    assert_eq!(requests, 0, "an invalid configuration requests nothing");
+    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stdout));
+    let value = data_value(&output, include_str!("../../schemas/output/compose.yaml"));
+    let location = fixture.home().join(".darkmatter.yaml").display().to_string();
+    let errors: Vec<&str> = value["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .filter(|record| record["severity"] == "error")
+        .filter_map(|record| record["message"].as_str())
+        .collect();
+    assert!(
+        errors.iter().any(|message| message.contains(&location) && also_named.iter().all(|named| message.contains(named.as_str()))),
+        "no error names {location} and {also_named:?}: {value:#}"
+    );
+}
+
+#[test]
+fn a_null_network_outranks_an_exact_host() {
+    assert_refused_naming("config-network-null-host", "permissions:\n  network: null\n", |_| vec!["/permissions/network".into()]);
+}
+
+#[test]
+fn null_permissions_outrank_an_exact_host() {
+    assert_refused_naming("config-permissions-null-host", "permissions: null\n", |_| vec!["/permissions".into()]);
+}
+
+#[test]
+fn a_missing_permissions_reference_outranks_an_exact_host() {
+    assert_refused_naming("config-reference-missing-host", "permissions: ./missing.yaml\n", |home| {
+        vec![home.join("missing.yaml").display().to_string()]
+    });
+}
+
+#[test]
+fn omitted_permissions_fetch_an_exact_host() {
+    let (_fixture, output, requests) = compose_with_exact_host("config-permissions-omitted-host", "{}\n");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    let value = data_value(&output, include_str!("../../schemas/output/compose.yaml"));
+    assert!(value["document"].as_str().is_some_and(|text| text.contains("Remote child.")), "{value:#}");
+    assert_eq!(requests, 1);
 }

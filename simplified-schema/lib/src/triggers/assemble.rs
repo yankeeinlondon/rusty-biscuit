@@ -241,6 +241,10 @@ pub struct ResolvedPayload {
     /// resolved here, whose digest the validator cache computes once per
     /// allocation.
     pub digest: Option<crate::SchemaDigest>,
+    /// The schema file declaring each default the payload imports from
+    /// another file ([`ResolvedSchema::default_files`](crate::resolve::ResolvedSchema::default_files));
+    /// empty for an embedded or prepared payload.
+    pub default_files: crate::resolve::DefaultFiles,
 }
 
 impl ResolvedPayload {
@@ -257,6 +261,7 @@ impl ResolvedPayload {
             advisories: Vec::new(),
             pending: None,
             digest: None,
+            default_files: crate::resolve::DefaultFiles::new(),
         }
     }
 }
@@ -415,6 +420,7 @@ pub fn finish_file_payload(
         advisories: resolved.advisories,
         pending: None,
         digest: None,
+        default_files: resolved.default_files,
     })
 }
 
@@ -907,6 +913,7 @@ pub(super) fn resolve_embedded_payload(
         advisories: resolved.advisories,
         pending: None,
         digest: None,
+        default_files: crate::resolve::DefaultFiles::new(),
     };
     Ok((payload, reads))
 }

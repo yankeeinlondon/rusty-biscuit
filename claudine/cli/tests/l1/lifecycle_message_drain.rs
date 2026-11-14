@@ -471,7 +471,9 @@ const SHORT_DRAIN_BUDGET: Duration = Duration::from_millis(2000);
 /// The budget is shortened to [`SHORT_DRAIN_BUDGET`]; the production 10 s value
 /// is covered by the library's `DELIVERY_DRAIN_BUDGET` tests. It is not named
 /// `slow_`, because claudine's L1 filter excludes `slow_` tests from every
-/// recipe (only darkmatter declares `l1-include-slow`).
+/// recipe (only darkmatter declares `l1-include-slow`). The budget seam
+/// exists only in `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
 #[test]
 fn stalled_deliveries_share_one_drain_budget_and_are_reported_as_unknown() {
     let fixture = CliProcessFixture::named("lifecycle-message-stalled");

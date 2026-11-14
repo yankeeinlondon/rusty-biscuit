@@ -416,6 +416,9 @@ impl Markdown {
         let mut provenance = prepare_frontmatter_for_compose(self, options);
         let mut deferred_keys = Vec::new();
         let mut provisional_keys = std::collections::HashSet::new();
+        // Every schema default either schema-validation pass inserts, so the
+        // later pass attributes a problem with one to its default.
+        let mut applied_defaults = Vec::new();
 
         // Caller file parameters are invocation-owned semantic inputs.
         // Project them from their captured origins before the
@@ -554,6 +557,7 @@ impl Markdown {
                 },
                 &schema_consumer,
                 report,
+                &mut applied_defaults,
             )?;
             // A schema default is the schema's value, not authored text:
             // later stages never scan it for `{{ … }}` or `$( … )`.
@@ -709,6 +713,7 @@ impl Markdown {
                     },
                     &schema_consumer,
                     report,
+                    &mut applied_defaults,
                 )?;
                 for path in defaulted {
                     provenance.data_mut().mark(path);

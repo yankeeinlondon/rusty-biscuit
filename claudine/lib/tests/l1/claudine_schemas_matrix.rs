@@ -257,11 +257,12 @@ const COLUMNS: &[Column] = &[
         selection: false,
         outcomes: [UNCONSTRAINED, Error, Error, Error, Error, UNCONSTRAINED, Error, Error],
     },
-    // A trigger condition operand: the `start: string(required)` alternative.
+    // A trigger condition operand: the `start: string(required)` alternative,
+    // after the five `sequence` alternatives.
     Column {
         name: "trigger_condition_operand",
         file: "claudine.yaml",
-        pointer: "/match/group/0/start",
+        pointer: "/match/group/5/start",
         probes: ("start: hi", "start: null"),
         selection: true,
         outcomes: [Error; 8],

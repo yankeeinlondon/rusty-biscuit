@@ -112,6 +112,12 @@ If a command fails with no matching error handler:
   `::file`: the error names that file, and the file is never replaced by a
   "could not transclude" notice
 
+Every shell-block error names the file of the document it belongs to: a
+command failure, an invalid opener option (`::shell-block timeout=bad`), and
+an unclosed block alike. A document with no file of its own (composed from
+text) names none, so a host can tell a block error of its own document from
+one of a file it transcludes.
+
 Inside a repeated `::map` or `::filter` body, a command failure's structured
 `source` and `span` identify the authored command, and `iteration_path` retains
 the original item. A failure charging the block's combined output identifies

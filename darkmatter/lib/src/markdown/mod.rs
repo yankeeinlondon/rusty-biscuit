@@ -105,6 +105,8 @@ pub struct Markdown {
     /// document identity (`ctx.hash`, `ctx.id`) describes the loaded revision
     /// even after this value is mutated or the file changes on disk.
     loaded: Option<std::sync::Arc<LoadedSource>>,
+    /// See [`Self::with_context_identity`].
+    context_identity: Option<std::path::PathBuf>,
 }
 
 /// Provenance captured once when a document is parsed from text or a file.
@@ -135,6 +137,7 @@ impl Markdown {
             content: content.into(),
             source: None,
             loaded: None,
+            context_identity: None,
         }
     }
 
@@ -145,6 +148,7 @@ impl Markdown {
             content: content.into(),
             source: None,
             loaded: None,
+            context_identity: None,
         }
     }
 
@@ -226,7 +230,7 @@ impl Markdown {
                 biscuit_terminal::errors::SourceContext::new(absolute, path.clone(), content)
             }
             _ => biscuit_terminal::errors::SourceContext::new(
-                std::path::PathBuf::from("unknown"),
+                self.unfiled_context_absolute(),
                 std::path::PathBuf::from("unknown"),
                 content,
             ),
@@ -254,12 +258,71 @@ impl Markdown {
                 )
             }
             _ => biscuit_terminal::errors::SourceContext::with_frontmatter(
-                std::path::PathBuf::from("unknown"),
+                self.unfiled_context_absolute(),
                 std::path::PathBuf::from("unknown"),
                 content,
                 frontmatter,
             ),
         }
+    }
+
+    /// Gives the error contexts of a document with no file source `identity`
+    /// as their absolute path; their displayed path stays `unknown`.
+    ///
+    /// For a host that composes text it generated from its own file (such as
+    /// a frontmatter property) and must report that text's failures against
+    /// the property: every context this document builds carries `identity`,
+    /// however a stage rewrote the text, while a transcluded child (a remote
+    /// one is file-less too) keeps its own. Everything that decides how a
+    /// context renders or whether it names a file reads the display path, so
+    /// a context with an identity is presented exactly as an `unknown` one.
+    /// A file-backed document ignores it.
+    pub fn with_context_identity(mut self, identity: impl Into<std::path::PathBuf>) -> Self {
+        self.context_identity = Some(identity.into());
+        self
+    }
+
+    /// The absolute path of a context this document builds without a file.
+    pub(crate) fn unfiled_context_absolute(&self) -> std::path::PathBuf {
+        self.context_identity.clone().unwrap_or_else(|| std::path::PathBuf::from("unknown"))
+    }
+
+    /// The document a directive error of this body names: its file, or the
+    /// identity of a file-less document; `None` with neither (a remote child).
+    pub(crate) fn error_document(&self) -> Option<std::path::PathBuf> {
+        match &self.source {
+            Some(ComposeSource::File(path)) => Some(path.clone()),
+            _ => self.context_identity.clone(),
+        }
+    }
+
+    /// The identity of a file-less document that has one: its lines count
+    /// text a host generated, so a warning about its own directive says what
+    /// is wrong without them. `None` for any other document.
+    pub(crate) fn generated_identity(&self) -> Option<&std::path::Path> {
+        if matches!(self.source, Some(ComposeSource::File(_))) {
+            return None;
+        }
+        self.context_identity.as_deref()
+    }
+
+    /// `source` with its context named by this document's identity, for a
+    /// file-less document that has one; `None` otherwise.
+    ///
+    /// The `::map` / `::filter` stages locate a failure in the body text under
+    /// a placeholder path, and only a loaded file can re-anchor it; this names
+    /// such a failure the way every other context of the document is named.
+    pub(crate) fn identified_unfiled(&self, source: &SourceRef) -> Option<SourceRef> {
+        if matches!(self.source, Some(ComposeSource::File(_))) {
+            return None;
+        }
+        let identity = self.context_identity.as_ref()?;
+        let mut source = source.clone();
+        let (SourceRef::OnDisk(context) | SourceRef::OnDiskSpan { context, .. }) = &mut source else {
+            return None;
+        };
+        context.absolute = identity.clone();
+        Some(source)
     }
 
     /// The text this document was loaded from, before any stage rewrote it;
@@ -1176,6 +1239,26 @@ mod tests {
     use serde_json::json;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    /// A file-less document's contexts carry its identity, through a body
+    /// rewrite and a clone, and still display `unknown`; a file-backed one
+    /// keeps its file.
+    #[test]
+    fn a_context_identity_survives_rewrites_and_keeps_the_unknown_display() {
+        let identity = std::path::PathBuf::from("<generated>");
+        let mut md = Markdown::new("::shell false\n").with_context_identity(identity.clone());
+        *md.content_mut() = "Rewritten.\n::shell false\n".to_string();
+        let md = md.clone();
+        for ctx in [md.source_context_for_errors(), md.full_source_context_for_errors()] {
+            assert_eq!(ctx.absolute, identity);
+            assert_eq!(ctx.display, std::path::Path::new("unknown"));
+        }
+        assert_eq!(Markdown::new("x\n").source_context_for_errors().absolute, std::path::Path::new("unknown"));
+
+        let file = std::path::PathBuf::from("/tmp/doc.md");
+        let filed = Markdown::new("x\n").with_source(ComposeSource::File(file.clone())).with_context_identity(identity);
+        assert_eq!(filed.source_context_for_errors().display, file);
+    }
 
     #[test]
     fn test_markdown_from_string() {

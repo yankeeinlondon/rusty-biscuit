@@ -114,7 +114,7 @@ but a document they accept can still be rejected by the parser (see
 | [`sequence-types.yaml`](../../schemas/sequence-types.yaml) | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`) |
 | [`linking.yaml`](../../schemas/linking.yaml) | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
 | [`document.yaml`](../../schemas/document.yaml) | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that both `claudine.yaml` and `inline-compose.yaml` import, so the two triggers declare them identically |
-| [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model`; types `initialize`, `cancelled`, and `finalize` on those documents; declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
+| [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null `sequence`, `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, or `model` (exactly the documents identified as Claudine's); types `initialize`, `cancelled`, and `finalize` on those documents; declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
 | [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: schema-trigger`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
 | [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
 
@@ -192,16 +192,16 @@ sequence document with no other control is judged too:
 | `fail_fast: true` beside `sequence:` | applies | invalid at `/fail_fast`: a sequence document has no `fail_fast` |
 | `fail_fast: null` beside `sequence:` | applies | valid to the schema; the sequence parser rejects any root `fail_fast`, null included, before anything runs |
 
-Only `sequence.yaml` declares `sequence`. A sequence document's `start`,
-`blocked`, `success`, `failure`, and `loop` select `claudine.yaml` whenever
-they are set, and are typed there, so no key has two declarations to keep in
-step.
+Only `sequence.yaml` declares `sequence`. A non-null `sequence` also selects
+`claudine.yaml`, so a sequence document's events, `loop`, and every other
+Claudine control (`timeout`, `agent`, …) are typed there, and Darkmatter's
+`composed:` is refused as it is in any Claudine document. No key has two
+declarations to keep in step.
 
 `initialize`, `cancelled`, and `finalize` never select `claudine.yaml` on
 their own, because Darkmatter's `md` host owns those events too. A document
-whose only lifecycle keys are those three (a router prompt with only an
-`initialize` stack, or a sequence document with only `sequence:` and
-`finalize:`) is not judged by Claudine's catalog: its schema verdict comes from
+whose only Claudine-looking keys are those three (a router prompt with only
+an `initialize` stack and no `prompt`, `agent`, or `sequence`) is not judged by Claudine's catalog: its schema verdict comes from
 Darkmatter's baseline. Claudine's lifecycle parser still checks the stacks at
 launch, so a misspelled verb or a `shell` in `initialize` is still refused
 before anything runs, by the parser rather than the schema. Add any Claudine
@@ -1284,10 +1284,11 @@ Key completion works in block mappings only: DMLS offers no keys inside a
 YAML flow mapping such as `ensure_file: { fi }`.
 
 Each key is declared by exactly one trigger, and completion offers only the
-keys of triggers that already apply. A sequence document whose root has only
-`sequence` (and `template`) matches `sequence.yaml` alone, so it is not
-offered `start`, `loop`, or the other root event keys. Once one of those keys
-is written, `claudine.yaml` applies and the rest are offered and typed.
+keys of triggers that already apply. A sequence document matches both
+`sequence.yaml` and `claudine.yaml`, because `sequence` identifies a Claudine
+document, so it is offered `start`, `loop`, and the other root keys too. A
+document whose only Claudine-looking keys are shared events (`initialize`,
+`cancelled`, `finalize`) matches neither and is completed as an `md` document.
 
 A property the document's own `$schema` redeclares is completed and hovered
 from the author's declaration, as it is validated (see below). One limit

@@ -68,9 +68,22 @@ read without one.
 `network: allow` changes consent, not the transport rules. Only `http` and
 `https` are fetched, a redirect is never followed (every redirect fails the
 read as a policy refusal, whatever the target), and a cached body is served
-only when the host is allowed now. When the `permissions` block is invalid, no
-blanket consent exists: a read of a host the run did not name fails with a
-message that names the configuration error.
+only when the host is allowed now.
+
+When the `permissions` block is invalid (any part of it: a bad `network`
+value such as `null` or `sometimes`, an invalid `file-read` or
+`shell-commands` entry, `permissions: null`, or a reference to a missing
+file), no URL is fetched, not even one whose host the run names with
+`--allow host=HOST`. The read fails with a message that names the
+configuration file, line, and setting, and no request is sent. Only a valid
+`deny` (or an absent setting, which means `deny`) lets a run's host through.
+
+```bash
+# ~/.darkmatter.yaml says `permissions: {network: null}`
+md compose doc.md --allow host=example.com
+# fails: remote read denied for host 'example.com': … the configuration is
+# invalid: ~/.darkmatter.yaml:2:12 at `/permissions/network`: …
+```
 
 Library callers configure `ComposeOptions::with_remote_read_config(...)` for
 per-run hosts; the configured `network` permission comes from the request's

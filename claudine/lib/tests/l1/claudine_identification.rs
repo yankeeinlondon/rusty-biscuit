@@ -1,5 +1,7 @@
 //! Claudine's identifying trigger (`claudine/schemas/claudine-document.yaml`)
-//! and the narrowed root trigger (`claudine/schemas/claudine.yaml`).
+//! and the narrowed root trigger (`claudine/schemas/claudine.yaml`), whose
+//! selectors must equal the identifying trigger's so every identified
+//! document receives the main host contract.
 //!
 //! `initialize`, `cancelled`, and `finalize` are Darkmatter events the `md`
 //! host owns too, so neither file selects a document on them alone. The
@@ -128,16 +130,17 @@ fn shared_events_md_keys_nulls_and_an_empty_document_do_not_identify_claudine() 
 }
 
 #[test]
-fn claudine_yaml_selects_on_its_own_keys_and_never_on_shared_events_alone() {
+fn claudine_yaml_selects_exactly_the_identified_documents_and_never_on_shared_events_alone() {
     let claudine = envelope(include_str!("../../../schemas/claudine.yaml")).conditions;
-    let selecting: Vec<&str> = IDENTIFYING_KEYS.iter().copied().filter(|key| *key != "sequence").collect();
-    // `sequence` is selected by `sequence.yaml`, so claudine.yaml's selectors
-    // are the identifying keys without it: every document it selects is a
-    // Claudine document.
-    assert_eq!(claudine, cross_product(&selecting), "claudine.yaml's selectors");
+    let identifying = envelope(include_str!("../../../schemas/claudine-document.yaml")).conditions;
+    // A document identified as Claudine's but not selected by claudine.yaml
+    // would be judged without the main contract (`sequence: []` beside an
+    // invalid `timeout` once did), so the two selector sets are one.
+    assert_eq!(claudine, identifying, "claudine.yaml's selectors are the identifying trigger's");
+    assert_eq!(claudine, cross_product(&IDENTIFYING_KEYS), "claudine.yaml's selectors");
 
     let subject = PathSubject::detached();
-    for key in &selecting {
+    for key in &IDENTIFYING_KEYS {
         for value in non_null_values() {
             let document = one(key, value);
             assert!(claudine.matches(&document, &subject), "{document} selects claudine.yaml");

@@ -469,7 +469,7 @@ fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     if directive.kind == DirectiveKind::Shell
         && let Some(command) = &directive.target
     {
-        lines.push(shell_verdict_markdown(&command.value, ctx));
+        lines.push(shell_verdict_markdown(shell::parse_directive_command(&command.value), Some(command.span.start), ctx));
         if let Some(line) = shell_hole_type_line(ctx, offset) {
             lines.push(format!("\n{line}"));
             // The hole's type is read from the document's schema.
@@ -633,7 +633,7 @@ fn frontmatter_shell_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover
     }
     let command = &ctx.text[shift_span(&parsed.inner_span, value_span.start)];
     let mut markdown = format!("**Shell value**\n\n`{}`", command.trim());
-    markdown.push_str(&shell_verdict_markdown(command, ctx));
+    markdown.push_str(&shell_verdict_markdown(shell::parse_command(command), None, ctx));
     Some(markup_hover(ctx, value_span, markdown))
 }
 
@@ -646,23 +646,24 @@ fn shell_block_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         .into_iter()
         .find(|(_, span)| span.start <= offset && offset <= span.end)?;
     let mut markdown = format!("**Shell command**\n\n`{command}`");
-    markdown.push_str(&shell_verdict_markdown(&command, ctx));
+    markdown.push_str(&shell_verdict_markdown(shell::parse_command(&command), Some(span.start), ctx));
     if let Some(line) = shell_hole_type_line(ctx, offset) {
         markdown.push_str(&format!("\n\n{line}"));
     }
     Some(markup_hover(ctx, span, markdown))
 }
 
-/// A Markdown line describing a command's policy verdict.
-fn shell_verdict_markdown(command: &str, ctx: &DocumentContext) -> String {
-    let Some(parsed) = shell::parse_command(command) else {
+/// A Markdown line describing the policy verdict of a command at body
+/// offset `site` (`None` for frontmatter), typed with that site's scope.
+fn shell_verdict_markdown(parsed: Option<shell::ParsedCommand>, site: Option<usize>, ctx: &DocumentContext) -> String {
+    let Some(parsed) = parsed else {
         return String::new();
     };
     let permissions = match ctx.file_context() {
         Ok(context) => shell::load_permissions(context),
         Err(failure) => Err(failure.to_string()),
     };
-    match shell::verdict(&parsed, &permissions) {
+    match with_site_scope(ctx, site, |scope| shell::verdict(&parsed, scope, &permissions)) {
         PolicyVerdict::Approved => "\n\nPolicy: ✅ approved (pre-approved by `permissions.shell-commands`).".to_string(),
         PolicyVerdict::Denied(reason) => format!("\n\nPolicy: ⛔ denied — {reason}."),
         PolicyVerdict::Unknown => match &permissions {
@@ -1316,7 +1317,7 @@ fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
         let Some(command) = directive.target else {
             continue;
         };
-        if let Some(parsed) = shell::parse_command(&command.value)
+        if let Some(parsed) = shell::parse_directive_command(&command.value)
             && let Some(reason) = shell::builtin_refusal(&parsed)
             && let Some(range) = ctx.source_map.byte_range_to_lsp(command.span.clone())
         {

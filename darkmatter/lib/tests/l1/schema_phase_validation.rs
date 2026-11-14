@@ -668,9 +668,10 @@ fn shipped_inline_schema_uses_normal_resolution_and_phase_path() {
         missing(&empty, SchemaPhase::Completion),
         vec!["plan".to_string(), "total_phases".to_string()],
     );
+    let defaults = schema.validate_for_phase(&empty, SchemaPhase::Completion).expect("phase schema builds").defaults;
     assert_eq!(
-        schema.validate_for_phase(&empty, SchemaPhase::Completion).expect("phase schema builds").defaults,
-        [simplified_schema::AppliedDefault { path: simplified_schema::PropertyPath::parse("phase").unwrap(), value: json!(1) }],
+        defaults.iter().map(|applied| (applied.path.to_string(), applied.value.clone())).collect::<Vec<_>>(),
+        [("phase".to_string(), json!(1))],
     );
 
     // The shipped document's own null-yielding `spec` expression is the input

@@ -164,6 +164,7 @@ pub fn output_diagnostic(code: &str, severity: Severity, message: &str) -> Diagn
         reference_details: None,
         data_location: None,
         grants_needed: None,
+        schema_default: None,
     }
 }
 

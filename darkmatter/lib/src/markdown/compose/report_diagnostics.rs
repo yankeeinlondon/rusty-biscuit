@@ -165,6 +165,7 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
         }),
         data_location: None,
         grants_needed: None,
+        schema_default: None,
     }
 }
 
@@ -374,6 +375,7 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                 reference_details: None,
                 data_location: None,
                 grants_needed: None,
+                schema_default: problem.default.as_ref().map(crate::markdown::compose::expression::SchemaDefaultOrigin::from),
             })
             .collect(),
         MarkdownError::ShellExpansion(shell) => shell_error_diagnostics(shell),
@@ -724,6 +726,11 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
             (PARAMETER_BINDING_CODE, None)
         }
         MarkdownError::Setter { .. } => (SETTER_INVALID_CODE, None),
+        // The document holding the directive, which for a transcluded child
+        // is not the composed one; the line counts the current body. A
+        // context identity is no file.
+        MarkdownError::TocLinking(inner) => (COMPOSE_FAILURE_CODE, file_only(inner.document().and_then(named))),
+        MarkdownError::FileLinks(inner) => (COMPOSE_FAILURE_CODE, file_only(inner.document().and_then(named))),
         _ => (COMPOSE_FAILURE_CODE, None),
     };
     Diagnostic {
@@ -741,6 +748,7 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         },
         data_location: None,
         grants_needed: None,
+        schema_default: None,
     }
 }
 
@@ -1088,5 +1096,6 @@ fn unlocated(code: &str, severity: Severity, message: String) -> Diagnostic {
         reference_details: None,
         data_location: None,
         grants_needed: None,
+        schema_default: None,
     }
 }

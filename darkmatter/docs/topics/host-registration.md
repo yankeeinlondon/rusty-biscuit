@@ -399,7 +399,11 @@ flowchart TD
 - **Deferred keys.** Every event key the host registers keeps its value as
   authored: no compose-time pass evaluates it, exactly like `md`'s own event
   keys on a lifecycle document. Every other key, `sequence` included, is
-  ordinary frontmatter.
+  ordinary frontmatter. Not evaluating an event does not skip checking it:
+  `md compose` reports the host schema's problems with every event,
+  including those it never runs, exactly as `md schema validate` does. For
+  Claudine, `start: 5` and `loop: [1, 2]` fail both commands, and a
+  `{{ … }}` template the host renders at event time is set aside by both.
 - **Host globals.** The host's globals (`seq`, `loop`, `group`) are declared,
   so a read of one is not an undeclared property, but they have no value:
   reading one, in a shared event, the frontmatter, or the body, fails as any

@@ -10,7 +10,7 @@
     },
     {
       "identity": "claudine/claudine.yaml",
-      "digest": "0bd87938a65d00eb"
+      "digest": "60a536968edb9af6"
     },
     {
       "identity": "claudine/document.yaml",
@@ -38,7 +38,7 @@
     },
     {
       "identity": "claudine/sequence.yaml",
-      "digest": "e12effa34f4caa3b"
+      "digest": "3e03ad35281e416c"
     }
   ],
   "dependencies": [

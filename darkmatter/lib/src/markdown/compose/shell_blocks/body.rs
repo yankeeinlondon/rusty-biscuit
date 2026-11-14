@@ -144,6 +144,7 @@ pub(crate) fn split_logical_commands(
                     message: format!("Command tokenization failed: {e}"),
                     excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
                     source_file: None,
+                    note: None,
                 })?;
 
         let pipeline = crate::markdown::compose::shell_expansion::tokenize::parse_pipeline(
@@ -155,6 +156,7 @@ pub(crate) fn split_logical_commands(
             message: format!("Command parsing failed: {e}"),
             excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
             source_file: None,
+            note: None,
         })?;
 
         if pipeline.actions.is_empty() {
@@ -163,6 +165,7 @@ pub(crate) fn split_logical_commands(
                 message: "Empty command after tokenization".to_string(),
                 excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
                 source_file: None,
+                note: None,
             });
         }
 
@@ -186,6 +189,7 @@ pub(crate) fn split_logical_commands(
             message: "Unterminated line continuation".to_string(),
             excerpt: SourceExcerpt::from_text(body, dangling.start_line, body_start_line, 2),
             source_file: None,
+            note: None,
         });
     }
 

@@ -397,6 +397,7 @@ pub(crate) fn reread_and_audit(
     mut options: PrepareOptions,
     approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     approval_options: &claudine::harness::ShellApprovalOptions,
+    mode: claudine::composition::CompositionMode,
 ) -> Result<(ResolvedCompositionSource, PrepareOptions), CompositionError> {
     let source = crate::commands::wrap::load_overlaid_document(path, original_ref, overlay.values())?;
     extend_epoch_context(&mut options, &source);
@@ -404,7 +405,7 @@ pub(crate) fn reread_and_audit(
     options.defer_schema_verdict = false;
     options.pre_approved_commands = Some(approved);
     let body_approved =
-        claudine::composition::preflight_document_shell(&source, &options, approval_options)?;
+        claudine::composition::preflight_document_shell(&source, &options, approval_options, mode)?;
     if let Some(set) = options.pre_approved_commands.as_mut() {
         set.extend(body_approved);
     }

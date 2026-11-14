@@ -159,7 +159,8 @@ pub use validation::{
 ///
 /// Cleared: the shared, conversion, completion-alternative, and
 /// example-target validator caches; the conversion-plan, format-validator,
-/// example-artifact, emitted-pattern, named-type parse, and root-arm caches. A host
+/// example-artifact, emitted-pattern, named-type parse, root-arm, and
+/// default-supplier caches. A host
 /// clears its own memos beside this call. The shipped artifact registry (the
 /// envelope definitions) is kept.
 #[doc(hidden)]
@@ -172,6 +173,7 @@ pub fn reset_process_caches() {
     simplified::convert::reset_process_caches();
     resolve::reset_process_caches();
     prepared::reset_process_caches();
+    defaults::reset_process_caches();
     triggers::assemble::reset_process_caches();
     triggers::discovery::reset_process_caches();
     triggers::matcher::reset_thread_caches();

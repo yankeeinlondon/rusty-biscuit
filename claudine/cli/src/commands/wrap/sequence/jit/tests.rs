@@ -200,7 +200,7 @@ fn template_preflight_resolves_against_document_dir() {
         claudine::composition::LayeredOverrides::authored(Some(&overrides)),
         &BTreeMap::new(),
     );
-    let result = approve_document_shell(&source, &options, &approval_options).unwrap();
+    let result = approve_document_shell(&source, &options, &approval_options, claudine::composition::CompositionMode::ChainedDocument).unwrap();
 
     assert!(
         result.approved_commands.contains_exact("echo true"),
@@ -247,7 +247,7 @@ fn template_preflight_does_not_resolve_launch_only_file() {
         claudine::composition::LayeredOverrides::authored(Some(&overrides)),
         &BTreeMap::new(),
     );
-    let result = approve_document_shell(&source, &options, &approval_options).unwrap();
+    let result = approve_document_shell(&source, &options, &approval_options, claudine::composition::CompositionMode::ChainedDocument).unwrap();
 
     assert!(
         result.approved_commands.contains_exact("echo false"),

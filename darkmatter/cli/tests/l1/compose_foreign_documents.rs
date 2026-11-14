@@ -234,3 +234,75 @@ fn an_md_document_with_shared_events_alone_is_not_foreign() {
     let stages: Vec<String> = lifecycle_lines(&value).into_iter().map(|(stage, _)| stage).collect();
     assert_eq!(stages, ["initialize", "composed"], "md runs its own `composed`: {value:#}");
 }
+
+// ── every event's verdict matches `md schema validate` ──────────────────────
+
+/// Who rejects `{key}: 5` under `md compose`.
+#[derive(Clone, Copy)]
+enum Verdict {
+    /// The host's schema, at the key's line, as `md schema validate` does.
+    Schema,
+    /// `md`'s lifecycle parser, which reads a shared event before composing.
+    Lifecycle,
+    /// Nobody: both commands accept it.
+    Accepted,
+}
+
+/// `{key}: 5` beside `sequence: []`, through `md schema validate` and `md
+/// compose`: both reject it, or both accept it.
+fn assert_event_verdict(name: &str, key: &str, verdict: Verdict) {
+    let fixture = registered(name);
+    fixture.write_file("cwd/doc.md", &format!("---\nsequence: []\n{key}: 5\n---\n# Body\n"));
+
+    let validated = run(&fixture, &["schema", "validate", "--output", "json", "doc.md"]);
+    let composed = run(&fixture, &["compose", "doc.md", "--output", "json"]);
+
+    let rejected = !matches!(verdict, Verdict::Accepted);
+    let record = common::schema_validate_record(&validated.stdout);
+    assert_eq!(record["valid"].as_bool(), Some(!rejected), "validate: {record:#}");
+    let value = envelope(&composed, include_str!("../../schemas/output/compose.yaml"));
+    assert_eq!(composed.status.code(), Some(if rejected { 1 } else { 0 }), "compose: {value:#}");
+    let errors: Vec<&Value> =
+        value["diagnostics"].as_array().expect("diagnostics").iter().filter(|record| record["severity"] == "error").collect();
+    match verdict {
+        Verdict::Schema => {
+            assert!(value["document"].is_null(), "nothing is written: {value:#}");
+            assert!(
+                errors.iter().any(|record| record["code"] == "dm.schema.type_mismatch" && record["source"]["line"] == 3),
+                "the host schema rejects `{key}` at its line: {value:#}"
+            );
+        }
+        Verdict::Lifecycle => {
+            assert!(value["document"].is_null(), "nothing is written: {value:#}");
+            let needle = format!("lifecycle stack item in `{key}`");
+            assert!(
+                errors.iter().any(|record| record["message"].as_str().is_some_and(|text| text.contains(&needle))),
+                "md's lifecycle parser rejects `{key}`: {value:#}"
+            );
+        }
+        Verdict::Accepted => assert!(errors.is_empty(), "{value:#}"),
+    }
+}
+
+macro_rules! event_verdicts {
+    ($($test:ident: $key:literal => $verdict:ident;)*) => {$(
+        #[test]
+        fn $test() {
+            let _ = include_str!("../../../lib/tests/host_fixtures/mod.rs");
+            assert_event_verdict(stringify!($test), $key, Verdict::$verdict);
+        }
+    )*};
+}
+
+event_verdicts! {
+    a_host_start_of_the_wrong_shape_is_rejected: "start" => Schema;
+    a_host_blocked_of_the_wrong_shape_is_rejected: "blocked" => Schema;
+    a_host_success_of_the_wrong_shape_is_rejected: "success" => Schema;
+    a_host_failure_of_the_wrong_shape_is_rejected: "failure" => Schema;
+    a_shared_initialize_of_the_wrong_shape_is_rejected: "initialize" => Lifecycle;
+    a_shared_cancelled_of_the_wrong_shape_is_rejected: "cancelled" => Lifecycle;
+    a_shared_finalize_of_the_wrong_shape_is_rejected: "finalize" => Lifecycle;
+    a_renamed_away_composed_is_rejected: "composed" => Schema;
+    a_renamed_away_failed_is_rejected: "failed" => Schema;
+    a_numeric_timeout_converts_and_is_accepted: "timeout" => Accepted;
+}

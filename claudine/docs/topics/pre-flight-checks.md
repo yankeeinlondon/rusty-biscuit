@@ -76,6 +76,102 @@ shell site with its source file and location. Discovery retains authored
 placeholders alongside any eligible resolved bytes; it never launches a shell
 to obtain a value. Transclusion paths must be knowable during this walk.
 
+The walk covers the text the run composes, and nothing else. `compose`
+composes the document's body. `inline-compose` composes the document's
+`prompt` property and never its body, so for an inline run Claudine walks the
+`prompt` (with the same frontmatter), not the body. The same holds for a
+sequence step whose document declares `prompt`, and for a retried, resumed,
+or proxied inline attempt:
+
+```md
+---
+agent: goose
+prompt: |
+  Update the body.
+
+  ::shell git log -1 --format=%s
+---
+# Body
+
+::shell echo never-run
+```
+
+`claudine inline-compose doc.md` asks about `git log -1 --format=%s`, which the
+delivered prompt runs, and never about `echo never-run`, which an inline run
+never composes.
+
+A command in the `prompt` is reported at the document and its `prompt`
+property, without a line number: the approval prompt shows
+`doc.md:frontmatter.prompt`, a refusal says the command at
+``doc.md (frontmatter `prompt`)`` requires approval (with `err.detail.line`
+`null` and `err.detail.property` `"prompt"`), and a command that fails names
+`doc.md` with `Origin: frontmatter.prompt` and no body excerpt. The run
+composes the `prompt` text as a separate body, so a line counted there is not a
+line of the file, and Claudine does not guess which line of the YAML text holds
+the command. A composition warning about the `prompt` text (such as an
+unknown `::file` option) is printed without a line for the same reason.
+
+This holds however the `prompt` text was rewritten before the failure: after
+`{{ … }}` values were filled in, after a `::block` was removed, and for a
+command whose own text was interpolated (`::shell mkdir {{ word }}`). It also
+holds for every `::shell-block` failure and for a malformed directive:
+
+```md
+---
+agent: goose
+prompt: |
+  Update the body.
+  ::shell-block timeout=bad
+  mkdir build
+  ::end-block
+---
+# Body
+```
+
+This run stops before the agent starts with a `prompt directive failed` error
+whose source is ``doc.md (frontmatter `prompt`)`` and whose message is the
+reason alone (`Invalid timeout value 'bad'. Expected a number of seconds.`).
+The same error, with a reason such as
+`` `::shell-block` is never closed with `::end-block` ``, reports an unclosed block, an unmatched `::end-block`, a
+`::block` or `::file` `when=` condition that does not parse, and a malformed
+`::file` directive. A command that fails inside a `::shell-block` is reported
+like a `::shell` command: `doc.md`, `Origin: frontmatter.prompt`, its exit
+code and stderr, and no block or command line. These errors keep the code
+(`composition.failed`) the same directive has in a body.
+
+`::map` and `::filter` regions follow the same rule. A source that cannot be
+iterated, a callback or `when=` gate that fails while the region repeats its
+body, and a pairing mistake (an unmatched `::end-map`, or a closer that meets
+another open region) are each a `prompt directive failed` error at
+``doc.md (frontmatter `prompt`)``. When the failure happened in one repeated
+copy, the message ends with that copy's items rather than a line:
+
+```text
+Message: callback failed: invalid file path: ./missing.md at items[0]
+```
+
+A command that fails inside a repeated copy is reported like any other
+command in the `prompt`: `doc.md`, `Origin: frontmatter.prompt`.
+
+Commands, failures, and warnings in a file the `prompt` transcludes keep that
+file's line (`child.md:3`), and a frontmatter `$( … )` value keeps its own
+line. A remote (`https://…`) child's failure keeps the child's own text and
+line; it is never reported at the document's `prompt`.
+
+`::toc-linking` and `::file-links` directives follow it too. A directive that
+cannot be read (`level=h9`, `cleanup=bogus`, `--depth x`) or a `::toc-linking`
+target that does not exist stops the run with a `prompt directive failed`
+error at ``doc.md (frontmatter `prompt`)``:
+
+```text
+Message: invalid `::file-links` directive: '--depth' expects a non-negative integer, got 'x'
+```
+
+A failure the composition tolerates, such as a `filter=` glob that does not
+compile or a `--dir` folder that does not exist, is a warning instead, and
+that warning names no line either. The same failure in a transcluded file
+keeps that file's line.
+
 For resolved-byte approval, **the discovered bytes are the bytes that run**.
 For shape approval, the authored argument structure and declared validators
 travel to execution instead. Discovery builds its compose options with the

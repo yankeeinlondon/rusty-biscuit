@@ -131,7 +131,7 @@ fn approve_preflight_graph(
             darkmatter::markdown::compose::ContextRequirements::for_document(&document);
         let mut context = graph_context.clone();
         approval_epoch.extend_launch_context(&mut context, &requirements);
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
+        let mut opts = claudine::composition::compose_options_with_context(context)
             .with_context_authority(approval_epoch.compose_context_authority())
             .with_source_file(path)
             .with_deferred_schema_verdict(true)

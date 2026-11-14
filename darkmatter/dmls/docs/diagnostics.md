@@ -624,6 +624,16 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
   (`number(required; min(5); default(3))`), or the `$schema` value when the
   inline mapping does not hold it (a referenced schema file, a root union). A property the baseline or a trigger
   declares ranges as an ordinary value problem.
+- A problem with a value a default supplied is ranged the same way. With
+  `doc: file(required; eager; default(vault:note.md))` and no vault
+  configured, the default cannot be resolved: the
+  `dm.schema.invalid_file_reference` ranges the declaration, its message ends
+  by naming the default's schema location, and its `data` adds
+  `"schema_default": {"path": "doc", "schema_location": "/properties/doc/default"}`,
+  with a `schema_file` when a schema file declares the default (for a
+  `doc: Doc@./types.yaml` import, `types.yaml`).
+  A default whose eager target does not exist yet is left to `md`, as an
+  authored one is.
 - A YAML parse error ranges the parser's reported position; the last-good tree
   keeps completion and hover alive meanwhile.
 - A schema grammar error ranges the **offending token** inside the

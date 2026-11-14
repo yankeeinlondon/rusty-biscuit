@@ -329,7 +329,7 @@ pub const CODES: &[CodeSpec] = &[
         // the document or the approval configuration. That shared remediation
         // is what keeps one code's `disposition` stable while `reason`
         // discriminates (error-catalog §7.5).
-        detail: &["command", "source_path", "line", "reason"],
+        detail: &["command", "source_path", "line", "property", "reason"],
     },
     CodeSpec {
         code: "composition.body_unchanged",

@@ -271,7 +271,7 @@ pub(super) fn compose_step_selecting(
     let mut approved = approved;
     if ctx.validation_probe {
         let template_preflight =
-            composition::approve_document_shell(&step_source, &prepare_options, &approval_options)?;
+            composition::approve_document_shell(&step_source, &prepare_options, &approval_options, mode)?;
         approved.extend(template_preflight.approved_commands);
     }
     prepare_options.pre_approved_commands = Some(approved.clone());

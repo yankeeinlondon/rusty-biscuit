@@ -56,8 +56,7 @@ keeps presence-sensitive serde defaults and gets nothing inserted. Errors are
 JSON pointer. A legacy `config.json` beside a canonical
 `<base>/.claudine/config.yaml` is converted by the temporary
 `json_conversion` module through Darkmatter's `ConfigTransaction` and
-migration receipt. The default engine never fills values under
-`patternProperties`, so event and provider maps list their keys explicitly.
+migration receipt. Event and provider maps list their keys explicitly.
 
 **Configuration writes** (`config/persist.rs`): nothing serializes a whole
 config any more. Every writer hands `persist` per-path `YamlEdit`s, applied
@@ -269,6 +268,15 @@ home read also needs its `context_construction_guard.rs` allowance. Because
 `CliProcessFixture` sets `HOME` and `USERPROFILE`, user-tier and
 `~/.claudine` fixtures run on Windows too: do not gate them `cfg(unix)` for the
 home.
+
+Every Claudine composition of a document starts from
+`composition::compose_options_with_context` (canonical preparation, the
+system prompt, the passthrough harness seed, sequence approval discovery):
+it switches on Darkmatter's remote transclusion, as `md compose` does, so
+the captured `network` permission alone decides whether a `::file`/`::code`/
+`prologue`/`epilogue` URL is fetched. A bare `ComposeOptions::new_with_context`
+leaves those targets failing even under `network: allow`. Tests:
+`lib/tests/l1/network_transclusion.rs` (loopback responder).
 
 Audio tests must remain silent: real playback uses explicit zero volume and
 recognizable test speech with a pinned provider/voice. A fake agent does not
@@ -483,8 +491,10 @@ declares `composed`/`failed` as `null` with descriptions naming `start`/`blocked
 The sequence trigger is `schemas/sequence.yaml` (matches any non-null
 `sequence`; payload `sequence`, `template`, and `fail_fast: null` so a root
 `fail_fast` is reported by name), and it is the only declaration of
-`sequence`: `claudine.yaml` no longer declares it, and a sequence document's
-events and `loop` are typed by `claudine.yaml` when it is selected. The
+`sequence`: `claudine.yaml` does not declare it but selects on it (its
+selectors equal the identifying trigger's nine keys, pinned by
+`claudine_identification.rs`), so a sequence document gets the whole main
+contract. The
 shared Darkmatter events `initialize`, `cancelled`, and `finalize` never
 select `claudine.yaml` alone (it still types them once selected), so a probe
 of their Claudine types adds a Claudine key (`claudine_schemas.rs::CLAUDINE_SELECTOR`,

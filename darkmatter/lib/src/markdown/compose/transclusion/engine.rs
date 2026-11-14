@@ -1359,7 +1359,9 @@ impl<'a> TransclusionEngine<'a> {
                         &options.source,
                         &transclusion_opts,
                         self.markdown.source_context_for_errors(),
-                    )? {
+                    )
+                    .map_err(|error| error.with_document(self.markdown.error_document()))?
+                {
                     let cache_handle = {
                         let runtime = runtime_mutex.lock().unwrap();
                         runtime.cache.clone()
@@ -1370,6 +1372,7 @@ impl<'a> TransclusionEngine<'a> {
                     let options_clone = directive.options.clone();
                     let display_clone = display_target.clone();
                     let path_clone = path.clone();
+                    let document = self.markdown.error_document();
 
                     let cached = cache_handle.get_or_compute_operation(
                         &cache_key,
@@ -1391,7 +1394,11 @@ impl<'a> TransclusionEngine<'a> {
                                 "",
                                 None,
                             )
-                            .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
+                            .map_err(|error| {
+                                crate::markdown::types::MarkdownError::TocLinking(
+                                    error.with_document(document.clone()),
+                                )
+                            })?;
                             Ok(cache::OperationResult { content })
                         },
                     )?;
@@ -1476,28 +1483,26 @@ impl<'a> TransclusionEngine<'a> {
                     if options.fail_fast {
                         return skipped_replace("_No matching files_".to_string(), report);
                     }
-                    report.add_warning(
-                        ComposeWarning::new(
-                            "file_links",
-                            format!(
-                                "No matching files for ::file-links directive at line {}",
-                                directive.line
-                            ),
-                        )
-                        .at_line(directive.line),
-                    );
+                    // A document counting generated lines names no line.
+                    let message = match self.markdown.generated_identity() {
+                        Some(_) => "No matching files for ::file-links directive".to_string(),
+                        None => format!("No matching files for ::file-links directive at line {}", directive.line),
+                    };
+                    report.add_warning(ComposeWarning::new("file_links", message).at_line(directive.line));
                     return skipped_replace(String::new(), report);
                 }
             },
             Err(err) => {
                 if self.resolve_ignore_invalid(options) {
                     report.transclusions_skipped = 1;
-                    report.add_warning(
-                        ComposeWarning::new("file_links", err.to_string()).at_line(directive.line),
-                    );
+                    let message = match self.markdown.generated_identity() {
+                        Some(_) => err.reason(),
+                        None => err.to_string(),
+                    };
+                    report.add_warning(ComposeWarning::new("file_links", message).at_line(directive.line));
                     return skipped_replace(String::new(), report);
                 }
-                return Err(err.into());
+                return Err(err.with_document(self.markdown.error_document()).into());
             }
         };
 
@@ -1507,9 +1512,12 @@ impl<'a> TransclusionEngine<'a> {
         let mut fs =
             biscuit_terminal::components::filesystem::FileSystem::new(&render.component_root)
                 .map_err(|e| {
+                    let at = match self.markdown.generated_identity() {
+                        Some(_) => String::new(),
+                        None => format!(" at line {}", directive.line),
+                    };
                     crate::markdown::types::MarkdownError::Transform(format!(
-                        "failed to create FileSystem for ::file-links at line {}: {e}",
-                        directive.line
+                        "failed to create FileSystem for ::file-links{at}: {e}"
                     ))
                 })?;
         fs = fs

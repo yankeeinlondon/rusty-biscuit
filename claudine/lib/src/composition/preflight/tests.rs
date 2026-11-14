@@ -250,6 +250,7 @@ fn approval_failures_project_a_matchable_reason() {
             command: "rm -rf /".to_string(),
             source_file: std::path::PathBuf::from("/repo/run.md"),
             line: 12,
+            property: None,
             failure,
         };
         assert_eq!(err.code(), "composition.shell_approval");
@@ -269,6 +270,7 @@ fn a_user_denial_shares_the_approval_code_with_reason_denied() {
         command: "curl example.com".to_string(),
         source_file: std::path::PathBuf::from("/repo/run.md"),
         line: 3,
+        property: None,
     };
     assert_eq!(err.code(), "composition.shell_approval");
     assert_eq!(err.detail()["reason"], serde_json::json!("denied"));
@@ -283,6 +285,7 @@ fn a_line_less_source_projects_a_null_line_not_zero() {
         command: "rm -rf /".to_string(),
         source_file: std::path::PathBuf::from("<lifecycle-stack>"),
         line: 0,
+        property: None,
         failure: ShellApprovalFailure::NoHandler,
     };
     assert!(err.detail()["line"].is_null(), "line 0 must project null");
@@ -1418,4 +1421,31 @@ fn a_resolved_site_without_a_handler_is_not_prompted_and_fails_naming_its_bytes(
         other => panic!("expected ShellApprovalUnavailable, got {other:?}"),
     }
     assert!(saved_rules(dir.path()).is_empty());
+}
+
+/// A command written in a frontmatter property with no proven line (an
+/// inline run's `prompt`) projects that property beside a `null` line, and
+/// its message names the property instead of a line.
+#[test]
+fn a_property_source_projects_its_property_and_a_null_line() {
+    let unavailable = CompositionError::ShellApprovalUnavailable {
+        command: "echo unpermitted".to_string(),
+        source_file: std::path::PathBuf::from("/repo/doc.md"),
+        line: 0,
+        property: Some("prompt".to_string()),
+        failure: ShellApprovalFailure::NoHandler,
+    };
+    let denied = CompositionError::ShellCommandDenied {
+        command: "echo unpermitted".to_string(),
+        source_file: std::path::PathBuf::from("/repo/doc.md"),
+        line: 0,
+        property: Some("prompt".to_string()),
+    };
+    for error in [unavailable, denied] {
+        let detail = error.detail();
+        assert_eq!(detail["property"], serde_json::json!("prompt"), "{error}");
+        assert!(detail["line"].is_null(), "{error}");
+        assert!(error.to_string().contains("frontmatter `prompt`"), "{error}");
+        assert!(!error.to_string().contains("line 0"), "{error}");
+    }
 }

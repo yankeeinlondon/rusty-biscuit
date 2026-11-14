@@ -216,6 +216,36 @@ fn warnings_and_a_typeless_failure_name_the_document() {
     assert_eq!(record["source"]["line"], Value::Null, "{record:#}");
 }
 
+/// A `::toc-linking` or `::file-links` failure names the document holding
+/// the directive: a transcluded child's names the child, not the composed
+/// root, whether it fails the run or the child's `::file` tolerates it, and
+/// the root's names the root.
+#[test]
+fn a_toc_or_file_links_failure_names_the_document_holding_it() {
+    let fixture = CliProcessFixture::named("report_toc_file_links_document");
+    fixture.write_file("cwd/x.md", "# X\n");
+    // A child's `::file-links` parse failure is tolerated by the root's `::file`.
+    for (case, directive, (status, severity)) in [
+        ("toc", "::toc-linking ./x.md level=h9", (1, "error")),
+        ("file-links", "::file-links --bogus", (0, "warning")),
+    ] {
+        fixture.write_file(format!("cwd/{case}-child.md"), &format!("# Child\n\nText.\n\n{directive}\n"));
+        for (name, content, owner, (status, severity)) in [
+            (format!("{case}-root.md"), format!("# Root\n\n::file ./{case}-child.md\n"), format!("{case}-child.md"), (status, severity)),
+            (format!("{case}-own.md"), format!("# Root\n\nText.\n\n{directive}\n"), format!("{case}-own.md"), (1, "error")),
+        ] {
+            let (code, report) = report(&fixture, &fixture.write_file(format!("cwd/{name}"), &content));
+            assert_eq!(code, Some(status), "{name}: {report:#}");
+            let [record] = report["diagnostics"].as_array().unwrap().as_slice() else {
+                panic!("{name}: one record: {report:#}");
+            };
+            assert_eq!(record["severity"], severity, "{name}: {record:#}");
+            assert_eq!(file_of(&record["source"]["file"]).file_name().unwrap(), owner.as_str(), "{name}: {record:#}");
+            assert_eq!(record["source"]["line"], Value::Null, "{name}: {record:#}");
+        }
+    }
+}
+
 /// `md render` delivers the same fallback for a record about its document.
 #[test]
 fn a_render_style_warning_names_the_document() {

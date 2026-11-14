@@ -1,9 +1,12 @@
 ---
-source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+source: darkmatter/lib/tests/l1/error_snapshots/transclusion.rs
 expression: out
 ---
 ⤫ TransclusionError: remote transclusion disabled
 ┃ 
-┃ The URL https://example.com/doc.md was blocked by policy.
+┃ The URL https://example.com/doc.md was not fetched: the composing
+┃ program turned remote transclusion off.
 ┃ 
-┃ Enable allow_remote: true in frontmatter or CLI options.
+┃ Remote transclusion is an option of the program composing this document;
+┃ md compose enables it, and the network permission then decides each
+┃ fetch.

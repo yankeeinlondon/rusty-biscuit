@@ -1039,6 +1039,7 @@ fn build_problem(
         offending_properties,
         file_reference,
         caller_file: None,
+        default: None,
     }
 }
 
@@ -3097,6 +3098,7 @@ mod tests {
             offending_properties: Vec::new(),
             file_reference: None,
             caller_file: None,
+            default: None,
         }
     }
 

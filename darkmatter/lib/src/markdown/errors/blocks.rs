@@ -761,7 +761,28 @@ pub(crate) fn schema_validation_failed_block(
     StatusBlock::new(StatusState::Error)
         .error_header(ErrorHeader::new("MarkdownError", "schema validation failed"))
         .body(Prose::new(body_lines.join("\n")).with_line_breaks(LineBreaks::Hard))
-        .hint("Correct the frontmatter so it satisfies the declared $schema (or baseline schema).")
+        .hint(schema_problems_hint(problems))
+}
+
+/// The hint of a schema-validation block: correct the frontmatter, unless
+/// some problems are about values a schema default supplied, which no
+/// frontmatter text holds; those name the default to repair instead.
+fn schema_problems_hint(problems: &[ValidationProblem]) -> String {
+    const FRONTMATTER: &str = "Correct the frontmatter so it satisfies the declared $schema (or baseline schema).";
+    let mut defaults: Vec<&simplified_schema::AppliedDefault> = Vec::new();
+    for applied in problems.iter().filter_map(|problem| problem.default.as_ref()) {
+        if !defaults.iter().any(|seen| seen.pointer == applied.pointer && seen.origin == applied.origin) {
+            defaults.push(applied);
+        }
+    }
+    let mut rows: Vec<String> = Vec::new();
+    if defaults.len() < problems.len() {
+        rows.push(FRONTMATTER.to_string());
+    }
+    rows.extend(defaults.into_iter().map(|applied| {
+        Prose::escape_text_outside_code_spans(&crate::markdown::errors::schema_default_repair(applied))
+    }));
+    crate::markdown::errors::hint_rows(&rows.join("\n"))
 }
 
 #[cfg(test)]
@@ -1301,6 +1322,7 @@ mod tests {
             offending_properties: Vec::new(),
             file_reference: None,
             caller_file: None,
+            default: None,
         }
     }
 

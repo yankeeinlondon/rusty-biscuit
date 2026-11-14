@@ -464,6 +464,8 @@ struct TriggerLayer {
     /// Payload dependency edges (referenced files + imports + examples).
     dependencies: Vec<PathBuf>,
     advisories: Vec<SchemaAdvisory>,
+    /// The files declaring the payload's imported defaults.
+    default_files: simplified_schema::resolve::DefaultFiles,
     /// The registered host that supplied this trigger; `None` for a schema
     /// root or bundle trigger.
     registered: Option<Arc<crate::config::registration::RegisteredHostProfile>>,
@@ -1250,6 +1252,7 @@ impl DarkmatterSchemas {
             self.baseline.is_some(),
             &merged_json,
         );
+        let default_files = Arc::new(build_default_files(resolved.as_ref(), &trigger_layers, &origins));
         let dependencies = build_dependencies(resolved.as_ref(), &trigger_layers);
         let advisories = build_advisories(
             self.baseline.as_ref(),
@@ -1285,6 +1288,7 @@ impl DarkmatterSchemas {
             json_schema: merged_json,
             digest: Some(digest),
             origins,
+            default_files,
             validators,
             base_dir: Some(base_dir),
             file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
@@ -1487,6 +1491,7 @@ impl DarkmatterSchemas {
                 definitions,
                 dependencies,
                 advisories,
+                default_files: payload.default_files.clone(),
                 registered: host.map(Arc::clone),
             });
         }
@@ -1759,6 +1764,11 @@ pub struct EffectiveSchema {
     /// source (R-5 Priority 2). Empty for root-union schemas, whose per-arm
     /// property provenance is not modelled in v1.
     pub origins: SchemaOriginMap,
+    /// The schema file declaring each default a `Name@file` import brought
+    /// into the layer that won its top-level property, from that layer's
+    /// [`simplified_schema::resolve::ResolvedSchema::default_files`]; a default
+    /// absent here is declared by the file [`Self::origins`] names.
+    default_files: Arc<simplified_schema::resolve::DefaultFiles>,
     validators: CompiledValidators,
     /// Prompt document directory used to reproduce the validator's
     /// document-first, then repository-relative candidate plan in diagnostics.
@@ -2018,7 +2028,9 @@ impl EffectiveSchema {
     /// so decoded literal text is never taken for a template.
     fn validate_converted(&self, frontmatter: &Value, stored: &Value, positions: &ProblemPositions<'_>) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
-        let templates = if self.accepts_as_is(frontmatter) {
+        let templates = if self.accepts_as_is(frontmatter)
+            && !simplified_schema::defaults::alternatives_supply_defaults(&self.json_schema)
+        {
             simplified_schema::coerce::NestedTemplates::default()
         } else {
             self.nested_templates(stored)
@@ -2030,20 +2042,31 @@ impl EffectiveSchema {
     /// `instance` completed with the defaults of its absent required
     /// properties, through the one default engine
     /// ([`simplified_schema::defaults::prepare_defaults`]); a value the
-    /// validators accept as written comes back borrowed with no defaults.
-    /// Values at or below one of `templates` are pending and never filled.
+    /// validators accept as written comes back borrowed with no defaults, or
+    /// is ambiguous when one union arm accepts it as written and another
+    /// completed with a default. Values at or below one of `templates` are pending and never filled.
     fn complete<'a>(
         &self,
         instance: std::borrow::Cow<'a, Value>,
         templates: &simplified_schema::coerce::NestedTemplates,
     ) -> Result<simplified_schema::DefaultPreparation<'a>, SchemaError> {
-        simplified_schema::defaults::prepare_defaults(
+        let mut prepared = simplified_schema::defaults::prepare_defaults(
             &self.json_schema,
             instance,
             templates,
             &self.validators,
             &SHARED_VALIDATOR_CACHE,
-        )
+        )?;
+        // A problem with the inserted value names the schema file whose text
+        // holds the default: the file a `Name@file` import read it from, else
+        // the layer that declared its top-level property.
+        for applied in &mut prepared.defaults {
+            applied.origin = match self.default_files.get(applied.path.segments()) {
+                Some(file) => Some(SchemaOrigin::referenced_file(file)),
+                None => applied.path.segments().first().and_then(|key| self.origins.get(key)).cloned(),
+            };
+        }
+        Ok(prepared)
     }
 
     /// The soft candidate of `instance`, in the order
@@ -2058,7 +2081,12 @@ impl EffectiveSchema {
         templates: &simplified_schema::coerce::NestedTemplates,
     ) -> Result<simplified_schema::DefaultPreparation<'a>, SchemaError> {
         if self.accepts_as_is(instance) {
-            return Ok(simplified_schema::DefaultPreparation { candidate: std::borrow::Cow::Borrowed(instance), defaults: Vec::new() });
+            // Union arms that could complete the value are still compared
+            // with the value as written; settling on it needs no conversion.
+            let prepared = self.complete(std::borrow::Cow::Borrowed(instance), templates)?;
+            if prepared.defaults.is_empty() {
+                return Ok(prepared);
+            }
         }
         let before = self.complete(std::borrow::Cow::Borrowed(instance), templates)?;
         let converted =
@@ -2116,6 +2144,7 @@ impl EffectiveSchema {
             json_schema,
             digest: None,
             origins,
+            default_files: Arc::new(resolved.default_files),
             validators,
             base_dir: Some(base_dir),
             file_ref_fallback_dir: schemas.cache.file_ref_fallback_dir().map(Path::to_path_buf),
@@ -2298,6 +2327,7 @@ impl EffectiveSchema {
             json_schema,
             digest,
             origins: self.origins.clone(),
+            default_files: Arc::clone(&self.default_files),
             validators,
             base_dir: self.base_dir.clone(),
             file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
@@ -2424,6 +2454,9 @@ impl EffectiveSchema {
             bound.report_rejections(&mut problems);
         }
         positions.locate_all(&mut problems);
+        // After locating: a problem with an inserted value belongs to its
+        // default, and an ancestor's position would invent an authored one.
+        simplified_schema::defaults::attribute_problems(&mut problems, &defaults);
         ValidationReport {
             valid: problems.is_empty(),
             problems,
@@ -2461,17 +2494,8 @@ impl EffectiveSchema {
     ) -> ValidationReport {
         let mut report = self.judge_stored(frontmatter, &ProblemPositions::Built(positions), false);
         let pending = scan_pending_values(frontmatter);
-        let shell_pending_keys: HashSet<&str> = pending
-            .iter()
-            .filter(|p| p.reason == PendingValueReason::ShellExpression)
-            .map(|p| p.key.as_str())
-            .collect();
         let defer = matches!(options.pending_policy, PendingPolicy::Defer);
 
-        // Path-precise, as compose's pre-shell gate is: rendering a template
-        // changes only the value at its own path, so it can settle a problem
-        // there or on an ancestor whose subtree holds it, never one on an
-        // unrelated sibling. A whole-value `$( … )` replaces its whole key.
         let deferred = &report.deferred;
         report.problems.retain(|problem| {
             let Some(key) = attributable_top_level_key(problem) else {
@@ -2480,22 +2504,7 @@ impl EffectiveSchema {
             if options.excluded_keys.contains(&key) {
                 return false;
             }
-            if !defer {
-                return true;
-            }
-            if shell_pending_keys.contains(key.as_str()) {
-                return false;
-            }
-            // A malformed `{{ … }}` span can never render into a valid value,
-            // so its problem stands, as plain validation and Claudine's launch
-            // verdict report it.
-            let holds = |text: &str| {
-                text.contains("{{")
-                    && crate::markdown::literal_token::holds_pending_syntax(text)
-                    && !crate::markdown::compose::expression::is_malformed_template(text)
-            };
-            !authored_node_at(frontmatter, &problem.path)
-                .is_some_and(|(pointer, node)| awaits_rendering(problem, node, &pointer, deferred, &holds))
+            !defer || !pending_rendering_sets_aside(problem, &key, frontmatter, deferred)
         });
         report.defaults.retain(|applied| !applied.path.segments().first().is_some_and(|key| options.excluded_keys.contains(key)));
         report.valid = report.problems.is_empty();
@@ -2778,6 +2787,7 @@ fn default_problem(error: &SchemaError) -> ValidationProblem {
         offending_properties: Vec::new(),
         file_reference: None,
         caller_file: None,
+        default: None,
     }
 }
 
@@ -3089,6 +3099,39 @@ fn pending_reason(value: &Value) -> Option<PendingValueReason> {
     }
 }
 
+/// Whether the default pending policy ([`PendingPolicy::Defer`]) sets
+/// `problem`, on top-level `key` of `frontmatter`, aside as waiting for a
+/// later rendering: `key` holds a whole-value `$( … )`, which replaces the
+/// whole value, or the value at the problem's own path holds a well-formed
+/// `{{ … }}` template the schema did not accept (`deferred`, see
+/// [`awaits_rendering`]). Path-precise: rendering a template changes only the
+/// value at its own path, so it can settle a problem there or on an ancestor
+/// whose subtree holds it, never one on an unrelated sibling.
+///
+/// `md schema validate` and `md compose`'s verdict on a registered host's
+/// event keys (which `md` never renders) share this rule, so both report the
+/// same problems.
+pub(crate) fn pending_rendering_sets_aside(
+    problem: &ValidationProblem,
+    key: &str,
+    frontmatter: &Value,
+    deferred: &[String],
+) -> bool {
+    if frontmatter.get(key).and_then(pending_reason) == Some(PendingValueReason::ShellExpression) {
+        return true;
+    }
+    // A malformed `{{ … }}` span can never render into a valid value, so its
+    // problem stands, as plain validation and Claudine's launch verdict
+    // report it.
+    let holds = |text: &str| {
+        text.contains("{{")
+            && crate::markdown::literal_token::holds_pending_syntax(text)
+            && !crate::markdown::compose::expression::is_malformed_template(text)
+    };
+    authored_node_at(frontmatter, &problem.path)
+        .is_some_and(|(pointer, node)| awaits_rendering(problem, node, &pointer, deferred, &holds))
+}
+
 /// Whether rendering a template could settle `problem`, so a caller that
 /// renders later may set it aside: `node` (at `node_pointer`, see
 /// [`authored_node_at`]) is a template itself, or a collection holding one,
@@ -3190,6 +3233,36 @@ fn build_origin_map_with_triggers(
             from_trigger.unwrap_or_else(SchemaOrigin::baseline)
         };
         out.insert(key.clone(), origin);
+    }
+    out
+}
+
+/// The imported-default files of the layer that won each top-level property
+/// (`origins`, see [`build_origin_map_with_triggers`]): the document's, or
+/// the last trigger's that declares it. The baseline imports no file.
+fn build_default_files(
+    resolved: Option<&simplified_schema::resolve::ResolvedSchema>,
+    trigger_layers: &[TriggerLayer],
+    origins: &SchemaOriginMap,
+) -> simplified_schema::resolve::DefaultFiles {
+    let mut out = simplified_schema::resolve::DefaultFiles::new();
+    for (key, origin) in origins {
+        let files = match origin.kind {
+            simplified_schema::SchemaOriginKind::Document | simplified_schema::SchemaOriginKind::ReferencedFile => resolved.map(|document| &document.default_files),
+            simplified_schema::SchemaOriginKind::Trigger => trigger_layers
+                .iter()
+                .rev()
+                .find(|layer| layer.json_schema.get("properties").and_then(Value::as_object).is_some_and(|p| p.contains_key(key)))
+                .map(|layer| &layer.default_files),
+            simplified_schema::SchemaOriginKind::Baseline => None,
+        };
+        let Some(files) = files else { continue };
+        out.extend(
+            files
+                .iter()
+                .filter(|(path, _)| path.first() == Some(key))
+                .map(|(path, file)| (path.clone(), file.clone())),
+        );
     }
     out
 }

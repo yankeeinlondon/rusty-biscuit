@@ -51,8 +51,26 @@ order. A failing run has `outcome: "failure"` and an empty run-level `diagnostic
 the problems stay in each file's record, and only a problem with the invocation
 itself is a run diagnostic. `-vv` timings are absent from data. A validated record whose
 verdict relied on the `default(...)` of an absent required property lists each one
-in `defaults`, as `{ "path": "greeting", "value": "hello" }`; the key is absent when
-there are none.
+in `defaults`, as `{ "path": "greeting", "value": "hello", "schema_location": "/properties/greeting/default" }`
+(`schema_location` is the JSON Pointer of the `default` keyword in the lowered
+schema, and a `schema_file` is added when a schema file declares the default: a
+referenced schema file, a trigger file, or the file a `Name@file` import read the
+type from); the key is absent when there are none.
+
+A default is still checked with the rest of the value. When it fails a check that
+needs the file system, such as `doc: file(required; eager; default(./note.md))` with
+no `note.md`, the problem is the default's, not the document's: its record carries
+the same `default` object, its `line` and `column` are `null`, and its message ends
+by naming the default's schema location (and schema file). The formatted output
+adds a `hint:` line under the problem saying the same: repair the default where
+the schema declares it, or write the property in the document.
+
+```json
+{ "kind": "invalid", "property": null, "path": "/doc", "line": null, "column": null,
+  "message": "no existing file matched reference `./note.md` while resolving from `/work` (the value is the schema default at schema location `/properties/doc/default`)",
+  "default": { "path": "doc", "value": "./note.md", "schema_location": "/properties/doc/default" },
+  "arm_index": null, "description": null }
+```
 
 ```json
 {

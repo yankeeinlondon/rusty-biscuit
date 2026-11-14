@@ -64,6 +64,18 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
             // boundary instead of being flattened by the catch-all arm.
             error.status_block(term)
         }
+        CompositionError::InlinePromptDirectiveFailed { source_path, property, message, command } => match command {
+            // A block command's own block, already reported at the property.
+            Some(command) => command.status_block(term),
+            None => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "prompt directive failed"))
+                .body(rows(format!(
+                    "<dim>Source:</dim> {} (frontmatter {})\n<dim>Message:</dim> {}",
+                    super::render_file_link(source_path),
+                    code_span(property),
+                    super::escape_prose_path(message)
+                ))),
+        },
         CompositionError::FileReferenceNoMatch {
             reference,
             resolution,

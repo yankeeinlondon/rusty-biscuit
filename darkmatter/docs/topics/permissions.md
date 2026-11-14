@@ -240,8 +240,10 @@ When any `permissions` block fails to load (an invalid entry, or a
 reference whose target is missing or invalid), nothing falls back to the
 defaults or to an empty policy. Every operation that needs the policy fails
 with that configuration error (`dm.config.invalid` or
-`dm.config.reference`), and nothing is asked. The built-in shell blacklist
-still refuses first.
+`dm.config.reference`), and nothing is asked. No current-run approval
+overrides it: a `--allow host=HOST` host is not fetched, and a pre-flight
+or cached shell approval does not run. The built-in shell blacklist still
+refuses first.
 
 ## Current-run approvals
 
