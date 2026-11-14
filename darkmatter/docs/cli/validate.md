@@ -34,7 +34,7 @@ should read the status, not the report's text.
 A document whose schema is a [template](../topics/schemas/schema-slots.md) is
 prepared with the reads its slots are already approved: the files your
 `permissions.file-read` pre-approves (see
-[Configuration](../topics/configuration.md#permissions)). The command never asks:
+[Permissions](../topics/permissions.md)). The command never asks:
 a template a read nobody approved stops is left unchecked here, as the check leaves
 any value only composition can judge, and `md compose` reports it.
 

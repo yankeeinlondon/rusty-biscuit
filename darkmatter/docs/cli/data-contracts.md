@@ -356,6 +356,7 @@ classified by what failed:
 | `dm.output.serialization_failed` | the value cannot be written in the requested format; see [TOML](#toml) |
 | `dm.output.open_failed` | `--show` could not open the file |
 | `dm.config.invalid`, `dm.config.reference` | `~/.darkmatter.yaml` or the repository's `.darkmatter.yaml` does not load, for a command that reads the configuration (`md compose`, `md graph`, `md validate refs`); one record per problem, with the file, line, and column. See [Configuration Files](../topics/configuration.md#how-md-and-claudine-report-configuration) |
+| `dm.config.not_saved` | `md init` has nowhere to write: no home directory can be found. See [`md init`](./init.md#exit-status) |
 | `dm.style.*`, and `dm.schema.*` for a style | `md render` could not use a style setter, a `--style` file, or the merged style; see [Style input errors](#style-input-errors) |
 | `dm.compose.failure` | anything else, on any command |
 
@@ -366,10 +367,18 @@ warnings belong to the run's output rather than to composition:
 |---|---|
 | `dm.output.fractional_width` | `--width` was fractional and was rounded down |
 | `dm.config.missing` | `~/.darkmatter.yaml` does not exist, so every setting takes its default; names the file and `md init`. Reported once per run by every command (a repository without `.darkmatter.yaml` is not reported) |
+| `dm.config.migration` | a legacy policy file (`.darkmatter-shell-whitelist`, `.darkmatter-shell-blacklist`, `.config/darkmatter/schema-read-policy`) was converted into the configuration, a line of it was dropped, a blacklist rule became a `!` exclusion, or a source was kept; one record per notice. See [Migrating Legacy Policy Files](../topics/configuration.md#migrating-legacy-policy-files-temporary) |
+| `dm.config.not_saved` | an "always allow" answer could not be saved to the user's `permissions`; the operation is still approved for this run. See [Saving an "Always Allow" Approval](../topics/configuration.md#saving-an-always-allow-approval) |
+| `dm.host.registration`, `dm.host.identify_too_broad`, `dm.host.ambiguous` | a `register` entry's host could not be used, or a document's host could not be chosen; each distinct warning once per run. See [Host Registration](../topics/host-registration.md#diagnostics) |
 | `dm.link.malformed_structured_title` | a link title starts with `{` but is not a JSON5 object, so it is read as plain text |
 | `dm.link.legacy_structured_title` | a link title uses the removed `key=value` syntax; [`md clean`](./clean.md#migrating-link-titles) migrates it |
 | `dm.style.unknown_key` | `md render` found an unknown `style:` key |
 | `dm.style.deprecated` | `md render` found a deprecated `style:` key or inline rule style |
+
+`md compose` of a document a registered host identifies also reports one
+`dm.host.foreign_document` record with `"severity": "info"`, naming the
+host's own command (see
+[`md compose` of a host's document](../topics/host-registration.md#md-compose-of-a-hosts-document)).
 
 ### Style input errors
 

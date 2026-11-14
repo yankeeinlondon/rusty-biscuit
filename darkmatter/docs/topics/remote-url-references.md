@@ -44,7 +44,7 @@ any request is issued, in one of two ways:
   `~/.darkmatter.yaml`. Inside a repository the repository's
   `.darkmatter.yaml` must also say `allow`, both as committed at `HEAD` and in
   the working copy; an uncommitted edit cannot widen what `HEAD` says (see
-  [Configuration](./configuration.md)). Every HTTP(S) host is then allowed.
+  [Permissions](./permissions.md)). Every HTTP(S) host is then allowed.
 - **For one run**, name the exact host:
 
   ```bash

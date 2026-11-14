@@ -98,7 +98,10 @@ imports Darkmatter's type rather than declaring it, so the block is checked
 the same way wherever it is written. The value may also be a file reference to
 another YAML file whose own `permissions` holds the block. Claudine keeps the
 block as written; Darkmatter interprets it. See
-[Darkmatter's configuration](../../../darkmatter/docs/topics/configuration.md).
+[Permissions](../../../darkmatter/docs/topics/permissions.md) for what the
+block allows and
+[Darkmatter's configuration](../../../darkmatter/docs/topics/configuration.md)
+for the files that hold it.
 
 ### Darkmatter's permissions
 
@@ -210,9 +213,10 @@ flowchart TD
 
 ## Converting a `config.json`
 
-Earlier versions used JSON5 files named `config.json`. While the conversion is
-supported, loading configuration at either canonical location handles the
-legacy file first:
+Earlier versions used JSON5 files named `config.json`. The conversion below is
+temporary: it will be removed a few releases after the move to YAML, and a
+`config.json` left in place after that is no longer read. Until then, loading
+configuration at either canonical location handles the legacy file first:
 
 | Files in the `.claudine` directory | Result |
 |---|---|

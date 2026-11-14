@@ -229,6 +229,18 @@ logging: false   # dm.schema.unknown_key: only the user file has `logging`
 - A file with the same name anywhere else, such as `docs/.darkmatter.yaml`,
   is an ordinary YAML document, selected by its `kind` or root `$schema`.
 
+Beyond checking the file you are editing, DMLS reads the configuration the
+way `md` does, to know your permissions and registered hosts. It observes
+every file that load depended on: both `.darkmatter.yaml` files (present or
+not), the file a `permissions` reference points at (such as
+`~/.claudine/config.yaml`), every host manifest a `register` entry names and
+the files that manifest names, and the repository's `HEAD`. Editing,
+creating, or deleting any of them, or replacing one atomically by a rename,
+refreshes the documents they serve without a restart. DMLS is a passive
+reader throughout: it never migrates a legacy policy file, prompts, publishes
+a host manifest, or runs anything. See
+[In the editor (DMLS)](../host-registration.md#in-the-editor-dmls).
+
 ### What is reported
 
 | Situation | Diagnostic |

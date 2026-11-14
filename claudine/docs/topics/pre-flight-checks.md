@@ -201,7 +201,7 @@ In the passthrough wrapper path (`claudine claude`, `claudine codex`), the harne
 
 Every command is decided in the same order `md compose` uses, from the
 `permissions` Claudine captured for the document at the start of the
-invocation (see Darkmatter's [Configuration](../../../darkmatter/docs/topics/configuration.md)):
+invocation (see Darkmatter's [Permissions](../../../darkmatter/docs/topics/permissions.md)):
 
 1. **The built-in blacklist refuses first.** Dangerous commands (`rm`, `dd`,
    `chmod`, …) are refused before anything else is consulted: no rule,

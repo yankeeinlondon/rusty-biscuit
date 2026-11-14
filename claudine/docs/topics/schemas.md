@@ -67,7 +67,10 @@ package `schemas/`, its package area's `schemas/`, the repository root's
 `schemas/`, and `~/schemas`. A trigger has a `match:` condition over the frontmatter and a
 `$schema` payload that applies whenever the condition holds. See
 [Repository Trigger Schemas](../../../darkmatter/docs/topics/schemas/definition.md#repository-trigger-schemas).
-Claudine's own schemas, described next, are delivered this way.
+Claudine's own schemas, described next, are trigger schemas too. Outside
+the Claudine area they reach `md` and DMLS through the
+[host registration](#the-published-host-registration) Claudine's setup
+publishes, not through these locations.
 
 ## Claudine's Schemas
 
@@ -324,7 +327,7 @@ communicate:
 `Name` in Darkmatter's shipped partial `<stem>.yaml`, read from the schemas
 compiled into Darkmatter, never from disk. It therefore resolves the same way
 whether the referring file is in the monorepo checkout, embedded in the
-`claudine` binary, or copied into `~/schemas` without Darkmatter's files, where a relative path to
+`claudine` binary, or published in a host revision folder without Darkmatter's files, where a relative path to
 `darkmatter/schemas/` would not exist. An unknown stem is a schema error
 naming the reference.
 
@@ -1044,30 +1047,28 @@ is `claudine/` therefore reaches `claudine/schemas/` with no setup. `md schema
 triggers <file>` lists the locations, the shadowed files, and which triggers
 matched.
 
-Anywhere else, install a **complete** bundle of regular files in one of
-these locations:
+Anywhere else, nothing needs to be copied. Claudine's
+setup publishes them with a `darkmatter-host.yaml` manifest and registers
+that manifest in `~/.darkmatter.yaml`, so `md` and DMLS type a Claudine
+document in any folder (see
+[The published host registration](#the-published-host-registration) and
+[Host registration](../../../darkmatter/docs/topics/host-registration.md)).
+The five locations remain the place for your own schemas, `~/schemas`
+included.
 
-- the repository root's `schemas/` folder (a real directory, not a symlink)
-- the folder an absolute `SCHEMAS_DIR` names, such as
-  `SCHEMAS_DIR=/opt/team/claudine-schemas`
-- `~/schemas`
-
-Complete means all eight bundle files side by side, so the relative imports
+A trigger file in one of the locations still applies on top of the
+registered ones, so a modified Claudine trigger placed there overrides the
+properties it declares. It must come with what it imports. A bundle is **complete**
+when all eight files sit side by side, so the relative imports
 (`@./document.yaml`, `@./lifecycle.yaml`, …) resolve:
 
 - the triggers `claudine.yaml`, `inline-compose.yaml`, and `sequence.yaml`;
 - the libraries `action.yaml`, `document.yaml`, `lifecycle.yaml`,
   `linking.yaml`, and `sequence-types.yaml`.
 
-Darkmatter's own schema files need not be copied: the
+Darkmatter's own schema files are never needed: the
 `@darkmatter:lifecycle` references resolve from the copy built into `md`, DMLS,
-and `claudine`. This command copies the bundle together with the host files
-`globals.yaml` and `globals.lifecycle.json`:
-
-```sh
-mkdir -p ~/schemas
-cp claudine/schemas/*.yaml claudine/schemas/globals.lifecycle.json ~/schemas/
-```
+and `claudine`.
 
 A disk trigger imports only from disk, never from the `claudine` binary's
 embedded files. This matters most when you place one trigger on disk to
@@ -1108,8 +1109,9 @@ bundle. The embedded copy is the **last** location:
   it applies alone: when the embedded `claudine.yaml` matches too, its
   declarations of those three properties win.
 
-`md` and DMLS register no embedded bundle. They see Claudine's schemas only
-when a disk bundle is reachable.
+`md` and DMLS have no embedded bundle. They see Claudine's schemas through
+the [published host registration](#the-published-host-registration), or
+from a bundle in one of the five locations.
 
 ### How the built-in copy is prepared
 
@@ -1258,9 +1260,10 @@ optional; a property declared only by a trigger is never cleaned away.)
 
 ### In the editor
 
-DMLS has no Claudine dependency and reads the schemas only from disk, through
-the same five locations. When the bundle is reachable, a Claudine prompt with
-no `$schema` gets diagnostics, completion, and hover from the matching
+DMLS has no Claudine dependency and reads the schemas only from disk: the
+host manifest registered in `~/.darkmatter.yaml`, and the same five
+locations. When either reaches the bundle, a Claudine prompt with no
+`$schema` gets diagnostics, completion, and hover from the matching
 triggers:
 
 - top-level keys (`mod` completes to `mode` and `model`) and their values
@@ -1288,8 +1291,9 @@ is written, `claudine.yaml` applies and the rest are offered and typed.
 
 A property the document's own `$schema` redeclares is completed and hovered
 from the author's declaration, as it is validated (see below). One limit
-remains: a document outside the Claudine area gets editor help only when a
-complete bundle is reachable on disk, even though the CLI validates it.
+remains: a document outside the Claudine area gets editor help only when
+Claudine's host registration is in place (run Claudine's setup once), even
+though the CLI validates it without one.
 
 See [DMLS Schema Support](../../../darkmatter/docs/topics/schemas/dmls-schema-support.md).
 

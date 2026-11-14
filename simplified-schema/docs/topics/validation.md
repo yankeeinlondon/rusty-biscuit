@@ -220,7 +220,9 @@ SimplifiedSchema rule that only this crate and its hosts apply.
 A host that compiles its own validators calls the same walk:
 `simplified_schema::defaults::prepare_defaults(json_schema, value, templates,
 validators, cache)` returns a `DefaultPreparation { candidate, defaults }`
-for it to judge.
+for it to judge. Nothing at or below a deferred template listed in
+`templates` (a `coerce::NestedTemplates`) is filled: that value does not
+exist until the template renders, so its defaults wait for it.
 
 ## Failures
 
