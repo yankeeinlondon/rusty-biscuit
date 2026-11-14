@@ -726,6 +726,83 @@ The net effect: the PATH scan runs once instead of eight times, macOS bundle det
 
 On Windows, `ExecutableIndex::build()` also populates a `WindowsIndex` holding two HashMaps: `app_paths` (from a HKLM+HKCU registry walk) and `install_roots` (from a one-level directory walk of `Program Files`, `Program Files (x86)`, and `LocalAppData\Programs`). Warm-cache cost: 40–80 ms serial, inside the existing build-once budget. Non-Windows builds do not compile this code.
 
+### Editor Launch Facts and the Display Session
+
+A program that opens "the user's editor" needs three answers before it
+launches anything: does the editor run in the terminal or open a window, how is
+it told to wait until the file is closed, and is there a display for a window
+to appear on. Sniff answers all three, so a caller never keeps its own table
+of editor flags.
+
+**Surface and wait flags.** Every `Editor` variant has an `EditorSurface`
+(`Terminal`, `Gui`, or `Both`) and the arguments that make it block:
+
+```rust
+use sniff::programs::{Editor, EditorSurface};
+
+assert_eq!(Editor::Vim.surface(), EditorSurface::Terminal);
+assert_eq!(Editor::VSCode.wait_args(), &["--wait"]);
+assert_eq!(Editor::Kate.wait_args(), &["--block"]);
+assert!(Editor::Emacs.can_block());   // `Both`: blocks when run in a terminal
+assert!(!Editor::Lapce.can_block());  // GUI editor with no verified wait flag
+```
+
+| Editors | Surface | Wait arguments |
+|---|---|---|
+| Vi, Vim, Neovim, Nano, Helix, Micro, Kakoune, Amp | `Terminal` | none (they block by nature) |
+| Emacs, XEmacs | `Both` | none |
+| VS Code, VSCodium, Sublime Text, Zed, TextMate, BBEdit, and the JetBrains IDEs | `Gui` | `--wait` |
+| Kate | `Gui` | `--block` |
+| Lapce, Geany | `Gui` | none: they return at once, so `can_block()` is `false` |
+
+`can_block()` is `false` only for a GUI editor with no wait arguments. A caller
+that must wait for the user to finish should never launch such an editor.
+
+**Recognizing a configured command.** `Editor::identify(program)` maps one
+program path or name, such as the first word of `$EDITOR`, to an editor:
+
+```rust
+use sniff::programs::Editor;
+
+assert_eq!(Editor::identify("/usr/local/bin/code"), Some(Editor::VSCode));
+assert_eq!(Editor::identify("code.cmd"), Some(Editor::VSCode));     // Windows shim
+assert_eq!(Editor::identify("code-insiders"), Some(Editor::VSCode));
+assert_eq!(Editor::identify("nvim.appimage"), None);               // only .exe/.cmd/.bat/.com are stripped
+assert_eq!(Editor::identify("my-wrapper.sh"), None);               // unknown command
+```
+
+Only the final path component is compared, so a directory with spaces in its
+name is fine; split the command line yourself and pass the program alone. The
+comparison is case-insensitive on Windows and exact elsewhere, and covers each
+editor's binary name, its alternate binary names, and a few extra names that
+discovery does not probe for (`code-insiders`, `helix`). `None` means "unknown
+command", which a caller usually trusts to block.
+
+**Display session.** `sniff::os::detect_display_session()` reports whether a
+GUI program can open a window from this process:
+
+| Host | `DisplaySession` |
+|---|---|
+| macOS, Windows | always `Available` |
+| Linux, WSL1, WSL2 | `Available` when `DISPLAY` or `WAYLAND_DISPLAY` is non-empty, else `Unavailable` |
+| any other OS | `Unavailable` |
+
+```rust
+use sniff::os::{detect_display_session, display_session_from, DisplaySession, OsType, RuntimeEnvironment};
+
+if detect_display_session().is_available() {
+    // a GUI editor can open a window
+}
+
+// The same rule over an explicit environment, for tests:
+let headless = display_session_from(OsType::Linux, RuntimeEnvironment::Wsl2, |_| None);
+assert_eq!(headless, DisplaySession::Unavailable);
+```
+
+Like `current_user_id()`, the display session is produced only on demand. It
+is not part of `OsInfo`, host inventory, `sniff --json`, or any cache, because
+it describes one process's environment rather than the host.
+
 ## Performance Evidence
 
 Performance claims in sniff are judged by **work removed**, not wall time. `sniff::performance`

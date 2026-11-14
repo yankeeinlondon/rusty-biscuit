@@ -128,7 +128,7 @@ pub use contract::{
     ExecutableSource, InstallationMethod, PrereqProbe, ProgramError, SystemPrerequisite,
 };
 pub use enums::{
-    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper,
+    AiCli, CategoryEnum, Editor, EditorSurface, EditorTraits, HeadlessAudio, LanguagePackageManager, NotificationHelper,
     OsPackageManager, TerminalApp, TestRunner, TtsClient, Utility,
 };
 pub use find_program::{

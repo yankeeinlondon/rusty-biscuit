@@ -23,6 +23,10 @@ and runtime path; it does not cross into native Windows detectors.
 - `current_user_id()` returns the effective Unix UID or Windows process-token
   SID without subprocess, registry, environment-variable, or network fallback.
   It is on-demand and absent from normal host inventory and caches.
+- `os::detect_display_session()` reports whether a GUI window can open
+  (macOS/Windows always; Linux and WSL by non-empty `DISPLAY` or
+  `WAYLAND_DISPLAY`; `display_session_from` is the pure rule). On-demand too,
+  like `current_user_id()`. Editor surface/wait facts: [programs.md](programs.md).
 - `os::processes_working_in(dir)` lists processes whose current directory is
   `dir` or below, with each one's command line, parent, and start time (one
   `sysinfo` refresh of cwd and command line; caller and its ancestors

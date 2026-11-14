@@ -6,6 +6,7 @@
 //! methods) previously stored in `inventory.rs`.
 
 pub mod categories;
+pub mod editor_traits;
 pub mod metadata;
 
 pub use crate::programs::contract::CategoryEnum;
@@ -13,6 +14,7 @@ pub use categories::{
     AiCli, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper, OsPackageManager,
     TerminalApp, TestRunner, TtsClient, Utility,
 };
+pub use editor_traits::{EditorSurface, EditorTraits};
 
 #[cfg(test)]
 mod tests {
