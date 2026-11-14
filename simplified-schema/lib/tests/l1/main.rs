@@ -19,6 +19,7 @@ mod expression_regions;
 mod expression_scanner;
 mod expression_syntax;
 mod foundations;
+mod identifying_triggers;
 mod located_failures;
 mod located_schema_errors;
 mod non_null_properties;
