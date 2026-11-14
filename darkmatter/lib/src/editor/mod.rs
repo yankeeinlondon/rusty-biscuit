@@ -1,13 +1,27 @@
 //! Reusable editor discovery and launch utilities.
 //!
-//! Shared by Darkmatter's `md edit` flow and Claudine wrapper prompt editing.
+//! Shared by Darkmatter's `md edit` flow, Claudine wrapper prompt editing,
+//! and the lifecycle `edit` action. One resolver ([`resolve_editor`]) picks
+//! the editor, one launcher ([`LaunchPlan`]) starts and waits for it, and
+//! [`ProcessEditorService`] adds the `edit` action's file preparation and
+//! host eligibility. Editor facts (surface, wait flags) come only from
+//! Sniff's `Editor` catalog.
+
+mod launch;
+mod resolve;
+mod service;
+pub mod surface;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-use sniff::programs::{Editor, ProgramMetadata, find_program};
+use sniff::programs::{Editor, ProgramMetadata};
 use thiserror::Error;
+
+pub use launch::{EDITOR_TERMINATE_GRACE, LaunchIo, LaunchOptions, LaunchOutput, LaunchPlan, LaunchStdin};
+pub use resolve::{RejectReason, ResolvedEditor, SurfaceRequest, resolve_editor, resolve_editor_command};
+pub use service::{EditError, EditOutcome, EditRequest, EditorHostFacts, EditorOutput, EditorService, ProcessEditorService};
+pub use surface::{EnvironmentProbe, TerminalDenyScope, deny_terminal_in_this_thread, terminal_denied};
 
 /// Default editor priority when neither `$EDITOR` nor `$VISUAL` resolve to an
 /// installed binary. Ordered from most capable/modern to most basic.
@@ -54,6 +68,27 @@ pub enum EditorError {
         /// What it holds.
         value: String,
     },
+    /// `$EDITOR` or `$VISUAL` is set, and the first set one names an editor
+    /// that returns before the file is closed.
+    #[error("{variable} names '{value}', which cannot wait for the file to close; set it to an editor that blocks or unset it")]
+    ConfiguredEditorCannotWait {
+        /// The first variable that is set.
+        variable: &'static str,
+        /// What it holds.
+        value: String,
+    },
+    /// No candidate has the surface the caller required.
+    #[error("{}", no_matching_message(*requested, candidates))]
+    NoMatchingEditor {
+        requested: SurfaceRequest,
+        /// Every variable and probe checked, in order, with why it was
+        /// passed over.
+        candidates: Vec<(String, RejectReason)>,
+    },
+    /// The run was cancelled while the editor was open; its process tree was
+    /// terminated. Whatever the editor saved before that is kept.
+    #[error("the editor on {} was closed because the run was cancelled", path.display())]
+    Cancelled { path: PathBuf },
     /// The launched editor returned a non-zero exit status.
     #[error(
         "editor '{editor}' exited with status {code} while editing {path}",
@@ -117,6 +152,43 @@ impl biscuit_terminal::errors::BlockError for EditorError {
                 )))
                 .hint("Fix the variable or unset it to use the first installed editor."),
 
+            EditorError::ConfiguredEditorCannotWait { variable, value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("EditorError", "configured editor cannot wait"))
+                .body(Prose::new(format!(
+                    "<cyan>${variable}</cyan> names <cyan>{}</cyan>, which returns before the file is closed.",
+                    Prose::escape_text(value)
+                )))
+                .hint("Set the variable to an editor that blocks (a terminal editor, or a GUI editor with a wait flag), or unset it."),
+
+            EditorError::NoMatchingEditor { requested, candidates } => {
+                let checked = candidates
+                    .iter()
+                    .map(|(candidate, reason)| {
+                        format!("<cyan>{}</cyan> <dim>({reason})</dim>", Prose::escape_text(candidate))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "EditorError",
+                        match requested {
+                            SurfaceRequest::Gui => "no gui editor found",
+                            SurfaceRequest::Terminal => "no terminal editor found",
+                            SurfaceRequest::Any => "no editor found",
+                        },
+                    ))
+                    .body(Prose::new(format!("<dim>Checked:</dim>\n{checked}")).with_line_breaks(LineBreaks::Hard))
+                    .hint("Set <cyan>$EDITOR</cyan> or <cyan>$VISUAL</cyan> to an editor of that kind, or install one.")
+            }
+
+            EditorError::Cancelled { path } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("EditorError", "editing cancelled"))
+                .body(Prose::new(format!(
+                    "The run was cancelled while <cyan>{}</cyan> was open; the editor was closed.",
+                    path.display()
+                )))
+                .hint("Anything saved before the cancellation is kept."),
+
             EditorError::NonZeroExit { code, editor, path } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("EditorError", "editor exited with error"))
                 .body(Prose::new(format!(
@@ -156,105 +228,28 @@ impl biscuit_terminal::errors::BlockError for EditorError {
     }
 }
 
-/// Parse the configured editor command into launch pieces plus a stable
-/// display string.
-///
-/// The returned `full_command` includes the editor binary, any configured
-/// editor arguments, and any auto-added wait flags, but intentionally omits
-/// the final file path so the preview is stable across temp-file runs.
-fn build_editor_command_details(editor_cmd: &str) -> (String, Vec<String>, String) {
-    let mut parts = editor_cmd.split_whitespace();
-    let editor_bin = parts.next().unwrap_or(editor_cmd).to_string();
-    let editor_args = parts.map(ToOwned::to_owned).collect::<Vec<_>>();
-
-    let mut display_parts = vec![editor_bin.clone()];
-    display_parts.extend(editor_args.iter().cloned());
-    display_parts.extend(
-        wait_args_for_editor(&editor_bin)
-            .iter()
-            .map(|flag| (*flag).to_string()),
-    );
-    let full_command = display_parts.join(" ");
-
-    (editor_bin, editor_args, full_command)
-}
-
-/// Resolve the editor command using `$EDITOR`, `$VISUAL`, then fallback probes.
-///
-/// A blank variable counts as unset. The probes run only when neither variable
-/// is set: a user who named an editor does not get a different one because of
-/// a typo.
-pub fn resolve_editor_command() -> Result<String, EditorError> {
-    let mut missing = None;
-    for (variable, value) in [("EDITOR", std::env::var("EDITOR")), ("VISUAL", std::env::var("VISUAL"))] {
-        let Ok(value) = value else {
-            continue;
-        };
-        let Some(cmd) = value.split_whitespace().next() else {
-            continue;
-        };
-        if find_program(cmd).is_some() {
-            return Ok(value);
-        }
-        missing.get_or_insert(EditorError::ConfiguredEditorMissing { variable, value });
-    }
-    if let Some(missing) = missing {
-        return Err(missing);
-    }
-
-    let editors = sniff::programs::InstalledEditors::new();
-    for &editor in DEFAULT_EDITOR_PRIORITY {
-        if editors.is_installed(editor) {
-            return Ok(editor.binary_name().to_string());
+/// One line naming the requested surface and every candidate checked.
+fn no_matching_message(requested: SurfaceRequest, candidates: &[(String, RejectReason)]) -> String {
+    let mut checked = Vec::new();
+    let mut not_installed = Vec::new();
+    for (candidate, reason) in candidates {
+        match reason {
+            RejectReason::NotInstalled => not_installed.push(candidate.as_str()),
+            reason => checked.push(format!("{candidate} ({reason})")),
         }
     }
-
-    Err(EditorError::NoEditorFound)
-}
-
-/// Returns the CLI flags needed to make a GUI editor block until the file is closed.
-pub fn wait_args_for_editor(binary: &str) -> &'static [&'static str] {
-    match binary {
-        "code" | "codium" | "code-insiders" => &["--wait"],
-        "subl" => &["--wait"],
-        "zed" => &["--wait"],
-        "mate" => &["--wait"],
-        "bbedit" => &["--wait"],
-        "kate" => &["--block"],
-        "phpstorm" | "idea" | "pycharm" | "webstorm" | "clion" | "goland" | "rider" => &["--wait"],
-        _ => &[],
+    if !not_installed.is_empty() {
+        checked.push(format!("not installed: {}", not_installed.join(", ")));
     }
+    format!("no {requested} editor found; checked {}", checked.join("; "))
 }
 
 /// Open a file path in the resolved editor and block until it closes.
+///
+/// The editor shares the host's process group and streams, and the wait
+/// cannot be interrupted.
 pub fn launch_editor_on_path(path: &Path) -> Result<(), EditorError> {
-    let editor_cmd = resolve_editor_command()?;
-    let (editor_bin, editor_args, full_command) = build_editor_command_details(&editor_cmd);
-
-    let mut cmd = Command::new(&editor_bin);
-    for arg in &editor_args {
-        cmd.arg(arg);
-    }
-    for flag in wait_args_for_editor(&editor_bin) {
-        cmd.arg(flag);
-    }
-    cmd.arg(path);
-
-    let status = cmd.status().map_err(|source| EditorError::LaunchFailed {
-        editor: editor_cmd.clone(),
-        full_command,
-        source,
-    })?;
-
-    if !status.success() {
-        return Err(EditorError::NonZeroExit {
-            code: status.code().unwrap_or(-1),
-            editor: editor_cmd,
-            path: path.to_path_buf(),
-        });
-    }
-
-    Ok(())
+    LaunchPlan::new(resolve_editor(SurfaceRequest::Any)?, path).run(LaunchOptions::PLAIN)
 }
 
 /// Edit text in a temp file and return the trimmed contents on success.
@@ -365,74 +360,6 @@ mod tests {
         perms.set_mode(0o755);
         std::fs::set_permissions(&path, perms).unwrap();
         path
-    }
-
-    #[test]
-    fn wait_args_vscode_returns_wait() {
-        assert_eq!(wait_args_for_editor("code"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_codium_returns_wait() {
-        assert_eq!(wait_args_for_editor("codium"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_code_insiders_returns_wait() {
-        assert_eq!(wait_args_for_editor("code-insiders"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_sublime_returns_wait() {
-        assert_eq!(wait_args_for_editor("subl"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_zed_returns_wait() {
-        assert_eq!(wait_args_for_editor("zed"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_kate_returns_block() {
-        assert_eq!(wait_args_for_editor("kate"), &["--block"]);
-    }
-
-    #[test]
-    fn wait_args_jetbrains_ides_return_wait() {
-        for ide in [
-            "phpstorm", "idea", "pycharm", "webstorm", "clion", "goland", "rider",
-        ] {
-            assert_eq!(
-                wait_args_for_editor(ide),
-                &["--wait"],
-                "expected --wait for {ide}"
-            );
-        }
-    }
-
-    #[test]
-    fn wait_args_textmate_returns_wait() {
-        assert_eq!(wait_args_for_editor("mate"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_bbedit_returns_wait() {
-        assert_eq!(wait_args_for_editor("bbedit"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_terminal_editors_return_empty() {
-        for editor in ["nvim", "vim", "vi", "hx", "nano", "micro", "kak", "emacs"] {
-            assert!(
-                wait_args_for_editor(editor).is_empty(),
-                "expected no wait args for {editor}"
-            );
-        }
-    }
-
-    #[test]
-    fn wait_args_unknown_binary_returns_empty() {
-        assert!(wait_args_for_editor("my-custom-editor").is_empty());
     }
 
     #[cfg(unix)]

@@ -696,6 +696,11 @@ impl<'a> StackExecutor<'a> {
                     .map(|_| None)
                     .map_err(|error| ActionFailure::Evaluation(self.expr_error(func.function.clone(), error)))
             }
+            // No host supplies an editor yet, so reaching `edit` refuses the
+            // event rather than skipping the edit the author asked for.
+            LifecycleActionKind::Edit(_) => Err(ActionFailure::Evaluation(
+                self.action_failure("edit", "this host cannot run `edit`"),
+            )),
             // Only a profile that ignores verbs produces one. It runs nothing,
             // and each occurrence reached says so once.
             LifecycleActionKind::Ignored(ignored) => {

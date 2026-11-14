@@ -31,9 +31,12 @@
 //! 7. [`FAKE_EDITOR_SPAWN_CHILD`] starts a copy of this program that sleeps
 //!    until killed and, once that copy is running, appends its PID, one per
 //!    line, to [`FAKE_EDITOR_PIDS`].
-//! 8. [`FAKE_EDITOR_HOLD`] creates the named ready-marker file and sleeps
+//! 8. [`FAKE_EDITOR_PAUSE`] creates the named marker file and waits until the
+//!    test removes it, then carries on, so a test can change the target while
+//!    the editor is "open" and still see a normal exit.
+//! 9. [`FAKE_EDITOR_HOLD`] creates the named ready-marker file and sleeps
 //!    until killed.
-//! 9. The process exits with [`FAKE_EDITOR_EXIT`] (default `0`).
+//! 10. The process exits with [`FAKE_EDITOR_EXIT`] (default `0`).
 //!
 //! [`FAKE_EDITOR_IGNORE_TERM`] (Unix only) ignores `SIGTERM` before any of
 //! this, in the editor and in a spawned child, so a test can prove a caller
@@ -84,6 +87,9 @@ pub const FAKE_EDITOR_SPAWN_CHILD: &str = "FAKE_EDITOR_SPAWN_CHILD";
 pub const FAKE_EDITOR_PIDS: &str = "FAKE_EDITOR_PIDS";
 /// Any non-empty value ignores `SIGTERM` (Unix only; no effect elsewhere).
 pub const FAKE_EDITOR_IGNORE_TERM: &str = "FAKE_EDITOR_IGNORE_TERM";
+/// Path of a marker file to create, then wait for a test to remove before
+/// continuing.
+pub const FAKE_EDITOR_PAUSE: &str = "FAKE_EDITOR_PAUSE";
 /// Path of a ready-marker file to create before sleeping until killed.
 pub const FAKE_EDITOR_HOLD: &str = "FAKE_EDITOR_HOLD";
 
@@ -232,6 +238,14 @@ fn run(var: &dyn Fn(&str) -> Option<OsString>) -> Result<u8, String> {
             .open(&pids)
             .and_then(|mut file| writeln!(file, "{}", child.id()))
             .map_err(|error| format!("cannot write {}: {error}", Path::new(&pids).display()))?;
+    }
+    if let Some(marker) = var(FAKE_EDITOR_PAUSE) {
+        let marker = Path::new(&marker);
+        write_file(marker, b"paused")?;
+        let started = Instant::now();
+        while marker.exists() && started.elapsed() < SLEEP_CEILING {
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
     if let Some(marker) = var(FAKE_EDITOR_HOLD) {
         write_file(Path::new(&marker), b"ready")?;

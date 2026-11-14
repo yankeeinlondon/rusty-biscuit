@@ -48,6 +48,8 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::process_tree::ProcessTree;
+
 /// Retained stdout. Answers are printed last, so the tail is what is kept.
 const STDOUT_TAIL_LIMIT: usize = 64 * 1024;
 
@@ -161,95 +163,6 @@ fn configure_detached(command: &mut Command) {
 
 #[cfg(not(any(unix, windows)))]
 fn configure_detached(_command: &mut Command) {}
-
-#[cfg(unix)]
-struct ProcessTree {
-    /// Equal to the shell's PID, because the shell leads its own session.
-    group: libc::pid_t,
-}
-
-#[cfg(unix)]
-impl ProcessTree {
-    fn attach(child: &std::process::Child) -> Option<Self> {
-        libc::pid_t::try_from(child.id()).ok().map(|group| Self { group })
-    }
-
-    fn terminate(&self) {
-        // SAFETY: `kill` with a negative PID signals a process group and has
-        // no memory-safety preconditions. An already-empty group is `ESRCH`.
-        unsafe {
-            libc::kill(-self.group, libc::SIGKILL);
-        }
-    }
-}
-
-#[cfg(windows)]
-struct ProcessTree {
-    job: windows::Win32::Foundation::HANDLE,
-}
-
-#[cfg(windows)]
-impl ProcessTree {
-    fn attach(child: &std::process::Child) -> Option<Self> {
-        use std::os::windows::io::AsRawHandle;
-        use windows::Win32::Foundation::{CloseHandle, HANDLE};
-        use windows::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-            SetInformationJobObject,
-        };
-
-        // SAFETY: every handle passed below is either the freshly created Job
-        // or the live child's process handle, both valid for these calls.
-        unsafe {
-            let job = CreateJobObjectW(None, None).ok()?;
-            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            let assigned = SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                std::ptr::from_ref(&info).cast(),
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-            .and_then(|()| AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())));
-            if assigned.is_err() {
-                let _ = CloseHandle(job);
-                return None;
-            }
-            Some(Self { job })
-        }
-    }
-
-    fn terminate(&self) {
-        // SAFETY: `job` stays open until `drop`.
-        unsafe {
-            let _ = windows::Win32::System::JobObjects::TerminateJobObject(self.job, 1);
-        }
-    }
-}
-
-#[cfg(windows)]
-impl Drop for ProcessTree {
-    fn drop(&mut self) {
-        // SAFETY: `job` was created by `attach` and is closed exactly once.
-        // Kill-on-close makes the close a backstop for `terminate`.
-        unsafe {
-            let _ = windows::Win32::Foundation::CloseHandle(self.job);
-        }
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-struct ProcessTree;
-
-#[cfg(not(any(unix, windows)))]
-impl ProcessTree {
-    fn attach(_child: &std::process::Child) -> Option<Self> {
-        Some(Self)
-    }
-
-    fn terminate(&self) {}
-}
 
 #[cfg(all(test, unix))]
 mod tests {

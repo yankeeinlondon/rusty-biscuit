@@ -13,7 +13,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use darkmatter::lifecycle::actions::all_lifecycle_verbs;
+use darkmatter::lifecycle::actions::{LIFECYCLE_ONLY_VERBS, all_lifecycle_verbs};
 use darkmatter::lifecycle::md_host::{UNPROVIDED_VERBS, registry};
 use darkmatter::lifecycle::registry::{ActionType, ActionTypes};
 use darkmatter::markdown::Markdown;
@@ -179,7 +179,12 @@ fn verbs_md_does_not_provide_pass_untyped_and_malformed_md_verbs_do_not() {
 #[test]
 fn the_open_arm_rejects_every_md_verb_and_admits_every_unprovided_verb() {
     let fixture = Fixture::new();
-    let provided = md_verbs();
+    // The lifecycle-only verbs are parsed but not yet typed by the md
+    // schema, so its open arm still admits them. The `untyped` row below
+    // fails once the schema types them; drop this exemption then.
+    let provided: BTreeSet<String> =
+        md_verbs().into_iter().filter(|verb| !LIFECYCLE_ONLY_VERBS.contains(&verb.as_str())).collect();
+    let untyped: Vec<String> = LIFECYCLE_ONLY_VERBS.iter().map(|verb| format!("{{ {verb}: 1 }}")).collect();
     assert!(provided.len() > 120 && provided.contains("info") && provided.contains("shell"), "{provided:?}");
     for verb in UNPROVIDED_VERBS {
         assert!(known_verbs().contains(*verb), "`{verb}` is a lifecycle verb");
@@ -189,9 +194,10 @@ fn the_open_arm_rejects_every_md_verb_and_admits_every_unprovided_verb() {
     let report = fixture.validate_with(
         &fixture.plain,
         &format!(
-            "$schema:\n    rejected: \"md-unknown-action[]@darkmatter:md-lifecycle\"\n    admitted: \"md-unknown-action[]@darkmatter:md-lifecycle\"\n    keys: \"md-unknown-action[]@darkmatter:md-lifecycle\"\nrejected: [{}]\nadmitted: [{}]\nkeys: [{{ when: 1 }}, {{ then: 1 }}, {{ else: 1 }}, {{ no_error: 1 }}]",
+            "$schema:\n    rejected: \"md-unknown-action[]@darkmatter:md-lifecycle\"\n    admitted: \"md-unknown-action[]@darkmatter:md-lifecycle\"\n    untyped: \"md-unknown-action[]@darkmatter:md-lifecycle\"\n    keys: \"md-unknown-action[]@darkmatter:md-lifecycle\"\nrejected: [{}]\nadmitted: [{}]\nuntyped: [{}]\nkeys: [{{ when: 1 }}, {{ then: 1 }}, {{ else: 1 }}, {{ no_error: 1 }}]",
             rejected.join(", "),
-            admitted.join(", ")
+            admitted.join(", "),
+            untyped.join(", ")
         ),
     );
     let failed_at = |property: &str| -> BTreeSet<usize> {
@@ -207,6 +213,11 @@ fn the_open_arm_rejects_every_md_verb_and_admits_every_unprovided_verb() {
         assert!(rejected_indexes.contains(&index), "the open arm admits md's `{verb}`");
     }
     assert!(failed_at("admitted").is_empty(), "the open arm rejects an unprovided verb: {:?}", problems(&report));
+    assert!(
+        failed_at("untyped").is_empty(),
+        "the md schema now types a lifecycle-only verb; remove its exemption from `provided`: {:?}",
+        problems(&report)
+    );
     assert_eq!(failed_at("keys"), BTreeSet::from([0, 1, 2, 3]), "conditional and bundle keys stay closed");
 }
 

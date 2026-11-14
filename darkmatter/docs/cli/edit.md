@@ -28,6 +28,30 @@ choose.
 EDITOR=/usr/local/bin/typo md edit notes.md   # fails; notes.md is not created
 ```
 
+`md edit` waits for the editor to close, so it only ever chooses an editor it can
+wait for:
+
+- **Terminal editors** (Vim, Neovim, Nano, Helix, ...) block until you quit them.
+- **GUI editors** get the flag that makes them wait for the file to close, such as
+  `--wait` for VS Code, Zed, and Sublime Text, or `--block` for Kate. The editor is
+  recognized by its program name, so `EDITOR=code` and
+  `EDITOR=/usr/local/bin/code` both get `--wait`; a flag you already wrote
+  (`EDITOR="code --wait"`) is not added twice.
+- **GUI editors with no such flag** (Geany, Lapce) would return before you have
+  edited anything, so they are skipped: the default list never picks one, and a
+  variable naming one gives way to the other variable or, if none is left, fails
+  with a message saying the editor cannot wait.
+- **A program it does not recognize**, such as your own wrapper script, is
+  trusted to wait.
+
+```sh
+EDITOR=geany VISUAL=nvim md edit notes.md   # opens nvim
+EDITOR=geany md edit notes.md               # fails: geany cannot wait
+```
+
+The variable's first word is the program and the rest are its arguments, so the
+program's path cannot contain a space.
+
 ## Creating a file
 
 When the reference matches nothing, the file is created at the first place the

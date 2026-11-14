@@ -60,7 +60,7 @@ use simplified_schema::simplified::{
 };
 
 use super::LOOP_ITERATION_KEYS;
-use super::actions::{CommunicationChannel, is_lifecycle_control_verb};
+use super::actions::{CommunicationChannel, is_lifecycle_control_verb, is_lifecycle_only_verb};
 
 /// The keys a lifecycle action map reserves beside its verbs.
 const RESERVED_KEYS: &[&str] = &["when", "then", "else", "no_error"];
@@ -558,6 +558,8 @@ fn hand_owner(name: &str) -> Option<&'static str> {
         Some("the `shell` action")
     } else if is_lifecycle_control_verb(name) {
         Some("a lifecycle control verb")
+    } else if is_lifecycle_only_verb(name) {
+        Some("a lifecycle-only verb")
     } else if name == "set" {
         Some("lifecycle `set`")
     } else if RESERVED_KEYS.contains(&name) {

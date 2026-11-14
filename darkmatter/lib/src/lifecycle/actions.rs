@@ -227,6 +227,9 @@ pub enum LifecycleActionKind {
     /// Read-only Darkmatter expression function invoked for its result.
     ExpressionFunction(ExpressionFunctionAction),
 
+    /// Open a file in the caller's editor and wait for it to close.
+    Edit(EditAction),
+
     /// A verb the parsing profile does not know, kept opaque under
     /// [`UnknownVerbPolicy::Ignore`](super::UnknownVerbPolicy::Ignore).
     ///
@@ -843,6 +846,24 @@ pub struct ExpressionFunctionAction {
     pub args: Vec<Expr>,
 }
 
+/// An `edit` action: open `file` in the caller's editor and block until the
+/// editor exits.
+///
+/// A parser-owned verb, never an expression function: nothing registers an
+/// `edit()` call. Editing writes no frontmatter, so the action has no write
+/// set and re-evaluates no predicate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditAction {
+    /// The target path. A literal is a non-blank string, checked at parse; an
+    /// interpolated value is typed when the event runs.
+    pub file: Expr,
+    /// Refuse a target that already exists instead of opening it.
+    pub create_new: bool,
+    /// `Some(true)` requires a GUI editor, `Some(false)` a terminal one;
+    /// `None` (the key was absent) accepts either. An authored `null` never
+    /// reaches here: the parser refuses it.
+    pub gui: Option<bool>,
+}
 
 /// Produce a did-you-mean rewrite from a removed short-form action to its
 /// positional form.

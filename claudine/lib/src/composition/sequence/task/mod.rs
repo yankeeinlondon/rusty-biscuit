@@ -1744,6 +1744,7 @@ fn describe_action(action: &LifecycleAction) -> String {
         }
         LifecycleActionKind::SideEffect(effect) => format!("`{}` is a side effect", effect.verb),
         LifecycleActionKind::RuntimeSet(_) => "`set` is a side effect".to_string(),
+        LifecycleActionKind::Edit(_) => "`edit` opens an editor and is not a task side effect".to_string(),
         // Claudine's parse profile rejects unknown verbs, so it never
         // produces an ignored action.
         LifecycleActionKind::Ignored(ignored) => format!("`{}` is not a lifecycle verb", ignored.verb),

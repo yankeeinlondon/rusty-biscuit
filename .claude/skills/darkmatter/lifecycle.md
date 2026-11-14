@@ -44,6 +44,17 @@ pages with the behavior.
 - `lifecycle_boundary/{engine,profiles,publisher}.rs` are a test-only
   prototype run driven by the production registry; its registration tests
   live in `protocol_tests.rs`.
+- A parser-owned verb that is neither flow control nor a catalog entry (today
+  only `edit`, `LifecycleActionKind::Edit`) is listed once in
+  `signatures.rs::LIFECYCLE_ONLY_VERBS`; `is_known_lifecycle_verb`,
+  `all_lifecycle_verbs`, `template_operands`, the source map's long form, and
+  the schema projection's collision check (`hand_owner`) read it. Never
+  register such a verb as an expression function or side effect
+  (`lib/tests/l1/lifecycle_edit_action.rs` asserts it). A new
+  `LifecycleActionKind` needs an arm in `action_type`/`action_verb`
+  (`parse.rs`), `walk_action` (`validate.rs`), `execute_action_inner`, and
+  Claudine's `describe_action` (`sequence/task/mod.rs`); the wildcard walkers
+  (preflight, shell templates, `action_writes`) treat it as inert.
 - Never add a hand-maintained list of lifecycle event keys or late roots;
   derive it from the host's `EventRegistry`.
 - Lifecycle operands evaluate lazy functions in

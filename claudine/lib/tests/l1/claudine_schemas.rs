@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
-use claudine::composition::lifecycle::actions::all_lifecycle_verbs;
+use claudine::composition::lifecycle::actions::{LIFECYCLE_ONLY_VERBS, all_lifecycle_verbs};
 use claudine::composition::parse_lifecycle_config;
 use darkmatter::effects::effect_descriptors;
 use darkmatter::lifecycle::schema_projection::LifecycleSchemaProjection;
@@ -526,8 +526,19 @@ fn hand_verbs_equal_the_parser_inventory() {
 
     let unparsed: BTreeSet<&String> = hand.difference(&parser).collect();
     assert!(unparsed.is_empty(), "action types the parser does not accept: {unparsed:?}");
-    let missing: BTreeSet<&String> = parser.difference(&hand).collect();
+    // The lifecycle-only verbs are parsed but not yet typed by the action
+    // schema. The second assertion fails once the schema types one; drop
+    // this exemption then.
+    let untyped: BTreeSet<&String> =
+        parser.difference(&hand).filter(|verb| LIFECYCLE_ONLY_VERBS.contains(&verb.as_str())).collect();
+    let missing: BTreeSet<&String> =
+        parser.difference(&hand).filter(|verb| !LIFECYCLE_ONLY_VERBS.contains(&verb.as_str())).collect();
     assert!(missing.is_empty(), "parser verbs missing from the action types: {missing:?}");
+    assert_eq!(
+        untyped.len(),
+        LIFECYCLE_ONLY_VERBS.len(),
+        "the action schema now types a lifecycle-only verb; remove its exemption: {untyped:?}"
+    );
 
     // Every verb sits in exactly one category.
     let mut seen = BTreeMap::new();

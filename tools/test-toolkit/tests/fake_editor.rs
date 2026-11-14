@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use test_toolkit::argv_recorder::read_argv_records;
 use test_toolkit::fake_editor::{
     FAKE_EDITOR_DELETE, FAKE_EDITOR_ERR_TEXT, FAKE_EDITOR_EXIT, FAKE_EDITOR_HOLD, FAKE_EDITOR_OUT_TEXT,
-    FAKE_EDITOR_PIDS, FAKE_EDITOR_READ_LINE, FAKE_EDITOR_RECORD, FAKE_EDITOR_REPLACE, FAKE_EDITOR_SPAWN_CHILD,
+    FAKE_EDITOR_PAUSE, FAKE_EDITOR_PIDS, FAKE_EDITOR_READ_LINE, FAKE_EDITOR_RECORD, FAKE_EDITOR_REPLACE, FAKE_EDITOR_SPAWN_CHILD,
     FAKE_EDITOR_STDIO, FAKE_EDITOR_WRITE, read_pids, read_stdio_report,
 };
 
@@ -177,6 +177,22 @@ fn hold_creates_its_marker_and_stays_running_until_killed() {
     wait_for(&marker);
     assert!(child.try_wait().unwrap().is_none(), "a held editor is still running");
     stop(child);
+}
+
+#[test]
+fn pause_waits_for_its_marker_to_be_removed_then_exits_normally() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("paused");
+    let mut child = editor()
+        .env(FAKE_EDITOR_PAUSE, &marker)
+        .env(FAKE_EDITOR_EXIT, "3")
+        .arg(dir.path().join("note.md"))
+        .spawn()
+        .unwrap();
+    wait_for(&marker);
+    assert!(child.try_wait().unwrap().is_none(), "a paused editor waits");
+    std::fs::remove_file(&marker).unwrap();
+    assert_eq!(child.wait().unwrap().code(), Some(3), "it continues to its normal exit");
 }
 
 #[test]

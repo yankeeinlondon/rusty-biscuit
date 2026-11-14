@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-13
 total_phases: 7
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: 'true'
 source_files_during_phase_1:
@@ -37,6 +37,57 @@ packages:
 - test-toolkit
 - darkmatter-cli
 - claudine-cli
+- darkmatter
+- claudine
+source_files_during_phase_2:
+- darkmatter/lib/src/process_tree.rs
+- darkmatter/lib/src/lib.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/launcher.rs
+- darkmatter/lib/src/effects/mod.rs
+- darkmatter/lib/src/effects/fs_write.rs
+- darkmatter/lib/src/editor/mod.rs
+- darkmatter/lib/src/editor/resolve.rs
+- darkmatter/lib/src/editor/launch.rs
+- darkmatter/lib/src/editor/surface.rs
+- darkmatter/lib/src/editor/service.rs
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/error_snapshots/editor.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/editor_support.rs
+- darkmatter/cli/tests/l1/editor_resolution.rs
+- darkmatter/cli/tests/l1/editor_launcher.rs
+- darkmatter/cli/tests/l1/editor_service.rs
+- tools/test-toolkit/src/fake_editor.rs
+- tools/test-toolkit/tests/fake_editor.rs
+docs_updated_during_phase_2:
+- darkmatter/docs/cli/edit.md
+- tools/test-toolkit/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/testing.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/os/SKILL.md
+source_files_during_phase_3:
+- darkmatter/lib/src/lifecycle/actions.rs
+- darkmatter/lib/src/lifecycle/signatures.rs
+- darkmatter/lib/src/lifecycle/mod.rs
+- darkmatter/lib/src/lifecycle/action_shape.rs
+- darkmatter/lib/src/lifecycle/parse.rs
+- darkmatter/lib/src/lifecycle/validate.rs
+- darkmatter/lib/src/lifecycle/operands.rs
+- darkmatter/lib/src/lifecycle/source_map.rs
+- darkmatter/lib/src/lifecycle/schema_projection.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/tests/l1/lifecycle_edit_action.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/lifecycle_schema_parity.rs
+- darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/lifecycle.md
 ---
 
 # Edit Action — Implementation Plan
@@ -665,7 +716,7 @@ the file/eligibility service, and keeps wrapper `--edit` and `md edit` working.
 
 #### Wave 3 — Resolver and process tree (parallel)
 
-- [ ] **Resolver**
+- [x] **Resolver**
     - implement R9 in `darkmatter/lib/src/editor/` (split `mod.rs` into `mod.rs`,
       `resolve.rs`, `launch.rs`, `service.rs`, `surface.rs`; keep every existing
       `pub` path re-exported from `mod.rs` so
@@ -686,14 +737,14 @@ the file/eligibility service, and keeps wrapper `--edit` and `md edit` working.
       typed `NoMatchingEditor` listing each candidate and reason, probes running
       although a variable is set under explicit `gui`, `EDITOR="code --wait"` not
       doubling the flag, `EDITOR=/abs/path/code` getting `--wait`
-- [ ] **Process tree extraction**
+- [x] **Process tree extraction**
     - move `ProcessTree` to `darkmatter/lib/src/process_tree.rs` (R10), add
       `terminate_gracefully`, keep `launcher.rs` behavior byte-identical (its
       existing tests stay green)
 
 #### Wave 4 — Launcher (after Wave 3)
 
-- [ ] **Launcher**
+- [x] **Launcher**
     - implement `LaunchPlan`/`LaunchOptions`/`LaunchIo` and the wait loop per R10;
       route `launch_editor_on_path` and `edit_text` through it unchanged in
       behavior (`own_tree: false`)
@@ -715,14 +766,14 @@ the file/eligibility service, and keeps wrapper `--edit` and `md edit` working.
 
 #### Wave 5 — Service and file preparation (after Wave 4)
 
-- [ ] **File preparation**
+- [x] **File preparation**
     - add `create_new_guarded` (R13) and unit tests in `fs_write.rs`: creation under
       a missing parent, `Existing` for a file, a directory, a symlink (Unix) and a
       dangling symlink; two threads racing `create_new` produce exactly one
       `Created`; a symlink escaping the root is refused before creation
-- [ ] **Surface denial and probe**
+- [x] **Surface denial and probe**
     - implement `surface.rs` (`TerminalDenyScope`, R16) and `EnvironmentProbe` (R12)
-- [ ] **Editor service**
+- [x] **Editor service**
     - implement `ProcessEditorService` per R11–R13, R15 with the `EditorService`
       trait, `EditRequest`, `EditOutcome`, `EditError` (`Unsupported`,
       `StructuredOutputRefusesTerminalEditor`, `NoInteractiveSurface`,
@@ -762,11 +813,11 @@ Phase 1's Sniff pieces exist; it is sequenced after Phase 2 only so the
 
 #### Wave 6 — Typed action and parse (sequential)
 
-- [ ] **Action kind and verb registration**
+- [x] **Action kind and verb registration**
     - add `EditAction`, `LifecycleActionKind::Edit`, `LIFECYCLE_ONLY_VERBS`,
       `is_lifecycle_only_verb`, and every exhaustive-match arm listed in R1/R2;
       `lifecycle/mod.rs` re-exports `EditAction`
-- [ ] **Parse short and long forms**
+- [x] **Parse short and long forms**
     - implement R3 in `action_shape.rs` (`validate_positional_arity_and_build`,
       `build_non_control_positional_action` before the expression-function
       fallback, `build_action_from_params` before the side-effect fallback,
@@ -778,12 +829,12 @@ Phase 1's Sniff pieces exist; it is sequenced after Phase 2 only so the
 
 #### Wave 7 — Passive surfaces and tests (parallel, after Wave 6)
 
-- [ ] **Operand walk and type scope**
+- [x] **Operand walk and type scope**
     - add the `Edit` arm in `validate.rs` (operand path `<prefix>.file`, R4),
       `action_writes` (no writes), `walk_scoped`, and `template_operands`
     - confirm both branches of a conditional are structurally checked and that an
       event-time value in `file` is deferred, not evaluated
-- [ ] **Parse tests** (`darkmatter/lib/src/lifecycle/tests/` and
+- [x] **Parse tests** (`darkmatter/lib/src/lifecycle/tests/` and
       `darkmatter/lib/tests/l1/`)
     - the Input robustness matrix, in process through `parse_lifecycle_config_with`:
       every cell above with located-error assertions (`source_path`, `property`

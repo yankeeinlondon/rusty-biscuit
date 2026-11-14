@@ -63,7 +63,7 @@ use biscuit_terminal::components::status::StatusState;
 use crate::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 
 use self::actions::{
-    CommunicationAction, CommunicationChannel, ExpressionFunctionAction, IgnoredAction, LifecycleAction,
+    CommunicationAction, CommunicationChannel, EditAction, ExpressionFunctionAction, IgnoredAction, LifecycleAction,
     LifecycleActionKind, LifecycleControlAction, LifecycleNode, LifecyclePath, RetryBackoff, RuntimeSet,
     RuntimeSetError, ShellAction, SideEffectAction, WithOverlay, WithOverlayError, all_lifecycle_verbs,
     expression_function_signature, is_known_lifecycle_verb, rewrite_to_positional, side_effect_signature,

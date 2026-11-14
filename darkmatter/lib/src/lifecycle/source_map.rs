@@ -20,7 +20,8 @@ use serde_json::Value;
 use super::LifecycleSignal;
 use super::action_shape::positional_operand_field;
 use super::actions::{
-    CommunicationChannel, expression_function_signature, is_lifecycle_control_verb, side_effect_signature,
+    CommunicationChannel, expression_function_signature, is_lifecycle_control_verb, is_lifecycle_only_verb,
+    side_effect_signature,
 };
 use super::parse::LOOP_ITERATION_KEYS;
 use super::registry::EventRegistry;
@@ -301,7 +302,7 @@ impl LifecycleSourceMap {
             self.record_with_value(&prefix.field("with"), with, &child_key(at, "with"));
         }
 
-        if is_lifecycle_control_verb(verb) || verb == "shell" {
+        if is_lifecycle_control_verb(verb) || is_lifecycle_only_verb(verb) || verb == "shell" {
             for (key, value) in params {
                 self.record(prefix.field(key.as_str()), Some(value), &child_key(at, key));
             }

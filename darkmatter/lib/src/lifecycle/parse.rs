@@ -372,7 +372,8 @@ pub fn action_type(action: &LifecycleAction) -> Option<ActionType> {
         LifecycleActionKind::Shell(_) => Some(ActionType::Shell),
         LifecycleActionKind::SideEffect(_)
         | LifecycleActionKind::RuntimeSet(_)
-        | LifecycleActionKind::ExpressionFunction(_) => Some(ActionType::Expression),
+        | LifecycleActionKind::ExpressionFunction(_)
+        | LifecycleActionKind::Edit(_) => Some(ActionType::Expression),
         LifecycleActionKind::Ignored(_) => None,
     }
 }
@@ -386,6 +387,7 @@ fn action_verb(action: &LifecycleAction) -> &str {
         LifecycleActionKind::SideEffect(effect) => &effect.verb,
         LifecycleActionKind::RuntimeSet(_) => "set",
         LifecycleActionKind::ExpressionFunction(func) => &func.function,
+        LifecycleActionKind::Edit(_) => "edit",
         LifecycleActionKind::Ignored(ignored) => &ignored.verb,
     }
 }
@@ -1126,6 +1128,17 @@ impl StackParser<'_> {
                         "`break.code` must be an integer from 0 to 255, got {}",
                         json_type_name(value)
                     ),
+                });
+            }
+            // `edit`'s flags are literal booleans: a quoted, interpolated, or
+            // `null` value would pass the expression rule below, and `null`
+            // must not read as the absent default.
+            if verb == "edit" && matches!(key.as_str(), "create_new" | "gui") && !value.is_boolean() {
+                return Err(LifecycleError::LifecycleInvalidArgs {
+                    source_path: self.source_file.to_path_buf(),
+                    property: path.field(key.as_str()).to_string(),
+                    action: verb.to_string(),
+                    message: format!("`edit.{key}` must be a boolean literal, got {}", json_type_name(value)),
                 });
             }
             // Direct YAML object literals are not parameter values; object

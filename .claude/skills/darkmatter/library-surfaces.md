@@ -10,6 +10,7 @@ behavior.
 - [Schemas and references](#schemas-and-references)
 - [Rendering and style](#rendering-and-style)
 - [Effects, cache, and remote access](#effects-cache-and-remote-access)
+- [Launching the user's editor](#launching-the-users-editor)
 - [Package boundaries](#package-boundaries)
 
 ## Document and frontmatter
@@ -232,6 +233,40 @@ directly: `darkmatter::markdown::schemas` does not re-export them.
   run-local only; no semantic-result persistence code exists until a
   `ContentPolicy` does.
 - Passive schema, DMLS, and validation surfaces never invoke the effect engine.
+
+## Launching the user's editor
+
+`darkmatter::editor` is the one editor path for `md edit`, Claudine's wrapper
+`--edit`, and the lifecycle `edit` action:
+
+- `resolve_editor(SurfaceRequest)` is the only resolver (`resolve_editor_command`
+  is its `Any` display string). Every editor fact (surface, wait flags,
+  identifying `$EDITOR`'s first word) comes from Sniff's `Editor` catalog; never
+  add a flag table here. A non-blocking GUI editor is never selected. The order
+  and filtering are unit-tested over `resolve_editor_from` with fake lookups
+  (`editor/resolve.rs`); the env reads are the guard's `editor/resolve.rs`
+  allowance.
+- `LaunchPlan::run(LaunchOptions)` is the only launcher. `LaunchOptions::PLAIN`
+  (`md edit`, `--edit`) keeps the host's process group and an uninterruptible
+  wait. `own_tree: true` makes the editor the root of a `crate::process_tree::ProcessTree`
+  (process group / Job Object, shared with the login-shell probe launcher), polls
+  `cancelled` every 20 ms, terminates with `SIGTERM` then `SIGKILL` after
+  `EDITOR_TERMINATE_GRACE`, hands a terminal editor the foreground (`pre_exec`
+  `tcsetpgrp`), and restores the host's foreground group and `termios` on drop. A
+  successful exit `release`s the tree (Windows clears kill-on-close) so a GUI
+  client's main window survives.
+- `ProcessEditorService` (trait `EditorService`) is the `edit` action's service:
+  cancellation check, resolution, eligibility (`EditorHostFacts`,
+  `EnvironmentProbe`, the thread-local `deny_terminal_in_this_thread` scope for
+  parallel members, one process-wide terminal claim), then
+  `effects::fs_write::create_new_guarded` (one `O_EXCL` create, never
+  `ensure_file`), launch on the `canonicalize_simplified` path, and a post-exit
+  containment and regular-file check. `EditOutcome::attempted` is false only for
+  refusals before creation.
+- Tests launch the fake editor installed under a real editor's name
+  (`cli/tests/l1/editor_support.rs::install_fake_editor`; reinstalling a name
+  reuses the existing hard link, because copying through it would truncate the
+  shared fixture binary).
 
 ## Package boundaries
 

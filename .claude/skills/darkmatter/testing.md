@@ -258,8 +258,9 @@ Point `EDITOR` (and clear `VISUAL`) at the `darkmatter-fake-editor` binary
 a shell script. Its body is `test_toolkit::fake_editor`: environment variables make it
 record argv (`FAKE_EDITOR_RECORD`), write or atomically replace the target (the last
 argument), delete it, exit nonzero, report which streams were terminals, spawn a
-sleeping child (`FAKE_EDITOR_PIDS`), ignore `SIGTERM`, or hold until killed after
-creating a ready marker (`FAKE_EDITOR_HOLD`). Wait on the marker, never on a sleep.
+sleeping child (`FAKE_EDITOR_PIDS`), ignore `SIGTERM`, pause until the test removes a
+marker and then exit normally (`FAKE_EDITOR_PAUSE`, for changing the target while the
+editor is open), or hold until killed after creating a ready marker (`FAKE_EDITOR_HOLD`). Wait on the marker, never on a sleep.
 Cargo builds the binary only for its own package's tests, so editor-launching tests
 live in `darkmatter/cli/tests/l1/`.
 - To count work, `work_counters` is on `darkmatter-cli`'s dev-dependency, so a CLI unit test
