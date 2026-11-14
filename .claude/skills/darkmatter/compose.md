@@ -537,8 +537,8 @@ blocks, so a read after a block waits for the block stage; the last enabled
 shell stage settles the rest. Structural decisions (page-block and `when=`
 conditions, collection gates, sources, callbacks) are not deferred. A command
 whose own line held pending reads is prepared with `prepare_refreshed_site`:
-under pre-approvals its new bytes run when an exact whitelist rule covers every
-segment (or its shape is a member), else `NotPreApproved`. Tests:
+under pre-approvals its new bytes run when an exact `shell-commands` rule covers
+every segment (or its shape is a member), else `NotPreApproved`. Tests:
 `lib/tests/l1/load_data_runtime.rs`.
 
 ### Variable Resolution
@@ -1092,7 +1092,7 @@ Shell approval and shell execution are separate concerns:
   `ComposeOptions::with_pre_approved_commands(set)`. The invariant
   `execution_set ⊆ approval_set` makes the gate a pure membership check,
   except for a refreshed site (its arguments read a file after an earlier
-  command ran), which an exact whitelist rule may also admit
+  command ran), which an exact `shell-commands` rule may also admit
   (`site::prepare_refreshed_site`).
 - A body/`::shell-block` command embedding a frontmatter value still pending
   frontmatter-shell expansion is rejected up front as
@@ -1136,25 +1136,40 @@ Shell approval and shell execution are separate concerns:
   template (`schema_validation::defers_template`). Details:
   [schema.md](schema.md), "Schema templates".
 
-### Interactive approval: the stage policy snapshot
+### Shell permissions: the captured policy plus the run's approvals
 
-When no pre-approved set is supplied and an `approval_handler` drives approval
-interactively, policy is snapshotted **once per stage**, not per directive. Each
-of the three shell stages (frontmatter `$()`, body `::shell`, `::shell-block`)
-takes one `ShellRuntimeSnapshot` of the whitelist/blacklist/allow-once state at
-stage open, and every directive that stage admits is judged against it. This
-keeps the policy mutex out of parsing, approval, and execution.
+There is no shell policy file and no policy root. Every decision reads the
+request's captured `permissions.shell-commands`
+(`request.config_snapshot().policy()?.shell()`, a `ShellPermissions`: user ∨
+(HEAD ∧ worktree) per segment, `exclusions()` from every layer) plus the
+runtime's own state, through `ShellExpansionRuntime::snapshot(request)` (a
+`ShellRuntimeSnapshot` of `allow_once`, the run's `saved` rules, and the
+`Arc<PermissionPolicy>`; `allows(..)`, `exclusion(..)`, `save_target()`). An
+invalid block is `ShellExpansionError::Config` before anything is asked.
+Order everywhere (body, blocks, frontmatter, templates, preflight, lifecycle):
+built-in blacklist (`check_filled_chain`, `check_template_blacklist`, no
+rule set) refuses first, before pre-approvals or the handler; an exclusion
+match (`blocks_filled` on the whole chain; `check_template_exclusion` for a
+shape) disables every allow, so only `allow_once`/the handler/pre-approvals
+admit it; otherwise each segment needs `allows(check_whitelist ..)` or an
+`allow_once` key. A filled template whose shape only a rule approved needs
+its own approval when an exclusion matches the filled values
+(`filled_template_needs_approval`; the lifecycle executor reads exclusions
+through `LifecycleHost::shell_exclusions`). Pre-approved membership is not
+re-judged against exclusions: preflight already did.
 
-Two consequences:
-
-- A rule **persisted** by an `AllowExactPersist` / `AllowCommandPersist`
-  decision is written to the runtime immediately but becomes *policy input*
-  only for a **subsequent** stage (or run). A later directive in the same stage
-  matching that fresh rule therefore prompts again. This is conservative by
-  construction — it can over-prompt, never under-authorize.
-- **Allow-once is exempt.** It is arbitrated live against shared runtime state,
-  so one approval covers repeats of that exact command for the rest of the
-  stage and across concurrently composed sibling transclusions.
+"Always allow" (`AllowExactPersist`/`AllowCommandPersist`/`AllowTemplatePersist`)
+calls `ShellExpansionRuntime::save_rule` (or `SitePolicy::save` in
+preflight): `config::permissions::persist::save_user_approval`, the rule added
+to the run's `saved` set, and the approved keys recorded in `allow_once` so an
+excluded command keeps its run approval. A `NotSaved` becomes a
+`dm.config.not_saved` `ComposeWarning` (`take_recent_warnings`, drained by the
+three stages beside `take_recent_approval_count`; preflight returns them in
+`ComposePreflightApprovals::warnings`, which the CLI holds in
+`PendingTriggerWarnings`). The captured snapshot never changes mid-run.
+Each directive takes its own snapshot, so a rule saved earlier in the stage
+answers a later directive without a prompt. `ApprovalKey` is mode + bytes or
+shape only. The compose fingerprint encodes the rules (`shell_permissions`).
 
 Orchestrators (Claudine) call `compose_preflight`, merge in their own harness
 commands, authorize the union once, and pass the merged set back via
@@ -1176,21 +1191,22 @@ declaration is approved as `{{ string }}` but still validated as a number.
 `TemplateShape` is what a `template` rule stores and matches, and
 `canonical_text`/`parse_rule` round-trip it. Covers is `rule_covers`, which
 gates `schemas::is_subtype` behind `is_string_like`, because `is_subtype`
-accepts any identical pair. Blacklist matching errs toward refusing: holes
+accepts any identical pair. Exclusion matching errs toward matching: holes
 ignore type, redirects are ignored, a one-segment rule matches any chain
 segment, and `blocks_filled` treats holes as `*` against filled argv.
 
 The runtime template rejection chain never stores a rejected value; this does
 not cover the earlier document-schema verdict, which can display it. Template
 authorization and command-result caching remain separate: fill, validate,
-check blacklists, and resolve direct targets before result reuse. The native
+check the built-in blacklist and exclusions, and resolve direct targets before result reuse. The native
 redirection regressions preserve original stream destinations, so `2>&1 >
 /dev/null` retains stderr on original stdout whereas `> /dev/null 2>&1`
 discards both. Do not replace a surviving `ToStdout`/`ToStderr` with that
 stream's own capture channel.
-`check_user_blacklist` already applies template blacklist rules to
-resolved-byte commands. `store::load_ruleset_with_warnings` returns the
-skipped lines with file and line; `load_ruleset` logs them.
+`check_user_blacklist` (the exclusion matcher, despite its name) already
+applies `template` rules to resolved-byte commands. `store::parse_rule_entry`
+is the one strict single-rule parser (the configuration loader's); an empty
+payload or unknown form is an error, never skipped.
 
 Discovery (`preflight/collect.rs`) also reads each command site as authored
 (`parser::authored_directive_commands` + `authored_template`, which drops
@@ -1235,12 +1251,14 @@ transclusion notices and nested `||`. `ComposeOptions.pre_approved_commands`
 is `ShellPreApprovals` (exact bytes + shapes; a `HashSet<String>` converts to
 exact only); `validate_pre_approved` admits a site by bytes or shape.
 The runtime allow-once set and Claudine's session cache key on `ApprovalKey`
-(mode + policy root). `compose_preflight_approvals` decides per site (exact
-rule, template rule, prefix rule, then the handler with
-`ShellApprovalRequest::offered`/`template`) and persists every chosen row.
+(mode only). `compose_preflight_approvals` decides per site (built-in
+refusal, then an exclusion check over the authored shape and resolved chain,
+then exact rule, template rule, prefix rule, then the handler with
+`ShellApprovalRequest::offered`/`template`/`exclusion`/`save_target`) and
+saves every "always" choice to the user configuration.
 The `md` prompt (`cli/src/approval.rs`, also Claudine's installed handler)
-numbers only the offered choices (exact, shape, prefix, once, deny,
-blacklist), shows `template.display` as `Command:` with the resolved bytes as
+numbers only the offered choices (exact, shape, prefix, once, deny for this
+run; there is no permanent deny), names an exclusion as `Excluded:`, shows `template.display` as `Command:` with the resolved bytes as
 `Resolved:` only when exact is offered, re-asks on an unlisted number, and
 denies at end of input; `approve_with_io` is its scripted-I/O test seam
 (`cli/tests/l1/approval_prompt.rs`).
@@ -1259,16 +1277,17 @@ the pristine body, advanced with every edit), `::shell-block` through
 (threaded into the inline stages) and evaluates holes with `LookupEvaluator`
 over the stage's state (`ResolvingLookup` for the body, `FrontmatterSeedState`
 for frontmatter). `prepare_site` picks the mode: pre-approved → exact bytes
-member, else shape member, else `NotPreApproved`; policy → blacklists, exact
-rule/cached exact key, template rule/cached shape key, prefix (bytes) or
+member, else shape member, else `NotPreApproved`; policy → built-in blacklist,
+exclusions, exact rule/cached exact key, template rule/cached shape key, prefix (bytes) or
 prefix-per-program (template-only), then the handler. `prepare_resolved` (the
 old `prepare_directive` body) offers the shape beside the bytes and handles
 `AllowTemplatePersist`. `TemplateSite::prepare_template` fills, runs
-`check_filled_chain`, resolves each program with `resolve_direct_target`, and
+`check_filled_chain` and `filled_template_needs_approval`, resolves each program with `resolve_direct_target`, and
 returns `ExecutionMode::Template` with authored `raw_command`; its cache key is
 `template_command_key` (length-prefixed argv), never the rendered line.
-Resolved-byte preparation now also runs `check_filled_chain` (pre-approved
-path included) so chain `template` blacklists reach bytes.
+Resolved-byte preparation runs `check_filled_chain` (pre-approved path
+included) and judges exclusions with `blocks_filled` on the whole chain, so
+chain `template` exclusions reach bytes.
 
 **Shared API for hosts (`template/fill.rs`, `template/target.rs`).**
 `HoleEvaluator` (closures and `LookupEvaluator<L: EvaluationLookup>`),

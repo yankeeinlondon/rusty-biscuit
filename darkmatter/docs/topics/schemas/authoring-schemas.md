@@ -592,9 +592,10 @@ values.
 A schema with a slot is a **template**. Reading it evaluates nothing: parsing,
 querying, exporting, trigger matching, completion, and hover all see the slot
 as text. The slot runs only when a command resolves the schema, and every
-read it makes must be approved first. A clean, committed file in the schema's
-own repository is approved automatically; anything else needs a grant or an
-answer at a prompt. See
+read it makes must be approved first. A file your `permissions.file-read`
+configuration matches is approved ahead of time (by default, a file with a
+common data or text extension beside the schema or anywhere in its
+repository); anything else needs an answer at a prompt. See
 [When a slot is evaluated](./schema-slots.md#when-a-slot-is-evaluated) and
 [What a slot may read](./schema-slots.md#what-a-slot-may-read).
 
@@ -620,14 +621,14 @@ A **template type** is a slot that supplies a property's whole type
 definition (`status: "{{ load_data('./status-type.yaml', 'type-definition') }}"`);
 see [Template Types](../../../../simplified-schema/docs/topics/language/slots.md#template-types).
 
-Every file a returned definition imports or names is read only with a grant,
+Every file a returned definition imports or names is read only once approved,
 exactly like the slot's own reads; see
 [The reads a returned definition causes](./schema-slots.md#the-reads-a-returned-definition-causes).
 
 The full grammar and every result rule are in
 [Slots: Values Supplied by an Expression](../../../../simplified-schema/docs/topics/language/slots.md).
 Darkmatter's side (which expressions a slot may contain, where slots may
-appear, approvals and grants, caching, the editor, and failure codes) is in
+appear, read approvals, caching, the editor, and failure codes) is in
 [Schema Slots in Darkmatter](./schema-slots.md).
 
 ### Union Types

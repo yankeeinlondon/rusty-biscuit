@@ -1993,11 +1993,11 @@ mod template_position {
         )
     }
 
-    /// Approve `graph` against the policy files in `policy`, with no handler:
+    /// Approve `graph` against the user permissions under `policy`, with no handler:
     /// whatever no rule covers fails as it does without a terminal.
     pub(super) fn approve(graph: &PreflightGraph, policy: &TempDir) -> Result<ShellPreApprovals, CompositionError> {
         let options = ShellApprovalOptions {
-            policy_root: Some(policy.path().to_path_buf()),
+            permissions: crate::harness::shell::test_support::user_permissions(policy.path(), &[]),
             ..Default::default()
         };
         resolve_graph_shell_approvals(graph, &options, &|reference| {
@@ -2062,19 +2062,11 @@ mod template_position {
         let graph = legacy_graph_for(&build_clean(dir.path())).unwrap();
 
         let policy = TempDir::new().unwrap();
-        fs::write(
-            policy.path().join(".darkmatter-shell-whitelist"),
-            "exact just build --out dist\nexact just clean --out dist/build\n",
-        )
-        .unwrap();
+        crate::harness::shell::test_support::write_shell_rules(policy.path(), "exact just build --out dist\nexact just clean --out dist/build\n");
         let error = approve(&graph, &policy).expect_err("the exact rule must not cover the later task");
         assert_eq!(unavailable_command(error), "just clean --out {{ out }}/build");
 
-        fs::write(
-            policy.path().join(".darkmatter-shell-whitelist"),
-            "exact just build --out dist\ntemplate just clean --out {{ string }}/build\n",
-        )
-        .unwrap();
+        crate::harness::shell::test_support::write_shell_rules(policy.path(), "exact just build --out dist\ntemplate just clean --out {{ string }}/build\n");
         let approved = approve(&graph, &policy).unwrap();
         assert!(approved.contains_exact("just build --out dist"));
         assert!(!approved.contains_exact("just clean --out dist/build"));
@@ -2285,11 +2277,7 @@ mod template_position {
         let error = approve(&graph, &policy).expect_err("the late command needs a template approval");
         assert_eq!(unavailable_command(error), "echo {{ pkg }} {{ topic }}");
 
-        fs::write(
-            policy.path().join(".darkmatter-shell-whitelist"),
-            "template echo {{ string }} {{ string }}\n",
-        )
-        .unwrap();
+        crate::harness::shell::test_support::write_shell_rules(policy.path(), "template echo {{ string }} {{ string }}\n");
         approve(&graph, &policy).expect("the template rule covers the document's command");
     }
 
@@ -2317,7 +2305,7 @@ mod template_position {
         assert_eq!(positions, vec![TaskPosition::First, TaskPosition::Later]);
 
         let policy = TempDir::new().unwrap();
-        fs::write(policy.path().join(".darkmatter-shell-whitelist"), "exact echo t\n").unwrap();
+        crate::harness::shell::test_support::write_shell_rules(policy.path(), "exact echo t\n");
         let error = approve(&graph, &policy).expect_err("the exact rule covers only the first reference");
         assert_eq!(unavailable_command(error), "echo {{ topic }}");
     }
@@ -2392,9 +2380,9 @@ fn first_task_shell_template_scripted_choices_persist_and_settle() {
         let dir = TempDir::new().unwrap();
         let path = write_legacy_source(dir.path(), "seq.md", &[("word", json!("hello")), ("sequence", json!([{ "name": "probe", "shell": "git --version {{ word }}" }]))], "Body.\n");
         let graph = legacy_graph_for(&path).unwrap();
-        let options = ShellApprovalOptions { policy_root: Some(dir.path().to_path_buf()), approval_handler: Some(Arc::new(Handler(decision))), ..Default::default() };
+        let options = ShellApprovalOptions { permissions: crate::harness::shell::test_support::user_permissions(dir.path(), &[]), approval_handler: Some(Arc::new(Handler(decision))), ..Default::default() };
         crate::composition::preflight::resolve_graph_shell_approvals(&graph, &options, &|_| unreachable!()).unwrap();
-        assert_eq!(fs::read_to_string(dir.path().join(".darkmatter-shell-whitelist")).unwrap(), row);
+        assert_eq!(crate::harness::shell::test_support::saved_rules(dir.path()), [row.trim_end()]);
         let mut task = graph.steps[0].task.as_ref().unwrap().clone();
         graph.settle_task_shell_modes(&mut task);
         assert_eq!(task.shell_sites[0].mode == SiteMode::Template, template_mode);
@@ -2421,7 +2409,7 @@ mod shell_template_program_approval {
 
     fn check(adapter: &str, event: &str, long: bool, chain: bool) {
         for decision in [ShellApprovalDecision::AllowCommandPersist, ShellApprovalDecision::AllowTemplatePersist,
-            ShellApprovalDecision::AllowExactPersist, ShellApprovalDecision::AllowOnce, ShellApprovalDecision::Deny, ShellApprovalDecision::BlacklistPersist] {
+            ShellApprovalDecision::AllowExactPersist, ShellApprovalDecision::AllowOnce, ShellApprovalDecision::Deny] {
             let dir = TempDir::new().unwrap();
             let command = if chain { "git --version && {{ tool }} probe" } else { "{{ tool }} probe" };
             let action = if long { json!({"shell": {"command": command}}) } else { json!({"shell": command}) };
@@ -2441,11 +2429,11 @@ mod shell_template_program_approval {
                 };
                 let step = if adapter.starts_with("group") { json!({"name": "bundle", "group": {"name": "group", "tasks": [task]}}) } else { task };
                 fm.push(("sequence", json!([step])));
-                fs::write(dir.path().join(".darkmatter-shell-whitelist"), "exact echo baseline\n").unwrap();
+                crate::harness::shell::test_support::write_shell_rules(dir.path(), "exact echo baseline\n");
             }
             let path = write_legacy_source(dir.path(), "seq.md", &fm, "Body.");
             let handler = Arc::new(Handler(decision.clone(), Mutex::new(Vec::new())));
-            let options = ShellApprovalOptions { policy_root: Some(dir.path().to_path_buf()), approval_handler: Some(handler.clone()), ..Default::default() };
+            let options = ShellApprovalOptions { permissions: crate::harness::shell::test_support::user_permissions(dir.path(), &[]), approval_handler: Some(handler.clone()), ..Default::default() };
             let result = if adapter == "standalone" {
                 let source = crate::composition::resolve_fixture_source(&path).unwrap();
                 let frontmatter = crate::composition::prepare::frontmatter_to_value(source.markdown.frontmatter());
@@ -2472,14 +2460,12 @@ mod shell_template_program_approval {
                 assert!(approved.approved_commands.contains_exact(&resolved));
                 assert_eq!(approved.approved_commands.templates().count(), 0);
             }
-            let whitelist = fs::read_to_string(dir.path().join(".darkmatter-shell-whitelist")).unwrap_or_default();
-            let blacklist = fs::read_to_string(dir.path().join(".darkmatter-shell-blacklist")).unwrap_or_default();
-            assert!(!whitelist.lines().any(|line| line.starts_with("prefix ")));
+            let saved = crate::harness::shell::test_support::saved_rules(dir.path()).join("\n");
+            assert!(!saved.lines().any(|line| line.starts_with("prefix ")));
             match decision {
-                ShellApprovalDecision::AllowExactPersist => { assert!(result.is_ok(), "{result:?}"); assert!(whitelist.contains("argv-recorder")); }
-                ShellApprovalDecision::AllowOnce => { assert!(result.is_ok(), "{result:?}"); assert!(!whitelist.contains("argv-recorder")); }
-                ShellApprovalDecision::BlacklistPersist => { assert!(result.is_err()); assert!(blacklist.contains("argv-recorder")); assert!(!whitelist.contains("argv-recorder")); }
-                _ => { assert!(result.is_err()); assert!(!whitelist.contains("argv-recorder")); assert!(blacklist.is_empty()); }
+                ShellApprovalDecision::AllowExactPersist => { assert!(result.is_ok(), "{result:?}"); assert!(saved.contains("argv-recorder")); }
+                ShellApprovalDecision::AllowOnce => { assert!(result.is_ok(), "{result:?}"); assert!(!saved.contains("argv-recorder")); }
+                _ => { assert!(result.is_err()); assert!(!saved.contains("argv-recorder")); }
             }
         }
     }
@@ -2507,11 +2493,11 @@ mod shell_template_program_approval {
         resolve_lifecycle_shell_commands(&mut lifecycle, &frontmatter, request.context(), &source.resolved_path,
             request.resolution_context(), None, crate::composition::lifecycle::bindings::EnclosingLoop::Outside, None).unwrap();
         let handler = Arc::new(BoundaryHandler(shape, Mutex::new(Vec::new())));
-        let options = ShellApprovalOptions { policy_root: Some(dir.path().to_path_buf()), approval_handler: Some(handler.clone()), ..Default::default() };
+        let options = ShellApprovalOptions { permissions: crate::harness::shell::test_support::user_permissions(dir.path(), &[]), approval_handler: Some(handler.clone()), ..Default::default() };
         let result = resolve_shell_approvals(None, None, &options, Some(&lifecycle), Some(&source.resolved_path));
         assert!(result.is_err(), "unoffered program approval must fail: {result:?}");
         assert_eq!(handler.1.lock().unwrap().len(), 1, "must reach authored site approval");
-        assert!(!dir.path().join(".darkmatter-shell-whitelist").exists(), "no grant persisted");
+        assert!(crate::harness::shell::test_support::saved_rules(dir.path()).is_empty(), "no grant persisted");
     }
 
     #[test]
@@ -3026,7 +3012,7 @@ mod task_guards {
             assert!(graph.prompt_references[0].deferred_with.is_empty(), "{row}");
 
             let policy = TempDir::new().unwrap();
-            fs::write(policy.path().join(".darkmatter-shell-whitelist"), "template tool {{ string }}\n").unwrap();
+            crate::harness::shell::test_support::write_shell_rules(policy.path(), "template tool {{ string }}\n");
             let error = super::template_position::approve(&graph, &policy).expect_err(row);
 
             let message = error.to_string();

@@ -298,20 +298,39 @@ mod tests {
     }
 
     #[test]
-    fn shell_approval_required_names_whitelist_paths() {
+    fn shell_approval_required_names_the_configuration() {
         let err = ShellExpansionError::ApprovalRequired {
             ctx: Box::new(test_ctx()),
             command: "gh repo list".into(),
-            whitelist_path: Box::new("/tmp/wl".into()),
-            blacklist_path: Box::new("/tmp/bl".into()),
+            save_target: Some(Box::new("/tmp/home/.darkmatter.yaml".into())),
+            exclusion: None,
             origin: ShellCommandOrigin::Body { line: 3 },
             suggested_rules: Box::default(),
         };
         let out = render(&err);
         assert!(out.contains("approval required"));
-        assert!(out.contains("/tmp/wl"));
-        assert!(out.contains("/tmp/bl"));
-        assert!(out.contains("--approve-shell"));
+        assert!(out.contains("/tmp/home/.darkmatter.yaml"));
+        assert!(out.contains("shell-commands rule"), "{out}");
+        assert!(!out.contains("lacklist"), "{out}");
+    }
+
+    #[test]
+    fn shell_approval_required_names_the_exclusion() {
+        let err = ShellExpansionError::ApprovalRequired {
+            ctx: Box::new(test_ctx()),
+            command: "gh repo list".into(),
+            save_target: None,
+            exclusion: Some(Box::new(crate::config::permissions::PolicyExclusion {
+                revision: crate::config::load::ConfigRevision::User,
+                file: "/tmp/home/.darkmatter.yaml".into(),
+                entry: "!prefix gh".into(),
+            })),
+            origin: ShellCommandOrigin::Body { line: 3 },
+            suggested_rules: Box::default(),
+        };
+        let out = render(&err);
+        assert!(out.contains("!prefix gh"), "{out}");
+        assert!(out.contains("approve it when prompted"), "{out}");
     }
 
     #[test]

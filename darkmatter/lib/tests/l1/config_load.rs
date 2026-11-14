@@ -225,7 +225,7 @@ fn a_key_with_no_value_is_an_explicit_null() {
 }
 
 #[test]
-fn migrate_legacy_loads_like_passive_until_migration_lands() {
+fn migrate_legacy_without_legacy_files_loads_like_passive() {
     let fixture = Fixture::new();
     fixture.write_user("permissions:\n  network: allow\n");
     let passive = fixture.load().unwrap();

@@ -275,10 +275,7 @@ fn frontmatter_interpolation_pass_two_fails() {
     // Pre-approved so the unselected command branch passes the allowlist; the
     // true condition selects the value branch, so nothing executes.
     let options = ComposeOptions::new_with_context(date_time_only(dir.path()))
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(dir.path().to_path_buf()),
-            ..Default::default()
-        })
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[])).with_shell(ShellExpansionOptions::default())
         .with_pre_approved_commands(HashSet::from(["echo never".to_string()]));
     let error = compose_file(&root, options).expect_err("pass 2 must not interpolate an uncaptured group");
     assert_not_captured(&error, "os", ContextGroup::Os);
@@ -330,10 +327,7 @@ fn frontmatter_shell_ternary_condition_and_branch_fail_with_a_typed_cause() {
                     ComposeOperation::FrontmatterInterpolation,
                     ComposeOperation::FrontmatterShellExpansion,
                 ])
-                .with_shell(ShellExpansionOptions {
-                    policy_root: Some(dir.path().to_path_buf()),
-                    ..Default::default()
-                })
+                .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[])).with_shell(ShellExpansionOptions::default())
                 .with_pre_approved_commands(HashSet::from(["echo other".to_string()])),
         )
         .expect_err("a $() ternary must not read an uncaptured group");

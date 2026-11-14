@@ -407,8 +407,8 @@ never replace a newer one.
 Each installed resolution records every local path it depended on: files
 it read, files it probed and found missing, folders it listed, and, when
 any of those lies in the document's Git repository, that repository's
-`.git/index` and `HEAD` (the automatic grant depends on what they record;
-for a linked worktree, the Git directory its `.git` file names).
+`.git/index` and `HEAD` (for a linked worktree, the Git directory its
+`.git` file names).
 
 | Event | Resolutions marked stale |
 |---|---|

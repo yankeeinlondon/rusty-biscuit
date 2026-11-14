@@ -205,7 +205,6 @@ use super::pipeline::operations::COMPOSE_OPERATION_DESCRIPTORS;
             std::sync::Arc::new(TestApprovalHandler);
         let options = ComposeOptions::new()
             .with_shell_timeout(std::time::Duration::from_secs(3))
-            .with_shell_policy_root("/tmp/policy")
             .with_shell_working_directory("/tmp/work")
             .with_shell_approval_handler(handler)
             .with_allow_remote_transclusion(true)
@@ -217,10 +216,6 @@ use super::pipeline::operations::COMPOSE_OPERATION_DESCRIPTORS;
             .with_code_fallback_language("md");
 
         assert_eq!(options.shell_timeout, std::time::Duration::from_secs(3));
-        assert_eq!(
-            options.shell_policy_root,
-            Some(PathBuf::from("/tmp/policy"))
-        );
         assert_eq!(
             options.shell_working_directory,
             Some(PathBuf::from("/tmp/work"))

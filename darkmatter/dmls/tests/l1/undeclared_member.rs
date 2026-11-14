@@ -373,9 +373,9 @@ fn pending_template_refresh_reports_once() {
     let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
     let data = root.join("roles.yaml");
     std::fs::write(&data, "- web\n").unwrap();
-    let store = root.join("home").join(".config").join("darkmatter").join("schema-read-policy");
-    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-    std::fs::write(&store, format!("allow file {}\n", data.display())).unwrap();
+    let config = root.join("home").join(".darkmatter.yaml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "permissions:\n    file-read:\n        - ./roles.yaml\n").unwrap();
     let text = "---
 $schema:
   server: \"{ name: string, role: enum({{ load_data(\\\"./roles.yaml\\\", \\\"string[]\\\") }}) }\"

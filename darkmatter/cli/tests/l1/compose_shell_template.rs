@@ -2,7 +2,8 @@
 //!
 //! Each placeholder fills exactly one argument of a native program, every
 //! value is checked and every filled command is checked against the
-//! blacklists before anything spawns, and a refusal never shows the value.
+//! built-in blacklist and the configured exclusions before anything spawns,
+//! and a refusal never shows the value.
 //!
 //! The program is the `darkmatter-argv-recorder` fixture copied into the
 //! fixture `bin` as `argv-recorder`, so the evidence is the argument vector the
@@ -18,6 +19,8 @@ use test_toolkit::argv_recorder::{ARGV_RECORDER_FILE, read_argv_records};
 struct Recorder {
     fixture: CliProcessFixture,
     records: PathBuf,
+    /// The `shell-commands` entries written so far, `!` entries included.
+    entries: std::cell::RefCell<Vec<String>>,
 }
 
 impl Recorder {
@@ -29,19 +32,29 @@ impl Recorder {
         std::fs::copy(biscuit_test_harness::bin_exe!("darkmatter-argv-recorder"), &program)
             .expect("the recorder fixture binary is built with `test-fixtures`");
         let records = fixture.tmp_dir().join("argv.bin");
-        Self { fixture, records }
+        Self { fixture, records, entries: std::cell::RefCell::default() }
     }
 
     fn write(&self, name: &str, content: &str) -> PathBuf {
         self.fixture.write_file(format!("cwd/{name}"), content)
     }
 
-    fn whitelist(&self, rules: &str) {
-        self.write(".darkmatter-shell-whitelist", rules);
+    /// Adds `rules` (one per line) to the user's `shell-commands`, as
+    /// allows, or as `!` exclusions when `exclude`.
+    fn add_rules(&self, rules: &str, exclude: bool) {
+        let mut entries = self.entries.borrow_mut();
+        let prefix = if exclude { "!" } else { "" };
+        entries.extend(rules.lines().filter(|line| !line.trim().is_empty()).map(|line| format!("{prefix}{line}")));
+        let entries: Vec<&str> = entries.iter().map(String::as_str).collect();
+        self.fixture.shell_permissions(&entries);
     }
 
-    fn blacklist(&self, rules: &str) {
-        self.write(".darkmatter-shell-blacklist", rules);
+    fn allow(&self, rules: &str) {
+        self.add_rules(rules, false);
+    }
+
+    fn exclude(&self, rules: &str) {
+        self.add_rules(rules, true);
     }
 
     /// `md compose doc.md` with `args` after the document.
@@ -117,7 +130,7 @@ before
 "#
         ),
     );
-    recorder.whitelist(&template_rule(command));
+    recorder.allow(&template_rule(command));
 
     let assert = recorder.compose(&[]).success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
@@ -159,7 +172,7 @@ fn a_refused_value_runs_nothing_and_never_appears_in_the_error() {
     for (setter, marker, expected) in cases {
         let recorder = Recorder::new("template_refused_value");
         recorder.write("doc.md", "---\ntitle: refusals\n---\n::shell argv-recorder {{ v }}\n");
-        recorder.whitelist(&template_rule("argv-recorder {{ v }}"));
+        recorder.allow(&template_rule("argv-recorder {{ v }}"));
 
         let assert = recorder.compose(&[setter]).failure();
         let stderr = stderr_of(&assert);
@@ -179,7 +192,7 @@ fn a_refused_value_runs_nothing_and_never_appears_in_the_error() {
 fn a_string_template_cannot_authorize_a_builtin_blacklisted_fill() {
     let recorder = Recorder::new("template_builtin_blacklist");
     recorder.write("doc.md", "::shell git {{ sub }} {{ junk }}\n");
-    recorder.whitelist(&template_rule("git {{ sub }} {{ junk }}"));
+    recorder.allow(&template_rule("git {{ sub }} {{ junk }}"));
 
     let assert = recorder.compose(&["sub=reset", "junk=a;b"]).failure();
 
@@ -188,40 +201,40 @@ fn a_string_template_cannot_authorize_a_builtin_blacklisted_fill() {
     assert!(mentions(&stderr, "git {{ sub }} {{ junk }}"), "{stderr}");
 }
 
-/// User blacklists judge the filled command: an exact rule blocks the fill
-/// it names, and a blocked later segment keeps the first from starting.
+/// Exclusions judge the filled command: an exact `!` entry makes the fill it
+/// names ask, and an excluded later segment keeps the first from starting.
 #[test]
-fn a_user_blacklist_blocks_a_filled_chain_before_its_first_segment() {
-    let recorder = Recorder::new("template_user_blacklist_chain");
+fn an_exclusion_stops_a_filled_chain_before_its_first_segment() {
+    let recorder = Recorder::new("template_exclusion_chain");
     let command = "argv-recorder first && argv-recorder {{ v }} {{ junk }}";
     recorder.write("doc.md", &format!("::shell {command}\n"));
-    recorder.whitelist(&template_rule(command));
+    recorder.allow(&template_rule(command));
     let filled = normalize_command("argv-recorder", &strings(&["reset", "a;b"]));
-    recorder.blacklist(&format!("exact {filled}\n"));
+    recorder.exclude(&format!("exact {filled}\n"));
 
     let assert = recorder.compose(&["v=reset", "junk=a;b"]).failure();
 
-    assert!(mentions(&stderr_of(&assert), "user blacklist"), "{}", stderr_of(&assert));
+    assert!(mentions(&stderr_of(&assert), "excluded by"), "{}", stderr_of(&assert));
     assert!(recorder.runs().is_empty(), "no segment of a blocked chain starts");
 }
 
-/// A shape-only `template` blacklist blocks commands without authored holes
+/// A shape-only `template` exclusion matches commands without authored holes
 /// too: a single command by its words, and a resolved-byte chain at run time.
 #[test]
-fn a_template_blacklist_blocks_resolved_byte_commands_and_chains() {
-    let recorder = Recorder::new("template_blacklist_resolved");
+fn a_template_exclusion_matches_resolved_byte_commands_and_chains() {
+    let recorder = Recorder::new("template_exclusion_resolved");
     recorder.write("doc.md", "::shell argv-recorder deploy prod\n");
-    recorder.whitelist("prefix argv-recorder\n");
-    recorder.blacklist(&template_rule("argv-recorder deploy {{ target }}"));
+    recorder.allow("prefix argv-recorder\n");
+    recorder.exclude(&template_rule("argv-recorder deploy {{ target }}"));
     recorder.compose(&[]).failure();
     assert!(recorder.runs().is_empty());
 
-    let recorder = Recorder::new("template_blacklist_resolved_chain");
+    let recorder = Recorder::new("template_exclusion_resolved_chain");
     recorder.write("doc.md", "::shell argv-recorder a && argv-recorder b\n");
-    recorder.whitelist("prefix argv-recorder\n");
-    recorder.blacklist(&template_rule("argv-recorder a && argv-recorder {{ x }}"));
+    recorder.allow("prefix argv-recorder\n");
+    recorder.exclude(&template_rule("argv-recorder a && argv-recorder {{ x }}"));
     let assert = recorder.compose(&[]).failure();
-    assert!(mentions(&stderr_of(&assert), "user blacklist"), "{}", stderr_of(&assert));
+    assert!(mentions(&stderr_of(&assert), "excluded by"), "{}", stderr_of(&assert));
     assert!(recorder.runs().is_empty(), "the first segment never starts");
 }
 
@@ -234,7 +247,7 @@ fn a_shape_approval_is_reused_but_changed_values_run_fresh() {
         "doc.md",
         "---\na: one\nb: two\n---\n::shell argv-recorder {{ a }}\n::shell argv-recorder {{ b }}\n::shell argv-recorder {{ a }}\n",
     );
-    recorder.whitelist(&template_rule("argv-recorder {{ a }}"));
+    recorder.allow(&template_rule("argv-recorder {{ a }}"));
 
     recorder.compose(&[]).success();
 
@@ -257,7 +270,7 @@ fn exact_and_template_rules_select_their_own_execution_mode() {
     for (rules, expected) in cases {
         let recorder = Recorder::new("template_mode_selection");
         recorder.write("doc.md", doc);
-        recorder.whitelist(&rules);
+        recorder.allow(&rules);
         recorder.compose(&[]).success();
         assert_eq!(recorder.runs(), vec![expected], "{rules}");
     }
@@ -269,7 +282,7 @@ fn exact_and_template_rules_select_their_own_execution_mode() {
 fn template_input_failures_are_never_suppressed() {
     let recorder = Recorder::new("template_unsuppressed_directive");
     recorder.write("doc.md", "::shell --when-error fallback argv-recorder {{ v }}\n");
-    recorder.whitelist(&template_rule("argv-recorder {{ v }}"));
+    recorder.allow(&template_rule("argv-recorder {{ v }}"));
     let assert = recorder.compose(&["v=[1]", "--allow", "shell-timeout"]).failure();
     assert!(mentions(&stderr_of(&assert), "is an array or object"), "{}", stderr_of(&assert));
     assert!(!String::from_utf8_lossy(&assert.get_output().stdout).contains("fallback"));
@@ -277,7 +290,7 @@ fn template_input_failures_are_never_suppressed() {
     let recorder = Recorder::new("template_unsuppressed_transclusion");
     recorder.write("doc.md", "# Parent\n\n::file ./child.md\n");
     recorder.write("child.md", "---\nv: [1, 2]\n---\n::shell argv-recorder {{ v }}\n");
-    recorder.whitelist(&template_rule("argv-recorder {{ v }}"));
+    recorder.allow(&template_rule("argv-recorder {{ v }}"));
     let assert = recorder.compose(&[]).failure();
     assert!(mentions(&stderr_of(&assert), "is an array or object"), "{}", stderr_of(&assert));
     assert!(recorder.runs().is_empty());
@@ -296,7 +309,7 @@ fn a_script_without_a_shebang_is_refused_and_a_shebang_script_runs() {
     std::fs::write(&plain, format!("touch '{}'\n", marker.display())).unwrap();
     std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o755)).unwrap();
     recorder.write("doc.md", "::shell plain-tool {{ v }}\n");
-    recorder.whitelist(&template_rule("plain-tool {{ v }}"));
+    recorder.allow(&template_rule("plain-tool {{ v }}"));
 
     let assert = recorder.compose(&["v=x"]).failure();
 
@@ -311,7 +324,7 @@ fn a_script_without_a_shebang_is_refused_and_a_shebang_script_runs() {
     std::fs::write(&shebang, "#!/bin/sh\nexec argv-recorder \"$@\"\n").unwrap();
     std::fs::set_permissions(&shebang, std::fs::Permissions::from_mode(0o755)).unwrap();
     recorder.write("doc.md", "::shell shebang-tool {{ v }}\n");
-    recorder.whitelist(&template_rule("shebang-tool {{ v }}"));
+    recorder.allow(&template_rule("shebang-tool {{ v }}"));
     recorder.compose(&["v=a b"]).success();
     assert_eq!(recorder.runs(), vec![strings(&["a b"])]);
 }
@@ -327,7 +340,7 @@ fn a_batch_file_is_refused_as_a_template_target() {
         let tool = recorder.fixture.bin_dir().join(format!("batch-tool.{extension}"));
         std::fs::write(&tool, format!("@echo ran> \"{}\"\r\n", marker.display())).unwrap();
         recorder.write("doc.md", "::shell batch-tool {{ v }}\n");
-        recorder.whitelist(&template_rule("batch-tool {{ v }}"));
+        recorder.allow(&template_rule("batch-tool {{ v }}"));
 
         let assert = recorder.compose(&["v=x"]).failure();
 
@@ -348,7 +361,7 @@ macro_rules! native_redirect_case {
             let recorder = Recorder::new("template-native-redirection");
             let command = concat!("argv-recorder {{ v }} ", $redirect);
             recorder.write("doc.md", &format!("---\nv: a b\n---\n::shell {command}\n"));
-            recorder.whitelist(&template_rule(command));
+            recorder.allow(&template_rule(command));
             let assert = recorder.fixture.command()
                 .env(ARGV_RECORDER_FILE, &recorder.records)
                 .env("ARGV_RECORDER_STDOUT", "stdout-probe")
@@ -374,7 +387,7 @@ fn a_native_result_keeps_the_original_channel_after_a_later_redirect() {
     let recorder = Recorder::new("template-native-result-channel");
     let command = "argv-recorder {{ word }} 2>&1 > /dev/null";
     recorder.write("doc.md", &format!("---\nword: a b\nresult: '$({command})::result'\n---\nCaptured: {{{{ result.stdout }}}}\nErrors: {{{{ result.stderr }}}}\n"));
-    recorder.whitelist(&template_rule(command));
+    recorder.allow(&template_rule(command));
     let assert = recorder.fixture.command()
         .env(ARGV_RECORDER_FILE, &recorder.records)
         .env("ARGV_RECORDER_STDOUT", "stdout-probe")
@@ -397,7 +410,7 @@ const QUOTED_EMPTY_DOC: &str = "---\nmsg: \"\"\n---\n::shell argv-recorder -m \"
 fn an_exact_rule_keeps_a_quoted_empty_argument() {
     let recorder = Recorder::new("exact_quoted_empty_argument");
     recorder.write("doc.md", QUOTED_EMPTY_DOC);
-    recorder.whitelist("exact argv-recorder -m \"\" -s \"\" tail\n");
+    recorder.allow("exact argv-recorder -m \"\" -s \"\" tail\n");
 
     recorder.compose(&[]).success();
 
@@ -408,7 +421,7 @@ fn an_exact_rule_keeps_a_quoted_empty_argument() {
 fn an_exact_rule_without_the_quoted_empty_argument_approves_nothing() {
     let recorder = Recorder::new("exact_dropped_empty_argument");
     recorder.write("doc.md", QUOTED_EMPTY_DOC);
-    recorder.whitelist("exact argv-recorder -m -s tail\n");
+    recorder.allow("exact argv-recorder -m -s tail\n");
 
     recorder.compose(&[]).failure();
 
@@ -421,26 +434,26 @@ fn an_exact_rule_without_the_quoted_empty_argument_approves_nothing() {
 fn an_unquoted_empty_value_contributes_no_resolved_word() {
     let recorder = Recorder::new("exact_unquoted_empty_value");
     recorder.write("doc.md", "---\nmsg: \"\"\n---\n::shell argv-recorder -m {{ msg }} tail\n");
-    recorder.whitelist("exact argv-recorder -m tail\n");
+    recorder.allow("exact argv-recorder -m tail\n");
 
     recorder.compose(&[]).success();
 
     assert_eq!(recorder.runs(), vec![strings(&["-m", "tail"])]);
 }
 
-/// A user blacklist `exact` rule naming an empty argument blocks the template
-/// fill that produces it.
+/// An `exact` exclusion naming an empty argument matches the template fill
+/// that produces it.
 #[test]
-fn an_exact_blacklist_rule_blocks_a_template_fill_with_an_empty_argument() {
-    let recorder = Recorder::new("template_blacklist_empty_argument");
+fn an_exact_exclusion_matches_a_template_fill_with_an_empty_argument() {
+    let recorder = Recorder::new("template_exclusion_empty_argument");
     let command = "argv-recorder -m {{ msg }}";
     recorder.write("doc.md", &format!("---\nmsg: \"\"\n---\n::shell {command}\n"));
-    recorder.whitelist(&template_rule(command));
-    recorder.blacklist("exact argv-recorder -m \"\"\n");
+    recorder.allow(&template_rule(command));
+    recorder.exclude("exact argv-recorder -m \"\"\n");
 
     let assert = recorder.compose(&[]).failure();
 
-    assert!(mentions(&stderr_of(&assert), "user blacklist"), "{}", stderr_of(&assert));
+    assert!(mentions(&stderr_of(&assert), "excluded by"), "{}", stderr_of(&assert));
     assert!(recorder.runs().is_empty());
 }
 
@@ -450,7 +463,7 @@ fn an_exact_blacklist_rule_blocks_a_template_fill_with_an_empty_argument() {
 fn a_frontmatter_command_keeps_a_quoted_empty_argument() {
     let recorder = Recorder::new("frontmatter_quoted_empty_argument");
     recorder.write("doc.md", "---\nmsg: \"\"\nout: '$(argv-recorder -m \"{{ msg }}\")'\n---\nOut: {{ out }}\n");
-    recorder.whitelist("exact argv-recorder -m \"\"\n");
+    recorder.allow("exact argv-recorder -m \"\"\n");
 
     recorder.compose(&[]).success();
 
@@ -471,7 +484,7 @@ fn suggested_rules(stderr: &str) -> Vec<String> {
 }
 
 /// Each rule the non-interactive hint suggests approves the command when
-/// copied into the whitelist: the exact key of the resolved bytes (quoted
+/// added to `permissions.shell-commands`: the exact key of the resolved bytes (quoted
 /// empty argument included), the template shape, and the program prefix,
 /// with quotes, backslashes, and underscores printed as the rule spells them.
 /// A command that can run only as a template is offered no exact key.
@@ -490,7 +503,7 @@ fn assert_every_suggested_rule_approves(doc: &str, expected: &[&str]) {
     for rule in rules {
         let approved = Recorder::new("suggested_rules_approved");
         approved.write("doc.md", doc);
-        approved.whitelist(&format!("{rule}\n"));
+        approved.allow(&format!("{rule}\n"));
         approved.compose(&[]).success();
         assert_eq!(approved.runs().len(), 1, "{rule}");
     }

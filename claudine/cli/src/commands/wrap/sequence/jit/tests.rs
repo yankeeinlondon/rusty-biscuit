@@ -177,19 +177,14 @@ fn template_preflight_resolves_against_document_dir() {
     )
     .unwrap();
 
-    // Whitelist `echo` so preflight approves without an interactive handler.
-    std::fs::write(
-        doc_dir.path().join(".darkmatter-shell-whitelist"),
-        "prefix echo\n",
-    )
-    .unwrap();
+    // Allow `echo` so preflight approves without an interactive handler.
 
     let source = claudine::composition::resolve_composition_source(source_path.to_string_lossy().as_ref(), crate::request::snapshot())
     .unwrap();
     let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), launch_dir.path()).unwrap();
     let overrides = serde_json::json!({ "spec": "spec.md" });
     let approval_options = ShellApprovalOptions {
-        policy_root: Some(doc_dir.path().to_path_buf()),
+        permissions: crate::commands::wrap::harness_orch::test_permissions::user_permissions(&doc_dir.path().join("home"), &["prefix echo"]),
         approval_handler: None,
         ..Default::default()
     };
@@ -232,18 +227,13 @@ fn template_preflight_does_not_resolve_launch_only_file() {
         "::shell echo {{ file_exists(spec) }}\n",
     )
     .unwrap();
-    std::fs::write(
-        doc_dir.path().join(".darkmatter-shell-whitelist"),
-        "prefix echo\n",
-    )
-    .unwrap();
 
     let source = claudine::composition::resolve_composition_source(source_path.to_string_lossy().as_ref(), crate::request::snapshot())
     .unwrap();
     let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), launch_dir.path()).unwrap();
     let overrides = serde_json::json!({ "spec": "spec.md" });
     let approval_options = ShellApprovalOptions {
-        policy_root: Some(doc_dir.path().to_path_buf()),
+        permissions: crate::commands::wrap::harness_orch::test_permissions::user_permissions(&doc_dir.path().join("home"), &["prefix echo"]),
         approval_handler: None,
         ..Default::default()
     };

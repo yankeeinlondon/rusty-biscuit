@@ -117,11 +117,7 @@ fn compose_honors_triggers_and_raw_mode() {
 fn compose_re_resolves_trigger_after_shell_value_becomes_concrete() {
     let process = CliProcessFixture::new();
     let document = fixture(&process, "kind: $(echo prompt)");
-    write(
-        process.cwd(),
-        "docs/.darkmatter-shell-whitelist",
-        "exact echo prompt\n",
-    );
+    process.shell_permissions(&["exact echo prompt"]);
     // `$(echo prompt)` is executed as a program, and on Windows `echo` exists
     // only as Git's echo.exe outside System32, so the host PATH is declared.
     process

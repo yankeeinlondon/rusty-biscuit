@@ -48,6 +48,6 @@ types:
         column: number -> 1-based column in the data, in characters
         byte_offset: number -> zero-based byte offset of invalid UTF-8; no line or column accompanies it
     grant-needed:
-        kind: enum(file,dir,url,url-any-query,site;required) -> the grant store's kind word
-        target: string(required) -> the path, URL, or scheme://host[:port] the grant covers
-        scope: enum(once,persisted;required) -> once for this run; persisted writes the user's grant store
+        kind: enum(file,url;required) -> what the approval covers (one file or one exact URL)
+        target: string(required) -> the file path or exact URL the approval covers
+        scope: enum(once,persisted;required) -> once for this run; persisted saves the file to the user's permissions.file-read

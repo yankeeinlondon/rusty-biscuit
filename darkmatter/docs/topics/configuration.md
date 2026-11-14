@@ -99,9 +99,81 @@ with no command is an error.
 
 **`network`** is `allow` or `deny`.
 
-How the user and repository policies combine, and how a read or a command is
-judged against them, is **planned**: until then the snapshot only records the
-validated blocks.
+### How the scopes combine
+
+A read or a command is **pre-approved** (it runs without asking) when:
+
+1. no `!` entry in the user file, the repository file at `HEAD`, or the
+   repository working copy matches it, **and**
+2. the user file allows it, **or** the repository file allows it both at
+   `HEAD` and in the working copy.
+
+Everything else needs a current-run approval: a prompt, or an
+approval-required error where nothing can prompt. An exclusion is not a
+deny list; a current-run approval can still permit the operation. The
+built-in shell blacklist is separate and always wins.
+
+The two repository revisions are judged per operation, not entry by entry,
+so they need not share entries:
+
+```yaml
+# .darkmatter.yaml at HEAD        # .darkmatter.yaml in the working copy
+permissions:                      permissions:
+    shell-commands:                   shell-commands:
+        - prefix ls                       - exact ls -la
+```
+
+`ls -la` is pre-approved (both revisions allow it); `ls -R` is not (only
+`HEAD` allows it).
+
+| Example | Pre-approved? |
+| --- | --- |
+| user `file-read: []`, repository defaults, reading `&docs/a.md` | yes: the repository allows it |
+| repository `file-read: ["&**/*.md", "!&secrets/**"]`, reading `secrets/key.md` | no: excluded |
+| user `!prefix rm`, repository `prefix rm` | no: an exclusion in any file removes pre-approval |
+
+`network` is `allow` only when every applicable file says `allow`: the user
+file outside a repository; the user file, `HEAD`, and the working copy inside
+one. An absent file counts as its defaults (`deny`). `--allow host=HOST`
+still allows one host for one run on top.
+
+**File reads.** A `file-read` entry is judged for the document doing the
+read: `./*.yaml` means YAML files beside that document, `&` is the
+repository root, `~/` the home. `..` in the path being read is resolved
+before matching (`docs/../secrets/key.md` is `secrets/key.md`), and a file
+that does not exist yet is judged by where it would be. A repository entry
+allows a file only when the file's real location, after following symbolic
+links, is inside the repository: a link to a file outside never becomes a
+repository allow. An exclusion matches either the path as written or where
+a link leads.
+
+In code, `ConfigSnapshot::policy()` returns the evaluated
+`darkmatter::config::permissions::PermissionPolicy`:
+
+```rust
+use biscuit_file::FileResolutionContext;
+use darkmatter::config::load::ConfigSnapshot;
+use darkmatter::markdown::compose::shell_expansion::policy::{check_user_blacklist, check_whitelist, normalize_command};
+use std::path::Path;
+
+fn decide(snapshot: &ConfigSnapshot, reading: &FileResolutionContext) -> Result<(), Box<dyn std::error::Error>> {
+    let policy = snapshot.policy()?;
+    let read = policy.file_read(Path::new("data/table.csv"), reading);
+    let args = vec!["-la".to_string()];
+    let normalized = normalize_command("ls", &args);
+    let shell = policy.shell().verdict(
+        |allows| check_whitelist(allows, "ls", &normalized),
+        |excluded| check_user_blacklist(excluded, "ls", &args, &normalized),
+    );
+    println!("{} {} {:?}", read.is_preapproved(), shell.is_preapproved(), policy.network());
+    Ok(())
+}
+```
+
+`PermissionPolicy::verdict` is the same rule for any per-file predicate, and
+`policy.shell().exclusions()` is every file's `!` rules in one set.
+`snapshot.permissions()` still returns each file's raw setting (a reference
+unfollowed).
 
 ### Pointing at another file
 
@@ -117,8 +189,25 @@ permissions: ~/.claudine/config.yaml
 Loading checks the reference's syntax: a blank or remote reference is an
 error, and a repository file's reference must stay inside the repository
 (no `~/`, absolute path, variable, or `..` above the repository root).
-Following the reference and validating its target is **planned**; a missing
-or invalid target will be an error, never an empty policy.
+
+The reference is then followed, once per file:
+
+- The target's top-level `permissions` must be a mapping. It is checked
+  against the same permissions type and entry rules as an inline block, and
+  takes the **referring** file's scope defaults for anything it omits.
+- A missing, unreadable, or invalid-YAML target, one without a
+  `permissions` mapping, or one whose `permissions` is another reference (no
+  chains) is an error (`dm.config.reference`) naming both files and
+  suggesting `md init --inline`. It is never replaced by defaults or an
+  empty policy; a command that needs the policy stops.
+- A repository file's target must really be inside the repository: in the
+  working copy, a symbolic link that leads outside is an error. At `HEAD` the
+  target is read from the committed tree only, never from disk; committed
+  symbolic links are followed inside the tree, and a link that leaves the
+  repository, a cycle, or more than 40 links is an error.
+
+Each target is listed in `dependencies()` with its hash, with
+`referenced_from` naming the file that points at it.
 
 ## Loading a Snapshot
 
@@ -150,9 +239,10 @@ fn load(context: &FileResolutionContext) -> Result<(), Box<dyn std::error::Error
   (`RepositorySnapshotRequired`), never a silent fall back to the working copy.
 - Loading is passive. It runs no shell command, fetches nothing, resolves no
   schema slot, and judges the files with the shipped schema only.
-- `ConfigLoadMode::MigrateLegacy` is for a writing CLI's startup. Converting
-  legacy policy files there is **planned**; today it loads exactly as
-  `Passive`.
+- `ConfigLoadMode::MigrateLegacy` is for a writing CLI's startup. Before it
+  reads anything it converts legacy policy files into the configuration; see
+  [Migrating legacy policy files](#migrating-legacy-policy-files-temporary).
+  `Passive` never writes or deletes a file.
 - `dependencies()` lists every file the load observed with the BLAKE3 hash of
   its bytes (or `None` when it was absent), so a caller can tell when a
   snapshot is stale.
@@ -186,8 +276,10 @@ Failures are attributed as narrowly as the file allows:
 | malformed YAML, a duplicate key, several documents, a non-string key, an inadmissible number, invalid UTF-8 | the whole load fails |
 | an empty file or a non-mapping document | the whole load fails |
 | a key other than `permissions` and `register` | the whole load fails |
-| an invalid `permissions` value in any file | `permissions()` returns the error; registrations still load |
+| an invalid `permissions` value in any file | `permissions()` and `policy()` return the error; registrations still load |
+| a `permissions` reference whose target is missing or invalid | `policy()` returns the error (`permissions()` still returns the raw reference); registrations still load |
 | an invalid `register` entry | that entry is left out and reported; the others load |
+| in `MigrateLegacy` mode, a legacy policy file that cannot be read or has an invalid line, or a migration receipt that cannot be finished | the whole load fails with `dm.config.migration`; nothing is written |
 
 Every problem names its file, which revision (user, repository `HEAD`, or
 repository working copy), a JSON pointer such as `/permissions/file-read/2`,
@@ -202,6 +294,101 @@ in [How `md` and Claudine report configuration](#how-md-and-claudine-report-conf
 reporting in DMLS is **planned**. The same module defines the codes
 `dm.config.not_saved` and `dm.config.migration` for saving approvals and
 migrating legacy files.
+
+## Migrating Legacy Policy Files (Temporary)
+
+Before `.darkmatter.yaml` existed, three plain-text files held these policies.
+A load in `ConfigLoadMode::MigrateLegacy` (every `md` and Claudine run)
+converts them once and deletes them. This conversion is temporary and will be
+removed after a few releases; anything it missed is re-created by hand.
+
+| Legacy file | Where | Becomes |
+| --- | --- | --- |
+| `.darkmatter-shell-whitelist` | home, repository root | `permissions.shell-commands` entries |
+| `.darkmatter-shell-blacklist` | home, repository root | `!` entries in `permissions.shell-commands` |
+| `.config/darkmatter/schema-read-policy` | home | `permissions.file-read` entries |
+
+A home whitelist and blacklist like these:
+
+```text
+# ~/.darkmatter-shell-whitelist
+prefix ls
+exact ps -e
+
+# ~/.darkmatter-shell-blacklist
+prefix rm
+```
+
+become one list in `~/.darkmatter.yaml` (created when it does not exist):
+
+```yaml
+permissions:
+  shell-commands:
+  - prefix ls
+  - exact ps -e
+  - "!prefix rm"
+```
+
+The rules:
+
+- **Only a missing property is filled.** A file whose configuration already
+  writes the property, even as `[]`, is left in place and reported as
+  ignored; delete it once its rules are in the configuration. A `permissions`
+  value that refers to another file is never migrated into; copy the rules
+  there by hand.
+- **The whitelist and blacklist move together**, so writing one never stops
+  the other from migrating.
+- **A blacklist rule now prompts.** It becomes a `!` exclusion, which removes
+  pre-approval instead of refusing the command; each such rule is reported.
+- **Grant-store lines become portable patterns.** `allow file` and `allow dir`
+  lines under the home become `~/` entries (`allow file /home/me/x/a[1].yaml`
+  becomes `~/x/a[[]1[]].yaml`, with glob characters escaped; `allow dir
+  /home/me/notes` becomes `~/notes/**`), and `deny` lines become the same
+  entries with `!`. The scope's default `file-read` list from the shipped
+  schema is written first, because a written list replaces the default. A
+  path outside the home, and every `allow url`, `url-any-query`, or `site`
+  line, is dropped and reported; `network` stays `deny`.
+- **A line the old grammar rejects stops the load** with a
+  `dm.config.migration` error naming the file and line. Nothing is written
+  and every legacy file is kept.
+- **Repository files** migrate into the working-copy `.darkmatter.yaml`. Under
+  the commit rule, the new entries take effect once that file is committed.
+- Policy files in a document's own folder are never read or migrated.
+
+The new entries are saved with the same locked, comment-preserving writer as
+every configuration edit, together with a migration receipt beside the file
+(`.darkmatter.yaml.darkmatter-migration.json`). Only after the saved file reads
+back with the new entries are the legacy files deleted, and only those whose
+bytes still match the receipt.
+
+```mermaid
+flowchart TD
+    S[MigrateLegacy load] --> R{receipt pending?}
+    R -->|yes, file published| C[delete the recorded sources]
+    R -->|no, or never published| L{legacy file and missing property?}
+    C --> L
+    L -->|no| D[load the configuration]
+    L -->|yes| P[parse strictly]
+    P -->|invalid line| E[dm.config.migration error, nothing written]
+    P --> W[save with receipt, under the lock]
+    W -->|save failed| K[notice; sources kept, retried next run]
+    W --> V[re-read and verify]
+    V --> C2[delete sources whose bytes match]
+    C2 --> D
+```
+
+- A crash after the save but before the deletion is finished by the next
+  load, from the receipt.
+- A failed save keeps every source and is tried again on the next run.
+- A source edited after it was migrated is kept, with a notice, until it is
+  deleted by hand.
+- Running again changes nothing: the property is now written, so nothing is
+  migrated twice.
+
+Each migrated file, each dropped line, and each blacklist rule is one
+`dm.config.migration` notice in `diagnostics()`. A `Passive` load (DMLS,
+validators) writes nothing; it reports each legacy file a writing run would
+migrate.
 
 ## One Snapshot per Request
 
@@ -301,10 +488,91 @@ own, and each takes the repository defaults when it is absent (an unborn
 as an invalid working file does.
 
 The two are kept apart so a repository's permissions can widen only through
-committed content: an uncommitted edit that adds an entry will have no effect
-until it is committed, while one that removes an entry or adds a `!` applies
-at once. Applying that rule (the narrower of the two, combined with the user
-policy) is **planned** permission evaluation.
+committed content (see [How the scopes combine](#how-the-scopes-combine)):
+an uncommitted edit that adds an entry has no effect until it is committed,
+while one that removes an entry or adds a `!` applies at once. Each revision
+follows its own reference, so turning an inline block into a reference,
+pointing a reference at another file, or editing or deleting the target is
+subject to the same rule: `HEAD` reads the target's committed bytes, the
+working copy its current ones. A failure to read the committed tree is an
+error, never a working-copy-only policy.
+
+```mermaid
+flowchart LR
+    H["HEAD block<br/>(reference followed in the commit)"] --> R{both allow?}
+    W["working-copy block<br/>(reference followed on disk)"] --> R
+    U[user block] --> O{user allows<br/>or both repository revisions allow}
+    R --> O
+    X["any ! entry in user, HEAD, or working copy"] --> N[approval required]
+    O -->|yes, no exclusion| P[pre-approved]
+    O -->|no| N
+```
 
 A committed `.darkmatter.yaml` that is a symbolic link, a directory, or a
 submodule is an error; it is never followed.
+
+## Saving an "Always Allow" Approval
+
+When a user chooses to keep an approval, call
+`darkmatter::config::permissions::persist::save_user_approval` with the
+snapshot's policy:
+
+```rust
+use darkmatter::config::load::ConfigSnapshot;
+use darkmatter::config::permissions::persist::{PersistentApproval, save_user_approval};
+use darkmatter::markdown::compose::shell_expansion::store::parse_rule_entry;
+
+fn keep(snapshot: &ConfigSnapshot) -> Result<(), Box<dyn std::error::Error>> {
+    let rule = parse_rule_entry("prefix ls")?;
+    match save_user_approval(snapshot.policy()?, &PersistentApproval::ShellRule { rule, command: None }) {
+        Ok(saved) => println!("saved `{}` to {}", saved.entry, saved.file.display()),
+        Err(not_saved) => eprintln!("{}: {not_saved}", not_saved.code()), // dm.config.not_saved
+    }
+    Ok(())
+}
+```
+
+What it does:
+
+- It writes to the **user** scope only: `~/.darkmatter.yaml`, or the file
+  its `permissions` reference names (for example Claudine's
+  `config.yaml`). A repository file is never edited. A missing
+  `~/.darkmatter.yaml` is created when there is a home directory.
+- It appends one entry to `shell-commands` (the approved `exact`, `prefix`,
+  or `template` rule) or `file-read` (the one approved file), skipping an
+  entry that is already there. Every other byte of the file (comments, key
+  order, quoting, other keys) is unchanged.
+- When the list was omitted, the scope's default entries are written first,
+  because a written list replaces the default:
+
+  ```yaml
+  # before                      # after approving ~/data/[id].yaml
+  permissions:                  permissions:
+      network: deny                 network: deny
+                                    file-read:
+                                        - ./*.txt
+                                        # … the other nine defaults
+                                        - ~/data/[[]id[]].yaml
+  ```
+
+- A file is saved as an exact `~/` reference with glob characters escaped,
+  never as a folder pattern. A file outside the home has no portable
+  spelling and is not saved; neither is a directory.
+- It never saves a site or `network` grant and never removes a `!` entry:
+  when an exclusion still matches the approved command or file, the result
+  says so and nothing is written.
+- The edit is made under the file's lock and the edited block is validated
+  before the file is replaced; an edit that cannot be made in place (a
+  one-line `[a, b]` list) or that would leave the block invalid is refused
+  and the file is untouched.
+
+A not-saved result (`NotSaved`, code `dm.config.not_saved`) never cancels the
+approval for the current run, and a saved one does not change the snapshot
+already captured: the new entry takes effect in the snapshot of the next run.
+
+Composition does this for you when a shell prompt's "always allow" choice is
+picked: it saves the rule, adds it to the run's own approvals (so a later
+command it covers is not asked about again, unless an exclusion matches that
+command), and reports a rule that could not be saved as a
+`dm.config.not_saved` warning while the command still runs. See
+[Pre-Flight Shell Approval](../inline/preflight-checks.md#interactive-approval).

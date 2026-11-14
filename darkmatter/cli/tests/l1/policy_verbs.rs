@@ -317,7 +317,7 @@ fn allow_all_authorizes_no_shell_command() {
 fn allow_all_recovers_a_shell_timeout_as_an_empty_string() {
     let fixture = CliProcessFixture::named("policy_allow_all_timeout");
     let document = fixture.write_file("cwd/doc.md", "# Test\n::shell sleep 2\nAfter\n");
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix sleep\n");
+    fixture.shell_permissions(&["prefix sleep"]);
     // A real `sleep` shell process is required to exercise timeout recovery.
     let output = fixture
         .command_builder()

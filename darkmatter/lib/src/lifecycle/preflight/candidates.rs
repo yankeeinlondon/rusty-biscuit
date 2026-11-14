@@ -113,10 +113,9 @@ pub fn settle_lifecycle_shell_modes(
     lifecycle: &LifecycleConfig,
     signals: &[LifecycleSignal],
     approved: &ShellPreApprovals,
-    policy_root: Option<&Path>,
 ) {
     for_each_lifecycle_shell_site(lifecycle, signals, &mut |site, _property| {
-        site.settle(approved, policy_root);
+        site.settle(approved);
     });
 }
 

@@ -138,7 +138,8 @@ its last resolution from memory: nothing a slot names is read or evaluated
 while you type. Until the first resolution arrives, completion offers the
 template's literal parts and diagnostics report `dm.schema.slot_pending`; an
 unapproved read is a `dm.schema.slot_approval_required` warning whose quick
-fixes grant it.
+fixes approve it for the session or always (saving the file to your
+`permissions.file-read`).
 
 A property whose whole type is a slot (a
 [template type](./schema-slots.md#template-types), such as

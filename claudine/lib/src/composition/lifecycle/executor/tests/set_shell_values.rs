@@ -125,7 +125,7 @@ fn prepared(repo: &Repo, frontmatter: &Value) -> LifecycleConfig {
         .into_iter()
         .map(|(command, _)| command)
         .collect();
-    crate::composition::preflight::settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &approved, None);
+    crate::composition::preflight::settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &approved);
     config
 }
 
@@ -228,7 +228,7 @@ fn preflight_approves_the_bare_command_under_its_property() {
 fn approval_applies_shell_policy_to_a_set_command() {
     let repo = Repo::new();
     let options = ShellApprovalOptions {
-        policy_root: Some(repo.dir.path().to_path_buf()),
+        permissions: crate::harness::shell::test_support::user_permissions(&repo.dir.path().join("home"), &[]),
         ..Default::default()
     };
     for (value, expected) in [

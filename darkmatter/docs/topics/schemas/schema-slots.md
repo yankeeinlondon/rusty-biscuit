@@ -53,21 +53,22 @@ command decides how far it goes:
 
 | Command | What happens to a template |
 | --- | --- |
-| `md compose` | resolves with the automatic, persisted, and run-only grants; on a terminal, asks about the rest before anything runs; a data output fails with `dm.schema.slot_approval_required` |
+| `md compose` | resolves with the reads `permissions.file-read` pre-approves and this run's approvals; on a terminal, asks about the rest before anything runs; a data output fails with `dm.schema.slot_approval_required` |
 | `md schema validate <document>` | the same gate as `md compose`; an unapproved read makes the file's check unavailable (`error: slots`, exit 1), never a success |
 | `md schema validate <schema file>` | the same gate as `md schema validate <document>`: every slot in the file resolves before the file is judged, and an unapproved or failed read makes the check unavailable (`error: slots`, exit 1) |
 | `md clean` | the same gate; an unapproved read fails the run with the slot's diagnostic, and the document is never reported clean |
-| `md graph`, `md validate refs` | resolve with the automatic and persisted grants only and never ask; a template whose read nobody granted is left for composition to judge, like any other value the check defers |
-| the editor (DMLS) | resolves in the background with the automatic, persisted, and editor-session grants, never on a keystroke and never by asking; an unapproved read is a warning at the slot with quick fixes that grant it; see [In the editor](#in-the-editor) |
+| `md graph`, `md validate refs` | resolve with the reads `permissions.file-read` pre-approves only and never ask; a template whose read nobody approved is left for composition to judge, like any other value the check defers |
+| the editor (DMLS) | resolves in the background with the reads `permissions.file-read` pre-approves and the editor session's approvals, never on a keystroke and never by asking; an unapproved read is a warning at the slot with quick fixes that approve it; see [In the editor](#in-the-editor) |
 
-For example, with Claudine's sandboxing schema committed beside its
-`os.yaml`:
+For example, with Claudine's sandboxing schema reading `claudine/docs/os.yaml`
+and the repository's default `file-read` list (`&**/*.yaml` among others)
+committed:
 
 ```sh
 md schema validate claudine/docs/research/sandboxing/providers/sandboxing.yaml
-# ✔ … valid …  (os.yaml was read with the automatic grant; the resolved schema was checked)
+# ✔ … valid …  (os.yaml is pre-approved by permissions.file-read; the resolved schema was checked)
 md schema validate provider.md            # resolves os.yaml: the document is checked
-echo "- BeOS" >> claudine/docs/os.yaml    # now dirty: no automatic grant
+# with a user `file-read` entry "!&claudine/docs/os.yaml", nothing pre-approves the read:
 md schema validate provider.md --output json   # error: slots, grants_needed: […], exit 1
 ```
 
@@ -118,7 +119,7 @@ os: Windows
 
 The document's `os: string` replaces the trigger's `os`, so `md compose`
 succeeds without reading `data/os.yaml` or asking about it; remove the
-document's `$schema` and the slot needs a grant again. The same holds when a
+document's `$schema` and the slot's read needs approval again. The same holds when a
 `b.trigger.yaml` that also matches declares `os: string`.
 
 - A root-union `$schema` replaces a property only when **every** arm
@@ -145,7 +146,7 @@ suffix are in
 A returned definition is type syntax, so it can name files the schema author
 never wrote: `Person@./types.yaml`, a bare `Person@person` looked up in the
 schema roots, or an `example(./sample.yaml)`. Those reads belong to the slot
-that returned the definition. Each one passes the same grant gate as the
+that returned the definition. Each one passes the same approval gate as the
 slot's own reads (see [What a slot may read](#what-a-slot-may-read)) before
 the file is probed, opened, taken from an editor buffer, or taken from a
 memo, and a static import's ability to read the same file never authorizes
@@ -162,10 +163,10 @@ owner:
 ---
 ```
 
-| Grants in force | Outcome |
+| Approvals in force | Outcome |
 | --- | --- |
-| an allow grant covering `types.yaml` (or the automatic grant: a clean, committed file of the schema's repository) | `owner` validates exactly as `owner: Person@./types.yaml` would |
-| a deny grant covering `types.yaml` | fails with `dm.schema.slot_denied` at the slot |
+| `permissions.file-read` pre-approves `types.yaml` (the user default `./*.yaml` does: it lies beside the document), or it was allowed for this run | `owner` validates exactly as `owner: Person@./types.yaml` would |
+| `types.yaml` was denied for this run | fails with `dm.schema.slot_denied` at the slot |
 | none, on a terminal | asks about `types.yaml` when the definition is expanded, then continues |
 | none, with a data output, in the editor, or in a reference check | fails with `dm.schema.slot_approval_required`; a reference check defers it instead |
 
@@ -179,8 +180,9 @@ the data file that supplied the text.
 Every file read and every location probed, found or missing, is recorded as
 a dependency of the resolution, like the slot's own reads: it joins the
 command's read set, a cached result is reused only while those files are
-unchanged (creating a missing candidate counts as a change) and the grants
-still cover them, and the editor watches them.
+unchanged (creating a missing candidate counts as a change) and the
+requesting command's permissions and approvals still allow them, and the
+editor watches them.
 
 ## What a slot may contain
 
@@ -269,6 +271,14 @@ read set like any other read (see
 
 ## What a slot may read
 
+A slot reads only what you have approved. Approval comes from two places:
+the `permissions.file-read` list of your configuration, which approves
+files ahead of time, and the answers you give during one run. Nothing a
+repository, a document folder, or a workspace setting holds can approve a
+read on its own; a repository's `file-read` entries count only as far as
+the configuration's rules let them (see
+[Permissions](../configuration.md#permissions)).
+
 Every read a slot makes is checked before it happens:
 
 - a content read or a fetch is checked before the file is opened or the URL
@@ -277,14 +287,15 @@ Every read a slot makes is checked before it happens:
 - a schema file is checked before it is opened: each file a `load_data`
   contract imports (`Names@./types.yaml`), and the schema a page names when
   `validate_schema` checks it (the page itself is a content read);
-- a folder listing is checked before the folder is enumerated: `find_files`
-  needs the folders its pattern lists below (`./*.md` lists the slot's own
-  folder), and `find_first_index` or `find_last_index` the folder the file's
-  family lives in. A listing is approved with a grant of that folder.
+- an existence check (`file_exists`) is checked like a content read of the
+  same path;
+- a listing (`find_files`, `find_first_index`, `find_last_index`) needs no
+  approval of its own; instead it returns only the files the slot may read
+  without asking (see [Listings](#listings)).
 
-Everything a function observed (a probed path, a listing, a contract import)
-is checked once more before the function's result reaches the slot. A
-refused read cannot be turned into a value by `try_frontmatter`, `||`, or
+Everything a function observed (a probed path, a contract import) is checked
+once more before the function's result reaches the slot. A refused read
+cannot be turned into a value by `try_frontmatter`, `||`, or
 [`try`](#an-optional-data-file).
 
 Slots belong to the slot resolver alone. Composing a document never
@@ -292,9 +303,10 @@ evaluates the `{{ … }}` inside its inline `$schema` as an ordinary
 frontmatter expression, so a slot's read is never made, and its list never
 turned into text, before the slot's approvals are checked.
 
-For example, with an empty grant store and no repository, this document
-fails with `dm.schema.slot_approval_required`, and its read set stays empty:
-neither `names.yaml` nor `types.yaml` is opened.
+For example, with a user `file-read: []`, outside any repository, this
+document fails with `dm.schema.slot_approval_required` when nothing can ask,
+and its read set stays empty: neither `names.yaml` nor `types.yaml` is
+opened.
 
 ```yaml
 ---
@@ -304,83 +316,98 @@ os: Linux
 ---
 ```
 
-A read happens only when something approves it. The gate decides each read
-in this order:
+### How a file read is decided
+
+Each read is judged for the **reading document**: the schema file the slot
+is written in, or the document itself for a slot in its inline `$schema`.
+A relative `file-read` entry such as `./*.yaml` therefore means "beside the
+schema file", not beside the document being validated. The gate decides in
+this order, and the first step that applies wins:
 
 ```mermaid
 flowchart TD
-    R[a slot is about to read a target] --> D{a deny grant covers it?}
+    R[a slot is about to read a file] --> P{the configuration's permissions load?}
+    P -- no --> E["refused: dm.config.invalid or dm.config.reference"]
+    P -- yes --> D{denied for this run?}
     D -- yes --> X[refused: dm.schema.slot_denied]
-    D -- no --> A{an allow grant covers it?}
+    D -- no --> A{allowed for this run?}
     A -- yes --> OK[read]
-    A -- no --> AU{the automatic grant covers it?}
-    AU -- yes --> OK
-    AU -- no --> H{an approval handler is present?}
+    A -- no --> F{permissions.file-read pre-approves it?}
+    F -- yes --> OK
+    F -- no --> H{an approval handler is present?}
     H -- "yes, and it allows" --> OK
     H -- "yes, and it denies" --> X
-    H -- "no, or no answer" --> N[refused: dm.schema.slot_approval_required]
+    H -- no --> N[refused: dm.schema.slot_approval_required]
 ```
 
-### The automatic grant
+1. **Invalid permissions refuse everything.** When the configuration's
+   `permissions` block fails to load, every slot read fails with that
+   configuration error's own code (`dm.config.invalid` or
+   `dm.config.reference`); nothing is allowed and nothing is asked.
+2. **This run's answers come next.** A "deny for this run" refuses the read
+   (`dm.schema.slot_denied`), and an "allow for this run" allows it, even
+   when a `!` exclusion in `file-read` matches the file.
+3. **`permissions.file-read` pre-approves.** The user scope's entries, or
+   the repository's entries when both its committed (`HEAD`) and working-copy
+   `.darkmatter.yaml` allow the file, approve the read; a `!` exclusion in
+   any of them removes that pre-approval. With no `file-read` written, the
+   defaults apply: files with a common data or text extension (`txt`, `md`,
+   `json`, `yaml`, `csv`, …) beside the reading document (user scope) or
+   anywhere in its repository (repository scope). See
+   [Defaults](../configuration.md#defaults) and
+   [How the scopes combine](../configuration.md#how-the-scopes-combine).
+4. **Otherwise the approval handler is asked** (see
+   [Prompts](#prompts)). With no handler (a data output, `md graph`,
+   `md validate refs`, the editor) the read fails with
+   `dm.schema.slot_approval_required`, whose data-output record lists the
+   approvals that would allow it (see [Failures](#failures)).
 
-A slot may read a file of its own repository that is exactly what Git has
-committed, with no grant at all. All of these must hold:
+For example, with the user defaults and a schema at `/home/me/schemas/os.yaml`:
 
-1. The schema file the slot is written in lies in the command's repository
-   (the repository the command found when it started). A schema anywhere
-   else gets no automatic grant for any read.
-2. The target lies in that same repository after symlinks are resolved, so a
-   link pointing out of the repository is judged by where it points.
-3. For a read of a file's content: Git reports the file clean (tracked, with
-   no staged or unstaged change and no `filter` attribute such as Git LFS),
-   the bytes read hash to the committed blob, and no unsaved editor buffer
-   for it differs from disk.
-
-| Target | Automatic? |
+| The slot reads | Outcome |
 | --- | --- |
-| a clean, committed file in the schema's repository | yes |
-| a modified, untracked, ignored, conflicted, or LFS-filtered file | no |
-| a file in another repository, or with no repository at all | no |
-| an existence check (`file_exists`) of a path in the repository, tracked or not | yes |
-| a `load_data` of a file that does not exist, in the repository | yes: it fails with the ordinary not-found error |
-| a folder listing or a glob (`find_files`, the `find_*_index` functions) | never |
-| a URL | never |
+| `./os-list.yaml` (beside the schema) | read: the user default `./*.yaml` pre-approves it |
+| `../data/os-list.yaml` | asked about on a terminal; `dm.schema.slot_approval_required` elsewhere |
+| `./os-list.yaml`, with a user entry `!./os-list.yaml` | asked about, because the exclusion removes pre-approval |
+| `./os-list.yaml`, denied earlier in this run | `dm.schema.slot_denied` |
 
-The decision is made once per target for the whole run, so a file the run
-itself changes later keeps the grant it had.
+### URL reads
 
-### Grants
+A slot's URL read is allowed by network consent or by an answer for this
+run, never by a saved approval:
 
-A grant allows or denies reads of one target: a file, a folder (and
-everything below it), an exact URL (query included), a URL whatever its
-query, or a whole site (scheme, host, and port; no subdomains). A deny
-always wins: if any deny covers a read, it is refused, whatever else allows
-it.
+- `permissions.network: allow` allows slot reads of every `http` and `https`
+  URL, and `--allow host=HOST` allows that host's URLs for one run, the same
+  decision composition takes (see
+  [Remote URL References](../remote-url-references.md#allowed-hosts));
+- without that consent, the read is asked about with two choices, allow
+  this URL for this run or deny it for this run, and fails with
+  `dm.schema.slot_approval_required` where nothing can ask.
 
-A grant lasts for one run, or is **persisted** in the user's grant store,
-`<home>/.config/darkmatter/schema-read-policy` on every OS. Nothing in a
-repository or workspace can grant: the store is never read from a
-repository, a document folder, or a workspace setting, and no setting can
-move it. It is separate from the shell command whitelist and blacklist. The
-file holds one grant per line; `#` lines and blank lines are ignored:
+A "deny for this run" refuses the URL even when network consent would allow
+it. A slot's URL reads go through a remote runtime of their own, which may
+fetch only the hosts the slot was allowed; approving a slot read never
+widens what the document's own reads may fetch.
 
-```text
-allow file /home/me/data/people.yaml
-allow dir /home/me/schemas
-deny dir /home/me/schemas/private
-allow url https://example.com/types.yaml?v=2
-allow url-any-query https://example.com/types.yaml
-allow site https://schemas.example.com
+### Listings
+
+`find_files`, `find_first_index`, and `find_last_index` list the folders
+their pattern names without asking anything, then keep only the files the
+slot could read without asking: those `permissions.file-read` pre-approves
+and those already allowed for this run. Every other file is silently left
+out, as if it did not exist. Nothing is ever asked about a folder.
+
+For example, with the user defaults (`./*.md`, `./*.yaml`, … beside the
+schema) and a schema folder holding `a.md`, `b.md`, and `notes.org`:
+
+```yaml
+$schema:
+    page: enum({{ find_files("./*") }})
 ```
 
-Paths must be absolute; URLs and sites are `http` or `https`. A line that
-does not parse makes the whole file unusable for the run (a skipped line
-could drop a deny), and the command stops with
-`dm.schema.slot_grant_store_invalid` at the file and line. A missing or empty
-file grants nothing.
-
-`--allow host=HOST` also allows slot reads of `http` and `https` URLs on that
-host for the run.
+`page` takes `a.md` and `b.md`; `notes.org` is not offered and nobody is
+asked about it. To include it, add an entry such as `./*.org` to
+`permissions.file-read`.
 
 ### Prompts
 
@@ -388,34 +415,54 @@ Before a composition runs any command, its pre-flight collects the reads its
 document schema's slots will make, without evaluating them. A read whose
 target is written as a literal (or built from literals and pure functions),
 as a URL or as an absolute or `./`/`../` path, is known up front; both
-branches of `?:` count. Every known read that no grant and no automatic
-grant decides is asked about **in the same batch as the shell commands,
-before them**. `md compose` on a terminal asks with a numbered prompt:
+branches of `?:` count. Every known read that neither
+`permissions.file-read` nor network consent approves is asked about **in the
+same batch as the shell commands, before them**. `md compose` on a terminal
+asks with a numbered prompt:
 
 ```text
   ⚠  Schema Read Approval Required
   Schema:   /repo/schemas/sandbox.yaml
   Read:     load_data() reads /repo/data/os.yaml
 
-  1 │ Allow this file for this run          (/repo/data/os.yaml; this run only)
-  2 │ Always allow this file                (saves "allow file /repo/data/os.yaml" to the schema read grants)
-  3 │ Allow this file's folder for this run (/repo/data; this run only)
-  4 │ Always allow this file's folder       (saves "allow dir /repo/data" to the schema read grants)
-  5 │ Always deny this file                 (saves "deny file /repo/data/os.yaml" to the schema read grants)
-  6 │ Deny for this run                     (the slot fails; this run only)
+  1 │ Allow this file for this run  (/repo/data/os.yaml; this run only)
+  2 │ Always allow this file        (/repo/data/os.yaml; saved to your permissions.file-read)
+  3 │ Deny for this run             (the slot fails; this run only)
 ```
 
-A URL offers the exact URL, the URL whatever its query (only when it has
-one), and the site. Ended input is "deny for this run". A read whose target
-is computed (from `env`, say) is asked about when the slot evaluates, through
-the same handler. Without a terminal, and for a data output (`--output
-json`, …), nothing is asked and an unapproved read is
-`dm.schema.slot_approval_required`; a library caller that passes no approval
-handler gets the same.
+| Choice | Effect |
+| --- | --- |
+| Allow this file for this run | the read happens; nothing is saved |
+| Always allow this file | the read happens for the rest of this run, and the file is saved to your `permissions.file-read` for later runs; offered only when the permissions loaded |
+| Deny for this run | the slot fails with `dm.schema.slot_denied`; nothing is saved |
+| Allow this URL for this run (a URL) | the fetch happens; nothing is saved |
 
-A slot's URL reads go through a remote runtime of their own, which may
-fetch only the hosts its grants name; a slot grant never widens what the
-document's own reads may fetch.
+Ended input is "deny for this run". There is no folder, site, or saved deny
+choice. A read whose target is computed (from `env`, say) is asked about
+when the slot evaluates, through the same handler. Without a terminal, and
+for a data output (`--output json`, …), nothing is asked and an unapproved
+read is `dm.schema.slot_approval_required`; a library caller that passes no
+approval handler gets the same.
+
+**What "always allow" saves.** The file is added to the user scope's
+`permissions.file-read` (in `~/.darkmatter.yaml`, or the file its
+`permissions` reference names) as one exact, portable `~/` entry with glob
+characters escaped: `/home/me/data/a[1].yaml` is saved as
+`~/data/a[[]1[]].yaml`. Only that list is edited; comments and other keys
+are kept, and an omitted list is first written out with its defaults,
+because a written list replaces them. The configuration this run captured is
+never reloaded, so the saved entry takes effect from the next run; the run
+itself keeps the file allowed. When the entry cannot be saved, the read is
+still allowed for this run and the composition report carries a
+`dm.config.not_saved` warning. That happens when:
+
+- a `!` exclusion still matches the file (an exclusion is never removed);
+- the file is outside the home, or there is no home;
+- writing the configuration fails.
+
+See
+[Saving an "Always Allow" Approval](../configuration.md#saving-an-always-allow-approval)
+for the writer's rules.
 
 `md compose` hands pre-flight's run-only answers to the composition that
 follows it, through the command's one session. A run with no shell operation
@@ -442,10 +489,12 @@ $schema:
 
 `try` changes what a slot recovers from, never what it may read:
 
-- **A missing file in the repository recovers without a grant**, because the
-  [automatic grant](#the-automatic-grant) covers it. A missing file outside
-  the repository is still a read that needs a grant, so without one the slot
-  fails with `dm.schema.slot_approval_required`, not the fallback.
+- **A missing file recovers only once its read is approved.** A file that
+  does not exist is judged by where it would be, so a missing `extra.yaml`
+  beside the schema is pre-approved by the default `./*.yaml` and recovers
+  to the fallback. A missing file that nothing pre-approves is still a read
+  that needs approval, so where nothing can ask the slot fails with
+  `dm.schema.slot_approval_required`, not the fallback.
 - **Refusals are never recovered.** An approval or deny refusal, and a
   forbidden binding or function in either argument, fail the slot as they
   would without `try`. A forbidden fallback is refused before anything is
@@ -459,58 +508,62 @@ $schema:
   `enum({{ try(load_data("./extra.yaml", "string[]"), []) }})` alone fails
   with `dm.schema.slot_empty`.
 
-Once the file is created and committed, the next command reads it rather
-than reusing the recovered result.
+Once the file is created, the next command reads it rather than reusing
+the recovered result.
 
 ## Resolving in a command
 
 One command (an `md compose` run, one library composition) resolves its
 templates through one **slot session**. A composition builds its own from
-the request (its data runtime, repository, `--allow host=HOST` values, home,
-and approval handler) unless the caller attached one with
+the request (its data runtime, repository, `--allow host=HOST` values, the
+configuration snapshot the request captured, and approval handler) unless
+the caller attached one with
 `ComposeOptions::with_slot_session`, which a caller running several passes
 (pre-flight, a reference check, lifecycle steps, then composition) does once
 so every pass shares it:
 
 ```rust,ignore
 use std::sync::Arc;
-use darkmatter::markdown::compose::{ComposeOptions, DataRuntime};
+use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::schemas::slots::SlotSession;
 
-let data = DataRuntime::new();
-let session = Arc::new(
-    SlotSession::new(data.clone())
-        .with_repository_root(Some(repository_root))
-        .with_home(home)
-        .with_run_grants(approvals.slot_grants),
-);
-let options = ComposeOptions::new().with_data_runtime(data).with_slot_session(session);
+let session = Arc::new(SlotSession::for_request(&request).with_run_grants(approvals.slot_grants));
+let options = ComposeOptions::new().with_slot_session(Arc::clone(&session));
+// after composing: "always allow" choices that could not be saved
+let warnings = session.take_not_saved_warnings(); // dm.config.not_saved
 ```
+
+`SlotSession::for_request` judges reads with the request's captured
+`ConfigSnapshot`; a caller assembling a session by hand passes one with
+`SlotSession::with_config_snapshot`.
 
 Within the session:
 
-- **Grants are decided once per run.** Each read's decision (automatic,
-  for this run, persisted, or denied) is kept for the whole run. When the
-  run's own approved step later changes a file it read, the file keeps the
-  grant it had, even though it is now dirty.
+- **Permissions are captured once per run.** Reads are judged against the
+  configuration the command captured when it started, never reloaded
+  mid-run, so a `permissions.file-read` entry saved by "always allow" (or
+  edited by hand) takes effect from the next run. This run's own answers
+  are kept for the whole run.
 - **Each template is pinned.** Every later validation in the run gets the
   same concrete schema, so the passes of one command agree.
 - **A pin follows the run's own writes.** After a shell command or lifecycle
   step runs, the next use rehashes what the pinned resolution read. An
   unrelated write keeps the pin; a changed input drops it, and the template
-  resolves again under the grants already decided. If that fails, the
+  resolves again under the same permissions and answers. If that fails, the
   failure (with its `dm.data.*` code) is reported; nothing is validated
   against a stale schema.
 - **A pass that must read nothing** (the reference check inside `md
   compose`, a pre-flight walk) uses only a schema already pinned, and
   otherwise leaves the template for composition to judge.
 - **A reference-check session** (`SessionMode::ReferenceCheck`, used by `md
-  graph` and `md validate refs`) resolves with the automatic and persisted
-  grants but never asks; a template a read nobody granted (or a denied read)
-  stops is left unresolved, and the check defers it.
+  graph` and `md validate refs`) resolves with the reads
+  `permissions.file-read` pre-approves but never asks; a template that a read
+  nobody approved stops is left unresolved, and the check defers it.
 
 A command that validates without composing builds its session from its
-context instead of a request:
+context instead of a request. `SlotSession::for_context` loads the
+configuration for that context passively (nothing is migrated or written)
+the first time a read needs it:
 
 ```rust,ignore
 let session = SlotSession::for_context(DataRuntime::new(), &document_context)
@@ -525,7 +578,7 @@ flowchart TD
     A[validate against a template] --> B{pinned in this command?}
     B -- yes, inputs unchanged --> P[use the pinned schema]
     B -- no, or an input changed --> C{cached by an earlier command?}
-    C -- "yes: inputs, context, captured calls, and this command's grants all still hold" --> Q[use it, replay its reads, pin it]
+    C -- "yes: inputs, context, captured calls, and this command's permissions and approvals all still hold" --> Q[use it, replay its reads, pin it]
     C -- no --> R[admit and evaluate every slot, store and pin the result]
 ```
 
@@ -546,15 +599,17 @@ disk) and shared when they still hold. A result is reused only if:
   not reused once the captured addresses, package topology, or installed
   tools give another answer; and one that used `has_command('/opt/bin/tool')`
   is not reused once the executable is gone, even with the same `PATH`;
-- the requesting command's grants allow every read it made, each judged for
-  the schema file whose slot made it. A result that needed a grant for this
-  run only is not reused by a command without that grant. This holds at
-  every depth: when a repository schema loads data under a type from a
-  shared schema outside the repository, and that type's own slot reads a
-  file, the read is judged for the shared schema, which gets no automatic
-  grant, even though the repository schema would have been granted the same
-  file automatically. This check comes before any file the result read is
-  looked at again.
+- the requesting command's permissions and current-run approvals allow
+  every read it made without asking, each judged for the schema file whose
+  slot made it. A result that needed an approval for this run only is not
+  reused by a command without that approval, and one whose read a command's
+  `!` exclusion now matches is not reused there. This holds at every depth:
+  when a repository schema loads data under a type from a shared schema
+  outside the repository, and that type's own slot reads a file, the read is
+  judged for the shared schema (a relative `file-read` entry means "beside
+  the shared schema"), even though the repository schema's entries would
+  have pre-approved the same file. This check comes before any file the
+  result read is looked at again.
 
 These dependencies are recorded as the slots evaluate, so they include every
 slot that ran: one in a root-union arm that resolution reaches only after the
@@ -564,13 +619,16 @@ another template.
 
 A resolution in which a volatile function ran (git state such as
 `remote_vendor()`, a network probe), whether in a slot of its own, a later
-union arm, or a contract's type, or one that read a URL or a folder listing,
-is never reused by another command. Within one command, a pinned schema that
+union arm, or a contract's type, or one that read a URL, is never reused by
+another command, and one that used a listing (`find_files`,
+`find_first_index`, `find_last_index`) is served only within its own
+command, because what a listing returns depends on that command's
+approvals. Within one command, a pinned schema that
 used a captured function is checked again after a shell command or other
 step ran, so an executable the step removed is noticed. Failures are kept like
 results, so creating the missing file or repairing the bad one is noticed;
-a failure that depends on grants (a read needing approval, a denied read)
-is never kept.
+a failure that depends on approvals (a read needing approval, a denied
+read) or on invalid permissions is never kept.
 
 A slot whose `load_data` contract names a type holding slots resolves that
 type's slots too, in the same session. When that leads back to a template
@@ -637,7 +695,7 @@ while the type is pending, because the returned type may admit null. In a
 union such as `status: "{{ … }} | boolean"`, the static arm keeps
 offering `true` and `false`, and the hover lists both arms with the
 pending one as *type pending*. The imports a returned definition names
-are read under the same grants as the slot's own reads and are watched
+are read under the same approvals as the slot's own reads and are watched
 like any other read (see below).
 
 A completion candidate says so in its detail line, after anything it
@@ -657,19 +715,26 @@ missing its loaded values never makes a document look valid. A slot
 written in another schema file is reported on the document's `$schema`
 value, with a related location pointing at the slot.
 
-**Granting a read.** Each grant an approval-required diagnostic offers is a
-quick fix (the choices a prompt would list: this file or its folder, for
-this session or always; then always deny, and deny for this session). A
-quick fix runs the `dmls.grantSlotRead` command, which edits nothing in the
-workspace:
+**Which reads are approved.** The background worker loads your
+configuration passively for the document's context (nothing is migrated or
+written), so a read `permissions.file-read` pre-approves resolves without
+any action, exactly as in `md compose`. Invalid permissions refuse every
+read with the configuration's own error code.
 
-- an "always" choice appends `allow file /repo/claudine/docs/os.yaml` (or
-  `deny …`) to the [grant store](#grants), the same file `md` reads;
-- a "this session" choice is kept in the server's memory until it exits and
-  is never written anywhere.
+**Approving a read.** Each approval an approval-required diagnostic offers
+is a quick fix, and each runs the `dmls.grantSlotRead` command, which edits
+nothing in the workspace:
 
-Either way every open document's slots are resolved again. Running the
-`dmls.refreshSchemaSlots` command does the same without granting anything,
+- *Allow schema slots to read file … for this session* (or *URL …*) is kept
+  in the server's memory until it exits and is never written anywhere;
+- *Always allow schema slots to read file …* saves the file to your user
+  `permissions.file-read`, as the prompt's
+  [always allow](#prompts) does, and also allows it for this session. When
+  it cannot be saved, it still applies for the session.
+
+There is no folder, site, or "always deny" quick fix. Either way every open
+document's slots are resolved again. Running the
+`dmls.refreshSchemaSlots` command does the same without approving anything,
 and so does a configuration change (`workspace/didChangeConfiguration`),
 because a slot may read the environment, which no file event reports.
 
@@ -678,15 +743,15 @@ read: data files, the files a returned type definition imports, files
 probed and found missing (a missing import candidate among them), folders
 listed, and, when
 any of those lies in a Git repository, that repository's `.git/index` and
-`HEAD` (an automatic grant depends on what they record). DMLS watches each
+`HEAD` (a repository `file-read` entry counts only when the committed
+`.darkmatter.yaml` at `HEAD` allows the file too). DMLS watches each
 path itself, whatever its extension, so saving a data file, creating a
 missing one, or staging a change refreshes the documents that read it. An
 unsaved edit to any open file a resolution read refreshes them too, whatever
 its format (a YAML, JSON, JSON5, JSON Lines, TOML, CSV, or TSV data file, a
 Markdown file `frontmatter()` reads, or a schema file a contract imports),
 and the resolution reads the unsaved text; closing the buffer unsaved goes
-back to the file on disk. An open buffer whose text differs from the
-committed file is a modified file, so it gets no automatic grant. A client that cannot watch files gets a
+back to the file on disk. A client that cannot watch files gets a
 fallback: each save re-checks every recorded path by `stat` (size,
 modification time, and whether it exists), not by content, so a rewrite
 that keeps a file's size and timestamp is not noticed until something else
@@ -747,7 +812,8 @@ The cause the expression failed with is kept:
 | --- | --- | --- |
 | the slot text is not an expression | `dm.schema.slot_syntax` | |
 | a refused binding or function | `dm.schema.slot_forbidden_binding`, `dm.schema.slot_forbidden_function` | the refused read's position |
-| a read no approval covers, or a denied one | `dm.schema.slot_approval_required`, `dm.schema.slot_denied` | `grants_needed` (approval only): the grants any one of which would allow the read |
+| a read no approval covers, or one denied for this run | `dm.schema.slot_approval_required`, `dm.schema.slot_denied` | `grants_needed` (approval only): the approvals any one of which would allow the read |
+| the configuration's `permissions` failed to load | `dm.config.invalid`, `dm.config.reference` | the configuration error's own fields |
 | a malformed data file, a contract mismatch | the `load_data` code (`dm.data.malformed`, …) | `data_location`, the position inside the data file |
 | a missing or unreadable file | `dm.schema.slot_failed` | the reference fields (`construct`, `reference`, `failure`) |
 | an exhausted work budget | `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | |
@@ -760,15 +826,17 @@ The cause the expression failed with is kept:
 | a template type's definition that conflicts with the suffix written after the slot | `dm.schema.slot_suffix_conflict` | |
 | a template type's definition that cannot stand at the slot's position once expanded | `dm.schema.slot_invalid_expansion` | |
 | a contract that leads back to a template being resolved | `dm.schema.slot_cycle` | |
-| the user's grant store is invalid | `dm.schema.slot_grant_store_invalid` | the store's file and line in the message |
 | the schema's slots were not resolved for this surface | `dm.schema.slot_pending` | the property holding the slot, and whether its whole type is pending (a template type) or one constraint is (a template constraint) |
 
 The full family of slot codes is `SLOT_DIAGNOSTIC_CODES` in
 `darkmatter::markdown::schemas::slots`.
 
-In a data output, an unapproved read's record names the grants that would
-allow it, in the order the prompt offers them, so a script can write one to
-the grant store and run again:
+In a data output, an unapproved read's record names the approvals that
+would allow it, in the order the prompt offers them. Each has a `kind`
+(`file` or `url`), a `target` (the file's path or the exact URL), and a
+`scope`: `once` is "allow for this run", which only a prompt can give, and
+`persisted` is "always allow" a file, which a script can give by adding the
+file to `permissions.file-read` and running again:
 
 ```json
 {
@@ -776,12 +844,12 @@ the grant store and run again:
   "source": { "file": "/repo/claudine/docs/research/sandboxing/providers/sandboxing.yaml", "line": 8, "column": 14, "inserted": false },
   "grants_needed": [
     { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "once" },
-    { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "persisted" },
-    { "kind": "dir", "target": "/repo/claudine/docs", "scope": "once" },
-    { "kind": "dir", "target": "/repo/claudine/docs", "scope": "persisted" }
+    { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "persisted" }
   ]
 }
 ```
 
-A `persisted` grant is the line `allow <kind> <target>` in the grant store;
-a `once` grant can only be given at a prompt.
+A URL read lists only `{ "kind": "url", "target": "<the exact URL>", "scope":
+"once" }`; it is allowed in a later run by network consent
+(`permissions.network: allow` or `--allow host=HOST`), never by a saved
+approval.

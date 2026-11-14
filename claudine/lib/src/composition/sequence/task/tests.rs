@@ -366,7 +366,7 @@ impl Fixture {
                 approved.insert_template(candidate.shape().expect("fixture template"));
             }
         }
-        graph.record_shell_authorization(approved, Some(dir.path().to_path_buf()));
+        graph.record_shell_authorization(approved, crate::harness::CapturedPermissions::Absent);
 
         let overlay = build_step_overlay(&plan, 0).as_set_overrides(None);
         let mut frontmatter: Map<String, Value> = resolved
@@ -6096,7 +6096,7 @@ mod late_values {
     #[test]
     fn discovery_without_shape_authorization_cannot_run_a_template() {
         let fixture = fixture("seq.outputs[3]", json!(["dist"]));
-        fixture.graph.record_shell_authorization(Default::default(), None);
+        fixture.graph.record_shell_authorization(Default::default(), crate::harness::CapturedPermissions::Absent);
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
         let outcome = fixture.execute_step(1, &Wiring::new(&recorder, &shell));

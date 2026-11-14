@@ -36,8 +36,9 @@ const FILE_STORE_ALLOWLIST: &[(&str, usize)] = &[
     ("markdown/compose/cache/mod.rs", 1),
     // Read, write, and purge of remote-URL entries.
     ("markdown/compose/cache/remote_cache.rs", 6),
-    // The fetch runtime owns the optional transport store.
-    ("markdown/compose/remote_fetch.rs", 4),
+    // The fetch runtime owns the optional transport store (`with_store` and
+    // `with_store_and_network` both accept it).
+    ("markdown/compose/remote_fetch.rs", 5),
     // Resolves the configured cache root into the fetch runtime's store.
     ("markdown/compose/context/options.rs", 3),
 ];

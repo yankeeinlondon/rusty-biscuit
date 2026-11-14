@@ -105,3 +105,27 @@ pub fn user_config(
 pub fn request_in(options: ComposeOptions, context: FileResolutionContext) -> ComposeRequest {
     ComposeRequest::with_context(configured(options, &context), context).expect("test request context")
 }
+
+/// The configuration of a user whose home is `home`, with `rules` as the
+/// `permissions.shell-commands` of `~/.darkmatter.yaml` (no file is written
+/// when there are none), and no repository: what a shell test composes
+/// under, so it never reads or writes the process's home.
+pub fn shell_config(home: impl AsRef<Path>, rules: &[&str]) -> Arc<ConfigSnapshot> {
+    let home = home.as_ref();
+    if !rules.is_empty() {
+        let mut text = String::from("permissions:\n  shell-commands:\n");
+        for rule in rules {
+            text.push_str(&format!("    - {}\n", serde_json::to_string(rule).expect("a rule string")));
+        }
+        std::fs::write(home.join(darkmatter::config::schema::CONFIG_FILE_NAME), text).expect("user configuration");
+    }
+    user_config(home, Some(home), std::collections::HashMap::new())
+}
+
+/// The `permissions.shell-commands` entries, as written (`!` included), of
+/// the user configuration under `home`; empty when there is none.
+pub fn saved_shell_rules(home: impl AsRef<Path>) -> Vec<String> {
+    let snapshot = shell_config(home, &[]);
+    let policy = snapshot.policy().expect("valid permissions");
+    policy.user().permissions().shell_commands.value.iter().map(|entry| entry.authored.clone()).collect()
+}

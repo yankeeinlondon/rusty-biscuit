@@ -25,7 +25,7 @@
 //! resolved bytes or by its authored shape, never by adding bytes it
 //! resolved at execution. The one exception is a site whose arguments read a
 //! file after an earlier command ran, so its bytes may be ones the walk never
-//! saw: an exact whitelist rule may also admit it
+//! saw: an exact `shell-commands` rule may also admit it
 //! (`shell_expansion::site::prepare_refreshed_site`), still without prompting.
 //!
 //! See [`darkmatter/features/2026-06-16-compose-pipe-2/tech-design.md`] for the
@@ -457,7 +457,7 @@ impl Markdown {
     ///
     /// Walks the document graph condition-blind and returns a
     /// [`ComposePreflightReport`] with the approval candidates. No approval
-    /// checks, whitelist lookups, or shell execution occur; the caller owns
+    /// checks, rule lookups, or shell execution occur; the caller owns
     /// authorization.
     ///
     /// ## Examples
@@ -553,14 +553,14 @@ mod acceptance_tests {
             .collect()
     }
 
-    fn execute_options(approval: HashSet<String>, policy_root: &std::path::Path) -> ComposeOptions {
+    fn execute_options(approval: HashSet<String>, home: &std::path::Path) -> ComposeOptions {
         ComposeOptions::new()
             .only(&[
                 ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::PageBlocks,
                 ComposeOperation::ShellExpansion,
             ])
-            .with_shell_policy_root(policy_root)
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(home, &[]))
             // The default per-command shell timeout is 10s. These acceptance
             // tests spawn real `echo` subprocesses, which finish in
             // milliseconds in isolation but can be starved well past 10s under
@@ -700,7 +700,7 @@ flag: a
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::ShellExpansion,
             ])
-            .with_shell_policy_root(temp.path())
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp.path(), &[]))
             .with_pre_approved_commands(approved);
 
         let result = md.compose_with(&crate::markdown::compose::test_request(options));
@@ -744,7 +744,7 @@ flag: a
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::ShellExpansion,
             ])
-            .with_shell_policy_root(temp.path())
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp.path(), &[]))
             .with_pre_approved_commands(approved);
 
         let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
@@ -783,7 +783,7 @@ flag: a
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellBlocks])
-            .with_shell_policy_root(temp.path())
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp.path(), &[]))
             .with_pre_approved_commands(approved);
 
         let result = md.compose_with(&crate::markdown::compose::test_request(options));
@@ -832,7 +832,7 @@ flag: a
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellBlocks, ComposeOperation::BlockTransclusion])
-            .with_shell_policy_root(temp.path())
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp.path(), &[]))
             .with_source_file(&root_path)
             .with_pre_approved_commands(approved);
 

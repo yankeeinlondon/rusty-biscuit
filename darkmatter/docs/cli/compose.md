@@ -182,7 +182,7 @@ md compose doc.md author=7 author.name=Bob
 - `--max-expansion-bytes <N>`: how many bytes of `::map` and `::filter` expansion one request may materialize, nested copies included. Same value rules as `--max-iteration-visits`; the library default is 16,777,216 (16 MiB).
 - `--shell`: report the effects discovered in the compose tree and exit without performing them. The report includes body `::shell` directives, top-level frontmatter `$(...)` shell expressions, and the root document's [lifecycle](#lifecycle-events) `shell` actions, including commands discovered through markdown transclusions, followed by the `ping`/`ping_under` probes the tree could send and whether an `--allow host=HOST` entry already grants each one. No command runs and no packet is sent. A [schema trigger skipped as invalid](../topics/schemas/schema-triggers.md#invalid-discovered-triggers) is reported on stderr after the report.
 - `--perf`: report how long compose took, as command-level timings (input loading, context capture, validation, option construction) and per-stage compose pipeline timings. A Markdown run prints the report to stderr, after any compose warnings and deferred validation issues. A data output puts the timings in the value's [`perf`](./data-contracts.md#timings) field and writes nothing to stderr.
-- `--allow host=HOST`: grant network access to a host or address. Repeat for multiple entries. The default policy is deny-all, and the entry's shape decides which capability it grants:
+- `--allow host=HOST`: grant network access to a host or address for this run. Repeat for multiple entries. The default policy is deny-all unless the configuration says `network: allow` (then every HTTP(S) host is already allowed and this changes nothing for URL reads), and the entry's shape decides which capability it grants:
     - a hostname or `*.wildcard` pattern allows remote URL reads from that host, and grants no ICMP;
     - an exact IP literal allows remote URL reads from that exact host **and** grants `ping`/`ping_under` to that address (an IPv6 zone constrains the ICMP grant to that interface, spelled the way the host spells it — the interface name on macOS and Linux (`fe80::1%en0`), the numeric interface index on Windows (`fe80::1%12`));
     - a strict CIDR such as `10.1.0.0/16` grants `ping`/`ping_under` to every address in the range of that family, and authorizes no HTTP at all.
@@ -310,8 +310,9 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
 - Non-object JSON (array/string/number/etc.) in `--state` returns an error.
 - Transform failures return non-zero exit with error details.
 - Remote URL transclusion fails unless the target host is allowed with
-  `--allow host=HOST`. Denied hosts are rejected before any network request is
-  attempted.
+  `--allow host=HOST` or the configuration says `network: allow` (see
+  [Remote URL References](../topics/remote-url-references.md#allowed-hosts)).
+  Denied hosts are rejected before any network request is attempted.
 
 ### Lifecycle Events
 
@@ -349,7 +350,7 @@ finalize:
   runs and the exit status is unaffected. A malformed or misplaced action
   that `md` does run is an error before anything runs.
 - **Shell approval.** Lifecycle `shell` actions are audited with the body's
-  commands, under the same blacklist, whitelist, approval, and timeout rules,
+  commands, under the same built-in blacklist, `permissions.shell-commands`, approval, and timeout rules,
   before composition. They run only from `composed` on. `--shell` lists them
   without running any stack.
 - **Errors.** An error in `initialize` or a preflight failure runs `failed`

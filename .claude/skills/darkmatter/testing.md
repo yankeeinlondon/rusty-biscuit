@@ -215,14 +215,28 @@ when changing the oracle.
   fixture-owned specs and execute the initialize event with its host binding
   view, without providers or shells.
 
+## Shell permission tests
+
+A shell test never reads or writes the process home's `~/.darkmatter.yaml`.
+Pin the configuration: lib unit tests use
+`shell_expansion::test_shell_config(home, &rules)`, `lib/tests` use
+`request_support::shell_config(home, &rules)` (and `saved_shell_rules(home)` to
+read what an "always allow" saved), both returning a user-only
+`ConfigSnapshot` for `ComposeOptions::with_config_snapshot`; `md` process tests
+call `CliProcessFixture::shell_permissions(&entries)`. Repository layers need a
+real committed tree: `git init` + commit (`lib/tests/l1/shell_permissions.rs`)
+and `ComposeRequest::prepare` from the repository root. No
+`.darkmatter-shell-whitelist`/`-blacklist` file is read anywhere but the
+temporary migration (`config/migration.rs`).
+
 ## Proving a passive path has no effects
 
 Completion, and anything else that must not evaluate, needs a positive assertion and a
 control as well as the absence: a document that fails to parse also runs nothing, so "no
 sentinel" alone passes for the wrong reason. `cli/tests/l1/path_completion.rs` is the example.
 
-- Use the `darkmatter-argv-recorder` program as the sentinel, approved in the fixture's
-  whitelist. It exists on every platform, and `read_argv_records` shows exactly what ran.
+- Use the `darkmatter-argv-recorder` program as the sentinel, approved in the fixture
+  home's `permissions.shell-commands` (`CliProcessFixture::shell_permissions`). It exists on every platform, and `read_argv_records` shows exactly what ran.
 - Compare the whole fixture workspace before and after, which also catches a cache write.
 - Run the control afterward: composing the same document runs the recorder, and the mock
   server answers an allowed composition.

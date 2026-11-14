@@ -7,6 +7,11 @@
 //! the state a [`RepoState`] names. Every other file is tracked and
 //! committed, so each approval-matrix cell differs from the clean control in
 //! exactly one way.
+//!
+//! The repository commits a root `.darkmatter.yaml` whose
+//! `permissions.file-read` is empty ([`NO_READS_CONFIG`]), so its default
+//! (`&**/*.yaml`, …) pre-approves nothing and a slot's read of the data file
+//! needs approval until [`SlotRepo::permit_data`] commits an entry for it.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,6 +40,13 @@ pub enum RepoState {
     NoRepository,
 }
 
+/// The repository configuration every fixture repository commits: no read
+/// is pre-approved.
+pub const NO_READS_CONFIG: &str = "permissions:\n    file-read: []\n";
+
+/// The repository configuration [`SlotRepo::permit_data`] commits.
+pub const DATA_READ_CONFIG: &str = "permissions:\n    file-read:\n        - \"&claudine/docs/os.yaml\"\n";
+
 /// The line [`RepoState::DirtyData`] appends to the data file.
 pub const DIRTY_ENTRY: &str = "- FreeBSD\n";
 
@@ -57,6 +69,7 @@ impl SlotRepo {
             return repo;
         }
 
+        std::fs::write(repo.root.join(".darkmatter.yaml"), NO_READS_CONFIG).expect("repository configuration");
         git(&repo.root, &["init", "-q", "-b", "main"]);
         match state {
             RepoState::UntrackedData => {
@@ -76,6 +89,15 @@ impl SlotRepo {
             std::fs::write(&data, text).expect("dirty data file");
         }
         repo
+    }
+
+    /// Commits a repository `.darkmatter.yaml` whose `permissions.file-read`
+    /// admits the data file, leaving the data file's own state unchanged:
+    /// a slot then reads it without asking.
+    pub fn permit_data(&self) {
+        std::fs::write(self.root.join(".darkmatter.yaml"), DATA_READ_CONFIG).expect("repository configuration");
+        git(&self.root, &["add", "--", ".darkmatter.yaml"]);
+        git(&self.root, &["commit", "-q", "-m", "permit the data file"]);
     }
 
     /// The repository root (canonical, simplified).

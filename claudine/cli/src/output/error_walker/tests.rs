@@ -21,8 +21,8 @@ fn walks_past_wrapper_error_to_typed_inner() {
     let shell = ShellExpansionError::ApprovalRequired {
         ctx: Box::new(ctx),
         command: "gh repo list".into(),
-        whitelist_path: Box::new(PathBuf::from("/tmp/wl")),
-        blacklist_path: Box::new(PathBuf::from("/tmp/bl")),
+        save_target: Some(Box::new(PathBuf::from("/tmp/home/.darkmatter.yaml"))),
+        exclusion: None,
         origin: ShellCommandOrigin::Body { line: 7 },
         suggested_rules: Box::default(),
     };

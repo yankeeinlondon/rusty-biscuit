@@ -30,13 +30,13 @@ finalize:
 
 const SENTINELS: [&str; 3] = ["sentinel-a.md", "sentinel-b", "sentinel-c.md"];
 
-/// `DOCUMENT` in its own directory, with its `composed` command whitelisted
-/// so nothing but passivity keeps it from running.
+/// `DOCUMENT` in its own directory, which is also the home whose
+/// `permissions.shell-commands` allow its `composed` command (see
+/// [`options`]), so nothing but passivity keeps it from running.
 fn workspace() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("doc.md");
     std::fs::write(&path, DOCUMENT).unwrap();
-    std::fs::write(dir.path().join(".darkmatter-shell-whitelist"), "exact touch sentinel-b\n").unwrap();
     (dir, path)
 }
 
@@ -44,9 +44,11 @@ fn created(dir: &Path) -> Vec<&'static str> {
     SENTINELS.into_iter().filter(|name| dir.join(name).exists()).collect()
 }
 
-/// A context capturing nothing of the host, anchored in the fixture.
+/// A context capturing nothing of the host, anchored in the fixture, whose
+/// home allows the `composed` command.
 fn options(dir: &Path) -> ComposeOptions {
     ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
+        .with_config_snapshot(crate::request_support::shell_config(dir, &["exact touch sentinel-b"]))
 }
 
 #[test]

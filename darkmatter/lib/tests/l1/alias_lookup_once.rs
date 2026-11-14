@@ -68,7 +68,7 @@ fn a_compose_run_looks_each_name_up_once() {
     context.env_mut().insert("SHELL".to_string(), shell.to_string_lossy().into_owned());
     let options = ComposeOptions::new_with_context(context)
         .with_source_file(&source)
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(dir.path());
     let request = crate::request_support::request(options);
 

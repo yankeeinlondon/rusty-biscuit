@@ -34,7 +34,7 @@ fn with_sentinel(fixture: &CliProcessFixture) {
         fixture.bin_dir().join(format!("argv-recorder{}", std::env::consts::EXE_SUFFIX)),
     )
     .expect("the recorder fixture binary is built with `test-fixtures`");
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "exact argv-recorder marker\n");
+    fixture.shell_permissions(&["exact argv-recorder marker"]);
 }
 
 fn compose(fixture: &CliProcessFixture, document: &Path, extra: &[&str]) -> Output {

@@ -586,6 +586,7 @@ impl ComposeRequest {
         options.align_context_environment(context.env());
         options.admit_source_in(&context);
         options.config_snapshot = Some(Arc::clone(&config));
+        options.align_remote_network();
         Self { options, context, config }
     }
 

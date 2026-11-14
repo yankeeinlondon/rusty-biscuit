@@ -116,7 +116,7 @@ fn compose(
     let document = Markdown::try_from(root.as_path()).map_err(|error| error.to_string())?;
     let options = ComposeOptions::new()
         .with_source_file(&root)
-        .with_shell_policy_root(dir)
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[]))
         .with_shell_working_directory(dir)
         .with_shell_timeout(timeout)
         .with_allow_shell_timeout(allow_timeout);

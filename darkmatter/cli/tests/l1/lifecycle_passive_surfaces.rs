@@ -43,7 +43,7 @@ impl Workspace {
         std::fs::copy(biscuit_test_harness::bin_exe!("darkmatter-argv-recorder"), &program)
             .expect("the recorder fixture binary is built with `test-fixtures`");
         // Approved, so the control row can run it; nothing else may.
-        fixture.write_file("cwd/.darkmatter-shell-whitelist", "exact argv-recorder composed\n");
+        fixture.shell_permissions(&["exact argv-recorder composed"]);
         let records = fixture.tmp_dir().join("argv.bin");
         Self { fixture, records }
     }

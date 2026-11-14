@@ -45,7 +45,7 @@ fn recording_context(
 ) -> (CachedHarnessLoopContext, Arc<RecordingApprovalHandler>) {
     let handler = Arc::new(RecordingApprovalHandler::default());
     let options = claudine::harness::ShellApprovalOptions {
-        policy_root: repo_root.map(Path::to_path_buf),
+        permissions: claudine::harness::CapturedPermissions::Absent,
         approval_handler: Some(handler.clone()),
         ..Default::default()
     };
@@ -81,7 +81,7 @@ fn a_hand_off_to_a_new_document_reopens_the_approval_window() {
         "the freeze closes the source document's approval window"
     );
 
-    context.refresh(&target, Some(dir.path()));
+    context.refresh(&target, Some(dir.path()), claudine::harness::CapturedPermissions::Absent);
     assert!(
         has_handler(&context),
         "a proxy target must get the same approval opportunity as a direct invocation",
@@ -101,7 +101,7 @@ fn a_retry_or_resume_of_the_same_document_keeps_the_freeze() {
     let (mut context, _handler) = recording_context(&source, Some(dir.path()));
 
     context.freeze_shell_approvals();
-    context.refresh(&source, Some(dir.path()));
+    context.refresh(&source, Some(dir.path()), claudine::harness::CapturedPermissions::Absent);
 
     assert!(
         !has_handler(&context),
@@ -118,7 +118,7 @@ fn a_run_that_cannot_prompt_gains_no_handler_at_a_hand_off() {
     let source = dir.path().join("router.md");
     let target = dir.path().join("target.md");
     let options = claudine::harness::ShellApprovalOptions {
-        policy_root: Some(dir.path().to_path_buf()),
+        permissions: claudine::harness::CapturedPermissions::Absent,
         approval_handler: None,
         ..Default::default()
     };
@@ -126,7 +126,7 @@ fn a_run_that_cannot_prompt_gains_no_handler_at_a_hand_off() {
         CachedHarnessLoopContext::with_shell_options(&source, Some(dir.path()), options);
 
     context.freeze_shell_approvals();
-    context.refresh(&target, Some(dir.path()));
+    context.refresh(&target, Some(dir.path()), claudine::harness::CapturedPermissions::Absent);
 
     assert!(
         !has_handler(&context),
@@ -143,7 +143,7 @@ fn every_document_in_a_chain_gets_its_own_approval_window() {
 
     for hop in ["b.md", "c.md"] {
         context.freeze_shell_approvals();
-        context.refresh(&dir.path().join(hop), Some(dir.path()));
+        context.refresh(&dir.path().join(hop), Some(dir.path()), claudine::harness::CapturedPermissions::Absent);
         assert!(
             has_handler(&context),
             "hop '{hop}' must be able to request approval for its own commands",
@@ -186,7 +186,7 @@ fn a_target_only_command_prompts_while_a_shared_command_reuses_the_approval() {
 
     // The source's window closes, then the run hands off.
     context.freeze_shell_approvals();
-    context.refresh(&target, Some(dir.path()));
+    context.refresh(&target, Some(dir.path()), claudine::harness::CapturedPermissions::Absent);
 
     let mut target_state = prompt_state(&target);
     preflight_harness_document(&mut target_state, context.shell_options(), dir.path())

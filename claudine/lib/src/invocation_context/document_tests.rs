@@ -56,11 +56,8 @@ impl Fixture {
         let document = work.join("doc.md");
         fs::write(&document, DOCUMENT).unwrap();
         fs::write(work.join("child.md"), format!("child=[{{{{ env.{PROBE} }}}}]\n")).unwrap();
-        let policy = root.join("policy");
-        fs::create_dir_all(&policy).unwrap();
-        fs::write(policy.join(".darkmatter-shell-whitelist"), "prefix echo\n").unwrap();
         let approval = ShellApprovalOptions {
-            policy_root: Some(policy),
+            permissions: crate::harness::shell::test_support::user_permissions(&root.join("policy"), &["prefix echo"]),
             approval_handler: None,
             ..Default::default()
         };

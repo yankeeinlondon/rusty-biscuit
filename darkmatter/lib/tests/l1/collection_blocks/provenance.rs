@@ -323,7 +323,7 @@ fn fail_with_document(case: &Case, kind: CollectionKind) -> (String, MarkdownErr
     let outcome = compose_with_options(&root, &document, |options| {
         let options = options
             .disable(ComposeOperation::Cleanup)
-            .with_shell_policy_root(&root)
+            .with_config_snapshot(crate::request_support::shell_config(&root, &[]))
             .with_shell_working_directory(&root)
             .with_shell_approval_handler(Arc::new(Approve));
         match case.limit {

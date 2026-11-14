@@ -56,9 +56,9 @@ impl Sequence {
         Self { fixture, records }
     }
 
-    /// The sequence's shell policy: its directory is the policy root.
+    /// The user's `permissions.shell-commands`, one rule per line.
     fn whitelist(&self, rules: &str) -> &Self {
-        std::fs::write(self.fixture.cwd().join(".darkmatter-shell-whitelist"), rules).unwrap();
+        crate::common::write_shell_permissions(self.fixture.home(), rules);
         self
     }
 

@@ -745,8 +745,8 @@ impl<'a> StackExecutor<'a> {
         if let Some(site) = &shell.template {
             match site.mode() {
                 Some(LifecycleShellMode::ResolvedBytes) => {}
-                Some(LifecycleShellMode::Template { policy_root }) => {
-                    return self.run_shell_template(shell, site, policy_root.as_deref(), property, fm);
+                Some(LifecycleShellMode::Template) => {
+                    return self.run_shell_template(shell, site, property, fm);
                 }
                 None => {
                     self.ensure_shell_permitted("shell")?;
@@ -783,16 +783,16 @@ impl<'a> StackExecutor<'a> {
     ///
     /// Every placeholder is read from the state current now, checked against
     /// its declared type, and filled into exactly one argument; the whole
-    /// filled command then meets the built-in and user blacklists, and only
-    /// then does any segment start. A value that is missing or rejected, a
-    /// blacklisted fill, and a program that needs an interpreter are
+    /// filled command then meets the built-in blacklist and the run's
+    /// exclusions, and only then does any segment start. A value that is
+    /// missing or rejected, a blacklisted or excluded fill, and a program
+    /// that needs an interpreter are
     /// evaluation errors: `no_error` cannot suppress them, and their message
     /// never shows a value. A non-zero exit is a dispatch error, as for bytes.
     fn run_shell_template(
         &self,
         shell: &ShellAction,
         site: &LifecycleShellTemplate,
-        policy_root: Option<&Path>,
         property: &str,
         fm: &SharedFrontmatter,
     ) -> Result<(), ActionFailure> {
@@ -806,13 +806,27 @@ impl<'a> StackExecutor<'a> {
                 let ctx = self.template_context(authored);
                 self.template_refusal(property, authored, error.into_shell_error(&ctx, authored, &template_origin(property)))
             })?;
-        let blacklist = self.inputs.host.user_blacklist(policy_root);
-        if let Some(reason) = crate::markdown::compose::shell_expansion::check_filled_chain(&chain, &blacklist) {
+        if let Some(reason) = crate::markdown::compose::shell_expansion::check_filled_chain(&chain) {
             let error = ShellExpansionError::Blacklisted {
                 ctx: Box::new(self.template_context(authored)),
                 command: authored.to_string(),
                 reason,
                 origin: template_origin(property),
+            };
+            return Err(self.template_refusal(property, authored, error));
+        }
+        let exclusions = self.inputs.host.shell_exclusions().map_err(|error| {
+            self.template_refusal(property, authored, ShellExpansionError::Config(Box::new(error)))
+        })?;
+        let shape = crate::markdown::compose::shell_expansion::template::TemplateShape::from_template(template);
+        if crate::markdown::compose::shell_expansion::filled_template_needs_approval(&chain, &shape, &exclusions) {
+            let error = ShellExpansionError::ApprovalRequired {
+                ctx: Box::new(self.template_context(authored)),
+                command: authored.to_string(),
+                save_target: None,
+                exclusion: None,
+                origin: template_origin(property),
+                suggested_rules: Box::default(),
             };
             return Err(self.template_refusal(property, authored, error));
         }
@@ -1113,7 +1127,6 @@ impl<'a> StackExecutor<'a> {
     ) -> Result<Vec<(String, Value)>, ActionFailure> {
         let mut values: Vec<std::borrow::Cow<'_, ResolvedShellValue>> = Vec::new();
         let mut authored = String::new();
-        let mut policy_root = None;
         for (key, shell) in set.shell_values() {
             let Some(resolved) = shell.resolved.as_ref() else {
                 return Err(ActionFailure::Evaluation(
@@ -1134,9 +1147,8 @@ impl<'a> StackExecutor<'a> {
                 None | Some((_, Some(LifecycleShellMode::ResolvedBytes))) => {
                     values.push(std::borrow::Cow::Borrowed(resolved));
                 }
-                Some((site, Some(LifecycleShellMode::Template { policy_root: root }))) => {
+                Some((site, Some(LifecycleShellMode::Template))) => {
                     self.ensure_shell_permitted("set")?;
-                    policy_root = root.or(policy_root);
                     let value = resolved.clone().with_template(site.template().clone());
                     values.push(std::borrow::Cow::Owned(match site.late_values() {
                         Some(late) => value.with_late_values(late.clone()),
@@ -1159,7 +1171,6 @@ impl<'a> StackExecutor<'a> {
                 file_resolution_context: self.inputs.file_resolution_context,
                 config_snapshot: self.inputs.config_snapshot,
                 holes,
-                policy_root: policy_root.as_deref(),
             };
             self.inputs.shell_runner.run_values(&request)
         };

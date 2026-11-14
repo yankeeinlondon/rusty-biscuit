@@ -14,7 +14,6 @@ use darkmatter::lifecycle::executor::LifecycleEventOutcome;
 use darkmatter::lifecycle::md_host::{self, CommandOutput, MdEvent, MdRuntimeState, MdStackContext};
 use darkmatter::lifecycle::run::ShellRefusal;
 use darkmatter::lifecycle::{LifecycleEffects, LifecycleSignal, LifecycleTiming};
-use darkmatter::markdown::compose::shell_expansion::ShellRuleSet;
 use darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest, SharedFrontmatter};
 use serde_json::{Value, json};
@@ -69,7 +68,6 @@ impl Root {
         let live = Mutex::new(frontmatter.clone());
         let state = MdRuntimeState::default();
         let approved = ShellPreApprovals::new();
-        let blacklist = ShellRuleSet::default();
         let engine = EffectEngine::builder().mutation_root(self.dir.path()).auto_rehash(false).build();
         let timing = LifecycleTiming::default();
         let never = || false;
@@ -80,7 +78,6 @@ impl Root {
             live_frontmatter: &live,
             state: &state,
             approved: &approved,
-            user_blacklist: &blacklist,
             effect_engine: &engine,
             effects: &Silent,
             output: &Silent,

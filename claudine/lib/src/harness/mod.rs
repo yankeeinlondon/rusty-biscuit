@@ -23,7 +23,7 @@ pub use resolve::{
 };
 pub use runtime::{build_attempt_outcome, classify_failure, concise_message, failure_message};
 pub use shell::{
-    ShellApprovalOptions, execute_approved_command, validate_and_approve_command,
+    CapturedPermissions, ShellApprovalOptions, execute_approved_command, validate_and_approve_command,
     validate_and_approve_command_parts,
 };
 pub use speech::speak_when_able;

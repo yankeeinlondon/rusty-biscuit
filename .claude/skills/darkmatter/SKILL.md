@@ -27,15 +27,16 @@ extension.
   trigger matching, completion, hover, and validation must not perform I/O,
   execute expressions, fetch remotes, or mutate documents.
 - Keep network access deny-all by default. Route every allowed remote read or
-  write through `biscuit_file::FetchPolicy` and exact-host consent.
+  write through `biscuit_file::FetchPolicy`: exact-host consent, or the
+  configured `network: allow` projected by `config::network::NetworkPermission`
+  (`FetchPolicy::allow_all()`, never a wildcard host).
 - Keep schema `{{ … }}` slots passive by default. Only an explicit resolution
   through a `SlotSession` (`DarkmatterSchemas::resolve_template`) evaluates
   them, after every slot is admitted; nothing ever validates against a
   template or a placeholder. Every slot read passes the grant gate before the
   file is opened or the shared memo consulted, and grants come only from the
-  user-level store under the home (`<home>/.config/darkmatter/schema-read-policy`),
-  a prompt, or the clean-committed automatic grant; repository or workspace
-  content never grants. See [schema.md](schema.md), "Schema templates".
+  captured `permissions.file-read` and this run's approvals; repository or
+  workspace content never grants. See [schema.md](schema.md), "Schema templates".
 - Render terminal output with `TerminalRenderable` components. The browser tier
   is headless and must use browser-protocol input, never host focus or OS input.
 - Preserve source spans and typed diagnostic provenance through parsing,
@@ -275,7 +276,7 @@ just gets its entries as optional properties; see
 HTTP(S) composition covers `::file`, `::code`, and read-side expression
 arguments where a remote runtime is present; rendered links are never fetched,
 and frontmatter interpolation and `$()` fail loudly on a URL. Reads are
-deny-all until `--allow host=HOST`; only transport artifacts (raw HTTP bodies) may
+deny-all until `--allow host=HOST` or a configured `network: allow`; only transport artifacts (raw HTTP bodies) may
 persist under a cache root; `Cache-Control` outranks every freshness flag;
 host policy is checked before the cache is read. Read
 [remote-cache.md](remote-cache.md) before changing any of this.

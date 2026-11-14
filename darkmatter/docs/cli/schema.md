@@ -103,9 +103,9 @@ it. Both go through the same read approval:
 - **A document** under the template is checked against the resolved schema. A
   `<prop>=<value>` assignment is converted by the resolved type, so `label=123` under a
   slot that returns `alphanumeric` arrives as the text `123`; when the template does not
-  resolve, the assignment is never judged and the check is unavailable. A data
-  file committed, unchanged, in the schema's repository is read without asking (the
-  [automatic grant](../topics/schemas/schema-slots.md#the-automatic-grant)). On a
+  resolve, the assignment is never judged and the check is unavailable. A file
+  your `permissions.file-read` pre-approves is read without asking (see
+  [How a file read is decided](../topics/schemas/schema-slots.md#how-a-file-read-is-decided)). On a
   terminal, every other read whose target is written in the slot is asked about in one
   batch, just before that document's schema resolves, with the numbered prompt
   `md compose` shows (see [Prompts](../topics/schemas/schema-slots.md#prompts)); a read
@@ -123,15 +123,20 @@ it. Both go through the same read approval:
   "message": "the schema's slots could not be resolved: …",
   "problems": [],
   "diagnostics": [{ "code": "dm.schema.slot_approval_required", "...": "..." }],
-  "grants_needed": [{ "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "persisted" }, "..."]
+  "grants_needed": [
+    { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "once" },
+    { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "persisted" }
+  ]
 }
 ```
 
-Adding `allow file /repo/claudine/docs/os.yaml` to `~/.config/darkmatter/schema-read-policy`
-grants the read in every later run; see
+Adding an entry that matches `/repo/claudine/docs/os.yaml` to `permissions.file-read`
+(for example `&claudine/docs/os.yaml` in your `~/.darkmatter.yaml`) approves the read in
+every later run, as choosing "Always allow this file" at the prompt does; see
 [What a slot may read](../topics/schemas/schema-slots.md#what-a-slot-may-read).
-`md schema validate` takes no `--allow host=HOST`, so a slot's URL read needs a
-grant here (see [Schema slot reads](./policy.md#schema-slot-reads)).
+`md schema validate` takes no `--allow host=HOST`, so a slot's URL read needs
+`permissions.network: allow` or an answer for this run here (see
+[Schema slot reads](./policy.md#schema-slot-reads)).
 
 ## `md schema detect`
 

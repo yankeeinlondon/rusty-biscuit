@@ -37,7 +37,7 @@ use darkmatter::lifecycle::executor::LifecycleEventOutcome;
 use darkmatter::lifecycle::run::ApprovalEpoch;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals;
-use darkmatter::markdown::compose::shell_expansion::{ShellApprovalHandler, ShellCommandEntry, ShellRuleSet};
+use darkmatter::markdown::compose::shell_expansion::{ShellApprovalHandler, ShellCommandEntry};
 use darkmatter::markdown::compose::report_diagnostics::lifecycle_failure_diagnostics;
 use darkmatter::markdown::compose::{ComposeOperation, ComposeReport, ComposeRequest, ComposeWarning};
 use serde_json::{Map, Value};
@@ -352,7 +352,6 @@ struct ComposeHost<'a> {
     live: Mutex<darkmatter::markdown::compose::SharedFrontmatter>,
     state: MdRuntimeState,
     approved: ShellPreApprovals,
-    user_blacklist: ShellRuleSet,
     effect_engine: EffectEngine,
     effects: &'a TerminalEffects<'a>,
     interrupted: Arc<AtomicBool>,
@@ -376,7 +375,6 @@ impl<'a> ComposeHost<'a> {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .map_or_else(|| compose.request.resolution_context().cwd().to_path_buf(), Path::to_path_buf);
-        let user_blacklist = md_host::user_blacklist(&compose.request);
         let frontmatter = darkmatter::markdown::compose::SharedFrontmatter::from(bootstrap);
         Self {
             md: compose.md,
@@ -394,7 +392,6 @@ impl<'a> ComposeHost<'a> {
             frontmatter,
             state: MdRuntimeState::default(),
             approved: ShellPreApprovals::new(),
-            user_blacklist,
             effect_engine: EffectEngine::builder().mutation_root(mutation_root).build(),
             effects,
             interrupted,
@@ -500,7 +497,7 @@ impl<'a> ComposeHost<'a> {
                     approvals.stats.total_discovered, approvals.stats.already_whitelisted, approvals.stats.user_approved
                 );
             }
-            md_host::settle_lifecycle_shells(&self.config, &approvals.pre_approved_commands, &self.request);
+            md_host::settle_lifecycle_shells(&self.config, &approvals.pre_approved_commands);
             self.approved = approvals.pre_approved_commands.clone();
             self.request = self.request.clone().map_options(|options| {
                 options
@@ -586,7 +583,6 @@ impl MdRunHost for ComposeHost<'_> {
             live_frontmatter: &self.live,
             state: &self.state,
             approved: &self.approved,
-            user_blacklist: &self.user_blacklist,
             effect_engine: &self.effect_engine,
             effects: self.effects,
             output: self.effects,

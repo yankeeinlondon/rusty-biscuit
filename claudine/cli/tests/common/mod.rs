@@ -945,6 +945,23 @@ pub fn write(path: &Path, content: &str) {
     fs::write(path, content).unwrap();
 }
 
+/// Writes `rules` (one `exact`/`prefix`/`template` rule per line, `!` for an
+/// exclusion) as the `permissions.shell-commands` of the user configuration
+/// `home/.darkmatter.yaml`, replacing the file. A child spawned with the
+/// fixture's home decides its shell commands with them.
+pub fn write_shell_permissions(home: &Path, rules: &str) {
+    let entries: Vec<String> = rules
+        .lines()
+        .map(str::trim)
+        .filter(|rule| !rule.is_empty())
+        .map(|rule| serde_json::to_string(rule).unwrap())
+        .collect();
+    write(
+        &home.join(".darkmatter.yaml"),
+        &format!("permissions:\n  shell-commands: [{}]\n", entries.join(", ")),
+    );
+}
+
 pub fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
     write(path, &serde_json::to_string_pretty(value).unwrap());
 }

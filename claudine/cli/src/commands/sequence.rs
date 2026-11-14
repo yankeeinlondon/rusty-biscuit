@@ -362,10 +362,10 @@ fn run_sequence_inner(
     )?;
 
     let shell_options = super::wrap::apply_composition_shell_overrides(
-        super::wrap::build_harness_shell_options_for_source(
-            &source.resolved_path,
-            source_context.repository_root(),
-        ),
+        super::wrap::build_harness_shell_options(claudine::harness::CapturedPermissions::for_source(
+            &invocation,
+            source_context.file_resolution_context(),
+        )),
         false,
         shared.yolo,
     );

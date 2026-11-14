@@ -141,8 +141,10 @@ impl LifecycleHost for FakeHost {
     fn prep(&self, _: &PrepRequest<'_>) -> Result<(), PrepError> {
         Err(PrepError::Unavailable)
     }
-    fn user_blacklist(&self, _: Option<&Path>) -> crate::markdown::compose::shell_expansion::ShellRuleSet {
-        Default::default()
+    fn shell_exclusions(
+        &self,
+    ) -> Result<crate::markdown::compose::shell_expansion::ShellRuleSet, crate::config::load::ConfigError> {
+        Ok(Default::default())
     }
     fn interrupted(&self) -> bool {
         false

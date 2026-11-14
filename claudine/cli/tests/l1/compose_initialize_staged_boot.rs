@@ -441,7 +441,7 @@ fn initialize_shells_are_forbidden_even_with_yolo_across_entry_paths() {
         ));
         staged.write_doc("router.md", "---\nprompt: Route the task\ninitialize:\n    - {proxy: './target.md'}\n---\nRouter\n");
         staged.write_doc("seq.md", "---\nsequence:\n  - name: one\n    prompt: router.md\n---\nSequence\n");
-        staged.write_doc(".darkmatter-shell-whitelist", "prefix touch\n");
+        common::write_shell_permissions(staged.fixture.home(), "prefix touch\n");
         let entry = if command == "sequence" { "seq.md" } else if proxy { "router.md" } else { "target.md" };
         let (success, output) = staged.run(&[command, entry, "--claude", "-y"]);
         assert!(!success, "{command}, proxy={proxy}, looping={looping}: {output}");

@@ -2,8 +2,9 @@
 //! memo layer, the slot gate before any warmed layer, one generation for all
 //! layers, and a three-argument call's target collected passively.
 //!
-//! Each case works in its own temp folder with no repository and an empty
-//! temp home (so no persisted grant applies), with every request anchored
+//! Each case works in its own temp folder with no repository and a temp
+//! home whose `permissions.file-read` pre-approves nothing (so a slot's read
+//! needs approval), with every request anchored
 //! there, and shares one explicit data runtime across the compositions it
 //! runs so the memo stays warm between them.
 
@@ -46,6 +47,7 @@ impl Case {
         let temp = tempfile::tempdir().expect("temp dir");
         let root = biscuit_file::canonicalize_simplified(temp.path()).expect("canonical temp dir");
         let case = Self { _temp: temp, root, home: tempfile::tempdir().expect("temp home"), runtime: DataRuntime::new() };
+        crate::slot_support::write_user_permissions(case.home.path(), &[]);
         case.write(ROWS, ROWS_TEXT);
         case
     }
@@ -201,7 +203,7 @@ fn generation_advances_once_for_all_layers() {
     let warm = [call("{}"), call("{delimiter: ';'}"), call("{header: false}")].join("\n\n");
     let document = case.write("doc.md", &format!("{warm}\n\n::shell git --version\n\n{warm}\n"));
     let options = ComposeOptions::new()
-        .with_shell(ShellExpansionOptions { policy_root: Some(case.root.clone()), ..Default::default() })
+        .with_config_snapshot(crate::request_support::shell_config(&case.root, &[])).with_shell(ShellExpansionOptions::default())
         .with_shell_working_directory(&case.root)
         .with_shell_approval_handler(Arc::new(AllowShell));
     assert_eq!(case.runtime.memo_generation(), 0);

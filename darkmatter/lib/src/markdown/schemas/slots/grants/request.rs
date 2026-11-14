@@ -1,7 +1,7 @@
 //! What an approval handler is asked about a slot's read, and what it may
 //! answer.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use super::{Grant, GrantDecision, GrantScope, GrantTarget};
 use crate::markdown::compose::expression::functions::ReadKind;
@@ -19,19 +19,20 @@ pub struct SlotGrantRequest {
     /// The schema file the slot was written in; `None` for an inline
     /// document `$schema`.
     pub schema: Option<PathBuf>,
-    /// The grants the handler may answer with, in the order a prompt lists
-    /// them. A handler answering with anything else is treated as
-    /// unanswered.
+    /// The answers the handler may give, in the order a prompt lists them:
+    /// allow for this run, "always allow" (a file only), deny for this run.
+    /// A handler answering with anything else is treated as unanswered.
     pub choices: Vec<Grant>,
 }
 
 /// A handler's answer to one [`SlotGrantRequest`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlotGrantDecision {
-    /// Allow reads of `target` for `scope`.
+    /// Allow reads of `target` for `scope`: this run, or always (a file,
+    /// saved to the user's `permissions.file-read`).
     Allow { target: GrantTarget, scope: GrantScope },
-    /// Deny reads of `target` for `scope`. A canceled prompt or ended input
-    /// is a deny for this run (`Once`).
+    /// Deny reads of `target` for this run (`scope` is always `Once`). A
+    /// canceled prompt or ended input is a deny for this run.
     Deny { target: GrantTarget, scope: GrantScope },
     /// No answer: the read stays `dm.schema.slot_approval_required`.
     Unanswered,
@@ -62,7 +63,8 @@ impl SlotGrantDecision {
 
 impl SlotGrantRequest {
     /// The request for `target`, read by a slot written in `schema`.
-    /// `persist` offers persisted choices (there is a grant store).
+    /// `persist` offers "always allow" for a file (the configuration's
+    /// permissions are valid, so an approval can be saved to them).
     pub(crate) fn for_target(target: &ReadTarget, schema: Option<&Path>, persist: bool) -> Self {
         Self {
             function: target.function.clone(),
@@ -74,80 +76,22 @@ impl SlotGrantRequest {
     }
 }
 
-/// The grants that would allow `target`, each for this run and (when
-/// `persist`) persisted, followed by a persisted deny and a deny for this
-/// run. Empty when no grant can allow the read (a relative glob).
-///
-/// - a file: this file, this file's folder;
-/// - a folder listing: this folder;
-/// - an absolute glob: the folder its literal leading components name;
-/// - a URL: this exact URL, this URL whatever its query (only when it has
-///   one), this site.
+/// The answers a prompt offers for `target`, in order: allow for this run,
+/// "always allow" (a file only, when `persist`), then deny for this run.
+/// Empty for a listing or a glob, which is never asked about: it returns
+/// only the files the slot may read without asking.
 pub(crate) fn grant_choices(target: &ReadTarget, persist: bool) -> Vec<Grant> {
-    let allows: Vec<GrantTarget> = match &target.location {
-        ReadLocation::Local(path) if target.kind == ReadKind::Listing => vec![GrantTarget::Dir(path.clone())],
-        ReadLocation::Local(path) => {
-            let mut targets = vec![GrantTarget::File(path.clone())];
-            if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
-                targets.push(GrantTarget::Dir(parent.to_path_buf()));
-            }
-            targets
-        }
-        ReadLocation::Glob(pattern) => match glob_folder(pattern) {
-            Some(folder) => vec![GrantTarget::Dir(folder)],
-            None => return Vec::new(),
-        },
-        ReadLocation::Remote(url) => {
-            let mut targets = vec![GrantTarget::Url(url.clone())];
-            if url.query().is_some() {
-                let mut stripped = url.clone();
-                stripped.set_query(None);
-                targets.push(GrantTarget::UrlAnyQuery(stripped));
-            }
-            if let Some(host) = url.host_str() {
-                let port = url.port().filter(|port| Some(*port) != default_port(url.scheme()));
-                targets.push(GrantTarget::Site { scheme: url.scheme().to_string(), host: host.to_string(), port });
-            }
-            targets
-        }
+    let allowed = match &target.location {
+        ReadLocation::Local(_) if target.kind == ReadKind::Listing => return Vec::new(),
+        ReadLocation::Glob(_) => return Vec::new(),
+        ReadLocation::Local(path) => GrantTarget::File(path.clone()),
+        ReadLocation::Remote(url) => GrantTarget::Url(url.clone()),
     };
-    let scopes: &[GrantScope] = if persist { &[GrantScope::Once, GrantScope::Persisted] } else { &[GrantScope::Once] };
-    let mut choices: Vec<Grant> = allows
-        .iter()
-        .flat_map(|target| {
-            scopes.iter().map(|scope| Grant { decision: GrantDecision::Allow, target: target.clone(), scope: *scope })
-        })
-        .collect();
-    let denied = allows[0].clone();
-    if persist {
-        choices.push(Grant { decision: GrantDecision::Deny, target: denied.clone(), scope: GrantScope::Persisted });
+    let grant = |decision, scope| Grant { decision, target: allowed.clone(), scope };
+    let mut choices = vec![grant(GrantDecision::Allow, GrantScope::Once)];
+    if persist && matches!(allowed, GrantTarget::File(_)) {
+        choices.push(grant(GrantDecision::Allow, GrantScope::Persisted));
     }
-    choices.push(Grant { decision: GrantDecision::Deny, target: denied, scope: GrantScope::Once });
+    choices.push(grant(GrantDecision::Deny, GrantScope::Once));
     choices
-}
-
-fn default_port(scheme: &str) -> Option<u16> {
-    match scheme {
-        "http" => Some(80),
-        "https" => Some(443),
-        _ => None,
-    }
-}
-
-/// The folder an absolute glob's literal leading components name; `None`
-/// for a relative pattern or one using `.` or `..`.
-fn glob_folder(pattern: &str) -> Option<PathBuf> {
-    let path = Path::new(pattern);
-    if !path.is_absolute() {
-        return None;
-    }
-    let mut folder = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir | Component::ParentDir => return None,
-            Component::Normal(part) if part.to_str().is_some_and(|text| text.contains(['*', '?', '[', '{'])) => break,
-            other => folder.push(other.as_os_str()),
-        }
-    }
-    Some(folder)
 }

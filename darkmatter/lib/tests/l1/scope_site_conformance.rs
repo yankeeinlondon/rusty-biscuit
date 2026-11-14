@@ -457,7 +457,7 @@ fn run(site: ScopeSite, case: GuardCase) {
 fn options_for(dir: &Path, path: &Path) -> ComposeOptions {
     ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
         .with_source_file(path.to_path_buf())
-        .with_shell_policy_root(dir)
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[]))
         .with_shell_working_directory(dir)
         .with_shell_timeout(std::time::Duration::from_secs(60))
 }

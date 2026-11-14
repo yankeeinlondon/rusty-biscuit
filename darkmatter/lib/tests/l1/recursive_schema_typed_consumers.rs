@@ -402,7 +402,7 @@ mod shell_template_holes {
         std::fs::write(&path, body).unwrap();
         let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir.path(), ""))
             .with_source_file(path.clone())
-            .with_shell_policy_root(dir.path())
+            .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
             .with_shell_working_directory(dir.path())
             .with_shell_approval_handler(Arc::new(ApproveShape));
 

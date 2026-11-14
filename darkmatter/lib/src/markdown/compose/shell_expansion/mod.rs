@@ -7,9 +7,12 @@
 //!
 //! Shell expansion is inherently dangerous and requires careful security controls:
 //!
-//! - Built-in blacklist blocks dangerous commands (rm, dd, chmod, etc.)
-//! - User whitelist and blacklist files (`.darkmatter-shell-whitelist`, `.darkmatter-shell-blacklist`)
-//! - Approval handler callback for interactive prompting
+//! - Built-in blacklist refuses dangerous commands (rm, dd, chmod, etc.);
+//!   nothing configures or overrides it
+//! - `permissions.shell-commands` in the captured configuration pre-approves
+//!   commands; a `!` entry (exclusion) of any layer makes a command ask
+//! - Approval handler callback for interactive prompting; "always allow"
+//!   choices save to the user configuration
 //! - Command validation and normalization
 //! - Timeout protection
 //! - No shell metacharacters or redirections allowed
@@ -43,15 +46,14 @@ pub use discovery::collect_shell_commands;
 pub use executor::{execute_command, resolve_working_directory};
 pub use parser::parse_directives;
 pub use policy::{
-    check_builtin_blacklist, check_filled_chain, check_template_blacklist, check_user_blacklist,
-    check_whitelist, normalize_command,
+    check_builtin_blacklist, check_filled_chain, check_template_blacklist, check_template_exclusion,
+    check_user_blacklist, check_whitelist, filled_template_needs_approval, normalize_command,
 };
-pub use store::resolve_policy_paths;
 pub use types::{
     ErrorHandling, ErrorHandlingOutcome, ShellApprovalDecision, ShellApprovalHandler,
     ShellApprovalRequest, ShellChildEnvironment, ShellCommandEntry, ShellCommandOrigin, ShellDirective,
-    ShellExpansionError, ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths,
-    ShellRuleSet, ShellTimeoutBehavior,
+    ShellExpansionError, ShellExpansionOptions, ShellExpansionRuntime, ShellRuleEntry, ShellRuleSet,
+    ShellTimeoutBehavior,
 };
 
 use crate::markdown::compose::ComposeWarning;
@@ -94,8 +96,8 @@ impl<'a> ReservationGuard<'a> {
 
     /// Completes the reservation for `normalized` if this guard owns it.
     ///
-    /// A command this guard never reserved is already authorized — by the
-    /// whitelist or by a peer's completed allow-once — so it is left alone
+    /// A command this guard never reserved is already authorized — by a rule
+    /// or by a peer's completed allow-once — so it is left alone
     /// rather than released out from under whoever does own it.
     fn release(&mut self, key: &template::ApprovalKey, approved: bool) {
         if let Some(index) = self.held.iter().position(|held| held == key) {
@@ -172,8 +174,10 @@ impl DirectiveExecutionResult {
 ///
 /// ## Errors
 ///
-/// - `Blacklisted` if the command matches built-in or user blacklist
-/// - `ApprovalRequired` if approval handler is not set
+/// - `Blacklisted` if the command matches the built-in blacklist
+/// - `Config` if the request's `permissions` block is invalid
+/// - `ApprovalRequired` if no rule pre-approves the command (or an exclusion
+///   matches it) and no approval handler is set
 /// - `Denied` if approval handler denies the command
 /// - Propagates errors from `execute_command`
 ///
@@ -181,7 +185,7 @@ impl DirectiveExecutionResult {
 ///
 /// ```no_run
 /// use biscuit_terminal::errors::SourceContext;
-/// use darkmatter::markdown::compose::shell_expansion::{execute_directive, types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
+/// use darkmatter::markdown::compose::shell_expansion::{execute_directive, types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionRuntime}};
 /// use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
 /// use std::path::PathBuf;
 ///
@@ -200,21 +204,16 @@ impl DirectiveExecutionResult {
 ///     ctx,
 /// };
 /// let request = ComposeRequest::prepare(ComposeOptions::new(), &RequestSnapshot::new(std::env::temp_dir())).unwrap();
-/// let policy_paths = ShellPolicyPaths {
-///     whitelist: PathBuf::from("/tmp/whitelist"),
-///     blacklist: PathBuf::from("/tmp/blacklist"),
-/// };
 /// let mut runtime = ShellExpansionRuntime::new();
-/// // let output = execute_directive(&directive, &request, &policy_paths, &mut runtime).unwrap();
+/// // let output = execute_directive(&directive, &request, &mut runtime).unwrap();
 /// ```
 pub fn execute_directive(
     directive: &ShellDirective,
     request: &crate::markdown::compose::ComposeRequest,
-    policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<String, ShellExpansionError> {
     Ok(
-        execute_directive_detailed(directive, request, policy_paths, shell_runtime)?
+        execute_directive_detailed(directive, request, shell_runtime)?
             .combined_output(),
     )
 }
@@ -224,10 +223,9 @@ pub fn execute_directive(
 pub(crate) fn execute_directive_detailed(
     directive: &ShellDirective,
     options: &crate::markdown::compose::ComposeRequest,
-    policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<DirectiveExecutionResult, ShellExpansionError> {
-    let prepared = prepare_directive(directive, options, policy_paths, shell_runtime)?;
+    let prepared = prepare_directive(directive, options, shell_runtime)?;
     execute_prepared_directive(&prepared, options, shell_runtime)
 }
 
@@ -237,11 +235,11 @@ pub(crate) fn execute_directive_detailed(
 /// ## Notes
 ///
 /// Each directive is judged against a policy view taken at its own entry, so a
-/// rule persisted by an approval earlier in the same stage suppresses a later
+/// rule saved by an approval earlier in the same run suppresses a later
 /// directive's prompt — the user-observable prompt frequency callers rely on.
-/// The view is an [`Arc`]-shared borrow of the runtime's rule collections
-/// ([`ShellExpansionRuntime::snapshot`]), not a copy of them, so taking it per
-/// directive costs three refcount bumps.
+/// The view is an [`Arc`]-shared borrow of the request's captured permissions
+/// and the runtime's approvals ([`ShellExpansionRuntime::snapshot`]), not a
+/// copy of them, so taking it per directive costs three refcount bumps.
 ///
 /// The policy mutex is held only for those refcount bumps — never across
 /// parsing, approval, or command execution.
@@ -252,22 +250,27 @@ pub(crate) fn execute_directive_detailed(
 pub(crate) fn prepare_directive(
     directive: &ShellDirective,
     options: &crate::markdown::compose::ComposeRequest,
-    policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
-    prepare_resolved(directive, None, options, policy_paths, shell_runtime)
+    prepare_resolved(directive, None, options, shell_runtime)
 }
 
 /// [`prepare_directive`] for a directive that may run as its resolved bytes.
 ///
 /// `template` is the directive's authored template site, when it has one: a
-/// prompt then also offers the shape, and choosing it persists the shape and
+/// prompt then also offers the shape, and choosing it saves the shape and
 /// prepares the directive in template mode instead.
+///
+/// The decision order: the built-in blacklist refuses any segment of the
+/// complete chain (before pre-approvals, session approvals, or a prompt);
+/// then, without pre-approvals, a chain any exclusion matches needs an
+/// explicit approval of this run for every segment; otherwise each segment
+/// is pre-approved by a rule or by an earlier approval, and the rest are
+/// asked about as one chain.
 pub(crate) fn prepare_resolved(
     directive: &ShellDirective,
     template: Option<&site::TemplateSite<'_>>,
     options: &crate::markdown::compose::ComposeRequest,
-    policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
     let (effective, alias_name) = resolve_or_passthrough(
@@ -280,10 +283,15 @@ pub(crate) fn prepare_resolved(
     // Collect all normalized commands from the pipeline (or single command)
     let normalized_commands = collect_normalized_commands(&effective);
 
+    // The built-in blacklist judges the complete chain before anything else
+    // can authorize it.
+    check_builtin_chain(&effective, &display_command)?;
+
     // ── Pre-approved fast path ───────────────────────────────────────
     // Resolved-byte membership only: every segment's freshly resolved bytes
     // must be in the exact set. A site approved by its shape alone is not a
-    // member here, and nothing here adds the bytes it resolved to.
+    // member here, and nothing here adds the bytes it resolved to. Pre-flight
+    // already judged exclusions, so a member runs.
     if let Some(ref approved) = options.pre_approved_commands {
         for normalized in &normalized_commands {
             if !approved.contains_exact(normalized) {
@@ -295,243 +303,199 @@ pub(crate) fn prepare_resolved(
                 });
             }
         }
-        // Pre-approved transport is membership, not policy: the complete
-        // chain still meets both blacklists before its first segment runs.
-        check_runtime_blacklists(&effective, &display_command, &shell_runtime.snapshot().user_blacklist)?;
+        types::request_policy(options)?;
         return Ok(PreparedShellDirective::resolved(effective, display_command));
     }
 
-    let runtime_snapshot = shell_runtime.snapshot();
-
-    // 1. Check built-in blacklist for all commands
-    for (exe, args) in executables_with_args(&effective) {
-        if let Some(reason) = check_builtin_blacklist(&exe, &args) {
-            return Err(ShellExpansionError::Blacklisted {
-                ctx: Box::new(directive.ctx.clone()),
-                command: display_command.clone(),
-                reason,
-                origin: directive.origin.clone(),
-            });
-        }
-    }
-
-    // 2. Check user blacklist for all commands
-    for (i, normalized) in normalized_commands.iter().enumerate() {
-        let (exe, args) = executable_and_args_at(&effective, i);
-        if check_user_blacklist(&runtime_snapshot.user_blacklist, &exe, &args, normalized) {
-            return Err(ShellExpansionError::Blacklisted {
-                ctx: Box::new(directive.ctx.clone()),
-                command: display_command.clone(),
-                reason: "user blacklist".to_string(),
-                origin: directive.origin.clone(),
-            });
-        }
-    }
-
-    // A multi-segment user rule (a chain `template` blacklist) is judged on
-    // the complete chain.
-    check_runtime_blacklists(&effective, &display_command, &runtime_snapshot.user_blacklist)?;
+    let runtime_snapshot = shell_runtime.snapshot(options)?;
+    let segments = executables_with_args(&effective);
+    let chain = filled_chain(&effective);
+    // An exclusion of any layer matching any segment (or a chain `template`
+    // exclusion matching the whole chain) leaves no segment pre-approved.
+    let exclusion = runtime_snapshot.exclusion(|rules| rules.blocks_filled(&chain));
+    let by_policy: Vec<bool> = segments
+        .iter()
+        .zip(&normalized_commands)
+        .map(|((exe, _), normalized)| {
+            exclusion.is_none() && runtime_snapshot.allows(|rules| check_whitelist(rules, exe, normalized))
+        })
+        .collect();
 
     let suggested_rules = || {
         let offered = template.map_or_else(template::OfferedChoices::resolved_bytes, |site| site.offered());
-        let programs: Vec<String> = executables_with_args(&effective).into_iter().map(|(exe, _)| exe).collect();
+        let programs: Vec<String> = segments.iter().map(|(exe, _)| exe.clone()).collect();
         let shape = template.map(|site| site.shape());
-        Box::new(template::SuggestedRules::new(offered, Some(&normalized_commands), shape.as_ref(), &programs))
+        template::SuggestedRules::new(offered, Some(&normalized_commands), shape.as_ref(), &programs)
+    };
+    let approval_required = || {
+        types::approval_required(
+            &directive.ctx,
+            display_command.clone(),
+            &directive.origin,
+            runtime_snapshot.save_target(),
+            exclusion.clone(),
+            suggested_rules(),
+        )
     };
 
-    // Session approvals are keyed by mode and policy root: these are
-    // resolved-byte keys, which a template approval never matches.
-    let policy_root = template::ApprovalKey::policy_root_of(policy_paths);
+    // Session approvals are keyed by mode: these are resolved-byte keys,
+    // which a template approval never matches.
     let approval_keys: Vec<template::ApprovalKey> = normalized_commands
         .iter()
-        .map(|normalized| template::ApprovalKey::exact(policy_root, normalized.clone()))
+        .map(|normalized| template::ApprovalKey::exact(normalized.clone()))
         .collect();
 
-    // 3. Check whitelist for all commands
-    let all_whitelisted = normalized_commands
+    let all_authorized = approval_keys
         .iter()
-        .enumerate()
-        .all(|(i, normalized)| {
-            let (exe, _) = executable_and_args_at(&effective, i);
-            check_whitelist(&runtime_snapshot.whitelist, &exe, normalized)
-                || runtime_snapshot.allow_once.contains(&approval_keys[i])
-        });
-
-    if all_whitelisted {
+        .zip(&by_policy)
+        .all(|(key, by_policy)| *by_policy || runtime_snapshot.allow_once.contains(key));
+    if all_authorized {
         return Ok(PreparedShellDirective::resolved(effective, display_command));
     }
 
-    // 5. Request approval for the entire chain
-    if let Some(ref handler) = options.shell_approval_handler {
-        // Reserve only the commands that are not already authorized. Commands
-        // already in the snapshot whitelist or already in `allow_once` are
-        // skipped. If another thread holds a pending reservation for any
-        // command in this chain, treat it as a conflict and require fresh
-        // approval rather than implicitly approving the unrelated commands.
-        let mut guard = ReservationGuard::new(shell_runtime);
-        let mut pending_conflict = false;
+    // Request approval for the entire chain
+    let Some(handler) = options.shell_approval_handler.as_ref() else {
+        return Err(approval_required());
+    };
+    // Reserve only the commands that are not already authorized by a rule.
+    // If another thread holds a pending reservation for any command in this
+    // chain, treat it as a conflict and require fresh approval rather than
+    // implicitly approving the unrelated commands.
+    let mut guard = ReservationGuard::new(shell_runtime);
+    let mut pending_conflict = false;
 
-        for (i, normalized) in normalized_commands.iter().enumerate() {
-            let (exe, _) = executable_and_args_at(&effective, i);
-            if check_whitelist(&runtime_snapshot.whitelist, &exe, normalized) {
-                continue;
+    for (key, by_policy) in approval_keys.iter().zip(&by_policy) {
+        if *by_policy {
+            continue;
+        }
+        // Block on a same-command peer approval only while we hold no
+        // reservations of our own; otherwise a hold-and-wait cycle across
+        // cross-ordered chains could deadlock.
+        let may_wait = guard.holds_none();
+        match guard.reserve(key, may_wait) {
+            types::ReserveOutcome::Reserved | types::ReserveOutcome::AlreadyAllowed => {}
+            types::ReserveOutcome::Pending => {
+                pending_conflict = true;
+                break;
             }
-            // Block on a same-command peer approval only while we hold no
-            // reservations of our own; otherwise a hold-and-wait cycle across
-            // cross-ordered chains could deadlock.
-            let may_wait = guard.holds_none();
-            match guard.reserve(&approval_keys[i], may_wait) {
-                types::ReserveOutcome::Reserved | types::ReserveOutcome::AlreadyAllowed => {}
-                types::ReserveOutcome::Pending => {
-                    pending_conflict = true;
-                    break;
+        }
+    }
+
+    if pending_conflict {
+        // Release reservations we just made so the conflicting thread can
+        // make progress, then surface the conflict as an approval-required
+        // error instead of silently approving the rest of the chain.
+        drop(guard);
+        return Err(approval_required());
+    }
+
+    if guard.holds_none() {
+        // Every command in the chain is now authorized (a rule or a
+        // concurrently-completed allow-once). No prompt is needed.
+        return Ok(PreparedShellDirective::resolved(effective, display_command));
+    }
+
+    // Build the unique list of chain executables for the prompt. Empty
+    // when the request is a single command.
+    let chain_executables = if effective.is_chain() {
+        let mut seen = std::collections::HashSet::new();
+        segments
+            .iter()
+            .filter(|(exe, _)| seen.insert(exe.clone()))
+            .map(|(exe, _)| exe.clone())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+
+    // Present the entire chain for approval
+    let request = ShellApprovalRequest {
+        source: options.source.clone(),
+        origin: directive.origin.clone(),
+        raw_command: effective.raw_command.clone(),
+        executable: effective.executable.clone(),
+        args: effective.args.clone(),
+        normalized_exact: normalized_commands.join(" && "),
+        save_target: runtime_snapshot.save_target(),
+        exclusion: exclusion.clone(),
+        alias_name: alias_name.clone(),
+        chain_executables,
+        offered: template.map_or_else(template::OfferedChoices::resolved_bytes, |site| site.offered()),
+        template: template.and_then(|site| site.candidate().approval_view()),
+    };
+
+    let decision = handler.approve(request)?;
+    let policy = &runtime_snapshot.policy;
+    if let (ShellApprovalDecision::AllowTemplatePersist, Some(site)) = (&decision, template) {
+        for key in &approval_keys {
+            guard.release(key, false);
+        }
+        let shape = site.shape();
+        guard.runtime.save_rule(policy, ShellRuleEntry::Template(shape.clone()), None);
+        // The shape was approved explicitly: an exclusion its filled values
+        // match does not ask again this run.
+        guard.runtime.complete_allow_once(&template::ApprovalKey::template(shape), true);
+        return site.prepare_template(options, &guard.runtime.snapshot(options)?);
+    }
+    match decision {
+        ShellApprovalDecision::AllowExactPersist => {
+            for (normalized, key) in normalized_commands.iter().zip(&approval_keys) {
+                guard.release(key, true);
+                guard.runtime.save_rule(policy, ShellRuleEntry::Exact(normalized.clone()), Some(chain.clone()));
+            }
+            Ok(PreparedShellDirective::resolved(effective, display_command))
+        }
+        ShellApprovalDecision::AllowCommandPersist => {
+            for key in &approval_keys {
+                guard.release(key, true);
+            }
+            // Save a prefix entry for every unique executable in the chain so
+            // the next run does not re-prompt for later actions.
+            let mut persisted = std::collections::HashSet::new();
+            for (exe, _) in &segments {
+                if persisted.insert(exe.clone()) {
+                    guard.runtime.save_rule(policy, ShellRuleEntry::Prefix(exe.clone()), Some(chain.clone()));
                 }
             }
+            Ok(PreparedShellDirective::resolved(effective, display_command))
         }
-
-        if pending_conflict {
-            // Release reservations we just made so the conflicting thread can
-            // make progress, then surface the conflict as an approval-required
-            // error instead of silently approving the rest of the chain.
-            drop(guard);
-            return Err(ShellExpansionError::ApprovalRequired {
-                ctx: Box::new(directive.ctx.clone()),
-                command: display_command,
-                whitelist_path: Box::new(policy_paths.whitelist.clone()),
-                blacklist_path: Box::new(policy_paths.blacklist.clone()),
-                origin: directive.origin.clone(),
-                suggested_rules: suggested_rules(),
-            });
+        ShellApprovalDecision::AllowOnce => {
+            for key in &approval_keys {
+                guard.release(key, true);
+            }
+            guard.runtime.approvals_used += 1;
+            Ok(PreparedShellDirective::resolved(effective, display_command))
         }
-
-        if guard.holds_none() {
-            // Every command in the chain is now authorized (whitelist or a
-            // concurrently-completed allow-once). No prompt is needed.
-            return Ok(PreparedShellDirective::resolved(effective, display_command));
-        }
-
-        // Build the unique list of chain executables for the prompt. Empty
-        // when the request is a single command.
-        let chain_executables = if effective.is_chain() {
-            let mut seen = std::collections::HashSet::new();
-            executables_with_args(&effective)
-                .into_iter()
-                .filter_map(|(exe, _)| seen.insert(exe.clone()).then_some(exe))
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-
-        // Present the entire chain for approval
-        let request = ShellApprovalRequest {
-            source: options.source.clone(),
-            origin: directive.origin.clone(),
-            raw_command: effective.raw_command.clone(),
-            executable: effective.executable.clone(),
-            args: effective.args.clone(),
-            normalized_exact: normalized_commands.join(" && "),
-            whitelist_path: policy_paths.whitelist.clone(),
-            blacklist_path: policy_paths.blacklist.clone(),
-            alias_name: alias_name.clone(),
-            chain_executables,
-            offered: template.map_or_else(template::OfferedChoices::resolved_bytes, |site| site.offered()),
-            template: template.and_then(|site| site.candidate().approval_view()),
-        };
-
-        let decision = handler.approve(request)?;
-        if let (ShellApprovalDecision::AllowTemplatePersist, Some(site)) = (&decision, template) {
+        // The shape choice was not offered: this request is for resolved
+        // bytes, so a template decision cannot authorize it.
+        ShellApprovalDecision::Deny | ShellApprovalDecision::AllowTemplatePersist => {
             for key in &approval_keys {
                 guard.release(key, false);
             }
-            let shape = site.shape();
-            store::append_whitelist_template(policy_paths, &shape)?;
-            guard.runtime.persist_whitelist_template(shape);
-            return site.prepare_template(options, &guard.runtime.snapshot());
+            Err(ShellExpansionError::Denied {
+                ctx: Box::new(directive.ctx.clone()),
+                command: display_command,
+                origin: directive.origin.clone(),
+            })
         }
-        match decision {
-            ShellApprovalDecision::AllowExactPersist => {
-                for (normalized, key) in normalized_commands.iter().zip(&approval_keys) {
-                    guard.release(key, false);
-                    store::append_whitelist_exact(policy_paths, normalized)?;
-                    guard.runtime.persist_whitelist_exact(normalized.clone());
-                }
-                Ok(PreparedShellDirective::resolved(effective, display_command))
-            }
-            ShellApprovalDecision::AllowCommandPersist => {
-                for key in &approval_keys {
-                    guard.release(key, false);
-                }
-                // Persist a prefix entry for every unique executable in the
-                // chain so the next run does not re-prompt for later actions.
-                let mut persisted = std::collections::HashSet::new();
-                for (exe, _) in executables_with_args(&effective) {
-                    if persisted.insert(exe.clone()) {
-                        store::append_whitelist_prefix(policy_paths, &exe)?;
-                        guard.runtime.persist_whitelist_prefix(exe);
-                    }
-                }
-                Ok(PreparedShellDirective::resolved(effective, display_command))
-            }
-            ShellApprovalDecision::AllowOnce => {
-                for key in &approval_keys {
-                    guard.release(key, true);
-                }
-                guard.runtime.approvals_used += 1;
-                Ok(PreparedShellDirective::resolved(effective, display_command))
-            }
-            // The shape choice was not offered: this request is for resolved
-            // bytes, so a template decision cannot authorize it.
-            ShellApprovalDecision::Deny | ShellApprovalDecision::AllowTemplatePersist => {
-                for key in &approval_keys {
-                    guard.release(key, false);
-                }
-                Err(ShellExpansionError::Denied {
-                    ctx: Box::new(directive.ctx.clone()),
-                    command: display_command,
-                    origin: directive.origin.clone(),
-                })
-            }
-            ShellApprovalDecision::BlacklistPersist => {
-                for (normalized, key) in normalized_commands.iter().zip(&approval_keys) {
-                    guard.release(key, false);
-                    store::append_blacklist_exact(policy_paths, normalized)?;
-                    guard.runtime.persist_blacklist_exact(normalized.clone());
-                }
-                Err(ShellExpansionError::Blacklisted {
-                    ctx: Box::new(directive.ctx.clone()),
-                    command: display_command,
-                    reason: "user blacklisted".to_string(),
-                    origin: directive.origin.clone(),
-                })
-            }
-        }
-    } else {
-        Err(ShellExpansionError::ApprovalRequired {
-            ctx: Box::new(directive.ctx.clone()),
-            command: display_command,
-            whitelist_path: Box::new(policy_paths.whitelist.clone()),
-            blacklist_path: Box::new(policy_paths.blacklist.clone()),
-            origin: directive.origin.clone(),
-            suggested_rules: suggested_rules(),
-        })
     }
 }
 
-/// Checks `effective`'s complete chain against the built-in and user
-/// blacklists, every segment before any runs.
-fn check_runtime_blacklists(
-    effective: &ShellDirective,
-    display_command: &str,
-    user_blacklist: &ShellRuleSet,
-) -> Result<(), ShellExpansionError> {
-    let chain = match &effective.pipeline {
+/// `effective` as one filled chain: every segment's program and arguments.
+fn filled_chain(effective: &ShellDirective) -> template::FilledChain {
+    match &effective.pipeline {
         Some(pipeline) => template::FilledChain::from_pipeline(pipeline),
         None => template::FilledChain::from_pipeline(&types::ShellPipeline::single(
             effective.executable.clone(),
             effective.args.clone(),
         )),
-    };
-    match check_filled_chain(&chain, user_blacklist) {
+    }
+}
+
+/// Checks `effective`'s complete chain against the built-in blacklist, every
+/// segment before any runs.
+fn check_builtin_chain(effective: &ShellDirective, display_command: &str) -> Result<(), ShellExpansionError> {
+    match check_filled_chain(&filled_chain(effective)) {
         Some(reason) => Err(ShellExpansionError::Blacklisted {
             ctx: Box::new(effective.ctx.clone()),
             command: display_command.to_string(),
@@ -1012,16 +976,28 @@ fn executables_with_args(directive: &ShellDirective) -> Vec<(String, Vec<String>
     }
 }
 
-fn executable_and_args_at(directive: &ShellDirective, index: usize) -> (String, Vec<String>) {
-    if let Some(ref pipeline) = directive.pipeline
-        && let Some(action) = pipeline.actions.get(index)
-    {
-        return (
-            action.command.executable.clone(),
-            action.command.args.clone(),
-        );
+/// The configuration of a user whose home is `home`, with `rules` as the
+/// `permissions.shell-commands` of `~/.darkmatter.yaml` (no file when there
+/// are none), and no repository: what a shell test composes under, so it
+/// never reads or writes the process's home.
+#[cfg(test)]
+pub(crate) fn test_shell_config(
+    home: &std::path::Path,
+    rules: &[&str],
+) -> std::sync::Arc<crate::config::load::ConfigSnapshot> {
+    if !rules.is_empty() {
+        let mut text = String::from("permissions:\n  shell-commands:\n");
+        for rule in rules {
+            text.push_str(&format!("    - {}\n", serde_json::to_string(rule).expect("a rule string")));
+        }
+        std::fs::write(home.join(crate::config::schema::CONFIG_FILE_NAME), text).expect("user configuration");
     }
-    (directive.executable.clone(), directive.args.clone())
+    let snapshot =
+        crate::markdown::compose::RequestSnapshot::new(home).with_home(Some(home.to_path_buf()));
+    std::sync::Arc::new(
+        crate::config::load::ConfigSnapshot::load_user(&snapshot, crate::config::load::ConfigLoadMode::Passive)
+            .expect("test configuration"),
+    )
 }
 
 #[cfg(test)]
@@ -1082,8 +1058,7 @@ mod integration_tests {
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1105,8 +1080,7 @@ mod integration_tests {
         let md: Markdown = content.into();
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1123,8 +1097,7 @@ mod integration_tests {
         let md: Markdown = content.into();
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1185,8 +1158,7 @@ mod integration_tests {
         let md: Markdown = content.into();
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1212,8 +1184,7 @@ mod integration_tests {
         let md: Markdown = content.into();
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1270,8 +1241,7 @@ mod integration_tests {
         let md: Markdown = content.as_str().into();
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::PageBlocks, ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1404,10 +1374,9 @@ mod integration_tests {
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 timeout: std::time::Duration::from_secs(1),
                 timeout_behavior: ShellTimeoutBehavior::EmptyString,
-                policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1436,8 +1405,7 @@ mod integration_tests {
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1460,8 +1428,7 @@ mod integration_tests {
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1482,8 +1449,7 @@ mod integration_tests {
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: None,
                 ..Default::default()
             });
@@ -1497,16 +1463,13 @@ mod integration_tests {
     #[test]
     fn pipeline_uses_whitelist() {
         let temp_dir = TempDir::new().unwrap();
-        let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
-        std::fs::write(&whitelist_path, "prefix echo\n").unwrap();
 
         let content = "# Test\n::shell echo hello\n";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &["prefix echo"])).with_shell(ShellExpansionOptions {
                 approval_handler: None, // No handler needed - whitelisted
                 ..Default::default()
             });
@@ -1526,8 +1489,7 @@ mod integration_tests {
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1558,8 +1520,7 @@ name: world
                 ComposeOperation::Interpolation,
                 ComposeOperation::ShellExpansion,
             ])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1590,8 +1551,7 @@ name: world
         let options =
             ComposeOptions::new()
                 .with_source_file(&root)
-                .with_shell(ShellExpansionOptions {
-                    policy_root: Some(temp_dir.path().to_path_buf()),
+                .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                     approval_handler: Some(handler.clone()),
                     ..Default::default()
                 });
@@ -1623,8 +1583,7 @@ name: world
         let options =
             ComposeOptions::new()
                 .with_source_file(&root)
-                .with_shell(ShellExpansionOptions {
-                    policy_root: Some(temp_dir.path().to_path_buf()),
+                .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                     approval_handler: Some(handler.clone()),
                     ..Default::default()
                 });
@@ -1656,8 +1615,7 @@ name: world
         let options =
             ComposeOptions::new()
                 .with_source_file(&root)
-                .with_shell(ShellExpansionOptions {
-                    policy_root: Some(temp_dir.path().to_path_buf()),
+                .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                     approval_handler: Some(handler.clone()),
                     ..Default::default()
                 });
@@ -1691,8 +1649,7 @@ name: world
         let options =
             ComposeOptions::new()
                 .with_source_file(&root)
-                .with_shell(ShellExpansionOptions {
-                    policy_root: Some(temp_dir.path().to_path_buf()),
+                .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                     approval_handler: Some(handler.clone()),
                     ..Default::default()
                 });
@@ -1729,8 +1686,7 @@ name: world
         ));
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(handler.clone()),
                 ..Default::default()
             });
@@ -1743,7 +1699,7 @@ name: world
             "the second directive must observe the `prefix echo` rule the first one persisted, \
              and not prompt again"
         );
-        let whitelist = std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist"))
+        let whitelist = std::fs::read_to_string(temp_dir.path().join(".darkmatter.yaml"))
             .unwrap();
         assert!(
             whitelist.contains("prefix echo"),
@@ -1768,8 +1724,7 @@ name: world
         ));
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(handler.clone()),
                 ..Default::default()
             });
@@ -1792,37 +1747,41 @@ name: world
     /// view per directive is affordable only because it copies no rules.
     #[test]
     fn snapshot_shares_rule_collections_by_pointer() {
+        let home = TempDir::new().unwrap();
+        let request = crate::markdown::compose::test_request(
+            ComposeOptions::new().with_config_snapshot(super::test_shell_config(home.path(), &[])),
+        );
         let mut runtime = ShellExpansionRuntime::new();
 
-        let first = runtime.snapshot();
-        let second = runtime.snapshot();
+        let first = runtime.snapshot(&request).unwrap();
+        let second = runtime.snapshot(&request).unwrap();
         assert!(
-            Arc::ptr_eq(&first.whitelist, &second.whitelist),
-            "two snapshots of an unchanged runtime must share one whitelist allocation"
+            Arc::ptr_eq(&first.saved, &second.saved),
+            "two snapshots of an unchanged runtime must share one saved-rule allocation"
         );
         assert!(
-            Arc::ptr_eq(&first.user_blacklist, &second.user_blacklist),
-            "two snapshots of an unchanged runtime must share one blacklist allocation"
+            Arc::ptr_eq(&first.policy, &second.policy),
+            "two snapshots of one request must share its captured policy"
         );
         assert!(
             Arc::ptr_eq(&first.allow_once, &second.allow_once),
             "two snapshots of an unchanged runtime must share one allow-once allocation"
         );
 
-        runtime.persist_whitelist_prefix("echo".to_string());
+        runtime.save_rule(&first.policy, ShellRuleEntry::Prefix("echo".to_string()), None);
 
-        let third = runtime.snapshot();
+        let third = runtime.snapshot(&request).unwrap();
         assert!(
-            !Arc::ptr_eq(&first.whitelist, &third.whitelist),
-            "persisting a rule must not mutate a snapshot taken before it"
+            !Arc::ptr_eq(&first.saved, &third.saved),
+            "saving a rule must not mutate a snapshot taken before it"
         );
         assert!(
-            first.whitelist.entries.is_empty(),
-            "the pre-persist snapshot must still observe the rules it was taken with"
+            first.saved.entries.is_empty(),
+            "the pre-save snapshot must still observe the rules it was taken with"
         );
         assert!(
-            third.whitelist.matches_prefix("echo"),
-            "a snapshot taken after the persist must observe the new rule"
+            third.allows(|rules| rules.matches_prefix("echo")),
+            "a snapshot taken after the save must observe the new rule"
         );
     }
 
@@ -1841,8 +1800,7 @@ name: world
         ));
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(handler.clone()),
                 ..Default::default()
             });
@@ -1875,7 +1833,7 @@ name: world
             ) -> Result<ShellApprovalDecision, ShellExpansionError> {
                 // Reaching into the shared policy state from inside the approval
                 // callback must not block.
-                let _ = self.runtime.snapshot();
+                let _ = self.runtime.pending_allow_once_for_test();
                 Ok(ShellApprovalDecision::AllowOnce)
             }
         }
@@ -1887,8 +1845,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(RuntimeTouchingHandler {
                     runtime: runtime.clone_for_child(),
                 })),
@@ -1914,8 +1871,7 @@ name: world
         let options = ComposeOptions::new()
             .with_source_file(&file_path)
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -1936,8 +1892,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::Deny,
                 })),
@@ -1964,8 +1919,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(handler.clone()),
                 ..Default::default()
             });
@@ -1996,8 +1950,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowCommandPersist,
                 })),
@@ -2008,7 +1961,7 @@ name: world
         assert!(composed.content().contains("ok"));
 
         let whitelist =
-            std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist")).unwrap();
+            std::fs::read_to_string(temp_dir.path().join(".darkmatter.yaml")).unwrap();
         assert!(
             whitelist.contains("prefix echo"),
             "whitelist missing 'prefix echo': {whitelist:?}"
@@ -2028,8 +1981,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowCommandPersist,
                 })),
@@ -2039,7 +1991,7 @@ name: world
         let _ = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let whitelist =
-            std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist")).unwrap();
+            std::fs::read_to_string(temp_dir.path().join(".darkmatter.yaml")).unwrap();
         let count = whitelist.matches("prefix echo").count();
         assert_eq!(
             count, 1,
@@ -2061,8 +2013,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(handler.clone()),
                 ..Default::default()
             });
@@ -2092,8 +2043,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(handler.clone()),
                 ..Default::default()
             });
@@ -2114,8 +2064,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowExactPersist,
                 })),
@@ -2126,33 +2075,29 @@ name: world
         assert!(composed.content().contains("hello"));
 
         let whitelist =
-            std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist")).unwrap();
+            std::fs::read_to_string(temp_dir.path().join(".darkmatter.yaml")).unwrap();
         assert!(whitelist.contains("exact echo hello"));
     }
 
-    /// BlacklistPersist writes to the blacklist and errors.
+    /// Deny refuses for this run only: nothing is saved.
     #[test]
-    fn pipeline_blacklist_persist_writes_and_errors() {
+    fn pipeline_deny_saves_nothing() {
         let temp_dir = TempDir::new().unwrap();
         let content = "# Test\n::shell echo hello\n";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
-                    decision: ShellApprovalDecision::BlacklistPersist,
+                    decision: ShellApprovalDecision::Deny,
                 })),
                 ..Default::default()
             });
 
         let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
-        assert!(err.to_string().contains("Blacklisted") || err.to_string().contains("blacklist"));
-
-        let blacklist =
-            std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-blacklist")).unwrap();
-        assert!(blacklist.contains("exact echo hello"));
+        assert!(err.to_string().contains("denied"), "{err}");
+        assert!(!temp_dir.path().join(".darkmatter.yaml").exists());
     }
 
     /// Empty command output removes the directive line entirely.
@@ -2164,8 +2109,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2187,8 +2131,7 @@ name: world
         let options = ComposeOptions::new()
             .with_fail_fast(false)
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2208,8 +2151,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2232,8 +2174,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2259,8 +2200,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2285,8 +2225,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2312,8 +2251,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2333,8 +2271,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2360,8 +2297,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2387,8 +2323,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2489,8 +2424,6 @@ name: world
     #[test]
     fn pipeline_whitelist_prefix_does_not_authorize_later_chain_actions() {
         let temp_dir = TempDir::new().unwrap();
-        let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
-        std::fs::write(&whitelist_path, "prefix echo\n").unwrap();
 
         // Whitelist allows `echo`, but `pwd` must trigger approval.
         let content = "::shell echo ok && pwd\n";
@@ -2498,8 +2431,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &["prefix echo"])).with_shell(ShellExpansionOptions {
                 approval_handler: None, // No approval handler -- must error
                 ..Default::default()
             });
@@ -2517,16 +2449,13 @@ name: world
     #[test]
     fn pipeline_whitelist_authorizes_chain_when_each_action_matches() {
         let temp_dir = TempDir::new().unwrap();
-        let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
-        std::fs::write(&whitelist_path, "prefix echo\nprefix pwd\n").unwrap();
 
         let content = "::shell echo ok && pwd\n";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &["prefix echo", "prefix pwd"])).with_shell(ShellExpansionOptions {
                 approval_handler: None,
                 ..Default::default()
             });
@@ -2549,8 +2478,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(handler.clone()),
                 ..Default::default()
             });
@@ -2580,8 +2508,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(handler.clone()),
                 ..Default::default()
             });
@@ -2605,8 +2532,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2628,8 +2554,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2650,8 +2575,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2671,8 +2595,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2693,8 +2616,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2715,8 +2637,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2742,8 +2663,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2769,8 +2689,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2797,8 +2716,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2830,8 +2748,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2858,8 +2775,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2888,8 +2804,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2925,8 +2840,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2958,8 +2872,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -2988,8 +2901,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -3013,8 +2925,7 @@ name: world
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::ShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApprovalHandler {
                     decision: ShellApprovalDecision::AllowOnce,
                 })),
@@ -3102,27 +3013,12 @@ name: world
                 .expect("fixture must parse to exactly one directive")
         }
 
-        fn options(decision: ShellApprovalDecision) -> crate::markdown::compose::ComposeRequest {
+        fn options(home: &Path, decision: ShellApprovalDecision) -> crate::markdown::compose::ComposeRequest {
             crate::markdown::compose::test_request(
-                ComposeOptions::new().with_shell_approval_handler(Arc::new(FixedHandler(decision))),
+                ComposeOptions::new()
+                    .with_config_snapshot(super::super::test_shell_config(home, &[]))
+                    .with_shell_approval_handler(Arc::new(FixedHandler(decision))),
             )
-        }
-
-        fn policy_paths(temp: &TempDir) -> ShellPolicyPaths {
-            ShellPolicyPaths {
-                whitelist: temp.path().join(".darkmatter-shell-whitelist"),
-                blacklist: temp.path().join(".darkmatter-shell-blacklist"),
-            }
-        }
-
-        /// Makes a policy file reject an append the way a read-only checkout or
-        /// a root-owned policy file does, so the persistence arms fail for real
-        /// rather than through a test-only seam.
-        fn make_unwritable(path: &Path) {
-            std::fs::write(path, "").unwrap();
-            let mut perms = std::fs::metadata(path).unwrap().permissions();
-            perms.set_readonly(true);
-            std::fs::set_permissions(path, perms).unwrap();
         }
 
         /// Asserts the failed flow released every reservation it took, then that
@@ -3133,11 +3029,7 @@ name: world
         /// exact definition of the defect, and failing on it reports the leaked
         /// command by name instead of letting the second composition stall for
         /// the full 30s `RESERVATION_WAIT_TIMEOUT`.
-        fn assert_reservations_released(
-            runtime: &mut ShellExpansionRuntime,
-            paths: &ShellPolicyPaths,
-            command: &str,
-        ) {
+        fn assert_reservations_released(runtime: &mut ShellExpansionRuntime, home: &Path, command: &str) {
             let leaked = runtime.pending_allow_once_for_test();
             assert!(
                 leaked.is_empty(),
@@ -3146,12 +3038,9 @@ name: world
                  user never caused"
             );
 
-            if let Err(err) = prepare_directive(
-                &directive(command),
-                &options(ShellApprovalDecision::AllowOnce),
-                paths,
-                runtime,
-            ) {
+            if let Err(err) =
+                prepare_directive(&directive(command), &options(home, ShellApprovalDecision::AllowOnce), runtime)
+            {
                 panic!("a released command must not surface an approval conflict; got: {err}");
             }
         }
@@ -3161,99 +3050,52 @@ name: world
         #[test]
         fn approval_handler_error_releases_every_reservation() {
             let temp = TempDir::new().unwrap();
-            let paths = policy_paths(&temp);
             let mut runtime = ShellExpansionRuntime::new();
 
             let failing = crate::markdown::compose::test_request(
-                ComposeOptions::new().with_shell_approval_handler(Arc::new(FailingHandler)),
+                ComposeOptions::new()
+                    .with_config_snapshot(super::super::test_shell_config(temp.path(), &[]))
+                    .with_shell_approval_handler(Arc::new(FailingHandler)),
             );
-            let err = prepare_directive(
-                &directive("echo alpha && echo beta"),
-                &failing,
-                &paths,
-                &mut runtime,
-            )
-            .expect_err("the handler's error must propagate unchanged");
+            let err = prepare_directive(&directive("echo alpha && echo beta"), &failing, &mut runtime)
+                .expect_err("the handler's error must propagate unchanged");
             assert!(
                 matches!(err, ShellExpansionError::PolicyIo { .. }),
                 "got: {err}"
             );
 
-            assert_reservations_released(&mut runtime, &paths, "echo beta");
+            assert_reservations_released(&mut runtime, temp.path(), "echo beta");
         }
 
-        /// Error class 2 — `append_whitelist_exact` fails mid-chain. `echo
-        /// alpha` is released and its append fails, so `echo beta` is still
-        /// reserved when the error propagates.
+        /// An "always allow" whose rule cannot be saved (an exclusion still
+        /// matches it) approves the run anyway, holds no reservation, and
+        /// reports `dm.config.not_saved`.
         #[test]
-        fn whitelist_exact_write_failure_releases_the_rest_of_the_chain() {
+        fn an_unsaved_rule_still_approves_and_releases_the_chain() {
             let temp = TempDir::new().unwrap();
-            let paths = policy_paths(&temp);
-            make_unwritable(&paths.whitelist);
+            let snapshot = super::super::test_shell_config(temp.path(), &["!prefix echo"]);
+            let before = std::fs::read(temp.path().join(".darkmatter.yaml")).unwrap();
             let mut runtime = ShellExpansionRuntime::new();
-
-            let err = prepare_directive(
-                &directive("echo alpha && echo beta"),
-                &options(ShellApprovalDecision::AllowExactPersist),
-                &paths,
-                &mut runtime,
-            )
-            .expect_err("an unwritable whitelist must fail the persist");
-            assert!(
-                matches!(err, ShellExpansionError::PolicyIo { .. }),
-                "got: {err}"
+            let request = crate::markdown::compose::test_request(
+                ComposeOptions::new()
+                    .with_config_snapshot(snapshot)
+                    .with_shell_approval_handler(Arc::new(FixedHandler(ShellApprovalDecision::AllowExactPersist))),
             );
 
-            assert_reservations_released(&mut runtime, &paths, "echo beta");
-        }
+            prepare_directive(&directive("echo alpha && echo beta"), &request, &mut runtime)
+                .expect("the run's approval stands although nothing was saved");
 
-        /// Error class 3 — `append_whitelist_prefix` fails. This arm releases
-        /// the whole chain before its first fallible write, so it holds nothing
-        /// to leak; the test pins that ordering against a future edit that
-        /// interleaves release and persist the way the exact arm does.
-        #[test]
-        fn whitelist_prefix_write_failure_leaves_no_reservation() {
-            let temp = TempDir::new().unwrap();
-            let paths = policy_paths(&temp);
-            make_unwritable(&paths.whitelist);
-            let mut runtime = ShellExpansionRuntime::new();
-
-            let err = prepare_directive(
-                &directive("echo alpha && pwd"),
-                &options(ShellApprovalDecision::AllowCommandPersist),
-                &paths,
-                &mut runtime,
-            )
-            .expect_err("an unwritable whitelist must fail the persist");
-            assert!(
-                matches!(err, ShellExpansionError::PolicyIo { .. }),
-                "got: {err}"
+            assert!(runtime.pending_allow_once_for_test().is_empty());
+            let warnings = runtime.take_recent_warnings();
+            assert_eq!(warnings.len(), 2, "{warnings:?}");
+            assert!(warnings.iter().all(|warning| warning.code.as_deref() == Some("dm.config.not_saved")));
+            assert_eq!(std::fs::read(temp.path().join(".darkmatter.yaml")).unwrap(), before);
+            // The run's approval covers the rest of the run.
+            let no_prompt = crate::markdown::compose::test_request(
+                ComposeOptions::new().with_config_snapshot(super::super::test_shell_config(temp.path(), &[])),
             );
-
-            assert_reservations_released(&mut runtime, &paths, "pwd");
-        }
-
-        /// Error class 4 — `append_blacklist_exact` fails mid-chain.
-        #[test]
-        fn blacklist_exact_write_failure_releases_the_rest_of_the_chain() {
-            let temp = TempDir::new().unwrap();
-            let paths = policy_paths(&temp);
-            make_unwritable(&paths.blacklist);
-            let mut runtime = ShellExpansionRuntime::new();
-
-            let err = prepare_directive(
-                &directive("echo alpha && echo beta"),
-                &options(ShellApprovalDecision::BlacklistPersist),
-                &paths,
-                &mut runtime,
-            )
-            .expect_err("an unwritable blacklist must fail the persist");
-            assert!(
-                matches!(err, ShellExpansionError::PolicyIo { .. }),
-                "got: {err}"
-            );
-
-            assert_reservations_released(&mut runtime, &paths, "echo beta");
+            prepare_directive(&directive("echo alpha && echo beta"), &no_prompt, &mut runtime)
+                .expect("the approved chain runs again without asking");
         }
 
         /// Longest the approver will spin waiting for the peer to park before
@@ -3320,7 +3162,6 @@ name: world
             }
 
             let temp = TempDir::new().unwrap();
-            let paths = policy_paths(&temp);
             let runtime = ShellExpansionRuntime::new();
             let entered = Arc::new((Mutex::new(false), Condvar::new()));
 
@@ -3330,10 +3171,10 @@ name: world
             // park and needlessly widen `WAITER_PARK_DEADLINE`; it also keeps
             // that cost out of `NOTIFICATION_BUDGET`.
             let waiter_directive = directive("echo shared");
-            let waiter_options = options(ShellApprovalDecision::AllowOnce);
+            let waiter_options = options(temp.path(), ShellApprovalDecision::AllowOnce);
+            let approver_config = super::super::test_shell_config(temp.path(), &[]);
 
             let mut approver_runtime = runtime.clone_for_child();
-            let approver_paths = paths.clone();
             let approver_entered = Arc::clone(&entered);
             // The probe shares the same `Arc<Mutex<..>>` as every other handle
             // (via `clone_for_child`), so `parked_waiters_for_test` on it sees
@@ -3345,14 +3186,9 @@ name: world
                     probe: approver_probe,
                 });
                 let opts = crate::markdown::compose::test_request(
-                    ComposeOptions::new().with_shell_approval_handler(handler),
+                    ComposeOptions::new().with_config_snapshot(approver_config).with_shell_approval_handler(handler),
                 );
-                prepare_directive(
-                    &directive("echo shared"),
-                    &opts,
-                    &approver_paths,
-                    &mut approver_runtime,
-                )
+                prepare_directive(&directive("echo shared"), &opts, &mut approver_runtime)
                 .expect_err("the handler's error must propagate unchanged")
             });
 
@@ -3376,14 +3212,8 @@ name: world
             // the approver's handler is blocked until that park is observed.
             let (outcome_tx, outcome_rx) = std::sync::mpsc::channel();
             let mut waiter_runtime = runtime.clone_for_child();
-            let waiter_paths = paths.clone();
             std::thread::spawn(move || {
-                let prepared = prepare_directive(
-                    &waiter_directive,
-                    &waiter_options,
-                    &waiter_paths,
-                    &mut waiter_runtime,
-                );
+                let prepared = prepare_directive(&waiter_directive, &waiter_options, &mut waiter_runtime);
                 let _ = outcome_tx.send(prepared.map(|_| ()).map_err(|err| err.to_string()));
             });
 
@@ -3408,3 +3238,4 @@ name: world
         }
     }
 }
+

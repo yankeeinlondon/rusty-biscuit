@@ -50,10 +50,7 @@ fn write(dir: &Path, name: &str, content: &str) -> PathBuf {
 fn options(dir: &Path, path: &Path) -> ComposeOptions {
     ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
         .with_source_file(path.to_path_buf())
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(dir.to_path_buf()),
-            ..Default::default()
-        })
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[])).with_shell(ShellExpansionOptions::default())
         .with_shell_approval_handler(Arc::new(AllowAll))
 }
 

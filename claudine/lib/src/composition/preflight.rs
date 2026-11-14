@@ -1,7 +1,7 @@
 //! Pre-flight shell command approval for provider sessions.
 //!
 //! Scans all sources of shell commands (template directives and lifecycle
-//! stacks), checks them against the whitelist, prompts the user for any that
+//! stacks), checks them against the captured `permissions`, prompts the user for any that
 //! need approval, and returns the full pre-approved set.
 
 use std::collections::{HashMap, HashSet};
@@ -33,13 +33,13 @@ pub struct PreFlightResult {
     pub approved_commands: ShellPreApprovals,
     /// Total commands discovered across all sources.
     pub total_discovered: usize,
-    /// Commands that were already whitelisted.
+    /// Commands the captured `permissions` already pre-approved.
     pub already_whitelisted: usize,
     /// Commands the user approved interactively.
     pub user_approved: usize,
 }
 
-/// Scans all sources of shell commands, checks whitelist, prompts user,
+/// Scans all sources of shell commands, checks the captured `permissions`, prompts user,
 /// returns the full pre-approved set: resolved bytes, and the shapes of
 /// document sites approved by a template rule or as templates.
 ///
@@ -129,7 +129,6 @@ pub fn resolve_shell_approvals(
             lifecycle_config,
             &LifecycleSignal::ALL,
             &result.approved_commands,
-            approval_options.policy_root.as_deref(),
         );
     }
     Ok(result)
@@ -163,7 +162,7 @@ pub fn resolve_graph_shell_approvals(
         &crate::composition::sequence::preflight::PromptReference,
     ) -> Result<ComposeRequest, CompositionError>,
 ) -> Result<PreFlightResult, CompositionError> {
-    graph.record_shell_authorization(ShellPreApprovals::new(), None);
+    graph.record_shell_authorization(ShellPreApprovals::new(), approval_options.permissions.clone());
     let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
     let mut candidates: Vec<ShellCandidate> = graph.template_candidates.clone();
 
@@ -215,7 +214,7 @@ pub fn resolve_graph_shell_approvals(
     }
 
     let result = approve_commands(all_commands, &candidates, approval_options)?;
-    graph.record_shell_authorization(result.approved_commands.clone(), approval_options.policy_root.clone());
+    graph.record_shell_authorization(result.approved_commands.clone(), approval_options.permissions.clone());
     Ok(result)
 }
 
@@ -227,7 +226,7 @@ pub fn resolve_graph_shell_approvals(
 /// then a template rule, then a prefix rule. A resolved-byte site with a
 /// placeholder that no rule covers is asked about as a site, so its prompt
 /// offers the shape beside the exact bytes. The bytes of a site approved by
-/// its shape are still checked against the blacklists; they join the exact
+/// its shape are still checked against the built-in blacklist; they join the exact
 /// set only when another site needs them as bytes.
 fn approve_commands(
     all_commands: Vec<(String, std::path::PathBuf, usize)>,
@@ -334,7 +333,6 @@ pub fn resolve_lifecycle_shell_approvals(
         lifecycle,
         signals,
         &result.approved_commands,
-        approval_options.policy_root.as_deref(),
     );
     Ok(result)
 }
@@ -346,14 +344,13 @@ pub(crate) fn settle_lifecycle_shell_modes(
     lifecycle: &LifecycleConfig,
     signals: &[LifecycleSignal],
     approved: &ShellPreApprovals,
-    policy_root: Option<&Path>,
 ) {
-    darkmatter::lifecycle::preflight::settle_lifecycle_shell_modes(lifecycle, signals, approved, policy_root);
+    darkmatter::lifecycle::preflight::settle_lifecycle_shell_modes(lifecycle, signals, approved);
 }
 
 /// Deduplicate `all_commands` and run each survivor through shell policy.
 /// The bytes in `shape_only` belong only to sites already approved by their
-/// shape: they are checked against the blacklists and neither prompted for
+/// shape: they are checked against the built-in blacklist and neither prompted for
 /// nor added to the exact set.
 fn approve_discovered_commands_with(
     all_commands: Vec<(String, std::path::PathBuf, usize)>,
@@ -387,7 +384,7 @@ fn approve_discovered_commands_with(
             tokenize_words_strict(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
 
         if shape_only.contains(normalized) {
-            crate::harness::shell::check_command_blacklists(&parts, approval_options).map_err(|error| {
+            crate::harness::shell::check_command_builtin_blacklist(&parts).map_err(|error| {
                 audit_failure(error, normalized.clone(), source_file, *line, approval_options)
             })?;
             continue;

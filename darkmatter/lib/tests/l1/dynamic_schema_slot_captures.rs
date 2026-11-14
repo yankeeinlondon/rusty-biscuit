@@ -33,7 +33,8 @@ use serde_json::Value;
 
 use crate::dynamic_slots_fixtures::git;
 
-/// A temp folder and an empty home.
+/// A temp folder and an empty home (the user default configuration, which
+/// pre-approves only files beside the reading document).
 struct Case {
     _temp: tempfile::TempDir,
     root: PathBuf,
@@ -58,12 +59,11 @@ impl Case {
         path
     }
 
-    /// Persists `allow dir <root>`, so a contract slot's data and contract
-    /// reads are granted.
+    /// Writes the home's `permissions.file-read` admitting every file below
+    /// the reading document (`./**`), so a contract slot's data and contract
+    /// reads are permitted.
     fn grant_folder(&self) {
-        let store = self.home.path().join(".config/darkmatter/schema-read-policy");
-        std::fs::create_dir_all(store.parent().expect("store folder")).expect("store folder");
-        std::fs::write(&store, format!("allow dir {}\n", biscuit_file::to_portable_string(&self.root))).expect("store");
+        crate::slot_support::write_user_permissions(self.home.path(), &["./**"]);
     }
 
     fn request(&self, document: &Path) -> ComposeRequest {

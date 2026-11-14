@@ -114,8 +114,7 @@ External filter drivers never run: a `filter` attribute makes the path
 followed. Nonexistent and directory paths outside the index are `Untracked`;
 `.git/`, nested repositories, and submodules are `Outside`. Root comparison is
 component-wise against the `canonicalize_simplified` root. Bare repositories
-fail with `BareRepository`. Darkmatter's schema-slot automatic grant
-(`darkmatter/lib/src/markdown/schemas/slots/grants/auto.rs`) uses both. Code: `filesystem/git/tracked_state.rs`; tests:
+fail with `BareRepository`. Code: `filesystem/git/tracked_state.rs`; tests:
 `tracked_state_tests.rs`.
 
 ## Committed tree snapshot

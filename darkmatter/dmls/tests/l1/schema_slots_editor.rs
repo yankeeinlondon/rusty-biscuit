@@ -3,14 +3,15 @@
 //! request, and served from the worker's last installed snapshot.
 //!
 //! Boundary: the LSP protocol (an in-memory `Connection` driving the real
-//! server, router, overlay, slot worker, and grant store), the filesystem
-//! (data files and the grant store under the fixture's own `HOME`), and Git
-//! (a repository built with `git` for the automatic-grant cell). F2, L1: no
-//! terminal, no editor process, and no window.
+//! server, router, overlay, slot worker, and `permissions` loading), the
+//! filesystem (data files and the user `.darkmatter.yaml` under the
+//! fixture's own `HOME`), and Git (a repository built with `git` for the
+//! commit-rule cell). F2, L1: no terminal, no editor process, and no window.
 //!
-//! The data file lies outside any repository in every cell but the Git one,
-//! so its read needs a grant: the persisted grant store under the fixture
-//! `HOME`, or an in-memory grant given through `dmls.grantSlotRead`.
+//! The data file lies outside any repository in every cell but the Git
+//! ones, so its read is decided by the user's `permissions.file-read` under
+//! the fixture `HOME` (which the cells that need approval set to admit
+//! nothing), or an in-memory approval given through `dmls.grantSlotRead`.
 
 use std::path::{Path, PathBuf};
 
@@ -21,28 +22,45 @@ use serde_json::{Value, json};
 
 const SCHEMA_DOC: &str = "---\n$schema:\n  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }})\nos: Linux\n---\n\n# Doc\n";
 
-/// A workspace whose `os.yaml` lists `members`; returns the canonical
-/// workspace folder.
+/// A workspace whose `os.yaml` lists `members`, under user permissions
+/// admitting no read; returns the canonical workspace folder.
 fn workspace_with_data(workspace: &LspWorkspace, members: &[&str]) -> PathBuf {
     let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
     write_members(&root.join("os.yaml"), members);
+    write_user_config(&root, NO_READS);
     root
 }
+
+/// A `permissions` block pre-approving no read.
+const NO_READS: &str = "permissions:\n    file-read: []\n";
 
 fn write_members(path: &Path, members: &[&str]) {
     let text: String = members.iter().map(|member| format!("- {member}\n")).collect();
     std::fs::write(path, text).unwrap();
 }
 
-/// The fixture `HOME`'s grant store.
-fn grant_store(root: &Path) -> PathBuf {
-    root.join("home").join(".config").join("darkmatter").join("schema-read-policy")
+/// The fixture `HOME`'s user configuration.
+fn user_config(root: &Path) -> PathBuf {
+    root.join("home").join(".darkmatter.yaml")
 }
 
+fn write_user_config(root: &Path, text: &str) {
+    let path = user_config(root);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}
+
+/// The user's `permissions.file-read` admitting exactly `entries`.
+fn permit(root: &Path, entries: &[&str]) {
+    let list: String = entries.iter().map(|entry| format!("        - \"{entry}\"\n")).collect();
+    write_user_config(root, &format!("permissions:\n    file-read:\n{list}"));
+}
+
+/// Admits `file` (in the workspace folder, beside `doc.md`) in the user's
+/// `permissions.file-read`, relative to the reading document.
 fn allow_file_persisted(root: &Path, file: &Path) {
-    let store = grant_store(root);
-    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-    std::fs::write(&store, format!("allow file {}\n", file.display())).unwrap();
+    let relative = file.strip_prefix(root).expect("a workspace file");
+    permit(root, &[&format!("./{}", biscuit_file::to_portable_string(relative))]);
 }
 
 fn snapshot(root: &Path) -> darkmatter::markdown::compose::RequestSnapshot {
@@ -180,13 +198,18 @@ fn an_unapproved_read_is_reported_at_the_slot_and_the_frontmatter_is_never_judge
     );
 }
 
+/// The workspace folder is the server's home here, so the data file has a
+/// portable `~/` spelling that "always allow" can save.
 #[test]
-fn a_quick_fix_runs_the_grant_command_which_writes_the_store_and_refreshes_the_document() {
+fn a_quick_fix_runs_the_grant_command_which_saves_the_permission_and_refreshes_the_document() {
     let workspace = LspWorkspace::new();
     let root = workspace_with_data(&workspace, &["Linux", "macOS"]);
+    let config = root.join(".darkmatter.yaml");
+    std::fs::write(&config, NO_READS).unwrap();
     let doc = root.join("doc.md");
     let text = SCHEMA_DOC.replace("os: Linux", "os: BeOS");
-    let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+    let home_snapshot = darkmatter::markdown::compose::RequestSnapshot::new(&root).with_home(Some(root.clone()));
+    let mut fixture = LspFixture::start_with_snapshot(&workspace, home_snapshot);
     fixture.initialize(params(&root));
     let diagnostics = open_and_resolve(&mut fixture, &doc, &text);
     let approval = with_code(&diagnostics, "dm.schema.slot_approval_required")[0].clone();
@@ -220,8 +243,9 @@ fn a_quick_fix_runs_the_grant_command_which_writes_the_store_and_refreshes_the_d
         json!({ "command": "dmls.grantSlotRead", "arguments": persisted["command"]["arguments"] }),
     );
     assert!(response.error.is_none(), "{:?}", response.error);
-    let store = std::fs::read_to_string(grant_store(&root)).expect("the grant store is written");
-    assert_eq!(store, format!("allow file {}\n", root.join("os.yaml").display()));
+    let saved = std::fs::read_to_string(&config).expect("the user configuration");
+    assert!(saved.contains("~/os.yaml"), "the exact portable entry is saved: {saved}");
+    assert_ne!(saved, NO_READS, "{saved}");
 
     assert!(fixture.wait_for_slot_prepared(), "the grant refreshes the document");
     fixture.flush_server();
@@ -232,7 +256,7 @@ fn a_quick_fix_runs_the_grant_command_which_writes_the_store_and_refreshes_the_d
 }
 
 #[test]
-fn a_once_grant_resolves_for_this_server_process_and_is_never_written_to_the_store() {
+fn a_once_grant_resolves_for_this_server_process_and_is_never_saved() {
     let workspace = LspWorkspace::new();
     let root = workspace_with_data(&workspace, &["Linux"]);
     let doc = root.join("doc.md");
@@ -258,7 +282,7 @@ fn a_once_grant_resolves_for_this_server_process_and_is_never_written_to_the_sto
     fixture.flush_server();
     let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
     assert!(codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")), "{diagnostics:#?}");
-    assert!(!grant_store(&root).exists(), "a once grant is kept in memory only");
+    assert_eq!(std::fs::read_to_string(user_config(&root)).unwrap(), NO_READS, "a once grant is kept in memory only");
 }
 
 #[test]
@@ -278,7 +302,7 @@ fn a_grant_command_with_an_invalid_target_is_refused_and_changes_nothing() {
     }
     let response = fixture.request("workspace/executeCommand", json!({ "command": "dmls.noSuchCommand", "arguments": [] }));
     assert!(response.error.is_some());
-    assert!(!grant_store(&root).exists());
+    assert_eq!(std::fs::read_to_string(user_config(&root)).unwrap(), NO_READS);
 }
 
 #[test]
@@ -489,9 +513,7 @@ fn a_newer_edit_of_the_template_cancels_the_job_in_flight() {
     let workspace = LspWorkspace::new();
     let root = workspace_with_data(&workspace, &["Linux"]);
     std::fs::write(root.join("other.yaml"), "- Haiku\n").unwrap();
-    let store = grant_store(&root);
-    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-    std::fs::write(&store, format!("allow dir {}\n", root.display())).unwrap();
+    permit(&root, &["./*.yaml"]);
     let doc = root.join("doc.md");
     let mut fixture = LspFixture::start_with_slot_gate(&workspace, snapshot(&root));
     fixture.initialize(params(&root));
@@ -510,21 +532,27 @@ fn a_newer_edit_of_the_template_cancels_the_job_in_flight() {
     assert!(message.contains("Haiku"), "{message}");
 }
 
+/// The repository's `permissions` count only as committed (the commit
+/// rule): a working-copy widening admits nothing until it is committed, and
+/// the commit's index event refreshes the document through its watch.
 #[test]
-fn staging_a_change_to_an_automatically_granted_file_refreshes_it_through_the_index_watch() {
+fn committing_a_repository_permission_refreshes_the_document_through_the_index_watch() {
     let workspace = LspWorkspace::new();
     let root = workspace_with_data(&workspace, &["Linux"]);
     std::fs::write(root.join("doc.md"), SCHEMA_DOC).unwrap();
+    std::fs::write(root.join(".darkmatter.yaml"), NO_READS).unwrap();
     git(&root, &["init", "-q", "-b", "main"]);
     git(&root, &["add", "-A"]);
     git(&root, &["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture"]);
+    std::fs::write(root.join(".darkmatter.yaml"), "permissions:\n    file-read:\n        - \"&os.yaml\"\n").unwrap();
     let doc = root.join("doc.md");
     let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
     fixture.initialize(params(&root));
     let diagnostics = open_and_resolve(&mut fixture, &doc, SCHEMA_DOC);
-    assert!(
-        codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")),
-        "a clean, committed file in the schema's repository is read without asking: {diagnostics:#?}"
+    assert_eq!(
+        with_code(&diagnostics, "dm.schema.slot_approval_required").len(),
+        1,
+        "an uncommitted widening admits nothing: {diagnostics:#?}"
     );
     let registration = fixture
         .buffered_server_requests()
@@ -541,16 +569,15 @@ fn staging_a_change_to_an_automatically_granted_file_refreshes_it_through_the_in
         .collect();
     assert!(patterns.contains(&"index") && patterns.contains(&"HEAD"), "{patterns:?}");
 
-    write_members(&root.join("os.yaml"), &["Linux", "Haiku"]);
-    git(&root, &["add", "os.yaml"]);
+    git(&root, &["add", ".darkmatter.yaml"]);
+    git(&root, &["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "widen"]);
     watched_change(&fixture, &root.join(".git").join("index"), 2);
     assert!(fixture.wait_for_slot_prepared(), "the index event refreshes the document");
     fixture.flush_server();
     let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
-    assert_eq!(
-        with_code(&diagnostics, "dm.schema.slot_approval_required").len(),
-        1,
-        "the staged file no longer matches HEAD, so it needs a grant: {diagnostics:#?}"
+    assert!(
+        codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")),
+        "the committed widening admits the file: {diagnostics:#?}"
     );
 }
 
@@ -612,9 +639,10 @@ fn without_watchers_a_save_re_checks_the_slot_inputs_by_stat() {
     assert_eq!(invalid_os(&diagnostics), None, "{diagnostics:#?}");
 }
 
-/// A workspace (a repository with no commit, so `data/os.yaml` gets no
-/// automatic grant) whose `a.trigger.yaml` selects `topic: sandbox` and
-/// declares `os` as an enum read from that file; returns the canonical root.
+/// A workspace (a repository with no commit, whose working-copy and user
+/// `permissions` admit no read) whose `a.trigger.yaml` selects `topic:
+/// sandbox` and declares `os` as an enum read from `data/os.yaml`; returns
+/// the canonical root.
 fn trigger_slot_workspace(workspace: &LspWorkspace) -> PathBuf {
     let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
     std::fs::create_dir_all(root.join(".git/objects")).unwrap();
@@ -630,6 +658,8 @@ fn trigger_slot_workspace(workspace: &LspWorkspace) -> PathBuf {
     std::fs::create_dir_all(root.join("data")).unwrap();
     write_members(&root.join("data/os.yaml"), &["macOS", "Linux"]);
     std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(root.join(".darkmatter.yaml"), NO_READS).unwrap();
+    write_user_config(&root, NO_READS);
     root
 }
 
@@ -1083,9 +1113,7 @@ mod unsaved_buffers {
         std::fs::write(&data, "- Linux\n- Haiku\n").unwrap();
         let disk = "kind: schema\ntypes:\n  Os: enum(Linux)[]\n";
         std::fs::write(&types, disk).unwrap();
-        let store = grant_store(&root);
-        std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-        std::fs::write(&store, format!("allow file {}\nallow file {}\n", data.display(), types.display())).unwrap();
+        permit(&root, &["./os.yaml", "./os.schema"]);
         let doc = root.join("doc.md");
         let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
         fixture.initialize(params(&root));
@@ -1103,39 +1131,6 @@ mod unsaved_buffers {
         fixture.flush_server();
         let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
         assert!(codes(&diagnostics).is_empty(), "the unsaved contract admits Haiku: {diagnostics:#?}");
-    }
-
-    /// An unsaved buffer that differs from the committed file is dirty, so
-    /// the automatic grant no longer covers it.
-    #[test]
-    fn a_dirty_buffer_loses_the_automatic_grant() {
-        let workspace = LspWorkspace::new();
-        let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
-        let data = root.join("os.toml");
-        std::fs::write(&data, "os = [\"Linux\"]\n").unwrap();
-        let text = document(r#"load_data("./os.toml", "{ os: string[] }").os"#);
-        let doc = root.join("doc.md");
-        std::fs::write(&doc, &text).unwrap();
-        git(&root, &["init", "-q", "-b", "main"]);
-        git(&root, &["add", "-A"]);
-        git(&root, &["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture"]);
-        let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
-        fixture.initialize(params(&root));
-        let diagnostics = open_and_resolve(&mut fixture, &doc, &text);
-        assert!(
-            codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.slot_")),
-            "the clean, committed file is granted automatically: {diagnostics:#?}"
-        );
-
-        open(&fixture, &data, "os = [\"Linux\", \"Haiku\"]\n", 1);
-        assert!(fixture.wait_for_slot_prepared(), "opening the data file refreshes the document");
-        fixture.flush_server();
-        let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
-        assert_eq!(
-            with_code(&diagnostics, "dm.schema.slot_approval_required").len(),
-            1,
-            "the unsaved text is not the committed file, so it needs a grant: {diagnostics:#?}"
-        );
     }
 }
 
@@ -1200,7 +1195,7 @@ mod template_types {
     const KIND_LINE: u32 = 5;
 
     /// A workspace whose `status.yaml` returns `definition`, with its folder
-    /// granted in the persisted store; returns the canonical root.
+    /// admitted by the user's permissions; returns the canonical root.
     fn granted_workspace(workspace: &LspWorkspace, definition: &str) -> PathBuf {
         let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
         write_type(&root, definition);
@@ -1212,10 +1207,10 @@ mod template_types {
         std::fs::write(root.join("status.yaml"), format!("type: \"{definition}\"\n")).unwrap();
     }
 
+    /// Admits every file below the reading document's folder in the user's
+    /// permissions of the workspace at `root`.
     fn allow_dir_persisted(root: &Path) {
-        let store = grant_store(root);
-        std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-        std::fs::write(&store, format!("allow dir {}\n", root.display())).unwrap();
+        permit(root, &["./**"]);
     }
 
     fn hover_text(fixture: &mut LspFixture, doc: &Path, line: u32, character: u32) -> String {
@@ -1481,7 +1476,8 @@ mod template_types {
         std::fs::create_dir_all(root.join("lib")).unwrap();
         std::fs::create_dir_all(root.join("doc")).unwrap();
         std::fs::write(root.join("lib/types.yaml"), types_file("admin")).unwrap();
-        allow_dir_persisted(&root.join("doc"));
+        // `./**` is judged from `doc/doc.md`: the document's folder alone.
+        allow_dir_persisted(&root);
         let doc = root.join("doc/doc.md");
         let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
         fixture.initialize(params(&root));

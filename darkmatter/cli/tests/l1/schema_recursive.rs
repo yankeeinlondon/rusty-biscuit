@@ -266,7 +266,7 @@ fn validation_runs_no_expression_inside_a_recursive_item_and_leaves_the_source_u
     // `git init` creates a directory on every OS without a shell builtin or
     // an interpreter (both of which policy or Windows would refuse), and
     // single-quoted YAML keeps a Windows path's backslashes literal.
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix git\n");
+    fixture.shell_permissions(&["prefix git"]);
     let text = format!(
         "---\n{TREE_SCHEMA}stamp: '$(git init -q {})'\ntree:\n  value: '$(git init -q {})'\n  children:\n    - value: \"{{{{ upper('x') }}}}\"\n      \
          children: []\n---\nbody\n",

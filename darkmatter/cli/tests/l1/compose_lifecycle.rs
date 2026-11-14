@@ -278,7 +278,7 @@ fn a_bare_error_in_composed_names_the_md_event() {
 #[test]
 fn a_shell_reached_before_preflight_is_refused_naming_the_md_event_where_shells_unlock() {
     let fixture = CliProcessFixture::named("lifecycle-locked-shell");
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "exact touch locked-marker\n");
+    fixture.shell_permissions(&["exact touch locked-marker"]);
     let doc = fixture.write_file(
         "cwd/doc.md",
         "---\nfailed:\n  - info: \"event:failed\"\n  - shell: \"touch locked-marker\"\n\
@@ -397,7 +397,7 @@ fn an_ignored_actions_operand_and_payload_cause_no_effect() {
 #[test]
 fn an_approved_lifecycle_shell_runs_once_shells_unlock_at_composed() {
     let fixture = CliProcessFixture::named("lifecycle-approved-shell");
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "exact echo lifecycle-said\n");
+    fixture.shell_permissions(&["exact echo lifecycle-said"]);
     let doc = fixture.write_file("cwd/doc.md", "---\ncomposed:\n  - shell: \"echo lifecycle-said\"\n---\nthe-body\n");
     let ran = compose(&fixture, &doc, &[]);
     assert_eq!(ran.status, Some(0), "{}", ran.stderr);
@@ -492,7 +492,7 @@ fn ctrl_c_runs_cancelled_then_finalize_and_exits_130() {
         &fixture.bin_dir().join("slow-step"),
         &format!("#!/bin/sh\n: > '{}'\nexec sleep 5\n", started.display()),
     );
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "exact slow-step\n");
+    fixture.shell_permissions(&["exact slow-step"]);
     let doc = fixture.write_file(
         "cwd/doc.md",
         "---\ncomposed:\n  - info: \"event:composed\"\n  - shell: \"slow-step\"\n  - info: \"event:after-shell\"\n\

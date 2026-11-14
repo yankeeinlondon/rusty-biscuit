@@ -114,7 +114,7 @@ impl ShellApprovalHandler for Recorder {
 
 fn shell_options(dir: &Path, recorder: &Arc<Recorder>) -> ComposeOptions {
     ComposeOptions::new()
-        .with_shell_policy_root(dir)
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[]))
         .with_shell_working_directory(dir)
         .with_shell_approval_handler(recorder.clone())
 }

@@ -273,6 +273,19 @@ impl CliProcessFixture {
         &self.cwd
     }
 
+    /// Replaces the fixture home's `.darkmatter.yaml` with one whose
+    /// `permissions.shell-commands` are `entries` (`!` entries included), the
+    /// shell policy every `md` run of this fixture reads.
+    pub fn shell_permissions(&self, entries: &[&str]) -> PathBuf {
+        let mut text = String::from("permissions:\n  shell-commands:\n");
+        for entry in entries {
+            text.push_str(&format!("    - {}\n", serde_json::to_string(entry).expect("an entry string")));
+        }
+        let path = self.home.join(".darkmatter.yaml");
+        fs::write(&path, text).expect("fixture user configuration must be writable");
+        path
+    }
+
     pub fn home(&self) -> &Path {
         &self.home
     }

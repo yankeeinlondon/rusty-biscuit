@@ -590,12 +590,8 @@ fn sequence_preflight_applies_whitelist_on_every_step() {
     // Those exercise non-whitelisted commands with mock approval handlers.
     let fixture = CliProcessFixture::named("sequence-cli");
 
-    // Whitelist echo in the workspace policy root.
-    fs::write(
-        fixture.cwd().join(".darkmatter-shell-whitelist"),
-        "prefix echo\n",
-    )
-    .unwrap();
+    // Allow echo in the user's permissions.
+    common::write_shell_permissions(fixture.home(), "prefix echo\n");
 
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
@@ -1137,11 +1133,7 @@ fn dry_run_performs_the_same_preflight() {
 #[cfg(unix)]
 fn well_formed_graph_passes_preflight() {
     let fixture = CliProcessFixture::named("sequence-cli");
-    fs::write(
-        fixture.cwd().join(".darkmatter-shell-whitelist"),
-        "prefix echo\n",
-    )
-    .unwrap();
+    common::write_shell_permissions(fixture.home(), "prefix echo\n");
     fs::write(
         fixture.cwd().join("task.yaml"),
         "kind: task\nshell: echo from-task\n",
@@ -1212,11 +1204,7 @@ fn starting_preflight_status_precedes_phase_1c_work() {
 #[test]
 fn preflight_statuses_bracket_phase_1c() {
     let fixture = CliProcessFixture::named("sequence-cli");
-    fs::write(
-        fixture.cwd().join(".darkmatter-shell-whitelist"),
-        "prefix echo\n",
-    )
-    .unwrap();
+    common::write_shell_permissions(fixture.home(), "prefix echo\n");
     let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,

@@ -96,6 +96,7 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (INVALID_FRONTMATTER_ASSIGNMENT_CODE, "an invalid `set=` assignment on a `::file` directive"),
     (REASSIGNED_FRONTMATTER_PROPERTY_CODE, "a property a `::file` directive assigns twice"),
     (SHELL_TIMEOUT_CODE, "a shell command timeout replaced by an empty string"),
+    (crate::config::load::CONFIG_NOT_SAVED_CODE, "an \"always allow\" approval that applies to this run only because it could not be saved"),
     (LINK_MALFORMED_TITLE_CODE, "a link title that starts with `{` but is not a valid structured title"),
     (LINK_LEGACY_TITLE_CODE, "a link title in the removed `key=value` syntax"),
     (super::collection_blocks::diagnostics::MALFORMED_CODE, "a malformed `::map` / `::filter` region, header, or option"),

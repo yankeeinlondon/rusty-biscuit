@@ -19,11 +19,11 @@ use tempfile::TempDir;
 
 const UNDECLARED: &str = "dm.expression.undeclared_property";
 
-/// Writes `files` (relative path, content) into a fresh request directory
-/// whose shell whitelist admits `touch`, `echo`, and `date`.
+/// Writes `files` (relative path, content) into a fresh request directory,
+/// which is also the home whose `permissions.shell-commands` admit `touch`,
+/// `echo`, and `date` (see [`compose`]).
 fn request_dir(files: &[(&str, &str)]) -> TempDir {
     let dir = TempDir::new().unwrap();
-    std::fs::write(dir.path().join(".darkmatter-shell-whitelist"), "prefix touch\nprefix echo\nprefix date\n").unwrap();
     for (name, content) in files {
         std::fs::write(dir.path().join(name), content).unwrap();
     }
@@ -34,7 +34,7 @@ fn compose(dir: &Path, policy: BlockingPolicy) -> Result<(Markdown, ComposeRepor
     let path = dir.join("doc.md");
     let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
         .with_source_file(path.clone())
-        .with_shell_policy_root(dir)
+        .with_config_snapshot(crate::request_support::shell_config(dir, &["prefix touch", "prefix echo", "prefix date"]))
         .with_shell_working_directory(dir)
         .with_blocking_policy(policy);
     Markdown::try_from(path.as_path()).unwrap().compose_with(&crate::request_support::request_at(dir, options))

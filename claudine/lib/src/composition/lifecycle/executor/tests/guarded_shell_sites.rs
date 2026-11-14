@@ -105,7 +105,7 @@ fn a_guard_proven_missing_value_waits_for_its_template_and_runs_only_when_select
 
     // Approved by its shape, the selected branch reads the live message as
     // one argument; the unselected branch launches nothing.
-    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &shape_of(COMMIT), None);
+    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &shape_of(COMMIT));
     let selected = MockShell::new(0);
     let outcome = run(LifecycleSignal::Success, &config, json!({ "dirty": true, "commit_message": "a b; c" }), &selected);
     assert_eq!(outcome, LifecycleEventOutcome::default());
@@ -241,7 +241,7 @@ fn a_set_value_is_checked_before_its_own_write() {
 fn a_guarded_set_value_checks_its_live_value_when_reached() {
     let frontmatter = json!({ "start": [{ "when": "msg", "then": [{ "set": { "out": "$(tool {{ msg }})" } }] }] });
     let config = resolve(&frontmatter).unwrap();
-    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &shape_of("tool {{ msg }}"), None);
+    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &shape_of("tool {{ msg }}"));
     let shell = MockShell::new(0);
 
     // A non-empty list selects the branch but is no scalar argument.
@@ -268,7 +268,7 @@ fn a_selected_action_whose_value_a_set_cleared_fails_and_launches_nothing() {
     let config = resolve(&frontmatter).expect("the value is present at approval");
     let mut approvals = shape_of("tool {{ msg }}");
     approvals.insert_exact("first");
-    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &approvals, None);
+    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &approvals);
     let shell = MockShell::new(0);
 
     let outcome = run(LifecycleSignal::Start, &config, json!({ "msg": "live" }), &shell);
@@ -294,7 +294,7 @@ fn a_value_a_set_changed_to_an_unapproved_type_is_refused_unsuppressibly() {
         }],
     });
     let config = resolve(&frontmatter).expect("a present value resolves");
-    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &shape_of("tool {{ target }}"), None);
+    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &shape_of("tool {{ target }}"));
     let shell = MockShell::new(0);
 
     let outcome = run(LifecycleSignal::Start, &config, json!({ "target": "live" }), &shell);

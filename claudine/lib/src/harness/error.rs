@@ -242,14 +242,12 @@ pub enum HarnessError {
     #[error("shell command blacklisted: \"{command}\" — {reason}")]
     ShellCommandBlacklisted { command: String, reason: String },
 
-    /// A persistent approval decision could not be written to the shell
-    /// policy file. The decision is not cached: it is neither a persistent
-    /// approval nor an implicit once.
-    #[error("could not write shell policy file {}: {source}", path.display())]
-    ShellPolicyWriteFailed {
-        path: PathBuf,
+    /// The captured Darkmatter configuration's `permissions` are invalid,
+    /// so no shell command can be judged; none runs.
+    #[error("shell permissions are invalid: {source}")]
+    ShellPermissionsInvalid {
         #[source]
-        source: Box<darkmatter::markdown::compose::shell_expansion::ShellExpansionError>,
+        source: Box<darkmatter::config::load::ConfigError>,
     },
 
     // --- Path resolution ---
@@ -394,8 +392,8 @@ impl Diagnostic for HarnessError {
             // Still environmental: the run needed a repo root and the process
             // was launched outside one.
             HarnessError::RepoRootRequired { .. } => "io.read_failed",
-            // The policy file beside the document could not be written.
-            HarnessError::ShellPolicyWriteFailed { .. } => "io.write_failed",
+            // The captured `permissions` block does not load.
+            HarnessError::ShellPermissionsInvalid { .. } => "config.invalid",
         }
     }
 
@@ -434,7 +432,9 @@ impl Diagnostic for HarnessError {
             }
             HarnessError::ShellAuditParseError { detail, .. } => json!({ "command": detail }),
             HarnessError::RepoRootRequired { path } => json!({ "path": path }),
-            HarnessError::ShellPolicyWriteFailed { path, .. } => json!({ "path": path }),
+            HarnessError::ShellPermissionsInvalid { source } => {
+                json!({ "field": "permissions", "message": source.to_string() })
+            }
             // Seeded from the catalog so every declared key is present.
             // `reference`, `source_path`, and the typed `failure` are always
             // known; `kind`, `effective_kind`, `base_dir`, `repository_root`,

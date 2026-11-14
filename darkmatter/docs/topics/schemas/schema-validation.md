@@ -50,7 +50,7 @@ diagnostics instead of a verdict, and `md schema validate` exits `1` with the
 file's check unavailable (`error: slots`). A schema missing its loaded values
 never makes a document look valid.
 
-Validating the schema file itself resolves it too, through the same grant
+Validating the schema file itself resolves it too, through the same approval
 gate: every slot in the file runs (template constraints and template types,
 including slots in named types the file's `$schema` does not use), and the
 resolved schema is then checked. There is no mode that passes a template
@@ -66,6 +66,6 @@ a refused or unapproved read, or a slot that fails makes the check
 unavailable: exit `1`, `error: slots`. See
 [`md schema validate`](../../cli/schema.md).
 
-Which commands resolve, and with which grants, is in
+Which commands resolve, and with which approvals, is in
 [When a slot is evaluated](./schema-slots.md#when-a-slot-is-evaluated); the
 diagnostic codes are in [Failures](./schema-slots.md#failures).

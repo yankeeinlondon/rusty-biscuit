@@ -188,15 +188,8 @@ fn compose_interactive_preflight_with_whitelisted_command() {
     )
     .unwrap();
 
-    // Whitelist "echo" so the ::shell directive passes preflight.
-    fs::write(
-        fixture.cwd().join(".darkmatter-shell-whitelist"),
-        "prefix echo\n",
-    )
-    .unwrap();
-
-    // Also create .git so the whitelist is found (policy root = git root).
-    fs::create_dir_all(fixture.cwd().join(".git")).unwrap();
+    // Allow "echo" so the ::shell directive passes preflight.
+    common::write_shell_permissions(fixture.home(), "prefix echo\n");
 
     write_executable(
         &fixture.bin_dir().join("codex"),

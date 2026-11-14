@@ -4,8 +4,9 @@
 //! with the same grants, refusal codes, and approval batch a document naming
 //! the file gets.
 //!
-//! Each case writes its files into a temp folder outside any repository (so
-//! no automatic grant applies) and states the session's grants or handler.
+//! Each case writes its files into a temp folder outside any repository and
+//! states the session's approvals or handler; the session has no
+//! configuration, so nothing else pre-approves a read.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

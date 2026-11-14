@@ -23,6 +23,7 @@
 
 mod entries;
 mod error;
+mod reference;
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -36,6 +37,7 @@ use simplified_schema::{AppliedDefault, SchemaError, ValidationFailure, Validati
 use sniff::filesystem::git::{CommittedEntry, CommittedTreeSnapshot};
 
 use super::migration_receipt::content_hash;
+use super::permissions::{PermissionPolicy, RepositoryLayers};
 use super::schema::{CONFIG_FILE_NAME, ConfigScope, contract, permissions_contract};
 
 pub use entries::{
@@ -79,9 +81,11 @@ pub trait ConfigSnapshotSource: Send + Sync + std::fmt::Debug {
 pub enum ConfigLoadMode {
     /// Read only. Passive tools (DMLS, validators, completion) use this.
     Passive,
-    /// A writing CLI's startup load, allowed to convert legacy policy files
-    /// first. The conversion is planned; until it lands this mode loads
-    /// exactly as [`Self::Passive`].
+    /// A writing CLI's startup load: before reading anything, legacy policy
+    /// files of the scopes the context names are converted into missing
+    /// `permissions` properties and then deleted
+    /// ([`super::migration`]); the notices lead [`ConfigSnapshot::diagnostics`].
+    /// A [`Self::Passive`] load reports those files instead.
     MigrateLegacy,
 }
 
@@ -96,6 +100,10 @@ pub struct ConfigDependency {
     pub path: PathBuf,
     /// [`content_hash`] of the bytes read, or `None` for an absent file.
     pub content_hash: Option<String>,
+    /// For the target of a followed `permissions` reference, the
+    /// configuration file that refers to it; `None` for a configuration
+    /// file itself. `revision` is the referring file's.
+    pub referenced_from: Option<PathBuf>,
 }
 
 /// One observed configuration file and its independently judged settings.
@@ -107,6 +115,8 @@ pub struct ConfigFile {
     effective: Value,
     defaults: Vec<AppliedDefault>,
     permissions: Result<PermissionsSetting, ConfigError>,
+    /// The 1-based line and column of the `permissions` value, when written.
+    permissions_at: Option<(usize, usize)>,
     registrations: Vec<Registration>,
     findings: Vec<ConfigError>,
 }
@@ -227,6 +237,7 @@ pub struct ConfigSnapshot {
     user: ConfigFile,
     repository: Option<RepositoryConfig>,
     permissions: Result<EffectivePermissions, ConfigError>,
+    policy: Result<Arc<PermissionPolicy>, ConfigError>,
     registrations: Registrations,
     dependencies: Vec<ConfigDependency>,
     diagnostics: Vec<ConfigDiagnostic>,
@@ -256,11 +267,21 @@ impl ConfigSnapshot {
         repository: Option<&CommittedTreeSnapshot>,
         mode: ConfigLoadMode,
     ) -> Result<Self, ConfigError> {
+        let migrated = match mode {
+            ConfigLoadMode::MigrateLegacy => super::migration::migrate(context)?,
+            ConfigLoadMode::Passive => Vec::new(),
+        };
         let user_bytes = match context.home_dir() {
             Some(home) => read_worktree(&home.join(CONFIG_FILE_NAME), ConfigRevision::User)?.map(Arc::from),
             None => None,
         };
-        Self::assemble(context, repository, mode, user_bytes)
+        let mut snapshot = Self::assemble(context, repository, mode, user_bytes)?;
+        let notices = match mode {
+            ConfigLoadMode::MigrateLegacy => migrated,
+            ConfigLoadMode::Passive => super::migration::passive_notices(context, &snapshot),
+        };
+        snapshot.diagnostics.splice(0..0, notices);
+        Ok(snapshot)
     }
 
     /// The user file of the home `snapshot` names, with no repository: what a
@@ -313,7 +334,16 @@ impl ConfigSnapshot {
         context: &FileResolutionContext,
         repository: Option<&CommittedTreeCapture>,
     ) -> Result<Self, ConfigError> {
-        Self::assemble(context, captured_tree(context, repository)?, self.mode, self.user_bytes.clone())
+        let tree = captured_tree(context, repository)?;
+        // A writing CLI loads the user file once, before it knows its
+        // sources' repositories; each repository's legacy files migrate here.
+        let migrated = match (self.mode, context.repository_root()) {
+            (ConfigLoadMode::MigrateLegacy, Some(_)) => super::migration::migrate_repository(context)?,
+            _ => Vec::new(),
+        };
+        let mut projected = Self::assemble(context, tree, self.mode, self.user_bytes.clone())?;
+        projected.diagnostics.splice(0..0, migrated);
+        Ok(projected)
     }
 
     fn assemble(
@@ -342,6 +372,7 @@ impl ConfigSnapshot {
             }
             _ => None,
         };
+        let tree = repository;
         let user_path = user_path.unwrap_or_else(|| PathBuf::from("~").join(CONFIG_FILE_NAME));
         dependencies.push(dependency(ConfigRevision::User, &user_path, user_bytes.as_deref()));
         let observe = Observe { context, portable: &portable };
@@ -379,7 +410,12 @@ impl ConfigSnapshot {
         };
 
         let permissions = effective_permissions(&user, repository.as_ref());
-        if let Err(error) = &permissions {
+        let policy = match &permissions {
+            Ok(_) => observe.policy(&user, repository.as_ref(), tree, &mut dependencies).map(Arc::new),
+            Err(error) => Err(error.clone()),
+        };
+        // An invalid raw block is already the policy's error; report it once.
+        if let Err(error) = permissions.as_ref().and(policy.as_ref()) {
             diagnostics.push(diagnostic(error));
         }
         let mut registrations = Registrations::default();
@@ -394,6 +430,7 @@ impl ConfigSnapshot {
             user,
             repository,
             permissions,
+            policy,
             registrations,
             dependencies,
             diagnostics,
@@ -417,6 +454,20 @@ impl ConfigSnapshot {
     /// The invalid settings of every projection, merged into one error.
     pub fn permissions(&self) -> Result<&EffectivePermissions, ConfigError> {
         self.permissions.as_ref().map_err(Clone::clone)
+    }
+
+    /// The evaluated permission policy: every layer's block resolved (a
+    /// `permissions` reference followed to its target) and combined by
+    /// [`PermissionPolicy::verdict`]. Unlike [`Self::permissions`], which
+    /// returns the raw per-file settings, this fails when a reference's
+    /// target is missing or invalid.
+    ///
+    /// ## Errors
+    ///
+    /// The [`Self::permissions`] error, or the reference error
+    /// ([`ConfigErrorKind::InvalidReference`]) naming both files.
+    pub fn policy(&self) -> Result<&Arc<PermissionPolicy>, ConfigError> {
+        self.policy.as_ref().map_err(Clone::clone)
     }
 
     /// The valid registrations and the findings that omitted the others.
@@ -631,6 +682,7 @@ impl Observe<'_> {
             effective,
             defaults,
             permissions,
+            permissions_at: locate(&["permissions".to_string()]),
             registrations,
             findings,
         })
@@ -679,6 +731,86 @@ impl Observe<'_> {
             shell_commands: Setting { value: shell_commands, authored: written("shell-commands") },
             network: Setting { value: network, authored: written("network") },
         }))
+    }
+}
+
+impl Observe<'_> {
+    /// Resolves every layer's block and builds the policy. Every layer is
+    /// resolved, so all reference errors are reported together.
+    fn policy(
+        &self,
+        user: &ConfigFile,
+        repository: Option<&RepositoryConfig>,
+        tree: Option<&CommittedTreeSnapshot>,
+        dependencies: &mut Vec<ConfigDependency>,
+    ) -> Result<PermissionPolicy, ConfigError> {
+        let user_layer = self.layer(user, reference::Where::User, dependencies);
+        let repository_layers = match (repository, tree) {
+            (Some(repository), Some(tree)) => {
+                let root = repository.root.as_path();
+                let head = self.layer(&repository.head, reference::Where::Head { root, tree }, dependencies);
+                let worktree = self.layer(&repository.worktree, reference::Where::Worktree { root }, dependencies);
+                Some((repository.root.clone(), head, worktree))
+            }
+            _ => None,
+        };
+        let mut errors: Vec<&ConfigError> = user_layer.as_ref().err().into_iter().collect();
+        if let Some((_, head, worktree)) = &repository_layers {
+            errors.extend(head.as_ref().err());
+            errors.extend(worktree.as_ref().err());
+        }
+        if let Some(first) = errors.first() {
+            let problems = errors.iter().flat_map(|error| error.problems().iter().cloned()).collect();
+            return Err(ConfigError::new(first.kind(), problems));
+        }
+        let user = user_layer?;
+        let repository = match repository_layers {
+            Some((root, head, worktree)) => Some(RepositoryLayers { root, head: head?, worktree: worktree? }),
+            None => None,
+        };
+        Ok(PermissionPolicy::new(user, repository, self.context))
+    }
+}
+
+/// Judges the `permissions` block of `text`, the whole file at `path`, as
+/// a writer's candidate: for a configuration file (`whole_config`) the whole
+/// document against `scope`'s contract, for a reference's target only its
+/// `permissions` mapping; then every entry with the loader's own checks.
+///
+/// ## Errors
+///
+/// The first problem found, as a message naming its pointer.
+pub(crate) fn check_permissions_text(
+    text: &str,
+    path: &Path,
+    scope: ConfigScope,
+    whole_config: bool,
+    context: &FileResolutionContext,
+) -> Result<ScopePermissions, String> {
+    let loaded = load_yaml_document(text, path).map_err(|error| error.to_string())?;
+    let first = |problems: Vec<(Vec<String>, String)>| {
+        problems
+            .into_iter()
+            .next()
+            .map_or_else(|| "the configuration is invalid".to_string(), |(segments, message)| format!("{}: {message}", pointer_of(&segments)))
+    };
+    if whole_config && let Err(failure) = contract(scope).validate_strict(&loaded.json) {
+        return Err(first(failure_problems(&failure)));
+    }
+    let Some(block @ Value::Object(_)) = loaded.json.get("permissions") else {
+        return Err("`permissions` is not a mapping".to_string());
+    };
+    let success = permissions_contract(scope).validate_strict(block).map_err(|failure| first(failure_problems(&failure)))?;
+    let mut effective = block.clone();
+    apply_defaults(&mut effective, &success.defaults);
+    let portable = context.portable_variables();
+    let observe = Observe { context, portable: &portable };
+    let locate = |_: &[String]| None;
+    let setting = SettingContext { path, revision: ConfigRevision::User, scope, locate: &locate };
+    match observe.permissions(&effective, Some(block), &setting) {
+        Ok(PermissionsSetting::Inline(block)) => Ok(block),
+        Ok(PermissionsSetting::Reference(_)) => Err("`permissions` is not a mapping".to_string()),
+        Err(error) => Err(error.problems().iter().map(|problem| format!("{}: {}", problem.pointer, problem.message)).collect::<Vec<_>>().join("; ")),
     }
 }
 
@@ -896,7 +1028,7 @@ fn captured_tree<'a>(
 }
 
 fn dependency(revision: ConfigRevision, path: &Path, bytes: Option<&[u8]>) -> ConfigDependency {
-    ConfigDependency { revision, path: path.to_path_buf(), content_hash: bytes.map(content_hash) }
+    ConfigDependency { revision, path: path.to_path_buf(), content_hash: bytes.map(content_hash), referenced_from: None }
 }
 
 /// The working-copy bytes at `path`, or `None` when nothing is there.

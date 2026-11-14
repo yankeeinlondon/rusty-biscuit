@@ -724,17 +724,16 @@ claudine compose doc.md kind=<TAB>    → kind='a'  kind='b'    # kind: enum(a, 
 ```
 
 Resolving a template reads files, so completion uses only the read
-permissions that never need a question:
+permissions that never need a question: the files your Darkmatter
+`permissions.file-read` configuration pre-approves (by default, files with a
+common data or text extension beside the schema or anywhere in its
+repository), and URLs your configured `network: allow` permits. See
+[Darkmatter configuration](../../../../darkmatter/docs/topics/configuration.md#permissions).
 
-- the **automatic grant**: a file in the prompt's repository whose
-  content is exactly what Git has committed;
-- **saved grants** in your grant store
-  (`~/.config/darkmatter/schema-read-policy`), including saved denials.
-
-A Tab never asks and never prints. When a read is not covered (an
-uncommitted or edited file, a file outside the repository with no saved
-grant, a URL), or the template fails to resolve, the property gets no
-schema candidates and the shell's own completion takes over.
+A Tab never asks and never prints. When a read is not pre-approved (a file
+`file-read` does not match or a `!` entry excludes, a URL without network
+consent), or the template fails to resolve, the property gets no schema
+candidates and the shell's own completion takes over.
 `claudine compose` itself still asks for approval when you run it.
 
 The template resolves as a whole. If any slot in it cannot resolve, every
@@ -745,9 +744,9 @@ keep completing from their declarations.
 flowchart TD
     T["property=&lt;TAB&gt;"] --> S{"does the property hold a slot?"}
     S -->|no| D["complete from the written declaration"]
-    S -->|yes| R["resolve the template with the automatic grant and saved grants only"]
+    S -->|yes| R["resolve the template with pre-approved reads only"]
     R -->|resolved| V["complete from the resolved type"]
-    R -->|"read not granted, or failed"| F["no schema candidates: the shell falls back"]
+    R -->|"read not pre-approved, or failed"| F["no schema candidates: the shell falls back"]
 ```
 
 Names are ordered without resolving anything. A template type's place in

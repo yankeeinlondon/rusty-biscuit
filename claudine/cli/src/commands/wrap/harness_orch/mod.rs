@@ -17,10 +17,11 @@ pub(crate) use prompt::{
 };
 #[cfg(test)]
 pub(crate) use prompt::materialize_harness_prompt;
+#[cfg(test)]
+pub(crate) use shell_options::test_permissions;
 pub(crate) use shell_options::{
     CachedHarnessLoopContext, apply_composition_shell_overrides, build_harness_shell_options,
-    build_harness_shell_options_for_source, build_harness_shell_options_for_source_with_cache,
-    build_harness_shell_options_with_cache, harness_policy_root,
+    build_harness_shell_options_with_cache,
 };
 pub(crate) use types::{
     AttemptLaunch, HarnessPromptMode, HarnessPromptState, MaterializedHarnessPrompt,

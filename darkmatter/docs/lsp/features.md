@@ -305,12 +305,12 @@ completion items are the same as they would be unmarked.
 
 A template that did not resolve is never validated against, so a schema missing its loaded values never makes a document look valid.
 
-**Granting a read.** Each grant an approval-required diagnostic offers is a quick fix (an LSP code action the editor lists on the diagnostic), titled like *Always allow schema slots to read file /repo/data/os.yaml*. A quick fix runs a workspace command rather than editing the document. The server advertises two commands in its `initialize` result (`executeCommandProvider`, the list of commands an editor may ask the server to run):
+**Approving a read.** Each approval an approval-required diagnostic offers is a quick fix (an LSP code action the editor lists on the diagnostic), titled like *Allow schema slots to read file /repo/data/os.yaml for this session* or *Always allow schema slots to read file /repo/data/os.yaml*. There is no folder, site, or "always deny" quick fix. A quick fix runs a workspace command rather than editing the document. The server advertises two commands in its `initialize` result (`executeCommandProvider`, the list of commands an editor may ask the server to run):
 
 | Command | Argument | What it does |
 |---|---|---|
-| `dmls.grantSlotRead` | one object: `{ "decision": "allow"\|"deny", "kind": "file"\|"dir"\|"url"\|"url-any-query"\|"site", "target": "…", "scope": "once"\|"persisted" }` | `persisted` appends the line to the user's [grant store](../topics/schemas/schema-slots.md#grants), the same file `md` reads; `once` keeps the grant in the server's memory until it exits |
-| `dmls.refreshSchemaSlots` | none | resolves every open document's slots again, granting nothing |
+| `dmls.grantSlotRead` | one object: `{ "decision": "allow"\|"deny", "kind": "file"\|"url", "target": "…", "scope": "once"\|"persisted" }` | `once` keeps the approval (or a deny) in the server's memory until it exits; `persisted` (an `allow` of a `file` only) saves the file to the user's `permissions.file-read`, as the terminal prompt's [always allow](../topics/schemas/schema-slots.md#prompts) does, and also keeps it for this session; when it cannot be saved it still applies for the session |
+| `dmls.refreshSchemaSlots` | none | resolves every open document's slots again, approving nothing |
 
 Either command, and any configuration change (`workspace/didChangeConfiguration`), marks every resolution stale and re-publishes diagnostics, because a slot may read the environment, which no file event reports. The resolution itself runs on the worker, so the command answers without waiting for it.
 

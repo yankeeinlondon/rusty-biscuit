@@ -791,6 +791,8 @@ fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
         ShellExpansionError::Preflight(inner) => markdown_error_diagnostics(inner),
         ShellExpansionError::ParseDirective { .. } => vec![shell_record(DIRECTIVE_PARSE_CODE, error)],
         ShellExpansionError::SlotGrantStore(store) => vec![shell_record(store.code(), error)],
+        // An invalid `permissions` block reports its own located problems.
+        ShellExpansionError::Config(config) => config_error_diagnostics(config),
         _ => vec![shell_record(SHELL_FAILURE_CODE, error)],
     }
 }

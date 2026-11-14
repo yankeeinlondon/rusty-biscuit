@@ -71,15 +71,12 @@ fn repo(name: &str) -> CliProcessFixture {
     write(&fixture.cwd().join("README.md"), "fixture\n");
     write(
         &fixture.cwd().join(".gitignore"),
-        ".darkmatter-shell-whitelist\nruns.log\nmarker.txt\n.claudine/\n",
+        "runs.log\nmarker.txt\n.claudine/\n",
     );
     git(&fixture, &["add", "README.md", ".gitignore"]);
     git(&fixture, &["commit", "-q", "-m", "initial"]);
     write(&fixture.cwd().join("a.txt"), "untracked\n");
-    write(
-        &fixture.cwd().join(".darkmatter-shell-whitelist"),
-        "exact git add a.txt\nexact git checkout -q -b feature\n",
-    );
+    common::write_shell_permissions(fixture.home(), "exact git add a.txt\nexact git checkout -q -b feature\n");
     fixture
 }
 
@@ -740,10 +737,7 @@ fn discovering_an_include_executes_none_of_its_commands() {
         ),
     ] {
         let fixture = repo(&format!("ctx-per-run-discovery-{label}"));
-        write(
-            &fixture.cwd().join(".darkmatter-shell-whitelist"),
-            &format!("exact {TICK}\n"),
-        );
+        common::write_shell_permissions(fixture.home(), &format!("exact {TICK}\n"));
         doc(&fixture, "kid.md", &kid);
         for (name, content) in &files {
             doc(&fixture, name, content);

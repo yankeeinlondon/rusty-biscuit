@@ -45,7 +45,7 @@ I'm sure you're ready to dig into the magic we call `SimplifiedSchema` so choose
         - how a schema with slots is resolved before validation, and how to check a template without resolving it
     - [Schema Slots in Darkmatter](./schema-slots.md)
         - what a `{{ … }}` slot in a schema may contain, where it evaluates, what it may read, and how its failures are reported
-        - how slot reads are approved and granted, and how resolutions are cached across commands
+        - how slot reads are approved (by `permissions.file-read` or a prompt), how listings are filtered, and how resolutions are cached across commands
     - [Schema Discovery](./schema-discovery.md)
         - how the definitions of YAML document kinds (`kind: yaml-schema`) are found in the schema roots, and what happens when two claim one kind or one fails
     - [Visual Support of Schemas from DMLS](dmls-schema-support.md)

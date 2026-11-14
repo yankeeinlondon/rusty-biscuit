@@ -1066,35 +1066,50 @@ impl ServerState {
         self.snapshot.store(index.snapshot());
     }
 
-    /// Applies one schema-slot grant: a `persisted` one is appended to the
-    /// user's grant store (`<home>/.config/darkmatter/schema-read-policy`),
-    /// a `once` one is kept in memory for this server process. Every slot
-    /// snapshot then goes stale.
+    /// Applies one schema-slot approval: a `once` one is kept in memory for
+    /// this server process; a `persisted` one ("always allow" a file) is
+    /// saved to the user's `permissions.file-read` and kept for this process
+    /// too. Every slot snapshot then goes stale.
     ///
     /// ## Errors
     ///
-    /// A message naming why the choice is not a grant, or why the store
-    /// could not be written.
+    /// A message naming why the choice is not an approval, or why it could
+    /// not be saved (it still applies for this process).
     fn grant_slot_read(&self, choice: &crate::diagnostics::slots::SlotGrantChoice) -> Result<(), String> {
-        use darkmatter::markdown::schemas::slots::grants::{Grant, GrantDecision, GrantScope, GrantStore, GrantTarget};
+        use darkmatter::markdown::schemas::slots::grants::{Grant, GrantDecision, GrantScope, GrantTarget};
         let decision = match choice.decision.as_str() {
             "allow" => GrantDecision::Allow,
             "deny" => GrantDecision::Deny,
             other => return Err(format!("unknown decision `{other}`; expected `allow` or `deny`")),
         };
         let target = GrantTarget::parse(&choice.kind, &choice.target)?;
-        match choice.scope.as_str() {
-            "once" => self.overlay.slots().add_once(Grant { decision, target, scope: GrantScope::Once }),
-            "persisted" => {
-                let path = GrantStore::path_for_home(self.contexts.home())
-                    .ok_or_else(|| "there is no home folder to keep the grant store in".to_string())?;
-                let mut store = GrantStore::load(Some(&path)).map_err(|error| error.to_string())?;
-                store.append(decision, target).map_err(|error| error.to_string())?;
-                tracing::info!(store = %path.display(), "schema-slot grant persisted");
-                self.overlay.slots().invalidate_all();
-            }
+        let scope = match choice.scope.as_str() {
+            "once" => GrantScope::Once,
+            "persisted" => GrantScope::Persisted,
             other => return Err(format!("unknown scope `{other}`; expected `once` or `persisted`")),
+        };
+        let grant = Grant { decision, target, scope };
+        if !grant.is_applicable() {
+            return Err("only one file or one exact URL can be approved, and only a file can be always allowed".to_string());
         }
+        self.overlay.slots().add_once(Grant { scope: GrantScope::Once, ..grant.clone() });
+        if let (GrantScope::Persisted, GrantTarget::File(path)) = (scope, &grant.target) {
+            self.save_slot_read_approval(path)?;
+        }
+        Ok(())
+    }
+
+    /// Saves an "always allow" of `path` to the user's `permissions.file-read`.
+    fn save_slot_read_approval(&self, path: &std::path::Path) -> Result<(), String> {
+        use darkmatter::config::load::{ConfigLoadMode, ConfigSnapshot};
+        use darkmatter::config::permissions::persist::{PersistentApproval, save_user_approval};
+        let home = self.contexts.home().ok_or_else(|| "there is no home folder to keep user settings in".to_string())?;
+        let context = biscuit_file::FileResolutionContext::from_snapshot(home, Some(home.to_path_buf()), std::collections::HashMap::new());
+        let snapshot = ConfigSnapshot::load(&context, None, ConfigLoadMode::Passive).map_err(|error| error.to_string())?;
+        let policy = snapshot.policy().map_err(|error| error.to_string())?;
+        let approval = PersistentApproval::FileRead { target: path.to_path_buf(), reading: Box::new(context) };
+        let saved = save_user_approval(policy, &approval).map_err(|error| error.to_string())?;
+        tracing::info!(file = %saved.file.display(), entry = %saved.entry, "schema-slot read approval saved");
         Ok(())
     }
 

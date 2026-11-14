@@ -41,7 +41,7 @@ impl Run {
         )
         .expect("the fake provider is built with `test-fixtures`");
         std::fs::write(fixture.cwd().join("doc.md"), document).unwrap();
-        std::fs::write(fixture.cwd().join(".darkmatter-shell-whitelist"), rules).unwrap();
+        crate::common::write_shell_permissions(fixture.home(), rules);
         let records = fixture.cwd().join("argv.bin");
         Self { fixture, records }
     }

@@ -71,7 +71,7 @@ impl Fixture {
     fn options(&self) -> ComposeOptions {
         ComposeOptions::new()
             .with_source_file(&self.root)
-            .with_shell_policy_root(&self.dir)
+            .with_config_snapshot(crate::request_support::shell_config(&self.dir, &[]))
             .with_shell_timeout(std::time::Duration::from_secs(60))
             .with_set_overrides(json!({ "spec": "fixes/demo/spec.md" }))
             .with_exclude_keys(["initialize"])

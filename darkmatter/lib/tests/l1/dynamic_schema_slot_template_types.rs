@@ -4,8 +4,9 @@
 //! recorded as a dependency of the resolution, and keeps its refusal code.
 //!
 //! Each case writes its own schema files into a temp folder outside any
-//! repository (so no automatic grant applies) and resolves through a
-//! [`SlotSession`] whose grants the case states. A slot whose expression is
+//! repository and resolves through a [`SlotSession`] whose approvals (or
+//! captured `permissions.file-read`) the case states; a bare session has no
+//! configuration, so nothing else pre-approves a read. A slot whose expression is
 //! a string literal reads nothing itself, so every read a case observes is
 //! one the returned definition caused.
 
@@ -91,9 +92,11 @@ impl Fixture {
         DarkmatterSchemas::new(self.context()).with_slot_session(Arc::new(session))
     }
 
-    /// A Dir grant on the whole fixture folder.
-    fn folder_grant(&self) -> Grant {
-        Grant { decision: GrantDecision::Allow, target: GrantTarget::Dir(self.root.clone()), scope: GrantScope::Once }
+    /// A session reading through `data` whose captured
+    /// `permissions.file-read` admits every file below the reading document
+    /// (`./**`), the home holding it kept apart in `.home`.
+    fn permitted_session(&self, data: DataRuntime) -> SlotSession {
+        SlotSession::new(data).with_config_snapshot(crate::slot_support::user_permissions(&self.path(".home"), &["./**"]))
     }
 }
 
@@ -269,11 +272,15 @@ fn granting_every_transitive_import_resolves_and_observes_each() {
     let fixture = Fixture::with(&files);
     write(&fixture.path("doc.md"), &owner_document(TEMPLATE_PERSON, "{ name: Ann }"));
     let by_file = [grant(GrantDecision::Allow, &fixture.path("types.yaml")), grant(GrantDecision::Allow, &fixture.path("address.yaml"))];
-    for grants in [by_file.to_vec(), vec![fixture.folder_grant()]] {
+    for by_permissions in [false, true] {
         let data = DataRuntime::new();
-        let session = SlotSession::new(data.clone()).with_run_grants(grants.clone());
+        let session = if by_permissions {
+            fixture.permitted_session(data.clone())
+        } else {
+            SlotSession::new(data.clone()).with_run_grants(by_file.to_vec())
+        };
         let owner = owner_schema(&fixture.schemas(session), &fixture.markdown())
-            .unwrap_or_else(|error| panic!("{grants:?}: {error}"));
+            .unwrap_or_else(|error| panic!("by permissions {by_permissions}: {error}"));
         assert!(owner.to_string().contains("city"), "{owner}");
         let read = data.read_set();
         assert!(read.contains(&fixture.entry("types.yaml")) && read.contains(&fixture.entry("address.yaml")), "{read:?}");
@@ -336,7 +343,7 @@ fn a_refused_union_arm_fails_the_union() {
 fn a_missing_import_fails_and_observes_its_probe() {
     let fixture = Fixture::with(&[("doc.md", &owner_document("\"{{ 'Person@./missing.yaml' }}\"", "{ name: Ann }"))]);
     let data = DataRuntime::new();
-    let session = SlotSession::new(data.clone()).with_run_grants([fixture.folder_grant()]);
+    let session = fixture.permitted_session(data.clone());
     let error = owner_schema(&fixture.schemas(session), &fixture.markdown()).expect_err("missing");
     let codes = template_diagnostics(&error, &fixture.path("doc.md"))
         .map(|diagnostics| diagnostics.into_iter().map(|diagnostic| diagnostic.code).collect::<Vec<_>>())
@@ -377,11 +384,11 @@ fn an_example_in_a_returned_tuple_needs_its_own_grant() {
 // Cache and dependencies: each "command" is a new session on a new runtime
 // ---------------------------------------------------------------------------
 
-/// One command resolving `owner` with a folder grant: its schema (or
+/// One command resolving `owner` with the folder permitted: its schema (or
 /// failure) and its read set.
 fn command(fixture: &Fixture) -> (Result<Value, SchemaError>, Vec<String>) {
     let data = DataRuntime::new();
-    let session = SlotSession::new(data.clone()).with_run_grants([fixture.folder_grant()]);
+    let session = fixture.permitted_session(data.clone());
     let owner = owner_schema(&fixture.schemas(session), &fixture.markdown());
     (owner, data.read_set())
 }
@@ -574,7 +581,7 @@ fn verdict(report: &ValidationReport) -> (bool, Vec<(String, String, String)>) {
 
 fn assert_equivalent(template: &str, static_type: &str, valid: &str, invalid: &str) {
     let fixture = Fixture::new();
-    let schemas = fixture.schemas(SlotSession::new(DataRuntime::new()).with_run_grants([fixture.folder_grant()]));
+    let schemas = fixture.schemas(fixture.permitted_session(DataRuntime::new()));
     let property = |name: &str, owner_type: &str, value: &str| {
         write(&fixture.path(name), &owner_document(owner_type, value));
         let markdown = fixture.markdown_at(name);

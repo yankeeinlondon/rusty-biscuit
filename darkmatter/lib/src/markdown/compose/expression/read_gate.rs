@@ -19,6 +19,12 @@
 //!   observed (a probed candidate, a listing, a contract import, a schema
 //!   file `validate_schema` read), before its result can reach the slot.
 //!
+//! A listing (`find_files`, the `find_*_index` functions) needs no approval
+//! of its own: the folders it names are listed, and each file it returns is
+//! put to [`ReadGate::admits_listed`], which answers without asking anyone.
+//! A file the gate would not admit without a prompt is dropped from the
+//! result silently.
+//!
 //! A refusal is [`ExpressionError::SlotReadRefused`](super::ExpressionError::SlotReadRefused),
 //! which no recovery (`try_frontmatter`, `||`) turns into a value.
 
@@ -36,6 +42,11 @@ pub(crate) trait ReadGate: Send + Sync + fmt::Debug {
     ///
     /// Why the read is refused.
     fn check(&self, target: &ReadTarget) -> Result<(), GateRefusal>;
+
+    /// Whether a file a listing returned may reach the slot. Never asks
+    /// anyone: a file only a prompt could allow is `false`, and the listing
+    /// leaves it out.
+    fn admits_listed(&self, target: &ReadTarget) -> bool;
 }
 
 /// What a read names.
@@ -107,14 +118,18 @@ impl fmt::Display for ReadTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GateRefusal {
-    /// A deny decision covers the target.
+    /// The target was denied for this run.
     Denied,
-    /// No grant covers the target, and none was given. `needed` lists the
-    /// grants any one of which would allow the read (empty when no grant
-    /// can, such as a relative glob).
+    /// Neither `permissions.file-read` (or, for a URL, the network
+    /// permission) nor an approval for this run covers the target. `needed`
+    /// lists the approvals any one of which would allow the read (empty when
+    /// none can).
     ApprovalRequired {
         needed: Vec<crate::markdown::schemas::slots::grants::Grant>,
     },
+    /// The configuration's `permissions` block is invalid, so no read is
+    /// decided; the error carries its own `dm.config.*` code.
+    InvalidPermissions(crate::config::load::ConfigError),
 }
 
 impl GateRefusal {
@@ -126,9 +141,10 @@ impl GateRefusal {
 
 impl fmt::Display for GateRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Denied => "the read is denied",
-            Self::ApprovalRequired { .. } => "the read needs approval",
-        })
+        match self {
+            Self::Denied => f.write_str("the read is denied for this run"),
+            Self::ApprovalRequired { .. } => f.write_str("the read needs approval"),
+            Self::InvalidPermissions(error) => write!(f, "the configured permissions are invalid: {error}"),
+        }
     }
 }

@@ -601,8 +601,12 @@ impl LifecycleHost for StackExecutionContext<'_> {
             .map_err(|failure| PrepError::Failed { message: failure.message, snapshot: failure.snapshot })
     }
 
-    fn user_blacklist(&self, policy_root: Option<&Path>) -> ShellRuleSet {
-        crate::harness::shell::user_blacklist(policy_root)
+    /// The `!` rules of the configuration the prepared context captured for
+    /// this document (the invocation's), or of a passive load where nothing
+    /// was captured.
+    fn shell_exclusions(&self) -> Result<ShellRuleSet, darkmatter::config::load::ConfigError> {
+        crate::harness::CapturedPermissions::for_prepared(self.prepared_context, self.file_resolution_context)
+            .exclusions()
     }
 
     fn interrupted(&self) -> bool {

@@ -42,7 +42,7 @@ fn compose_rejects_pending_target_before_child_command_can_execute() {
         "cwd/root.md",
         "---\nchild: \"$(printf child.md)\"\n---\n::file {{child}}\n",
     );
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix printf\nprefix touch\n");
+    fixture.shell_permissions(&["prefix printf", "prefix touch"]);
     let output = fixture
         .command_builder()
         .host_path()

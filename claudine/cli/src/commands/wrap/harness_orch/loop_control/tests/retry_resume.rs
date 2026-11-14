@@ -89,7 +89,7 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     let mut active = claudine::composition::ActiveDocumentState::initial();
     let approval_handler = std::sync::Arc::new(CountingApprovalHandler::default());
     let shell_options = claudine::harness::ShellApprovalOptions {
-        policy_root: Some(fx._dir.path().to_path_buf()),
+        permissions: crate::commands::wrap::harness_orch::test_permissions::user_permissions(&fx._dir.path().join("home"), &[]),
         approval_handler: Some(approval_handler.clone()),
         ..Default::default()
     };

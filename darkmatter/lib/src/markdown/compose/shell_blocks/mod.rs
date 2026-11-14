@@ -14,10 +14,7 @@ pub use types::ShellBlockError;
 use super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, prepare_refreshed_site, prepare_site};
 use super::shell_expansion::template::HoleEvaluator;
 use super::shell_expansion::types::{ShellCommandOrigin, ShellDirective, ShellExpansionError, ShellExpansionRuntime};
-use super::shell_expansion::{
-    execute_prepared_directive,
-    resolve_policy_paths,
-};
+use super::shell_expansion::execute_prepared_directive;
 use super::ComposeReport;
 use super::body_origin::{AuthoredBody, DataRanges, EditOrigin, TextEdit};
 use std::path::PathBuf;
@@ -159,24 +156,6 @@ pub(crate) fn run_shell_blocks_stage_in(
         return Ok((content.to_string(), ComposeReport::new(), Vec::new()));
     }
 
-    // Resolve policy paths once
-    let shell_opts = options.shell_options();
-    let policy_paths =
-        resolve_policy_paths(&shell_opts, &options.source, options.resolution_context()).map_err(|e| ShellBlockError::Parse {
-            line: 0,
-            message: format!("Policy path resolution failed: {e}"),
-            excerpt: SourceExcerpt::default(),
-            source_file: source_file.clone(),
-        })?;
-
-    runtime
-        .ensure_loaded(&policy_paths)
-        .map_err(|e| ShellBlockError::Parse {
-            line: 0,
-            message: format!("Policy loading failed: {e}"),
-            excerpt: SourceExcerpt::default(),
-            source_file: source_file.clone(),
-        })?;
 
     let mut replacements = Vec::new();
     let mut report = ComposeReport::new();
@@ -312,7 +291,7 @@ pub(crate) fn run_shell_blocks_stage_in(
         for (directive, site, start_line, offset) in commands {
             enter(offset);
             let prepare = if first == Some(true) { prepare_refreshed_site } else { prepare_site };
-            match prepare(directive, site.as_ref(), options, &policy_paths, runtime) {
+            match prepare(directive, site.as_ref(), options, runtime) {
                 Ok(p) => prepared.push((p, start_line, offset)),
                 Err(e) => {
                     return Err(ShellBlockError::Command {
@@ -388,6 +367,7 @@ pub(crate) fn run_shell_blocks_stage_in(
         EditOrigin::Data,
     );
     report.shell_approvals_used += runtime.take_recent_approval_count();
+    report.warnings.extend(runtime.take_recent_warnings());
 
     Ok((new_content, report, edits))
 }
@@ -546,7 +526,7 @@ mod tests {
         let options = test_request(
             ComposeOptions::new()
                 .with_shell_approval_handler(handler)
-                .with_shell_policy_root(temp_dir.path())
+                .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[]))
                 .with_shell_working_directory(std::env::current_dir().unwrap()),
         );
         (options, temp_dir)
@@ -746,10 +726,9 @@ mod tests {
         // timeout, so its length costs no wall clock.
         let content = "::shell-block\nsleep 10 && echo after\n::end-block\n";
         let temp_dir = TempDir::new().unwrap();
-        let options = test_request(ComposeOptions::new().with_shell(ShellExpansionOptions {
+        let options = test_request(ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
             timeout: std::time::Duration::from_secs(1),
             timeout_behavior: ShellTimeoutBehavior::EmptyString,
-            policy_root: Some(temp_dir.path().to_path_buf()),
             approval_handler: Some(Arc::new(AllowAllHandler)),
             ..Default::default()
         }));

@@ -596,7 +596,7 @@ fn test_compose_stages_run_in_order() {
 
     let options = ComposeOptions::new()
         .with_source_file(&root)
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(dir.path(), &[]))
         .only(&[
             ComposeOperation::PageBlocks,
             ComposeOperation::ShellExpansion,

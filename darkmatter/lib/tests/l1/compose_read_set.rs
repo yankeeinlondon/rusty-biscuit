@@ -181,7 +181,7 @@ fn shell_runtime_after(dir: &Path, content: &str) -> DataRuntime {
     let path = write(dir, "doc.md", content);
     let runtime = DataRuntime::new();
     let options = options_for(&path)
-        .with_shell(ShellExpansionOptions { policy_root: Some(dir.to_path_buf()), ..Default::default() })
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[])).with_shell(ShellExpansionOptions::default())
         .with_shell_working_directory(dir)
         .with_shell_approval_handler(Arc::new(AllowAll))
         .with_data_runtime(runtime.clone());

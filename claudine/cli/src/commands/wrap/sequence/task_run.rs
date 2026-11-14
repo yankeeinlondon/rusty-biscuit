@@ -799,8 +799,8 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         );
         let lifecycle = composition::validate_document_shell_late_values(&source, &options)?;
         let approval_options = super::super::apply_composition_shell_overrides(
-            super::super::build_harness_shell_options_for_source_with_cache(
-                &source.resolved_path, context.source_repo_root,
+            super::super::build_harness_shell_options_with_cache(
+                claudine::harness::CapturedPermissions::for_source(context.invocation, context.file_resolution_context),
                 Some(Arc::clone(&context.approval_cache)),
             ), context.shared.dry_run, context.shared.yolo,
         );

@@ -55,6 +55,10 @@ const RESULT_EVENT: &str = r#"{"type":"result","subtype":"success","result":"don
 /// resolved at pre-flight.
 const GUARDED_SHELL_RULES: &str = "template trace-shell start {{ string }}\n";
 
+/// A scenario "document" with this name is not written beside the entry: its
+/// lines become the user's `permissions.shell-commands`.
+const SHELL_PERMISSIONS: &str = "~/.darkmatter.yaml shell-commands";
+
 /// `trace-shell <event> <value>` appends `shell <event> <value>` to the trace.
 /// A template command starts its program directly and refuses `>>`, so the
 /// guarded-shell scenarios write through this helper instead of `printf`.
@@ -153,7 +157,11 @@ fn check(scenario: &Scenario) {
     let fixture = CliProcessFixture::named("lifecycle-traces");
     fixture.seed_user_config();
     for (name, content) in scenario.documents {
-        fs::write(fixture.cwd().join(name), content).unwrap();
+        if *name == SHELL_PERMISSIONS {
+            crate::common::write_shell_permissions(fixture.home(), content);
+        } else {
+            fs::write(fixture.cwd().join(name), content).unwrap();
+        }
     }
     if let Some(generate) = scenario.generate {
         generate(fixture.cwd());
@@ -530,7 +538,7 @@ scenarios! {
         args: ["compose", "--claude"],
         documents: [
             ("guarded-shell-present.md", include_str!("../fixtures/lifecycle_traces/guarded-shell-present.md")),
-            (".darkmatter-shell-whitelist", GUARDED_SHELL_RULES),
+            ("~/.darkmatter.yaml shell-commands", GUARDED_SHELL_RULES),
         ],
         trace: include_str!("../fixtures/lifecycle_traces/guarded-shell-present.trace"),
     }
@@ -542,7 +550,7 @@ scenarios! {
         args: ["compose", "--claude"],
         documents: [
             ("guarded-shell-null.md", include_str!("../fixtures/lifecycle_traces/guarded-shell-null.md")),
-            (".darkmatter-shell-whitelist", GUARDED_SHELL_RULES),
+            ("~/.darkmatter.yaml shell-commands", GUARDED_SHELL_RULES),
         ],
         trace: include_str!("../fixtures/lifecycle_traces/guarded-shell-null.trace"),
     }

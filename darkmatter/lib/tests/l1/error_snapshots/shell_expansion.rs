@@ -79,11 +79,11 @@ fn blacklisted_shows_reason() {
 }
 
 #[test]
-fn approval_required_names_whitelist_paths() {
+fn approval_required_names_the_configuration() {
     let err = ShellExpansionError::ApprovalRequired {
         command: "gh repo list".into(),
-        whitelist_path: Box::new(PathBuf::from("/tmp/wl")),
-        blacklist_path: Box::new(PathBuf::from("/tmp/bl")),
+        save_target: Some(Box::new(PathBuf::from("/tmp/home/.darkmatter.yaml"))),
+        exclusion: None,
         origin: body_origin(),
         suggested_rules: Box::default(),
         ctx: Box::new(test_ctx("", "doc.md")),
@@ -95,9 +95,8 @@ fn approval_required_names_whitelist_paths() {
             "ShellExpansionError",
             "approval required",
             "gh repo list",
-            "/tmp/wl",
-            "/tmp/bl",
-            "--approve-shell",
+            "/tmp/home/.darkmatter.yaml",
+            "shell-commands rule",
         ],
     );
 }
@@ -230,12 +229,12 @@ fn labeled_rows_render_on_their_own_lines() {
             ShellExpansionError::ApprovalRequired {
                 ctx: ctx(),
                 command: "gh repo list".into(),
-                whitelist_path: Box::new(PathBuf::from("/tmp/wl")),
-                blacklist_path: Box::new(PathBuf::from("/tmp/bl")),
+                save_target: Some(Box::new(PathBuf::from("/tmp/home/.darkmatter.yaml"))),
+                exclusion: None,
                 origin: body_origin(),
                 suggested_rules: Box::default(),
             },
-            &["Command:", "Origin:", "Whitelist:", "Blacklist:"],
+            &["Command:", "Origin:", "Configuration:"],
         ),
         (
             ShellExpansionError::Denied { ctx: ctx(), command: "git push".into(), origin: frontmatter_origin() },

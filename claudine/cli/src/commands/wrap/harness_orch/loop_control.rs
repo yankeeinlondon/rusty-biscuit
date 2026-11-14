@@ -564,16 +564,12 @@ fn prepare_attempt_phase(
         source_path = %prompt.prompt_state.source_path.display(),
     )
     .entered();
-    if let Some(source_context) = prompt.prompt_state.source_context.as_ref() {
-        prompt.harness_context.refresh_for_source(
-            &prompt.prompt_state.source_path,
-            source_context.repository_root(),
-        );
-    } else {
-        prompt
-            .harness_context
-            .refresh(&prompt.prompt_state.source_path, prompt.repo_root);
-    }
+    let permissions = prompt.prompt_state.shell_permissions();
+    prompt.harness_context.refresh(
+        &prompt.prompt_state.source_path,
+        prompt.prompt_state.repository_root_or(prompt.repo_root),
+        permissions,
+    );
     if let Some(step) = initialize_adopted_target_phase(&mut prompt, &mut lifecycle, &mut control)? {
         return Ok(PhaseResult::Transition(Box::new(step)));
     }

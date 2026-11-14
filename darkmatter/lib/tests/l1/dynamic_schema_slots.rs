@@ -2,9 +2,13 @@
 //!
 //! Every case builds a real Git repository in a temp dir (from the
 //! sandboxing-shaped fixture, or written inline), anchors the request there
-//! with a temp home (so the user's real grant store is never read), and
-//! composes through the public API. The session, cache, grants, trigger
-//! payloads, and contract recursion are the real ones.
+//! with a temp home (so the user's real configuration is never read), and
+//! composes through the public API. The fixture repository commits a
+//! `permissions.file-read` that pre-approves nothing until a case commits an
+//! entry for the data file (`SlotRepo::permit_data`); an inline repository
+//! with no configuration gets the repository default (`&**/*.yaml`). The
+//! session, cache, permissions, trigger payloads, and contract recursion are
+//! the real ones.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -25,9 +29,29 @@ use crate::dynamic_slots_fixtures::{DATA_FILE, DOCUMENT_FILE, RepoState, SCHEMA_
 
 const APPROVAL_REQUIRED: &str = "dm.schema.slot_approval_required";
 
-/// A home with no grant store, so only the run's own grants apply.
+/// A home with no configuration: the user default pre-approves only files
+/// beside the reading document, which the fixture's data file is not.
 fn empty_home() -> tempfile::TempDir {
     tempfile::tempdir().expect("temp home")
+}
+
+/// The fixture repository in `state`, with its data file permitted by the
+/// committed repository configuration.
+fn permitted_repo(state: RepoState) -> SlotRepo {
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
+    let repo = SlotRepo::build(&source, state);
+    repo.permit_data();
+    repo
+}
+
+/// A command's session for the fixture document, reading through `data`
+/// with the configuration of the repository and `home` (loaded passively).
+fn repo_session(repo: &SlotRepo, home: &Path, data: &DataRuntime) -> Arc<SlotSession> {
+    let context = biscuit_file::FileResolutionContext::new(repo.path(DOCUMENT_FILE).parent().unwrap())
+        .with_env(HashMap::new())
+        .with_repository_root(repo.root())
+        .with_home_dir(home);
+    Arc::new(SlotSession::for_context(data.clone(), &context))
 }
 
 fn request(document: &Path, home: &Path, options: ComposeOptions) -> ComposeRequest {
@@ -64,8 +88,7 @@ fn document_with(repo: &SlotRepo, frontmatter: &str) -> PathBuf {
 
 #[test]
 fn a_document_valid_under_the_resolved_list_composes_and_reads_the_data_file() {
-    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
-    let repo = SlotRepo::build(&source, RepoState::Clean);
+    let repo = permitted_repo(RepoState::Clean);
     let home = empty_home();
     let (_, report) = compose(&repo.path(DOCUMENT_FILE), home.path(), ComposeOptions::new())
         .unwrap_or_else(|failure| panic!("composes: {}", failure.error));
@@ -78,8 +101,7 @@ fn a_document_valid_under_the_resolved_list_composes_and_reads_the_data_file() {
 
 #[test]
 fn a_value_outside_the_resolved_list_is_a_validation_problem() {
-    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
-    let repo = SlotRepo::build(&source, RepoState::Clean);
+    let repo = permitted_repo(RepoState::Clean);
     let document = document_with(&repo, "schema_revision: 5\nhas_native_support: true\nos_support:\n  - BeOS\n");
     let failure = compose(&document, empty_home().path(), ComposeOptions::new()).expect_err("BeOS is not listed");
     let messages = messages(&failure);
@@ -88,11 +110,11 @@ fn a_value_outside_the_resolved_list_is_a_validation_problem() {
 }
 
 #[test]
-fn a_dirty_data_file_needs_approval_and_a_library_caller_is_never_asked() {
+fn an_unpermitted_data_file_needs_approval_and_a_library_caller_is_never_asked() {
     let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
-    let repo = SlotRepo::build(&source, RepoState::DirtyData);
+    let repo = SlotRepo::build(&source, RepoState::Clean);
     let failure = compose(&repo.path(DOCUMENT_FILE), empty_home().path(), ComposeOptions::new())
-        .expect_err("a dirty file is not read without a grant");
+        .expect_err("a file no permission admits is not read without an approval");
     assert_eq!(codes(&failure), vec![APPROVAL_REQUIRED.to_string()]);
     let diagnostic = &error_diagnostics(&failure.error)[0];
     let at = diagnostic.source.as_ref().expect("positioned");
@@ -128,11 +150,10 @@ fn a_slot_supplied_default_lowers_like_the_same_literal_default() {
 
 #[test]
 fn one_session_keeps_its_pinned_snapshot_for_every_pass() {
-    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
-    let repo = SlotRepo::build(&source, RepoState::Clean);
+    let repo = permitted_repo(RepoState::Clean);
     let home = empty_home();
     let data = DataRuntime::new();
-    let session = Arc::new(SlotSession::new(data.clone()).with_repository_root(Some(repo.root().to_path_buf())));
+    let session = repo_session(&repo, home.path(), &data);
     let options = || ComposeOptions::new().with_data_runtime(data.clone()).with_slot_session(Arc::clone(&session));
     compose(&repo.path(DOCUMENT_FILE), home.path(), options()).unwrap_or_else(|failure| panic!("{}", failure.error));
 
@@ -141,9 +162,11 @@ fn one_session_keeps_its_pinned_snapshot_for_every_pass() {
     write(&repo.path(DATA_FILE), "- macOS\n- Windows\n");
     compose(&repo.path(DOCUMENT_FILE), home.path(), options())
         .unwrap_or_else(|failure| panic!("the pinned snapshot applies: {}", failure.error));
-    // ...while a new command judges the edited (now dirty) file afresh.
-    let failure = compose(&repo.path(DOCUMENT_FILE), home.path(), ComposeOptions::new()).expect_err("dirty");
-    assert_eq!(codes(&failure), vec![APPROVAL_REQUIRED.to_string()]);
+    // ...while a new command reads the edited file afresh, and `Linux` is no
+    // longer listed.
+    let failure = compose(&repo.path(DOCUMENT_FILE), home.path(), ComposeOptions::new()).expect_err("Linux was dropped");
+    assert!(messages(&failure).contains("Linux"), "{}", messages(&failure));
+    assert!(!codes(&failure).iter().any(|code| code.starts_with("dm.schema.slot_")), "{:?}", codes(&failure));
 }
 
 #[cfg(unix)]
@@ -161,16 +184,14 @@ impl ShellApprovalHandler for AllowAll {
 
 /// Q7/Q17: a step the run approved rewrites the data file; the next
 /// validation in the same command re-resolves (the memo generation moved and
-/// the pin's input changed) under the automatic grant decided earlier, even
-/// though the file is now dirty.
+/// the pin's input changed) under the permissions the run captured.
 #[cfg(unix)]
 #[test]
-fn a_rewrite_by_the_runs_own_shell_step_re_resolves_with_the_grant_decided_earlier() {
-    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
-    let repo = SlotRepo::build(&source, RepoState::Clean);
+fn a_rewrite_by_the_runs_own_shell_step_re_resolves_under_the_captured_permissions() {
+    let repo = permitted_repo(RepoState::Clean);
     let home = empty_home();
     let data = DataRuntime::new();
-    let session = Arc::new(SlotSession::new(data.clone()).with_repository_root(Some(repo.root().to_path_buf())));
+    let session = repo_session(&repo, home.path(), &data);
     let folder = repo.path(DOCUMENT_FILE).parent().unwrap().to_path_buf();
     let shell_document = folder.join("rewrite.md");
     write(&folder.join("next-os.yaml"), "- macOS\n- Linux\n- Windows\n- FreeBSD\n");
@@ -181,7 +202,7 @@ fn a_rewrite_by_the_runs_own_shell_step_re_resolves_with_the_grant_decided_earli
         &shell_document,
         home.path(),
         options()
-            .with_shell(ShellExpansionOptions { policy_root: Some(folder.clone()), ..Default::default() })
+            .with_config_snapshot(crate::request_support::shell_config(&folder, &[])).with_shell(ShellExpansionOptions::default())
             .with_shell_working_directory(&folder)
             .with_shell_approval_handler(Arc::new(AllowAll)),
     )
@@ -190,7 +211,7 @@ fn a_rewrite_by_the_runs_own_shell_step_re_resolves_with_the_grant_decided_earli
 
     let freebsd = document_with(&repo, "schema_revision: 5\nhas_native_support: true\nos_support:\n  - FreeBSD\n");
     compose(&freebsd, home.path(), options())
-        .unwrap_or_else(|failure| panic!("re-resolved under the run's grant: {}", failure.error));
+        .unwrap_or_else(|failure| panic!("re-resolved under the run's permissions: {}", failure.error));
 }
 
 /// A repository with a schema trigger whose payload is a template.
@@ -231,12 +252,13 @@ fn an_unselected_template_trigger_payload_reads_nothing() {
 
 #[test]
 fn the_effective_schema_holds_only_resolved_constraints() {
-    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
-    let repo = SlotRepo::build(&source, RepoState::Clean);
+    let repo = permitted_repo(RepoState::Clean);
+    let home = empty_home();
     let document = repo.path(DOCUMENT_FILE);
     let context = biscuit_file::FileResolutionContext::new(document.parent().unwrap())
         .with_env(HashMap::new())
-        .with_repository_root(repo.root());
+        .with_repository_root(repo.root())
+        .with_home_dir(home.path());
     let markdown = Markdown::try_from(document.as_path()).unwrap()
         .with_source(darkmatter::markdown::compose::ComposeSource::File(document.clone()));
 
@@ -247,7 +269,7 @@ fn the_effective_schema_holds_only_resolved_constraints() {
         without.err()
     );
 
-    let session = Arc::new(SlotSession::new(DataRuntime::new()).with_repository_root(Some(repo.root().to_path_buf())));
+    let session = Arc::new(SlotSession::for_context(DataRuntime::new(), &context));
     let effective = DarkmatterSchemas::new(context)
         .with_slot_session(session)
         .effective_for(&markdown)

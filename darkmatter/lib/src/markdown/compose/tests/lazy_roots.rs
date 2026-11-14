@@ -645,8 +645,7 @@ mod ambient_repository {
         let (roots, walks) = discovery_counts();
         let options = ComposeOptions::for_document(&anchor, &markdown)
             .with_source_file(&root_path)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(policy.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(policy.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(approval.clone()),
                 ..Default::default()
             });

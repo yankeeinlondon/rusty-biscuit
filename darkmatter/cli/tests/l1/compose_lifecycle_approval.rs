@@ -5,7 +5,7 @@
 //! Every command is the `darkmatter-argv-recorder` fixture copied into the
 //! fixture `bin` as `argv-recorder`, so "what ran" is the argument vectors
 //! the program itself recorded, on every platform. There is no terminal, so
-//! a command no whitelist rule covers is refused rather than prompted for.
+//! a command no `shell-commands` rule covers is refused rather than prompted for.
 //! Each stack marks its events with `info: "event:<name>"` lines.
 
 use crate::common::{CliProcessFixture, unwrapped};
@@ -44,13 +44,15 @@ impl Ran {
 }
 
 impl Document {
-    fn new(name: &str, document: &str, whitelist: &str) -> Self {
+    /// `rules` (one per line) become the home's `permissions.shell-commands`.
+    fn new(name: &str, document: &str, rules: &str) -> Self {
         let fixture = CliProcessFixture::named(name);
         let program = fixture.bin_dir().join(format!("argv-recorder{}", std::env::consts::EXE_SUFFIX));
         std::fs::copy(biscuit_test_harness::bin_exe!("darkmatter-argv-recorder"), &program)
             .expect("the recorder fixture binary is built with `test-fixtures`");
         fixture.write_file("cwd/doc.md", document);
-        fixture.write_file("cwd/.darkmatter-shell-whitelist", whitelist);
+        let rules: Vec<&str> = rules.lines().filter(|line| !line.trim().is_empty()).collect();
+        fixture.shell_permissions(&rules);
         let records = fixture.tmp_dir().join("argv.bin");
         Self { fixture, records }
     }

@@ -575,10 +575,12 @@ fn conforms_schema_validate_keeps_a_failing_and_an_unopened_file_apart() {
     assert_eq!(files[2]["valid"], true);
 }
 
-/// A schema template beside a document, outside any repository: its slot's
-/// read gets no automatic grant, so a data output reports it unapproved.
+/// A schema template beside a document, outside any repository, under user
+/// permissions admitting no read (the default would admit `./os.yaml`
+/// beside the schema): a data output reports the slot's read unapproved.
 fn with_template_document(name: &str) -> CliProcessFixture {
     let fixture = with_document(name, "---\n$schema: ./schema.yaml\nos: macOS\n---\n# H\n");
+    fixture.write_file("home/.darkmatter.yaml", "permissions:\n    file-read: []\n");
     fixture.write_file("cwd/schema.yaml", "kind: schema\n$schema:\n    os: enum({{ load_data(\"./os.yaml\", \"string[]\") }})\n");
     fixture.write_file("cwd/os.yaml", "- macOS\n- Linux\n");
     fixture
@@ -596,8 +598,7 @@ fn conforms_schema_validate_slots_failure_names_the_grants_needed() {
 
 #[test]
 fn conforms_schema_validate_template_schema_file_resolves_its_slots() {
-    // Outside a repository `os.yaml` has no automatic grant, and a data output
-    // never prompts: the schema file's own check is unavailable, never "valid
+    // Nothing admits `os.yaml`, and a data output never prompts: the schema file's own check is unavailable, never "valid
     // as written".
     let fixture = with_template_document("output-validate-template");
     let value = conforms(include_str!("../../schemas/output/schema-validate.yaml"), &fixture, &["schema", "validate", "schema.yaml", "--output", "json"], 1);

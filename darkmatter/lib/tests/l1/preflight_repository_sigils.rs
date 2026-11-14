@@ -148,7 +148,7 @@ fn compose_preflight_approvals_resolves_repository_sigils_from_a_nested_document
     let md = markdown(&fixture);
     let policy = TempDir::new().expect("policy dir");
     for (row, options) in option_rows(&fixture) {
-        let options = options.with_shell_policy_root(policy.path());
+        let options = options.with_config_snapshot(crate::request_support::shell_config(policy.path(), &[]));
         let approvals = md
             .compose_preflight_approvals(&crate::request_support::request(options.clone()), Some(Arc::new(AllowAll)))
             .unwrap_or_else(|error| panic!("{row}: approvals failed: {error}"));

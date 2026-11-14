@@ -61,8 +61,7 @@ impl CommandExecution {
 /// Resolution order:
 /// 1. `options.shell.working_directory` if set
 /// 2. Source file's parent directory if `ComposeSource::File`
-/// 3. `options.shell.policy_root` if set
-/// 4. the request directory (`context.cwd()`), never the process's
+/// 3. the request directory (`context.cwd()`), never the process's
 ///
 /// ## Examples
 ///
@@ -92,9 +91,6 @@ pub fn resolve_working_directory(
         && !parent.as_os_str().is_empty()
     {
         return parent.to_path_buf();
-    }
-    if let Some(ref root) = shell_opts.policy_root {
-        return root.clone();
     }
     context.cwd().to_path_buf()
 }
@@ -910,7 +906,6 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let options = ShellExpansionOptions {
             working_directory: Some(temp_dir.path().to_path_buf()),
-            policy_root: Some(PathBuf::from("/some/other/path")),
             ..Default::default()
         };
         let source = ComposeSource::File(PathBuf::from("/yet/another/path/file.md"));
@@ -923,16 +918,7 @@ mod tests {
         let wd = resolve_working_directory(&options, &source, &request_context());
         assert_eq!(wd, PathBuf::from("/path/to"));
 
-        // Test 3: policy_root when no file source
-        let options = ShellExpansionOptions {
-            policy_root: Some(PathBuf::from("/policy/root")),
-            ..Default::default()
-        };
-        let source = ComposeSource::Unknown;
-        let wd = resolve_working_directory(&options, &source, &request_context());
-        assert_eq!(wd, PathBuf::from("/policy/root"));
-
-        // Test 4: the request directory as fallback, never the process's
+        // Test 3: the request directory as fallback, never the process's
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
         let wd = resolve_working_directory(&options, &source, &FileResolutionContext::new(temp_dir.path()));

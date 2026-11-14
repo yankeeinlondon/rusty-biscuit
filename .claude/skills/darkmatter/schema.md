@@ -478,27 +478,41 @@ text the same way, or its slots have no position. Tests:
 `lib/tests/l1/dynamic_schema_slot_positions.rs`.
 The gate is chosen per slot by its defining file
 (`evaluator.rs::SlotGates`; `with_gate` is one gate for all).
-Approval is `schemas/slots/grants/`: `store.rs` (the user-level
-`<home>/.config/darkmatter/schema-read-policy`, path from
-`FileResolutionContext::home_dir()`, never a repo or workspace file; any bad
-line fails the whole store), `matching.rs::GrantBook` (deny wins anywhere;
-`--allow host=` is a run-only site allow), `auto.rs::RepositoryGrounds`
-(Sniff `GitRepo::tracked_state` + `worktree_blob_id` at the request's
-observed root, `ComposeOptions::slot_repository_root`; probes and absent
-targets need only "schema and target in the repo"; listings/URLs never),
-`gate.rs::SlotGrants`/`RunGates` (deny → allow → automatic (memoized per run,
-post-read BLAKE3 must equal the granted bytes) → handler → `ApprovalRequired
-{ needed }`; slots fetch through their own `remote_runtime`),
+Approval is `schemas/slots/grants/`, judged from the reading document (the
+slot's defining schema file; the document for an inline `$schema`) before
+the file is opened or the `load_data`/data memo consulted.
+`gate.rs::SlotGrants`/`RunGates` order: invalid `permissions` refuse every
+read with the config error's own code (`dm.config.invalid`/`dm.config.reference`)
+→ a listing needs no approval → deny-for-run (`dm.schema.slot_denied`) /
+allow-for-run (overrides a `!` exclusion) → captured `permissions.file-read`
+pre-approval (user ∪ (repo `HEAD` ∧ working copy), `!` from any layer removes
+it; see `docs/topics/configuration.md`) or, for a URL, network consent
+(`permissions.network: allow` / `--allow host=`) → handler → `ApprovalRequired
+{ needed }`. Listings (`find_files`, `find_*_index`) enumerate without asking
+and keep only files `SlotGrants::admits_listed` admits (pre-approved or
+allowed this run); nothing is ever asked about a folder. Choices are exactly
+allow-for-run, "always allow" a file (offered only with valid permissions;
+`config::permissions::persist::save_user_approval` writes an exact glob-escaped
+`~/` entry to the user scope's `file-read` and the file is allowed for the
+rest of the run either way; a failed save is a `dm.config.not_saved`
+warning via `SlotSession::take_not_saved_warnings`), and deny-for-run; no
+folder, site, URL-any-query, or persistent deny exists, and the captured
+config is never reloaded mid-run. `matching.rs::GrantBook` holds this run's
+approvals; slots fetch through their own `remote_runtime`.
 `targets.rs::collect_targets` (passive; literal/pure-folded args, URL or
-absolute/`./`/`../` path only; a listing names the folder it enumerates), and `request.rs` (`SlotGrantRequest`,
+absolute/`./`/`../` path only), and `request.rs` (`SlotGrantRequest`,
 `SlotGrantDecision`; a decision not among `choices` is unanswered).
+`grants_needed` holds `{kind: file|url, target, scope: once|persisted}`.
 `ShellApprovalHandler::approve_slot_reads` (provided, default unanswered) is
 asked by `compose_preflight_approvals*` before shell prompts
 (`ComposePreflightApprovals::slot_grants`, `stats.slot_reads_asked`); the CLI
 prompt is `cli/src/approval.rs::approve_slot_reads_with_io`. A discovery pass
 (`defer_shell_pending_schema_problems`) leaves an `UnresolvedSlots` schema to
 the terminal pass (`schema_validation::defers_template`).
-Resolution: `slots/session.rs::SlotSession` (one per command; built by
+Resolution: `slots/session.rs::SlotSession` (`for_request` uses the
+request's captured `ConfigSnapshot`, `for_context` loads the context's config
+passively on first need, `with_config_snapshot` sets one; no `with_home`;
+one per command; built by
 `run_root_pipeline_collecting` from the request unless
 `ComposeOptions::with_slot_session` attached one; `prepare_schemas` hands it to
 `DarkmatterSchemas::with_slot_session`, pins-only when the pass defers).
@@ -524,7 +538,9 @@ notes every allowed read with its defining file into
 the same recording gates, so their reads reach the outer entry, the contract
 memo, and its replay under the contract's own file, and `serves` judges each
 `entry.dependencies.reads` for its own defining file, before the stat-first rechecks reread an input, command-scoped entries for volatile/URL/listing
-reads, no grant-dependent failures; cleared by
+reads, no failures that depend on approvals, denies, or invalid permissions;
+`serves` requires the requesting session's permissions and run approvals to
+admit every recorded read without asking; cleared by
 `reset_process_caches_for_bench`). What an entry depends on beyond observed
 files is evaluation-driven, never derived from `pending.slots()`:
 `slots/dependencies.rs` collects it thread-locally while slots run

@@ -363,10 +363,10 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                             "Install the binary or update <cyan>$PATH</cyan>."
                         }
                         ShellExpansionError::Blacklisted { .. } => {
-                            "Remove the entry from your blacklist file if you trust this command."
+                            "The built-in blacklist cannot be overridden."
                         }
                         ShellExpansionError::ApprovalRequired { .. } => {
-                            "Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist."
+                            "Approve it when prompted or add a <cyan>shell-commands</cyan> rule."
                         }
                         ShellExpansionError::Denied { .. } => {
                             "The user declined to approve this shell command."

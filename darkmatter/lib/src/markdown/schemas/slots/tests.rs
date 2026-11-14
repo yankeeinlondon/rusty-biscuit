@@ -32,6 +32,10 @@ impl ReadGate for AllowAll {
     fn check(&self, _target: &ReadTarget) -> Result<(), GateRefusal> {
         Ok(())
     }
+
+    fn admits_listed(&self, _target: &ReadTarget) -> bool {
+        true
+    }
 }
 
 /// A slot whose text is `{{ expression }}` at the start of its source.

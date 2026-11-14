@@ -1,11 +1,15 @@
 //! The dynamic-slot repository fixture produces each state it names, and its
 //! copied schema's slot path reaches the data file. Later approval tests rely
-//! on these states differing from the clean control in exactly one way.
+//! on these states differing from the clean control in exactly one way, and
+//! on the committed repository configuration pre-approving nothing until
+//! `permit_data` commits an entry for the data file.
 
 use std::path::Path;
 use std::process::Command;
 
-use crate::dynamic_slots_fixtures::{DATA_FILE, DIRTY_ENTRY, DOCUMENT_FILE, RepoState, SCHEMA_FILE, SlotRepo};
+use crate::dynamic_slots_fixtures::{
+    DATA_FILE, DATA_READ_CONFIG, DIRTY_ENTRY, DOCUMENT_FILE, NO_READS_CONFIG, RepoState, SCHEMA_FILE, SlotRepo,
+};
 
 /// `git status --porcelain --ignored` for the whole repository.
 fn porcelain(root: &Path) -> String {
@@ -69,4 +73,15 @@ fn no_repository_state_copies_the_files_without_git() {
     assert!(!repo.root().join(".git").exists());
     assert!(repo.path(DATA_FILE).is_file());
     assert!(repo.path(SCHEMA_FILE).is_file());
+}
+
+#[test]
+fn the_committed_configuration_permits_the_data_file_only_after_permit_data() {
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
+    let repo = SlotRepo::build(&source, RepoState::DirtyData);
+    let config = repo.root().join(".darkmatter.yaml");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), NO_READS_CONFIG);
+    repo.permit_data();
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), DATA_READ_CONFIG);
+    assert_eq!(porcelain(repo.root()), format!(" M {DATA_FILE}\n"), "the data file keeps its own state");
 }

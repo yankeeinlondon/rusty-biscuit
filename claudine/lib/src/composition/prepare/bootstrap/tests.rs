@@ -220,12 +220,12 @@ impl ShellApprovalHandler for CountingHandler {
 }
 
 fn approval_options(
-    policy_root: &Path,
+    home: &Path,
     handler: Option<Arc<dyn ShellApprovalHandler>>,
     cache: &Arc<Mutex<HashMap<darkmatter::markdown::compose::shell_expansion::template::ApprovalKey, crate::harness::shell::CachedApprovalDecision>>>,
 ) -> ShellApprovalOptions {
     ShellApprovalOptions {
-        policy_root: Some(policy_root.to_path_buf()),
+        permissions: crate::harness::shell::test_support::user_permissions(home, &["prefix echo"]),
         approval_handler: handler,
         approval_cache: Arc::clone(cache),
         ..Default::default()
@@ -259,8 +259,7 @@ fn bootstrap_frontmatter_shells_ignore_approval_handlers_and_cached_commands() {
     let source = source_at(dir.path(), "---\nstamp: \"$(echo ready)\"\n---\n::file ./missing.md\n");
     let handler = Arc::new(CountingHandler(Mutex::new(Vec::new())));
     let cache = Arc::new(Mutex::new(HashMap::new()));
-    fs::write(policy.path().join(".darkmatter-shell-whitelist"), "prefix echo\n").unwrap();
-    cache.lock().unwrap().insert(darkmatter::markdown::compose::shell_expansion::template::ApprovalKey::exact(Some(policy.path()), "echo ready"), crate::harness::shell::CachedApprovalDecision::Allowed);
+    cache.lock().unwrap().insert(darkmatter::markdown::compose::shell_expansion::template::ApprovalKey::exact("echo ready"), crate::harness::shell::CachedApprovalDecision::Allowed);
     let gate = approval_options(policy.path(), Some(handler.clone()), &cache);
     let options = PrepareOptions {
         pre_approved_commands: Some(HashSet::from(["echo ready".to_string()]).into()),

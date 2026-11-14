@@ -540,7 +540,7 @@ calls in skipped regions.
 
 Shell authorization remains owned by the existing
 [preflight approval system](./preflight-checks.md). All authored shell commands
-require explicit whitelist permission regardless of `when`, `filter`, `while`,
+require explicit approval (a `permissions.shell-commands` rule or a prompt) regardless of `when`, `filter`, `while`,
 or `until`. Conditions govern execution, never authorization. No map-specific
 permission system is introduced.
 

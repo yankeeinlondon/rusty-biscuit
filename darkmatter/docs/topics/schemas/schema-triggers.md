@@ -220,9 +220,9 @@ whatever its `when=` condition, so it finds such a child-only trigger too.
 
 - when composition then skips the child (`::file ../alpha/docs/child.md
   when=false`), on success;
-- when preparation refuses a shell command, because no whitelist rule
-  approves it on a non-interactive run (`Approval required`) or a blacklist
-  rule rejects it;
+- when preparation refuses a shell command, because no `shell-commands` rule
+  approves it (or an exclusion matches it) on a non-interactive run
+  (`Approval required`) or the built-in blacklist rejects it;
 - when a later document in the walk fails, such as a sibling whose `$schema`
   does not load: the triggers found before the failure, in the order they
   were found.
@@ -261,7 +261,7 @@ see [Diagnostic Policy](../../cli/policy.md#diagnostics---deny).
 
 A trigger that only shell preparation finds stops the command at that walk,
 before any shell command is approved, prompted for, or run. With the
-child-only trigger above, the whitelisted `::shell` below never runs:
+child-only trigger above, the allowed `::shell` below never runs:
 
 ```console
 $ cat docs/prompt.md

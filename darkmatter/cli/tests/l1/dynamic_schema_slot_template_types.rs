@@ -5,11 +5,13 @@
 //!
 //! Each test but the constant-slot one builds a Git repository at the fixture `cwd` holding
 //! `schemas/schema.yaml`, whose `status` and `label` types each come from a
-//! data file beside it, and `docs/doc.md`, which names the schema. Committed
-//! files get the automatic grant; a cell then changes one thing (a dirty or
-//! malformed data file, a grant store line) and runs one command. Nothing
-//! here has a terminal, so nothing prompts; the fixture home holds the grant
-//! store, so the developer's own grants never apply.
+//! data file beside it, and `docs/doc.md`, which names the schema. The
+//! committed repository `.darkmatter.yaml` admits both data files; a cell then
+//! changes one thing (a dirty status file whose permission the working copy
+//! withdraws, a malformed data file, a user `permissions.file-read` entry)
+//! and runs one command. Nothing here has a terminal, so nothing prompts;
+//! the fixture home holds the user configuration (admitting nothing unless a
+//! cell says so), so the developer's own never applies.
 
 use crate::common;
 
@@ -30,6 +32,8 @@ const SCHEMA_FILE: &str = "schemas/schema.yaml";
 const STATUS_FILE: &str = "schemas/status.yaml";
 const DOCUMENT_FILE: &str = "docs/doc.md";
 const APPROVAL_REQUIRED: &str = "dm.schema.slot_approval_required";
+/// A `permissions` block pre-approving no read.
+const NO_READS: &str = "permissions:\n    file-read: []\n";
 
 /// The repository above, committed; `None` when `git` is unavailable.
 fn repository(name: &str, label_type: &str) -> Option<CliProcessFixture> {
@@ -41,14 +45,18 @@ fn repository(name: &str, label_type: &str) -> Option<CliProcessFixture> {
     fixture.write_file(format!("cwd/{STATUS_FILE}"), STATUS_TYPE);
     fixture.write_file("cwd/schemas/label.yaml", label_type);
     fixture.write_file(format!("cwd/{DOCUMENT_FILE}"), DOCUMENT);
+    fixture.write_file("cwd/.darkmatter.yaml", "permissions:\n    file-read:\n        - \"&schemas/*.yaml\"\n");
+    fixture.write_file("home/.darkmatter.yaml", NO_READS);
     assert!(fixture.commit_all(fixture.cwd()), "the fixture commits");
     Some(fixture)
 }
 
-/// Adds a member to the committed `status` type: tracked, but no longer
-/// identical to `HEAD`, so its read gets no automatic grant.
+/// Adds a member to the committed `status` type and withdraws its
+/// permission in the working copy (a narrowing applies at once), so
+/// nothing admits its read.
 fn dirty_status(fixture: &CliProcessFixture) {
     std::fs::write(in_repo(fixture, STATUS_FILE), "type: enum(draft, published, archived)\n").expect("the status type is writable");
+    fixture.write_file("cwd/.darkmatter.yaml", "permissions:\n    file-read:\n        - \"&schemas/label.yaml\"\n");
 }
 
 fn in_repo(fixture: &CliProcessFixture, relative: &str) -> PathBuf {
@@ -60,10 +68,10 @@ fn canonical(fixture: &CliProcessFixture, relative: &str) -> String {
     biscuit_file::canonicalize_simplified(&in_repo(fixture, relative)).expect("exists").display().to_string()
 }
 
-/// Grants reading the status type file, persisted in the fixture home.
-fn grant_status(fixture: &CliProcessFixture) {
-    let store = fixture.home().join(".config").join("darkmatter").join("schema-read-policy");
-    common::fixture::write(&store, &format!("allow file {}\n", canonical(fixture, STATUS_FILE)));
+/// Admits the status type file in the user's `permissions.file-read`,
+/// relative to the schema that reads it.
+fn permit_status(fixture: &CliProcessFixture) {
+    fixture.write_file("home/.darkmatter.yaml", "permissions:\n    file-read:\n        - ./status.yaml\n");
 }
 
 fn validate(fixture: &CliProcessFixture, args: &[&str]) -> Output {
@@ -116,7 +124,7 @@ fn a_schema_file_whose_template_types_resolve_is_valid() {
 }
 
 #[test]
-fn a_schema_file_with_an_ungranted_template_type_read_is_unavailable() {
+fn a_schema_file_with_an_unpermitted_template_type_read_is_unavailable() {
     let Some(fixture) = repository("template-types-schema-file-dirty", LABEL_TYPE) else {
         return;
     };
@@ -130,12 +138,12 @@ fn a_schema_file_with_an_ungranted_template_type_read_is_unavailable() {
 }
 
 #[test]
-fn a_schema_file_with_a_persisted_grant_reads_the_dirty_type_file() {
+fn a_schema_file_with_user_permissions_reads_the_dirty_type_file() {
     let Some(fixture) = repository("template-types-schema-file-granted", LABEL_TYPE) else {
         return;
     };
     dirty_status(&fixture);
-    grant_status(&fixture);
+    permit_status(&fixture);
     let report = report(&validate(&fixture, &[SCHEMA_FILE]), 0);
     assert_eq!(report["files"][0]["valid"], true, "{report:#}");
 }
@@ -169,7 +177,7 @@ fn a_document_is_judged_by_the_resolved_template_type() {
 }
 
 #[test]
-fn a_document_with_an_ungranted_template_type_read_is_unavailable_never_valid() {
+fn a_document_with_an_unpermitted_template_type_read_is_unavailable_never_valid() {
     let Some(fixture) = repository("template-types-document-dirty", LABEL_TYPE) else {
         return;
     };
@@ -179,14 +187,14 @@ fn a_document_with_an_ungranted_template_type_read_is_unavailable_never_valid() 
 }
 
 #[test]
-fn a_document_with_a_persisted_grant_reads_the_dirty_type_file() {
+fn a_document_with_user_permissions_reads_the_dirty_type_file() {
     let Some(fixture) = repository("template-types-document-granted", LABEL_TYPE) else {
         return;
     };
     dirty_status(&fixture);
-    grant_status(&fixture);
+    permit_status(&fixture);
     let report = report(&validate(&fixture, &[DOCUMENT_FILE, "status=archived"]), 0);
-    assert_eq!(report["files"][0]["valid"], true, "the grant read the dirty list, which allows `archived`: {report:#}");
+    assert_eq!(report["files"][0]["valid"], true, "the user permission read the dirty list, which allows `archived`: {report:#}");
 }
 
 /// `label=123` parses as a number; only the resolved `alphanumeric` type
@@ -202,10 +210,10 @@ fn an_assignment_is_converted_by_the_resolved_template_type() {
     assert_eq!(record["problems"], json!([]), "{report:#}");
 }
 
-/// Without the grant the assignment is never converted against a guessed
+/// Without the permission the assignment is never converted against a guessed
 /// type or judged: the check is unavailable.
 #[test]
-fn an_assignment_with_an_ungranted_template_type_read_is_unavailable() {
+fn an_assignment_with_an_unpermitted_template_type_read_is_unavailable() {
     let Some(fixture) = repository("template-types-assignment-dirty", LABEL_TYPE) else {
         return;
     };
@@ -216,7 +224,7 @@ fn an_assignment_with_an_ungranted_template_type_read_is_unavailable() {
 
 /// A grouped union holding a template type, written as an arm of another
 /// union, resolves like the static text with `string` in place of the slot.
-/// The slot is a constant, so no read and no grant is involved.
+/// The slot is a constant, so no read and no approval is involved.
 #[test]
 fn a_schema_file_with_a_template_type_in_a_nested_grouped_union_is_valid() {
     let fixture = CliProcessFixture::named("template-types-nested-grouped-union");

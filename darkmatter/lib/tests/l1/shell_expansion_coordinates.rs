@@ -31,7 +31,7 @@ impl ShellApprovalHandler for AllowAllHandler {
 fn compose_options(dir: &TempDir) -> ComposeOptions {
     ComposeOptions::new()
         .with_source_file(dir.path().join("doc.md"))
-        .with_shell_policy_root(dir.path())
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[]))
         .with_shell_working_directory(std::env::current_dir().unwrap())
         .with_shell_approval_handler(Arc::new(AllowAllHandler))
 }

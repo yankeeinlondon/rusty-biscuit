@@ -32,8 +32,7 @@ mod frontmatter_shell_expansion_integration {
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::Interpolation,
             ])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApproval)),
                 ..Default::default()
             });
@@ -59,8 +58,7 @@ mod frontmatter_shell_expansion_integration {
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::Interpolation,
             ])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApproval)),
                 ..Default::default()
             });
@@ -87,8 +85,7 @@ mod frontmatter_shell_expansion_integration {
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::ShellExpansion,
             ])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApproval)),
                 ..Default::default()
             });
@@ -113,8 +110,7 @@ mod frontmatter_shell_expansion_integration {
                 ComposeOperation::Interpolation,
                 ComposeOperation::ShellExpansion,
             ])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApproval)),
                 ..Default::default()
             });
@@ -177,10 +173,9 @@ mod frontmatter_shell_expansion_integration {
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::Interpolation,
             ])
-            .with_shell(ShellExpansionOptions {
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 timeout: Duration::from_millis(100),
                 timeout_behavior: super::ShellTimeoutBehavior::EmptyString,
-                policy_root: Some(temp_dir.path().to_path_buf()),
                 approval_handler: Some(Arc::new(MockApproval)),
                 ..Default::default()
             });
@@ -217,8 +212,7 @@ mod frontmatter_shell_expansion_integration {
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::FrontmatterShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApproval)),
                 ..Default::default()
             });
@@ -239,8 +233,7 @@ mod frontmatter_shell_expansion_integration {
 
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::FrontmatterShellExpansion])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApproval)),
                 ..Default::default()
             });
@@ -276,8 +269,7 @@ mod frontmatter_shell_expansion_integration {
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::Interpolation,
             ])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApproval)),
                 ..Default::default()
             });
@@ -317,8 +309,7 @@ mod frontmatter_shell_expansion_integration {
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::Interpolation,
             ])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApproval)),
                 ..Default::default()
             });
@@ -357,8 +348,7 @@ mod frontmatter_shell_expansion_integration {
                 ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::FrontmatterShellExpansion,
             ])
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
+            .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
                 approval_handler: Some(Arc::new(MockApproval)),
                 ..Default::default()
             });

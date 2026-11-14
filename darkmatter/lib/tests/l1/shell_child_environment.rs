@@ -32,10 +32,7 @@ fn compose(dir: &Path, content: &str, environment: Option<ShellChildEnvironment>
     std::fs::write(&path, content).unwrap();
     let mut options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
         .with_source_file(path.clone())
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(dir.to_path_buf()),
-            ..Default::default()
-        })
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[])).with_shell(ShellExpansionOptions::default())
         .with_shell_working_directory(dir)
         .with_shell_approval_handler(Arc::new(AllowAll));
     if let Some(environment) = environment {

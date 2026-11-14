@@ -734,9 +734,11 @@ pub(crate) fn prepare_and_run_active_document(
     // parent CWD to the repo root, so an ambient capture would answer
     // `ctx.area` differently depending on when it ran.
     let approval_options = crate::commands::wrap::apply_composition_shell_overrides(
-        crate::commands::wrap::build_harness_shell_options_for_source_with_cache(
-            &source.resolved_path,
-            prep_context.source_context.repository_root(),
+        crate::commands::wrap::build_harness_shell_options_with_cache(
+            claudine::harness::CapturedPermissions::for_source(
+                &prep_context.invocation,
+                prep_context.source_context.file_resolution_context(),
+            ),
             Some(Arc::clone(shared_approval_cache)),
         ),
         shared.dry_run,

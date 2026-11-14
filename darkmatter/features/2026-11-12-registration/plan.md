@@ -1389,7 +1389,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 7 — Permission mechanisms (parallel)
 
-- [ ] **Evaluate scope policies**
+- [x] **Evaluate scope policies**
   - Own `config/permissions.rs` and reference resolution, using the pinned
     Sniff view and Rules 14–15. Implement whole-block references with one hop,
     independent HEAD/worktree reads, user/repo defaults, semantic intersections,
@@ -1403,7 +1403,7 @@ never count a private parser assertion as the matrix result.
     committed symlink chains/cycles, and missing-file probes. Use native path
     fixtures and shared identity APIs rather than slash-replacement helpers.
 
-- [ ] **Enforce fetch consent**
+- [x] **Enforce fetch consent**
   - Own Biscuit File's FetchPolicy change and Darkmatter's remote policy
     projection. Implement Rule 17 without changing transport/cache rules.
   - Use loopback HTTP fixtures to prove allow, deny, exact-host override,
@@ -1412,7 +1412,7 @@ never count a private parser assertion as the matrix result.
   - Update Biscuit File fetch docs and the affected skill/API description;
     keep default construction deny-all.
 
-- [ ] **Prepare legacy migration**
+- [x] **Prepare legacy migration**
   - Own `config/migration.rs` and policy migration recovery tests. Implement
     Rule 20 on top of the Phase 2 transactions/receipts, using strict legacy
     parsing. Report every dropped or reinterpreted line through returned
@@ -1424,7 +1424,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 8 — Enforcement adapters (parallel)
 
-- [ ] **Unify shell decisions**
+- [x] **Unify shell decisions**
   - Own Darkmatter shell policy/preflight/execution and md lifecycle adapters.
     Replace old stores/paths with shared permission decisions and transaction
     persistence; remove user blacklist and permanent-deny APIs. The coordinator
@@ -1437,7 +1437,7 @@ never count a private parser assertion as the matrix result.
     cached approval, templates, yolo, and lifecycle execution; test exclusions
     prompt or return a noninteractive approval-required error.
 
-- [ ] **Unify slot decisions**
+- [x] **Unify slot decisions**
   - Own slot grants/gates/session and file listing filtering. The coordinator
     owns `darkmatter/cli/src/approval.rs` for both shell and schema prompt
     edits after these parallel library tasks; neither worker edits that shared

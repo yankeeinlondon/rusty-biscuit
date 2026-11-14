@@ -332,12 +332,6 @@ pub struct ComposeOptions {
     /// Default: `Error` (abort compose).
     pub(crate) shell_timeout_behavior: ShellTimeoutBehavior,
 
-    /// Root directory for shell expansion policy files.
-    ///
-    /// When set, only commands matching an approval policy in this
-    /// directory (or its ancestors) are allowed to execute.
-    pub(crate) shell_policy_root: Option<PathBuf>,
-
     /// Working directory for `::shell` command execution.
     ///
     /// When `None`, commands run in the directory of the source file
@@ -723,7 +717,6 @@ impl std::fmt::Debug for ComposeOptions {
             .field("iteration_limits", &self.iteration_limits)
             .field("resolve_repo_root", &self.resolve_repo_root)
             .field("shell_timeout", &self.shell_timeout)
-            .field("shell_policy_root", &self.shell_policy_root)
             .field("shell_working_directory", &self.shell_working_directory)
             .field("shell_child_environment", &self.shell_child_environment.is_some())
             .field(
@@ -1033,7 +1026,6 @@ impl ComposeOptions {
             source_opening: None,
             shell_timeout: std::time::Duration::from_secs(10),
             shell_timeout_behavior: ShellTimeoutBehavior::Error,
-            shell_policy_root: None,
             shell_working_directory: None,
             shell_child_environment: None,
             shell_approval_handler: None,
@@ -1570,7 +1562,6 @@ impl ComposeOptions {
     pub fn with_shell(mut self, shell: super::super::shell_expansion::ShellExpansionOptions) -> Self {
         self.shell_timeout = shell.timeout;
         self.shell_timeout_behavior = shell.timeout_behavior;
-        self.shell_policy_root = shell.policy_root;
         self.shell_working_directory = shell.working_directory;
         self.shell_approval_handler = shell.approval_handler;
         self.shell_strip_ansi = shell.strip_ansi;
@@ -1602,13 +1593,6 @@ impl ComposeOptions {
         } else {
             ShellTimeoutBehavior::Error
         };
-        self
-    }
-
-    /// Sets the shell policy root directly on flat compose options.
-    #[must_use]
-    pub fn with_shell_policy_root(mut self, path: impl Into<PathBuf>) -> Self {
-        self.shell_policy_root = Some(path.into());
         self
     }
 
@@ -1951,7 +1935,6 @@ impl ComposeOptions {
         super::super::shell_expansion::ShellExpansionOptions {
             timeout: self.shell_timeout,
             timeout_behavior: self.shell_timeout_behavior,
-            policy_root: self.shell_policy_root.clone(),
             working_directory: self.shell_working_directory.clone(),
             approval_handler: self.shell_approval_handler.clone(),
             strip_ansi: self.shell_strip_ansi,
@@ -2055,16 +2038,19 @@ impl ComposeOptions {
     ///
     /// Read-side expression URL reads (`markdown_title(url)`, `frontmatter(url)`,
     /// …) are a separate capability from `::file`/`::code` block transclusion: a
-    /// caller that configures an allowed host via [`with_remote_read_config`]
-    /// enables them without also opting into remote transclusion. Block
-    /// transclusion keeps its own explicit [`with_allow_remote_transclusion`]
-    /// gate. An empty allowlist with the transclusion flag unset means remote
+    /// caller that configures an allowed host via [`with_remote_read_config`],
+    /// or whose configuration says `network: allow`, enables them without
+    /// also opting into remote transclusion. Block transclusion keeps its own
+    /// explicit [`with_allow_remote_transclusion`] gate. An empty allowlist
+    /// and a denied `network` with the transclusion flag unset mean remote
     /// reads stay fully disabled, preserving the deny-all default.
     ///
     /// [`with_remote_read_config`]: Self::with_remote_read_config
     /// [`with_allow_remote_transclusion`]: Self::with_allow_remote_transclusion
     pub(crate) fn remote_reads_enabled(&self) -> bool {
-        self.allow_remote_transclusion || self.remote_read_config.http_hosts().next().is_some()
+        self.allow_remote_transclusion
+            || self.remote_read_config.http_hosts().next().is_some()
+            || self.network_permission().allows_every_host()
     }
 
     /// The request's ICMP authority with its grants derived from the
@@ -2405,7 +2391,11 @@ impl ComposeOptions {
     /// approval lifecycle) should call this once so both stages fetch each
     /// remote URL exactly once instead of twice. The runtime is built with the
     /// same transport-cache resolution `compose_with` uses, honoring
-    /// `cache_root` / `cache_namespace`.
+    /// `cache_root` / `cache_namespace`, and with the `network` permission
+    /// of the configuration snapshot attached so far; attach the snapshot
+    /// ([`Self::with_config_snapshot`]) first. A request whose snapshot decides
+    /// `network` differently replaces the runtime rather than fetch under a
+    /// stale decision.
     #[must_use]
     pub fn with_shared_remote_fetch(mut self) -> Self {
         self.remote_fetch = Some(self.build_remote_fetch_runtime());
@@ -2472,7 +2462,27 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_config_snapshot(mut self, snapshot: Arc<crate::config::load::ConfigSnapshot>) -> Self {
         self.config_snapshot = Some(snapshot);
+        self.align_remote_network();
         self
+    }
+
+    /// The `network` permission of the attached configuration snapshot;
+    /// deny without one. Composition and schema-slot URL reads both take
+    /// their host consent from it.
+    pub(crate) fn network_permission(&self) -> crate::config::network::NetworkPermission {
+        crate::config::network::NetworkPermission::from_snapshot(self.config_snapshot.as_deref())
+    }
+
+    /// Replaces an attached remote-fetch runtime built under another
+    /// `network` decision than the attached snapshot's. A runtime that
+    /// already agrees is kept, so the passes sharing it still fetch each URL
+    /// once.
+    pub(crate) fn align_remote_network(&mut self) {
+        if let Some(runtime) = &self.remote_fetch
+            && *runtime.network() != self.network_permission()
+        {
+            self.remote_fetch = Some(self.build_remote_fetch_runtime());
+        }
     }
 
     /// The supplied (or, once a request holds these options, captured)
@@ -2519,7 +2529,7 @@ impl ComposeOptions {
                 self.cache_namespace.as_deref(),
             )))
         });
-        RemoteFetchRuntime::with_store(&self.remote_read_config, remote_store)
+        RemoteFetchRuntime::with_store_and_network(&self.remote_read_config, remote_store, self.network_permission())
     }
 
     // ── Getters ────────────────────────────────────────────────────
@@ -3106,6 +3116,49 @@ fn encode_source_opening(enc: &mut GraphIdentityEncoder, opening: &Option<Source
     }
 }
 
+/// Encodes the configured `network` decision; an invalid configuration
+/// keeps its message, since a refused read reports it.
+fn encode_network_permission(enc: &mut GraphIdentityEncoder, network: &crate::config::network::NetworkPermission) {
+    use crate::config::network::NetworkPermission;
+    match network {
+        NetworkPermission::Deny => enc.tag(0),
+        NetworkPermission::Allow => enc.tag(1),
+        NetworkPermission::Invalid(error) => {
+            enc.tag(2);
+            enc.str(&error.to_string());
+        }
+    }
+}
+
+/// The `shell-commands` rules of every layer `snapshot` captured that has
+/// any, in layer order with allows before exclusions; an invalid block keeps
+/// its message, since every command then fails with it. No snapshot, and a
+/// snapshot with no rules, are the same empty policy.
+fn shell_permissions_identity(snapshot: Option<&crate::config::load::ConfigSnapshot>) -> String {
+    use std::fmt::Write as _;
+    let Some(snapshot) = snapshot else {
+        return String::new();
+    };
+    let policy = match snapshot.policy() {
+        Ok(policy) => policy,
+        Err(error) => return format!("invalid\u{0}{error}"),
+    };
+    let mut identity = String::new();
+    for layer in policy.layers() {
+        if layer.shell_allows().entries.is_empty() && layer.shell_exclusions().entries.is_empty() {
+            continue;
+        }
+        let _ = write!(identity, "{:?}\u{0}", layer.revision());
+        for (tag, rules) in [("+", layer.shell_allows()), ("!", layer.shell_exclusions())] {
+            for rule in &rules.entries {
+                let text = crate::config::permissions::shell_rule_text(rule);
+                let _ = write!(identity, "{tag}{}:{text}\u{0}", text.len());
+            }
+        }
+    }
+    identity
+}
+
 impl ComposeOptions {
     /// Exhaustively classifies every field into the two identity products.
     ///
@@ -3150,7 +3203,6 @@ impl ComposeOptions {
             source_opening,
             shell_timeout,
             shell_timeout_behavior,
-            shell_policy_root,
             shell_working_directory,
             shell_child_environment,
             shell_approval_handler,
@@ -3210,13 +3262,21 @@ impl ComposeOptions {
             // Grants and pinned snapshots: they decide whether a template
             // resolves, and the resolved schema is judged by its content.
             slot_session: _,
-            // Read by no stage that shapes a composed result yet; permission
-            // enforcement must add its policy here when it starts reading it.
-            config_snapshot: _,
+            // Its `network` decision and its `shell-commands` rules shape a
+            // composed result (encoded as `network_permission` and
+            // `shell_permissions` below): one decides which URLs a run
+            // reads, the other whether a command runs or needs approval.
+            // Permission enforcement must add each further policy it reads.
+            config_snapshot,
             file_ref_fallback_dir,
         } = self;
 
         use serde_json::Value;
+
+        // The configured `network` decision decides which URLs a run reads.
+        let network_permission =
+            crate::config::network::NetworkPermission::from_snapshot(config_snapshot.as_deref());
+        let shell_permissions = shell_permissions_identity(config_snapshot.as_deref());
 
         // Both identity domains below encode the baseline schema, and the
         // conversion-plus-canonicalization dominates this whole function
@@ -3377,14 +3437,8 @@ impl ComposeOptions {
             ShellTimeoutBehavior::Error => 0,
             ShellTimeoutBehavior::EmptyString => 1,
         });
-        enc.field("shell_policy_root");
-        match shell_policy_root {
-            Some(p) => {
-                enc.tag(1);
-                enc.path(p);
-            }
-            None => enc.tag(0),
-        }
+        enc.field("shell_permissions");
+        enc.str(&shell_permissions);
         enc.field("shell_working_directory");
         match shell_working_directory {
             Some(p) => {
@@ -3573,6 +3627,8 @@ impl ComposeOptions {
             RemoteFreshnessMode::Strict => 1,
             RemoteFreshnessMode::Fallback => 2,
         });
+        enc.field("network_permission");
+        encode_network_permission(&mut enc, &network_permission);
 
         enc.field("defer_shell_pending_schema_problems");
         enc.bool(*defer_shell_pending_schema_problems);
@@ -3701,6 +3757,10 @@ impl ComposeOptions {
         cenc.u64(*max_transclusion_depth as u64);
         cenc.field("allow_remote_transclusion");
         cenc.bool(*allow_remote_transclusion);
+        cenc.field("network_permission");
+        encode_network_permission(&mut cenc, &network_permission);
+        cenc.field("shell_permissions");
+        cenc.str(&shell_permissions);
         cenc.field("allow_local_markdown");
         cenc.bool(*allow_local_markdown);
         cenc.field("allow_local_code");
@@ -3978,6 +4038,7 @@ fn schema_phase_tag(phase: Option<simplified_schema::SchemaPhase>) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::network::NetworkPermission;
     use crate::markdown::compose::{test_request, test_request_in, ComposeRequest};
     use std::path::PathBuf;
 
@@ -4718,10 +4779,6 @@ mod tests {
                 }) as Box<dyn Fn(PathBuf) -> ComposeRequest>,
             ),
             (
-                "shell_policy_root",
-                Box::new(|p| req(fixed_opts().with_shell_policy_root(p))),
-            ),
-            (
                 "shell_working_directory",
                 Box::new(|p| req(fixed_opts().with_shell_working_directory(p))),
             ),
@@ -4757,11 +4814,9 @@ mod tests {
     /// separator must not collide with its halves landing in two adjacent
     /// path-valued fields.
     #[test]
-    fn options_identity_separator_does_not_cross_shell_root_field_boundary() {
-        let merged = fixed_opts().with_shell_policy_root("a/b");
-        let split = fixed_opts()
-            .with_shell_policy_root("a")
-            .with_shell_working_directory("b");
+    fn options_identity_separator_does_not_cross_path_field_boundary() {
+        let merged = fixed_opts().with_shell_working_directory("a/b");
+        let split = fixed_opts().with_shell_working_directory("a").with_file_ref_fallback_dir("b");
         assert_ne!(id(&merged), id(&split));
     }
 
@@ -4772,7 +4827,6 @@ mod tests {
     fn options_identity_path_encoding_is_clone_stable() {
         let opts = with_magic_roots(&["/one"]).derive(|options| {
             options
-                .with_shell_policy_root("/policy")
                 .with_shell_working_directory("/work")
                 .with_cache_root("/cache")
                 .with_file_ref_fallback_dir("/fallback")
@@ -4896,6 +4950,86 @@ mod tests {
         let fresh: Arc<dyn ShellApprovalHandlerTrait> = Arc::new(DummyApproval);
         let fresh_opts = fixed_opts().with_shell_approval_handler(fresh);
         assert_ne!(captured, id(&fresh_opts));
+    }
+
+    /// A configuration snapshot of a temp home whose user file says
+    /// `network: <network>`, outside any repository.
+    fn network_snapshot(home: &std::path::Path, network: &str) -> Arc<crate::config::load::ConfigSnapshot> {
+        std::fs::write(home.join(".darkmatter.yaml"), format!("permissions:\n  network: {network}\n")).unwrap();
+        let context = biscuit_file::FileResolutionContext::from_snapshot(
+            home,
+            Some(home.to_path_buf()),
+            std::collections::HashMap::new(),
+        );
+        Arc::new(
+            crate::config::load::ConfigSnapshot::load(&context, None, crate::config::load::ConfigLoadMode::Passive)
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn identities_include_the_configured_network_decision() {
+        let allow_home = tempfile::tempdir().unwrap();
+        let deny_home = tempfile::tempdir().unwrap();
+        let allow = fixed_opts().with_config_snapshot(network_snapshot(allow_home.path(), "allow"));
+        let deny = fixed_opts().with_config_snapshot(network_snapshot(deny_home.path(), "deny"));
+
+        assert_ne!(fp(&allow), fp(&deny), "a cached result composed under `allow` never serves `deny`");
+        assert_eq!(fp(&deny), fp(&fixed_opts()), "no snapshot decides as `deny` does");
+        let classify = |options: &ComposeOptions| options.classify_options(&neutral_context()).graph_value_fingerprint;
+        assert_ne!(classify(&allow), classify(&deny));
+    }
+
+    fn shell_snapshot(home: &std::path::Path, rules: &str) -> Arc<crate::config::load::ConfigSnapshot> {
+        std::fs::write(home.join(".darkmatter.yaml"), format!("permissions:\n  shell-commands: [{rules}]\n")).unwrap();
+        let context = biscuit_file::FileResolutionContext::from_snapshot(
+            home,
+            Some(home.to_path_buf()),
+            std::collections::HashMap::new(),
+        );
+        Arc::new(
+            crate::config::load::ConfigSnapshot::load(&context, None, crate::config::load::ConfigLoadMode::Passive)
+                .unwrap(),
+        )
+    }
+
+    /// A shell result composed where a rule allowed its command never serves
+    /// a request whose policy asks about it (or refuses every command).
+    #[test]
+    fn identities_include_the_configured_shell_commands() {
+        let homes: Vec<_> = (0..4).map(|_| tempfile::tempdir().unwrap()).collect();
+        let allow = fixed_opts().with_config_snapshot(shell_snapshot(homes[0].path(), "\"prefix ls\""));
+        let exclude = fixed_opts().with_config_snapshot(shell_snapshot(homes[1].path(), "\"prefix ls\", \"!prefix ls\""));
+        let invalid = fixed_opts().with_config_snapshot(shell_snapshot(homes[2].path(), "\"prefix\""));
+        let none = fixed_opts().with_config_snapshot(shell_snapshot(homes[3].path(), ""));
+
+        let fingerprints = [fp(&allow), fp(&exclude), fp(&invalid), fp(&none)];
+        for (index, first) in fingerprints.iter().enumerate() {
+            for second in &fingerprints[index + 1..] {
+                assert_ne!(first, second);
+            }
+        }
+        assert_eq!(fp(&none), fp(&fixed_opts()), "no rules decide as no snapshot does");
+        let classify = |options: &ComposeOptions| options.classify_options(&neutral_context()).graph_value_fingerprint;
+        assert_ne!(classify(&allow), classify(&exclude));
+    }
+
+    #[test]
+    fn attaching_a_snapshot_aligns_a_shared_runtime_with_its_network_decision() {
+        let home = tempfile::tempdir().unwrap();
+        let shared_first = fixed_opts().with_shared_remote_fetch();
+        assert_eq!(*shared_first.remote_fetch.as_ref().unwrap().network(), NetworkPermission::Deny);
+
+        let aligned = shared_first.with_config_snapshot(network_snapshot(home.path(), "allow"));
+        assert_eq!(*aligned.remote_fetch.as_ref().unwrap().network(), NetworkPermission::Allow);
+        assert!(aligned.remote_reads_enabled());
+
+        let kept = aligned.remote_fetch.clone().unwrap();
+        let realigned = aligned.with_config_snapshot(network_snapshot(home.path(), "allow"));
+        assert!(
+            kept.weak_id().same_instance(&realigned.remote_fetch.unwrap().weak_id()),
+            "an agreeing runtime is kept, so passes still share it"
+        );
     }
 
     #[test]

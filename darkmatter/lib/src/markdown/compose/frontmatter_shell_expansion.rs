@@ -35,12 +35,11 @@ use super::expression::{
 use super::frontmatter_interpolation::FrontmatterSeedState;
 use super::value_origin::{DataPaths, FrontmatterProvenance};
 use super::interpolation::{Evaluator, ExpressionFailurePolicy, ScanMode, interpolate_text};
-use super::shell_expansion::store::resolve_policy_paths;
 use super::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use super::shell_expansion::executor::{ShellOutcome, ShellStatus};
 use super::shell_expansion::types::{
     ChainOperator, ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective,
-    ShellExpansionError, ShellExpansionRuntime, ShellPipeline, ShellPolicyPaths,
+    ShellExpansionError, ShellExpansionRuntime, ShellPipeline,
     ShellTimeoutBehavior, frontmatter_key_line,
 };
 use super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, prepare_site};
@@ -1473,10 +1472,6 @@ pub(crate) fn execute_frontmatter_shell_expansion_into(
         });
     }
 
-    // Resolve policy paths once for all directives
-    let shell_opts = options.shell_options();
-    let policy_paths = resolve_policy_paths(&shell_opts, &options.source, options.resolution_context())?;
-    runtime.shell.ensure_loaded(&policy_paths)?;
 
     // Snapshot frontmatter values for ternary condition lookups. Built lazily
     // so non-ternary inputs don't pay the cloning cost. The real run carries a
@@ -1516,7 +1511,7 @@ pub(crate) fn execute_frontmatter_shell_expansion_into(
             FrontmatterShellAst::Pipeline(pipeline) if site.is_some() => {
                 let directive = branch_directive(pipeline.clone(), candidate.raw_command.clone(), candidate, ctx);
                 let prepared =
-                    prepare_site(Ok(directive), site.as_ref(), options, &policy_paths, &mut runtime.shell)?;
+                    prepare_site(Ok(directive), site.as_ref(), options, &mut runtime.shell)?;
                 Pending::Execute(Box::new(prepared))
             }
             FrontmatterShellAst::Pipeline(pipeline) => {
@@ -1525,7 +1520,6 @@ pub(crate) fn execute_frontmatter_shell_expansion_into(
                     candidate.raw_command.clone(),
                     candidate,
                     options,
-                    &policy_paths,
                     &mut runtime.shell,
                     ctx,
                 )?;
@@ -1540,7 +1534,7 @@ pub(crate) fn execute_frontmatter_shell_expansion_into(
                     },
                     message: reason.clone(),
                 };
-                let prepared = prepare_site(Err(unread), site.as_ref(), options, &policy_paths, &mut runtime.shell)?;
+                let prepared = prepare_site(Err(unread), site.as_ref(), options, &mut runtime.shell)?;
                 Pending::Execute(Box::new(prepared))
             }
             FrontmatterShellAst::Ternary {
@@ -1580,7 +1574,6 @@ pub(crate) fn execute_frontmatter_shell_expansion_into(
                     then_branch,
                     candidate,
                     options,
-                    &policy_paths,
                     &mut runtime.shell,
                     ctx,
                     state,
@@ -1593,7 +1586,6 @@ pub(crate) fn execute_frontmatter_shell_expansion_into(
                     else_branch,
                     candidate,
                     options,
-                    &policy_paths,
                     &mut runtime.shell,
                     ctx,
                     state,
@@ -1690,6 +1682,7 @@ pub(crate) fn execute_frontmatter_shell_expansion_into(
     validate_no_whole_value_shell_leak(frontmatter, provenance.data(), ctx, &options.exclude_keys)?;
 
     let approvals_used = runtime.shell.take_recent_approval_count();
+    warnings.extend(runtime.shell.take_recent_warnings());
 
     Ok(FrontmatterShellExpansionReport {
         replacements: candidates.len(),
@@ -1992,12 +1985,11 @@ fn prepare_branch_pipeline(
     raw_command: String,
     candidate: &FrontmatterShellDirective,
     options: &crate::markdown::compose::ComposeRequest,
-    policy_paths: &ShellPolicyPaths,
     runtime: &mut ShellExpansionRuntime,
     ctx: &SourceContext,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
     let directive = branch_directive(pipeline, raw_command, candidate, ctx);
-    prepare_directive(&directive, options, policy_paths, runtime)
+    prepare_directive(&directive, options, runtime)
 }
 
 /// The template site of a non-conditional `$( … )` value whose authored
@@ -2089,7 +2081,6 @@ fn prepare_optional_branch(
     branch: &Branch,
     candidate: &FrontmatterShellDirective,
     options: &crate::markdown::compose::ComposeRequest,
-    policy_paths: &ShellPolicyPaths,
     runtime: &mut ShellExpansionRuntime,
     ctx: &SourceContext,
     state: &FrontmatterSeedState,
@@ -2140,7 +2131,6 @@ fn prepare_optional_branch(
                 raw_command,
                 candidate,
                 options,
-                policy_paths,
                 runtime,
                 ctx,
             )?;

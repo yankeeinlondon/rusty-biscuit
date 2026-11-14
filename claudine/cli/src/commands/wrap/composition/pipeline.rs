@@ -1309,9 +1309,15 @@ fn construct_lifecycle_runtime(
         // checks and handler recovery DSL are no longer evaluated.
 
         let shell_options = apply_composition_shell_overrides(
-            super::super::build_harness_shell_options_for_source_with_cache(
-                &request.prepared.resolved_path,
-                effective_repo_root,
+            super::super::build_harness_shell_options_with_cache(
+                claudine::harness::CapturedPermissions::resolve(
+                    request.invocation_context.as_ref(),
+                    Some(&request.prepared.compose_context),
+                    request.source_context.as_ref().map_or(
+                        &request.prepared.input_layers.file_resolution_context,
+                        claudine::invocation_context::SourceContext::file_resolution_context,
+                    ),
+                ),
                 request.shared_approval_cache.clone(),
             ),
             request.dry_run,

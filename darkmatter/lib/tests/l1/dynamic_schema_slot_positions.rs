@@ -4,9 +4,10 @@
 //! and the schema or imported file otherwise. A position is given only when
 //! it is proven; the record's `span` is the slot's bytes in that file.
 //!
-//! Each case is a Git repository in a temp dir with an empty home, so no
-//! persisted grant applies; data files left untracked get no automatic
-//! grant. Composition runs as `md compose` does, and validation prepares the
+//! Each case is a Git repository in a temp dir with a home whose
+//! configuration pre-approves nothing; the repository's committed
+//! `permissions.file-read` admits exactly its committed files, so a data
+//! file left untracked needs approval. Composition runs as `md compose` does, and validation prepares the
 //! schemas `md schema validate` prepares (baseline, discovered triggers, a
 //! slot session), so both reports come from the library's own projections
 //! (`error_diagnostics`, `template_diagnostics`).
@@ -30,8 +31,9 @@ const APPROVAL_REQUIRED: &str = "dm.schema.slot_approval_required";
 const DOC: &str = "docs/doc.md";
 const TRIGGER: &str = "schemas/a.trigger.yaml";
 
-/// A repository holding `files` (committed) and `untracked`, and a home
-/// with no grant store.
+/// A repository holding `files` (committed, and admitted by the committed
+/// `permissions.file-read`) and `untracked` (admitted by nothing), and a
+/// home whose configuration pre-approves nothing.
 struct Case {
     _temp: tempfile::TempDir,
     root: PathBuf,
@@ -43,9 +45,13 @@ impl Case {
         let temp = tempfile::tempdir().expect("temp dir");
         let root = biscuit_file::canonicalize_simplified(temp.path()).expect("canonical temp dir").join("repo");
         let case = Self { _temp: temp, root, home: tempfile::tempdir().expect("temp home") };
+        crate::slot_support::write_user_permissions(case.home.path(), &[]);
         for (name, text) in files {
             case.write(name, text);
         }
+        let admitted: Vec<String> = files.iter().map(|(name, _)| format!("&{name}")).collect();
+        let admitted: Vec<&str> = admitted.iter().map(String::as_str).collect();
+        case.write(".darkmatter.yaml", &crate::slot_support::file_read_config(&admitted));
         git(&case.root, &["init", "-q", "-b", "main"]);
         git(&case.root, &["add", "-A"]);
         git(&case.root, &["commit", "-q", "-m", "fixture"]);
@@ -487,7 +493,7 @@ mod contract_template {
         "---\n$schema:\n  os: enum({{ load_data(\"./os.yaml\", \"Os@./types.yaml\") }})\nos: Linux\n---\n";
 
     /// The document reading `os.yaml` under `Os@./types.yaml`, whose
-    /// definition is `os_type`; `untracked` files get no automatic grant.
+    /// definition is `os_type`; `untracked` files need approval.
     fn case(os_type: &str, files: &[(&str, &str)], untracked: &[(&str, &str)]) -> Case {
         let types = format!("kind: schema\ntypes:\n  Os: {os_type}\n");
         let mut committed = vec![("docs/types.yaml", types.as_str()), ("docs/os.yaml", "- Linux\n"), (DOC, DOC_TEXT)];

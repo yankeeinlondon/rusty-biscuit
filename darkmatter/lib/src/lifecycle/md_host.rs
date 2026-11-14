@@ -53,7 +53,6 @@ use crate::markdown::compose::expression::{
 use crate::markdown::compose::SharedFrontmatter;
 use crate::markdown::compose::preflight::ExtraShellSources;
 use crate::markdown::compose::shell_expansion::executor::{ShellStatus, execute_directive_outcome};
-use crate::markdown::compose::shell_expansion::store::{load_ruleset, resolve_policy_paths};
 use crate::markdown::compose::shell_expansion::template::{FilledChain, ShellPreApprovals};
 use crate::markdown::compose::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use crate::markdown::compose::shell_expansion::types::{
@@ -297,11 +296,9 @@ pub fn lifecycle_shell_sources(config: &LifecycleConfig, source_path: &Path) -> 
     ExtraShellSources { entries, candidates: audit.candidates }
 }
 
-/// Records on each lifecycle shell site the mode `approved` grants it, under
-/// `request`'s shell policy root.
-pub fn settle_lifecycle_shells(config: &LifecycleConfig, approved: &ShellPreApprovals, request: &ComposeRequest) {
-    let policy_root = request.options().shell_options().policy_root;
-    super::preflight::settle_lifecycle_shell_modes(config, &LifecycleSignal::ALL, approved, policy_root.as_deref());
+/// Records on each lifecycle shell site the mode `approved` grants it.
+pub fn settle_lifecycle_shells(config: &LifecycleConfig, approved: &ShellPreApprovals) {
+    super::preflight::settle_lifecycle_shell_modes(config, &LifecycleSignal::ALL, approved);
 }
 
 fn command_pipeline(command: &str, source_path: &Path) -> Result<ShellPipeline, ShellExpansionError> {
@@ -368,8 +365,6 @@ pub struct MdStackHost<'a> {
     pub request: &'a ComposeRequest,
     /// Where `set` commits.
     pub state: &'a MdRuntimeState,
-    /// The user blacklist a template-mode command also meets.
-    pub user_blacklist: &'a ShellRuleSet,
     /// The cancellation probe.
     pub interrupted: &'a (dyn Fn() -> bool + Sync),
 }
@@ -452,8 +447,8 @@ impl LifecycleHost for MdStackHost<'_> {
         Err(PrepError::Unavailable)
     }
 
-    fn user_blacklist(&self, _policy_root: Option<&Path>) -> ShellRuleSet {
-        self.user_blacklist.clone()
+    fn shell_exclusions(&self) -> Result<ShellRuleSet, crate::config::load::ConfigError> {
+        self.request.config_snapshot().policy().map(|policy| policy.shell().exclusions().clone())
     }
 
     fn interrupted(&self) -> bool {
@@ -531,8 +526,9 @@ pub trait CommandOutput: Sync {
 ///
 /// Every chain segment must be an exact member of the approval set (a
 /// template-mode site arrives filled and checked through
-/// [`ShellRunner::run_structured`]), and the whole chain meets both
-/// blacklists before its first segment starts. The command runs under the
+/// [`ShellRunner::run_structured`]), and the whole chain meets the built-in
+/// blacklist before its first segment starts. Pre-flight already judged the
+/// exclusions, so an exact member runs. The command runs under the
 /// document's shell options (timeout, working directory) with its output
 /// captured and handed to [`CommandOutput`].
 pub struct MdShellRunner<'a> {
@@ -540,8 +536,6 @@ pub struct MdShellRunner<'a> {
     pub permission: Result<ApprovalEpoch, ShellRefusal>,
     /// The approval set preflight produced.
     pub approved: &'a ShellPreApprovals,
-    /// The user blacklist.
-    pub user_blacklist: &'a ShellRuleSet,
     /// The run's one request: shell options, source, and file context.
     pub request: &'a ComposeRequest,
     /// The root document.
@@ -653,7 +647,7 @@ impl ShellRunner for MdShellRunner<'_> {
                 });
             }
         }
-        if let Some(reason) = check_filled_chain(&FilledChain::from_pipeline(&pipeline), self.user_blacklist) {
+        if let Some(reason) = check_filled_chain(&FilledChain::from_pipeline(&pipeline)) {
             return Err(ShellRunError::Value {
                 source: ShellExpansionError::Blacklisted {
                     ctx: Box::new(ctx),
@@ -718,8 +712,6 @@ pub struct MdStackContext<'a> {
     pub state: &'a MdRuntimeState,
     /// The approval set preflight produced; empty before it.
     pub approved: &'a ShellPreApprovals,
-    /// The user blacklist.
-    pub user_blacklist: &'a ShellRuleSet,
     /// The side-effect engine.
     pub effect_engine: &'a EffectEngine,
     /// Terminal communication.
@@ -744,13 +736,11 @@ pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &
         timing: context.timing,
         request: context.request,
         state: context.state,
-        user_blacklist: context.user_blacklist,
         interrupted: context.interrupted,
     };
     let shell_runner = MdShellRunner {
         permission: event.shells,
         approved: context.approved,
-        user_blacklist: context.user_blacklist,
         request: context.request,
         source_path: context.source_path,
         output: context.output,
@@ -773,15 +763,6 @@ pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &
         host: &host,
     };
     StackExecutor::with_services(inputs, context.effects, &MdDiagnostics).execute_event(config)
-}
-
-/// The user blacklist of `request`'s shell policy; an unreadable policy file
-/// reads as empty here because preflight already refused it.
-pub fn user_blacklist(request: &ComposeRequest) -> ShellRuleSet {
-    let options = request.options();
-    resolve_policy_paths(&options.shell_options(), options.source(), request.resolution_context())
-        .and_then(|paths| load_ruleset(&paths.blacklist))
-        .unwrap_or_default()
 }
 
 // ── The driver ───────────────────────────────────────────────────────────

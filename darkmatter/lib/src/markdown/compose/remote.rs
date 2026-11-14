@@ -171,6 +171,15 @@ pub enum RemoteReadError {
         /// The rejected host.
         host: String,
     },
+    /// The host is not allowed and the configuration's `permissions` block
+    /// is invalid, so whether `network` allows it cannot be decided.
+    #[error("remote read denied for host '{host}': the `network` permission cannot be decided because the configuration is invalid: {message}")]
+    InvalidConfiguration {
+        /// The rejected host.
+        host: String,
+        /// The configuration error.
+        message: String,
+    },
     /// URL validation failure.
     #[error("invalid URL '{url}': {reason}")]
     InvalidUrl {

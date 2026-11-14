@@ -145,9 +145,6 @@ pub struct ShellValueRequest<'a> {
     /// Reads a template-mode value's placeholders against [`Self::state`]
     /// with the event's globals, exactly as the action's other values read.
     pub holes: Option<&'a dyn HoleEvaluator>,
-    /// The shell policy root a template-mode value was approved under; its
-    /// user blacklist judges the filled command.
-    pub policy_root: Option<&'a Path>,
 }
 
 /// Runs a `set` action's shell values through Darkmatter in a fresh result
@@ -159,8 +156,8 @@ pub struct ShellValueRequest<'a> {
 /// approved bytes on the same terms. A template-mode value
 /// ([`ResolvedShellValue::template`]) is pre-approved by its shape instead:
 /// its placeholders are read through [`ShellValueRequest::holes`], each fills
-/// one argument, and the filled command meets both blacklists before it
-/// starts. Commands run in the request's launch directory, as a
+/// one argument, and the filled command meets the built-in blacklist and
+/// the request's exclusions before it starts. Commands run in the request's launch directory, as a
 /// lifecycle `shell` action does, and from `child_environment` when one is
 /// given (otherwise they inherit this process's).
 ///
@@ -197,9 +194,6 @@ pub(crate) fn execute_set_shell_values_sharing(
         .with_source_file(request.source_path)
         .with_pre_approved_commands(approved)
         .with_shell_working_directory(request.file_resolution_context.request_cwd());
-    if let Some(policy_root) = request.policy_root {
-        options = options.with_shell_policy_root(policy_root);
-    }
     if let Some(environment) = child_environment {
         options = options.with_shell_child_environment(environment.clone());
     }

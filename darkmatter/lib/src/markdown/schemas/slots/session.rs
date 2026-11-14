@@ -6,11 +6,12 @@
 //! validates a document against a template resolves it through the same
 //! session, so:
 //!
-//! - **grants are decided once per run.** The session builds one
-//!   [`SlotGrants`] on first use (the user's grant store, the run-only grants
-//!   pre-flight gave, the command's `--allow host=HOST` values, and the
-//!   approval handler), and its automatic decisions are kept for the run: a
-//!   file the run's own approved step later changes keeps the grant it had.
+//! - **reads are decided by one captured configuration.** The session
+//!   builds one [`SlotGrants`] on first use from the captured
+//!   `permissions` (never reloaded mid-run), the approvals pre-flight gave
+//!   for this run, the command's `--allow host=HOST` values and network
+//!   permission, and the approval handler. An approval given later in the
+//!   run (a computed target) lasts for the rest of the run.
 //! - **one snapshot is pinned per template and context.** A later validation
 //!   in the run gets the same concrete schema. When the command's data memo
 //!   moved on (a shell command or lifecycle effect ran), the pin's inputs are
@@ -41,12 +42,15 @@ use simplified_schema::slots::{
 use simplified_schema::{SlotResolutionFailure, UnresolvedSlots};
 
 use super::cache::{self, CacheEntry, GrantedRead, InputCheck, Outcome, ResolutionKey};
-use super::codes::{SLOT_CYCLE_CODE, SLOT_GRANT_STORE_INVALID_CODE};
+use super::codes::SLOT_CYCLE_CODE;
 use super::dependencies::{self, SlotDependencies};
 use super::evaluator::{SlotEvaluator, SlotGates};
-use super::grants::gate::{RunGates, SlotGrants};
-use super::grants::{Grant, GrantBook, GrantStore, GrantStoreError};
+use super::grants::gate::{NotSavedWarnings, RunGates, SlotGrants, SlotPermissions, reading_context, save_file_approval};
+use super::grants::{Grant, GrantBook, GrantScope, GrantTarget};
 use super::host::DarkmatterSlotHost;
+use crate::config::load::ConfigSnapshot;
+use crate::config::network::NetworkPermission;
+use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::DataRuntime;
 use super::observations::SessionObservations;
 use crate::markdown::compose::context::capture::CapturedObservations;
@@ -58,14 +62,15 @@ use crate::markdown::compose::shell_expansion::ShellApprovalHandler;
 /// How far a session may go to resolve a template.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SessionMode {
-    /// Resolve with the automatic, persisted, and run-only grants, asking
-    /// the approval handler (when there is one) about anything else.
+    /// Resolve with the configured permissions and this run's approvals,
+    /// asking the approval handler (when there is one) about anything else.
     #[default]
     Full,
-    /// Resolve with the automatic, persisted, and run-only grants only;
-    /// never ask. A template a read nothing grants (or a deny) stops is
-    /// left unresolved ([`SchemaError::UnresolvedSlots`]), which a
-    /// reference check defers like any value only composition can judge.
+    /// Resolve with the configured permissions and this run's approvals
+    /// only; never ask. A template a read nothing allows (or a deny for this
+    /// run) stops is left unresolved ([`SchemaError::UnresolvedSlots`]),
+    /// which a reference check defers like any value only composition can
+    /// judge.
     ReferenceCheck,
     /// Never resolve: a template stays unresolved
     /// ([`SchemaError::UnresolvedSlots`]).
@@ -87,15 +92,31 @@ pub struct SlotSession {
     observations: Arc<SessionObservations>,
     remote: Option<RemoteFetchRuntime>,
     hosts: Vec<String>,
+    network: Option<NetworkPermission>,
     repository_root: Option<PathBuf>,
     handler: Option<Arc<dyn ShellApprovalHandler>>,
     run_grants: Vec<Grant>,
     mode: SessionMode,
-    home: Option<PathBuf>,
+    configuration: Configuration,
+    /// The request context an "always allow" pre-flight gave is judged from.
+    request_context: Option<FileResolutionContext>,
+    permissions: OnceLock<(SlotPermissions, NetworkPermission)>,
+    not_saved: NotSavedWarnings,
     cancel: Option<Arc<AtomicBool>>,
     limits: Option<IterationLimits>,
-    grants: OnceLock<Result<Arc<SlotGrants>, Arc<GrantStoreError>>>,
+    grants: OnceLock<Arc<SlotGrants>>,
     pinned: Mutex<HashMap<ResolutionKey, Pin>>,
+}
+
+/// Where a session's permissions come from.
+#[derive(Debug, Clone)]
+enum Configuration {
+    /// None: nothing is pre-approved and nothing can be saved.
+    Unconfigured,
+    /// A snapshot the caller captured (a composition request's).
+    Captured(Arc<ConfigSnapshot>),
+    /// Loaded passively, once, for this context when first needed.
+    LoadFor(Box<FileResolutionContext>),
 }
 
 impl std::fmt::Debug for SlotSession {
@@ -176,8 +197,9 @@ impl std::error::Error for SlotCycle {}
 impl SlotSession {
     /// A session for one command reading through `data` (the command's
     /// `load_data` runtime, whose memo and read set the slots share), with
-    /// automatic grants judged against no repository, no handler, and no
-    /// grant store until [`Self::with_home`] names a home.
+    /// no configuration (nothing is pre-approved, so only this run's
+    /// approvals allow a read) until [`Self::with_config_snapshot`] supplies
+    /// one, and no handler.
     pub fn new(data: DataRuntime) -> Self {
         Self {
             id: NEXT_SESSION.fetch_add(1, Ordering::Relaxed),
@@ -185,11 +207,15 @@ impl SlotSession {
             observations: Arc::new(SessionObservations::supplied(CapturedObservations::default())),
             remote: None,
             hosts: Vec::new(),
+            network: None,
             repository_root: None,
             handler: None,
             run_grants: Vec::new(),
             mode: SessionMode::Full,
-            home: None,
+            configuration: Configuration::Unconfigured,
+            request_context: None,
+            permissions: OnceLock::new(),
+            not_saved: NotSavedWarnings::default(),
             cancel: None,
             limits: None,
             grants: OnceLock::new(),
@@ -199,8 +225,9 @@ impl SlotSession {
 
     /// The session a composition request builds when its caller attached
     /// none: the request's data runtime, captured observations, remote
-    /// runtime, `--allow host=HOST` values, repository, home (for the grant
-    /// store), and approval handler. A slot calling a function that reads a
+    /// runtime, `--allow host=HOST` values, configuration snapshot (its
+    /// `permissions` and `network`), repository, and approval handler. A
+    /// slot calling a function that reads a
     /// group the request has not captured (`ipv4()` in a referenced schema
     /// the document never names) has it captured when it first runs: the
     /// `Repo` group from the request's repository observation, the others
@@ -215,15 +242,17 @@ impl SlotSession {
     pub fn for_request(request: &crate::markdown::compose::ComposeRequest) -> Self {
         let options = request.options();
         let mut session = Self::new(options.data_runtime())
-            .with_home(request.resolution_context().home_dir().map(Path::to_path_buf))
+            .with_config_snapshot(Arc::clone(request.config_snapshot()))
             .with_repository_root(options.slot_repository_root())
-            .with_allowed_hosts(options.remote_read_config.http_hosts().cloned().collect());
+            .with_allowed_hosts(options.remote_read_config.http_hosts().cloned().collect())
+            .with_network(options.network_permission());
         session.observations = Arc::new(SessionObservations::for_request(
             options.context(),
             options.context_authority(),
             options.slot_repository(),
         ));
         session.remote = options.remote_fetch.clone();
+        session.request_context = Some(request.resolution_context().clone());
         if let Some(handler) = &options.shell_approval_handler {
             session = session.with_handler(Arc::clone(handler));
         }
@@ -231,19 +260,21 @@ impl SlotSession {
     }
 
     /// A session for a command that validates without composing (`md schema
-    /// validate`, `md clean`): reading through `data`, judging automatic
-    /// grants against `context`'s repository, and reading the grant store
-    /// below `context`'s home. A slot calling a function that reads a
+    /// validate`, `md clean`): reading through `data`, with the
+    /// configuration `context` names (loaded passively when a template first
+    /// needs it, unless [`Self::with_config_snapshot`] supplies one; a
+    /// repository's committed policy is read from its `HEAD` then), and the
+    /// network permission it holds. A slot calling a function that reads a
     /// captured group (`package()`, `ipv4()`, `has_agentic_cli()`) has the
     /// group captured from `context` when it first runs: with `context`'s
     /// environment, the repository at `context`'s repository root (none when
     /// it has none). A slot probing `PATH` (`has_command`) reads `context`'s
     /// own.
     pub fn for_context(data: DataRuntime, context: &FileResolutionContext) -> Self {
-        let mut session = Self::new(data)
-            .with_home(context.home_dir().map(Path::to_path_buf))
-            .with_repository_root(context.repository_root().map(Path::to_path_buf));
+        let mut session = Self::new(data).with_repository_root(context.repository_root().map(Path::to_path_buf));
+        session.configuration = Configuration::LoadFor(Box::new(context.clone()));
         session.observations = Arc::new(SessionObservations::for_context(context));
+        session.request_context = Some(context.clone());
         session
     }
 
@@ -261,15 +292,31 @@ impl SlotSession {
         self
     }
 
-    /// Adds grants that last for this run (pre-flight's
+    /// Adds approvals that last for this run (pre-flight's
     /// [`slot_grants`](crate::markdown::compose::preflight::ComposePreflightApprovals::slot_grants)).
+    ///
+    /// An "always allow" of a file ([`GrantScope::Persisted`]) is saved to
+    /// the user's `permissions.file-read` now (an exclusion is judged from
+    /// the request's document), and applies for this run either way; a save
+    /// that fails is reported by [`Self::take_not_saved_warnings`]. An
+    /// approval naming a folder or a site is ignored.
     #[must_use]
     pub fn with_run_grants(mut self, grants: impl IntoIterator<Item = Grant>) -> Self {
-        self.run_grants.extend(grants);
+        for grant in grants {
+            if !grant.is_applicable() {
+                continue;
+            }
+            if grant.scope == GrantScope::Persisted
+                && let (GrantTarget::File(path), Some(reading)) = (&grant.target, self.request_context.clone())
+            {
+                save_file_approval(&self.permissions().0, path, &reading, &self.not_saved);
+            }
+            self.run_grants.push(Grant { scope: GrantScope::Once, ..grant });
+        }
         self
     }
 
-    /// The command's `--allow host=HOST` values: each is also a site grant
+    /// The command's `--allow host=HOST` values: each allows its host's URLs
     /// for this run.
     #[must_use]
     pub fn with_allowed_hosts(mut self, hosts: Vec<String>) -> Self {
@@ -277,20 +324,56 @@ impl SlotSession {
         self
     }
 
-    /// Judges automatic grants against the repository at `root`: the
-    /// request's own observation, never a new discovery.
+    /// Decides slot URL reads under `network`, as composition does, in
+    /// place of the configuration's own; without either a session allows
+    /// only its hosts.
+    #[must_use]
+    pub fn with_network(mut self, network: NetworkPermission) -> Self {
+        self.network = Some(network);
+        self
+    }
+
+    /// Keys resolutions by the repository at `root`: the request's own
+    /// observation, never a new discovery.
     #[must_use]
     pub fn with_repository_root(mut self, root: Option<PathBuf>) -> Self {
         self.repository_root = root;
         self
     }
 
-    /// Reads persisted grants from (and persists them to) the grant store
-    /// below `home`; without a home nothing persisted applies.
+    /// Decides reads by `snapshot`'s `permissions` (and, unless
+    /// [`Self::with_network`] says otherwise, its `network`): the captured
+    /// configuration, never reloaded during the run. Call it before
+    /// [`Self::with_run_grants`], whose "always allow" approvals it saves.
     #[must_use]
-    pub fn with_home(mut self, home: Option<PathBuf>) -> Self {
-        self.home = home;
+    pub fn with_config_snapshot(mut self, snapshot: Arc<ConfigSnapshot>) -> Self {
+        self.configuration = Configuration::Captured(snapshot);
+        self.permissions = OnceLock::new();
         self
+    }
+
+    /// The `dm.config.not_saved` warnings left so far by "always allow"
+    /// approvals that could not be saved (each still applied for the run),
+    /// drained: a composition reports them in its report.
+    pub fn take_not_saved_warnings(&self) -> Vec<ComposeWarning> {
+        std::mem::take(&mut *self.not_saved.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// The permissions and network permission the run decides by, resolved
+    /// once.
+    fn permissions(&self) -> &(SlotPermissions, NetworkPermission) {
+        self.permissions.get_or_init(|| {
+            let snapshot = match &self.configuration {
+                Configuration::Unconfigured => None,
+                Configuration::Captured(snapshot) => Some(Ok(Arc::clone(snapshot))),
+                Configuration::LoadFor(context) => Some(load_passively(context).map(Arc::new)),
+            };
+            match snapshot {
+                None => (SlotPermissions::Unconfigured, NetworkPermission::Deny),
+                Some(Ok(snapshot)) => (SlotPermissions::of(&snapshot), NetworkPermission::from_snapshot(Some(&snapshot))),
+                Some(Err(error)) => (SlotPermissions::Invalid(error.clone()), NetworkPermission::Invalid(error)),
+            }
+        })
     }
 
     /// Stops a resolution in progress once `cancel` is set: the slot being
@@ -319,27 +402,27 @@ impl SlotSession {
         self.mode
     }
 
-    /// The grants in force now, for a check that a snapshot's reads are
-    /// covered; `None` until a template needed them, or when the grant store
-    /// is invalid.
+    /// This run's approvals in force now; `None` until a template needed
+    /// them.
     pub fn grants(&self) -> Option<GrantBook> {
-        self.grants.get().and_then(|grants| grants.as_ref().ok()).map(|grants| grants.book())
+        self.grants.get().map(|grants| grants.book())
     }
 
     /// Asks the session's approval handler once, in one batch, about every
     /// read the slots of `templates` name before evaluation (a literal or
-    /// pure target) that no grant or automatic grant decides yet, and keeps
-    /// its answers for the run (a persisted answer is also written to the
-    /// grant store). Returns how many reads were asked about.
+    /// pure target) that neither the permissions nor this run's approvals
+    /// decide yet, and keeps its answers for the run (an "always allow" is
+    /// also saved to the user's `permissions.file-read`). Returns how many
+    /// reads were asked about.
     ///
     /// This is the collect-and-approve step of a command that validates
     /// without the compose pre-flight; call it before the first validation.
     /// Nothing is asked in a [`SessionMode::ReferenceCheck`] or
     /// [`SessionMode::Passive`] session, or without a handler; an undecided
     /// read then stays `dm.schema.slot_approval_required` when its slot
-    /// resolves. A computed target is judged when its slot evaluates. An
-    /// invalid grant store asks nothing here and fails the resolution with
-    /// `dm.schema.slot_grant_store_invalid`.
+    /// resolves. A computed target is judged when its slot evaluates, and a
+    /// listing is never asked about. Invalid `permissions` ask nothing here;
+    /// each read then fails with the configuration's error.
     ///
     /// ## Errors
     ///
@@ -355,34 +438,32 @@ impl SlotSession {
         let Some(handler) = self.handler.as_ref() else {
             return Ok(0);
         };
-        let Ok(grants) = self.run_grants() else {
-            return Ok(0);
-        };
+        let grants = self.run_grants();
         let requests = grants.undecided_requests(templates, context);
         if requests.is_empty() {
             return Ok(0);
         }
-        let decisions = handler.approve_slot_reads(&requests)?;
+        let asked: Vec<_> = requests.iter().map(|(request, _)| request.clone()).collect();
+        let decisions = handler.approve_slot_reads(&asked)?;
         grants.apply_all(&requests, &decisions);
         Ok(requests.len())
     }
 
     /// The run's grants, built on first use.
-    fn run_grants(&self) -> Result<Arc<SlotGrants>, Arc<GrantStoreError>> {
-        self.grants
-            .get_or_init(|| {
-                let store = GrantStore::load(GrantStore::path_for_home(self.home.as_deref()).as_deref())?;
-                let mut book = GrantBook::new(store, self.hosts.clone());
-                for grant in &self.run_grants {
-                    book.add_once(grant.decision, grant.target.clone());
-                }
-                let handler = match self.mode {
-                    SessionMode::Full => self.handler.clone(),
-                    SessionMode::ReferenceCheck | SessionMode::Passive => None,
-                };
-                Ok(Arc::new(SlotGrants::new(book, self.repository_root.as_deref(), handler)))
-            })
-            .clone()
+    fn run_grants(&self) -> Arc<SlotGrants> {
+        Arc::clone(self.grants.get_or_init(|| {
+            let (permissions, configured_network) = self.permissions().clone();
+            let network = self.network.clone().unwrap_or(configured_network);
+            let mut book = GrantBook::new(self.hosts.clone()).with_network(network);
+            for grant in &self.run_grants {
+                book.add_once(grant.decision, grant.target.clone());
+            }
+            let handler = match self.mode {
+                SessionMode::Full => self.handler.clone(),
+                SessionMode::ReferenceCheck | SessionMode::Passive => None,
+            };
+            Arc::new(SlotGrants::new(book, permissions, handler, Arc::clone(&self.not_saved)))
+        }))
     }
 
     /// Resolves `pending` in `context`: the pinned snapshot, a cached
@@ -463,11 +544,9 @@ impl SlotSession {
         template_key: &str,
         context: &FileResolutionContext,
     ) -> Outcome {
-        let grants = match self.run_grants() {
-            Ok(grants) => grants,
-            Err(error) => return Err(Arc::new(store_failure(pending.slots(), &error))),
-        };
-        let host = DarkmatterSlotHost::new(self.evaluator(&grants, Arc::new(RecordingGates(RunGates(Arc::clone(&grants))))))
+        let grants = self.run_grants();
+        let gates = RunGates { grants: Arc::clone(&grants), context: context.clone() };
+        let host = DarkmatterSlotHost::new(self.evaluator(&grants, Arc::new(RecordingGates(gates))))
             .with_cancel(self.cancel.clone())
             .with_request_base(context.base_dir());
         // Everything the evaluations consumed is collected as they run, so
@@ -519,8 +598,9 @@ impl SlotSession {
 
     /// Whether the cached `entry` may be served to this session in
     /// `context`: it belongs to any session or this one, this session's
-    /// grants cover every read it made (each judged for the file that
-    /// defined the reading slot, a nested contract's included), its inputs
+    /// permissions and approvals cover every read it made (each judged for
+    /// the file that defined the reading slot, a nested contract's
+    /// included), its inputs
     /// and context inputs are unchanged, and every captured call it made
     /// answers the same with this session's captured observations. Coverage
     /// is judged first, because confirming an input rereads it.
@@ -529,14 +609,11 @@ impl SlotSession {
             return false;
         }
         if !entry.dependencies.reads.is_empty() {
-            let Ok(grants) = self.run_grants() else {
-                return false;
-            };
-            if !entry
-                .dependencies
-                .reads
-                .iter()
-                .all(|read| matches!(grants.decide_without_asking(&read.defining, &read.target), Some(Ok(()))))
+            let grants = self.run_grants();
+            if !entry.dependencies.reads.iter().all(|read| {
+                let reading = reading_context(context, &read.defining);
+                matches!(grants.decide_without_asking(&reading, &read.target), Some(Ok(())))
+            })
             {
                 return false;
             }
@@ -645,17 +722,21 @@ fn cycle_error(slots: &[Slot], template: &str, pending: Option<&PendingSchema>) 
     }))
 }
 
-/// The failure of every slot of a template whose reads cannot be decided
-/// because the user's grant store is invalid.
-fn store_failure(slots: &[Slot], error: &Arc<GrantStoreError>) -> SlotResolutionError {
-    SlotResolutionError::Failed(
-        slots
-            .iter()
-            .map(|slot| {
-                (slot.clone(), SlotFailure::from_shared(Arc::clone(error) as _, Some(SLOT_GRANT_STORE_INVALID_CODE)))
-            })
-            .collect(),
-    )
+/// The configuration `context` names, loaded passively: the user file, and
+/// inside a repository the repository file as committed at its `HEAD` (read
+/// from the repository at `context`'s root) and in the working copy.
+fn load_passively(context: &FileResolutionContext) -> Result<ConfigSnapshot, crate::config::load::ConfigError> {
+    use crate::config::load::ConfigLoadMode;
+    // A context naming a repository where none is found loads with no
+    // committed tree, which the loader reports as an error.
+    let committed: Option<crate::config::load::CommittedTreeCapture> = context.repository_root().and_then(|root| {
+        match sniff::filesystem::git::GitRepo::discover(root) {
+            Ok(Some(repo)) => Some(repo.committed_tree().map(Arc::new).map_err(Arc::new)),
+            Ok(None) => None,
+            Err(error) => Some(Err(Arc::new(error))),
+        }
+    });
+    ConfigSnapshot::load_captured(context, committed.as_ref(), ConfigLoadMode::Passive)
 }
 
 /// The run's gates, reporting every read they allow, with the file that
@@ -684,6 +765,10 @@ impl ReadGate for RecordingGate {
         let target = ReadTarget { observed_hash: None, ..target.clone() };
         dependencies::note_read(GrantedRead { defining: self.defining.clone(), target });
         Ok(())
+    }
+
+    fn admits_listed(&self, target: &ReadTarget) -> bool {
+        self.inner.admits_listed(target)
     }
 }
 
@@ -721,13 +806,11 @@ pub(crate) fn resolve_contract_slots(
     if in_progress(session.id, &template) {
         return Some(Err(cycle_error(&slots, &template, None)));
     }
-    let grants = match session.run_grants() {
-        Ok(grants) => grants,
-        Err(error) => return Some(Err(contract_failure(store_failure(&slots, &error)))),
-    };
+    let grants = session.run_grants();
     // Recording gates, so the contract's own reads reach the enclosing
     // collections under the contract's defining file.
-    let host = DarkmatterSlotHost::new(session.evaluator(&grants, Arc::new(RecordingGates(RunGates(Arc::clone(&grants))))));
+    let gates = RunGates { grants: Arc::clone(&grants), context: context.clone() };
+    let host = DarkmatterSlotHost::new(session.evaluator(&grants, Arc::new(RecordingGates(gates))));
     let _resolving = Resolving::enter(&session, template, &context);
     let mut values = SlotValues::default();
     let mut unique: Vec<&Slot> = Vec::new();

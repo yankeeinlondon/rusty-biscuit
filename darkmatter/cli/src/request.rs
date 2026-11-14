@@ -100,6 +100,10 @@ pub struct MdRequest {
     user: OnceCell<Result<Arc<ConfigSnapshot>, ConfigError>>,
     /// One projection per repository root (`None`: no repository).
     configs: RefCell<HashMap<Option<PathBuf>, Arc<ConfigSnapshot>>>,
+    /// Whether run notices go to a data output's `diagnostics` (set by
+    /// `main` with [`Self::report_config_notices`]); a repository
+    /// projection's migration notices follow the same route.
+    data_output: std::cell::Cell<bool>,
 }
 
 impl MdRequest {
@@ -111,6 +115,7 @@ impl MdRequest {
             trees: RefCell::default(),
             user: OnceCell::new(),
             configs: RefCell::default(),
+            data_output: std::cell::Cell::new(false),
         }
     }
 
@@ -149,12 +154,32 @@ impl MdRequest {
         let tree = key.as_ref().and_then(|root| trees.get(root));
         let snapshot = Arc::new(user.with_repository_projection(context, tree)?);
         drop(trees);
+        // The user scope's notices were reported once by `main`; a
+        // repository's legacy-file migration is reported as it happens.
+        if let Some(root) = &key {
+            let migrated: Vec<_> = snapshot
+                .diagnostics()
+                .iter()
+                .filter(|notice| notice.code == darkmatter::config::load::CONFIG_MIGRATION_CODE && notice.file.starts_with(root))
+                .flat_map(darkmatter::markdown::compose::report_diagnostics::config_notice_diagnostics)
+                .collect();
+            crate::output::report_run_notices(migrated, self.data_output.get());
+        }
         self.configs.borrow_mut().insert(key, Arc::clone(&snapshot));
         Ok(snapshot)
     }
 
+    /// Reports [`Self::config_notices`] once, on stderr or (for a data
+    /// output) in the result's `diagnostics`, and routes any later
+    /// repository migration notice the same way.
+    pub fn report_config_notices(&self, data_output: bool) {
+        self.data_output.set(data_output);
+        crate::output::report_run_notices(self.config_notices(), data_output);
+    }
+
     /// The run-level notices of the invocation's configuration: the missing
-    /// user file's `dm.config.missing` warning, or none. A user file that
+    /// user file's `dm.config.missing` warning and the user scope's
+    /// `dm.config.migration` notices. A user file that
     /// fails to load is reported by the commands that read it, not here.
     pub fn config_notices(&self) -> Vec<darkmatter::markdown::compose::expression::Diagnostic> {
         let Ok(user) = self.user_config() else {
@@ -162,7 +187,10 @@ impl MdRequest {
         };
         user.diagnostics()
             .iter()
-            .filter(|notice| notice.code == darkmatter::config::load::CONFIG_MISSING_CODE)
+            .filter(|notice| {
+                notice.code == darkmatter::config::load::CONFIG_MISSING_CODE
+                    || notice.code == darkmatter::config::load::CONFIG_MIGRATION_CODE
+            })
             .flat_map(darkmatter::markdown::compose::report_diagnostics::config_notice_diagnostics)
             .collect()
     }

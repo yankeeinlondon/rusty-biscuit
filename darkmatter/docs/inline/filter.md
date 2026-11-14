@@ -286,7 +286,7 @@ Composition and DMLS use the same types and diagnostics. A predicate does not
 replace the body's item type with the predicate result type. Existing static
 call checks still apply inside skipped regions.
 
-Every authored shell command requires explicit whitelist permission regardless
+Every authored shell command requires explicit approval (a `shell-commands` rule or a prompt) regardless
 of selection conditions. For a string-typed `pkg`:
 
 ```md

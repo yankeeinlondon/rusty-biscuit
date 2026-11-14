@@ -40,7 +40,7 @@ pub(super) struct StepComposeContext<'a> {
     pub(super) prepared_context: Option<darkmatter::markdown::compose::ComposeContext>,
     /// A prompt task reuses the epoch its passive entry barrier captured.
     pub(super) document_epoch: Option<claudine::invocation_context::DocumentEpoch>,
-    /// Repo root of the sequence source, for shell policy resolution.
+    /// Repo root of the document being composed.
     pub(super) source_repo_root: Option<&'a Path>,
     /// Working directory `::shell` expansions run in.
     pub(super) child_cwd: &'a Path,
@@ -244,9 +244,8 @@ pub(super) fn compose_step_selecting(
             .with_sequence_value(set_overrides.sequence_value().cloned());
 
     let approval_options = super::super::apply_composition_shell_overrides(
-        super::super::build_harness_shell_options_for_source_with_cache(
-            &step_source.resolved_path,
-            ctx.source_repo_root,
+        super::super::build_harness_shell_options_with_cache(
+            claudine::harness::CapturedPermissions::for_source(ctx.invocation, ctx.file_resolution_context),
             Some(Arc::clone(&ctx.approval_cache)),
         ),
         ctx.shared.dry_run,

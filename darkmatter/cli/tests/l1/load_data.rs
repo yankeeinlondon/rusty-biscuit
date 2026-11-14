@@ -201,7 +201,7 @@ fn sentinel_fixture(name: &str, data: &str) -> CliProcessFixture {
         fixture.bin_dir().join(format!("argv-recorder{}", std::env::consts::EXE_SUFFIX)),
     )
     .expect("the recorder fixture binary is built with `test-fixtures`");
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "exact argv-recorder sentinel\n");
+    fixture.shell_permissions(&["exact argv-recorder sentinel"]);
     fixture.write_file("cwd/ports.json", data);
     fixture.write_file("cwd/doc.md", "Ports: {{ load_data(\"ports.json\", \"number[]\") }}\n\n::shell argv-recorder sentinel\n");
     fixture

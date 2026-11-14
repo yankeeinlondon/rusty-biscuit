@@ -1772,7 +1772,7 @@ unchanged.
 
 `has_command(cmd)` is a `PATH`/executable existence probe: it reports whether
 `cmd` can be run on the host and **never executes** it, so it needs no command
-whitelisting. A bare name (`git`) triggers an OS-native search of the `PATH`
+approval. A bare name (`git`) triggers an OS-native search of the `PATH`
 in the composition's captured environment (the environment the request was
 started with, never a `PATH` the process changed later); an
 absolute path (`/usr/bin/git`) must both exist and be executable. On Windows the

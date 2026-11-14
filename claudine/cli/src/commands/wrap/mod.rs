@@ -44,9 +44,8 @@ pub(crate) use flags::{
 pub(crate) use harness_orch::{
     AttemptLaunch, CachedHarnessLoopContext, HarnessPromptMode, HarnessPromptState,
     MaterializedHarnessPrompt, apply_composition_shell_overrides, build_harness_launch,
-    build_harness_shell_options, build_harness_shell_options_for_source,
-    build_harness_shell_options_for_source_with_cache, build_harness_shell_options_with_cache,
-    execute_harness_attempt, find_wrapper_harness_source, harness_policy_root,
+    build_harness_shell_options, build_harness_shell_options_with_cache,
+    execute_harness_attempt, find_wrapper_harness_source,
     harness_prompt_mode_label, load_overlaid_document,
     materialize_passthrough_harness_seed,
     materialized_harness_prompt_from_prepared, run_harness_loop,

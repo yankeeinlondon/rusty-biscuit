@@ -191,7 +191,7 @@ These rules hold whatever a host declares; no host can relax them.
 
 - **No shell in `initialize`.** A `shell` action, and a `set` whose whole value
   is a `$( … )` command, are parse errors in `initialize`, even in a branch
-  that can never run. Whitelists, cached approvals, and `no_error` cannot grant
+  that can never run. `shell-commands` rules, cached approvals, and `no_error` cannot grant
   an exception.
 
   ```yaml
@@ -338,7 +338,7 @@ initialize:
 ### Shell commands in events
 
 Lifecycle commands go through the same approval as body `::shell` commands:
-the blacklists, the whitelist, batched interactive approval, refusal when no
+the built-in blacklist, the `permissions.shell-commands` rules and exclusions, batched interactive approval, refusal when no
 terminal can prompt, and the shell timeout (see
 [Preflight Checks](../../inline/preflight-checks.md)). A document whose only
 commands are in lifecycle stacks is still audited.
@@ -361,8 +361,8 @@ x: plain
 composed:
     - set: { x: changed }
     - shell: "echo {{ x }}"
-# whitelist `exact echo plain`        -> runs `echo plain`
-# whitelist `template echo {{ string }}` -> runs `echo changed`
+# shell-commands rule `exact echo plain`           -> runs `echo plain`
+# shell-commands rule `template echo {{ string }}` -> runs `echo changed`
 ```
 
 A refused command fails the run like any other preflight failure; see

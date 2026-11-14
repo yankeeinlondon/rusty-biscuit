@@ -75,7 +75,6 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
 #[allow(clippy::too_many_arguments, clippy::result_large_err)]
 fn approve_preflight_graph(
     graph: &composition::PreflightGraph,
-    source: &ResolvedCompositionSource,
     source_context: &claudine::invocation_context::SourceContext,
     approval_cache: composition::SharedApprovalCache,
     shared: &SharedComposeArgs,
@@ -92,9 +91,8 @@ fn approve_preflight_graph(
     }
 
     let approval_options = super::apply_composition_shell_overrides(
-        super::build_harness_shell_options_for_source_with_cache(
-            &source.resolved_path,
-            source_context.repository_root(),
+        super::build_harness_shell_options_with_cache(
+            claudine::harness::CapturedPermissions::for_source(invocation, source_context.file_resolution_context()),
             Some(approval_cache),
         ),
         shared.dry_run,
@@ -559,7 +557,6 @@ fn execute_sequence_inner(
         .check(LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, || {
             approve_preflight_graph(
                 &graph,
-                source,
                 &prep_context.source_context,
                 Arc::clone(&shared_approval_cache),
                 shared,

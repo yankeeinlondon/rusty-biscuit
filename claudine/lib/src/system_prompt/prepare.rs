@@ -138,7 +138,7 @@ fn compose_prompt_markdown(
     let options = ComposeOptions::new_with_context(shared_ctx.runtime.clone())
         .with_context_authority(invocation.compose_context_authority())
         .with_shell_child_environment(invocation.env_baseline().shell_child_environment());
-    let mut options = match source_path(source) {
+    let options = match source_path(source) {
         Some(path) => crate::composition::bind_agent_workspace(options, path, shell_cwd),
         None => options,
     };
@@ -155,16 +155,6 @@ fn compose_prompt_markdown(
         || invocation.launch_file_resolution_context().clone(),
         |source_context| source_context.file_resolution_context().clone(),
     );
-    // Without a session workspace, shell policy is the prompt's own: its
-    // repository, else its directory.
-    if shell_cwd.is_none()
-        && let Some(parent) = source_path(source).and_then(std::path::Path::parent)
-    {
-        let policy_root = file_resolution_context
-            .repository_root()
-            .map_or_else(|| parent.to_path_buf(), std::path::Path::to_path_buf);
-        options = options.with_shell_policy_root(policy_root);
-    }
     // Attach the baseline schema for discovered `system-prompt.md` files
     // only — explicit flags carry their own mode and the non-interactive
     // appendix is always appended, so neither runs `mode` validation.

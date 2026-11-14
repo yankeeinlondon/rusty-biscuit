@@ -332,7 +332,7 @@ fn assert_runs_only_when_selected(frontmatter: &Value, selecting: Value, args: &
     let [site] = shell_sites(&config, LifecycleSignal::Start).try_into().expect("one site");
     let mut discovered = ShellPreApprovals::new();
     discovered.insert_template(TemplateShape::from_template(site.template()));
-    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &discovered, None);
+    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &discovered);
 
     let selected = MockShell::new(0);
     let outcome = run(LifecycleSignal::Start, &config, selecting, &selected);
@@ -414,7 +414,7 @@ fn equality(site: ScopeSite) {
 fn unknown_value(site: ScopeSite) {
     let frontmatter = start(json!([site_action(site, Some("msg"), "tool {{ msg }}")]));
     let config = resolve(&frontmatter).expect("a guard proves the value present");
-    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &shape_of("tool {{ msg }}"), None);
+    settle_lifecycle_shell_modes(&config, &LifecycleSignal::ALL, &shape_of("tool {{ msg }}"));
     let shell = MockShell::new(0);
 
     let outcome = run(LifecycleSignal::Start, &config, json!({ "msg": ["SECRET-ITEM"] }), &shell);

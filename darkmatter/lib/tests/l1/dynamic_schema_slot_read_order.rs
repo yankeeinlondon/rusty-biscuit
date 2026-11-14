@@ -1,12 +1,13 @@
 //! A slot's read is judged before it happens, on every path.
 //!
 //! Each case runs a document as `md compose` does (the passive reference
-//! check, then the composition) in a temp folder with no repository, an
-//! empty home (so no persisted grant applies unless the case writes one), no
-//! approval handler, and an explicit data runtime whose observation log is
-//! read after the failure. A content observation with a hash proves bytes
-//! were read and a listing observation proves a folder was enumerated, so a
-//! refused target must leave neither. `names.yaml` holds `- Linux` and the
+//! check, then the composition) in a temp folder with no repository, a home
+//! whose `permissions.file-read` pre-approves nothing unless the case writes
+//! an entry, no approval handler, and an explicit data runtime whose
+//! observation log is read after the failure. A content observation with a
+//! hash proves bytes were read, so a refused target must leave none. A
+//! listing needs no approval: it returns only the files the slot may read
+//! without asking. `names.yaml` holds `- Linux` and the
 //! document's value is `Linux` throughout.
 
 use std::collections::HashMap;
@@ -36,6 +37,7 @@ impl Case {
         let temp = tempfile::tempdir().expect("temp dir");
         let root = biscuit_file::canonicalize_simplified(temp.path()).expect("canonical temp dir");
         let case = Self { _temp: temp, root, home: tempfile::tempdir().expect("temp home"), runtime: DataRuntime::new() };
+        crate::slot_support::write_user_permissions(case.home.path(), &[]);
         case.write(NAMES, "- Linux\n");
         case
     }
@@ -48,20 +50,10 @@ impl Case {
         std::fs::write(self.path(name), text).expect("write");
     }
 
-    /// Persists `allow file <name>` in the home's grant store.
+    /// Writes the home's `permissions.file-read` as `./<name>` (beside the
+    /// reading document, which every case keeps in the root).
     fn grant_file(&self, name: &str) {
-        self.grant(&format!("allow file {}\n", biscuit_file::to_portable_string(&self.path(name))));
-    }
-
-    /// Persists `allow dir <root>` in the home's grant store.
-    fn grant_folder(&self) {
-        self.grant(&format!("allow dir {}\n", biscuit_file::to_portable_string(&self.root)));
-    }
-
-    fn grant(&self, line: &str) {
-        let store = self.home.path().join(".config/darkmatter/schema-read-policy");
-        std::fs::create_dir_all(store.parent().expect("store folder")).expect("store folder");
-        std::fs::write(&store, line).expect("grant store");
+        crate::slot_support::write_user_permissions(self.home.path(), &[&format!("./{name}")]);
     }
 
     /// `doc.md` under an inline `$schema` whose `os` property is `os_type`.
@@ -115,14 +107,6 @@ impl Case {
         });
         assert!(read.is_none(), "{name} was read before approval: {observations:?}");
         assert!(!self.runtime.read_set().contains(&entry), "{name} is in the read set: {:?}", self.runtime.read_set());
-    }
-
-    fn assert_nothing_listed(&self) {
-        let observations = self.observations();
-        let listed = observations
-            .iter()
-            .find(|observation| matches!(observation.kind, ObservationKind::Listing | ObservationKind::Glob));
-        assert!(listed.is_none(), "a folder was listed before approval: {observations:?}");
     }
 }
 
@@ -213,7 +197,7 @@ fn validate_schema_reads_the_permitted_page_and_stops_before_its_schema() {
     );
 }
 
-mod listings_are_judged_before_the_folder_is_enumerated {
+mod listings_need_no_approval_and_return_only_permitted_files {
     use super::*;
     use std::sync::{Arc, Mutex};
 
@@ -221,33 +205,7 @@ mod listings_are_judged_before_the_folder_is_enumerated {
     use darkmatter::markdown::compose::shell_expansion::{
         ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
     };
-    use darkmatter::markdown::schemas::slots::SlotSession;
-    use darkmatter::markdown::schemas::slots::grants::{
-        GrantDecision, GrantScope, GrantTarget, SlotGrantDecision, SlotGrantRequest,
-    };
-
-    fn refused(os_type: &str) {
-        let case = Case::new();
-        case.write("review-1.md", "");
-        let document = case.referenced_document(os_type);
-        case.compose_needing_approval(&document);
-        case.assert_nothing_listed();
-    }
-
-    #[test]
-    fn find_files() {
-        refused("enum({{ length(find_files('./*.md')) > 0 ? ['Linux'] : ['Linux'] }})");
-    }
-
-    #[test]
-    fn find_first_index() {
-        refused("enum({{ find_first_index('./review-1.md') ? ['Linux'] : ['Linux'] }})");
-    }
-
-    #[test]
-    fn find_last_index() {
-        refused("enum({{ find_last_index('./review-1.md') ? ['Linux'] : ['Linux'] }})");
-    }
+    use darkmatter::markdown::schemas::slots::grants::{SlotGrantDecision, SlotGrantRequest};
 
     const LISTINGS: [&str; 3] = [
         "length(find_files('./*.md')) > 0",
@@ -260,77 +218,66 @@ mod listings_are_judged_before_the_folder_is_enumerated {
         case.referenced_document(&format!("enum({{{{ {condition} ? ['Linux'] : ['Linux'] }}}})"))
     }
 
-    /// A persisted grant of the folder lets each listing run: the check
-    /// before listing and the check of what was listed name the same folder.
+    /// With nothing permitted, each listing still runs: no folder approval
+    /// is needed, and pre-flight asks about nothing.
     #[test]
-    fn a_persisted_folder_grant_lets_each_listing_run() {
+    fn each_listing_runs_without_approval_and_is_never_asked_about() {
         for condition in LISTINGS {
             let case = Case::new();
-            case.grant_folder();
             let document = listing_document(&case, condition);
+            let handler = Arc::new(RecordingHandler::default());
+            let grants = Markdown::try_from(document.as_path())
+                .expect("document")
+                .compose_slot_approvals(&case.request(&document), Some(handler.clone()))
+                .expect("approvals");
+            assert!(grants.is_empty(), "{condition}: {grants:?}");
+            assert!(handler.asked().is_empty(), "{condition}: a listing is never asked about: {:?}", handler.asked());
             case.compose(&document).unwrap_or_else(|failure| panic!("{condition} composes: {}", failure.error));
         }
     }
 
-    /// Pre-flight offers a grant of the folder each listing enumerates, and
-    /// that grant covers the listing when the slot evaluates.
+    /// `find_files` returns only the files the permissions admit: the
+    /// document is valid exactly when one of the two listed files is
+    /// permitted.
     #[test]
-    fn the_folder_grant_pre_flight_offers_covers_each_listing() {
-        for condition in LISTINGS {
-            let case = Case::new();
-            let document = listing_document(&case, condition);
-            let request = case.request(&document);
-            let handler = Arc::new(AllowFolderOnce::default());
-            let grants = Markdown::try_from(document.as_path())
-                .expect("document")
-                .compose_slot_approvals(&request, Some(handler.clone()))
-                .expect("approvals");
-            assert_eq!(handler.asked(), vec![GrantTarget::Dir(case.root.clone())], "{condition}");
-            let session = Arc::new(SlotSession::for_request(&request).with_run_grants(grants));
-            let granted = request.map_options(|options| options.with_slot_session(session));
-            Markdown::try_from(document.as_path())
-                .expect("document")
-                .compose_with_warnings(&granted)
-                .unwrap_or_else(|failure| panic!("{condition} composes: {}", failure.error));
-        }
+    fn find_files_returns_only_the_permitted_files() {
+        let os_type = "enum({{ length(find_files('./review-*.md')) == 1 ? ['Linux'] : ['macOS'] }})";
+        let case = Case::new();
+        case.write("review-1.md", "");
+        case.write("review-2.md", "");
+        let document = case.referenced_document(os_type);
+        let failure = case.compose(&document).expect_err("nothing is permitted, so nothing is listed");
+        let codes: Vec<String> = error_diagnostics(&failure.error).into_iter().map(|diagnostic| diagnostic.code).collect();
+        assert!(!codes.iter().any(|code| code.starts_with("dm.schema.slot_")), "{codes:?}");
+
+        let case = Case::new();
+        case.write("review-1.md", "");
+        case.write("review-2.md", "");
+        case.grant_file("review-2.md");
+        let document = case.referenced_document(os_type);
+        case.compose(&document).unwrap_or_else(|failure| panic!("only review-2.md is listed: {}", failure.error));
     }
 
-    /// Answers each slot request with its "this folder, once" choice and
-    /// records the folders offered.
+    /// Records every slot request and answers none.
     #[derive(Default)]
-    struct AllowFolderOnce {
-        asked: Mutex<Vec<GrantTarget>>,
+    struct RecordingHandler {
+        asked: Mutex<Vec<SlotGrantRequest>>,
     }
 
-    impl AllowFolderOnce {
-        fn asked(&self) -> Vec<GrantTarget> {
+    impl RecordingHandler {
+        fn asked(&self) -> Vec<SlotGrantRequest> {
             self.asked.lock().expect("asked").clone()
         }
     }
 
-    impl ShellApprovalHandler for AllowFolderOnce {
+    impl ShellApprovalHandler for RecordingHandler {
         fn approve(&self, _request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
             Ok(ShellApprovalDecision::Deny)
         }
 
         fn approve_slot_reads(&self, requests: &[SlotGrantRequest]) -> Result<Vec<SlotGrantDecision>, ShellExpansionError> {
-            Ok(requests
-                .iter()
-                .map(|request| {
-                    let folder = request.choices.iter().find(|grant| {
-                        grant.decision == GrantDecision::Allow
-                            && grant.scope == GrantScope::Once
-                            && matches!(grant.target, GrantTarget::Dir(_))
-                    });
-                    match folder {
-                        Some(grant) => {
-                            self.asked.lock().expect("asked").push(grant.target.clone());
-                            SlotGrantDecision::from_grant(grant)
-                        }
-                        None => SlotGrantDecision::Unanswered,
-                    }
-                })
-                .collect())
+            self.asked.lock().expect("asked").extend(requests.iter().cloned());
+            Ok(requests.iter().map(|_| SlotGrantDecision::Unanswered).collect())
         }
     }
 }

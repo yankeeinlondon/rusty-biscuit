@@ -144,6 +144,7 @@ impl Markdown {
         // `current.*` read raised anywhere under this root.
         let current = options.current_authority();
         let glob_warnings = options.glob_warnings.clone();
+        let slot_session = options.slot_session.clone();
         let node = Self::pipeline_node(&options);
         let mut report = match self.run_compose_pipeline_node(options, &mut runtime, node, hook) {
             Ok(report) => report,
@@ -156,6 +157,11 @@ impl Markdown {
         report.warnings.extend(icmp.take_warnings());
         report.warnings.extend(current.take_warnings());
         report.add_warnings(glob_warnings.take_warnings());
+        // An "always allow" a slot read could not save still applied; the
+        // composition reports it.
+        if let Some(session) = slot_session {
+            report.warnings.extend(session.take_not_saved_warnings());
+        }
         report.read_set = data_runtime.read_set();
         (Ok(report), Vec::new())
     }

@@ -289,7 +289,7 @@ pub struct ShellCommandEntry {
     pub executable: String,
     /// The argument list (e.g., ["repo", "packages"]).
     pub args: Vec<String>,
-    /// Normalized form for whitelist matching (e.g., "sniff repo packages").
+    /// Normalized form for rule matching (e.g., "sniff repo packages").
     pub normalized: String,
     /// Source file where this directive was found.
     pub source_file: PathBuf,
@@ -478,7 +478,6 @@ impl ShellChildEnvironment {
 pub struct ShellExpansionOptions {
     pub timeout: std::time::Duration,
     pub timeout_behavior: ShellTimeoutBehavior,
-    pub policy_root: Option<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
     /// Whether to strip ANSI escape codes and set `NO_COLOR=1`.
@@ -490,7 +489,6 @@ impl Clone for ShellExpansionOptions {
         Self {
             timeout: self.timeout,
             timeout_behavior: self.timeout_behavior,
-            policy_root: self.policy_root.clone(),
             working_directory: self.working_directory.clone(),
             approval_handler: self.approval_handler.clone(),
             strip_ansi: self.strip_ansi,
@@ -503,7 +501,6 @@ impl fmt::Debug for ShellExpansionOptions {
         f.debug_struct("ShellExpansionOptions")
             .field("timeout", &self.timeout)
             .field("timeout_behavior", &self.timeout_behavior)
-            .field("policy_root", &self.policy_root)
             .field("working_directory", &self.working_directory)
             .field(
                 "approval_handler",
@@ -523,7 +520,6 @@ impl Default for ShellExpansionOptions {
         Self {
             timeout: std::time::Duration::from_secs(10),
             timeout_behavior: ShellTimeoutBehavior::Error,
-            policy_root: None,
             working_directory: None,
             approval_handler: None,
             strip_ansi: true,
@@ -568,8 +564,13 @@ pub struct ShellApprovalRequest {
     pub executable: String,
     pub args: Vec<String>,
     pub normalized_exact: String,
-    pub whitelist_path: PathBuf,
-    pub blacklist_path: PathBuf,
+    /// The user configuration file an "always allow" choice saves its rule
+    /// to (`~/.darkmatter.yaml`, or the file its `permissions` reference
+    /// names); `None` when the request has no home, so nothing can be saved.
+    pub save_target: Option<PathBuf>,
+    /// The `!` entry that removed this command's pre-approval, when an
+    /// exclusion (rather than a missing allow) is why it is asked about.
+    pub exclusion: Option<crate::config::permissions::PolicyExclusion>,
     /// If the command was resolved from a shell alias, the original alias name.
     pub alias_name: Option<String>,
     /// When the request covers a chained command (e.g. `a && b`), this lists
@@ -585,9 +586,17 @@ pub struct ShellApprovalRequest {
 }
 
 /// Possible decisions from approval handler.
+///
+/// The three `…Persist` choices save their rule to the user's
+/// `permissions.shell-commands` and approve the command for the rest of the
+/// run either way; a rule that cannot be saved is reported as
+/// `dm.config.not_saved`. There is no permanent deny: [`Self::Deny`] refuses
+/// for this run only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellApprovalDecision {
+    /// Save `exact <command>` for every segment.
     AllowExactPersist,
+    /// Save `prefix <program>` for every program of the chain.
     AllowCommandPersist,
     /// Persist the request's template shape (`template <shape>`) and run the
     /// command in template mode. Valid only when the request offered the
@@ -596,8 +605,8 @@ pub enum ShellApprovalDecision {
     /// This session only. For a template request it approves the shape, not
     /// the bytes of this run.
     AllowOnce,
+    /// Refuse the command for this run.
     Deny,
-    BlacklistPersist,
 }
 
 use biscuit_terminal::errors::SourceContext;
@@ -631,6 +640,8 @@ pub enum ShellExpansionError {
         origin: ShellCommandOrigin,
     },
 
+    /// The built-in blacklist refused the command. Nothing configures,
+    /// extends, or overrides that list.
     #[error("Blacklisted command '{command}' at {origin}: {reason}")]
     Blacklisted {
         ctx: Box<SourceContext>,
@@ -643,14 +654,16 @@ pub enum ShellExpansionError {
     ApprovalRequired {
         ctx: Box<SourceContext>,
         command: String,
-        /// Boxed to keep `ShellExpansionError` under the `result_large_err`
-        /// threshold, matching the boxing convention of the other heavy fields.
-        whitelist_path: Box<PathBuf>,
-        /// Boxed for the same size reason as `whitelist_path`.
-        blacklist_path: Box<PathBuf>,
+        /// The user configuration file a `permissions.shell-commands` rule
+        /// approving the command goes in; `None` without a home. Boxed to
+        /// keep `ShellExpansionError` under the `result_large_err` threshold.
+        save_target: Option<Box<PathBuf>>,
+        /// The `!` entry that removed the command's pre-approval; no allow
+        /// rule approves it while that entry matches. Boxed for size.
+        exclusion: Option<Box<crate::config::permissions::PolicyExclusion>>,
         origin: ShellCommandOrigin,
-        /// The whitelist rules that would approve this command, from the
-        /// choices its approval prompt would offer. Boxed for size.
+        /// The `shell-commands` rules that would approve this command, from
+        /// the choices its approval prompt would offer. Boxed for size.
         suggested_rules: Box<super::template::SuggestedRules>,
     },
 
@@ -773,6 +786,12 @@ pub enum ShellExpansionError {
         origin: ShellCommandOrigin,
     },
 
+    /// The request's `permissions` block is invalid, so no command may run:
+    /// nothing is pre-approved and nothing is asked.
+    #[error("shell commands cannot run: {0}")]
+    Config(Box<crate::config::load::ConfigError>),
+
+    /// Reading an approval answer or writing its prompt failed.
     #[error("Policy I/O error for {path}: {source}")]
     PolicyIo {
         path: PathBuf,
@@ -818,6 +837,7 @@ impl ShellExpansionError {
             Self::ParseDirective { .. }
             | Self::ExpressionEvaluation { .. }
             | Self::PolicyIo { .. }
+            | Self::Config(_)
             | Self::Preflight(_)
             | Self::SlotGrantStore(_) => None,
         }
@@ -841,7 +861,7 @@ impl ShellExpansionError {
             | Self::UnevaluatedDependencyShape { ctx, .. }
             | Self::Timeout { ctx, .. }
             | Self::ExecutionFailed { ctx, .. } => Some(ctx),
-            Self::PolicyIo { .. } | Self::Preflight(_) | Self::SlotGrantStore(_) => None,
+            Self::PolicyIo { .. } | Self::Config(_) | Self::Preflight(_) | Self::SlotGrantStore(_) => None,
         }
     }
 
@@ -866,7 +886,7 @@ impl ShellExpansionError {
             | Self::UnevaluatedDependencyShape { origin, .. }
             | Self::Timeout { origin, .. }
             | Self::ExecutionFailed { origin, .. } => Some(origin),
-            Self::PolicyIo { .. } | Self::Preflight(_) | Self::SlotGrantStore(_) => None,
+            Self::PolicyIo { .. } | Self::Config(_) | Self::Preflight(_) | Self::SlotGrantStore(_) => None,
         }
     }
 }
@@ -940,26 +960,40 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
-                .hint("Remove the entry from your blacklist file if you trust this command."),
+                .hint("The built-in blacklist cannot be overridden; run the command yourself if you trust it."),
 
             ShellExpansionError::ApprovalRequired {
                 ctx,
                 command,
-                whitelist_path,
-                blacklist_path,
+                save_target,
+                exclusion,
                 origin,
                 ..
-            } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("ShellExpansionError", "approval required"))
-                .body(vec![
-                    Prose::new(format!(
-                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Whitelist:</dim> {}\n<dim>Blacklist:</dim> {}",
-                        whitelist_path.display(),
-                        blacklist_path.display()
-                    )).with_line_breaks(LineBreaks::Hard),
-                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
-                ])
-                .hint("Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist."),
+            } => {
+                let mut text = format!("<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}");
+                if let Some(exclusion) = exclusion {
+                    text.push_str(&format!(
+                        "\n<dim>Excluded by:</dim> <cyan>{}</cyan> in {}",
+                        exclusion.entry,
+                        exclusion.file.display()
+                    ));
+                }
+                if let Some(target) = save_target {
+                    text.push_str(&format!("\n<dim>Configuration:</dim> {}", target.display()));
+                }
+                let hint = if exclusion.is_some() {
+                    "Excluded commands ask each time: approve it when prompted."
+                } else {
+                    "Approve it when prompted or add a <cyan>shell-commands</cyan> rule."
+                };
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("ShellExpansionError", "approval required"))
+                    .body(vec![
+                        Prose::new(text).with_line_breaks(LineBreaks::Hard),
+                        ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                    ])
+                    .hint(hint)
+            }
 
             ShellExpansionError::Denied {
                 ctx,
@@ -1177,6 +1211,11 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     .hint("Run the command directly to reproduce the failure.")
             }
 
+            ShellExpansionError::Config(error) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "permissions invalid"))
+                .body(Prose::new(error.to_string()))
+                .hint("Fix the <cyan>permissions</cyan> block; until then no shell command runs."),
+
             ShellExpansionError::PolicyIo { path, source } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ShellExpansionError", "policy I/O error"))
                 .body(Prose::new(format!(
@@ -1184,7 +1223,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     path.display(),
                     source.kind()
                 )).with_line_breaks(LineBreaks::Hard))
-                .hint("Verify the policy file exists and the process can read it."),
+                .hint("Check that the terminal can be read from and written to."),
 
             // Delegate to the wrapped rich error so its styled block (excerpt,
             // gutter, OSC8 header, schema problems, …) is preserved verbatim.
@@ -1262,14 +1301,7 @@ fn stdout_looks_relevant(stdout: &str) -> bool {
         .any(|kw| lowered.contains(kw))
 }
 
-/// Paths to whitelist and blacklist policy files.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShellPolicyPaths {
-    pub whitelist: PathBuf,
-    pub blacklist: PathBuf,
-}
-
-/// A single rule in a whitelist or user blacklist file.
+/// One `permissions.shell-commands` rule, without its `!`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ShellRuleEntry {
     Exact(String),
@@ -1279,7 +1311,8 @@ pub enum ShellRuleEntry {
     Template(super::template::TemplateShape),
 }
 
-/// A loaded set of rules from a policy file.
+/// A set of `shell-commands` rules: one layer's allows or exclusions, or the
+/// rules a run saved.
 #[derive(Debug, Clone, Default)]
 pub struct ShellRuleSet {
     pub entries: Vec<ShellRuleEntry>,
@@ -1316,22 +1349,26 @@ pub struct ShellExpansionRuntime {
     /// across child runtimes alongside `shared`.
     reservation_done: Arc<std::sync::Condvar>,
     pub approvals_used: usize,
+    /// `dm.config.not_saved` warnings of approvals made through this runtime
+    /// since the last [`Self::take_recent_warnings`].
+    recent_warnings: Vec<crate::markdown::compose::ComposeWarning>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct SharedShellExpansionRuntime {
-    /// The three policy collections below are held behind `Arc` so
+    /// The two approval collections below are held behind `Arc` so
     /// [`ShellExpansionRuntime::snapshot`] is a refcount bump rather than a deep
-    /// copy of every rule — a snapshot is taken once per directive, but rules
-    /// change only on approval. Writers copy-on-write via `Arc::make_mut`, so an
-    /// outstanding snapshot keeps observing the rules it was taken with.
-    /// Session approvals, tagged with their execution mode and policy root,
-    /// so a resolved-byte approval never authorizes a template or the reverse.
+    /// copy — a snapshot is taken once per directive, but they change only on
+    /// approval. Writers copy-on-write via `Arc::make_mut`, so an outstanding
+    /// snapshot keeps observing what it was taken with.
+    /// Session approvals, tagged with their execution mode, so a
+    /// resolved-byte approval never authorizes a template or the reverse.
     allow_once: Arc<HashSet<ApprovalKey>>,
     pending_allow_once: HashSet<ApprovalKey>,
-    whitelist: Arc<ShellRuleSet>,
-    user_blacklist: Arc<ShellRuleSet>,
-    policy_paths: Option<ShellPolicyPaths>,
+    /// The rules an "always allow" choice added in this run, saved to the
+    /// user configuration or not. They allow like a user rule and, like one,
+    /// never override an exclusion; the captured policy itself never changes.
+    saved: Arc<ShellRuleSet>,
     /// Per-compose memoization of whole command outcomes, keyed by the command,
     /// its execution context, and its deadline (see `cache_key`). Shared across
     /// recursive transclusion (same `Arc`), so an identical command in a child
@@ -1355,19 +1392,90 @@ struct SharedShellExpansionRuntime {
     parked_waiters: HashMap<ApprovalKey, usize>,
 }
 
-/// An immutable read-only view of the runtime's policy collections, shared by
-/// pointer with the runtime rather than deep-copied.
+/// What one directive is judged against: the request's captured shell
+/// permissions, the rules this run saved, and this run's session approvals,
+/// shared by pointer with the runtime rather than deep-copied.
+///
+/// The decision order is fixed: the built-in blacklist refuses first (the
+/// caller checks it); an exclusion of any layer then requires an explicit
+/// approval of this run; otherwise a segment is pre-approved when the user
+/// rules, the saved rules, or both repository layers allow it.
 ///
 /// ## Notes
 ///
 /// Cloning a snapshot costs three refcount bumps. Because writers copy-on-write,
-/// a snapshot is a stable view: rules persisted after it was taken are invisible
-/// to it, and a fresh snapshot is required to observe them.
+/// a snapshot is a stable view: approvals recorded after it was taken are
+/// invisible to it, and a fresh snapshot is required to observe them.
 #[derive(Debug, Clone)]
 pub(crate) struct ShellRuntimeSnapshot {
     pub allow_once: Arc<HashSet<ApprovalKey>>,
-    pub whitelist: Arc<ShellRuleSet>,
-    pub user_blacklist: Arc<ShellRuleSet>,
+    pub saved: Arc<ShellRuleSet>,
+    pub policy: Arc<crate::config::permissions::PermissionPolicy>,
+}
+
+impl ShellRuntimeSnapshot {
+    /// Whether `positive` holds for the saved rules, the user rules, or both
+    /// repository layers. Exclusions are not consulted.
+    pub(crate) fn allows(&self, positive: impl Fn(&ShellRuleSet) -> bool) -> bool {
+        positive(&self.saved) || self.policy.shell().preapproves(&positive)
+    }
+
+    /// Every layer's `!` rules, without the `!`.
+    pub(crate) fn exclusions(&self) -> &ShellRuleSet {
+        self.policy.shell().exclusions()
+    }
+
+    /// The `!` entry `excluded` matches, judged layer by layer.
+    pub(crate) fn exclusion(
+        &self,
+        excluded: impl Fn(&ShellRuleSet) -> bool,
+    ) -> Option<crate::config::permissions::PolicyExclusion> {
+        match self.policy.shell().verdict(|_| true, excluded) {
+            crate::config::permissions::PermissionVerdict::ApprovalRequired { exclusion } => exclusion,
+            crate::config::permissions::PermissionVerdict::Preapproved => None,
+        }
+    }
+
+    /// The user configuration file an "always allow" choice saves to.
+    pub(crate) fn save_target(&self) -> Option<PathBuf> {
+        self.policy.home().map(|_| self.policy.user().block_file().to_path_buf())
+    }
+}
+
+/// The [`ShellExpansionError::ApprovalRequired`] of a command nothing
+/// approved: no rule covers it, or `exclusion` removed its pre-approval.
+pub(crate) fn approval_required(
+    ctx: &biscuit_terminal::errors::SourceContext,
+    command: String,
+    origin: &ShellCommandOrigin,
+    save_target: Option<PathBuf>,
+    exclusion: Option<crate::config::permissions::PolicyExclusion>,
+    suggested_rules: super::template::SuggestedRules,
+) -> ShellExpansionError {
+    ShellExpansionError::ApprovalRequired {
+        ctx: Box::new(ctx.clone()),
+        command,
+        save_target: save_target.map(Box::new),
+        exclusion: exclusion.map(Box::new),
+        origin: origin.clone(),
+        suggested_rules: Box::new(suggested_rules),
+    }
+}
+
+/// The captured permission policy of `request`.
+///
+/// ## Errors
+///
+/// [`ShellExpansionError::Config`] when its `permissions` block is invalid:
+/// then no command runs.
+pub(crate) fn request_policy(
+    request: &crate::markdown::compose::ComposeRequest,
+) -> Result<Arc<crate::config::permissions::PermissionPolicy>, ShellExpansionError> {
+    request
+        .config_snapshot()
+        .policy()
+        .map(Arc::clone)
+        .map_err(|error| ShellExpansionError::Config(Box::new(error)))
 }
 
 /// Result of attempting to reserve a normalized command for allow-once
@@ -1395,17 +1503,25 @@ impl ShellExpansionRuntime {
             shared: Arc::new(std::sync::Mutex::new(SharedShellExpansionRuntime::default())),
             reservation_done: Arc::new(std::sync::Condvar::new()),
             approvals_used: 0,
+            recent_warnings: Vec::new(),
         }
     }
 
-    /// Creates a child runtime inheriting allow-once, whitelist, and
-    /// blacklist state so that approvals persist across recursive transclusion.
+    /// Creates a child runtime inheriting allow-once and saved-rule state so
+    /// that approvals persist across recursive transclusion.
     pub fn clone_for_child(&self) -> Self {
         Self {
             shared: Arc::clone(&self.shared),
             reservation_done: Arc::clone(&self.reservation_done),
             approvals_used: 0,
+            recent_warnings: Vec::new(),
         }
+    }
+
+    /// Returns the warnings recorded since the last call (approvals that
+    /// could not be saved, `dm.config.not_saved`) and clears them.
+    pub fn take_recent_warnings(&mut self) -> Vec<crate::markdown::compose::ComposeWarning> {
+        std::mem::take(&mut self.recent_warnings)
     }
 
     /// Returns the number of approvals used since the last call and resets the counter.
@@ -1415,31 +1531,29 @@ impl ShellExpansionRuntime {
         count
     }
 
-    /// Ensures policy files are loaded (loads on first call, skips subsequent calls).
-    pub fn ensure_loaded(&mut self, paths: &ShellPolicyPaths) -> Result<(), ShellExpansionError> {
-        let mut shared = self.shared.lock().unwrap();
-        if shared.policy_paths.is_some() {
-            return Ok(());
-        }
-        shared.whitelist = Arc::new(super::store::load_ruleset(&paths.whitelist)?);
-        shared.user_blacklist = Arc::new(super::store::load_ruleset(&paths.blacklist)?);
-        shared.policy_paths = Some(paths.clone());
-        Ok(())
-    }
-
-    /// Takes an immutable view of the policy collections.
+    /// Takes an immutable view of `request`'s captured permissions and this
+    /// run's approvals.
+    ///
+    /// ## Errors
+    ///
+    /// [`ShellExpansionError::Config`] when the request's `permissions`
+    /// block is invalid.
     ///
     /// ## Notes
     ///
-    /// The lock is held only for three `Arc` clones — never across parsing,
+    /// The lock is held only for two `Arc` clones — never across parsing,
     /// approval, or command execution.
-    pub(crate) fn snapshot(&self) -> ShellRuntimeSnapshot {
+    pub(crate) fn snapshot(
+        &self,
+        request: &crate::markdown::compose::ComposeRequest,
+    ) -> Result<ShellRuntimeSnapshot, ShellExpansionError> {
+        let policy = request_policy(request)?;
         let shared = self.shared.lock().unwrap();
-        ShellRuntimeSnapshot {
+        Ok(ShellRuntimeSnapshot {
             allow_once: Arc::clone(&shared.allow_once),
-            whitelist: Arc::clone(&shared.whitelist),
-            user_blacklist: Arc::clone(&shared.user_blacklist),
-        }
+            saved: Arc::clone(&shared.saved),
+            policy,
+        })
     }
 
     /// Reserves a command for allow-once approval.
@@ -1569,39 +1683,24 @@ impl ShellExpansionRuntime {
             .sum()
     }
 
-    pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
+    /// Saves `rule` to the user configuration of `policy` and adds it to
+    /// this run's saved rules either way. A rule that cannot be saved is
+    /// recorded as a `dm.config.not_saved` warning
+    /// ([`Self::take_recent_warnings`]); the run's approval stands.
+    pub(crate) fn save_rule(
+        &mut self,
+        policy: &crate::config::permissions::PermissionPolicy,
+        rule: ShellRuleEntry,
+        command: Option<super::template::FilledChain>,
+    ) {
+        if let Some(warning) = save_user_rule(policy, &rule, command) {
+            self.recent_warnings.push(warning);
+        }
         let mut shared = self.shared.lock().unwrap();
-        Arc::make_mut(&mut shared.whitelist)
-            .entries
-            .push(ShellRuleEntry::Exact(normalized));
-    }
-
-    pub(crate) fn persist_whitelist_prefix(&mut self, executable: String) {
-        let mut shared = self.shared.lock().unwrap();
-        Arc::make_mut(&mut shared.whitelist)
-            .entries
-            .push(ShellRuleEntry::Prefix(executable));
-    }
-
-    pub(crate) fn persist_whitelist_template(&mut self, shape: super::template::TemplateShape) {
-        let mut shared = self.shared.lock().unwrap();
-        Arc::make_mut(&mut shared.whitelist)
-            .entries
-            .push(ShellRuleEntry::Template(shape));
-    }
-
-    pub(crate) fn persist_blacklist_template(&mut self, shape: super::template::TemplateShape) {
-        let mut shared = self.shared.lock().unwrap();
-        Arc::make_mut(&mut shared.user_blacklist)
-            .entries
-            .push(ShellRuleEntry::Template(shape));
-    }
-
-    pub(crate) fn persist_blacklist_exact(&mut self, normalized: String) {
-        let mut shared = self.shared.lock().unwrap();
-        Arc::make_mut(&mut shared.user_blacklist)
-            .entries
-            .push(ShellRuleEntry::Exact(normalized));
+        let saved = Arc::make_mut(&mut shared.saved);
+        if !saved.entries.contains(&rule) {
+            saved.entries.push(rule);
+        }
     }
 
     /// Returns the outcome cached under `key`, running `run` to produce it
@@ -1674,6 +1773,27 @@ impl ShellExpansionRuntime {
         shared.volatile_warned.insert(normalized.to_string())
     }
 }
+
+/// Saves `rule` to `policy`'s user configuration, returning the
+/// `dm.config.not_saved` warning when it could not be saved.
+pub(crate) fn save_user_rule(
+    policy: &crate::config::permissions::PermissionPolicy,
+    rule: &ShellRuleEntry,
+    command: Option<super::template::FilledChain>,
+) -> Option<crate::markdown::compose::ComposeWarning> {
+    use crate::config::permissions::persist::{PersistentApproval, save_user_approval};
+    let approval = PersistentApproval::ShellRule { rule: rule.clone(), command };
+    save_user_approval(policy, &approval).err().map(|not_saved| {
+        let mut warning = crate::markdown::compose::ComposeWarning::new("shell_approval", not_saved.to_string());
+        warning.code = Some(not_saved.code().to_string());
+        warning.source = Some(NOT_SAVED_SOURCE.to_string());
+        warning.path = not_saved.file;
+        warning
+    })
+}
+
+/// Producer of the `dm.config.not_saved` warning of a shell approval.
+pub const NOT_SAVED_SOURCE: &str = "darkmatter.shell.approval";
 
 /// Built-in blacklist rule types.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1798,7 +1918,7 @@ impl PipelineRuntime {
     }
 
     /// Creates a child runtime sharing cycle detection and inheriting
-    /// shell expansion state (whitelists, allow-once, blacklists).
+    /// shell expansion state (saved rules and allow-once approvals).
     pub fn clone_for_child(&self) -> Self {
         Self {
             transclusion: self.transclusion.clone_for_child(),

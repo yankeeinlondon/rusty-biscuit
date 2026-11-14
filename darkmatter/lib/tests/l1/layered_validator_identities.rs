@@ -125,10 +125,9 @@ fn a_changed_template_result_changes_the_identity() {
     let folder = Folder::new();
     let home = tempfile::tempdir().expect("home");
     crate::dynamic_slots_fixtures::git(&folder.root, &["init", "-q", "-b", "main"]);
-    let data = folder.write("data/os.yaml", "- macOS\n- Linux\n");
-    let store = home.path().join(".config/darkmatter/schema-read-policy");
-    std::fs::create_dir_all(store.parent().expect("store folder")).expect("store folder");
-    std::fs::write(&store, format!("allow file {}\n", biscuit_file::to_portable_string(&data))).expect("grant");
+    folder.write("data/os.yaml", "- macOS\n- Linux\n");
+    // The user's permissions admit the data file beside the document.
+    crate::slot_support::write_user_permissions(home.path(), &["./data/os.yaml"]);
     let path = folder.write(
         "doc.md",
         "---\n$schema:\n  os: enum({{ load_data(\"data/os.yaml\", \"string[]\") }})\nos: Linux\n---\nBody.\n",

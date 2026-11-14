@@ -15,8 +15,9 @@
 //! ```
 //!
 //! Each job resolves with a fresh [`SlotSession`] in full mode **without**
-//! an approval handler: the automatic, persisted, and in-memory (this server
-//! process) grants decide every read, and anything else is
+//! an approval handler: the configured `permissions.file-read` and the
+//! in-memory (this server process) approvals decide every read, and
+//! anything else is
 //! `dm.schema.slot_approval_required`, never a prompt. The installed session
 //! keeps the snapshots it pinned; requests serve them through
 //! [`DarkmatterSchemas::with_slot_pins_only`](darkmatter::markdown::schemas::DarkmatterSchemas::with_slot_pins_only),
@@ -469,8 +470,8 @@ pub(crate) fn run_job(job: SlotJob) -> SlotResult {
 
 /// Every local path the resolution observed (content reads, existence
 /// answers, missing probes, listings), plus the repository's index and
-/// `HEAD` when any of them lies inside it: an automatic grant depends on
-/// what the index and `HEAD` record for the file.
+/// `HEAD` when any of them lies inside it: the repository's `permissions`
+/// count only as committed at `HEAD` (the commit rule).
 fn slot_reads(data: &DataRuntime, repository: Option<&Path>) -> Vec<WatchedRead> {
     let mut paths: BTreeSet<PathBuf> = BTreeSet::new();
     for observation in data.observations_since(Default::default()) {
@@ -549,8 +550,13 @@ pub(crate) fn template_shape(
 mod tests {
     use super::*;
 
+    /// The context of a document in `dir`, whose home (`dir/.home`) holds a
+    /// configuration pre-approving no read, so only once approvals allow one.
     fn context(dir: &Path) -> FileResolutionContext {
-        FileResolutionContext::from_snapshot(dir, None, std::collections::HashMap::new())
+        let home = dir.join(".home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".darkmatter.yaml"), "permissions:\n    file-read: []\n").unwrap();
+        FileResolutionContext::from_snapshot(dir, Some(home), std::collections::HashMap::new())
     }
 
     fn inputs(dir: &Path) -> JobInputs {
@@ -636,16 +642,18 @@ mod tests {
         assert!(store.view(&doc).refreshing);
     }
 
-    /// A job for `text` at `dir/doc.md`, reading with a once grant for the
-    /// whole folder.
+    /// A job for `text` at `dir/doc.md`, reading with once approvals for
+    /// the folder's `os.yaml` and `types.yaml`.
     fn granted_job(dir: &Path, text: &str) -> SlotJob {
         let store = SlotSnapshots::default();
         let doc = dir.join("doc.md");
-        store.add_once(Grant {
-            decision: darkmatter::markdown::schemas::slots::grants::GrantDecision::Allow,
-            target: darkmatter::markdown::schemas::slots::grants::GrantTarget::Dir(dir.to_path_buf()),
-            scope: darkmatter::markdown::schemas::slots::grants::GrantScope::Once,
-        });
+        for name in ["os.yaml", "types.yaml"] {
+            store.add_once(Grant {
+                decision: darkmatter::markdown::schemas::slots::grants::GrantDecision::Allow,
+                target: darkmatter::markdown::schemas::slots::grants::GrantTarget::File(dir.join(name)),
+                scope: darkmatter::markdown::schemas::slots::grants::GrantScope::Once,
+            });
+        }
         store.demand(&doc, 1, true, || JobInputs { text: text.to_string(), ..inputs(dir) });
         store.take_demands().pop().unwrap()
     }

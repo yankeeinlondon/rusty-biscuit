@@ -148,7 +148,7 @@ pub struct Diagnostic {
     /// (and not serialized) for every other record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_location: Option<DataLocation>,
-    /// The grants any one of which would allow the read a
+    /// The approvals any one of which would allow the read a
     /// `dm.schema.slot_approval_required` record is about, in the order an
     /// approval prompt offers them; `None` (and not serialized) for every
     /// other record.
@@ -156,17 +156,16 @@ pub struct Diagnostic {
     pub grants_needed: Option<Vec<GrantNeeded>>,
 }
 
-/// One grant that would allow a schema slot's read, as a data output
+/// One approval that would allow a schema slot's read, as a data output
 /// writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GrantNeeded {
-    /// `file`, `dir`, `url`, `url-any-query`, or `site`: the grant store's
-    /// kind word.
+    /// `file` or `url`.
     pub kind: &'static str,
-    /// The path, URL, or `scheme://host[:port]` the grant covers, as the
-    /// grant store spells it.
+    /// The file's path or the exact URL the approval covers.
     pub target: String,
-    /// `once` (this run) or `persisted` (written to the grant store).
+    /// `once` (this run) or `persisted` ("always allow" a file: saved to the
+    /// user's `permissions.file-read` and applied for the run).
     pub scope: &'static str,
 }
 

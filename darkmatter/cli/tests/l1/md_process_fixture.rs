@@ -138,21 +138,12 @@ exit 0
 }
 
 /// Everything a probe run needs: a fixture with the recording stub in place
-/// and the shell whitelist at the anchors md's policy resolution can pick —
-/// the fixture home (when the resolution context carries a home) and the
-/// launch directory (the base-dir fallback for stdin compose).
+/// and a fixture home whose `permissions.shell-commands` allow it, wherever
+/// the run is launched.
 fn probe_fixture(name: &str) -> (CliProcessFixture, PathBuf) {
     let fixture = CliProcessFixture::named(name);
     write_probe_stub(fixture.bin_dir());
-    let whitelist = format!("prefix {PROBE}\n");
-    write(
-        &fixture.home().join(".darkmatter-shell-whitelist"),
-        &whitelist,
-    );
-    write(
-        &fixture.cwd().join(".darkmatter-shell-whitelist"),
-        &whitelist,
-    );
+    fixture.shell_permissions(&[&format!("prefix {PROBE}")]);
     let capture = fixture.workspace_path().join("probe-capture.txt");
     (fixture, capture)
 }
@@ -680,12 +671,6 @@ fn ambient_context_escape_pins_the_cwd_to_a_test_built_directory() {
     let (fixture, capture) = probe_fixture("fixture-ambient-context");
     let nested = fixture.workspace_path().join("project").join("docs");
     std::fs::create_dir_all(&nested).expect("nested launch directory");
-    // The base-dir anchor for the shell whitelist moves with the pinned
-    // launch directory, so the whitelist must exist there too.
-    write(
-        &nested.join(".darkmatter-shell-whitelist"),
-        &format!("prefix {PROBE}\n"),
-    );
 
     // Escape: ambient context. The subject is launch-context behavior from a
     // nested directory the test built inside its own workspace.

@@ -475,9 +475,11 @@ fn schema_slot_requests_evaluate_no_slot_before_or_after_the_worker_resolves_it(
     let workspace = LspWorkspace::new();
     let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
     std::fs::write(root.join("os.yaml"), "- Linux\n").unwrap();
-    let store = root.join("home/.config/darkmatter/schema-read-policy");
-    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-    std::fs::write(&store, format!("allow file {}\n", root.join("os.yaml").display())).unwrap();
+    // The user's `permissions.file-read` admits the data file beside the
+    // document.
+    let config = root.join("home/.darkmatter.yaml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "permissions:\n    file-read:\n        - ./os.yaml\n").unwrap();
     let text = "---\n$schema:\n  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }})\nos: Linux\n---\n\nBody {{ os }}\n";
     let doc = root.join("doc.md");
     std::fs::write(&doc, text).unwrap();

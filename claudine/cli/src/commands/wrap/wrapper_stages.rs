@@ -434,9 +434,8 @@ pub(crate) fn detect_wrapper_harness(
             &source_context,
         )?;
         let materialization_elapsed = materialization_started.elapsed();
-        let shell_options = harness_orch::build_harness_shell_options_for_source(
-            &source_path,
-            source_context.repository_root(),
+        let shell_options = harness_orch::build_harness_shell_options(
+            claudine::harness::CapturedPermissions::for_source(invocation, source_context.file_resolution_context()),
         );
 
         Ok((

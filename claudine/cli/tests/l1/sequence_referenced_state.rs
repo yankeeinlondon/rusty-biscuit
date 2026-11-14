@@ -217,7 +217,7 @@ fn referenced_sequence_shell_executes_against_its_own_property() {
 fn referenced_sequence_shell_is_discovered_with_its_own_property() {
     use test_toolkit::argv_recorder::{ARGV_RECORDER_FILE, read_argv_records};
     let (fixture, records) = shell_fixture("sequence-referenced-shell-approval");
-    fs::write(fixture.cwd().join(".darkmatter-shell-whitelist"), "exact argv-recorder child-value\n").unwrap();
+    crate::common::write_shell_permissions(fixture.home(), "exact argv-recorder child-value\n");
     let output = fixture.command().env(ARGV_RECORDER_FILE, &records)
         .args(["sequence", "--goose", "--silent"]).arg(fixture.cwd().join("root.md"))
         .assert().get_output().clone();

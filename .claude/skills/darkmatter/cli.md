@@ -215,4 +215,6 @@ The terminal prompt is `cli/src/approval.rs::approve_slot_reads_with_io` (testab
 over any `BufRead`/`Write`; ended input is deny-for-run). A data output never
 asks: an unapproved read is `dm.schema.slot_approval_required` with
 `grants_needed`, and `md schema validate` reports the file as `error: slots`
-(exit 1). The grant store is read from the request's home, never the repository.
+(exit 1). Pre-approval is the request's captured `permissions.file-read`;
+the prompt offers allow-for-run, "always allow" a file (saved to the user's
+`permissions.file-read`), and deny-for-run.

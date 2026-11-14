@@ -107,7 +107,7 @@ fn a_required_default_reaches_a_second_pass_frontmatter_value() {
 
     let (composed, _) = try_compose_at(dir.path(), "doc.md", document, |options| {
         options
-            .with_shell(ShellExpansionOptions { policy_root: Some(dir.path().to_path_buf()), ..Default::default() })
+            .with_config_snapshot(crate::request_support::shell_config(dir.path(), &[])).with_shell(ShellExpansionOptions::default())
             .with_shell_working_directory(dir.path())
             .with_shell_approval_handler(Arc::new(AllowAll))
     })

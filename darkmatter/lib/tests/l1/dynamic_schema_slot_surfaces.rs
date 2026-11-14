@@ -5,10 +5,11 @@
 //! then a template type through the same paths.
 //!
 //! Every case builds a real Git repository from the sandboxing-shaped
-//! fixture (or, to have no automatic grant, a temp folder outside any
-//! repository), anchors its request or context there with a temp home (so
-//! the user's real grant store is never read), and stubs only the approval
-//! handler.
+//! fixture (whose committed `permissions.file-read` pre-approves nothing
+//! until `SlotRepo::permit_data`), or a temp folder outside any repository,
+//! anchors its request or context there with a temp home whose
+//! `.darkmatter.yaml` pre-approves nothing (so the user's real configuration
+//! is never read), and stubs only the approval handler.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -88,9 +89,21 @@ fn allow_file_once(request: &SlotGrantRequest) -> SlotGrantDecision {
     file_once(request).map_or(SlotGrantDecision::Unanswered, SlotGrantDecision::from_grant)
 }
 
-/// A home with no grant store, so only the run's own grants apply.
+/// A home whose configuration pre-approves no read, so only the
+/// repository's permissions and the run's own approvals apply.
 fn empty_home() -> tempfile::TempDir {
-    tempfile::tempdir().expect("temp home")
+    let home = tempfile::tempdir().expect("temp home");
+    crate::slot_support::write_user_permissions(home.path(), &[]);
+    home
+}
+
+/// The fixture repository with its data file permitted by the committed
+/// repository configuration.
+fn permitted_repo() -> SlotRepo {
+    let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
+    let repo = SlotRepo::build(&source, RepoState::Clean);
+    repo.permit_data();
+    repo
 }
 
 fn request(document: &Path, home: &Path) -> ComposeRequest {
@@ -185,9 +198,8 @@ mod compose_slot_approvals {
     }
 
     #[test]
-    fn a_clean_committed_data_file_is_granted_automatically_without_asking() {
-        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
-        let repo = SlotRepo::build(&source, RepoState::Clean);
+    fn a_data_file_the_permissions_admit_is_read_without_asking() {
+        let repo = permitted_repo();
         let home = empty_home();
         let document = repo.path(DOCUMENT_FILE);
         let request = request(&document, home.path());
@@ -259,9 +271,8 @@ mod reference_check {
     }
 
     #[test]
-    fn an_automatically_granted_read_resolves_and_the_resolved_list_validates() {
-        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
-        let repo = SlotRepo::build(&source, RepoState::Clean);
+    fn a_permitted_read_resolves_and_the_resolved_list_validates() {
+        let repo = permitted_repo();
         let home = empty_home();
         let context = context(&repo, home.path());
         let session = session(&context).with_mode(SessionMode::ReferenceCheck);
@@ -318,7 +329,6 @@ mod grants_needed {
         let record = &records[0];
         assert_eq!(record.code, APPROVAL_REQUIRED);
         let file = biscuit_file::canonicalize_simplified(&repo.path(DATA_FILE)).expect("data file");
-        let dir = biscuit_file::canonicalize_simplified(&folder_of(&repo.path(DATA_FILE))).expect("data folder");
         let needed: Vec<(&str, String, &str)> = record
             .grants_needed
             .as_ref()
@@ -327,16 +337,9 @@ mod grants_needed {
             .map(|grant| (grant.kind, grant.target.clone(), grant.scope))
             .collect();
         let file = file.display().to_string();
-        let dir = dir.display().to_string();
-        assert_eq!(
-            needed,
-            vec![
-                ("file", file.clone(), "once"),
-                ("file", file.clone(), "persisted"),
-                ("dir", dir.clone(), "once"),
-                ("dir", dir.clone(), "persisted"),
-            ]
-        );
+        // Allow for this run, or always allow (saved to the user's
+        // `permissions.file-read`); never a folder.
+        assert_eq!(needed, vec![("file", file.clone(), "once"), ("file", file.clone(), "persisted")]);
 
         let serialized = serde_json::to_value(record).expect("serializes");
         assert_eq!(
@@ -344,16 +347,13 @@ mod grants_needed {
             json!([
                 { "kind": "file", "target": file, "scope": "once" },
                 { "kind": "file", "target": file, "scope": "persisted" },
-                { "kind": "dir", "target": dir, "scope": "once" },
-                { "kind": "dir", "target": dir, "scope": "persisted" },
             ])
         );
     }
 
     #[test]
     fn a_slot_failure_that_is_not_an_approval_names_no_grants() {
-        let source = biscuit_test_harness::manifest_dir!().join("tests/fixtures/dynamic_slots/claudine");
-        let repo = SlotRepo::build(&source, RepoState::Clean);
+        let repo = permitted_repo();
         write(&repo.path(DATA_FILE), "- macOS\n- [Linux\n");
         git(repo.root(), &["commit", "-q", "-am", "malformed data"]);
         let home = empty_home();
@@ -471,8 +471,8 @@ mod template_types {
     const NOT_A_TYPE: &str = "dm.schema.slot_not_a_type";
     const PENDING: &str = "dm.schema.slot_pending";
 
-    /// A canonical temp folder outside any repository, so no read is
-    /// granted automatically.
+    /// A canonical temp folder outside any repository, with a home (`.home`)
+    /// whose configuration pre-approves no read.
     struct Folder {
         _temp: tempfile::TempDir,
         root: PathBuf,
@@ -493,7 +493,9 @@ mod template_types {
         }
 
         fn context(&self) -> FileResolutionContext {
-            FileResolutionContext::new(&self.root).with_env(HashMap::new())
+            let home = self.root.join(".home");
+            crate::slot_support::write_user_permissions(&home, &[]);
+            FileResolutionContext::new(&self.root).with_env(HashMap::new()).with_home_dir(home)
         }
     }
 
@@ -574,7 +576,7 @@ mod template_types {
                 folder.document("$schema:\n    status: \"{{ load_data('./status-type.yaml', 'string[]') }}\"\nstatus: draft\n");
             let home = empty_home();
 
-            let failure = compose_in(&document, home.path()).expect_err("no grant covers the read");
+            let failure = compose_in(&document, home.path()).expect_err("nothing permits the read");
 
             assert_eq!(failure_codes(&failure), vec![APPROVAL_REQUIRED.to_string()]);
         }
@@ -680,13 +682,15 @@ mod template_types {
             write(&folder.join("status-type.yaml"), "- enum(draft, published)\n");
             let document = folder.join("status.md");
             write(&document, &format!("---\n{FRONTMATTER}---\n\nBody.\n"));
+            // The committed repository configuration admits its YAML files.
+            write(&repo.root().join(".darkmatter.yaml"), &crate::slot_support::file_read_config(&["&**/*.yaml"]));
             git(repo.root(), &["add", "-A"]);
             git(repo.root(), &["commit", "-q", "-m", "status type"]);
             let home = empty_home();
 
             let effective = reference_check_schemas(context(&repo, home.path()))
                 .effective_for(&markdown(&document))
-                .expect("a clean committed read is granted")
+                .expect("a read the committed permissions admit resolves")
                 .expect("a schema applies");
 
             assert!(!effective.validate(&json!({ "status": "bogus" })).valid);

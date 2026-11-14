@@ -24,7 +24,7 @@ use darkmatter::markdown::compose::remote::RemoteReadConfig;
 use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
 use darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals;
 use darkmatter::markdown::compose::shell_expansion::{
-    ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionOptions, ShellRuleSet,
+    ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionOptions,
 };
 use darkmatter::markdown::compose::{
     CacheAccessMode, ComposeFailure, ComposeOptions, ComposeReport, ComposeRequest, DataRuntime, SharedFrontmatter,
@@ -105,7 +105,7 @@ impl ShellApprovalHandler for AllowAll {
 /// Options that run every command `dir`'s documents ask for, sharing `runtime`.
 fn shell_options(dir: &Path, runtime: &DataRuntime) -> ComposeOptions {
     ComposeOptions::new()
-        .with_shell(ShellExpansionOptions { policy_root: Some(dir.to_path_buf()), ..Default::default() })
+        .with_config_snapshot(crate::request_support::shell_config(dir, &[])).with_shell(ShellExpansionOptions::default())
         .with_shell_working_directory(dir)
         .with_shell_approval_handler(Arc::new(AllowAll))
         .with_data_runtime(runtime.clone())
@@ -362,13 +362,14 @@ fn a_later_shell_argument_sees_an_earlier_commands_write() {
 }
 
 /// Composes the later-argument fixture the way `md compose` does: pre-flight
-/// approves what the whitelist `rules` cover, and composition runs only that
+/// approves what the `shell-commands` `rules` cover, and composition runs only that
 /// set, plus `shapes` when asked for the walk's template shapes.
 fn compose_pre_approved(rules: &str, shapes: bool) -> (TempDir, Composed) {
     let (dir, doc) = later_argument_fixture();
-    write(dir.path(), ".darkmatter-shell-whitelist", rules);
+    let rules: Vec<&str> = rules.lines().collect();
     let options = ComposeOptions::new()
-        .with_shell(ShellExpansionOptions { policy_root: Some(dir.path().to_path_buf()), ..Default::default() })
+        .with_config_snapshot(crate::request_support::shell_config(dir.path(), &rules))
+        .with_shell(ShellExpansionOptions::default())
         .with_shell_working_directory(dir.path())
         .with_source_file(&doc);
     let request = crate::request_support::request(options);
@@ -449,7 +450,6 @@ fn evaluate_event(
     let live = Mutex::new(frontmatter.clone());
     let state = MdRuntimeState::default();
     let approved = ShellPreApprovals::new();
-    let blacklist = ShellRuleSet::default();
     let root = source.parent().expect("source folder");
     let engine = EffectEngine::builder().mutation_root(root).auto_rehash(false).build();
     let timing = LifecycleTiming::default();
@@ -461,7 +461,6 @@ fn evaluate_event(
         live_frontmatter: &live,
         state: &state,
         approved: &approved,
-        user_blacklist: &blacklist,
         effect_engine: &engine,
         effects: &Silent,
         output: &Silent,

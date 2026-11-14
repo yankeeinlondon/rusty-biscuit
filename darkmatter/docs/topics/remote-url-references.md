@@ -37,19 +37,52 @@ remote compose inputs. Local file references continue to use the existing
 ## Allowed Hosts
 
 Remote reads use the shared `biscuit-file` fetch primitive and its
-`FetchPolicy`. The default policy is deny-all. A host must be explicitly
-allowed before any request is issued.
+`FetchPolicy`. The default policy is deny-all. A host must be allowed before
+any request is issued, in one of two ways:
 
-```bash
-md compose doc.md --allow host=example.com
-```
+- **For every run**, set `network: allow` in the `permissions` block of
+  `~/.darkmatter.yaml`. Inside a repository the repository's
+  `.darkmatter.yaml` must also say `allow`, both as committed at `HEAD` and in
+  the working copy; an uncommitted edit cannot widen what `HEAD` says (see
+  [Configuration](./configuration.md)). Every HTTP(S) host is then allowed.
+- **For one run**, name the exact host:
 
-The CLI currently accepts exact host names. Library callers configure
-`ComposeOptions::with_remote_read_config(...)`. Supplying an allowed host there
-enables read-side expression URL reads (`frontmatter(url)`, `markdown_title(url)`,
-`file_exists(url)`, …) on its own. Remote `::file` / `::code` block transclusion
-additionally requires the explicit `with_allow_remote_transclusion(true)` opt-in,
-since it injects fetched bodies into the document.
+  ```bash
+  md compose doc.md --allow host=example.com
+  ```
+
+  This works under `network: deny` and changes nothing under `allow`.
+
+| User file | Repository (`HEAD` / working copy) | `--allow host=example.com` | `https://example.com/a.md` | `https://other.test/a.md` |
+| --- | --- | --- | --- | --- |
+| absent or `deny` | any | no | refused | refused |
+| absent or `deny` | any | yes | fetched | refused |
+| `allow` | none (outside a repository) | no | fetched | fetched |
+| `allow` | `allow` / `allow` | no | fetched | fetched |
+| `allow` | `deny` / `allow` | no | refused | refused |
+
+A schema slot that reads a URL takes the same decision: under `network:
+allow` its read needs no approval, and under `deny` only the run's hosts are
+read without one.
+
+`network: allow` changes consent, not the transport rules. Only `http` and
+`https` are fetched, a redirect is never followed (every redirect fails the
+read as a policy refusal, whatever the target), and a cached body is served
+only when the host is allowed now. When the `permissions` block is invalid, no
+blanket consent exists: a read of a host the run did not name fails with a
+message that names the configuration error.
+
+Library callers configure `ComposeOptions::with_remote_read_config(...)` for
+per-run hosts; the configured `network` permission comes from the request's
+configuration snapshot (`ComposeOptions::with_config_snapshot`, or the one
+`ComposeRequest::prepare` loads). Attach the snapshot before
+`with_shared_remote_fetch()`; a request whose snapshot decides differently
+replaces the shared runtime. An allowed host or `network: allow` enables
+read-side expression URL reads (`frontmatter(url)`, `markdown_title(url)`,
+`file_exists(url)`, …) on its own. Remote `::file` / `::code` block
+transclusion additionally requires the explicit
+`with_allow_remote_transclusion(true)` opt-in, since it injects fetched bodies
+into the document; `md compose` always sets it.
 
 ## Cache And Freshness
 

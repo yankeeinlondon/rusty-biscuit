@@ -471,7 +471,7 @@ mod shell {
         let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
         let handler = recorder.clone();
         let output = compose_with_options(&root, content, |options| {
-            options.with_shell_policy_root(&root).with_shell_working_directory(&root).with_shell_approval_handler(handler)
+            options.with_config_snapshot(crate::request_support::shell_config(&root, &[])).with_shell_working_directory(&root).with_shell_approval_handler(handler)
         });
         let commands = recorder.0.lock().unwrap().clone();
         (output, commands)

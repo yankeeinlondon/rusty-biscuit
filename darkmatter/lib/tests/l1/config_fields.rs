@@ -214,12 +214,12 @@ fn shell_commands_type_each_rule_and_default_to_none() {
 #[test]
 fn every_invalid_shell_rule_is_a_located_error() {
     for (entry, reason) in [
-        ("exact ", "expected 'exact"),
+        ("exact ", "names no command"),
         ("!", "needs a rule"),
         ("!  ", "needs a rule"),
-        ("prefix    ", "expected 'exact"),
+        ("prefix    ", "names no command"),
         ("run ls", "expected 'exact"),
-        ("template", "expected 'exact"),
+        ("template", "names no command"),
         ("template git {{ nope", ""),
     ] {
         let text = format!("permissions:\n  shell-commands:\n    - prefix ls\n    - \"{entry}\"\n");

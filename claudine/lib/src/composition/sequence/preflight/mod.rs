@@ -127,7 +127,9 @@ pub struct PromptDocument {
     pub has_schema: bool,
 }
 
-type GraphShellAuthorization = Option<(darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals, Option<PathBuf>)>;
+/// The approvals the graph audit granted, with the captured permissions they
+/// were decided under (a filled template meets their `!` entries).
+type GraphShellAuthorization = Option<(darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals, crate::harness::CapturedPermissions)>;
 
 /// The complete statically-knowable picture of one sequence invocation.
 #[derive(Debug, Clone, Default)]
@@ -333,34 +335,35 @@ impl PreflightGraph {
 
     pub(crate) fn settle_container_events(
         &self, approved: &darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
-        policy_root: Option<&Path>,
     ) {
         for lifecycle in &self.container_lifecycles {
             super::super::preflight::settle_lifecycle_shell_modes(lifecycle,
-                &crate::composition::LifecycleSignal::ALL, approved, policy_root);
+                &crate::composition::LifecycleSignal::ALL, approved);
         }
     }
 
     pub(crate) fn record_shell_authorization(
         &self,
         approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
-        policy_root: Option<PathBuf>,
+        permissions: crate::harness::CapturedPermissions,
     ) {
-        self.settle_container_events(&approved, policy_root.as_deref());
+        self.settle_container_events(&approved);
         if let Ok(mut authorization) = self.shell_authorization.lock() {
-            *authorization = Some((approved, policy_root));
+            *authorization = Some((approved, permissions));
         }
     }
 
-    pub(crate) fn shell_authorization(&self) -> Option<(darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals, Option<PathBuf>)> {
+    pub(crate) fn shell_authorization(&self) -> Option<(darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals, crate::harness::CapturedPermissions)> {
         self.shell_authorization.lock().ok()?.clone()
     }
 
-    pub(crate) fn template_authorization(&self, template: &CommandTemplate) -> Option<Option<PathBuf>> {
+    /// The permissions the audit decided under, when it approved `template`'s
+    /// shape.
+    pub(crate) fn template_authorization(&self, template: &CommandTemplate) -> Option<crate::harness::CapturedPermissions> {
         let authorization = self.shell_authorization.lock().ok()?;
-        let (approved, root) = authorization.as_ref()?;
+        let (approved, permissions) = authorization.as_ref()?;
         approved.contains_template(&darkmatter::markdown::compose::shell_expansion::template::TemplateShape::from_template(template))
-            .then(|| root.clone())
+            .then(|| permissions.clone())
     }
     /// Settle either-mode task sites against the audited membership before
     /// stack stamping or reapproval can turn their authored text into bytes.

@@ -292,7 +292,7 @@ shell_variants! {
         ctx: context(), command: "c".into(), reason: "r".into(), origin,
     };
     shell_approval_required: "dm.shell.failure", |origin| ShellExpansionError::ApprovalRequired {
-        ctx: context(), command: "c".into(), whitelist_path: Box::default(), blacklist_path: Box::default(), origin,
+        ctx: context(), command: "c".into(), save_target: None, exclusion: None, origin,
         suggested_rules: Box::default(),
     };
     shell_denied: "dm.shell.failure", |origin| ShellExpansionError::Denied {

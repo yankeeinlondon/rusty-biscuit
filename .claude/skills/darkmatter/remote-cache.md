@@ -2,7 +2,22 @@
 
 Detail behind the "Remote and cache safety" section of [SKILL.md](SKILL.md).
 
-- CLI callers opt in with `md compose --allow host=<host>`.
+- CLI callers opt in per run with `md compose --allow host=<host>`, or for
+  every run with `permissions: network: allow` (user file, and inside a
+  repository its `.darkmatter.yaml` at both `HEAD` and the working copy).
+- One projection decides consent for composition and schema slots alike:
+  `config::network::NetworkPermission::from_snapshot(config_snapshot)` (no
+  snapshot = `Deny`; an invalid `permissions` block = `Invalid`, which denies
+  and puts the config error in `RemoteReadError::InvalidConfiguration`), then
+  `.fetch_policy(exact_hosts)` (`FetchPolicy::allow_all()` under `Allow`).
+  `ComposeOptions::network_permission()` feeds `RemoteFetchRuntime::with_store_and_network`
+  and `SlotSession`/`GrantBook::with_network` (slot gate and slot fetch policy);
+  the decision is `ConfigSnapshot::policy()?.network()`: the AND of user,
+  `HEAD`, and worktree, with each `permissions` reference followed. The decision is in both
+  option identities (`network_permission` field). Attach the config snapshot
+  before `with_shared_remote_fetch()`; `with_config_snapshot` and
+  `ComposeRequest` assembly rebuild a shared runtime whose decision differs
+  (`align_remote_network`). Pinned by `lib/tests/l1/network_permission.rs`.
 - Use the two-category vocabulary everywhere (help, docs, comments):
   **semantic-result artifacts** (composed documents, `::file` children,
   `::code`/`::toc-linking` results, snapshots) are memory-only until a

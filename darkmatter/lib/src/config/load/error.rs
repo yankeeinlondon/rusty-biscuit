@@ -97,6 +97,10 @@ pub enum ConfigErrorKind {
     RepositorySnapshotRequired,
     /// A file or the committed tree could not be read.
     Read,
+    /// A legacy policy file could not be migrated (an unreadable file, a line
+    /// its grammar rejects, an unfinishable migration receipt); nothing was
+    /// written and every legacy file is kept.
+    Migration,
 }
 
 /// A configuration failure: what kind it is and every located problem.
@@ -129,11 +133,13 @@ impl ConfigError {
     }
 
     /// The diagnostic code: [`CONFIG_REFERENCE_CODE`] for a reference,
-    /// otherwise [`CONFIG_INVALID_CODE`].
+    /// [`CONFIG_MIGRATION_CODE`] for a migration, otherwise
+    /// [`CONFIG_INVALID_CODE`].
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self.kind {
             ConfigErrorKind::InvalidReference => CONFIG_REFERENCE_CODE,
+            ConfigErrorKind::Migration => CONFIG_MIGRATION_CODE,
             _ => CONFIG_INVALID_CODE,
         }
     }

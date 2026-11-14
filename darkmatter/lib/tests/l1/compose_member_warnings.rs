@@ -163,7 +163,7 @@ fn approve_shell(dir: &Path) -> impl FnOnce(ComposeOptions) -> ComposeOptions {
     let dir = dir.to_path_buf();
     move |options| {
         options
-            .with_shell_policy_root(dir.clone())
+            .with_config_snapshot(crate::request_support::shell_config(&dir, &[]))
             .with_shell_working_directory(dir)
             .with_shell_approval_handler(std::sync::Arc::new(AllowAll))
     }

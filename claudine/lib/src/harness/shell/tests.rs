@@ -1,4 +1,5 @@
 use super::*;
+use super::test_support::{saved_rules, user_permissions};
 use darkmatter::markdown::compose::shell_expansion::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
 };
@@ -57,10 +58,10 @@ impl ShellApprovalHandler for CountingApprovalHandler {
 
 #[test]
 fn unknown_command_denied_without_approval_handler() {
-    // Use an isolated directory with no policy files and no approval handler.
+    // An isolated home with no permissions and no approval handler.
     let dir = tempfile::TempDir::new().unwrap();
     let options = ShellApprovalOptions {
-        policy_root: Some(dir.path().to_path_buf()),
+        permissions: user_permissions(dir.path(), &[]),
         approval_handler: None,
         ..Default::default()
     };
@@ -81,36 +82,111 @@ fn blacklisted_command_rejected() {
 }
 
 #[test]
-fn full_approval_reads_both_policy_files() {
+fn captured_permissions_preapprove_and_an_exclusion_requires_approval() {
     let dir = tempfile::TempDir::new().unwrap();
-    let whitelist = dir.path().join(".darkmatter-shell-whitelist");
-    let blacklist = dir.path().join(".darkmatter-shell-blacklist");
-    std::fs::write(&whitelist, "exact echo hello\n").unwrap();
-    std::fs::write(&blacklist, "prefix curl\n").unwrap();
-    let options = ShellApprovalOptions { policy_root: Some(dir.path().to_path_buf()), ..Default::default() };
-    let reads = policy_reads::observe_this_thread(&[]);
+    let options = ShellApprovalOptions {
+        permissions: user_permissions(dir.path(), &["exact echo hello", "prefix curl", "!exact curl secrets"]),
+        ..Default::default()
+    };
 
-    let approved = validate_and_approve_command("echo hello", &options);
-    let blacklisted = validate_and_approve_command("curl x", &options);
+    let allowed = validate_and_approve_command("echo hello", &options);
+    let prefixed = validate_and_approve_command("curl x", &options);
+    let excluded = validate_and_approve_command("curl secrets", &options);
 
-    assert!(approved.is_ok(), "{approved:?}");
-    assert!(matches!(blacklisted, Err(HarnessError::ShellCommandBlacklisted { .. })), "{blacklisted:?}");
-    assert_eq!(reads.reads(), [whitelist.as_path(), &blacklist, &whitelist, &blacklist]);
+    assert!(allowed.is_ok(), "{allowed:?}");
+    assert!(prefixed.is_ok(), "{prefixed:?}");
+    // An exclusion removes pre-approval; it never blacklists.
+    assert!(matches!(excluded, Err(HarnessError::ShellCommandDenied { .. })), "{excluded:?}");
 }
 
 #[test]
-fn full_approval_denies_an_underivable_policy_root() {
+fn an_excluded_command_is_asked_about_naming_its_exclusion() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let handler = Arc::new(CapturingHandler::new());
     let options = ShellApprovalOptions {
-        policy_root: Some(PathBuf::from("relative-policy-root")),
-        approval_handler: Some(Arc::new(CountingApprovalHandler { approvals: AtomicUsize::new(0) })),
+        permissions: user_permissions(dir.path(), &["prefix curl", "!exact curl secrets"]),
+        approval_handler: Some(handler.clone()),
         ..Default::default()
     };
-    let reads = policy_reads::observe_this_thread(&[]);
+
+    let approved = validate_and_approve_command("curl secrets", &options);
+
+    assert!(approved.is_ok(), "a run's approval overrides an exclusion: {approved:?}");
+    let request = handler.captured_request();
+    assert_eq!(request.exclusion.map(|exclusion| exclusion.entry).as_deref(), Some("!exact curl secrets"));
+    assert_eq!(request.save_target, Some(dir.path().join(".darkmatter.yaml")));
+}
+
+#[test]
+fn invalid_permissions_fail_every_command_without_asking() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join(".darkmatter.yaml"), "permissions:\n  shell-commands:\n    - frobnicate ls\n").unwrap();
+    let load = darkmatter::config::load::ConfigSnapshot::load(
+        &biscuit_file::FileResolutionContext::from_snapshot(dir.path(), Some(dir.path().to_path_buf()), Default::default()),
+        None,
+        darkmatter::config::load::ConfigLoadMode::Passive,
+    )
+    .map(Arc::new);
+    let handler = Arc::new(CountingApprovalHandler { approvals: AtomicUsize::new(0) });
+    let options = ShellApprovalOptions {
+        permissions: CapturedPermissions::of_load(load),
+        approval_handler: Some(handler.clone()),
+        ..Default::default()
+    };
 
     let result = validate_and_approve_command("echo hello", &options);
+    let builtin = validate_and_approve_command("rm -rf /", &options);
 
-    assert!(matches!(result, Err(HarnessError::ShellCommandDenied { .. })), "{result:?}");
-    assert!(reads.reads().is_empty());
+    assert!(matches!(result, Err(HarnessError::ShellPermissionsInvalid { .. })), "{result:?}");
+    assert!(matches!(builtin, Err(HarnessError::ShellCommandBlacklisted { .. })), "{builtin:?}");
+    assert_eq!(handler.approvals(), 0);
+}
+
+#[test]
+fn always_allow_saves_the_rule_to_the_user_permissions() {
+    struct Persist;
+    impl ShellApprovalHandler for Persist {
+        fn approve(&self, _request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            Ok(ShellApprovalDecision::AllowCommandPersist)
+        }
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    let options = ShellApprovalOptions {
+        permissions: user_permissions(dir.path(), &[]),
+        approval_handler: Some(Arc::new(Persist)),
+        ..Default::default()
+    };
+
+    let first = validate_and_approve_command("git status", &options);
+    let frozen = ShellApprovalOptions { approval_handler: None, ..options.clone() };
+    let later = validate_and_approve_command("git log", &frozen);
+
+    assert!(first.is_ok(), "{first:?}");
+    assert_eq!(saved_rules(dir.path()), ["prefix git"]);
+    // The saved rule approves the rest of the run without reloading.
+    assert!(later.is_ok(), "{later:?}");
+}
+
+#[test]
+fn an_unsaved_approval_still_approves_the_run() {
+    struct Persist;
+    impl ShellApprovalHandler for Persist {
+        fn approve(&self, _request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            Ok(ShellApprovalDecision::AllowExactPersist)
+        }
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    let options = ShellApprovalOptions {
+        permissions: user_permissions(dir.path(), &["!exact curl secrets"]),
+        approval_handler: Some(Arc::new(Persist)),
+        ..Default::default()
+    };
+
+    let approved = validate_and_approve_command("curl secrets", &options);
+
+    assert!(approved.is_ok(), "{approved:?}");
+    // The exclusion still matches, so nothing is saved and it is not removed.
+    assert_eq!(saved_rules(dir.path()), ["!exact curl secrets"]);
 }
 
 #[test]
@@ -153,7 +229,7 @@ fn approval_cache_avoids_prompting_for_same_command_twice() {
         approvals: AtomicUsize::new(0),
     });
     let options = ShellApprovalOptions {
-        policy_root: Some(dir.path().to_path_buf()),
+        permissions: user_permissions(dir.path(), &[]),
         approval_handler: Some(handler.clone()),
         ..Default::default()
     };
@@ -238,7 +314,7 @@ fn provenance_is_passed_through_to_approval_request() {
     let dir = tempfile::TempDir::new().unwrap();
     let handler = Arc::new(CapturingHandler::new());
     let options = ShellApprovalOptions {
-        policy_root: Some(dir.path().to_path_buf()),
+        permissions: user_permissions(dir.path(), &[]),
         approval_handler: Some(handler.clone()),
         ..Default::default()
     };
@@ -273,7 +349,7 @@ fn frozen_options_deny_new_commands_after_cache_populated() {
         approvals: AtomicUsize::new(0),
     });
     let mut options = ShellApprovalOptions {
-        policy_root: Some(dir.path().to_path_buf()),
+        permissions: user_permissions(dir.path(), &[]),
         approval_handler: Some(handler.clone()),
         ..Default::default()
     };

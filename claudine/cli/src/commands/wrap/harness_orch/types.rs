@@ -128,6 +128,17 @@ impl HarnessPromptState {
         )
     }
 
+    /// The `permissions` captured for the active source: the invocation's
+    /// configuration projected onto the source's repository, else what its
+    /// epoch context captured.
+    pub(crate) fn shell_permissions(&self) -> claudine::harness::CapturedPermissions {
+        claudine::harness::CapturedPermissions::resolve(
+            self.invocation_context.as_ref(),
+            self.epoch_context.as_ref(),
+            self.file_resolution_context(),
+        )
+    }
+
     pub(crate) fn repository_root_or<'a>(
         &'a self,
         compatibility_fallback: Option<&'a std::path::Path>,

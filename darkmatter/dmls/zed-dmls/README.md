@@ -1,9 +1,22 @@
 # zed-dmls
 
 Zed extension that launches the native [Darkmatter Language Server](https://github.com/)
-(`dmls`) for Markdown files. The extension contains **no language logic** — it is
+(`dmls`) for Markdown and YAML files. The extension contains **no language logic** — it is
 a thin WASM shim (`zed_extension_api`) that resolves and starts the native
 binary. All intelligence lives in `dmls`.
+
+Zed also attaches its built-in `yaml-language-server` to YAML files. That server
+reads a root `$schema:` key as a JSON Schema URL relative to the document, so a
+bare Darkmatter schema name such as `$schema: implementation.yaml` shows a
+false "Unable to load schema" error. Turn it off for YAML:
+
+```json
+{
+  "languages": {
+    "YAML": { "language_servers": ["dmls", "!yaml-language-server", "..."] }
+  }
+}
+```
 
 > **This directory is a scaffold.** It lives inside the rusty-biscuit monorepo
 > for versioning convenience but is **excluded from the Cargo workspace**

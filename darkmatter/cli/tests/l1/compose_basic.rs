@@ -127,7 +127,7 @@ fn test_compose_strips_frontmatter_when_values_contain_shell_substitution() {
     );
 
     // Approve shell commands so the pipeline runs to completion.
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix dirname\n");
+    fixture.shell_permissions(&["prefix dirname"]);
 
     // Real `dirname` shell expansion is part of this regression's observable result.
     fixture
@@ -159,7 +159,7 @@ fn test_compose_frontmatter_flag_emits_single_block_with_nested_quotes() {
         "---\nreview: \"\"\ndir: \"$(dirname \"{{review}}\")\"\n---\nBody\n",
     );
 
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix dirname\n");
+    fixture.shell_permissions(&["prefix dirname"]);
 
     // Real `dirname` shell expansion is needed before the frontmatter is emitted.
     let output = fixture
@@ -205,7 +205,7 @@ fn test_compose_runs_frontmatter_shell_with_nested_quotes() {
         "---\npath: \"docs/foo.md\"\ndir: \"$(dirname \"{{path}}\")\"\n---\nok\n",
     );
 
-    fixture.write_file("cwd/.darkmatter-shell-whitelist", "prefix dirname\n");
+    fixture.shell_permissions(&["prefix dirname"]);
 
     // Real `dirname` shell expansion is the behavior observed in frontmatter.
     fixture

@@ -77,8 +77,7 @@ fn execute_replaces_frontmatter_value_with_output() {
     let mut fm = fm_from_json(json!({
         "greeting": "$(echo hello world)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -96,8 +95,7 @@ fn execute_trims_output_whitespace() {
     let mut fm = fm_from_json(json!({
         "val": "$(echo '  padded  ')"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -117,8 +115,7 @@ fn execute_skips_non_shell_values() {
         "count": 42,
         "cmd": "$(echo result)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -157,8 +154,7 @@ fn execute_aborts_on_padded_malformed_whole_value() {
     let mut fm = fm_from_json(json!({
         "leaky": "  $(echo ok"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -185,8 +181,7 @@ fn execute_expands_padded_whole_value() {
     let mut fm = fm_from_json(json!({
         "val": "  $(echo ok)  "
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -206,8 +201,7 @@ fn execute_expands_padded_whole_value_with_suffix() {
     let mut fm = fm_from_json(json!({
         "val": "  $(echo ok)::no-cache  "
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -227,8 +221,7 @@ fn execute_leaves_mixed_literal_unexpanded() {
     let mut fm = fm_from_json(json!({
         "val": "literal $(echo ok)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -253,8 +246,7 @@ fn execute_frontmatter_uses_stdout_only() {
             python.display()
         )
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -272,10 +264,9 @@ fn execute_timeout_fallback_emits_warning() {
     let mut fm = fm_from_json(json!({
         "val": "$(sleep 1)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         timeout: Duration::from_millis(100),
         timeout_behavior: super::super::shell_expansion::types::ShellTimeoutBehavior::EmptyString,
-        policy_root: Some(temp_dir.path().to_path_buf()),
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -299,10 +290,9 @@ fn execute_pipeline_timeout_fallback_emits_warning() {
     let mut fm = fm_from_json(json!({
         "val": "$(sleep 10 && echo after)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         timeout: Duration::from_secs(1),
         timeout_behavior: super::super::shell_expansion::types::ShellTimeoutBehavior::EmptyString,
-        policy_root: Some(temp_dir.path().to_path_buf()),
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -342,9 +332,9 @@ print("ready", end="")
         "one": barrier_cmd("one.ready", "two.ready"),
         "two": barrier_cmd("two.ready", "one.ready")
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         timeout: Duration::from_secs(15),
-        policy_root: Some(temp_dir.path().to_path_buf()),
+        working_directory: Some(temp_dir.path().to_path_buf()),
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -373,8 +363,7 @@ fn ternary_truthy_condition_runs_then_branch() {
         "flag": true,
         "out": "$(flag ? echo yes : echo no)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -393,8 +382,7 @@ fn ternary_falsy_condition_runs_else_branch() {
         "flag": false,
         "out": "$(flag ? echo yes : echo no)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -409,8 +397,8 @@ fn ternary_falsy_condition_runs_else_branch() {
 #[test]
 fn ternary_empty_branch_short_circuits_to_empty_string() {
     // Phase 4: the unselected then-branch must still be allowlisted, so
-    // pre-approve `echo yes` and pin policy_root to an isolated dir to
-    // avoid picking up the repo whitelist. Selecting the empty branch then
+    // pre-approve `echo yes` and pin the configuration to an isolated home
+    // so no ambient rule applies. Selecting the empty branch then
     // short-circuits to "" without executing any shell command.
     let temp_dir = TempDir::new().unwrap();
     let mut approved = std::collections::HashSet::new();
@@ -422,10 +410,7 @@ fn ternary_empty_branch_short_circuits_to_empty_string() {
     }));
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let report =
@@ -447,10 +432,7 @@ fn ternary_then_branch_must_be_allowlisted_even_when_else_selected() {
         "flag": false,
         "out": "$(flag ? echo unapproved : '')"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
-        ..Default::default()
-    });
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None) {
@@ -474,10 +456,7 @@ fn ternary_else_branch_must_be_allowlisted_even_when_then_selected() {
         "flag": true,
         "out": "$(flag ? '' : echo unapproved)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
-        ..Default::default()
-    });
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None) {
@@ -507,10 +486,7 @@ fn ternary_partial_preapproval_fails_with_unselected_branch_command() {
     }));
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None) {
@@ -539,10 +515,7 @@ fn ternary_both_branches_allowlisted_succeeds() {
     }));
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let report =
@@ -558,8 +531,7 @@ fn ternary_with_brace_wrapped_condition_resolves_via_seed_state() {
         "has_value": true,
         "out": "$({{has_value}} ? echo present : '')"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -583,8 +555,7 @@ fn ternary_with_stringified_false_condition_selects_else_branch() {
         "has_spec": "false",
         "spec_file": "$({{has_spec}} ? echo present : '')"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -605,8 +576,7 @@ fn ternary_with_stringified_true_condition_selects_then_branch() {
         "has_spec": "true",
         "spec_file": "$({{has_spec}} ? echo present : '')"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -646,10 +616,7 @@ fn ternary_condition_interpolation_cannot_bleed_into_then_branch_executable() {
 
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let report =
@@ -703,10 +670,7 @@ fn ternary_branch_arg_interpolation_cannot_inject_new_action() {
 
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let err =
@@ -748,10 +712,7 @@ fn ternary_branch_quoted_interpolation_breakout_is_rejected() {
 
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let err =
@@ -787,8 +748,7 @@ fn non_ternary_arg_interpolation_cannot_inject_new_action() {
     let mut snapshot = std::collections::HashMap::new();
     snapshot.insert("out".to_string(), "$(basename '{{spec}}')".to_string());
 
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -817,8 +777,7 @@ fn ternary_condition_supports_infix_and() {
         "b": true,
         "out": "$(a && b ? echo yes : echo no)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -838,8 +797,7 @@ fn ternary_condition_infix_and_selects_else_when_one_falsy() {
         "b": false,
         "out": "$(a && b ? echo yes : echo no)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -859,8 +817,7 @@ fn ternary_condition_supports_infix_or() {
         "b": true,
         "out": "$(a || b ? echo yes : echo no)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -880,8 +837,7 @@ fn ternary_condition_supports_negation() {
         "flag": false,
         "out": "$(!flag ? echo yes : echo no)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -903,8 +859,7 @@ fn ternary_condition_supports_comparison() {
         "count": 3,
         "out": "$(count == 3 ? echo equal : echo unequal)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -926,8 +881,7 @@ fn ternary_condition_supports_nested_expression_ternary() {
         "flag": true,
         "out": "$((flag ? true : false) ? echo yes : echo no)"
     }));
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
@@ -954,10 +908,7 @@ fn ternary_branch_url_with_colon_argument_executes() {
     }));
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let report =
@@ -983,10 +934,7 @@ fn ternary_value_branch_resolves_literal_fallback() {
     }));
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let report =
@@ -1010,10 +958,7 @@ fn ternary_value_branch_absent_property_resolves_to_empty() {
     }));
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let report =
@@ -1037,10 +982,7 @@ fn ternary_fm_namespace_branch_resolves_property_over_executable() {
     }));
     let options = ComposeOptions::new()
         .with_pre_approved_commands(approved)
-        .with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
+        .with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions::default());
     let mut runtime = make_runtime();
 
     let report =
@@ -1104,8 +1046,7 @@ fn argument_interpolation_with_a_quoted_closer_keeps_the_command_shape() {
     let mut snapshot = std::collections::HashMap::new();
     snapshot.insert("out".to_string(), "$(echo {{ upper(\"}}\") }} && echo done)".to_string());
 
-    let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        policy_root: Some(temp_dir.path().to_path_buf()),
+    let options = ComposeOptions::new().with_config_snapshot(crate::markdown::compose::shell_expansion::test_shell_config(temp_dir.path(), &[])).with_shell(ShellExpansionOptions {
         approval_handler: Some(Arc::new(MockApproval)),
         ..Default::default()
     });
