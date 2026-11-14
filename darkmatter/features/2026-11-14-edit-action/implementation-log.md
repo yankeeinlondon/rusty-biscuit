@@ -37,6 +37,7 @@ packages:
   - claudine-cli
   - darkmatter
   - claudine
+  - darkmatter-lsp
 decisions_for_review:
   - |-
     `Editor::identify` treats its whole argument as one program path and compares only its final component; it does not split on whitespace. The plan (R7) said it "takes the first whitespace-separated token's path", but also asked for a test with "a path with spaces in the directory", which cannot be recognized if the input is split on spaces. Splitting the `$EDITOR` command line is left to the caller (the Phase 2 resolver, which already takes the first whitespace token). Alternative: split inside `identify`, which makes `identify("code --wait")` work but makes `/opt/My Editors/bin/subl` unrecognizable. Redoing it means changing one line in `identify` and two test assertions.
@@ -60,12 +61,37 @@ decisions_for_review:
     Two schema-agreement tests compare the parser's verbs with the shipped schemas, which do not type `edit` until the schema work later in the plan: `darkmatter/lib/tests/l1/lifecycle_schema_parity.rs::the_open_arm_rejects_every_md_verb_and_admits_every_unprovided_verb` and `claudine/lib/tests/l1/claudine_schemas.rs::hand_verbs_equal_the_parser_inventory`. Each now exempts `LIFECYCLE_ONLY_VERBS` and also asserts the verb is still untyped, so the test fails (with a message saying to drop the exemption) as soon as a schema types `edit`; the exemption cannot outlive the gap. The plan expected these checks to be updated now without saying how. Alternative: write the `edit` schema types now and regenerate the shipped artifacts, moving part of the schema phase forward. Until the schemas land, `md schema validate` and DMLS accept any `edit` value through the md open arm and reject it in Claudine's closed action types.
   - |-
     The schema projection's collision check now treats a lifecycle-only verb like a control verb: a catalog function or effect named `edit` fails generation ("a lifecycle-only verb"). The plan only asked for a test that no descriptor is named `edit`; this makes the generator refuse it too. Reversing means removing one branch in `schema_projection.rs::hand_owner` and one row of `lifecycle_schema_generation.rs`.
+  - |-
+    On a failed `edit`, `md compose` prints "`<property>` could not edit the file: <reason>", adding " (<target>)" only when the reason does not already name the target. The plan (R19) said "`<property>` could not edit <target>: <reason>". Every lifecycle failure message is clamped to one 240-character line, and most reasons name the path again (some also name the editor by full path), so with the plan's order the reason itself was routinely cut off, in the terminal line and in the JSON diagnostic. Alternatives: keep the plan's order and accept truncated reasons; or raise or bypass the shared clamp for `edit` (affects text-to-speech and webhook consumers of the same messages). Reversing means changing one arm of `failure_message` in `darkmatter/lib/src/lifecycle/md_host.rs` and the expected prefix in `darkmatter/cli/tests/l1/compose_edit_action.rs`.
+  - |-
+    Under `md compose`, the "prompt stored outside the launch directory" acceptance case is tested with the prompt in a directory above the launch directory, and a prompt in a sibling library directory is pinned as refused. `md compose` confines writes to the prompt's own directory (Claudine confines them to the launch workspace), so a sibling prompt editing `{{ ctx.cwd }}/…` fails containment before anything is created. The spec's example targets Claudine's prompt libraries; it did not say which root `md` should use. Alternative: change `md compose`'s mutation root to the launch directory, which also changes where `ensure_file` and the other file side effects may write for every `md` document. Reversing means changing the root in `ComposeHost::new` (`darkmatter/cli/src/commands/compose/lifecycle.rs`) and flipping the sibling assertion in `a_prompt_outside_the_launch_directory_edits_the_absolute_target_inside_its_root`.
+  - |-
+    Until Claudine's host wiring lands (the next phase), Claudine reports an `edit` failure as a plain `edit` action failure with the same "could not edit" text, not as a typed `CompositionError`. Claudine's failure match is exhaustive, so the new failure kind needed an arm to compile, and its host supplies no editor yet, so the only failure it can see is "this host cannot run `edit`". Alternative: add `CompositionError::LifecycleEditFailed` now, which is the next phase's listed task. Nothing to redo: the next phase replaces the arm in `claudine/lib/src/composition/lifecycle/executor.rs::classify_run_failure`.
+  - |-
+    `EditError` gained a `NoLocalTarget { reference }` variant for a reference that resolves to no local path a file could be created at (the side-effect resolver's existing "has no local mutation target" case). The plan's list had no variant for it, and flattening it into a string would have dropped the typed cause the spec asks to keep. Alternative: reuse `Reference(FileReferenceError)` with a synthesized error, which misstates the cause. Reversing touches `editor/service.rs` and `executor.rs::resolve_edit_target`.
+  - |-
+    A cancellation noticed before the editor starts is reported as "the run was cancelled, so `edit` did not open an editor", distinct from "the run was cancelled while an `edit` was open" (the plan's wording, used when the editor was open). Both are the same unsuppressible failure kind. Alternative: one message for both, which hides whether the editor ever started. Reversing is a one-line change in `executor.rs::dispatch_edit` and its unit test.
+  - |-
+    The race acceptance case ("a test hook creates the target between the existence check and the edit") is driven by an authored `ensure_file` placed between the `when: file_exists(fqn)` check and the `edit` in `initialize`, rather than a test-only seam in the executor or service. It reproduces the window exactly as a concurrent writer would, through the normal invocation path. Alternative: a test-only hook in the service, which tests a seam instead of real behavior. Nothing to redo unless a reviewer wants the seam.
+  - |-
+    `darkmatter/justfile`'s `test-l2` now builds the CLI with `terminal-tests,test-fixtures`, matching the features CI already enables for the L2 cell, so the L2 `edit` test can launch the fake editor binary. Alternative: gate the L2 `edit` tests behind `test-fixtures` (they would silently not run locally), or make the `level2` test target require `test-fixtures` (changes every L2 test's build contract). Reversing is one line in the justfile.
+  - |-
+    The seven Claudine process tests that need `edit` outside a skipping `initialize` (start/success/finalize ordering, container stacks, a prompt task, both parallel-member cases, the sibling-failure cancellation) are written now but wrapped in `pending_until_the_schema_knows_edit`: each passes only while its body fails on Claudine's schema refusal of `edit`, and fails, asking for the wrapper's removal, once the schemas accept it. The plan put these tests in this phase and the Claudine schema entries in the next, but Claudine validates every document against those schemas before `start` and before any sequence task runs, so the tests cannot pass until then. Each body was proven against a temporary schema entry that was then removed. Alternative: move Claudine's `edit` schema entries (and the shipped-artifact regeneration they require) forward into this phase. Redoing: delete the wrapper calls in `claudine/cli/tests/l1/lifecycle_edit_action.rs` when the schemas land (the tests force this).
+  - |-
+    No timeout cancels an open editor in Claudine, so the spec's example (`timeout: 30m` on a document whose `initialize` edits) does not stop the edit. A document's `timeout:` and `--timeout` bound only the provider session and a task's `timeout:` only its shell commands; no deadline covers lifecycle stacks. I did not add one: making the run timeout cover lifecycle events changes what every Claudine timeout means (when the clock starts, whether `shell` actions and `initialize` count), which is a design choice beyond this feature. Cancellation is proven with an interrupt and a fail-fast sibling. Alternatives: start a watchdog at run start that sets a cancellation cause when the document `timeout:` expires during an event (covers `edit` and every other action), or a per-action deadline for `edit` only. Redoing: a new deadline-to-cancellation bridge in Claudine's run guard plus the plan's timeout test.
+  - |-
+    A sequence whose root `initialize` fails exits with status 1 and prints nothing, for every action (`edit`, `ensure_file`, `prep`), so an `edit` failure there is silent. This predates the feature: `claudine/cli/src/commands/wrap/sequence/mod.rs`'s `Finished { failed }` arm returns the code without rendering the recorded error. I left it unfixed because how a root-container failure should render (status block, warning line, or a returned typed error) is a choice the sequence owners should make, and it affects every action. Alternative: render `root.runner.primary_error()` there as a warning line. Redoing: one arm plus a CLI test.
+  - |-
+    `composition.lifecycle_edit_failed` is cataloged with origin `environment` and disposition `correctable`: most causes are the host (no editor, no terminal or display, an editor that failed or cannot wait), though a refused target (outside the workspace, a URL, `create_new` on an existing file) is the author's. The typed cause is stored as `Box<EditError>`, not the plan's `Arc`, because Claudine's errors are not cloned. Alternative: origin `author`, or split the code by cause. Redoing: one registry field (and the `err.origin` a lifecycle handler sees).
+  - |-
+    Two plan items were proved with the closest current grammar: task `setup:`/`teardown:` and `execution: serial` groups were removed from Claudine's grammar and every group is concurrent, so the serial-stack ordering test uses an inline `sequence:` container's `start`/`finalize` stacks around its children. And "structured output keeps one valid result" has no Claudine counterpart: `--output json` sets the provider's output format and Claudine prints no envelope for an `initialize` failure, so the test asserts stdout stays empty and the refusal reaches stderr. Nothing to redo unless a reviewer wants a Claudine-level JSON result for lifecycle failures.
 message_to_agent: |-
-  Phase 3 is in place: `LifecycleActionKind::Edit(EditAction { file: Expr, create_new: bool, gui: Option<bool> })` parses from the short, one-element-list, and long forms (`darkmatter/lib/src/lifecycle/action_shape.rs`, `parse.rs`), is an `Expression` action, and `LIFECYCLE_ONLY_VERBS = ["edit"]` lives in `lifecycle/signatures.rs`. Things later phases need:
-  - Phase 4: `execute_action_inner` (`lifecycle/executor.rs`) has a placeholder `Edit` arm that refuses with an evaluation failure ("this host cannot run `edit`"); replace it with `dispatch_edit` (R14/R17/R18/R19). `dispatch_task_side_effect_inner` already rejects `Edit` through its wildcard. A literal `file` is guaranteed a non-blank `Expr::StringLiteral` (bytes kept, never trimmed); `{{ fqn }}` arrives as an expression (`Expr::Variable`), mixed text as a `StringLiteral` template, so the runtime string/blank check (R14) is still needed for interpolated values.
-  - Phase 5: Claudine's `describe_action` (`claudine/lib/src/composition/sequence/task/mod.rs`) already has the R22 `Edit` arm and message; only the refusal test is left.
-  - Phase 6: two tests exempt `LIFECYCLE_ONLY_VERBS` until the schemas type `edit`, and each fails on purpose once a schema does: `darkmatter/lib/tests/l1/lifecycle_schema_parity.rs::the_open_arm_rejects_every_md_verb_and_admits_every_unprovided_verb` (remove the `provided` filter and the `untyped` row once `md-unknown-action` excludes `edit`) and `claudine/lib/tests/l1/claudine_schemas.rs::hand_verbs_equal_the_parser_inventory` (remove the `untyped`/`missing` split). `template_operands` already reads `edit` (`file` only; `create_new`/`gui` excluded), and the schema projection refuses a catalog verb named `edit`.
-  - Error locations: flag errors are `LifecycleInvalidArgs` at `…edit.<flag>`; long-form `file` type/blank errors at `…edit.file`; short-form and arity errors at `…edit`. Phase 6's schema/DMLS wiring cases should agree with those paths.
+  Phase 5 wired Claudine: `claudine/lib/src/composition/lifecycle/editor.rs` (service + `set_structured_output`), `CompositionError::LifecycleEditFailed` / `composition.lifecycle_edit_failed`, parallel members deny terminal editors. Things Phase 6 must do because of it:
+  - Claudine's schemas (`claudine/schemas/action.yaml`, `lifecycle.yaml`) still reject `edit`, so seven tests in `claudine/cli/tests/l1/lifecycle_edit_action.rs` are wrapped in `pending_until_the_schema_knows_edit`. Once the schema entries land they FAIL with "the contract now holds ... delete the wrapper": remove each wrapper call (and the helper and `SCHEMA_ORACLE` when none remain), then rerun `cargo nextest run -p claudine-cli --features test-fixtures --test l1 -E 'test(/lifecycle_edit_action::/)'`. The bodies were verified against a temporary schema entry, so a body failure then is a real defect.
+  - Phase 3's exemptions also fail when a schema types `edit` (`lifecycle_schema_parity.rs`, `claudine_schemas.rs::hand_verbs_equal_the_parser_inventory`): drop them in the same change.
+  - Claudine's `just test-l2` now builds with `test-fixtures` (L2 `edit` tests use `claudine-fake-editor`).
+  - Open for review, not for you to fix: no Claudine timeout cancels an open editor, and a failing sequence-root `initialize` exits 1 silently (see decisions).
+  - Disk: `/Volumes/coding` was full this phase; check `df -h /Volumes/coding` before a full build, and run `bash scripts/sweep.sh` (this worktree only) if it is low.
 source_files_during_phase_2:
   - darkmatter/lib/src/process_tree.rs
   - darkmatter/lib/src/lib.rs
@@ -114,6 +140,54 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+  - .claude/skills/darkmatter/lifecycle.md
+source_files_during_phase_4:
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/compose/lifecycle.rs
+  - darkmatter/cli/tests/l1/main.rs
+  - darkmatter/cli/tests/l1/compose_edit_action.rs
+  - darkmatter/cli/tests/level2/main.rs
+  - darkmatter/cli/tests/level2/level2_edit_action.rs
+  - darkmatter/dmls/tests/l1/no_side_effects.rs
+  - darkmatter/justfile
+  - darkmatter/lib/src/editor/service.rs
+  - darkmatter/lib/src/lifecycle/cancellation/tests.rs
+  - darkmatter/lib/src/lifecycle/executor.rs
+  - darkmatter/lib/src/lifecycle/executor/host.rs
+  - darkmatter/lib/src/lifecycle/executor/tests.rs
+  - darkmatter/lib/src/lifecycle/md_host.rs
+  - darkmatter/lib/src/lifecycle/md_host/tests.rs
+  - darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+  - darkmatter/lib/tests/l1/load_data_runtime.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/lifecycle.md
+  - .claude/skills/darkmatter/testing.md
+source_files_during_phase_5:
+  - claudine/lib/src/composition/lifecycle/editor.rs
+  - claudine/lib/src/composition/lifecycle/editor/tests.rs
+  - claudine/lib/src/composition/lifecycle/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/diagnostics/registry.rs
+  - claudine/lib/src/composition/sequence/task/group.rs
+  - claudine/lib/src/composition/sequence/task/tests.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/tests/l1/lifecycle_edit_action.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/l1/error_guards.rs
+  - claudine/cli/tests/level2/level2_edit_action.rs
+  - claudine/cli/tests/level2/main.rs
+  - claudine/justfile
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/claudine/architecture.md
   - .claude/skills/darkmatter/lifecycle.md
 ---
 
@@ -464,3 +538,244 @@ schemas do not type `edit` yet).
   `claudine-cli` compiles (`cargo check --all-targets`).
 - Cross-OS: not run. Phase 3 is pure parsing over in-memory JSON with no path, process,
   or OS-specific code.
+
+## Phase 4
+
+### What was built
+
+- **Host seam** (R18, R19): `LifecycleHost::editor() -> Option<&dyn EditorService>`
+  (default `None`) and `LifecycleRunFailure::EditFailed { source_path, property, target,
+  error: Box<EditError> }` in `lifecycle/executor/host.rs`. `EditError` gained
+  `NoLocalTarget` (see decisions).
+- **Executor** (R14, R17): `execute_action_inner`'s placeholder arm is replaced by
+  `dispatch_edit`. Order: evaluate `file` (`evaluate_operand`); a non-string or blank value
+  is an unsuppressible evaluation failure ("`edit` needs a string path, got number",
+  "`edit` needs a non-blank path"); resolve the target; refuse if a cancellation cause
+  exists (`cancellation::cause_with`, evaluation failure); `host.editor()` or
+  `EditFailed(Unsupported)`; call the service with `cancelled = cause_with(..).is_some()`;
+  `host.side_effect_attempted()` once when `attempted`; a cancelled outcome, or a cause
+  that appeared while the editor was open, is the evaluation failure "the run was
+  cancelled while an `edit` was open"; every other failure is a dispatch failure through
+  `host.failure(EditFailed{..})`, located at the action (`…edit`). `resolve_effect_path`
+  and the new `resolve_edit_target` share one private helper, `mutation_target`, so the
+  two cannot drift; `resolve_edit_target` refuses a URL before resolving anything.
+  `dispatch_task_side_effect_inner` still rejects `Edit` through its wildcard (R22).
+- **`md compose` host**: `MdStackContext::editor` / `MdStackHost::editor`, filled per
+  event by the CLI with `ProcessEditorService::new(EditorHostFacts { output: Structured`
+  under a data output, else `MarkdownDocument`, `stdin_reserved` when the document came
+  from stdin `})`; `LifecycleCompose`/`ComposeHost` carry `stdin_is_input`.
+  `failure_message` renders `EditFailed` (see decisions for the wording).
+- **Claudine compile arm**: `classify_run_failure` maps `EditFailed` to a plain `edit`
+  action failure until Phase 5 adds `CompositionError::LifecycleEditFailed`.
+- **Recipe**: `darkmatter/justfile`'s `test-l2` builds the CLI with
+  `terminal-tests,test-fixtures`, as CI's `[package.metadata.ci.tests] features` already
+  does, so the L2 tier can launch `darkmatter-fake-editor`.
+- **Skills**: `darkmatter/lifecycle.md` (the executor/host contract, md's mutation root,
+  the message clamp) and `darkmatter/testing.md` (how the `md compose` and L2 editor
+  tests are built).
+- **Docs**: none in this phase; the canonical lifecycle docs for `edit` are Phase 7's
+  task. Until then `docs/` does not describe `edit`.
+
+### Findings along the way
+
+- **`md`'s failure line is clamped to 240 characters** (`concise_message`). R19's
+  "`{property}` could not edit {target}: {error}" put two absolute paths ahead of the
+  reason, and most `EditError` texts name the path again, so the reason itself was cut
+  off (in the terminal line and in the JSON diagnostic alike). Fixed by putting the
+  reason first (decisions).
+- **`md compose`'s mutation root is the prompt's own directory**, while Claudine's is the
+  launch workspace. A prompt in a sibling library therefore cannot `edit` a
+  `{{ ctx.cwd }}` path under `md` (containment refuses it before anything is created).
+  The spec's "prompt outside the launch directory" acceptance case is met under `md` with
+  the prompt in an ancestor directory, and the sibling case is pinned as a refusal
+  (decisions).
+- **`error:` in `composed` goes straight to `finalize` under `md`**; only a preparation
+  failure (here a missing `::file`) reaches `failed`. The ordering test uses one run for
+  `composed`/`finalize` and one for `failed`.
+- **`PENDIN` flips on its own.** Comparing `stty -g` before and after `md` differed only
+  in `PENDIN` (`lflag` `0x20000000`), which the kernel sets while typed input is pending;
+  the L2 test compares `stty -a` without the `pendin` token.
+- **The local `just test-l2` never built the fake editor** (it lacked `test-fixtures`,
+  which CI enables), so an L2 test that launches it could only fail locally.
+
+### Requirement-to-test mapping
+
+Boundaries: the executor contract is F1 in-process against a recording fake
+`EditorService` (`darkmatter/lib/src/lifecycle/executor/tests.rs`, L1); the `md compose`
+host crosses the process, filesystem, and stream boundaries, so it is F3: the real `md`
+binary launching the real `darkmatter-fake-editor` (`darkmatter/cli/tests/l1/compose_edit_action.rs`,
+L1, argv recorder + directory checks, never mocked dispatch); the terminal handoff needs a
+real terminal, F3 at L2 (`darkmatter/cli/tests/level2/level2_edit_action.rs`, tmux, no focus).
+Unit-test names below are under `darkmatter lifecycle::executor::tests::`, process tests
+under `darkmatter-cli::l1 compose_edit_action::`, L2 under `darkmatter-cli::level2 level2_edit_action::`.
+
+| Requirement | Test(s) |
+|---|---|
+| R17 `cause_with` sees a cause inside `CleanupScope`, `requested_with` does not | `darkmatter lifecycle::cancellation::tests::inside_cleanup_a_cause_is_still_visible_to_cause_with_but_not_requested_with` |
+| R14 interpolated absolute path, flags passed through, next action runs, attempted → memo forgotten | `edit_opens_the_interpolated_absolute_path_with_its_flags_then_continues` |
+| R14 missing bare relative target under the mutation root; refusal before preparation keeps the memo | `a_missing_bare_relative_target_is_created_under_the_mutation_root` |
+| R18 host without an editor → `EditFailed(Unsupported)` located at `…edit`, no continuation; `no_error` continues | `a_host_without_an_editor_fails_the_action_as_unsupported_and_no_error_continues` |
+| R19 editor failure is a located dispatch failure; `no_error` suppresses; attempted still forgets reads | `an_editor_failure_is_a_located_dispatch_failure_that_no_error_suppresses` |
+| R14 non-string (number, boolean, null, array) and blank (`""`, `"   "`) values: unsuppressible evaluation failure, editor never called | `a_non_string_or_blank_value_is_an_unsuppressible_evaluation_failure` |
+| R14 URL refused without reaching the editor | `a_url_is_refused_without_reaching_the_editor`; process: `editor_failures_name_the_action_property_and_target_and_stop_the_stack` (`url` row) |
+| R17 cancelled while open → evaluation failure, `no_error` does not continue | `an_edit_cancelled_while_open_never_continues_even_with_no_error` |
+| R17 cancellation during a successful exit still stops | `a_cancellation_during_a_successful_editor_exit_still_stops_the_stack` |
+| R17 cleanup events edit on a healthy run; refused after an interrupt or a worker cause | `cleanup_events_edit_on_a_healthy_run_and_refuse_after_a_cancellation` |
+| Compact dictionary: communication before `edit`, failure ends the stack | `a_compact_dictionary_runs_communication_before_edit` |
+| AC1 motivating workflow: absolute computed path, `--wait`, exact bytes (CRLF, tab, trailing spaces), success line, `skip` writes nothing; existing spec → warn branch, no launch | `the_motivating_workflow_creates_and_opens_the_spec_then_skips` |
+| AC1 prompt outside the launch directory; sibling library refused before creation | `a_prompt_outside_the_launch_directory_edits_the_absolute_target_inside_its_root` |
+| AC1 race: `create_new` fails without launch, bytes unchanged; `no_error` continues; without `create_new` the existing file is opened | `a_name_taken_after_the_check_fails_create_new_and_opens_without_it` |
+| AC1 `create_new` target held by a directory or a (dangling) symlink | `a_create_new_name_held_by_a_directory_or_symlink_fails_without_launch` |
+| AC7 ordering in `composed`, `failed`, `finalize`, `then`/`else`, compact dictionary | `edit_runs_in_order_in_composed_failed_and_finalize` (initialize: the motivating test) |
+| AC7 post-edit reads see changed data after a failed edit absorbed by `no_error`, and deleted data | `a_read_after_the_edit_sees_changed_and_deleted_data` |
+| AC5 non-zero exit, deleted target, directory target, outside the root, no editor, URL: located message naming property and target, no continuation; launched only where expected | `editor_failures_name_the_action_property_and_target_and_stop_the_stack` |
+| AC3/AC5 symlink escape refused, no parent created through it | `a_symlink_escaping_the_root_is_refused_before_anything_is_created` (Unix) |
+| AC5 noninteractive terminal editor refused before creation; stdin document reserves stdin | `a_terminal_editor_without_an_interactive_terminal_is_refused_before_creation` |
+| AC9 Markdown mode: editor output on stderr, never in the document; GUI stdin null | `a_gui_editors_output_never_reaches_the_composed_document` |
+| AC9 structured output: terminal editor refused into one envelope, empty stderr; `no_error` → success envelope; GUI editor runs silenced | `structured_output_refuses_a_terminal_editor_and_silences_a_gui_editor` |
+| AC6 `md compose --shell`, `md schema validate`, untaken branch: no launch, no creation; bad call in untaken branch still rejected at `…edit.file` | `passive_surfaces_and_untaken_branches_never_launch_or_create` |
+| AC6 library composition | `library_composition_never_runs_an_edit` |
+| AC6 DMLS analysis | `darkmatter-lsp l1 no_side_effects::expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers` (now includes an `edit` with `create_new`; the workspace listing is unchanged) |
+| AC7/AC9 terminal handoff: editor reads a typed line, all three streams are terminals, next action and document follow, terminal settings restored, shell takes input | `level2_edit_action_a_terminal_editor_reads_the_pane_then_the_stack_continues` |
+| AC9/AC10 interrupt while open: editor tree reaped (spawned child dead), run reported cancelled, `no_error` does not resume, created file kept, settings restored | `level2_edit_action_an_interrupt_reaps_the_open_editor_and_returns_the_terminal` |
+
+Launch failure of a resolved program is covered at the launcher by Phase 2
+(`editor_launcher::a_non_zero_exit_and_a_missing_program_are_typed_failures`); through `md`
+the "no editor" row covers a configured program that does not exist. The input-robustness
+matrix does not apply: this phase adds no reader of a file format or configuration (the
+operand's shapes were Phase 3's matrix; R14's runtime string/blank check is covered above).
+
+### Gates
+
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [claudine, darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit, claudine-cli]`,
+  `change_class: package`; gates run.
+- `darkmatter`: `just lint` clean (plus `cargo clippy -p darkmatter-cli --all-targets
+  --features test-fixtures,terminal-tests -- -D warnings` clean); `just test` 16587 passed,
+  10 skipped, "none at or above 5.0s" (host load ≈ 11 on 16 cores); `just slow-tests fresh`
+  exit 0; `just check-tier-coverage darkmatter`: nothing stranded. The race test was moved
+  from `composed` to `initialize` after that run's build; re-run alone: 13/13 passed.
+- `just test-l2 edit_action`: 2 passed (tmux, no focus).
+- Dependents: `claudine` (over 200 tests, filtered) `-E 'test(lifecycle) | test(side_effect) |
+  test(classify) | test(claudine_schemas::)'` 1153 passed; `cargo clippy -p claudine
+  --all-targets -- -D warnings` clean. `claudine-cli` `-E 'test(/prompt_source|edit|lifecycle_failure/)'`
+  30 passed.
+- Cross-OS (process spawns, paths, `code.exe` identification, containment):
+  `just cross-check darkmatter-cli --os windows compose_edit_action` 12/12 passed (the
+  symlink-escape test is Unix-only); `--os linux` 13/13 passed. The L2 tests are Unix-only
+  by design.
+
+## Phase 5
+
+### What was built
+
+- **Host seam** (R18, R20): `claudine/lib/src/composition/lifecycle/editor.rs` (new, `pub mod editor`).
+  `StackExecutionContext`'s `LifecycleHost::editor` returns `Some(&EDITOR_SERVICE)`, a zero-sized
+  `ClaudineEditorService` that builds a `ProcessEditorService` at each edit (`service()` →
+  `service_with(EnvironmentProbe::process())`), so the probe sees the streams as they are when the
+  editor would open. `EditorHostFacts { output: Structured` when the process-wide
+  `set_structured_output(true)` flag is set, else `Terminal`; `stdin_reserved: false }`.
+- **Output mode** (R20): set in `claudine/cli/src/commands/wrap/mod.rs::run_provider_wrapper_inner`
+  (first thing, from `--output`; an unparsable value is still reported where the flag is applied) and in
+  `claudine/cli/src/commands/compose/prep.rs::run_composition_inner` (from `SharedComposeArgs::output`,
+  which `compose` and `inline-compose` share).
+- **Failure routing** (R19): `CompositionError::LifecycleEditFailed { source_path, property, target,
+  error: Box<EditError> }` (`#[source]` keeps the typed cause), Display "`<property>` could not edit the
+  file: <reason>[ (<target>)] (<source>)" — reason first, target only when the reason does not name it,
+  matching `md`. Code `composition.lifecycle_edit_failed` (registry entry: Composition / Correctable /
+  Environment, detail `source_path`, `property`, `target`, `reason`), its `code()` and `detail()` arms in
+  `error/render/mod.rs`, and a corpus entry in `claudine/cli/tests/l1/error_guards.rs` (the
+  scan-backed guard requires one per returnable code). `classify_run_failure`'s temporary Phase 4 arm is
+  replaced by the typed mapping. The status block uses the generic catch-all, as `LifecyclePrepFailed` does.
+- **Parallel denial** (R16): each `group.rs` member thread enters
+  `darkmatter::editor::deny_terminal_in_this_thread()` beside its cancellation and prep scopes.
+- **Task refusal** (R22): already present from Phase 3 (`describe_action`); this phase added its tests.
+- **Fake editor** (R21): `claudine-fake-editor` was wired in Phase 1. `claudine/justfile`'s `test-l2`
+  now builds `claudine-cli` with `terminal-tests,test-fixtures` (CI's declared features already include
+  both), so the L2 tier can launch it — the same fix Phase 4 made for Darkmatter.
+- **Skills**: `.claude/skills/claudine/architecture.md` (Execution bullet) and a pointer in `.claude/skills/darkmatter/lifecycle.md` record the host wiring,
+  the corpus requirement, and the timeout gap.
+
+### Findings along the way
+
+- **Claudine's schemas reject `edit` until Phase 6.** `claudine compose` schema-validates the document
+  after `initialize` and before `start`; `claudine sequence` validates prompt tasks and containers before
+  running them. Today an `edit` is reachable only in an `initialize` that ends in `skip` or a failure.
+  Seven L1 tests therefore wrap their bodies in `pending_until_the_schema_knows_edit`, which passes only
+  while the body fails on that schema refusal and fails (asking for its own removal) once the schemas
+  accept `edit`. The test agent verified all seven bodies pass against a temporary schema entry, then
+  restored `claudine/schemas/` byte-for-byte (decisions).
+- **No Claudine timeout bounds a lifecycle stack.** A document's `timeout:`/`--timeout` bound only the
+  provider session and a task's `timeout:` only its shell commands; `claudine compose --timeout 1s` with
+  a held editor stays blocked. The spec's "a sequence `timeout` cancels an open editor" therefore has no
+  Claudine trigger; cancellation is proven with an interrupt and a fail-fast sibling instead (decisions).
+- **A failing sequence-root `initialize` exits 1 silently** (pre-existing; reproduced with
+  `ensure_file: "../outside.md"`, also seen with `prep`). `wrap/sequence/mod.rs`'s `Finished { failed }`
+  arm returns the exit code without rendering `root.runner.primary_error()`. An `edit` failure there is
+  therefore silent too. Not fixed in this phase: it affects every action, predates this feature, and the
+  rendering route for a root-container failure needs a design choice (recorded for review).
+- **A sequence root value such as `fqn: "{{ ctx.cwd }}/x.md"` is not interpolated when the root
+  `initialize` reads it** (it stays literal), whereas `compose` expands it. The sequence test spells
+  `{{ ctx.cwd }}` at the use site. Pre-existing; noted only.
+- **Task `setup:`/`teardown:` and `execution: serial` are removed grammar**, and groups are always
+  concurrent, so the plan's "serial-group stack" and "task setup/teardown" orderings were proved with an
+  inline `sequence:` container's `start`/`finalize`, the serial equivalent.
+- **Disk full.** `/Volumes/coding` hit 0 bytes free mid-phase (the APFS container is shared; another
+  worktree's `target/` holds 790 GB). `scripts/sweep.sh` on this worktree only (repository policy)
+  trimmed its `target/` 127 → 102 GB and freed ~18 GB. Nothing outside this worktree was touched.
+
+### Requirement-to-test mapping
+
+Boundaries: the host seam and failure classification are F1 in-process through Claudine's real
+`StackExecutionContext` (`claudine` lib unit tests, L1); the CLI wiring (output-format flag, group
+threads, sequences, provider skipping) crosses process, filesystem, and stream boundaries, so it is F3:
+the real `claudine` binary launching the real `claudine-fake-editor` and `claudine-fake-goose`
+(`claudine-cli::l1 lifecycle_edit_action::`); the terminal handoff is F3 at L2 in a detached tmux pane
+(`claudine-cli::level2 level2_edit_action::`, Unix only). "(pending)" marks a body wrapped in
+`pending_until_the_schema_knows_edit` until Phase 6.
+
+| Requirement | Test(s) |
+|---|---|
+| R20 output mode from the flag; stdin never reserved; injected probe used | `claudine composition::lifecycle::editor::tests::the_output_mode_follows_the_invocation_and_stdin_is_never_reserved` |
+| No display → GUI editor refused before creation (injected probe) | `…editor::tests::a_host_without_a_display_refuses_a_gui_editor_before_creating_the_file` |
+| R19 typed `LifecycleEditFailed`, code, located property, detail, reason-first message; `no_error` absorbs | `claudine composition::lifecycle::executor::tests::action_dispatch::an_edit_failure_is_a_typed_lifecycle_edit_failure_that_no_error_absorbs` |
+| R18 Claudine supplies a real service (never `Unsupported`); nothing created before an editor resolves | `…action_dispatch::claudine_stacks_supply_an_editor_service` |
+| R22 `side_effect: edit` refused, nothing created (in-process / CLI) | `claudine composition::sequence::task::tests::side_effect_tasks::an_edit_side_effect_is_refused_without_opening_or_creating_anything`; `lifecycle_edit_action::a_side_effect_task_containing_edit_is_refused_without_launching_or_creating` |
+| Catalog completeness | `claudine diagnostics::registry::tests::catalog_covers_the_ratified_count`; `claudine-cli::l1 error_guards::production_sources_pass_every_scan_backed_guard` |
+| AC1 motivating workflow via `compose`: absolute path, `--wait`, exact bytes, success line, `skip` → provider never launched; existing spec → warn, no launch | `lifecycle_edit_action::compose_motivating_workflow_creates_and_opens_the_spec_then_skips_the_provider` |
+| AC1 prompt kept outside the launch directory edits inside the launch workspace | `lifecycle_edit_action::compose_edits_inside_the_launch_workspace_from_a_prompt_kept_elsewhere` |
+| AC1 via `sequence` (root initialize / prompt task) | `lifecycle_edit_action::sequence_root_initialize_runs_the_motivating_workflow_before_any_task`; `…::sequence_prompt_task_runs_the_motivating_workflow_and_launches_no_provider` (pending) |
+| AC7 ordering: initialize incl. `then`; `start`/`success`/`finalize`; container `start`/`finalize` around children | `…::initialize_runs_each_edit_in_order_with_the_actions_around_it`; `…::compose_runs_edit_in_order_in_start_success_and_finalize` (pending); `…::a_sequence_container_runs_edit_in_its_start_and_finalize_around_its_children` (pending) |
+| R16 parallel member: terminal editor refused before creation; GUI editor runs | `…::a_parallel_member_refuses_a_terminal_editor_before_creating_anything` (pending); `…::a_parallel_member_runs_a_gui_editor` (pending) |
+| AC9 structured output refuses a terminal editor, stdout untouched; `no_error` continues; GUI output off stdout | `…::structured_output_refuses_a_terminal_editor_and_no_error_continues`; `…::structured_output_runs_a_gui_editor_and_keeps_its_output_off_stdout` |
+| AC10 interrupt reaps the editor tree, keeps saved bytes and the created file, next action skipped despite `no_error`, `cancelled`/`finalize` run, exit 130; SIGTERM-ignoring editor escalates | `…::an_interrupt_terminates_a_held_editor_tree_and_keeps_what_it_saved`; `…::an_interrupt_escalates_to_kill_for_an_editor_that_ignores_term` (Unix) |
+| AC10 sibling failure in a fail-fast group cancels a held GUI editor | `…::a_failing_sibling_cancels_a_held_editor_in_a_fail_fast_group` (pending, Unix) |
+| Non-blocking configured editor refused (lifecycle `edit`, wrapper `--edit`) | `…::an_edit_refuses_a_configured_editor_that_cannot_wait`; `…::wrapper_edit_refuses_a_configured_editor_that_cannot_wait` |
+| AC7/AC9 terminal handoff: typed line read, three terminal streams, next action follows, `stty` restored | `level2_edit_action_a_terminal_editor_reads_the_pane_then_the_stack_continues` |
+| AC10 interrupt while a terminal editor is open: tree reaped, `no_error` does not resume, file kept, terminal restored | `level2_edit_action_an_interrupt_reaps_the_open_editor_and_returns_the_terminal` |
+
+Not covered: a sequence `timeout:` cancelling an open edit (no such Claudine timeout exists; see
+findings). The input-robustness matrix does not apply: no file-format or configuration reader changed.
+
+### Gates
+
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit]`,
+  `change_class: package` (Phase 4's changes are still uncommitted in this tree, hence the Darkmatter
+  packages); gates run.
+- `claudine`: `just lint` clean after adding the error-guard corpus entry (its first run failed on
+  `error_guards::production_sources_pass_every_scan_backed_guard`, which requires a corpus entry for the
+  new code). `just test`: 12070 passed, 15 skipped; 2 recorded at or above 5 s on a loaded host
+  (load ≈ 74 on 16 cores), both outside this phase's code and cleared by re-measuring alone:
+  `claudine_schemas::shared_payload_properties_have_identical_types` 5.65 s → 2.23 s alone,
+  `container_schema_recursion::deep_container_deferral_does_not_hide_literal_or_shape_errors_in_either_phase`
+  5.60 s → 2.33 s alone. `just test-l2 edit_action`: 2 passed (tmux, detached, no focus).
+- `darkmatter` (no source change this phase): `just lint` clean; `just test` 16587 passed, 10 skipped;
+  2 recorded at or above 5 s at load ≈ 128, cleared alone:
+  `expression_type_scope::every_guard_side_admits_every_value_the_evaluator_sends_there::scalar_unions`
+  6.80 s → 1.70 s, `glob_implementation_guard::file_references_have_one_glob_implementation` 5.93 s → 1.33 s.
+- Dependents: no package outside the `claudine` area depends on `claudine`/`claudine-cli`; `claudine-gen`
+  ran inside `claudine`'s `just test`.
+- Cross-OS (process spawns, editor identification by file name, paths):
+  `just cross-check claudine-cli --os windows lifecycle_edit_action` 13/13 passed (the four
+  interrupt/PTY tests are Unix-only by design).

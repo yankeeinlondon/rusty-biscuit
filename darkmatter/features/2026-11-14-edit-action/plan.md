@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-13
 total_phases: 7
-phase: 4
+phase: 6
 agent: claude/sonnet
 yolo: 'true'
 source_files_during_phase_1:
@@ -39,6 +39,7 @@ packages:
 - claudine-cli
 - darkmatter
 - claudine
+- darkmatter-lsp
 source_files_during_phase_2:
 - darkmatter/lib/src/process_tree.rs
 - darkmatter/lib/src/lib.rs
@@ -87,6 +88,54 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/lifecycle.md
+source_files_during_phase_4:
+- claudine/lib/src/composition/lifecycle/executor.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/compose_edit_action.rs
+- darkmatter/cli/tests/level2/main.rs
+- darkmatter/cli/tests/level2/level2_edit_action.rs
+- darkmatter/dmls/tests/l1/no_side_effects.rs
+- darkmatter/justfile
+- darkmatter/lib/src/editor/service.rs
+- darkmatter/lib/src/lifecycle/cancellation/tests.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/host.rs
+- darkmatter/lib/src/lifecycle/executor/tests.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+- darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+- darkmatter/lib/tests/l1/load_data_runtime.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/lifecycle.md
+- .claude/skills/darkmatter/testing.md
+source_files_during_phase_5:
+- claudine/lib/src/composition/lifecycle/editor.rs
+- claudine/lib/src/composition/lifecycle/editor/tests.rs
+- claudine/lib/src/composition/lifecycle/mod.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/composition/error/render/mod.rs
+- claudine/lib/src/diagnostics/registry.rs
+- claudine/lib/src/composition/sequence/task/group.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/cli/src/commands/compose/prep.rs
+- claudine/cli/src/commands/wrap/mod.rs
+- claudine/cli/tests/l1/lifecycle_edit_action.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/cli/tests/l1/error_guards.rs
+- claudine/cli/tests/level2/level2_edit_action.rs
+- claudine/cli/tests/level2/main.rs
+- claudine/justfile
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/claudine/architecture.md
 - .claude/skills/darkmatter/lifecycle.md
 ---
 
@@ -870,16 +919,16 @@ Phase 4 depends on Phases 2 and 3.
 
 #### Wave 8 — Executor and host trait (sequential)
 
-- [ ] **Cancellation probe**
+- [x] **Cancellation probe**
     - no new public function is needed (R17 uses `cause_with`); add a test in
       `darkmatter/lib/src/lifecycle/cancellation/tests.rs` pinning that
       `cause_with` is `Some` inside `CleanupScope` while `requested_with` is `false`,
       documenting why `edit` uses the former
-- [ ] **Host trait and failure variant**
+- [x] **Host trait and failure variant**
     - add `LifecycleHost::editor` (R18) and `LifecycleRunFailure::EditFailed` (R19)
       in `executor/host.rs`; update the test `FakeHost` (`executor/tests.rs:94`),
       `MdStackHost`, and Claudine's host to compile (Claudine's arm lands in Phase 5)
-- [ ] **Executor dispatch**
+- [x] **Executor dispatch**
     - in `execute_action_inner` (`executor.rs:~650`) add the `Edit` arm calling
       `dispatch_edit`: evaluate the operand (R14), refuse non-string/blank as an
       evaluation failure, resolve the target (R14), refuse in `Cancelled`/cause
@@ -892,11 +941,11 @@ Phase 4 depends on Phases 2 and 3.
 
 #### Wave 9 — `md compose` wiring and tests (parallel, after Wave 8)
 
-- [ ] **md host wiring**
+- [x] **md host wiring**
     - add `editor` to `MdStackContext`, `MdStackHost::editor`, the
       `failure_message` arm, and the CLI fill at
       `darkmatter/cli/src/commands/compose/lifecycle.rs:579` per R18
-- [ ] **Executor and host L1 tests** (`darkmatter/lib/src/lifecycle/executor/tests.rs`
+- [x] **Executor and host L1 tests** (`darkmatter/lib/src/lifecycle/executor/tests.rs`
       and `darkmatter/cli/tests/l1/compose_edit_action.rs`, process recorder not
       mocked dispatch for the CLI ones)
     - the motivating `initialize` workflow end to end through `md compose` with the
@@ -928,7 +977,7 @@ Phase 4 depends on Phases 2 and 3.
       validate`, and DMLS analysis never launch or create (process recorder and
       directory snapshot); an untaken branch never resolves an editor or touches
       disk while its invalid operands still produce passive diagnostics
-- [ ] **Terminal integration test** (`darkmatter/cli/tests/level2/level2_edit_action.rs`,
+- [x] **Terminal integration test** (`darkmatter/cli/tests/level2/level2_edit_action.rs`,
       `just test-l2 edit_action`, tmux backend, no window focus per the repository
       L2 rules and `biscuit-test-harness` skill)
     - the blocking handoff: the fake editor with `FAKE_EDITOR_READ_LINE` reads a line
@@ -954,22 +1003,22 @@ profile; Claudine owns no parser or implementation.
 
 #### Wave 10 — Host and cancellation wiring (parallel)
 
-- [ ] **Host and error mapping**
+- [x] **Host and error mapping**
     - add `editor.rs` (R20), `StackExecutionContext::editor` returning
       `Some(&service)`, and `CompositionError::LifecycleEditFailed` mirrored from
       `LifecyclePrepFailed` at every site (R19)
     - set `set_structured_output` in the wrapper and `compose` commands (R20)
-- [ ] **Parallel denial and fake editor**
+- [x] **Parallel denial and fake editor**
     - enter `deny_terminal_in_this_thread()` in each `std::thread::scope` member
       closure in `group.rs` (R16)
     - add the `claudine-fake-editor` thin bin and its wiring beside
       `claudine-argv-recorder` (R21)
-- [ ] **Task refusal**
+- [x] **Task refusal**
     - implement R22 in `sequence/task/mod.rs`
 
 #### Wave 11 — Claudine tests (parallel, after Wave 10)
 
-- [ ] **Claudine L1** (`claudine/cli/tests/l1/` with `CliProcessFixture`, no real
+- [x] **Claudine L1** (`claudine/cli/tests/l1/` with `CliProcessFixture`, no real
       provider: a fake provider executable that records launches, as the existing
       L1 tests do)
     - the motivating workflow through `claudine compose` and through a `sequence`
@@ -994,7 +1043,7 @@ profile; Claudine owns no parser or implementation.
       proves only the client is terminated
     - wrapper `--edit` and `md edit` regressions: a non-blocking configured editor is
       refused with the cannot-wait error; everything else unchanged
-- [ ] **Claudine L2** (`claudine/cli/tests/level2/level2_edit_action.rs`, tmux, no
+- [x] **Claudine L2** (`claudine/cli/tests/level2/level2_edit_action.rs`, tmux, no
       focus): a serial stack's terminal editor receives input and returns to the next
       action; terminal state restored after success and cancellation
 
