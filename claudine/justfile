@@ -155,7 +155,7 @@ test-gen *args="":
 test-l2 *args="":
     #!/usr/bin/env bash
     set -euo pipefail
-    just _test_l2 claudine-cli --features terminal-tests {{ args }}
+    just _test_l2 claudine-cli --features terminal-tests,test-fixtures {{ args }}
     # claudine-gen owns the report-rendering L2 tests (declared in its manifest).
     just _test_l2 claudine-gen --features terminal-tests {{ args }}
 

@@ -521,6 +521,7 @@ pub fn run_compose(
             call_warnings: lifecycle_warnings,
             pending_triggers,
             started: cmd_start,
+            stdin_is_input: !is_file_input,
         });
     }
 

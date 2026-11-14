@@ -221,7 +221,8 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
 
 /// Expression validation is passive (spec R7, DMLS Level 1): reporting an
 /// undeclared property and an unknown function — in a frontmatter
-/// `expression`, a lifecycle stack, and the body — runs no lifecycle action,
+/// `expression`, a lifecycle stack, and the body — runs no lifecycle action
+/// (an `edit` neither launches an editor nor creates its target),
 /// no frontmatter `$()` or `::shell`, writes no file, and reads no lazy
 /// `current.*` value (DMLS never opens an evaluation
 /// session; `undeclared_property.rs` scans the source for that).
@@ -245,6 +246,7 @@ fn expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers()
          note: $(touch {frontmatter_shell})\n\
          start:\n  - when: err\n    then:\n      - shell: touch {action_shell}\n      - set_frontmatter:\n          touched: true\n\
          finalize:\n  say: \"{{{{ current.os }}}}\"\n\
+         composed:\n  - edit:\n      file: new/spec.md\n      create_new: true\n\
          ---\n\n\
          {{{{ current.branch }}}} {{{{ undeclared_prop }}}} {{{{ no_such_fn(title) }}}}\n\n\
          ::shell touch {body_shell}\n"
@@ -288,7 +290,7 @@ fn expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers()
         assert!(unknown.iter().any(|message| message.starts_with(&format!("`{name}`"))), "{name}: {diagnostics:#?}");
     }
     // Hover on each lazy read evaluates nothing either.
-    for (line, character) in [(4u32, 8u32), (13, 14), (16, 6)] {
+    for (line, character) in [(4u32, 8u32), (13, 14), (16, 12), (20, 6)] {
         let response = fixture.request(
             "textDocument/hover",
             json!({ "textDocument": { "uri": doc_uri.as_str() }, "position": { "line": line, "character": character } }),

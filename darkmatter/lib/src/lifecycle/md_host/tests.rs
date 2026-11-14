@@ -443,6 +443,7 @@ fn evaluate_event(config: &LifecycleConfig, signal: LifecycleSignal, interrupted
         output: &lines,
         timing: &timing,
         interrupted: &probe,
+        editor: None,
     };
     let event = MdEvent { signal, name: "test", error: None, shells: Err(ShellRefusal::Locked) };
     evaluate(&context, config, &event);

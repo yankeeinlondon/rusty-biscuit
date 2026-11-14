@@ -1476,6 +1476,26 @@ pub enum CompositionError {
         snapshot: Option<Box<DiagnosticSnapshot>>,
     },
 
+    /// A lifecycle `edit` action could not open its file, or its editor
+    /// failed. The reason comes before the target: lifecycle messages are
+    /// clamped to one short line, and most reasons already name the target.
+    #[error(
+        "`{property}` could not edit the file: {} ({source_path})",
+        edit_failure_detail(error, target),
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleEditFailed {
+        /// The file whose stack ran the action.
+        source_path: PathBuf,
+        /// The authored path of the action, e.g. `initialize[0].edit`.
+        property: String,
+        /// The resolved file the action was to open.
+        target: PathBuf,
+        /// The typed cause.
+        #[source]
+        error: Box<darkmatter::editor::EditError>,
+    },
+
     /// A `prep` call would re-enter a document with an active call or handoff
     /// (a self-call, or A calling B calling A), or exceed the hop limit.
     #[error(
@@ -3432,6 +3452,14 @@ impl DroppedOptionalSource {
 }
 
 /// Render a reference-cycle chain as `a.md → b.yaml → a.md`.
+/// An `edit` failure's reason, naming the target only when the reason does
+/// not already.
+fn edit_failure_detail(error: &darkmatter::editor::EditError, target: &Path) -> String {
+    let reason = error.to_string();
+    let target = target.display().to_string();
+    if reason.contains(&target) { reason } else { format!("{reason} ({target})") }
+}
+
 fn render_reference_chain(chain: &[PathBuf]) -> String {
     chain
         .iter()

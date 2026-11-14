@@ -140,6 +140,7 @@ mod editor_support;
 mod editor_resolution;
 mod editor_launcher;
 mod editor_service;
+mod compose_edit_action;
 mod toc;
 mod validate_refs;
 mod compose_lifecycle_approval;

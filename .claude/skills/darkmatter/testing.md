@@ -262,7 +262,16 @@ sleeping child (`FAKE_EDITOR_PIDS`), ignore `SIGTERM`, pause until the test remo
 marker and then exit normally (`FAKE_EDITOR_PAUSE`, for changing the target while the
 editor is open), or hold until killed after creating a ready marker (`FAKE_EDITOR_HOLD`). Wait on the marker, never on a sleep.
 Cargo builds the binary only for its own package's tests, so editor-launching tests
-live in `darkmatter/cli/tests/l1/`.
+live in `darkmatter/cli/tests/l1/`; the L2 tier needs `test-fixtures` too, which
+`just test-l2` and CI both enable for the CLI.
+For `md compose` runs, set the editor environment on the spawned command (not the test
+process), give the command a wide `COLUMNS` so a failure line naming two temp paths is not
+shortened by the terminal, and set `DISPLAY` so Linux admits the fake editor installed as
+`code` (`cli/tests/l1/compose_edit_action.rs`). A terminal-editor handoff needs a real
+terminal: `cli/tests/level2/level2_edit_action.rs` runs `sh -i` in a detached tmux pane,
+waits for the editor's record file before typing, and sends `SIGINT` to `md`'s own PID
+(a typed Ctrl-C reaches the editor, which owns the foreground). Compare `stty -a`
+without `pendin`, a bit the kernel flips while input is pending.
 - To count work, `work_counters` is on `darkmatter-cli`'s dev-dependency, so a CLI unit test
   can read it, and `simplified_schema::resolve::observed::collect` lists the schema files
   read. The baseline schema costs hundreds of expression parses on a first use, so compare

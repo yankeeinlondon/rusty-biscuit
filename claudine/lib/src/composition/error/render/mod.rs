@@ -430,6 +430,7 @@ impl Diagnostic for CompositionError {
                 "composition.invalid_file_reference"
             }
             CompositionError::CompletionBodyUnchanged { .. } => "composition.body_unchanged",
+            CompositionError::LifecycleEditFailed { .. } => "composition.lifecycle_edit_failed",
             // The agent produced the document, so its output postcondition
             // failed, not the author's document.
             CompositionError::InlineAgentFrontmatterRejected { .. } => {
@@ -695,6 +696,14 @@ impl Diagnostic for CompositionError {
             CompositionError::InlineGuardMissing { .. } => {
                 base["argument"] = json!("inline_guard");
                 base["expected"] = json!("the active document's captured inline guard");
+            }
+            // `composition.lifecycle_edit_failed` declares `source_path`,
+            // `property`, `target`, `reason`.
+            CompositionError::LifecycleEditFailed { source_path, property, target, error } => {
+                base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
+                base["property"] = json!(property);
+                base["target"] = json!(biscuit_file::to_portable_string(target));
+                base["reason"] = json!(error.to_string());
             }
             // `composition.body_unchanged` declares `source_path`, `reason`.
             CompositionError::CompletionBodyUnchanged {

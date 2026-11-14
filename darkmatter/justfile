@@ -110,7 +110,7 @@ test-l2 *args="":
     @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
     @echo -e "{{ DIM }}- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness{{ RESET }}"
     @echo
-    @just _test_l2_all "{{ LIBRARY }} --features terminal-tests; {{ CLI }} --features terminal-tests; {{ DMLS }} --features terminal-tests" {{ args }}
+    @just _test_l2_all "{{ LIBRARY }} --features terminal-tests; {{ CLI }} --features terminal-tests,test-fixtures; {{ DMLS }} --features terminal-tests" {{ args }}
 
 # darkmatter Level-3 tests
 test-l3 *args="":

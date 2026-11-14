@@ -89,6 +89,10 @@ impl ShellRunner for RecordingShell {
 struct FakeHost {
     committed: RefCell<Map<String, Value>>,
     failures: RefCell<Vec<String>>,
+    /// `None` is a host that cannot run `edit`, the trait's default.
+    editor: Option<FakeEditor>,
+    side_effects_attempted: std::cell::Cell<usize>,
+    interrupted: bool,
 }
 
 impl LifecycleHost for FakeHost {
@@ -147,7 +151,13 @@ impl LifecycleHost for FakeHost {
         Ok(Default::default())
     }
     fn interrupted(&self) -> bool {
-        false
+        self.interrupted
+    }
+    fn side_effect_attempted(&self) {
+        self.side_effects_attempted.set(self.side_effects_attempted.get() + 1);
+    }
+    fn editor(&self) -> Option<&dyn crate::editor::EditorService> {
+        self.editor.as_ref().map(|editor| editor as &dyn crate::editor::EditorService)
     }
     fn is_known_effect(&self, _: &str) -> bool {
         true
@@ -451,4 +461,307 @@ fn template_operand_compose_failure_is_not_recovered() {
     let template = Expr::StringLiteral(format!("{{{{ {MISSING_DATA} }}}}"));
     let error = action_call("try", json!({}), vec![template, operand("'fallback'")]).unwrap_err();
     assert!(matches!(error, LifecycleExprError::Compose(_)), "{error:?}");
+}
+
+// ── edit ─────────────────────────────────────────────────────────────────
+
+/// What a [`FakeEditor`] saw for one request.
+#[derive(Debug, Clone, PartialEq)]
+struct SeenEdit {
+    target: PathBuf,
+    mutation_root: PathBuf,
+    create_new: bool,
+    gui: Option<bool>,
+    cancelled_at_start: bool,
+}
+
+/// An editor service that records each request and answers with a canned
+/// outcome; `cancel` cancels the worker's token while "open".
+#[derive(Default)]
+struct FakeEditor {
+    seen: Mutex<Vec<SeenEdit>>,
+    attempted: bool,
+    fail: Option<fn(&Path) -> crate::editor::EditError>,
+    cancel: Option<cancellation::CancellationToken>,
+}
+
+impl crate::editor::EditorService for FakeEditor {
+    fn edit(&self, request: &crate::editor::EditRequest<'_>) -> crate::editor::EditOutcome {
+        self.seen.lock().unwrap().push(SeenEdit {
+            target: request.target.to_path_buf(),
+            mutation_root: request.mutation_root.to_path_buf(),
+            create_new: request.create_new,
+            gui: request.gui,
+            cancelled_at_start: (request.cancelled)(),
+        });
+        if let Some(token) = &self.cancel {
+            token.cancel(cancellation::CancellationCause::Interrupt);
+        }
+        crate::editor::EditOutcome {
+            attempted: self.attempted,
+            result: match self.fail {
+                Some(fail) => Err(fail(request.target)),
+                None => Ok(()),
+            },
+        }
+    }
+}
+
+impl Fixture {
+    fn with_editor(editor: FakeEditor) -> Self {
+        let mut fixture = Self::new();
+        fixture.host.editor = Some(editor);
+        fixture
+    }
+
+    /// [`Self::run`] with the document inside the fixture's directory, so
+    /// its references resolve there.
+    fn run_edit(&self, signal: LifecycleSignal, frontmatter: Value, document: Value) -> LifecycleEventOutcome {
+        let config = parse(document);
+        let fm: SharedFrontmatter = frontmatter.as_object().cloned().unwrap_or_default().into();
+        let source = self.root().join("doc.md");
+        let inputs = StackInputs { source_path: &source, ..self.inputs(signal, &fm) };
+        StackExecutor::with_services(inputs, &self.effects, &NoCodes).execute_event(&config)
+    }
+
+    fn root(&self) -> &Path {
+        self._dir.path()
+    }
+
+    fn seen(&self) -> Vec<SeenEdit> {
+        self.host.editor.as_ref().map(|editor| editor.seen.lock().unwrap().clone()).unwrap_or_default()
+    }
+}
+
+fn cancelled_at(target: &Path) -> crate::editor::EditError {
+    crate::editor::EditorError::Cancelled { path: target.to_path_buf() }.into()
+}
+
+fn non_zero_exit(target: &Path) -> crate::editor::EditError {
+    crate::editor::EditorError::NonZeroExit { code: 3, editor: "fake".into(), path: target.to_path_buf() }.into()
+}
+
+#[test]
+fn edit_opens_the_interpolated_absolute_path_with_its_flags_then_continues() {
+    let fixture = Fixture::with_editor(FakeEditor { attempted: true, ..Default::default() });
+    let target = fixture.root().join("features/new/spec.md");
+
+    let outcome = fixture.run_edit(
+        LifecycleSignal::Initialize,
+        json!({ "fqn": target.to_string_lossy() }),
+        json!({ "initialize": [
+            { "edit": { "file": "{{ fqn }}", "create_new": true, "gui": false } },
+            { "info": "ready at {{ fqn }}" },
+        ] }),
+    );
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(
+        fixture.seen(),
+        [SeenEdit {
+            target: target.clone(),
+            mutation_root: fixture.root().to_path_buf(),
+            create_new: true,
+            gui: Some(false),
+            cancelled_at_start: false,
+        }]
+    );
+    assert_eq!(fixture.effects.lines(), [format!("info ready at {}", target.display())]);
+    assert_eq!(fixture.host.side_effects_attempted.get(), 1, "an attempted edit forgets reused reads");
+}
+
+#[test]
+fn a_missing_bare_relative_target_is_created_under_the_mutation_root() {
+    let fixture = Fixture::with_editor(FakeEditor::default());
+
+    let outcome = fixture.run_edit(LifecycleSignal::Success, json!({}), json!({ "success": [{ "edit": "notes/today.md" }] }));
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    let seen = fixture.seen();
+    assert_eq!(seen[0].target, fixture.root().join("notes/today.md"));
+    assert_eq!((seen[0].create_new, seen[0].gui), (false, None));
+    assert_eq!(fixture.host.side_effects_attempted.get(), 0, "a refusal before preparation reuses reads");
+}
+
+#[test]
+fn a_host_without_an_editor_fails_the_action_as_unsupported_and_no_error_continues() {
+    let fixture = Fixture::new();
+
+    let outcome = fixture.run_edit(
+        LifecycleSignal::Success,
+        json!({}),
+        json!({ "success": [{ "edit": "a.md" }, { "info": "after" }] }),
+    );
+
+    let error = outcome.action_error.expect("a dispatch failure");
+    assert_eq!(error.property.as_deref(), Some("success[0].edit"));
+    assert!(error.msg.contains("error: Unsupported"), "{}", error.msg);
+    assert!(error.msg.contains(&fixture.root().join("a.md").display().to_string()), "names the target: {}", error.msg);
+    assert_eq!(*fixture.host.failures.borrow(), ["EditFailed"]);
+    assert!(fixture.effects.lines().is_empty(), "no continuation after an unsuppressed failure");
+
+    let fixture = Fixture::new();
+    let outcome = fixture.run_edit(
+        LifecycleSignal::Success,
+        json!({}),
+        json!({ "success": [{ "edit": { "file": "a.md", "no_error": true } }, { "info": "after" }] }),
+    );
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(fixture.effects.lines(), ["info after"]);
+}
+
+#[test]
+fn an_editor_failure_is_a_located_dispatch_failure_that_no_error_suppresses() {
+    let fixture = Fixture::with_editor(FakeEditor { attempted: true, fail: Some(non_zero_exit), ..Default::default() });
+
+    let outcome = fixture.run_edit(
+        LifecycleSignal::Success,
+        json!({}),
+        json!({ "success": [{ "when": "true", "then": [{ "edit": "a.md" }, { "info": "after" }] }] }),
+    );
+
+    let error = outcome.action_error.expect("a dispatch failure");
+    assert_eq!(error.property.as_deref(), Some("success[0].then[0].edit"));
+    assert!(error.msg.contains("EditFailed"), "{}", error.msg);
+    assert!(fixture.effects.lines().is_empty());
+    assert_eq!(fixture.host.side_effects_attempted.get(), 1, "a failed attempt still forgets reused reads");
+
+    let fixture = Fixture::with_editor(FakeEditor { attempted: true, fail: Some(non_zero_exit), ..Default::default() });
+    let outcome = fixture.run_edit(
+        LifecycleSignal::Success,
+        json!({}),
+        json!({ "success": [{ "edit": { "file": "a.md", "no_error": true } }, { "info": "after" }] }),
+    );
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(fixture.effects.lines(), ["info after"]);
+    assert_eq!(fixture.host.side_effects_attempted.get(), 1);
+}
+
+#[test]
+fn a_non_string_or_blank_value_is_an_unsuppressible_evaluation_failure() {
+    for (value, expected) in [
+        (json!(5), "got number"),
+        (json!(true), "got boolean"),
+        (json!(null), "got null"),
+        (json!(["a.md"]), "got array"),
+        (json!("   "), "non-blank"),
+        (json!(""), "non-blank"),
+    ] {
+        let fixture = Fixture::with_editor(FakeEditor::default());
+        let outcome = fixture.run_edit(
+            LifecycleSignal::Success,
+            json!({ "fqn": value }),
+            json!({ "success": [{ "edit": { "file": "{{ fqn }}", "no_error": true } }, { "info": "after" }] }),
+        );
+
+        let error = outcome.evaluation_error.unwrap_or_else(|| panic!("{value}: an evaluation failure"));
+        assert!(error.msg.contains(expected), "{value}: {}", error.msg);
+        assert_eq!(error.property.as_deref(), Some("success[0].edit"), "{value}");
+        assert!(fixture.seen().is_empty(), "{value}: the editor never ran");
+        assert!(fixture.effects.lines().is_empty(), "{value}: `no_error` does not continue");
+    }
+}
+
+#[test]
+fn a_url_is_refused_without_reaching_the_editor() {
+    let fixture = Fixture::with_editor(FakeEditor::default());
+
+    let outcome = fixture.run_edit(
+        LifecycleSignal::Success,
+        json!({}),
+        json!({ "success": [{ "edit": "https://example.invalid/spec.md" }] }),
+    );
+
+    let error = outcome.action_error.expect("a dispatch failure");
+    assert!(error.msg.contains("UrlRefused"), "{}", error.msg);
+    assert!(fixture.seen().is_empty());
+}
+
+#[test]
+fn an_edit_cancelled_while_open_never_continues_even_with_no_error() {
+    let token = cancellation::CancellationToken::default();
+    let _scope = token.enter();
+    let fixture = Fixture::with_editor(FakeEditor {
+        attempted: true,
+        fail: Some(cancelled_at),
+        ..Default::default()
+    });
+
+    let outcome = fixture.run_edit(
+        LifecycleSignal::Success,
+        json!({}),
+        json!({ "success": [{ "edit": { "file": "a.md", "no_error": true } }, { "info": "after" }] }),
+    );
+
+    let error = outcome.evaluation_error.expect("cancellation is an evaluation failure");
+    assert_eq!(error.msg, "the run was cancelled while an `edit` was open");
+    assert!(fixture.effects.lines().is_empty());
+    assert_eq!(fixture.host.side_effects_attempted.get(), 1);
+}
+
+#[test]
+fn a_cancellation_during_a_successful_editor_exit_still_stops_the_stack() {
+    let token = cancellation::CancellationToken::default();
+    let _scope = token.enter();
+    let fixture = Fixture::with_editor(FakeEditor { cancel: Some(token.clone()), ..Default::default() });
+
+    let outcome = fixture.run_edit(
+        LifecycleSignal::Success,
+        json!({}),
+        json!({ "success": [{ "edit": { "file": "a.md", "no_error": true } }, { "info": "after" }] }),
+    );
+
+    assert_eq!(outcome.evaluation_error.expect("cancelled").msg, "the run was cancelled while an `edit` was open");
+    assert!(fixture.effects.lines().is_empty());
+}
+
+/// Terminal events run in a cleanup scope. A healthy run still edits there;
+/// after a cancellation (a worker cause or the host's interrupt) the edit is
+/// refused before the editor is reached.
+#[test]
+fn cleanup_events_edit_on_a_healthy_run_and_refuse_after_a_cancellation() {
+    let token = cancellation::CancellationToken::default();
+    let _scope = token.enter();
+    let _cleanup = cancellation::CleanupScope::enter();
+    let document = json!({ "finalize": [{ "edit": { "file": "a.md", "no_error": true } }, { "info": "after" }] });
+
+    let healthy = Fixture::with_editor(FakeEditor::default());
+    assert_eq!(healthy.run_edit(LifecycleSignal::Finalize, json!({}), document.clone()), LifecycleEventOutcome::default());
+    assert_eq!(healthy.seen().len(), 1);
+    assert!(!healthy.seen()[0].cancelled_at_start);
+
+    let mut interrupted = Fixture::with_editor(FakeEditor::default());
+    interrupted.host.interrupted = true;
+    let outcome = interrupted.run_edit(LifecycleSignal::Finalize, json!({}), document.clone());
+    assert_eq!(
+        outcome.evaluation_error.expect("refused").msg,
+        "the run was cancelled, so `edit` did not open an editor"
+    );
+    assert!(interrupted.seen().is_empty());
+
+    token.cancel(cancellation::CancellationCause::Interrupt);
+    let cancelled = Fixture::with_editor(FakeEditor::default());
+    let outcome = cancelled.run_edit(LifecycleSignal::Finalize, json!({}), document);
+    assert!(outcome.evaluation_error.is_some());
+    assert!(cancelled.seen().is_empty());
+    assert!(cancelled.effects.lines().is_empty());
+}
+
+#[test]
+fn a_compact_dictionary_runs_communication_before_edit() {
+    let fixture = Fixture::with_editor(FakeEditor { fail: Some(non_zero_exit), ..Default::default() });
+
+    let outcome = fixture.run_edit(
+        LifecycleSignal::Start,
+        json!({}),
+        json!({ "start": [
+            { "info": "first" },
+            { "edit": "a.md", "warn": "same item" },
+            { "info": "last" },
+        ] }),
+    );
+
+    assert!(outcome.action_error.is_some(), "the failing edit ends the stack");
+    assert_eq!(fixture.effects.lines(), ["info first", "warn same item"]);
+    assert_eq!(fixture.seen().len(), 1);
 }

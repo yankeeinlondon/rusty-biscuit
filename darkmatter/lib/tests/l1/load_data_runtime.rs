@@ -466,6 +466,7 @@ fn evaluate_event(
         output: &Silent,
         timing: &timing,
         interrupted: &never,
+        editor: None,
     };
     let name = match signal {
         LifecycleSignal::Initialize => "initialize",

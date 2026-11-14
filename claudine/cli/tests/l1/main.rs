@@ -152,6 +152,10 @@ mod lifecycle_prep;
 #[cfg(unix)]
 mod lifecycle_initialize_zero_attempts;
 mod lifecycle_renamed_events;
+// Installs the `claudine-fake-editor` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod lifecycle_edit_action;
 // Records launches with the Unix-only `launch_recorder`.
 #[cfg(unix)]
 mod lifecycle_root_preparation;

@@ -284,6 +284,12 @@ fn run_provider_wrapper_inner(
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
 ) -> Result<WrapperOutcome> {
     let perf_enabled = perf_collector.is_some();
+    // Before any event can run an `edit`; an unparsable format is reported
+    // where the flag is applied, below.
+    claudine::composition::lifecycle::editor::set_structured_output(matches!(
+        args.output.as_deref().map(str::parse::<OutputFormat>),
+        Some(Ok(OutputFormat::Json | OutputFormat::Stream))
+    ));
     // ------------------------------------------------------------------
     // Stage 1: Resolve profile and binary
     // ------------------------------------------------------------------

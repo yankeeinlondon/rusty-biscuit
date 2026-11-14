@@ -1144,6 +1144,18 @@ mod corpus {
                     }),
                 }),
             ),
+            // A lifecycle `edit` that could not open its file.
+            (
+                "CompositionError::LifecycleEditFailed",
+                Box::new(CompositionError::LifecycleEditFailed {
+                    source_path: PathBuf::from("run.md"),
+                    property: "initialize[0].edit".to_string(),
+                    target: PathBuf::from("specs/new.md"),
+                    error: Box::new(darkmatter::editor::EditError::UrlRefused {
+                        reference: "https://example.com/spec.md".to_string(),
+                    }),
+                }),
+            ),
             // The completion verdict's two halves.
             (
                 "CompositionError::CompletionBodyUnchanged",

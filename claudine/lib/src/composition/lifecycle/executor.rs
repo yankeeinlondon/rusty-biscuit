@@ -613,6 +613,10 @@ impl LifecycleHost for StackExecutionContext<'_> {
         crate::interrupt::interrupted()
     }
 
+    fn editor(&self) -> Option<&dyn darkmatter::editor::EditorService> {
+        Some(&super::editor::EDITOR_SERVICE)
+    }
+
     fn is_known_effect(&self, name: &str) -> bool {
         playa::SoundEffect::from_name(name).is_some()
     }
@@ -668,6 +672,9 @@ pub(crate) fn classify_run_failure(failure: LifecycleRunFailure) -> LifecycleErr
             }
             LifecycleRunFailure::CancellationRecovery { source_path, action } => {
                 CompositionError::LifecycleCancellationRecovery { source_path, action }
+            }
+            LifecycleRunFailure::EditFailed { source_path, property, target, error } => {
+                CompositionError::LifecycleEditFailed { source_path, property, target, error }
             }
         };
         LifecycleErrorInfo::from_composition_error(&error)

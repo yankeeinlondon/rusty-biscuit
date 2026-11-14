@@ -534,6 +534,10 @@ impl TaskExecution<'_> {
                         };
                         let _cancellation_scope = cancellations[index].enter();
                         let _prep_scope = prep_scope.enter();
+                        // Members share the parent's terminal, so none may
+                        // lend it to a terminal editor; a fresh thread would
+                        // otherwise start permitted.
+                        let _terminal_denied = darkmatter::editor::deny_terminal_in_this_thread();
                         let task = &group.tasks[index];
                         let started = Instant::now();
                         // Each concurrent task takes its own palette entry, so

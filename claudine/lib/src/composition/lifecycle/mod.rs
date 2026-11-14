@@ -53,6 +53,7 @@ mod binding_checks;
 pub mod cancellation;
 pub mod context;
 pub mod control;
+pub mod editor;
 pub mod effects;
 pub mod executor;
 pub mod prep;

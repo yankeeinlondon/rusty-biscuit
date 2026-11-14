@@ -93,6 +93,9 @@ pub enum EditError {
     /// `edit` opens only local files and never fetches.
     #[error("`{reference}` is a URL; `edit` opens only local files")]
     UrlRefused { reference: String },
+    /// The reference has no local path a file could be created at.
+    #[error("file reference `{reference}` has no local target")]
+    NoLocalTarget { reference: String },
     /// The file reference did not resolve.
     #[error(transparent)]
     Reference(#[from] FileReferenceError),

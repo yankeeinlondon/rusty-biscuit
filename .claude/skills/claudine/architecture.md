@@ -643,7 +643,18 @@ checks, and DMLS's `nested_span.rs` mirrors its path spelling.
   adapter: bindings, `set` commits, loop `break`, `prep`, shell policy,
   failure classification), evaluates a
   reached guard once, runs only the selected body, and the first directive
-  ends the whole event. Audio is published in list position (no
+  ends the whole event. `edit` is Darkmatter's (`dispatch_edit`); Claudine
+  only lends it `lifecycle/editor.rs::EDITOR_SERVICE` through
+  `LifecycleHost::editor`, a `ProcessEditorService` built per edit whose
+  output mode is the process-wide `set_structured_output` flag (set by the
+  wrapper and `compose`/`inline-compose` from `--output json|stream`).
+  Parallel group members enter `deny_terminal_in_this_thread()` in
+  `sequence/task/group.rs`, so only GUI editors run there. Failures map to
+  `CompositionError::LifecycleEditFailed` (`composition.lifecycle_edit_failed`,
+  which needs a corpus entry in `cli/tests/l1/error_guards.rs`); a
+  `side_effect:` task refuses `edit`. No Claudine timeout bounds a lifecycle
+  stack, so only an interrupt or a sibling's failure cancels an open editor.
+  Audio is published in list position (no
   `audio_phases`). Darkmatter's `run_guard.rs::LifecycleRunGuard::emit_signal`
   (the drop safety net) emits only root, unguarded, literal communication.
 - **Run guard and runtime.** `LifecycleRunGuard` (the one terminal slot,

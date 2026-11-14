@@ -55,7 +55,9 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use tracing::warn;
 
+use crate::editor::{EditError, EditRequest};
 use crate::effects::{EffectEngine, effect_registration};
+use crate::markdown::compose::context::merge::json_type_name;
 use crate::markdown::compose::expression::{
     BindingView, Expr, ExpressionError, ExpressionFinder, ResolutionContext, RuntimeBinding, evaluate, functions,
     is_truthy, scalar_string, unknown_function_error,
@@ -70,7 +72,7 @@ use crate::markdown::compose::{
 };
 
 use super::actions::{
-    CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction, LifecycleNode,
+    CommunicationChannel, EditAction, LifecycleAction, LifecycleActionKind, LifecycleControlAction, LifecycleNode,
     RetryBackoff, RuntimeSet, ShellAction, WithOverlay, WithValue, is_known_side_effect,
 };
 use super::cancellation;
@@ -169,6 +171,13 @@ enum ActionStep {
     /// [`LifecycleEventOutcome::evaluation_error`]. Never suppressed by
     /// `no_error`.
     EvaluationErrored(LifecycleErrorInfo),
+}
+
+/// Why a mutation target did not resolve to a local path.
+enum MutationTargetError {
+    Reference(biscuit_file::FileReferenceError),
+    /// The reference has no document-scoped candidate to create.
+    NoLocalTarget,
 }
 
 /// Which layer an action error originated in.
@@ -696,11 +705,7 @@ impl<'a> StackExecutor<'a> {
                     .map(|_| None)
                     .map_err(|error| ActionFailure::Evaluation(self.expr_error(func.function.clone(), error)))
             }
-            // No host supplies an editor yet, so reaching `edit` refuses the
-            // event rather than skipping the edit the author asked for.
-            LifecycleActionKind::Edit(_) => Err(ActionFailure::Evaluation(
-                self.action_failure("edit", "this host cannot run `edit`"),
-            )),
+            LifecycleActionKind::Edit(edit) => self.dispatch_edit(edit, property, working).map(|()| None),
             // Only a profile that ignores verbs produces one. It runs nothing,
             // and each occurrence reached says so once.
             LifecycleActionKind::Ignored(ignored) => {
@@ -1213,6 +1218,37 @@ impl<'a> StackExecutor<'a> {
         }
     }
 
+    /// Resolve a side effect's document-authored mutation target; see
+    /// [`Self::mutation_target`]. Every failure is a dispatch failure of `verb`.
+    fn resolve_effect_path(&self, verb: &str, raw: &str) -> Result<String, ActionFailure> {
+        let reference = FileReference::new(raw).map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
+        match self.mutation_target(&reference, raw) {
+            Ok(path) => Ok(path.to_string_lossy().into_owned()),
+            Err(MutationTargetError::Reference(error)) => Err(ActionFailure::Dispatch(self.error_or_action(verb, &error))),
+            Err(MutationTargetError::NoLocalTarget) => Err(ActionFailure::Dispatch(
+                self.action_failure(verb, format!("file reference `{raw}` has no local mutation target")),
+            )),
+        }
+    }
+
+    /// Resolve an `edit` target exactly as a side effect's mutation target,
+    /// except that a URL is refused before resolution, so nothing is fetched.
+    ///
+    /// ## Errors
+    ///
+    /// The [`EditError`] for a URL or a reference that does not resolve.
+    fn resolve_edit_target(&self, raw: &str) -> Result<PathBuf, EditError> {
+        let reference = FileReference::new(raw)?;
+        if reference.class().kind == FileReferenceKind::Url {
+            return Err(EditError::UrlRefused { reference: raw.to_string() });
+        }
+        match self.mutation_target(&reference, raw) {
+            Ok(path) => Ok(path),
+            Err(MutationTargetError::Reference(error)) => Err(error.into()),
+            Err(MutationTargetError::NoLocalTarget) => Err(EditError::NoLocalTarget { reference: raw.to_string() }),
+        }
+    }
+
     /// Resolve a document-authored mutation target through the same captured
     /// file-reference context used by composition.
     ///
@@ -1221,15 +1257,13 @@ impl<'a> StackExecutor<'a> {
     /// mutation root, preserving the effect engine's relative mutation policy;
     /// other reference kinds use their first document-scoped candidate. A later
     /// transclusion therefore resolves the same identity.
-    fn resolve_effect_path(&self, verb: &str, raw: &str) -> Result<String, ActionFailure> {
-        let request_context = self.inputs.file_resolution_context;
-        let reference = FileReference::new(raw).map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
-        let document_context = request_context.for_source(self.inputs.source_path);
+    fn mutation_target(&self, reference: &FileReference, raw: &str) -> Result<PathBuf, MutationTargetError> {
+        let document_context = self.inputs.file_resolution_context.for_source(self.inputs.source_path);
         let resolved = reference
             .resolve_in_context(&document_context)
-            .map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?;
-        let path = match resolved {
-            Some(path) => path,
+            .map_err(MutationTargetError::Reference)?;
+        match resolved {
+            Some(path) => Ok(path),
             // A new implicit-relative target is created under the mutation root.
             // Joined directly rather than through `request_context.for_cwd(..)`:
             // that context keeps the document's repository boundary, and the
@@ -1237,21 +1271,94 @@ impl<'a> StackExecutor<'a> {
             // document comes from a different repository, e.g. a shared prompt
             // library.
             None if reference.class().kind == FileReferenceKind::ImplicitRelative => {
-                self.inputs.effect_engine.mutation_root().join(raw)
+                Ok(self.inputs.effect_engine.mutation_root().join(raw))
             }
             None => reference
                 .candidate_plan(&document_context)
-                .map_err(|error| ActionFailure::Dispatch(self.error_or_action(verb, &error)))?
+                .map_err(MutationTargetError::Reference)?
                 .into_iter()
                 .next()
                 .map(|candidate| candidate.path().to_path_buf())
-                .ok_or_else(|| {
-                    ActionFailure::Dispatch(
-                        self.action_failure(verb, format!("file reference `{raw}` has no local mutation target")),
-                    )
-                })?,
+                .ok_or(MutationTargetError::NoLocalTarget),
+        }
+    }
+
+    /// Open an `edit` action's file in the host's editor and wait for it.
+    ///
+    /// A `file` value that is not a non-blank string, and a cancellation
+    /// (before the editor starts or while it is open), are evaluation
+    /// failures that `no_error` never suppresses. Every other failure
+    /// (resolution, eligibility, preparation, the editor itself, a host with
+    /// no editor) is a dispatch failure the host classifies as
+    /// [`LifecycleRunFailure::EditFailed`].
+    ///
+    /// The cancellation probe is [`cancellation::cause_with`], not
+    /// `requested_with`: terminal events run inside a cleanup scope, where
+    /// `requested_with` is always false, and an `edit` there must still run
+    /// on a healthy run but never after a cancellation.
+    fn dispatch_edit(&self, edit: &EditAction, property: &str, working: &SharedFrontmatter) -> Result<(), ActionFailure> {
+        let value = self
+            .evaluate_operand(&edit.file, working)
+            .map_err(|error| ActionFailure::Evaluation(self.expr_error("edit", error)))?;
+        let raw = match value {
+            Value::String(text) if !text.trim().is_empty() => text,
+            Value::String(_) => {
+                return Err(ActionFailure::Evaluation(self.action_failure("edit", "`edit` needs a non-blank path")));
+            }
+            other => {
+                return Err(ActionFailure::Evaluation(self.action_failure(
+                    "edit",
+                    format!("`edit` needs a string path, got {}", json_type_name(&other)),
+                )));
+            }
         };
-        Ok(path.to_string_lossy().into_owned())
+        let target = self
+            .resolve_edit_target(&raw)
+            .map_err(|error| self.edit_failed(property, PathBuf::from(&raw), error))?;
+        let cancelled = || cancellation::cause_with(|| self.inputs.host.interrupted()).is_some();
+        if cancelled() {
+            return Err(ActionFailure::Evaluation(
+                self.action_failure("edit", "the run was cancelled, so `edit` did not open an editor"),
+            ));
+        }
+        let Some(service) = self.inputs.host.editor() else {
+            return Err(self.edit_failed(property, target, EditError::Unsupported));
+        };
+        let outcome = service.edit(&EditRequest {
+            target: &target,
+            mutation_root: self.inputs.effect_engine.mutation_root(),
+            create_new: edit.create_new,
+            gui: edit.gui,
+            cancelled: &cancelled,
+        });
+        // A failed edit may still have created or saved the file.
+        if outcome.attempted {
+            self.inputs.host.side_effect_attempted();
+        }
+        match outcome.result {
+            Err(error) if error.is_cancelled() => Err(self.edit_cancelled()),
+            _ if cancelled() => Err(self.edit_cancelled()),
+            Ok(()) => Ok(()),
+            Err(error) => Err(self.edit_failed(property, target, error)),
+        }
+    }
+
+    fn edit_cancelled(&self) -> ActionFailure {
+        ActionFailure::Evaluation(self.action_failure("edit", "the run was cancelled while an `edit` was open"))
+    }
+
+    fn edit_failed(&self, property: &str, target: PathBuf, error: EditError) -> ActionFailure {
+        ActionFailure::Dispatch(
+            self.inputs
+                .host
+                .failure(LifecycleRunFailure::EditFailed {
+                    source_path: self.inputs.source_path.to_path_buf(),
+                    property: property.to_string(),
+                    target,
+                    error: Box::new(error),
+                })
+                .at_property(property.to_string()),
+        )
     }
 
     /// Mirror a successful frontmatter-verb mutation onto the in-memory

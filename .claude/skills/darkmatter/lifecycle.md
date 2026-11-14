@@ -55,6 +55,26 @@ pages with the behavior.
   (`parse.rs`), `walk_action` (`validate.rs`), `execute_action_inner`, and
   Claudine's `describe_action` (`sequence/task/mod.rs`); the wildcard walkers
   (preflight, shell templates, `action_writes`) treat it as inert.
+- `edit` runs in `executor.rs::dispatch_edit` through the host's
+  `LifecycleHost::editor()` (`None`, the default, fails the action as
+  `EditError::Unsupported`; `md compose` fills `MdStackContext::editor` with a
+  `ProcessEditorService` per event: `Structured` under a data output, else
+  `MarkdownDocument`, `stdin_reserved` when the document came from stdin;
+  Claudine's host lends one built at each edit, see the `claudine` skill's
+  architecture page, and maps `EditFailed` to `LifecycleEditFailed`).
+  A non-string/blank `file` and any cancellation are unsuppressible
+  evaluation failures; everything else is a dispatch failure classified as
+  `LifecycleRunFailure::EditFailed` (`no_error` applies). The cancellation
+  probe is `cancellation::cause_with`, never `requested_with`, which is false
+  inside the `CleanupScope` every terminal event runs in. The target resolves
+  through `mutation_target`, the one helper `resolve_effect_path` also uses,
+  with URLs refused first. `md`'s mutation root is the prompt's own
+  directory (Claudine's is the launch workspace), so an `md` prompt in a
+  sibling library cannot edit a `{{ ctx.cwd }}` path. A failure message is
+  clamped to one 240-character line (`concise_message`), so `md` puts the
+  reason before the target. Terminal-editor success is provable only in L2
+  (`cli/tests/level2/level2_edit_action.rs`); L1 process tests use the fake
+  editor installed as `code` (GUI, `--wait`) with `DISPLAY` set.
 - Never add a hand-maintained list of lifecycle event keys or late roots;
   derive it from the host's `EventRegistry`.
 - Lifecycle operands evaluate lazy functions in

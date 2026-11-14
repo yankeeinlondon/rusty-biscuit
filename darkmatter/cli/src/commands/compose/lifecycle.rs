@@ -25,6 +25,7 @@ use std::time::Instant;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Report, Result, eyre};
+use darkmatter::editor::{EditorHostFacts, EditorOutput, ProcessEditorService};
 use darkmatter::effects::EffectEngine;
 use darkmatter::lifecycle::md_host::{
     self, CommandOutput, MdEvent, MdRunHost, MdRuntimeState, MdStackContext,
@@ -137,6 +138,8 @@ pub(super) struct LifecycleCompose<'a> {
     pub(super) pending_triggers: PendingTriggerWarnings,
     /// When the command started, when timings were asked for.
     pub(super) started: Option<Instant>,
+    /// The document was read from stdin, so an editor cannot read from it.
+    pub(super) stdin_is_input: bool,
 }
 
 /// Runs the lifecycle.
@@ -356,6 +359,7 @@ struct ComposeHost<'a> {
     effects: &'a TerminalEffects<'a>,
     interrupted: Arc<AtomicBool>,
     started: Instant,
+    stdin_is_input: bool,
     composed: Option<(Markdown, ComposeReport)>,
     deferred_report: Option<darkmatter::markdown::reference::validate::ReferenceValidationReport>,
     /// The message of the failure already rendered in full, so the run's end
@@ -396,6 +400,7 @@ impl<'a> ComposeHost<'a> {
             effects,
             interrupted,
             started: Instant::now(),
+            stdin_is_input: compose.stdin_is_input,
             composed: None,
             deferred_report: None,
             reported: None,
@@ -576,6 +581,12 @@ impl MdRunHost for ComposeHost<'_> {
         let interrupted = Arc::clone(&self.interrupted);
         let probe = move || interrupted.load(Ordering::SeqCst);
         let timing = LifecycleTiming::from_instants(self.started, Some(self.started), Instant::now());
+        // A data output owns both streams for its one result; otherwise
+        // stdout carries the document, so an editor's output goes to stderr.
+        let editor = ProcessEditorService::new(EditorHostFacts {
+            output: if self.document.sink.is_some() { EditorOutput::Structured } else { EditorOutput::MarkdownDocument },
+            stdin_reserved: self.stdin_is_input,
+        });
         let context = MdStackContext {
             request: &self.request,
             source_path: &self.source_path,
@@ -588,6 +599,7 @@ impl MdRunHost for ComposeHost<'_> {
             output: self.effects,
             timing: &timing,
             interrupted: &probe,
+            editor: Some(&editor),
         };
         md_host::evaluate(&context, &self.config, &event)
     }

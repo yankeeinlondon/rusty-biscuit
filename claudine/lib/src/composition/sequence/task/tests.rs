@@ -2625,6 +2625,30 @@ mod side_effect_tasks {
     }
 
     #[test]
+    fn an_edit_side_effect_is_refused_without_opening_or_creating_anything() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("notes.md");
+        let source = one_step_source(
+            dir.path(),
+            json!({ "name": "alpha", "side_effect": { "edit": { "file": target.to_string_lossy(), "gui": true } } }),
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+
+        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(
+            failure_message(&outcome).contains("`edit` opens an editor and is not a task side effect"),
+            "{}",
+            failure_message(&outcome),
+        );
+        assert!(!target.exists(), "a refused `edit` creates nothing");
+        assert!(recorder.events().is_empty(), "{:?}", recorder.events());
+    }
+
+    #[test]
     fn a_side_effect_targeting_a_reserved_key_fails_the_task() {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(

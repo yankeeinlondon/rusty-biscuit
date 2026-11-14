@@ -15,6 +15,7 @@ use std::sync::Arc;
 use indexmap::IndexMap;
 use serde_json::Value;
 
+use crate::editor::{EditError, EditorService};
 use crate::effects::EffectEngine;
 use crate::markdown::compose::expression::{BindingView, ResolutionContext, RuntimeBinding};
 use crate::markdown::compose::shell_expansion::{ShellExpansionError, ShellRuleSet};
@@ -135,6 +136,13 @@ pub trait LifecycleHost {
     /// that did not bind or evaluate) is not reported. By default nothing is
     /// reused across expressions, so there is nothing to forget.
     fn side_effect_attempted(&self) {}
+
+    /// The service an `edit` action opens its file through. `None`, the
+    /// default, means this host cannot run `edit`: reaching one is a failure
+    /// of that action ([`EditError::Unsupported`]), never a skip.
+    fn editor(&self) -> Option<&dyn EditorService> {
+        None
+    }
 
     /// Whether `name` is a sound effect the host can play.
     fn is_known_effect(&self, name: &str) -> bool;
@@ -259,6 +267,20 @@ pub enum LifecycleRunFailure {
         message: String,
         /// The typed cause.
         cause: Option<LifecycleCause>,
+    },
+    /// An `edit` action did not complete: its target did not resolve, the
+    /// host cannot lend an editor what it needs, the file could not be
+    /// prepared, or the editor failed. A cancellation is never this failure.
+    EditFailed {
+        /// The document that authored it.
+        source_path: PathBuf,
+        /// The authored property path, e.g. `initialize[0].else[0].edit`.
+        property: String,
+        /// The resolved target, or the evaluated reference when it did not
+        /// resolve.
+        target: PathBuf,
+        /// The typed cause.
+        error: Box<EditError>,
     },
     /// Cancellation cleanup requested a recovery (`retry`, `resume`, `proxy`,
     /// or `defer`), which cancellation refuses: the cancellation keeps the

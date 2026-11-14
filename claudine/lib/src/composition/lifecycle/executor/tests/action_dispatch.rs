@@ -759,3 +759,81 @@ fn programmatic_initialize_shell_is_rejected_even_with_no_error() {
     assert!(outcome.evaluation_error.is_some(), "{outcome:?}");
     assert!(shell.commands.lock().unwrap().is_empty());
 }
+
+/// Run `stack` as a `start` event over an empty frontmatter.
+fn run_start(stack: Value) -> (LifecycleEventOutcome, Vec<Emitted>) {
+    let config = parse_lifecycle_config(&json!({ "start": stack }), Path::new("t.md")).unwrap();
+    let fm = map(json!({}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(LifecycleSignal::Start, &fm, None, &engine, &shell, &recorder, &harness, Path::new("t.md"));
+    let outcome = context.execute_event(&config);
+    (outcome, recorder.events())
+}
+
+/// An `edit` failure keeps its typed cause through Claudine's catalog: the
+/// code, the located property, the target, and the reason, and it stops the
+/// stack unless `no_error` absorbs it.
+#[test]
+fn an_edit_failure_is_a_typed_lifecycle_edit_failure_that_no_error_absorbs() {
+    let (outcome, events) = run_start(json!([{ "edit": "https://example.com/spec.md" }, { "info": "after" }]));
+    let info = outcome.action_error.expect("a URL is refused");
+    assert_eq!(info.variant, "LifecycleEditFailed");
+    assert_eq!(info.property.as_deref(), Some("start[0].edit"));
+    let snapshot = info.snapshot.as_ref().expect("typed");
+    assert_eq!(snapshot.code, "composition.lifecycle_edit_failed");
+    assert_eq!(snapshot.detail["property"], json!("start[0].edit"));
+    assert_eq!(snapshot.detail["source_path"], json!("t.md"));
+    assert!(
+        snapshot.detail["reason"].as_str().is_some_and(|reason| reason.contains("is a URL")),
+        "{}",
+        snapshot.detail,
+    );
+    assert!(
+        snapshot.message.starts_with("`start[0].edit` could not edit the file: `https://example.com/spec.md` is a URL"),
+        "the reason leads the clamped message: {}",
+        snapshot.message,
+    );
+    assert!(events.is_empty(), "the stack stopped: {events:?}");
+
+    let (outcome, events) =
+        run_start(json!([{ "edit": { "file": "https://example.com/spec.md", "no_error": true } }, { "info": "after" }]));
+    assert!(outcome.action_error.is_none(), "no_error absorbs a dispatch failure");
+    assert_eq!(events, vec![Emitted::Info("after".to_string())]);
+}
+
+/// Claudine's stacks lend `edit` a real editor service: with no usable
+/// editor configured, the failure names the editor, never "this host cannot
+/// run `edit`".
+#[test]
+fn claudine_stacks_supply_an_editor_service() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("no-such-editor");
+    // SAFETY: nextest runs each test in its own process.
+    unsafe {
+        std::env::set_var("EDITOR", &missing);
+        std::env::remove_var("VISUAL");
+    }
+    let target = dir.path().join("spec.md");
+    let config = parse_lifecycle_config(&json!({ "start": [{ "edit": target.to_string_lossy() }] }), Path::new("t.md")).unwrap();
+    let fm = map(json!({}));
+    let engine = EffectEngine::builder().mutation_root(dir.path()).auto_rehash(false).build();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let source_path = dir.path().join("t.md");
+    let context = StackExecutionContext {
+        base_dir: Some(dir.path()),
+        ..ctx(LifecycleSignal::Start, &fm, None, &engine, &shell, &recorder, &harness, &source_path)
+    };
+    let outcome = context.execute_event(&config);
+    let info = outcome.action_error.expect("no editor resolves");
+    let snapshot = info.snapshot.as_ref().expect("typed");
+    assert_eq!(snapshot.code, "composition.lifecycle_edit_failed");
+    let reason = snapshot.detail["reason"].as_str().unwrap_or_default();
+    assert!(reason.contains("EDITOR") && reason.contains("not found"), "{reason}");
+    assert!(!reason.contains("cannot run `edit`"), "{reason}");
+    assert!(!target.exists(), "nothing is created before an editor resolves");
+}
