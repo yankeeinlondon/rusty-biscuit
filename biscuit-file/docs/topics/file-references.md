@@ -448,8 +448,9 @@ A URL parses into a typed remote reference. It never becomes a local
 candidate: sending it through local-path resolution fails with
 `RemoteNotLocal`. With the `url` feature, `resolve_target_in_context(&ctx)`
 distinguishes `Resolved::Local` from `Resolved::Remote` so callers can route
-remote references to the separate fetching API (whose failures are
-`FetchError`, a different type from `FileReferenceError`). A `{{VAR}}` in the
+remote references to the separate fetching API ([Fetching Remote
+Content](./fetch.md); its failures are `FetchError`, a different type from
+`FileReferenceError`). A `{{VAR}}` in the
 URL is filled from the context's environment, so
 `https://{{DOCS_HOST}}/guide.md` names the host the request was given, not
 whatever the process has. `resolve_target()` is the ambient twin.

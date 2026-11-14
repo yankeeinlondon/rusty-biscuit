@@ -19,6 +19,8 @@ description: >
 - Asking whether text is a well-formed file reference without touching the host (no filesystem, environment, or network)? `FileReference::new(s).is_ok()` is the passive structural validator, identical on every OS: it rejects `""`, NULs, hostless or malformed URLs (`https://`), recursive URLs, and empty or rooted vault paths. Darkmatter's `is_file_type` and `file_exists`'s malformed-text `false` both reach it through `resolve_ctx::is_well_formed_reference`; never add a second syntax check. Corpus: `biscuit-file/lib/tests/l1/structural_validation.rs`. See [the topic doc](../../../biscuit-file/docs/topics/file-references.md#structural-validation)
 - Writing a link to a file (portable `./`, `&`, `~`, `{{VAR}}`, absolute)? Use `biscuit_file::PortablePath` — never hand-roll a relative or env-rooted spelling. See [references/api.md](references/api.md#portable-references-portablepath)
 
+- Fetching a URL? Use the `fetch` feature's `fetch`/`post` with a `PolicyClient` (never follows redirects) and a `FetchPolicy`: `default()`/`deny_all()` allow nothing, `allow_host` one exact host, `HostPattern::Wildcard` subdomains only, and `allow_all()` every host as an explicit mode (`allows_every_host()`), never a wildcard hostname. No policy relaxes the HTTP(S)-only scheme check or redirect blocking; a caller that follows a redirect or serves a cached body asks `is_allowed` again. See [the topic doc](../../../biscuit-file/docs/topics/fetch.md)
+
 - Read [references/architecture.md](references/architecture.md) for module layout, feature flags, and re-exports
 
 - Read [../docs/topics/file-references.md](../../../biscuit-file/docs/topics/file-references.md) for the authoritative file reference topic doc

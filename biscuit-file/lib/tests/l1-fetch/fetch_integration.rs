@@ -367,3 +367,53 @@ fn fetch_blocking_works() {
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body.as_ref(), b"sync body");
 }
+
+#[tokio::test]
+async fn allow_all_fetches_a_host_no_pattern_names() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/open"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("open"))
+        .mount(&server)
+        .await;
+    let client = PolicyClient::new().unwrap();
+
+    let url = url::Url::parse(&format!("{}/open", server.uri())).unwrap();
+    let resp = fetch(&client, &url, &FetchPolicy::allow_all(), &Conditional::default())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.body.as_ref(), b"open");
+}
+
+#[tokio::test]
+async fn allow_all_still_refuses_a_non_http_scheme() {
+    let client = PolicyClient::new().unwrap();
+    let url = url::Url::parse("ftp://example.com/file.txt").unwrap();
+
+    let err = fetch(&client, &url, &FetchPolicy::allow_all(), &Conditional::default())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, FetchError::UnsupportedScheme(ref s) if s == "ftp"), "{err}");
+}
+
+#[tokio::test]
+async fn allow_all_still_blocks_redirects() {
+    // Blanket consent never turns redirect-following on: the hop is surfaced
+    // so the caller re-authorizes the `Location` host itself.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/redirect"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "/elsewhere"))
+        .mount(&server)
+        .await;
+    let client = PolicyClient::new().unwrap();
+
+    let url = url::Url::parse(&format!("{}/redirect", server.uri())).unwrap();
+    let err = fetch(&client, &url, &FetchPolicy::allow_all(), &Conditional::default())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, FetchError::RedirectBlocked { status: 302, .. }), "{err}");
+}
