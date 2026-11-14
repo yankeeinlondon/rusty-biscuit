@@ -337,8 +337,30 @@ decisions_for_review:
       Foreign-document compose (Phase 5, plan Rule 27): only host event keys (every event in the host's lifecycle registry) are withheld from compose-time interpolation and execution; host data keys such as `sequence` are still interpolated, because the manifest and lifecycle artifact carry no list of host-owned data keys. A Claudine document whose `sequence` or body reads `{{ seq.… }}` therefore fails normally under `md compose`, as the spec allows for unavailable host values. `composed`/`failed` are not withheld, so the host schema rejects them; because problems under withheld keys are dropped before reporting, a wrongly typed host event (`start: 5`) is not reported by `md compose` (DMLS and `md schema validate` still judge it). Alternatives: a "deferred keys" field in the manifest or lifecycle artifact (format change, moderate work), or keeping withheld-key problems in the report.
     - |-
       Foreign-document notice (Phase 5): `dm.host.foreign_document` depends on the root document only: a foreign child adds no second notice, and an md root that transcludes a foreign child gets none. Host globals are declared to analysis as unavailable with reason `dm.host.runtime_only`, so a shared stack reading `seq.name` fails with md's ordinary unavailable-global error. Host function sets are installed for typing on the composing thread only; a child evaluated on another thread reports an unknown function instead of a missing implementation. Info-severity run notices now print as info rows rather than warning rows on stderr, and `CommandRun`/`ReportSink` also collect notices raised during a run (previously only at its start). Alternatives: a notice per foreign document in the request; propagating host functions to worker threads.
+    - |-
+      Configuration files in DMLS (Phase 6): an empty new configuration buffer is judged as `{}` with no diagnostic, so completion works at once, while `md` and Claudine refuse an empty file when they load it (the docs state the difference). An authored `$schema` or `kind` in a configuration file is data, which the closed contract reports as an unknown key. When the home and the repository root are the same folder, the user scope wins. DMLS prepares Darkmatter's contracts through the new public `config::schema::resolve_host_config_type` over the same shipped text, not the loader's crate-private `contract(scope)`, because hover and completion need the simplified form. Alternatives: emit a diagnostic for an empty buffer in `YamlContract::validate` on the `Configuration` route, or expose the loader's prepared schema with its simplified form.
+    - |-
+      Where DMLS shows registration warnings (Phase 6): load warnings (`dm.host.registration`, `dm.host.identify_too_broad` for refused entries) are published on the file each names (the configuration file at the `register` entry, the manifest, or the member or artifact), merged with that file's own diagnostics; selection warnings (`dm.host.ambiguous`, a conflicting claim, `dm.lifecycle.unknown_host`) stay on the document. A stale lifecycle or facts artifact is warned on the artifact at line 0, not on the catalog that changed. Wave 12 first put load warnings at the top of every document, which was noisy. Alternative: show them on every affected document as well. Reversing is in `router.rs` publishing and `overlay/hosts.rs`.
+    - |-
+      `Registration` gained a public `at: Option<(usize, usize)>` (Phase 6) so a `register` entry naming a missing manifest is warned at the entry instead of line 0 of the configuration file; `md` reports it at the entry too. This adds a field to a public struct (three in-repo construction sites updated; Claudine builds none). Alternative: leave the warning unlocated and rely on "line when known".
+    - |-
+      Documents without frontmatter in DMLS (Phase 6): they select their host through the same central selection over an empty frontmatter, so a registered host's root catalog never reaches them. They never wait for host loading (existing registry-gate tests rely on a plain document never waiting); the workspace startup pass loads each scope's registrations, and until a document's configuration is loaded it is `md` and then refreshed. A frontmatter-less document outside the workspace that shares no configuration with an open frontmatter document therefore stays `md` and gets no legacy globals. YAML documents always get `md`. Alternatives: make such documents wait (and rework the gate tests), or fall back to the unfiltered legacy scan (which breaks "a registered host is never a legacy host"). The new public field `DocumentContext::host` carries the view (about 30 construction sites).
+    - |-
+      `dm.lifecycle.unknown_host` (Phase 6) fires only for a host whose manifests agree, only when the document's selection is `md` or legacy, and only for a key the host's registry resolves to an event while the selected lifecycle and `md` both treat it as data; renamed spellings such as `composed` are excluded. The hosts version is folded into the schema cache key (and so into `AnalysisIdentity`) rather than added as a separate field. Watching covers `HEAD` and the branch ref by exact path, not `packed-refs` or the index. Session notices are `window/showMessage`: `dm.config.missing` once per session as a warning, and a pending legacy migration once per file as information. An unsaved configuration buffer is not yet used to narrow permission analysis (hover loads permissions from disk); the plan allows it but does not require it.
+    - |-
+      Claudine's revision folder is named `<version>-<first 16 hex of the BLAKE3 digest>`, not the full digest, and the version is not part of the digest (it is in the folder name and manifest). Reuse always compares every file's bytes, so a short name cannot serve wrong content. A damaged existing folder is never repaired or moved: the revision is republished as `<name>-2`, `-3`, … (up to 64). Alternatives: the full 64-hex digest (longer paths, especially on Windows), or treating a damaged folder as an error (stops publication until someone deletes it by hand). Changing either is local to `claudine/lib/src/composition/registration.rs` and its `host_publication` tests.
+    - |-
+      Claudine's identifying trigger `claudine/schemas/claudine-document.yaml` matches each of the nine keys once per non-null YAML type (45 selectors), mirroring `claudine.yaml`, rather than one presence atom per key. That way ordinary trigger matching (Darkmatter's root discovery finds the file for documents under `claudine/`, where it adds nothing because its payload is empty) and Darkmatter's presence-only identification select exactly the same documents. Alternative: one `unknown[](required)` atom per key, which is shorter but means something narrower under ordinary matching. The file is published but not in Claudine's embedded trigger bundle, so a `claudine` run never applies it.
+    - |-
+      After narrowing, `claudine.yaml` still does not select on `sequence` (the plan kept the existing selectors). So a document whose only Claudine-looking keys are `initialize`/`cancelled`/`finalize`, including a sequence document with only those root events and the shipped router prompts `implement.md`/`review.md`, is no longer schema-checked by Claudine's types for those events. Claudine's lifecycle parser still refuses a bad verb before anything runs, but `md schema validate` and DMLS stop flagging it, and Darkmatter's baseline types for those events are loose (`initialize: [{ bogus: 1 }]` passes). Alternatives: also select `claudine.yaml` on `sequence` (all sequence documents then get Claudine's catalog, which may surface new errors), or tighten the baseline's md types. Tests that were really about Claudine's types gained `agent: claude` so they stay selected.
+    - |-
+      Claudine registration is always written to the USER `~/.darkmatter.yaml`, also when setup ran for the repository scope, because the manifest lives under the home. The repository `.darkmatter.yaml` gets only the permissions handoff. Setup prints nothing when publication and registration succeed (as quiet as the existing default permissions handoff, which a headless first run under `claudine <wrapper> --help` relies on); only failures warn. Publication failure stops setup before any configuration write; a registration failure is a warning after Claudine's configuration is saved. Alternatives: register in the scope that was set up, print an informational line, or make a registration failure fatal. Local to `claudine/lib/src/config/setup.rs` and `claudine/cli/src/commands/init_wizard.rs`.
+    - |-
+      The launch refresh runs for every `claudine` command except `handle` (provider hooks), `steer`, `completions`, `__complete`, and `uninstall`, after the help exits and the Darkmatter config read and before the first-run wizard. Hooks were excluded because they run on every agent event and answer a machine; `uninstall` so it does not recreate what it is about to remove. Alternatives: refresh only on composition/wrapper commands, or also in hooks. The warning's `format!` of the `PublishError` is allowlisted in `claudine/cli/tests/l1/error_guards/transport-allow.toml` as the final render. Local to `claudine/cli/src/main.rs`.
+    - |-
+      The plan asks to run md and DMLS against the published revision outside `claudine/`. Claudine cannot spawn `md` (no binary artifact dependency) and DMLS cannot depend on Claudine (Rule 33), so `claudine/lib/tests/l1/installed_registration.rs` drives the library path both use (`ConfigSnapshot::load` → `RegisteredHosts::load` → `select` → `ComposeOptions::with_registered_hosts`) over a revision that `setup_claudine` published. DMLS's own editor tests keep using the Claudine-shaped `relay` fixture. Alternative: a darkmatter-lsp dev-dependency in claudine-cli, or a generated install fixture checked by a freshness test, which is more literal coverage but costs build time and a second copy of the schemas.
 message_to_agent: |-
-    Phase 5 landed registration in the library and md CLI; DMLS is untouched (Phase 6). Read `darkmatter/docs/topics/host-registration.md` first. API: `darkmatter::config::registration::{load_registrations, load_entries, md_owned_names, agreement, RegisteredHosts, select, HostSelection { Md, Registered, Legacy, Ambiguous }, Selected, LegacyHost, RegisteredHostProfile}`; `LegacyHost` is the ONE central legacy view (root `host_catalogs`/`host_function_catalogs`/lifecycle profiles with registered hosts suppressed) and should replace DMLS's `LifecycleHost::first_usable` and the independent `providers/dsl.rs::host_catalogs` rescans. `DarkmatterSchemas::{with_registered_hosts, host_selection_for, registered_selection_for (reads nothing), registered_trace}`; `ComposeOptions::{with_registered_hosts, host_selection_for, with_selected_host}`; `RegisteredHostProfile::{dependencies, revision, analysis_globals}` give the files to watch and the revision for `AnalysisIdentity`. `ConfigSnapshot::with_passive_repository_projection` reads the repository config without migrating: DMLS must use passive loads only. Test fixtures: `darkmatter/lib/tests/host_fixtures/{mod.rs,recorder.rs}` (acme host, Claudine-like `relay` host with renames, in-process lifecycle recorder); the CLI suite includes them and lists them in `source-inputs`. Caution: never run md in a test with the real checkout as its repository; compose migrates legacy repository policy files. No mid-phase commits appeared during Phase 5; the host load average was 8-60 from unrelated work.
+    Phase 7 wired Claudine's Darkmatter registration; nothing CI-related changed. For Phase 8 (permission-widening CI) the relevant facts: Claudine's first-run setup (`claudine::config::setup::setup_claudine`) now publishes `~/.claudine/darkmatter-host/<version>-<digest16>/schemas/*` plus `~/.claudine/darkmatter-host.yaml`, then writes config + permissions handshake, then appends `~/.claudine/darkmatter-host.yaml` to the USER `~/.darkmatter.yaml` `register` list (`darkmatter::config::init::register_manifest`, dedup by `config::registration::manifest_identity`). Every claudine launch except handle/steer/completion/uninstall republishes when stale (`claudine/cli/src/main.rs::refresh_host_registration`); claudine-cli L1 fixtures therefore get a published revision in their temp home on first substantive spawn. `claudine.yaml` no longer selects on initialize/cancelled/finalize alone; `claudine/schemas/claudine-document.yaml` is the identifying trigger (published, not in the embedded bundle). Phase 6 and Phase 7 were both still uncommitted at the end of Phase 7, so `git status` covers both phases. Load-sensitive (pass alone well under 5 s): claudine `claudine_schemas::cancelled_conditional_depth_is_the_parsers_alone_to_limit` and two `container_schema_recursion` tests; claudine-cli `level1_provider_overlay_home::every_activation_reason_leaves_the_launch_home_variables_unchanged` (7.6 s loaded, 2.96 s alone).
 source_files_during_phase_3:
     - "biscuit-file/lib/src/file_reference/context.rs"
     - "biscuit-file/lib/src/file_reference/mod.rs"
@@ -973,6 +995,121 @@ skills_files_updated_during_phase_5:
     - ".claude/skills/darkmatter/SKILL.md"
     - ".claude/skills/darkmatter/lifecycle.md"
     - ".claude/skills/darkmatter/schema.md"
+source_files_during_phase_6:
+    - "darkmatter/dmls/Cargo.toml"
+    - "darkmatter/dmls/benches/pipeline_work_a3.rs"
+    - "darkmatter/dmls/src/bench.rs"
+    - "darkmatter/dmls/src/config_contracts.rs"
+    - "darkmatter/dmls/src/context.rs"
+    - "darkmatter/dmls/src/diagnostics/call_check.rs"
+    - "darkmatter/dmls/src/diagnostics/codes.rs"
+    - "darkmatter/dmls/src/diagnostics/frontmatter.rs"
+    - "darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs"
+    - "darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs"
+    - "darkmatter/dmls/src/lib.rs"
+    - "darkmatter/dmls/src/overlay/analysis.rs"
+    - "darkmatter/dmls/src/overlay/event_views.rs"
+    - "darkmatter/dmls/src/overlay/hosts.rs"
+    - "darkmatter/dmls/src/overlay/mod.rs"
+    - "darkmatter/dmls/src/overlay/registry.rs"
+    - "darkmatter/dmls/src/overlay/schema.rs"
+    - "darkmatter/dmls/src/overlay/yaml_contract.rs"
+    - "darkmatter/dmls/src/overlay/yaml_document.rs"
+    - "darkmatter/dmls/src/providers/code_actions.rs"
+    - "darkmatter/dmls/src/providers/collections.rs"
+    - "darkmatter/dmls/src/providers/dsl.rs"
+    - "darkmatter/dmls/src/providers/formatting.rs"
+    - "darkmatter/dmls/src/providers/frontmatter.rs"
+    - "darkmatter/dmls/src/providers/frontmatter/enum_item_tests.rs"
+    - "darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs"
+    - "darkmatter/dmls/src/providers/frontmatter/snapshot_tests.rs"
+    - "darkmatter/dmls/src/providers/lifecycle_host_tests.rs"
+    - "darkmatter/dmls/src/providers/mod.rs"
+    - "darkmatter/dmls/src/providers/semantic_tokens.rs"
+    - "darkmatter/dmls/src/router.rs"
+    - "darkmatter/dmls/src/slot_jobs.rs"
+    - "darkmatter/dmls/src/workspace/watch.rs"
+    - "darkmatter/dmls/tests/common/mod.rs"
+    - "darkmatter/dmls/tests/common/oracle.rs"
+    - "darkmatter/dmls/tests/l1/claudine_editor_parity.rs"
+    - "darkmatter/dmls/tests/l1/config_contracts.rs"
+    - "darkmatter/dmls/tests/l1/formatting_transaction.rs"
+    - "darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs"
+    - "darkmatter/dmls/tests/l1/host_registration_watches.rs"
+    - "darkmatter/dmls/tests/l1/incremental_graph_equivalence.rs"
+    - "darkmatter/dmls/tests/l1/main.rs"
+    - "darkmatter/dmls/tests/l1/mapping_only_corpus.rs"
+    - "darkmatter/dmls/tests/l1/registered_host_editor_agreement.rs"
+    - "darkmatter/dmls/tests/l1/registered_host_views.rs"
+    - "darkmatter/dmls/tests/l1/schema_reference_parity.rs"
+    - "darkmatter/dmls/tests/l1/value_hovers.rs"
+    - "darkmatter/dmls/tests/l1/yaml_document_editor.rs"
+    - "darkmatter/lib/src/config/load.rs"
+    - "darkmatter/lib/src/config/registration.rs"
+    - "darkmatter/lib/src/config/schema.rs"
+    - "darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs"
+    - "darkmatter/lib/tests/host_fixtures/mod.rs"
+    - "darkmatter/lib/tests/l1/context_construction_guard.rs"
+    - "darkmatter/lib/tests/l1/host_registration.rs"
+docs_updated_during_phase_6:
+    - "darkmatter/dmls/docs/autocomplete.md"
+    - "darkmatter/dmls/docs/diagnostics.md"
+    - "darkmatter/dmls/docs/features.md"
+    - "darkmatter/docs/lsp/architecture.md"
+    - "darkmatter/docs/lsp/features.md"
+    - "darkmatter/docs/topics/configuration.md"
+    - "darkmatter/docs/topics/host-registration.md"
+    - "darkmatter/docs/topics/schemas/definition.md"
+    - "darkmatter/docs/topics/schemas/dmls-schema-support.md"
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - ".claude/skills/darkmatter/SKILL.md"
+    - ".claude/skills/darkmatter/dmls.md"
+    - ".claude/skills/darkmatter/library-surfaces.md"
+source_files_during_phase_7:
+    - "claudine/cli/src/commands/init_wizard.rs"
+    - "claudine/cli/src/main.rs"
+    - "claudine/cli/tests/l1/error_guards/transport-allow.toml"
+    - "claudine/cli/tests/l1/host_registration_refresh.rs"
+    - "claudine/cli/tests/l1/main.rs"
+    - "claudine/lib/Cargo.toml"
+    - "claudine/lib/generated/shipped.json"
+    - "claudine/lib/src/composition/mod.rs"
+    - "claudine/lib/src/composition/registration.rs"
+    - "claudine/lib/src/config/setup.rs"
+    - "claudine/lib/tests/fixtures/claudine-schemas/shell-expansion-in-initialize-set.md"
+    - "claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-depth3-then.md"
+    - "claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-list.md"
+    - "claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-root-dictionary.md"
+    - "claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-then.md"
+    - "claudine/lib/tests/l1/claudine_identification.rs"
+    - "claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs"
+    - "claudine/lib/tests/l1/claudine_schemas.rs"
+    - "claudine/lib/tests/l1/claudine_schemas_embedded.rs"
+    - "claudine/lib/tests/l1/claudine_schemas_matrix.rs"
+    - "claudine/lib/tests/l1/claudine_trigger_selection_parity.rs"
+    - "claudine/lib/tests/l1/host_publication.rs"
+    - "claudine/lib/tests/l1/installed_registration.rs"
+    - "claudine/lib/tests/l1/main.rs"
+    - "claudine/schemas/claudine-document.yaml"
+    - "claudine/schemas/claudine.yaml"
+    - "darkmatter/cli/tests/l1/schema_validate.rs"
+    - "darkmatter/lib/src/config/init.rs"
+    - "darkmatter/lib/src/config/registration.rs"
+    - "darkmatter/lib/tests/l1/config_init.rs"
+    - "darkmatter/lib/tests/l1/shipped_schema_corpus.rs"
+docs_updated_during_phase_7:
+    - "claudine/docs/dependencies.md"
+    - "claudine/docs/topics/configuration.md"
+    - "claudine/docs/topics/frontmatter-properties.md"
+    - "claudine/docs/topics/schemas.md"
+    - "claudine/schemas/README.md"
+    - "darkmatter/docs/topics/host-registration.md"
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - ".claude/skills/claudine/SKILL.md"
+    - ".claude/skills/claudine/module-map.md"
+    - ".claude/skills/darkmatter/SKILL.md"
 ---
 
 # Implementation Log for 2026-11-12-registration (9 phases)
@@ -1276,3 +1413,171 @@ Input-robustness smell audit: the manifest loader validates the whole document a
   - `shipped_schema_corpus::shipped_markdown_named_type_references_resolve` (9.0 s) and `shipped_markdown_inline_schemas_parse_passively` (9.3 s). These two scan the repository's documentation, skill, and feature trees, take 0.8 s each on macOS, and reflect Windows file I/O under full-suite load; this phase added only one documentation page to what they scan.
   - With no Windows failure, `os_failing` is not set. Linux and WSL2 are left to CI.
 - Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gives `change_class: package` and `packages: [claudine, darkmatter, darkmatter-cli, simplified-schema, test-toolkit, claudine-cli]`. `test-toolkit` comes from the unrelated, already-present `prompts/plan.md` edit. The gates were not skipped.
+
+## Phase 6
+
+Phase 6 ran as foreground-scoped subagents with separate file ownership. Wave 12 ran two in parallel: configuration contracts for YAML documents (`config_contracts.rs`, the YAML routing) and the cached host-selection view (registrations cache, selected view, providers). Wave 13 then ran watching, invalidation, and the editor verification matrix. The coordinator ran the area gates once, after every subagent had finished.
+
+- **Retired `shell.policy_path`.** This had already landed in Phase 4 (`dmls/src/config/mod.rs`, `RETIRED_SHELL_POLICY_PATH`, tested by `a_retired_shell_policy_path_warns_naming_the_permissions_location`). The warning names its source (the file or the editor settings) and the key, so Phase 6 left it unchanged.
+
+The two Wave 12 subagents were started in the background by mistake. The coordinator waited for both in the same turn, and no task was skipped. Wave 13 ran as two foreground subagents, one after the other.
+
+### Wave 12 — Editor preparation
+
+- **Configuration contracts (Rule 33).** New `dmls/src/config_contracts.rs` (`ConfigHost`, `ConfigurationFile::select(path, ctx)`). It compares paths with `PathIdentity` against the captured context's home and repository root, and selects exactly four files: `~/.darkmatter.yaml`, `{repo}/.darkmatter.yaml`, `~/.claudine/config.yaml`, and `{repo}/.claudine/config.yaml`.
+  - Claudine's `claudine/schemas/claudine-config.yaml` is embedded with `include_str!`; DMLS takes no Claudine dependency.
+  - Each contract is prepared once per process through the new `darkmatter::config::schema::resolve_host_config_type`, which `prepare_host_config_type` now also uses. It keeps the simplified form, so hover and completion keep docs and defaults.
+  - The library adds `Route::Configuration` and `DarkmatterSchemas::prepare_configuration_contract`. `overlay/yaml_contract.rs` routes configuration files before kind or `$schema` selection, with no file reads; an authored `$schema` or `kind` is data there, which the closed contract rejects.
+  - An empty new buffer is judged as `{}` and completes its top-level keys.
+- **Selected host cache (Rules 26/28).** New `dmls/src/overlay/hosts.rs` (`HostRegistrations`, `InstalledHosts`, `HostView`, `UnknownHostEvent`) loads registrations passively, once per configuration identity (`load_passively` → `RegisteredHosts::load`).
+  - It uses the begin/run/install model of `TriggerRegistries` (the newest preparation wins, and a change during preparation leaves it stale). Each install gets a version; an invalidation whose BLAKE3 hashes are unchanged keeps that version.
+  - `schema_for` selects the document's host once (`select`), folds the hosts version into the schema key, and so into `AnalysisIdentity`. It layers registered triggers through `DarkmatterSchemas::with_registered_hosts`, and carries a `HostView` that every provider reads through `DocumentContext::host_view()`.
+  - The independent rescans are gone: `LifecycleHost::first_usable` and `providers/dsl.rs::{host_catalog_results, host_function_results}`. The legacy fallback now comes only from the central `LegacyHost`, and an ambiguous selection never reaches it.
+  - New `dm.lifecycle.unknown_host` (`diagnostics/codes.rs`) fires only for an agreed installed host that did not identify the document. It applies to a key that host's registry resolves to an event while the selected lifecycle and `md` treat it as data, and the warning names the host.
+
+### Wave 13 — Editor invalidation
+
+- **Watching.** `host_watch_folders()` joins the schema watch set, which covers both configuration files whether present or absent, manifests (including a missing one), members, imports, and JSON artifacts. A missing folder is watched from its nearest existing ancestor.
+  - The repository's `HEAD` and the branch ref it names are watched by exact path through the slot registration. A commit or checkout reloads the registrations.
+  - New library helper `config::registration::manifest_member_candidates` lists where a refused manifest's members are looked for, so recreating a missing member is noticed.
+- **Recovery without restart.** Delete, recreate, atomic replacement (write a temp file, then rename), adding or removing a `register` entry, and a newly appearing manifest all refresh every open document. An invalid new revision drops the host view (no last-good facts) and warns.
+- **Where warnings appear.** Registration load warnings are published on the file each one names (the configuration, the manifest, or the member), merged with that file's own diagnostics, and cleared when the problem goes away. Selection warnings (`dm.host.ambiguous`, a conflicting claim, `dm.lifecycle.unknown_host`) stay on the document.
+- **Session notices.** `dm.config.missing` is one `window/showMessage` warning per session, naming the file and `md init`. A pending legacy migration is one information message per file. Nothing is written, migrated, or prompted.
+- **Follow-up fixes.**
+  - A Markdown document with no frontmatter now selects through the same central selection over an empty frontmatter. A registered host's root catalog therefore never reaches it; Wave 12 had left it on an unfiltered legacy scan.
+  - A configuration buffer whose folder does not exist yet (a new `~/.claudine/config.yaml`) now takes the context of its nearest existing ancestor (`dmls/src/context.rs`), so it is routed.
+- **Verification found a defect.** A `register` entry naming a missing manifest was warned at line 0. `Registration` gained `at: Option<(usize, usize)>`, filled when the configuration is loaded, and `md` now reports that warning at the entry as well.
+
+### Requirement → test mapping
+
+| Behavior | Tests (`darkmatter-lsp` L1 unless noted) |
+| --- | --- |
+| Four configuration paths select their host or scope contract; a same-named file elsewhere routes normally | `config_contracts::each_configuration_path_selects_its_host_and_scope_contract`, `a_same_named_file_away_from_the_configuration_paths_routes_normally` |
+| Scope-specific defaults and docs on hover; a Claudine user-only key is rejected in the repository file | `config_contracts::the_darkmatter_scopes_differ_in_their_file_read_default_on_hover`, `a_claudine_setting_only_the_user_scope_declares_is_unknown_in_the_repository_file` |
+| An empty new buffer, including in a folder that does not exist yet | `config_contracts::an_empty_new_buffer_is_judged_and_completes_its_top_level_keys`, `a_configuration_buffer_whose_folder_does_not_exist_yet_is_routed` |
+| An authored `$schema`/`kind` is ignored; configuration errors are located | `config_contracts::an_authored_schema_or_kind_does_not_override_the_configuration_contract`, `a_configuration_error_is_located_at_the_offending_value` |
+| The embedded Claudine schema matches its source and prepares; end-to-end over stdio | `config_contracts::every_compiled_in_configuration_schema_prepares`, `a_new_claudine_configuration_is_served_through_a_session_without_any_registration` |
+| Motivating `sequence`/`start` document outside the package area; no registration means `md` | `registered_host_views::a_registered_hosts_document_gets_its_globals_stacks_and_functions`, `without_a_registration_the_motivating_document_is_an_md_document` |
+| Shared events only; no frontmatter; wrong-typed identifying values; unrelated keys; `dm.lifecycle.unknown_host` | `registered_host_views::{a_shared_events_only_document_beside_an_installed_hosts_catalog_is_md, a_wrong_typed_identifying_value_still_identifies, a_known_host_only_event_in_an_unidentified_document_names_its_host}`, `host_registration_watches::a_document_without_frontmatter_never_gets_a_registered_hosts_globals` |
+| Ambiguous, conflicting, and duplicate hosts | `registered_host_views::{an_ambiguous_document_is_md_and_never_falls_back_to_legacy, conflicting_claims_of_one_host_apply_no_host}`, `registered_host_editor_agreement::{the_user_and_repository_files_registering_one_manifest_load_it_once, one_manifest_spelled_two_ways_loads_once, two_identical_installs_agree_on_one_host}` |
+| Pending defaults (registered trigger and configuration) | `registered_host_editor_agreement::a_registered_hosts_required_defaults_are_pending_not_missing` |
+| Missing targets and invalid artifacts (located, no partial host) | `registered_host_editor_agreement::{a_register_entry_naming_a_missing_manifest_applies_no_host, a_manifest_naming_a_missing_member_refuses_the_host, a_stale_lifecycle_artifact_refuses_the_host, a_facts_artifact_for_another_catalog_refuses_the_host, a_rejected_register_value_loads_no_host_until_it_is_fixed}` |
+| Diagnostics, hover, completion, and lifecycle analysis agree after atomic replacement and deletion, then recover | `registered_host_editor_agreement::{every_feature_drops_the_host_after_an_invalid_atomic_replacement_and_restores_it, every_feature_drops_the_host_after_its_manifest_is_deleted_and_restores_it}`, `registered_host_views::an_invalid_replacement_clears_the_host_view_and_reports_the_failure` |
+| Delete, recreate, rename-replace, `register` add/remove, missing manifest appears, merged configuration diagnostics | `host_registration_watches::*` |
+| Watches cover missing configurations, JSON artifacts, `HEAD`, and the branch ref; HEAD reload | `workspace::watch` unit tests, `overlay::hosts::tests::a_commit_or_checkout_reloads_the_registrations`, `host_registration_watches::every_registration_input_is_watched_once_prepared` |
+| Version reuse and stale preparation; `AnalysisIdentity` follows the revision | `overlay::hosts::tests::*`, `registered_host_views::the_analysis_snapshot_follows_the_registration_revision` |
+| `dm.config.missing` once per session; migration reported, never performed | `host_registration_watches::a_missing_user_configuration_is_one_session_notice`, `overlay::hosts::tests::{a_missing_user_configuration_is_a_notice_and_nothing_is_written, a_pending_legacy_migration_is_reported_and_never_performed}` |
+
+Input-robustness: this phase added no new file-format reader. Configuration files are judged by the shipped closed contracts, whose field matrix Phase 3 tested; the manifest loader is Phase 5's. The new tests exercise the editor wiring: control documents, an invalid `register` value, missing and stale members, and empty buffers.
+
+### Gates
+
+- `darkmatter`: `just test` — 16605 passed, 10 skipped, none ≥ 5 s (load average 20–74). `just lint` clean, including the zed-dmls wasm check. `just check-tier-coverage darkmatter` — 0 stranded.
+- Dependents:
+  - `cargo check --workspace --all-targets` is clean. Claudine builds no `Registration`, matches no `Route` exhaustively, and uses `prepare_host_config_type`, which now delegates to `resolve_host_config_type`.
+  - Claudine, filtered by the changed surfaces (`config|schema|host|registration|shipped`): `claudine` 1747 passed. Four were 5.0–6.0 s at load average ≈ 92, and alone with `--test-threads 1` they took 1.8–2.5 s, so they are load-sensitive, not slow: `claudine_schemas::{cancelled_conditional_depth_is_the_parsers_alone_to_limit, nested_group_cancelled_rejects_forbidden_actions_in_the_deepest_conditionals, shared_payload_properties_have_identical_types}` and `container_schema_recursion::deep_container_deferral_does_not_hide_literal_or_shape_errors_in_either_phase`.
+  - `claudine-cli --features test-fixtures` (`config|host|registration|schema`): 512 passed.
+- Cross-OS: this phase changed path identity comparison, context derivation for folders that do not exist yet, and watch patterns, so Windows was checked.
+  - `just cross-check darkmatter --os windows` passed all 12029 tests.
+  - `just cross-check darkmatter-lsp --os windows` passed all 1960 tests, none ≥ 5 s.
+  - The darkmatter run had 14 Windows-only tests at 5.0–12.3 s, all in code this phase did not change, and contiguous in run order: they competed for the same resource rather than each being slow. They were `base_schema_end_to_end::*` (6 tests, 5.2–6.2 s), `expression_recovery_data::*` (7 tests, 5.0–6.9 s; `connection_refused` was already recorded in Phases 4 and 5), and `current_root_migration_guard::the_removed_nesting_appears_only_where_the_allowlist_expects` (12.3 s, already recorded in Phases 4 and 5).
+  - No Windows failure, so `os_failing` is not set. Linux and WSL2 are left to CI.
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gives `change_class: package` and `packages: [darkmatter, darkmatter-lsp, test-toolkit, darkmatter-cli, zed-dmls-cli]`. `test-toolkit` comes from the unrelated `prompts/` edit already present. The gates were not skipped.
+- Checked that `git status` shows no `.darkmatter.yaml`, lock file, or migration output in the repository root.
+
+## Phase 7
+
+Phase 6's work was still uncommitted when Phase 7 started, so the working tree holds both phases; Phase 7's files are tracked by hand rather than from `git status`.
+
+The coordinator wrote Claudine's identifying trigger, `claudine/schemas/claudine-document.yaml`, before Wave 14 so that both Wave 14 tasks could build on it. It is a `group` of the nine identifying keys (`sequence`, `start`, `blocked`, `success`, `failure`, `loop`, `prompt`, `agent`, `model`), each matched once per non-null YAML type as `claudine.yaml` does. Ordinary trigger matching and Darkmatter's presence-only identification therefore select the same documents. The payload is `{}`.
+
+Wave 14 ran as two subagents; they were started in the background by mistake, and the coordinator waited for both in the same turn. Wave 15's verification ran as one foreground subagent. The coordinator wrote Darkmatter's `register_manifest`, Claudine's `setup_claudine`, and the CLI wiring, and ran the gates once, after every subagent had finished.
+
+### Wave 14 — Claudine publication
+
+- **Publisher (Rule 29).** New `claudine/lib/src/composition/registration.rs`:
+  - API: `HostRevision::claudine()`, `with_version`, `with_file`, `publish(home, &HostRevision) -> Result<PublishOutcome, PublishError>`, `manifest_path`, `revisions_dir`, and `MANIFEST_REFERENCE` (`~/.claudine/darkmatter-host.yaml`).
+  - The revision holds twelve files: the eight bundle files, `globals.yaml`, `globals.lifecycle.json` (from `lifecycle_artifact()`), the identifying trigger, and `claudine-config.yaml`. The config schema is an auxiliary file; the manifest never names it.
+  - Content identity is `biscuit_hash::blake3_hash_json` over the ordered roles plus a filename → text map. The folder is `<version>-<first 16 hex>`.
+  - Files are written into a `.staging-*` folder and renamed into place. A lost rename race verifies the winner and reuses it. A damaged final folder is left untouched, and the revision is republished as `-2`, `-3`, ….
+  - The stable manifest is written last with `atomic_write`. When the manifest and its folder already match, publishing does no write at all. Old revisions are kept.
+  - `claudine/lib/Cargo.toml`: biscuit-hash now enables `json`. `blake3_hash_json` had compiled only because another crate in the build enabled that feature.
+- **Narrowed triggers.**
+  - `claudine.yaml`'s `match` no longer lists `initialize`, `cancelled`, or `finalize`: 40 selectors remain (8 keys × 5 types). Their payload definitions stay.
+  - `claudine-document.yaml` is published but is not in the embedded trigger bundle, so a `claudine` run never applies it.
+  - `just shipped-schemas` regenerated `claudine/lib/generated/shipped.json`; the other artifacts were unchanged.
+  - Darkmatter's `shipped_schema_corpus` classifies the new file as a trigger.
+  - Tests that relied on a shared event alone selecting `claudine.yaml`, but were really about Claudine's types for those events, gained `agent: claude`. In the fixtures it goes on the last frontmatter line, so no asserted position moves.
+  - The parity table's 15 shared-event rows now expect no selection.
+  - Observed after narrowing: a document whose only Claudine-looking keys are shared events is no longer schema-checked by Claudine. Claudine's lifecycle parser still refuses a bad verb before anything runs, but `md schema validate` and DMLS no longer flag it. The baseline md types for those events are loose (`initialize: [{ bogus: 1 }]` passes). This is the spec's intended narrowing; see `decisions_for_review`.
+
+### Wave 15 — Launch and setup integration
+
+- **Darkmatter.** New `config::init::register_manifest(context, scope, reference) -> RegisterReport`. It appends one `register` entry under the configuration lock, keeps every entry and comment, and creates a missing file with every default. It adds nothing when an entry resolves to the same manifest file, which new `config::registration::manifest_identity` decides. It refuses a missing manifest or a non-list `register`.
+- **Claudine library.** New `config::setup::setup_claudine` runs the steps in order:
+  1. publish the revision; on `SetupError::Publish`, nothing else is written;
+  2. run `setup_with_darkmatter` for the requested scope;
+  3. call `register_manifest` in the **user** file, whichever scope was set up.
+
+  Only a failure of Claudine's own write stops setup after publication. Handshake and registration results are returned for the caller to report.
+- **Claudine CLI.**
+  - `init_wizard::write_with_darkmatter_setup` is used by every setup path: the first-run wizard, interactive or headless, plus the test-only `commands::init`. It now calls `setup_claudine`. A successful publication and registration print nothing, as the default permissions handoff does; failures warn. The first full Claudine run caught the regression: `claudine claude --help` with no config runs the quiet headless first-run setup, and a "now registers" line on stderr failed `argv_normalization::wrapper_help_renders_wrapper_screen`.
+  - `main.rs::refresh_host_registration` runs in `dispatch` after the help exits and the Darkmatter config read, before wrapper or command dispatch. It is skipped for `handle`, `steer`, `completions`, `__complete`, and `uninstall`. A failure is a stderr warning, and `~/.darkmatter.yaml` is never written there.
+  - `cli/tests/l1/error_guards/transport-allow.toml` lists that warning's `format!` of the `PublishError` as the final render.
+- Claudine's runtime still never loads registrations: no Claudine source names `RegisteredHosts` or `with_registered_hosts`. A test pins this against a hostile repository registration that claims `claudine`.
+- **Docs.**
+  - `claudine/docs/topics/schemas.md` has a new section, "The published host registration", plus "When Claudine publishes and registers". It also covers the identifying trigger and the narrowed selection.
+  - `claudine/docs/topics/configuration.md` gives the `register` entry in the example.
+  - `claudine/docs/topics/frontmatter-properties.md` and `claudine/schemas/README.md` are updated.
+  - `darkmatter/docs/topics/host-registration.md` covers how a host program registers itself.
+
+### Requirement → test mapping
+
+| Behavior | Tests |
+| --- | --- |
+| First publish loads as one `claudine` profile through Darkmatter's loader; every member inside one revision | `claudine::l1 host_publication::first_publish_loads_as_one_claudine_profile` |
+| No-op refresh writes nothing (bytes + mtime) | `host_publication::refresh_of_a_current_registration_writes_nothing`, `claudine-cli::l1 host_registration_refresh::second_launch_writes_nothing` |
+| Version-only and content-only changes publish new revisions; old revision kept byte-identical | `host_publication::version_and_content_changes_publish_new_revisions` |
+| Concurrent publishers (same and different revisions) | `host_publication::concurrent_publishers_of_one_revision_share_it`, `concurrent_different_revisions_leave_one_complete_one` |
+| Corrupt preexisting revision left untouched; suffixed revision published and reused | `host_publication::corrupt_revision_is_left_and_a_suffixed_one_published` |
+| Failed staging / failed stable-manifest replacement keep the previous manifest | `host_publication::failed_staging_keeps_the_previous_manifest`, `failed_manifest_replacement_leaves_a_complete_revision` |
+| A reader holding the old manifest still loads | `host_publication::reader_holding_the_old_manifest_still_loads` |
+| Embedded source table byte-equal to repository files | `host_publication::embedded_sources_match_the_repository_files` |
+| Identifying trigger admitted with md-owned names; exact 9 × 5 shape; empty payload | `claudine::l1 claudine_identification::*` |
+| Each key identifies at every non-null type (wrong types included); shared events alone, md keys, nulls, empty do not | `claudine_identification::*` |
+| `claudine.yaml` no longer selects on initialize/cancelled/finalize alone; still types them when selected; end to end through the launch verdict | `claudine_identification::*`, `claudine_trigger_selection_parity` (15 rows now expect no selection) |
+| Identifying trigger not in the embedded bundle | `claudine_schemas_embedded` pin |
+| `register_manifest`: create with defaults, append keeping comments, add list, dedup by identity across spellings, repeat no-op, missing manifest, non-list `register`, no home | `darkmatter::l1 config_init::register_manifest_*` (8) |
+| Setup order publish → handshake → user registration; both orders with `md init`; repeat writes nothing; existing entries kept; absolute spelling not duplicated; repository scope registers in the user file only | `claudine::l1 installed_registration::*` |
+| Failure recovery: publication failure writes no configuration and recovers; registration failure reported after Claudine's config is saved | `installed_registration::*failed_publication*`, `*failed_registration*` |
+| md/DMLS library path outside `claudine/`: Registered selection, schema failure at `/model` only with registration, shared-only document is `Md` | `installed_registration::*identifies_claudine_documents_outside_claudine` |
+| Binary refresh updates facts, old revision retained, no `~/schemas` | `installed_registration::*upgraded_binary_refresh_changes_the_facts` |
+| Claudine runtime ignores a hostile repository registration claiming `claudine` | `installed_registration::*claudine_runtime_ignores_a_hostile_repository_registration` |
+| Launch refresh: first launch publishes without touching `~/.darkmatter.yaml`; stale manifest replaced; failure warns, exits 0, keeps manifest; hooks/steer/completion publish nothing | `claudine-cli::l1 host_registration_refresh::*` (5) |
+| Headless first-run setup stays silent on success | `claudine-cli::l1 argv_normalization::wrapper_help_renders_wrapper_screen` (pre-existing; it caught the regression) |
+
+Input robustness: the one new reader is `register_manifest`'s read of the `register` field, which goes through the existing `observe` loader. Its shapes:
+
+- absent → a list is added;
+- `null` → replaced by a one-entry list;
+- a scalar → located `InitError::Invalid`, nothing written;
+- a list → appended, or nothing when an entry names the same manifest;
+- a non-string element → never treated as a match.
+
+The manifest Claudine writes is read only by Phase 5's closed loader, whose matrix is already tested. The publisher's own no-op check compares bytes, and any mismatch republishes. The smell grep of the new files found no `#[serde(default)]`, no `unwrap_or_default()`, and no `.ok()` on a load-bearing parse.
+
+### Gates
+
+- `darkmatter`: `just test` — 16613 passed, 10 skipped, none ≥ 5 s. `just lint` clean (including the zed-dmls wasm check). `just check-tier-coverage darkmatter` — 0 stranded.
+- `claudine` (changed directly this phase):
+  - The first `just test` stopped on `argv_normalization::wrapper_help_renders_wrapper_screen`, the stderr regression described above. After the fix, `just test` passed 12083 tests, 15 skipped.
+  - Two tests were slow in the loaded run (load average ≈ 40). Alone, each is under 5 s, so both are cleared as load-sensitive:
+    - `claudine-cli compose_initialize_staged_boot::the_reviewed_early_catch_shell_trigger_is_refused_on_every_entry_path`: 6.0 s in the run, 1.7 s alone;
+    - `claudine-cli level1_provider_overlay_home::every_activation_reason_leaves_the_launch_home_variables_unchanged`: 8.6 s in the run, 3.0 s alone.
+  - `just lint` clean. `just check-tier-coverage claudine` — 0 stranded. Its first invocation failed while another cargo build held the package cache, and the rerun passed.
+- Dependents: Claudine's only other dependent is `claudine-contract`, covered by the area run. The Darkmatter library changes only add functions (`register_manifest`, `manifest_identity`). The `darkmatter-cli` change is a test file, covered by the darkmatter run.
+- Cross-OS: the publisher renames directories and replaces files atomically, so Windows was checked.
+  - `just cross-check claudine --os windows`: 6642 passed, none ≥ 5 s, including `host_publication`, `installed_registration`, and `claudine_identification`.
+  - `just cross-check claudine-cli --os windows`: 3972 passed, including `host_registration_refresh`.
+  - No Windows failure, so `os_failing` is not set. Linux and WSL2 are left to CI. Darkmatter's own Windows run was not repeated: its change only adds a function built on the manifest-resolution code that Phases 5 and 6 checked on Windows.
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gives `change_class: package` and `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit, simplified-schema, zed-dmls-cli]`. The tree still holds Phase 6's uncommitted DMLS work. `test-toolkit` comes from the unrelated `prompts/` edit that was already present. The gates were not skipped.

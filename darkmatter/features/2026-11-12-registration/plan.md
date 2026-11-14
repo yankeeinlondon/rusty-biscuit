@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-11-13
 total_phases: 9
-phase: 6
+phase: 8
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -896,6 +896,121 @@ skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/SKILL.md
 - .claude/skills/darkmatter/lifecycle.md
 - .claude/skills/darkmatter/schema.md
+source_files_during_phase_6:
+- darkmatter/dmls/Cargo.toml
+- darkmatter/dmls/benches/pipeline_work_a3.rs
+- darkmatter/dmls/src/bench.rs
+- darkmatter/dmls/src/config_contracts.rs
+- darkmatter/dmls/src/context.rs
+- darkmatter/dmls/src/diagnostics/call_check.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+- darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+- darkmatter/dmls/src/lib.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/event_views.rs
+- darkmatter/dmls/src/overlay/hosts.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/registry.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/overlay/yaml_contract.rs
+- darkmatter/dmls/src/overlay/yaml_document.rs
+- darkmatter/dmls/src/providers/code_actions.rs
+- darkmatter/dmls/src/providers/collections.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/formatting.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/frontmatter/enum_item_tests.rs
+- darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+- darkmatter/dmls/src/providers/frontmatter/snapshot_tests.rs
+- darkmatter/dmls/src/providers/lifecycle_host_tests.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/slot_jobs.rs
+- darkmatter/dmls/src/workspace/watch.rs
+- darkmatter/dmls/tests/common/mod.rs
+- darkmatter/dmls/tests/common/oracle.rs
+- darkmatter/dmls/tests/l1/claudine_editor_parity.rs
+- darkmatter/dmls/tests/l1/config_contracts.rs
+- darkmatter/dmls/tests/l1/formatting_transaction.rs
+- darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+- darkmatter/dmls/tests/l1/host_registration_watches.rs
+- darkmatter/dmls/tests/l1/incremental_graph_equivalence.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/mapping_only_corpus.rs
+- darkmatter/dmls/tests/l1/registered_host_editor_agreement.rs
+- darkmatter/dmls/tests/l1/registered_host_views.rs
+- darkmatter/dmls/tests/l1/schema_reference_parity.rs
+- darkmatter/dmls/tests/l1/value_hovers.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+- darkmatter/lib/src/config/load.rs
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/src/config/schema.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/tests/host_fixtures/mod.rs
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/host_registration.rs
+docs_updated_during_phase_6:
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/features.md
+- darkmatter/docs/lsp/architecture.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/topics/configuration.md
+- darkmatter/docs/topics/host-registration.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/library-surfaces.md
+source_files_during_phase_7:
+- claudine/cli/src/commands/init_wizard.rs
+- claudine/cli/src/main.rs
+- claudine/cli/tests/l1/error_guards/transport-allow.toml
+- claudine/cli/tests/l1/host_registration_refresh.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/lib/Cargo.toml
+- claudine/lib/generated/shipped.json
+- claudine/lib/src/composition/mod.rs
+- claudine/lib/src/composition/registration.rs
+- claudine/lib/src/config/setup.rs
+- claudine/lib/tests/fixtures/claudine-schemas/shell-expansion-in-initialize-set.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-depth3-then.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-list.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-root-dictionary.md
+- claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-then.md
+- claudine/lib/tests/l1/claudine_identification.rs
+- claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- claudine/lib/tests/l1/claudine_schemas_matrix.rs
+- claudine/lib/tests/l1/claudine_trigger_selection_parity.rs
+- claudine/lib/tests/l1/host_publication.rs
+- claudine/lib/tests/l1/installed_registration.rs
+- claudine/lib/tests/l1/main.rs
+- claudine/schemas/claudine-document.yaml
+- claudine/schemas/claudine.yaml
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/lib/src/config/init.rs
+- darkmatter/lib/src/config/registration.rs
+- darkmatter/lib/tests/l1/config_init.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+docs_updated_during_phase_7:
+- claudine/docs/dependencies.md
+- claudine/docs/topics/configuration.md
+- claudine/docs/topics/frontmatter-properties.md
+- claudine/docs/topics/schemas.md
+- claudine/schemas/README.md
+- darkmatter/docs/topics/host-registration.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/claudine/module-map.md
+- .claude/skills/darkmatter/SKILL.md
 ---
 
 # Configuration, permissions, and host registration implementation plan
@@ -1970,7 +2085,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 12 — Editor preparation (parallel)
 
-- [ ] **Select editor contracts**
+- [x] **Select editor contracts**
   - Own explicit configuration path selection in `overlay/yaml_document.rs`,
     `overlay/yaml_contract.rs`, and schema preparation/providers. Select the
     shipped user/repo config types by captured path identity before general
@@ -1985,7 +2100,7 @@ never count a private parser assertion as the matrix result.
   - Remove active `shell.policy_path` semantics and return a located retired
     setting diagnostic naming `.darkmatter.yaml`/`permissions.shell-commands`.
 
-- [ ] **Cache selected hosts**
+- [x] **Cache selected hosts**
   - Own `TriggerRegistries`, `AnalysisIdentity`, `LifecycleHost`, and
     provider host-view plumbing. Implement the one coherent selected view
     in Rules 26/28 across `providers/{dsl,frontmatter}.rs`, event views,
@@ -1996,7 +2111,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 13 — Editor invalidation (sequential)
 
-- [ ] **Watch passive inputs**
+- [x] **Watch passive inputs**
   - Extend `workspace/watch.rs` and backend invalidation to configuration,
     references, manifests, revision directories, all schema/catalog/artifact
     dependencies, and captured HEAD. Watch missing paths from existing parents
@@ -2007,7 +2122,7 @@ never count a private parser assertion as the matrix result.
   - Emit `dm.config.missing` as one session notification. Passive configuration
     and legacy-migration diagnostics never launch setup or write files.
 
-- [ ] **Verify editor behavior**
+- [x] **Verify editor behavior**
   - Use existing in-process/provider and hermetic stdio LSP fixtures; add no
     real editor, browser, or OS-focus test. Cover the motivating sequence/start
     example outside the package area, shared-events-only md files, wrong-typed
@@ -2021,7 +2136,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 14 — Claudine publication (parallel)
 
-- [ ] **Publish host revisions**
+- [x] **Publish host revisions**
   - Own new Claudine registration service and embedded revision source table.
     Implement Rule 29 and export the passive config schema alongside the
     manifest members/dependencies. Keep the stable manifest fields exactly
@@ -2036,7 +2151,7 @@ never count a private parser assertion as the matrix result.
     Retain old revisions and prove every published manifest sees one complete
     revision. No manual copied-schema fixture is an installation mechanism.
 
-- [ ] **Narrow Claudine triggers**
+- [x] **Narrow Claudine triggers**
   - Own `claudine/schemas/claudine-document.yaml`, `claudine.yaml` match
     changes, and corresponding bundle/corpus tests. Remove initialize,
     cancelled, and finalize as sole root-trigger selectors; retain their
@@ -2047,7 +2162,7 @@ never count a private parser assertion as the matrix result.
 
 ### Wave 15 — Launch and setup integration (sequential)
 
-- [ ] **Connect Claudine setup**
+- [x] **Connect Claudine setup**
   - Connect init to publication, permission transfer, and user registration
     insertion in that order. Preserve all existing register entries and
     deduplicate by resolved stable manifest identity. Add repository setup
@@ -2059,7 +2174,7 @@ never count a private parser assertion as the matrix result.
   - Return refresh diagnostics through the existing output path without
     launching init or asking a question in noninteractive operation.
 
-- [ ] **Verify installed integration**
+- [x] **Verify installed integration**
   - In temporary home/repository fixtures, exercise init in both orders,
     repeat setup, launch refresh, old-revision readers, and failure recovery.
     Run md and DMLS against the published revision outside `claudine/`.
