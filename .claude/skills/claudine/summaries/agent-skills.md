@@ -11,7 +11,7 @@ The current skills research shows first-class Agent Skills support across the re
 The divergence is in the edges:
 
 | Provider    | Support     | Primary Entry Point                 | Main User Scope                                                                                  | Main Repo Scope                                                                            | Activation Shape                                                                    |
-|-------------|-------------|-------------------------------------|--------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| ----------- | ----------- | ----------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | Claude Code | First class | `SKILL.md`                          | `~/.claude/skills/<name>/SKILL.md`                                                               | `.claude/skills/<name>/SKILL.md`                                                           | Explicit `/name`, model invocation, subagent preload, settings overrides            |
 | Codex       | First class | `SKILL.md`                          | `~/.agents/skills/` and `~/.codex/skills/`                                                       | `.agents/skills/`                                                                          | Explicit `$name` or `/skills`, implicit model selection, sidecar policy             |
 | Gemini CLI  | First class | `SKILL.md`                          | `~/.gemini/skills/` and `~/.agents/skills/`                                                      | `.gemini/skills/` and `.agents/skills/`                                                    | Model proposes `activate_skill`; user consent loads body/resources                  |
@@ -27,7 +27,7 @@ The divergence is in the edges:
 The most portable unit is the skill directory rooted at `SKILL.md`.
 
 | Asset                                  | Portability                                                                                             |
-|----------------------------------------|---------------------------------------------------------------------------------------------------------|
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `SKILL.md` entry point                 | Portable across the researched providers, except Pi and Kimi also accept flat `.md` forms in some roots |
 | YAML frontmatter                       | Portable when limited to standard Agent Skills keys                                                     |
 | `name`                                 | Portable in concept, but validation, defaults, and directory-name matching differ                       |
@@ -67,7 +67,7 @@ The major interoperability path is `.agents/skills/`. Codex, Gemini, Goose, Kimi
 Provider-branded paths remain important:
 
 | Provider    | Branded User Paths                                    | Branded Repo Paths                                   |
-|-------------|-------------------------------------------------------|------------------------------------------------------|
+| ----------- | ----------------------------------------------------- | ---------------------------------------------------- |
 | Claude Code | `~/.claude/skills/`                                   | `.claude/skills/`                                    |
 | Codex       | `~/.codex/skills/` plus `$CODEX_HOME/skills/.system/` | none branded; repo uses `.agents/skills/`            |
 | Gemini CLI  | `~/.gemini/skills/`                                   | `.gemini/skills/`                                    |
@@ -129,7 +129,7 @@ Kilo formats an available-skill list and loads bodies through a `skill` tool fil
 Claudine should classify skills as layered resources.
 
 | Layer                                 | Portable?              | Notes                                                                                                                                             |
-|---------------------------------------|------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| ------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Standard `SKILL.md` directory         | Usually portable       | Best canonical artifact when it has `name`, `description`, provider-neutral Markdown, and relative assets                                         |
 | Standard metadata                     | Mostly portable        | `name`, `description`, `license`, `compatibility`, `metadata` are the safest keys                                                                 |
 | Provider metadata                     | Provider-specific      | Claude hooks/agents/context, Codex sidecars, Qwen hooks/paths, Pi trust/package wiring, OpenCode/Kilo URL sources, etc. need mapping or filtering |
@@ -141,7 +141,7 @@ Claudine should classify skills as layered resources.
 A practical Claudine classification should look like this:
 
 | Classification                 | Meaning                                                                                                              | Linking Behavior                                                             |
-|--------------------------------|----------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Portable                       | Standard `SKILL.md` content can be linked with no semantic rewrite beyond path placement                             | Symlink or copy into provider skill root                                     |
 | Portable With Provider Mapping | Core skill travels, but metadata or activation controls need translation or omission                                 | Link core files and emit provider-specific sidecars/config where supported   |
 | Linked But Degraded            | Target provider loads the skill but ignores some semantics                                                           | Link with warnings about ignored activation, permissions, tools, or metadata |

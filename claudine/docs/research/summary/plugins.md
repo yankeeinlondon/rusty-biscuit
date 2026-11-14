@@ -11,7 +11,7 @@ failure:
   message: 'The summary research for **plugins** failed to complete: {{ err.message }}'
 $schema:
   file: file(required;eager)
-file: docs/research/summary/plugins.md
+file: ./plugins.md
 last_updated: 2026-07-09
 hash: 6f9d868be700fa5c-dd47e8289f030cef
 ---

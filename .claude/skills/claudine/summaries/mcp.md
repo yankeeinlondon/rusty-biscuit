@@ -30,7 +30,7 @@ The important distinction is between provider-native support and Claudine-mediat
 ## Provider Matrix
 
 | Provider    | Provider-native MCP posture                                                                                                        | Claudine support today                     | Claudine runtime injection today | Main last-mile variance                                                                      |
-|-------------|------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------|----------------------------------|----------------------------------------------------------------------------------------------|
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------- | -------------------------------------------------------------------------------------------- |
 | Claude Code | Rich MCP client: tools, prompts, partial resources, partial roots, elicitation, OAuth, managed policy, multiple transports         | Import/export/sync                         | No                               | Native `--mcp-config` exists, but Claudine currently treats Claude as persistent-config only |
 | Codex       | Strong MCP client: stdio + Streamable HTTP, tools, partial resources, elicitation, OAuth, managed requirements                     | Import/export/sync                         | Yes                              | Shadow `CODEX_HOME` with generated TOML                                                      |
 | Gemini CLI  | Strong MCP client: stdio/SSE/HTTP, tools, prompts, partial resources, roots, OAuth, folder trust                                   | Import/export/sync                         | Yes                              | Shadow `GEMINI_CLI_HOME` with generated `.gemini/settings.json` and copied sidecars          |
@@ -79,7 +79,7 @@ Kimi and standalone Qwen should be treated as persistent-config providers for wr
 “MCP support” is not a single yes/no capability. Tool support does not imply resources, prompts, roots, sampling, or elicitation.
 
 | Feature     | Claude  | Codex   | Gemini  | Goose   | Kimi                 | OpenCode | Qwen                               |
-|-------------|---------|---------|---------|---------|----------------------|----------|------------------------------------|
+| ----------- | ------- | ------- | ------- | ------- | -------------------- | -------- | ---------------------------------- |
 | Tools       | Full    | Full    | Full    | Full    | Full                 | Full     | Full                               |
 | Resources   | Partial | Partial | Partial | Partial | Unknown/undocumented | Partial  | Partial                            |
 | Prompts     | Full    | None    | Full    | Partial | Unknown/undocumented | Full     | Full                               |
