@@ -91,13 +91,32 @@ flowchart TD
     F --> G[write migration receipts, if any]
     G --> H[read each target once more]
     H -->|bytes moved under us| Y
-    H --> I[for each changed target:<br/>temp file, sync, keep permissions, rename]
+    H --> I[for each changed target, in lock order<br/>with published_last targets after the rest:<br/>temp file, sync, keep permissions, rename]
     I -->|rename fails| R[ReplacementFailed: that target untouched,<br/>temp file removed]
     I --> J[release locks; lock files stay]
 ```
 
 Every step from taking the locks to the last rename happens while all locks
 are held.
+
+Targets are replaced one at a time, so a failure after the first rename
+leaves the earlier targets published (`ReplacementFailed` lists them). When
+one file only points at another, mark the pointing file
+`TargetChange::published_last()`: it is replaced after every other target,
+whatever the lock order, so a failure in between never leaves it pointing at
+a file that does not yet hold what it should. Claudine's setup uses this to
+move a `permissions` block into `~/.claudine/config.yaml` before
+`~/.darkmatter.yaml` is rewritten to refer to it.
+
+```rust
+transaction.add(TargetChange::edit(&claudine_config, SourceExpectation::Bytes(read), move_block))?;
+transaction.add(TargetChange::edit(&darkmatter_config, SourceExpectation::Bytes(read_too), refer).published_last())?;
+```
+
+Tests built with the `effects-instrumentation` feature can fail a replacement
+on purpose: `write::test_hooks::fail_next_replacement()` fails the next one,
+and `fail_replacement_after(n)` lets `n` through first (an interruption
+between two targets).
 
 ## Locking
 

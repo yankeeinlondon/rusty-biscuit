@@ -69,7 +69,6 @@ impl SlotGrantChoice {
         match (self.decision.as_str(), self.scope.as_str()) {
             ("allow", "persisted") => format!("Always allow schema slots to read {what} {}{any_query}", self.target),
             ("allow", _) => format!("Allow schema slots to read {what} {}{any_query} for this session", self.target),
-            (_, "persisted") => format!("Always deny schema slots reading {what} {}{any_query}", self.target),
             _ => format!("Deny schema slots reading {what} {}{any_query} for this session", self.target),
         }
     }

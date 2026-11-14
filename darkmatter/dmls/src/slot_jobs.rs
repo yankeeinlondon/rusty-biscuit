@@ -469,9 +469,10 @@ pub(crate) fn run_job(job: SlotJob) -> SlotResult {
 }
 
 /// Every local path the resolution observed (content reads, existence
-/// answers, missing probes, listings), plus the repository's index and
-/// `HEAD` when any of them lies inside it: the repository's `permissions`
-/// count only as committed at `HEAD` (the commit rule).
+/// answers, missing probes, listings), plus, for a document in a
+/// repository, that repository's index and `HEAD`: its `permissions` decided
+/// every read and count only as committed at `HEAD` (the commit rule), so a
+/// commit can admit a read the resolution was refused and never observed.
 fn slot_reads(data: &DataRuntime, repository: Option<&Path>) -> Vec<WatchedRead> {
     let mut paths: BTreeSet<PathBuf> = BTreeSet::new();
     for observation in data.observations_since(Default::default()) {
@@ -484,7 +485,6 @@ fn slot_reads(data: &DataRuntime, repository: Option<&Path>) -> Vec<WatchedRead>
         }
     }
     if let Some(root) = repository
-        && paths.iter().any(|path| path.starts_with(root))
         && let Some(git_dir) = git_dir(root)
     {
         paths.insert(SourceBuffers::key(&git_dir.join("index")));

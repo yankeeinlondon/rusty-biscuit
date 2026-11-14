@@ -177,6 +177,19 @@ impl MdRequest {
         crate::output::report_run_notices(self.config_notices(), data_output);
     }
 
+    /// [`Self::report_config_notices`] for `md init`, which creates the user
+    /// file: a `dm.config.missing` warning would point at the very file it is
+    /// about to write, so only the other notices are reported.
+    pub fn report_config_notices_for_init(&self, data_output: bool) {
+        self.data_output.set(data_output);
+        let notices = self
+            .config_notices()
+            .into_iter()
+            .filter(|notice| notice.code != darkmatter::config::load::CONFIG_MISSING_CODE)
+            .collect();
+        crate::output::report_run_notices(notices, data_output);
+    }
+
     /// The run-level notices of the invocation's configuration: the missing
     /// user file's `dm.config.missing` warning and the user scope's
     /// `dm.config.migration` notices. A user file that

@@ -2055,9 +2055,10 @@ name: world
         assert!(requests[0].chain_executables.is_empty());
     }
 
-    /// AllowExactPersist writes the normalized command to the whitelist file.
+    /// AllowExactPersist saves the normalized command as an `exact` rule in
+    /// the user's `permissions.shell-commands`.
     #[test]
-    fn pipeline_allow_exact_persist_writes_whitelist() {
+    fn pipeline_allow_exact_persist_saves_the_permission() {
         let temp_dir = TempDir::new().unwrap();
         let content = "# Test\n::shell echo hello\n";
         let md: Markdown = content.into();
@@ -2074,9 +2075,9 @@ name: world
         let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("hello"));
 
-        let whitelist =
+        let config =
             std::fs::read_to_string(temp_dir.path().join(".darkmatter.yaml")).unwrap();
-        assert!(whitelist.contains("exact echo hello"));
+        assert!(config.contains("exact echo hello"));
     }
 
     /// Deny refuses for this run only: nothing is saved.

@@ -716,6 +716,35 @@ fn conforms_schema_about_carries_the_whole_catalog_at_any_verbosity() {
 }
 
 #[test]
+fn conforms_init_json_names_the_created_user_file() {
+    let fixture = CliProcessFixture::named("output-init-json").without_user_config();
+    let value = conforms(include_str!("../../schemas/output/init.yaml"), &fixture, &["init", "--output", "json"], 0);
+    let path = fixture.home().join(".darkmatter.yaml");
+    assert_eq!(
+        value,
+        json!({
+            "files": [{ "path": path.display().to_string(), "scope": "user", "action": "created" }],
+            "notices": [],
+            "outcome": "success",
+            "diagnostics": [],
+        }),
+        "no `dm.config.missing` for the file init creates"
+    );
+    assert!(path.is_file());
+}
+
+#[test]
+fn conforms_init_json_failure_outside_a_repository() {
+    let fixture = CliProcessFixture::named("output-init-repo-json").without_user_config();
+    let value = conforms(include_str!("../../schemas/output/init.yaml"), &fixture, &["init", "--repo", "--output", "json"], 1);
+    assert_eq!(value["outcome"], "failure");
+    assert_eq!(value["files"], json!([]));
+    let codes: Vec<&str> = value["diagnostics"].as_array().unwrap().iter().map(|record| record["code"].as_str().unwrap()).collect();
+    assert_eq!(codes, ["dm.config.not_saved"], "{value:#}");
+    assert!(!fixture.home().join(".darkmatter.yaml").exists(), "nothing is written outside a repository");
+}
+
+#[test]
 fn conforms_list_themes_json_is_every_theme_in_canonical_order() {
     use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
     let fixture = CliProcessFixture::named("output-list-themes-json");
@@ -921,6 +950,7 @@ help_shows_the_default! {
     help_set => ["set"], "markdown";
     help_get => ["get"], "json";
     help_list_themes => ["list-themes"], "terminal";
+    help_init => ["init"], "terminal";
     help_toc => ["toc"], "terminal";
     help_delta => ["delta"], "terminal";
     help_rm => ["rm"], "terminal";

@@ -5,16 +5,12 @@
 //! migration into `permissions.file-read` (`config::migration`) reads: the
 //! store's location and the grammar of one line's target.
 
-use std::fmt;
 use std::path::PathBuf;
 
 use super::GrantTarget;
 
 /// The retired store's location below the user's home, as path components.
 pub const GRANT_STORE_RELATIVE_PATH: [&str; 3] = [".config", "darkmatter", "schema-read-policy"];
-
-/// The code the retired store's errors carried.
-const RETIRED_GRANT_STORE_CODE: &str = "dm.schema.slot_grant_store_invalid";
 
 /// The target a store line's kind word and argument name.
 pub(super) fn target_from_words(kind: &str, argument: &str) -> Result<GrantTarget, String> {
@@ -72,57 +68,4 @@ fn site(argument: &str) -> Result<GrantTarget, String> {
         return Err(format!("`{argument}` has no host"));
     };
     Ok(GrantTarget::Site { scheme: url.scheme().to_string(), host: host.to_string(), port: url.port() })
-}
-
-/// Why the retired grant store could not be read.
-///
-/// No reader produces it any more: the store is no longer read, and the
-/// migration reports its own located errors. It remains only while
-/// [`ShellExpansionError::SlotGrantStore`](crate::markdown::compose::ShellExpansionError::SlotGrantStore)
-/// still names it.
-///
-/// `line` is 1-based for [`GrantStoreErrorKind::InvalidLine`] and for
-/// [`GrantStoreErrorKind::NotUtf8`] (the line holding the first invalid
-/// byte), and `0` for [`GrantStoreErrorKind::Unreadable`], which concerns the
-/// whole file.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GrantStoreError {
-    /// The store file.
-    pub path: PathBuf,
-    /// The 1-based line, or `0` for the whole file.
-    pub line: usize,
-    /// What is wrong, for a person.
-    pub message: String,
-    /// The failure's shape.
-    pub kind: GrantStoreErrorKind,
-}
-
-impl GrantStoreError {
-    /// The diagnostic code, the same for every kind.
-    pub fn code(&self) -> &'static str {
-        RETIRED_GRANT_STORE_CODE
-    }
-}
-
-impl fmt::Display for GrantStoreError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let path = biscuit_file::to_portable_string(&self.path);
-        match self.line {
-            0 => write!(f, "{path}: {}", self.message),
-            line => write!(f, "{path}:{line}: {}", self.message),
-        }
-    }
-}
-
-impl std::error::Error for GrantStoreError {}
-
-/// The shape of a [`GrantStoreError`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum GrantStoreErrorKind {
-    /// A line is not a grant.
-    InvalidLine,
-    /// The file exists but cannot be read.
-    Unreadable,
-    /// The file is not UTF-8.
-    NotUtf8,
 }

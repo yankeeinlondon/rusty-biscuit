@@ -40,6 +40,7 @@ use super::migration_receipt::content_hash;
 use super::permissions::{PermissionPolicy, RepositoryLayers};
 use super::schema::{CONFIG_FILE_NAME, ConfigScope, contract, permissions_contract};
 
+pub(crate) use reference::follow_on_disk;
 pub use entries::{
     FileReadEntry, NetworkAccess, PermissionsReference, PermissionsSetting, ScopePermissions, Setting,
     ShellCommandEntry,
@@ -358,6 +359,19 @@ impl ConfigSnapshot {
 
         let user_path = context.home_dir().map(|home| home.join(CONFIG_FILE_NAME));
         let user_missing = match (&user_path, &user_bytes) {
+            (None, _) => {
+                let path = PathBuf::from("~").join(CONFIG_FILE_NAME);
+                diagnostics.push(ConfigDiagnostic {
+                    code: CONFIG_MISSING_CODE,
+                    file: path.clone(),
+                    message: format!(
+                        "there is no home directory, so `{}` cannot be read and every user setting takes its default; nothing can be saved to it",
+                        path.display()
+                    ),
+                    problems: Vec::new(),
+                });
+                None
+            }
             (Some(path), None) => {
                 diagnostics.push(ConfigDiagnostic {
                     code: CONFIG_MISSING_CODE,
@@ -770,6 +784,24 @@ impl Observe<'_> {
         };
         Ok(PermissionPolicy::new(user, repository, self.context))
     }
+}
+
+/// Judges one revision of the file at `path` (`bytes`, `None` when absent)
+/// as [`ConfigSnapshot::load`] does, without following its reference: what
+/// setup ([`super::init`]) reads before it edits a file.
+///
+/// ## Errors
+///
+/// As [`ConfigSnapshot::load`] for a file that fails as a whole.
+pub(crate) fn observe_file(
+    context: &FileResolutionContext,
+    bytes: Option<&[u8]>,
+    path: &Path,
+    revision: ConfigRevision,
+    scope: ConfigScope,
+) -> Result<ConfigFile, ConfigError> {
+    let portable = context.portable_variables();
+    Observe { context, portable: &portable }.file(bytes, path, revision, scope)
 }
 
 /// Judges the `permissions` block of `text`, the whole file at `path`, as

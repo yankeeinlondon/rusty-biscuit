@@ -56,8 +56,9 @@ pub struct PreflightApprovalStats {
     pub already_whitelisted: usize,
     /// Commands the approval handler admitted.
     pub user_approved: usize,
-    /// Schema-slot reads known before evaluation that no grant (or the
-    /// automatic grant) already decided, and so were asked about.
+    /// Schema-slot reads known before evaluation that neither the
+    /// `permissions` nor this run's approvals already decided, and so were
+    /// asked about.
     pub slot_reads_asked: usize,
 }
 

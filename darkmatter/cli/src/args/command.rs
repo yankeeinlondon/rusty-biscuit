@@ -210,6 +210,27 @@ pub enum Command {
         cache_root: Option<PathBuf>,
     },
 
+    /// Create or complete your Darkmatter configuration (`~/.darkmatter.yaml`).
+    ///
+    /// Writes every missing setting at its default and keeps everything already
+    /// written, comments included; running it again changes nothing. See
+    /// `darkmatter/docs/cli/init.md`.
+    Init {
+        /// Also create or complete the repository's `.darkmatter.yaml`; fails
+        /// without writing anything outside a repository
+        #[arg(long)]
+        repo: bool,
+
+        /// Replace a `permissions` reference with the block it points at (or
+        /// with the defaults when that file cannot be read)
+        #[arg(long)]
+        inline: bool,
+
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
+    },
+
     /// List the themes `style.page.theme` and `style.page.code.theme` accept.
     ListThemes {
         /// What to print

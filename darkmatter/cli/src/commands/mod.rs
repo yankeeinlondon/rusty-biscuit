@@ -17,6 +17,7 @@ mod delta;
 mod frontmatter;
 mod graph;
 mod hash;
+mod init;
 pub mod list_themes;
 pub mod render;
 pub mod schema;
@@ -180,6 +181,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 None => result?,
             }
         }
+        CliCommand::Init { repo, inline, output } => init::run_init(repo, inline, output, cli, request)?,
         CliCommand::ListThemes { output } => list_themes::run_list_themes(output, cli)?,
         CliCommand::Toc { input, output } => toc::run_toc(input.as_ref(), output, cli, request)?,
         CliCommand::Delta { base, updated, output } => delta::run_delta(&base, &updated, output, cli, request)?,

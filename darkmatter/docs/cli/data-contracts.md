@@ -987,6 +987,7 @@ outcome, depending on whether its shape was published before `outcome` existed:
 | Command | Schema | Value |
 |---|---|---|
 | [`md clean`](./clean.md#version-1-json-envelope) | [`clean.yaml`](../../cli/schemas/output/clean.yaml) | the version-1 object: `version`, `source`, `frontmatter`, `diagnostics`, `applied`, `changed`, `warnings`; see below for its run-level records |
+| [`md init`](./init.md) | [`init.yaml`](../../cli/schemas/output/init.yaml) | `{ "files", "notices", "outcome", "diagnostics" }`: one `{ path, scope, action }` row per configuration file (`action` is `created`, `updated`, or `unchanged`); a failure before any write has empty lists |
 | [`md list-themes`](./list-themes.md) | [`list-themes.yaml`](../../cli/schemas/output/list-themes.yaml) | a bare array of `{ name, description }`, one per theme in canonical order; a run with a diagnostic is `{ "outcome", "diagnostics", "value" }`, as for `md get` |
 | [`md toc`](./toc.md) | [`toc.yaml`](../../cli/schemas/output/toc.yaml) | `title`, the hashes, `preamble`, `structure` (the heading tree), `code_blocks`, `internal_links`, `slug_index` |
 | [`md delta`](./delta.md) | [`delta.yaml`](../../cli/schemas/output/delta.yaml) | `classification`, `statistics`, the frontmatter and preamble flags, `added`, `removed`, `modified`, `moved`, `code_block_changes`, `broken_links` |

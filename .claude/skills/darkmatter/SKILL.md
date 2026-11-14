@@ -300,7 +300,8 @@ themes, disclosure blocks, browser safety, or the render-tree fold.
 
 The binary is `md`: `render`, `compose`, `clean`, `toc`, `delta`, `schema
 validate|detect|about|triggers`, `hash`, `get|set|rm` (frontmatter), `edit`,
-`code-block`, `graph`, and `validate refs`. Users' contract:
+`code-block`, `graph`, `validate refs`, and `init` (configuration setup; see
+[cli.md](cli.md#md-init)). Users' contract:
 `docs/cli/output-and-width.md` and `docs/cli/data-contracts.md`.
 
 Checks are relaxed or tightened only through three verbs: `--allow <id|all>`

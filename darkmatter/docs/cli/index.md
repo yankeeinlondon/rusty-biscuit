@@ -19,6 +19,7 @@ Commands:
   render       Render a markdown document (same as default behavior without a subcommand)
   clean        Clean up markdown formatting
   compose      Compose a document through the compose pipeline
+  init         Create or complete your Darkmatter configuration (`~/.darkmatter.yaml`)
   list-themes  List the themes `style.page.theme` and `style.page.code.theme` accept
   toc          Show markdown table of contents
   delta        Compare two markdown documents
@@ -77,6 +78,7 @@ Three things work the same way on every command:
 - [`clean <file-reference>`](./clean.md) - cleans up the Markdown file by ensuring good headings structure, consistent indent levels, use of proper vertical spacing. Sends fixed file to STDOUT unless the `--save` switch is used
 - [`compose <file-reference>`](./compose.md) - runs the referenced Markdown file through the [composition pipeline](../darkmatter-compose-pipeline.md) and returns the composed Markdown to STDOUT, or the document and every problem as data; pipe it to `md render` for any other output
 - [`toc <file-ref>`](./toc.md) - shows the table of contents for the file referenced
+- [`init [--repo] [--inline]`](./init.md) - creates or completes your configuration file `~/.darkmatter.yaml` (and, with `--repo`, the repository's `.darkmatter.yaml`) with every setting at its default, keeping anything already written
 - [`list-themes`](./list-themes.md) - lists the theme names `style.page.theme` and `style.page.code.theme` accept
 - [`delta <file-ref> <file-ref>`](./delta.md) - describes the changes found between the two Markdown files. Uses a structured analysis to describe semantically what's changed. Adds visual diffing if you use the `--verbose` flag.
 - [`get <file-ref> <path>`](./get.md) - extracts a frontmatter value, named by [property path](#property-paths), from the Markdown file referenced

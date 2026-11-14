@@ -185,7 +185,10 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   no interpolation diagnostics, and a quick-fix can wrap a spurious malformed
   interpolation into a literal.
 - **Shell awareness** — `::shell` and frontmatter `$()` values hover with an
-  approved / denied / unknown policy verdict, and denied built-ins raise a
+  approved / denied / unknown policy verdict, decided passively from the
+  document's captured `permissions.shell-commands` the way `md compose`
+  decides it (never prompting, saving, or approving), and denied built-ins
+  raise a
   `darkmatter.security.*` diagnostic. A `$()` value's suffixes complete, hover
   with their meaning, and raise `dm.shell.invalid_suffix` when compose would
   reject them. A quoted `$()` value is recognized like an unquoted one. Nothing
@@ -322,6 +325,6 @@ For the full, source-cited capability matrix behind these gates, see
   `workspace/didChangeConfiguration` settings and reloadable without a
   restart. Keys cover wiki behavior, baseline schema extensions, strict
   schema/style modes, strict function-call diagnostics
-  (`[expressions] strict`), shell-policy discovery, code-action categories,
+  (`[expressions] strict`), code-action categories,
   formatting, semantic tokens (`[semantic_tokens] enable`), and diagnostics
   debounce. See [DMLS Configuration](../../docs/lsp/configuration.md).

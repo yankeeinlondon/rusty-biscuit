@@ -172,7 +172,9 @@ pub enum ConfigWriteError {
         refusal: ValidationRefusal,
     },
     /// Replacing a target failed. That target is untouched and its temporary
-    /// file removed; targets earlier in lock order were already published.
+    /// file removed; targets replaced before it (lock order, with
+    /// [`TargetChange::published_last`] targets after the rest) were already
+    /// published.
     #[error("could not replace {}: {source}", path.display())]
     ReplacementFailed {
         /// The target that was not replaced.
@@ -180,7 +182,7 @@ pub enum ConfigWriteError {
         /// The underlying error.
         #[source]
         source: std::io::Error,
-        /// Targets already replaced before this one, in lock order.
+        /// Targets already replaced before this one, in replacement order.
         published: Vec<PathBuf>,
     },
     /// One transaction names the same file twice (perhaps through two
@@ -220,19 +222,20 @@ pub struct TargetChange {
     base: Base,
     edits: Vec<YamlEdit>,
     migration: Option<Vec<MigrationSource>>,
+    publish_last: bool,
 }
 
 impl TargetChange {
     /// Edits the existing file at `path`, which must hold what `expected`
     /// describes when it is re-read under the lock.
     pub fn edit(path: impl Into<PathBuf>, expected: SourceExpectation, edits: Vec<YamlEdit>) -> Self {
-        Self { path: path.into(), base: Base::Existing(expected), edits, migration: None }
+        Self { path: path.into(), base: Base::Existing(expected), edits, migration: None, publish_last: false }
     }
 
     /// Creates the file at `path` from `initial` with `edits` applied. The
     /// file must still be missing under the lock; its directory must exist.
     pub fn create(path: impl Into<PathBuf>, initial: impl Into<String>, edits: Vec<YamlEdit>) -> Self {
-        Self { path: path.into(), base: Base::Create { initial: initial.into() }, edits, migration: None }
+        Self { path: path.into(), base: Base::Create { initial: initial.into() }, edits, migration: None, publish_last: false }
     }
 
     /// Records `sources` in the target's migration receipt, written under the
@@ -240,6 +243,17 @@ impl TargetChange {
     /// [`migration_receipt`].
     pub fn with_migration(mut self, sources: Vec<MigrationSource>) -> Self {
         self.migration = Some(sources);
+        self
+    }
+
+    /// Replaces this target only after every target without this mark,
+    /// whatever the lock order. A two-file change whose second file only
+    /// points at the first (a `permissions` reference) uses it so that a
+    /// failure between the two replacements leaves the referring file as it
+    /// was.
+    #[must_use]
+    pub fn published_last(mut self) -> Self {
+        self.publish_last = true;
         self
     }
 }
@@ -252,6 +266,7 @@ struct PlannedTarget {
     base: Base,
     edit_batches: Vec<Vec<YamlEdit>>,
     migration: Option<Vec<MigrationSource>>,
+    publish_last: bool,
 }
 
 /// One saved target in a [`CommitOutcome`].
@@ -269,10 +284,12 @@ pub struct CommittedTarget {
     pub hash: String,
 }
 
-/// The result of a successful [`ConfigTransaction::commit`], in lock order.
+/// The result of a successful [`ConfigTransaction::commit`], in replacement
+/// order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitOutcome {
-    /// Every target, in lock order.
+    /// Every target, in replacement order: lock order, with
+    /// [`TargetChange::published_last`] targets after the rest.
     pub targets: Vec<CommittedTarget>,
 }
 
@@ -329,6 +346,7 @@ impl ConfigTransaction {
                 return Err(ConfigWriteError::ConflictingChanges { path: resolved });
             }
             existing.edit_batches.push(change.edits);
+            existing.publish_last |= change.publish_last;
             if change.migration.is_some() {
                 existing.migration = change.migration;
             }
@@ -345,6 +363,7 @@ impl ConfigTransaction {
                 base: change.base,
                 edit_batches: vec![change.edits],
                 migration: change.migration,
+                publish_last: change.publish_last,
             },
         );
         Ok(self)
@@ -394,7 +413,10 @@ impl ConfigTransaction {
 
         let mut published = Vec::new();
         let mut targets = Vec::with_capacity(self.targets.len());
-        for (target, stage) in self.targets.iter().zip(staged) {
+        // Lock order, except that a `published_last` target waits for the rest.
+        let mut order: Vec<(&PlannedTarget, Staged)> = self.targets.iter().zip(staged).collect();
+        order.sort_by_key(|(target, _)| target.publish_last);
+        for (target, stage) in order {
             let bytes = stage.candidate.as_bytes();
             let written = stage.current.as_deref() != Some(bytes);
             if written {
@@ -598,8 +620,13 @@ fn lock_deadline() -> Duration {
 
 fn injected_replacement_failure() -> std::io::Result<()> {
     #[cfg(feature = "effects-instrumentation")]
-    if test_hooks::FAIL_REPLACEMENT.with(|fail| fail.replace(false)) {
-        return Err(std::io::Error::other("injected replacement failure"));
+    match test_hooks::FAIL_REPLACEMENT.with(std::cell::Cell::get) {
+        Some(0) => {
+            test_hooks::FAIL_REPLACEMENT.with(|cell| cell.set(None));
+            return Err(std::io::Error::other("injected replacement failure"));
+        }
+        Some(remaining) => test_hooks::FAIL_REPLACEMENT.with(|cell| cell.set(Some(remaining - 1))),
+        None => {}
     }
     Ok(())
 }
@@ -613,7 +640,8 @@ pub mod test_hooks {
 
     thread_local! {
         pub(super) static LOCK_DEADLINE: Cell<Option<Duration>> = const { Cell::new(None) };
-        pub(super) static FAIL_REPLACEMENT: Cell<bool> = const { Cell::new(false) };
+        /// How many replacements succeed before the injected failure.
+        pub(super) static FAIL_REPLACEMENT: Cell<Option<usize>> = const { Cell::new(None) };
     }
 
     /// Restores a hook's default when dropped.
@@ -636,7 +664,14 @@ pub mod test_hooks {
     /// Makes the next target replacement fail after its temporary file is
     /// written and synced, just before the rename.
     pub fn fail_next_replacement() -> HookGuard {
-        FAIL_REPLACEMENT.with(|cell| cell.set(true));
-        HookGuard(|| FAIL_REPLACEMENT.with(|cell| cell.set(false)))
+        fail_replacement_after(0)
+    }
+
+    /// Lets `succeeding` replacements through, then makes the next one fail
+    /// as [`fail_next_replacement`] does: a two-file transaction interrupted
+    /// between its replacements.
+    pub fn fail_replacement_after(succeeding: usize) -> HookGuard {
+        FAIL_REPLACEMENT.with(|cell| cell.set(Some(succeeding)));
+        HookGuard(|| FAIL_REPLACEMENT.with(|cell| cell.set(None)))
     }
 }

@@ -701,6 +701,17 @@ Frontmatter `$( … )` suffixes follow the same rule: completion, hover, and the
 `frontmatter_shell_values` strips a quoted scalar's quotes before parsing,
 because the YAML span includes them.
 
+A shell command's policy verdict (`overlay/shell.rs`) is passive: the built-in
+blacklist denies (`builtin_refusal`, the only input of the
+`dm.security.disallowed_command` diagnostic); otherwise `verdict` reads the
+document's `permissions.shell-commands`, loaded with
+`slots::session::load_passively` (user file, plus the repository's HEAD and
+working copy, committed tree discovered), and approves only when every segment
+is pre-approved with no `!` match. Invalid permissions are `Unknown`, never
+approved. DMLS never prompts, saves, or runs a command; `shell.policy_path` is
+retired (`config::RETIRED_SHELL_POLICY_PATH` warns, file or editor settings).
+Tests: `tests/l1/shell_permission_classification.rs`.
+
 ## Schema slots
 
 User-facing contract: `darkmatter/docs/topics/schemas/schema-slots.md#in-the-editor`.
@@ -734,8 +745,10 @@ Code: `dmls/src/slot_jobs.rs`, `overlay/mod.rs::schema_for`,
   watch fallback), grants, `dmls.refreshSchemaSlots`, and
   `didChangeConfiguration` (`invalidate_all`). Watches: one `RelativePattern`
   per recorded path (`slot_watch_registration`, id
-  `dmls-schema-slot-watchers`), plus `.git/index` and `HEAD` when a read lies
-  in the repository.
+  `dmls-schema-slot-watchers`), plus `.git/index` and `HEAD` whenever the
+  document is in a repository (`slot_jobs::slot_reads`): a refused read is
+  never observed, yet committing a repository `permissions` entry can admit
+  it.
 - Diagnostics: `slots::failure_diagnostics` ranges a slot written in the
   document at the record's own `span` (the library projects it into the
   document through every YAML carrier), only when

@@ -3,11 +3,13 @@
 //! program that edits them shares, the recovery receipts a migration
 //! leaves between publishing a file and cleaning up its sources, the
 //! effective `network` permission remote reads take their consent from, and
-//! the evaluated permission policy with its approval persistence.
+//! the evaluated permission policy with its approval persistence, and setup
+//! (`md init` and a host's setup handshake).
 //!
 //! User-facing guides: `darkmatter/docs/topics/configuration.md` and
 //! `darkmatter/docs/topics/config-writes.md`.
 
+pub mod init;
 pub mod load;
 pub mod migration;
 pub mod migration_receipt;

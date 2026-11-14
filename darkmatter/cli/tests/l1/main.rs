@@ -55,6 +55,7 @@ mod compose_refs_and_missing;
 mod compose_report_diagnostics;
 mod compose_data_output;
 mod config_notices;
+mod init_command;
 mod link_titles;
 mod compose_remote_caching;
 mod compose_schema;

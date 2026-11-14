@@ -684,11 +684,17 @@ fn shell_verdict_markdown(command: &str, ctx: &DocumentContext) -> String {
     let Some(parsed) = shell::parse_command(command) else {
         return String::new();
     };
-    let whitelist = shell::load_whitelist(ctx.config);
-    match shell::verdict(&parsed, whitelist.as_ref()) {
-        PolicyVerdict::Approved => "\n\nPolicy: ✅ approved (whitelisted).".to_string(),
+    let permissions = match ctx.file_context() {
+        Ok(context) => shell::load_permissions(context),
+        Err(failure) => Err(failure.to_string()),
+    };
+    match shell::verdict(&parsed, &permissions) {
+        PolicyVerdict::Approved => "\n\nPolicy: ✅ approved (pre-approved by `permissions.shell-commands`).".to_string(),
         PolicyVerdict::Denied(reason) => format!("\n\nPolicy: ⛔ denied — {reason}."),
-        PolicyVerdict::Unknown => "\n\nPolicy: ❔ unknown (compose would prompt for approval).".to_string(),
+        PolicyVerdict::Unknown => match &permissions {
+            Ok(_) => "\n\nPolicy: ❔ unknown (compose would prompt for approval).".to_string(),
+            Err(error) => format!("\n\nPolicy: ❔ unknown (the permissions do not load: {error})."),
+        },
     }
 }
 
@@ -1325,11 +1331,10 @@ pub(crate) fn undeclared_property_diagnostic(
     }
 }
 
-/// Shell commands the built-in policy blacklist disallows (`::shell`,
+/// Shell commands the built-in blacklist disallows (`::shell`,
 /// `::shell-block` body lines, and frontmatter `$()`), and a frontmatter
 /// `$()` suffix the suffix grammar rejects.
 fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
-    let whitelist = shell::load_whitelist(ctx.config);
     for directive in directives::directives(ctx.text) {
         if directive.kind != DirectiveKind::Shell {
             continue;
@@ -1338,7 +1343,7 @@ fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
             continue;
         };
         if let Some(parsed) = shell::parse_command(&command.value)
-            && let PolicyVerdict::Denied(reason) = shell::verdict(&parsed, whitelist.as_ref())
+            && let Some(reason) = shell::builtin_refusal(&parsed)
             && let Some(range) = ctx.source_map.byte_range_to_lsp(command.span.clone())
         {
             out.push(diagnostic(
@@ -1366,7 +1371,7 @@ fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
         }
         let command = &ctx.text[shift_span(&parsed.inner_span, value_span.start)];
         if let Some(command) = shell::parse_command(command)
-            && let PolicyVerdict::Denied(reason) = shell::verdict(&command, whitelist.as_ref())
+            && let Some(reason) = shell::builtin_refusal(&command)
             && let Some(range) = ctx.source_map.byte_range_to_lsp(value_span)
         {
             out.push(diagnostic(
@@ -1384,7 +1389,7 @@ fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     // `block_pairing_diagnostics`, so an unpaired block simply yields no lines.
     for (command, span) in shell_block_commands(ctx.text) {
         if let Some(parsed) = shell::parse_command(&command)
-            && let PolicyVerdict::Denied(reason) = shell::verdict(&parsed, whitelist.as_ref())
+            && let Some(reason) = shell::builtin_refusal(&parsed)
             && let Some(range) = ctx.source_map.byte_range_to_lsp(span)
         {
             out.push(diagnostic(

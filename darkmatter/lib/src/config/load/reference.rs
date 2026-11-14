@@ -211,6 +211,39 @@ impl Observe<'_> {
     }
 }
 
+/// A followed reference's target and its bytes (`None` when absent).
+pub(crate) type FollowedTarget = (PathBuf, Option<Vec<u8>>);
+
+/// The file `file`'s `permissions` reference names on disk, and its bytes
+/// (`None` when nothing is there), following it as the policy does for the
+/// user file (`scope` user) or the repository working copy: what setup
+/// ([`crate::config::init`]) reads to write a referenced block back inline.
+/// `None` when `file`'s `permissions` is not a valid reference.
+///
+/// ## Errors
+///
+/// The reference error the policy would report, naming both files.
+pub(crate) fn follow_on_disk(
+    context: &FileResolutionContext,
+    file: &ConfigFile,
+    scope: ConfigScope,
+) -> Option<Result<FollowedTarget, ConfigError>> {
+    let Ok(PermissionsSetting::Reference(reference)) = &file.permissions else {
+        return None;
+    };
+    let portable = context.portable_variables();
+    let observe = Observe { context, portable: &portable };
+    let source = Source { reference, revision: file.revision, at: file.permissions_at };
+    let place = match (scope, context.repository_root()) {
+        (ConfigScope::User, _) => Where::User,
+        (ConfigScope::Repository, Some(root)) => Where::Worktree { root },
+        (ConfigScope::Repository, None) => {
+            return Some(Err(source.error(Path::new(&reference.reference), "which needs a repository to resolve in")));
+        }
+    };
+    Some(observe.follow(&source, place))
+}
+
 /// The referring side of a reference, for errors.
 struct Source<'a> {
     reference: &'a PermissionsReference,

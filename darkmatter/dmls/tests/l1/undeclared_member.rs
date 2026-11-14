@@ -450,7 +450,6 @@ fn library_and_editor(text: &str, files: &[(&str, &str)]) -> (Vec<darkmatter::ma
     std::fs::write(&path, text).unwrap();
     let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir, ""))
         .with_source_file(path.clone())
-        .with_shell_policy_root(dir)
         .with_shell_working_directory(dir)
         .with_shell_approval_handler(std::sync::Arc::new(AllowAll));
     let snapshot = RequestSnapshot::new(dir).with_home(Some(dir.join("home")));

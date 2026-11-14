@@ -27,7 +27,7 @@ pub(crate) mod targets;
 use std::fmt;
 use std::path::PathBuf;
 
-pub use legacy::{GRANT_STORE_RELATIVE_PATH, GrantStoreError, GrantStoreErrorKind};
+pub use legacy::GRANT_STORE_RELATIVE_PATH;
 pub use matching::GrantBook;
 pub use request::{SlotGrantDecision, SlotGrantRequest};
 

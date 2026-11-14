@@ -406,9 +406,11 @@ never replace a newer one.
 
 Each installed resolution records every local path it depended on: files
 it read, files it probed and found missing, folders it listed, and, when
-any of those lies in the document's Git repository, that repository's
-`.git/index` and `HEAD` (for a linked worktree, the Git directory its
-`.git` file names).
+the document lies in a Git repository, that repository's `.git/index` and
+`HEAD` (for a linked worktree, the Git directory its `.git` file names).
+The repository's `permissions` count only as committed, so a commit can
+admit a read the resolution was refused and therefore never recorded; the
+index event of that commit refreshes the document.
 
 | Event | Resolutions marked stale |
 |---|---|

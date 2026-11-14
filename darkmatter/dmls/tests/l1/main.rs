@@ -63,6 +63,7 @@ mod schema_roots_parity;
 mod schema_slots_editor;
 mod schema_yaml_spellings;
 mod searched_candidates;
+mod shell_permission_classification;
 mod shell_suffixes;
 mod standalone_stdio;
 mod startup_log_lines;

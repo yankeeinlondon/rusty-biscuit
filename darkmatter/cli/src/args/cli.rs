@@ -111,6 +111,7 @@ impl Cli {
                 | Command::Compose { output, .. }
                 | Command::Toc { output, .. }
                 | Command::ListThemes { output }
+                | Command::Init { output, .. }
                 | Command::Delta { output, .. }
                 | Command::Get { output, .. }
                 | Command::Set { output, .. }
@@ -128,6 +129,12 @@ impl Cli {
             Some(Command::Schema { target: SchemaTarget::Detect { output, .. } }) => Some(output.target()),
         };
         target.is_some_and(OutputTarget::is_data)
+    }
+
+    /// Whether this invocation is `md init`, which creates the user file a
+    /// missing-file warning would point at.
+    pub fn is_init(&self) -> bool {
+        matches!(self.command, Some(crate::args::Command::Init { .. }))
     }
 
     /// The explicit command, or `render` with the root's render options.

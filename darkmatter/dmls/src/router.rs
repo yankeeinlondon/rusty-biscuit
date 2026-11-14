@@ -1100,14 +1100,18 @@ impl ServerState {
     }
 
     /// Saves an "always allow" of `path` to the user's `permissions.file-read`.
+    ///
+    /// The file is judged from its own document context (the builder's, so
+    /// its repository's exclusions still refuse the save), with the
+    /// configuration that context names loaded passively.
     fn save_slot_read_approval(&self, path: &std::path::Path) -> Result<(), String> {
-        use darkmatter::config::load::{ConfigLoadMode, ConfigSnapshot};
         use darkmatter::config::permissions::persist::{PersistentApproval, save_user_approval};
-        let home = self.contexts.home().ok_or_else(|| "there is no home folder to keep user settings in".to_string())?;
-        let context = biscuit_file::FileResolutionContext::from_snapshot(home, Some(home.to_path_buf()), std::collections::HashMap::new());
-        let snapshot = ConfigSnapshot::load(&context, None, ConfigLoadMode::Passive).map_err(|error| error.to_string())?;
+        use darkmatter::markdown::schemas::slots::session::load_passively;
+        let resolution = self.contexts.for_document(path);
+        let context = resolution.context().map_err(ToString::to_string)?;
+        let snapshot = load_passively(context).map_err(|error| error.to_string())?;
         let policy = snapshot.policy().map_err(|error| error.to_string())?;
-        let approval = PersistentApproval::FileRead { target: path.to_path_buf(), reading: Box::new(context) };
+        let approval = PersistentApproval::FileRead { target: path.to_path_buf(), reading: Box::new(context.clone()) };
         let saved = save_user_approval(policy, &approval).map_err(|error| error.to_string())?;
         tracing::info!(file = %saved.file.display(), entry = %saved.entry, "schema-slot read approval saved");
         Ok(())
@@ -2573,9 +2577,9 @@ impl Router {
         Response::new_ok(id, CompletionResponse::Array(items))
     }
 
-    /// Runs a `workspace/executeCommand`: a schema-slot grant (written to
-    /// the user's grant store, or kept for this server process) or a slot
-    /// refresh. Either marks every slot snapshot stale; the refreshes it
+    /// Runs a `workspace/executeCommand`: a schema-slot grant (saved to the
+    /// user's `permissions.file-read`, or kept for this server process) or a
+    /// slot refresh. Either marks every slot snapshot stale; the refreshes it
     /// demands run on the slot worker, so the answer never waits for one.
     fn execute_command(&mut self, id: RequestId, params: serde_json::Value) -> Response {
         use crate::diagnostics::slots::{GRANT_SLOT_READ_COMMAND, REFRESH_SCHEMA_SLOTS_COMMAND, SlotGrantChoice};

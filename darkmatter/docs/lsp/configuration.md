@@ -181,8 +181,8 @@ If the merged result is not a valid configuration, for example
 `"debounce_ms": "fast"`, DMLS ignores the editor settings for every section
 but `formatting`, keeps the file layer, and shows an error. Bad editor
 settings cannot wedge the server. A `null` value replaces the value below it
-like any other: on an optional key (`workspace.root`, `wiki.wiki_root`,
-`shell.policy_path`) it clears the setting, and on any other key it makes the
+like any other: on an optional key (`workspace.root`, `wiki.wiki_root`) it
+clears the setting, and on any other key it makes the
 merged result invalid.
 
 ### `formatting`: leaf by leaf
@@ -227,7 +227,7 @@ these; see [Who wins](../topics/markdown-formatting.md#who-wins-precedence).
 | `schema.slow_validation_ms` | `200` | yes |
 | `style.strict` | `false` | **parsed only** |
 | `expressions.strict` | `false` | yes |
-| `shell.policy_path` | unset | yes |
+| `shell.policy_path` (retired) | unset | warned, ignored |
 | `hints.inlay` | `true` | **parsed only** |
 | `code_actions.categories.<category>` | every category enabled | yes |
 | `formatting.markdown.<rule>` | no overrides | yes |
@@ -480,21 +480,30 @@ editor key is `expressions.strict` under `dmls`, and it overrides the file
 both ways. See [DMLS Diagnostics](../../dmls/docs/diagnostics.md#expressionsstrict)
 for the categories, the fix for each warning, and what an invalid value does.
 
-## `[shell]`
+## `[shell]` (retired)
+
+DMLS has no shell settings. A shell command's hover verdict comes from the
+same place `md compose` decides it: Darkmatter's built-in blacklist, then the
+`permissions.shell-commands` of `~/.darkmatter.yaml` and, inside a
+repository, of `{repo}/.darkmatter.yaml` as committed (see
+[Configuration](../topics/configuration.md)). DMLS reads them passively: it
+never prompts, saves an approval, or runs a command.
+
+The former `shell.policy_path` setting is retired. A `.dmls.toml` or editor
+settings that still set it load normally, and DMLS shows one warning naming
+the key and where its rules belong now:
 
 ```toml
 [shell]
-policy_path = "/Users/me/.config/darkmatter"
+policy_path = "/Users/me/.config/darkmatter"   # warned and ignored
 ```
 
-`policy_path` (default unset) names a **directory** holding a
-`.darkmatter-shell-whitelist` file. When it is set and the file has entries,
-hovering a `::shell`, `::shell-block`, or `$(…)` command reports a command
-the whitelist covers as approved. DMLS never runs a command, and the
-whitelist never changes diagnostics: a `dm.security.disallowed_command`
-error comes only from Darkmatter's built-in blacklist, which always applies.
-A relative path resolves against the server process's working directory,
-not the workspace folder, so an absolute path is the reliable choice.
+```yaml
+# ~/.darkmatter.yaml: move the rules here
+permissions:
+    shell-commands:
+        - prefix git
+```
 
 ## `[hints]`
 

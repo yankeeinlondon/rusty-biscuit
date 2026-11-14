@@ -198,7 +198,8 @@ exactly one `SlotSession` and passes it to every pass:
   pre-flight (run-only answers from `ComposePreflightApprovals::slot_grants`;
   the approval handler only on an interactive, formatted run).
 - `md graph`, `md validate refs`: `with_reference_check_slot_session`
-  (`SessionMode::ReferenceCheck`: automatic and persisted grants, never asks;
+  (`SessionMode::ReferenceCheck`: the captured `permissions` and this run's
+  approvals, never asks;
   an unapproved template is deferred, not failed).
 - `md schema validate`, `md clean`: `SlotSession::for_context` plus one batched
   `DarkmatterSchemas::approve_slot_reads` per document before it resolves.
@@ -218,3 +219,22 @@ asks: an unapproved read is `dm.schema.slot_approval_required` with
 (exit 1). Pre-approval is the request's captured `permissions.file-read`;
 the prompt offers allow-for-run, "always allow" a file (saved to the user's
 `permissions.file-read`), and deny-for-run.
+
+## `md init`
+
+`commands/init.rs` is a thin `CommandRun` leaf (`DataShape::typed`, schema
+`cli/schemas/output/init.yaml`) over `darkmatter::config::init::init`, which
+plans every scope first (`config_path` refuses a missing home or repository
+before any read), observes each file with the loader's own judgment
+(`load::observe_file`, `load::follow_on_disk` for a reference's target),
+adds only missing top-level settings at their schema defaults, and commits
+all scopes in one `ConfigTransaction` validated by `check_config_text`.
+`--inline` alone replaces a reference (with the target's authored block, or
+schema defaults plus an `InitNotice`). `main` calls
+`MdRequest::report_config_notices_for_init`, which drops `dm.config.missing`
+for the file init creates; setup errors become `ClassifiedFailure::located`
+records (`dm.config.invalid`/`reference` for an invalid file,
+`dm.config.not_saved` otherwise). Claudine's handshake reuses `observe`,
+`setup_change`, `commit_checked`, and `TargetChange::published_last` (the
+reference is replaced after Claudine's block lands). User docs:
+`docs/cli/init.md`, `docs/topics/configuration.md#setting-up-md-init`.

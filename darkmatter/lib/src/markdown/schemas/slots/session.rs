@@ -98,8 +98,6 @@ pub struct SlotSession {
     run_grants: Vec<Grant>,
     mode: SessionMode,
     configuration: Configuration,
-    /// The request context an "always allow" pre-flight gave is judged from.
-    request_context: Option<FileResolutionContext>,
     permissions: OnceLock<(SlotPermissions, NetworkPermission)>,
     not_saved: NotSavedWarnings,
     cancel: Option<Arc<AtomicBool>>,
@@ -113,9 +111,14 @@ pub struct SlotSession {
 enum Configuration {
     /// None: nothing is pre-approved and nothing can be saved.
     Unconfigured,
-    /// A snapshot the caller captured (a composition request's).
+    /// A snapshot the caller captured, with no request context: an "always
+    /// allow" applies for the run but is not saved.
     Captured(Arc<ConfigSnapshot>),
-    /// Loaded passively, once, for this context when first needed.
+    /// A snapshot captured for a request whose context an "always allow" is
+    /// judged from (and saved with).
+    CapturedFor(Arc<ConfigSnapshot>, Box<FileResolutionContext>),
+    /// Loaded passively, once, for this context when first needed; an
+    /// "always allow" is judged from it too.
     LoadFor(Box<FileResolutionContext>),
 }
 
@@ -213,7 +216,6 @@ impl SlotSession {
             run_grants: Vec::new(),
             mode: SessionMode::Full,
             configuration: Configuration::Unconfigured,
-            request_context: None,
             permissions: OnceLock::new(),
             not_saved: NotSavedWarnings::default(),
             cancel: None,
@@ -242,7 +244,6 @@ impl SlotSession {
     pub fn for_request(request: &crate::markdown::compose::ComposeRequest) -> Self {
         let options = request.options();
         let mut session = Self::new(options.data_runtime())
-            .with_config_snapshot(Arc::clone(request.config_snapshot()))
             .with_repository_root(options.slot_repository_root())
             .with_allowed_hosts(options.remote_read_config.http_hosts().cloned().collect())
             .with_network(options.network_permission());
@@ -252,7 +253,10 @@ impl SlotSession {
             options.slot_repository(),
         ));
         session.remote = options.remote_fetch.clone();
-        session.request_context = Some(request.resolution_context().clone());
+        session.configuration = Configuration::CapturedFor(
+            Arc::clone(request.config_snapshot()),
+            Box::new(request.resolution_context().clone()),
+        );
         if let Some(handler) = &options.shell_approval_handler {
             session = session.with_handler(Arc::clone(handler));
         }
@@ -274,7 +278,6 @@ impl SlotSession {
         let mut session = Self::new(data).with_repository_root(context.repository_root().map(Path::to_path_buf));
         session.configuration = Configuration::LoadFor(Box::new(context.clone()));
         session.observations = Arc::new(SessionObservations::for_context(context));
-        session.request_context = Some(context.clone());
         session
     }
 
@@ -307,9 +310,10 @@ impl SlotSession {
                 continue;
             }
             if grant.scope == GrantScope::Persisted
-                && let (GrantTarget::File(path), Some(reading)) = (&grant.target, self.request_context.clone())
+                && let GrantTarget::File(path) = &grant.target
+                && let Configuration::CapturedFor(_, reading) | Configuration::LoadFor(reading) = &self.configuration
             {
-                save_file_approval(&self.permissions().0, path, &reading, &self.not_saved);
+                save_file_approval(&self.permissions().0, path, reading, &self.not_saved);
             }
             self.run_grants.push(Grant { scope: GrantScope::Once, ..grant });
         }
@@ -347,7 +351,12 @@ impl SlotSession {
     /// [`Self::with_run_grants`], whose "always allow" approvals it saves.
     #[must_use]
     pub fn with_config_snapshot(mut self, snapshot: Arc<ConfigSnapshot>) -> Self {
-        self.configuration = Configuration::Captured(snapshot);
+        self.configuration = match std::mem::replace(&mut self.configuration, Configuration::Unconfigured) {
+            Configuration::CapturedFor(_, context) | Configuration::LoadFor(context) => {
+                Configuration::CapturedFor(snapshot, context)
+            }
+            Configuration::Unconfigured | Configuration::Captured(_) => Configuration::Captured(snapshot),
+        };
         self.permissions = OnceLock::new();
         self
     }
@@ -365,7 +374,7 @@ impl SlotSession {
         self.permissions.get_or_init(|| {
             let snapshot = match &self.configuration {
                 Configuration::Unconfigured => None,
-                Configuration::Captured(snapshot) => Some(Ok(Arc::clone(snapshot))),
+                Configuration::Captured(snapshot) | Configuration::CapturedFor(snapshot, _) => Some(Ok(Arc::clone(snapshot))),
                 Configuration::LoadFor(context) => Some(load_passively(context).map(Arc::new)),
             };
             match snapshot {
@@ -724,8 +733,15 @@ fn cycle_error(slots: &[Slot], template: &str, pending: Option<&PendingSchema>) 
 
 /// The configuration `context` names, loaded passively: the user file, and
 /// inside a repository the repository file as committed at its `HEAD` (read
-/// from the repository at `context`'s root) and in the working copy.
-fn load_passively(context: &FileResolutionContext) -> Result<ConfigSnapshot, crate::config::load::ConfigError> {
+/// from the repository at `context`'s root) and in the working copy. Shared
+/// with readers outside a session: DMLS's shell classification and its
+/// "always allow" save, and Claudine's shell permissions.
+///
+/// ## Errors
+///
+/// The load's [`ConfigError`](crate::config::load::ConfigError), including a
+/// repository whose committed tree cannot be read.
+pub fn load_passively(context: &FileResolutionContext) -> Result<ConfigSnapshot, crate::config::load::ConfigError> {
     use crate::config::load::ConfigLoadMode;
     // A context naming a repository where none is found loads with no
     // committed tree, which the loader reports as an error.

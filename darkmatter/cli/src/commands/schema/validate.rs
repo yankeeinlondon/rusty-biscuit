@@ -292,8 +292,9 @@ fn validate_all(
             .map(|context| (DarkmatterSchemas::new(context.clone()), Baseline::None))
             .map_err(|error| SchemaError::Baseline { message: format!("{error:#}"), source: None })
     };
+    let session = slot_session(request, is_data);
     let (api, baseline) = match loaded {
-        Ok((api, baseline)) => (api.with_slot_session(slot_session(request, is_data)), baseline),
+        Ok((api, baseline)) => (api.with_slot_session(std::sync::Arc::clone(&session)), baseline),
         Err(err) if is_data => {
             // A baseline holding a slot keeps its own code.
             let code = darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(&err).unwrap_or("dm.schema.baseline");
@@ -325,6 +326,11 @@ fn validate_all(
         if let Some(terminal) = &stderr {
             // Warnings, so `--quiet` (which hides successes) keeps them.
             emit_warnings(&findings, terminal);
+            // Only a formatted run prompts, so only it can leave an "always
+            // allow" that could not be saved.
+            for warning in session.take_not_saved_warnings() {
+                crate::output::stderr_warning(&warning.message);
+            }
             if verbose > 1
                 && let Some(timings) = &timings
             {
@@ -358,10 +364,9 @@ fn pretty_report(results: &[FileResult], quiet: bool, verbose: u8, options: &Out
 
 /// The command's one schema-slot session: every document's template resolves
 /// through it, so a grant decided for one file holds for the rest of the run.
-/// Its automatic grants are judged against the launch context's repository,
-/// and its grant store is the one below the request's home. A formatted run
-/// on a terminal asks; a data output never prompts, so an unapproved read is
-/// `dm.schema.slot_approval_required`.
+/// Its reads are decided by the `permissions` the launch context names. A
+/// formatted run on a terminal asks; a data output never prompts, so an
+/// unapproved read is `dm.schema.slot_approval_required`.
 fn slot_session(request: &MdRequest, is_data: bool) -> std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession> {
     use darkmatter::markdown::schemas::slots::SlotSession;
     let data = darkmatter::markdown::compose::DataRuntime::new();
@@ -1229,8 +1234,8 @@ mod tests {
     }
 
     /// `schema.yaml` and its `status.yaml` type in a temp folder outside any
-    /// repository, so no automatic grant applies, resolved by the CLI's
-    /// function under `handler`.
+    /// repository, with no configuration pre-approving a read, resolved by
+    /// the CLI's function under `handler`.
     fn resolve_under(handler: Arc<Scripted>) -> Result<(), SchemaError> {
         let temp = tempfile::tempdir().expect("temp dir");
         let root = biscuit_file::canonicalize_simplified(temp.path()).expect("canonical temp dir");

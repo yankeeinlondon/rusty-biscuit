@@ -754,10 +754,6 @@ fn shell_source(error: &ShellExpansionError) -> Option<DiagnosticSource> {
     if let ShellExpansionError::PolicyIo { path, .. } = error {
         return file_only(named(path));
     }
-    if let ShellExpansionError::SlotGrantStore(store) = error {
-        let line = (store.line > 0).then_some(store.line);
-        return Some(DiagnosticSource { line, ..DiagnosticSource::file_only(Some(store.path.clone())) });
-    }
     let file = context_file(error.context()?)?;
     let line = match error.origin() {
         Some(ShellCommandOrigin::Frontmatter { line, .. }) => *line,
@@ -790,7 +786,6 @@ fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
     match error {
         ShellExpansionError::Preflight(inner) => markdown_error_diagnostics(inner),
         ShellExpansionError::ParseDirective { .. } => vec![shell_record(DIRECTIVE_PARSE_CODE, error)],
-        ShellExpansionError::SlotGrantStore(store) => vec![shell_record(store.code(), error)],
         // An invalid `permissions` block reports its own located problems.
         ShellExpansionError::Config(config) => config_error_diagnostics(config),
         _ => vec![shell_record(SHELL_FAILURE_CODE, error)],

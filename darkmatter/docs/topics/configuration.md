@@ -12,6 +12,8 @@ be fetched, and which host manifests to register:
 This page covers:
 
 - [what a configuration file holds](#the-file) and its [defaults](#defaults),
+- [setting the files up](#setting-up-md-init) with `md init`, and what
+  [Claudine's setup](#when-claudine-is-set-up) does to them,
 - [the permissions block](#permissions), and pointing it at
   [another file](#pointing-at-another-file),
 - [loading a snapshot](#loading-a-snapshot) from Rust,
@@ -74,6 +76,79 @@ file at that scope. Explicit `null` is an error, never "use the default".
 `<ext>` is each of `txt`, `text`, `md`, `csv`, `tsv`, `json`, `json5`,
 `yaml`, `yml`, and `toml`, one entry per extension. An absent `permissions`
 block, or `permissions: {}`, holds all three permission defaults.
+
+## Setting Up: `md init`
+
+`md init` writes `~/.darkmatter.yaml` with every setting at its default, so
+you can see and edit them. `md init --repo` also writes the repository's
+`.darkmatter.yaml` (with the repository defaults). The command reference is
+[`md init`](../cli/init.md).
+
+```yaml
+# ~/.darkmatter.yaml, as `md init` creates it
+permissions:
+  file-read:
+  - ./*.txt
+  - ./*.text
+  # … one entry per default extension
+  shell-commands: []
+  network: deny
+register: []
+```
+
+Running it on a file you already have is safe:
+
+- every value, comment, reference, and `register` entry you wrote stays byte
+  for byte; only a missing top-level setting (`permissions`, `register`) is
+  added, at its default;
+- a second run writes nothing;
+- it never resets a policy and never replaces a `permissions` reference;
+- an invalid file is reported (`dm.config.invalid`) and left alone.
+
+`md init --inline` is the one repair: it replaces a `permissions` reference
+with the block the referenced file holds. When that file cannot be read (it
+is missing, invalid, or has no `permissions` mapping), the reference is
+replaced with the schema defaults and the command says so, because the
+defaults may grant or revoke something the lost block did.
+
+`--repo` outside a repository fails before anything is written, the user
+file included. Without a home directory nothing can be written either; see
+[No home directory](#no-home-directory).
+
+From Rust, `darkmatter::config::init::{init, init_user, init_repository}`
+do the same through one locked transaction and return what happened to each
+file (`created`, `updated`, or `unchanged`) with any notices.
+
+### When Claudine is set up
+
+Most people who use Darkmatter's permissions meet them through Claudine, so
+once Claudine is set up its file holds the block and `~/.darkmatter.yaml`
+points at it (`permissions: ~/.claudine/config.yaml`). Claudine's setup
+writes its own file first and `.darkmatter.yaml` second:
+
+| Before Claudine's setup | After it |
+| --- | --- |
+| no `~/.darkmatter.yaml` | created with `permissions: ~/.claudine/config.yaml`; Claudine's file holds the default block |
+| `~/.darkmatter.yaml` with an inline block | the block moves into `~/.claudine/config.yaml`, then `.darkmatter.yaml` is rewritten to the reference |
+| both files hold a block, and they differ | nothing moves; setup reports a conflict naming both files and keeps the inline block in force |
+| `.darkmatter.yaml` already refers to Claudine's file | nothing changes |
+| `.darkmatter.yaml` refers to some other file | the reference stays; Claudine does not take it over |
+
+`md init` after Claudine's setup leaves the reference alone. The two writes
+take both files' locks in path order, and `.darkmatter.yaml` is replaced
+last: if anything fails between them, the original inline block is still the
+one in force, and running setup again finishes the move. The same applies to
+`{repo-root}/.darkmatter.yaml` and `{repo-root}/.claudine/config.yaml`
+(referenced as `./.claudine/config.yaml`) for Claudine's repository setup.
+
+```mermaid
+flowchart TD
+    A[Claudine writes ~/.claudine/config.yaml] --> B{~/.darkmatter.yaml permissions}
+    B -->|absent| C[write the reference;<br/>Claudine gets the default block]
+    B -->|inline, Claudine had none or an equal one| D[copy the block into Claudine's file,<br/>then write the reference]
+    B -->|inline, Claudine's differs| E[conflict: neither block changes]
+    B -->|a reference| F[leave it]
+```
 
 ## Permissions
 
@@ -459,7 +534,17 @@ warning naming the file and `md init`:
   (or `run_diagnostics` for `md clean`), with stderr empty.
 
 This holds for every command, including ones that compose nothing (`md hash`,
-`md get`). A repository without `.darkmatter.yaml` reports nothing.
+`md get`), except `md init`, which creates the file the warning would point
+at. A repository without `.darkmatter.yaml` reports nothing.
+
+### No home directory
+
+When no home directory can be found for the process, there is no user file
+to read. Every command still runs with the
+user defaults and reports one `dm.config.missing` warning saying that no home
+directory is available. Nothing is ever written there: `md init` fails with
+`dm.config.not_saved`, and an "always allow" approval applies to the current
+run only.
 
 A user or repository file that does not load stops each command that reads the
 configuration (`md compose`, `md graph`, `md validate refs`) with exit status 1
@@ -478,6 +563,12 @@ run with that located error. A missing file is one warning naming
 `claudine steer`, which answer a program on their streams; completion reads no
 configuration. Each request Claudine composes receives the invocation's
 snapshot, projected for the repository the request's document lives in.
+Claudine's shell approvals decide with that same projection: a prompt in
+another repository is judged by that repository's rules, in the same order as
+`md` (built-in blacklist, then `!` entries, then allows), and an invalid
+`permissions` block fails every command instead of falling back to an empty
+policy. DMLS shows the same verdict on a shell command's hover from a
+`Passive` load; it never prompts or saves.
 
 ## The Repository File at HEAD and in the Working Copy
 

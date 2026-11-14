@@ -805,11 +805,6 @@ pub enum ShellExpansionError {
     /// path rather than flattening it into an opaque policy error.
     #[error(transparent)]
     Preflight(Box<crate::markdown::types::MarkdownError>),
-
-    /// The user's schema-slot grant store has an invalid line or cannot be
-    /// read, so none of its grants (or denies) can be trusted for the run.
-    #[error(transparent)]
-    SlotGrantStore(Box<crate::markdown::schemas::slots::grants::GrantStoreError>),
 }
 
 impl ShellExpansionError {
@@ -838,8 +833,7 @@ impl ShellExpansionError {
             | Self::ExpressionEvaluation { .. }
             | Self::PolicyIo { .. }
             | Self::Config(_)
-            | Self::Preflight(_)
-            | Self::SlotGrantStore(_) => None,
+            | Self::Preflight(_) => None,
         }
     }
 
@@ -861,7 +855,7 @@ impl ShellExpansionError {
             | Self::UnevaluatedDependencyShape { ctx, .. }
             | Self::Timeout { ctx, .. }
             | Self::ExecutionFailed { ctx, .. } => Some(ctx),
-            Self::PolicyIo { .. } | Self::Config(_) | Self::Preflight(_) | Self::SlotGrantStore(_) => None,
+            Self::PolicyIo { .. } | Self::Config(_) | Self::Preflight(_) => None,
         }
     }
 
@@ -886,7 +880,7 @@ impl ShellExpansionError {
             | Self::UnevaluatedDependencyShape { origin, .. }
             | Self::Timeout { origin, .. }
             | Self::ExecutionFailed { origin, .. } => Some(origin),
-            Self::PolicyIo { .. } | Self::Config(_) | Self::Preflight(_) | Self::SlotGrantStore(_) => None,
+            Self::PolicyIo { .. } | Self::Config(_) | Self::Preflight(_) => None,
         }
     }
 }
@@ -1228,11 +1222,6 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
             // Delegate to the wrapped rich error so its styled block (excerpt,
             // gutter, OSC8 header, schema problems, …) is preserved verbatim.
             ShellExpansionError::Preflight(inner) => inner.status_block(_term),
-
-            ShellExpansionError::SlotGrantStore(error) => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("ShellExpansionError", "schema read grants unusable"))
-                .body(Prose::new(error.to_string()))
-                .hint("Fix or remove the line; until then no schema read grant or deny applies."),
         }
     }
 }

@@ -229,6 +229,16 @@ and `ComposeRequest::prepare` from the repository root. No
 `.darkmatter-shell-whitelist`/`-blacklist` file is read anywhere but the
 temporary migration (`config/migration.rs`).
 
+**Permission parity.** `lib/tests/fixtures/permission_parity/cases.json` is
+one table of commands, file reads, URL reads, and exclusions with the
+decision every consumer must reach (`preapproved`, `approval-required`,
+`refused`). `lib/tests/l1/permission_parity.rs` (md pre-flight and slot
+gate), `claudine/lib/tests/l1/shell_permission_parity.rs` (`shared_fixture`:
+Claudine preparation beside md), and
+`dmls/tests/l1/shell_permission_classification.rs` (passive verdicts of the
+literal command rows) each `include_str!` it; add a row there, not a copy in
+one suite.
+
 ## Proving a passive path has no effects
 
 Completion, and anything else that must not evaluate, needs a positive assertion and a

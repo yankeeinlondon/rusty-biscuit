@@ -1,24 +1,27 @@
 //! Layer-3 shell overlay: read-only parsing and policy classification of
 //! `::shell` / `::shell-block` / `$()` commands.
 //!
-//! DMLS never runs a command. It splits one into chain segments, then classifies
-//! each against Darkmatter's shell policy — the always-on **library** built-in
-//! blacklist (dangerous commands), plus an optional workspace whitelist loaded
-//! from `shell.policy_path`. Command-splitting is intentionally local and
-//! lightweight (a passive analyzer needs the executable and args, not a full
-//! shell grammar) so DMLS stays decoupled from the terminal-oriented compose
-//! tokenizer, while the *policy rules* remain the library's authority. A hover
-//! shows the parsed command and the verdict; a `dm.security.disallowed_command`
-//! diagnostic fires only for the built-in blacklist (a decision `md compose`
-//! would also refuse), so there are no false positives against valid docs.
+//! DMLS never runs, approves, or saves a command, and never prompts. It splits
+//! one into chain segments, then classifies each the way `md compose` decides
+//! it: Darkmatter's built-in blacklist first, then the
+//! `permissions.shell-commands` of the document's configuration, loaded
+//! passively (the user file, and inside a repository its file as committed at
+//! `HEAD` and in the working copy). Command-splitting is intentionally local
+//! and lightweight (a passive analyzer needs the executable and args, not a
+//! full shell grammar) so DMLS stays decoupled from the terminal-oriented
+//! compose tokenizer, while the *policy rules* remain the library's
+//! authority. A hover shows the parsed command and the verdict; a
+//! `dm.security.disallowed_command` diagnostic fires only for the built-in
+//! blacklist (a decision `md compose` would also refuse), so there are no
+//! false positives against valid docs.
 
+use std::sync::Arc;
+
+use biscuit_file::FileResolutionContext;
+use darkmatter::config::permissions::PermissionPolicy;
 use darkmatter::markdown::compose::shell_expansion::policy::{
-    check_builtin_blacklist, check_whitelist, normalize_command,
+    check_builtin_blacklist, check_user_blacklist, check_whitelist, normalize_command,
 };
-use darkmatter::markdown::compose::shell_expansion::store::load_ruleset;
-use darkmatter::markdown::compose::shell_expansion::types::ShellRuleSet;
-
-use crate::config::DmlsConfig;
 
 /// One command in a chain: an executable and its arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,13 +42,18 @@ pub struct ParsedCommand {
 /// The policy classification of a parsed command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicyVerdict {
-    /// Every command in the chain matched the workspace whitelist.
+    /// The captured permissions pre-approve every command in the chain and
+    /// no `!` entry matches one.
     Approved,
     /// A command matched the built-in dangerous-command blacklist.
     Denied(String),
-    /// No policy rule matched — compose would prompt for approval.
+    /// No rule pre-approves the chain, an exclusion matches it, or the
+    /// permissions do not load — compose would prompt for approval.
     Unknown,
 }
+
+/// The document's captured permissions, or why there are none.
+pub type CapturedPermissions = Result<Arc<PermissionPolicy>, String>;
 
 /// Splits a raw command into chain segments with executable + args.
 ///
@@ -71,37 +79,43 @@ pub fn parse_command(command: &str) -> Option<ParsedCommand> {
     (!segments.is_empty()).then_some(ParsedCommand { segments })
 }
 
-/// Classifies a command against the built-in blacklist and an optional
-/// workspace whitelist.
-pub fn verdict(command: &ParsedCommand, whitelist: Option<&ShellRuleSet>) -> PolicyVerdict {
-    for segment in &command.segments {
-        if let Some(reason) = check_builtin_blacklist(&segment.executable, &segment.args) {
-            return PolicyVerdict::Denied(reason);
-        }
+/// Classifies a command: the built-in blacklist denies; otherwise the chain is
+/// approved only when `permissions` loaded and pre-approve every segment with
+/// no exclusion matching it. Invalid permissions never approve.
+pub fn verdict(command: &ParsedCommand, permissions: &CapturedPermissions) -> PolicyVerdict {
+    if let Some(reason) = builtin_refusal(command) {
+        return PolicyVerdict::Denied(reason);
     }
-    if let Some(whitelist) = whitelist {
-        let all_whitelisted = command.segments.iter().all(|segment| {
-            let normalized = normalize_command(&segment.executable, &segment.args);
-            check_whitelist(whitelist, &segment.executable, &normalized)
-        });
-        if all_whitelisted {
-            return PolicyVerdict::Approved;
-        }
-    }
-    PolicyVerdict::Unknown
+    let Ok(policy) = permissions else {
+        return PolicyVerdict::Unknown;
+    };
+    let preapproved = command.segments.iter().all(|segment| {
+        let normalized = normalize_command(&segment.executable, &segment.args);
+        policy
+            .shell()
+            .verdict(
+                |allows| check_whitelist(allows, &segment.executable, &normalized),
+                |excluded| check_user_blacklist(excluded, &segment.executable, &segment.args, &normalized),
+            )
+            .is_preapproved()
+    });
+    if preapproved { PolicyVerdict::Approved } else { PolicyVerdict::Unknown }
 }
 
-/// Loads the workspace shell whitelist from `shell.policy_path` (a directory
-/// holding `.darkmatter-shell-whitelist`), if configured. Absent config or a
-/// missing file yields `None` — the verdict then rests on the built-in
-/// blacklist alone.
-pub fn load_whitelist(config: &DmlsConfig) -> Option<ShellRuleSet> {
-    let dir = config.shell.policy_path.as_ref()?;
-    let path = dir.join(".darkmatter-shell-whitelist");
-    match load_ruleset(&path) {
-        Ok(ruleset) if !ruleset.entries.is_empty() => Some(ruleset),
-        _ => None,
-    }
+/// The built-in blacklist's reason for refusing a segment of `command`: the
+/// only verdict that needs no configuration.
+pub fn builtin_refusal(command: &ParsedCommand) -> Option<String> {
+    command
+        .segments
+        .iter()
+        .find_map(|segment| check_builtin_blacklist(&segment.executable, &segment.args))
+}
+
+/// The permissions of the configuration `context` names, loaded passively:
+/// nothing is migrated, written, or prompted for.
+pub fn load_permissions(context: &FileResolutionContext) -> CapturedPermissions {
+    let snapshot = darkmatter::markdown::schemas::slots::session::load_passively(context).map_err(|error| error.to_string())?;
+    snapshot.policy().map(Arc::clone).map_err(|error| error.to_string())
 }
 
 /// Splits a command on top-level chain operators (`&&`, `||`, `|`, `;`),
@@ -194,33 +208,57 @@ fn tokenize_words(segment: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use darkmatter::markdown::compose::shell_expansion::types::ShellRuleEntry;
+
+    /// The permissions of a user whose home holds `rules`, outside any
+    /// repository.
+    fn permissions(rules: &[&str]) -> (tempfile::TempDir, CapturedPermissions) {
+        let home = tempfile::tempdir().unwrap();
+        let list: Vec<String> = rules.iter().map(|rule| serde_json::to_string(rule).unwrap()).collect();
+        std::fs::write(
+            home.path().join(".darkmatter.yaml"),
+            format!("permissions:\n  shell-commands: [{}]\n", list.join(", ")),
+        )
+        .unwrap();
+        let context = FileResolutionContext::from_snapshot(home.path(), Some(home.path().to_path_buf()), Default::default());
+        let loaded = load_permissions(&context);
+        (home, loaded)
+    }
 
     #[test]
     fn test_builtin_blacklist_denies_dangerous_command() {
+        let (_home, permissions) = permissions(&["prefix rm"]);
         let command = parse_command("rm -rf /").expect("parses");
-        assert!(matches!(verdict(&command, None), PolicyVerdict::Denied(_)));
+        assert!(matches!(verdict(&command, &permissions), PolicyVerdict::Denied(_)));
     }
 
     #[test]
-    fn test_unknown_without_whitelist() {
+    fn test_unknown_without_a_rule() {
+        let (_home, permissions) = permissions(&[]);
         let command = parse_command("echo hello").expect("parses");
-        assert_eq!(verdict(&command, None), PolicyVerdict::Unknown);
+        assert_eq!(verdict(&command, &permissions), PolicyVerdict::Unknown);
     }
 
     #[test]
-    fn test_approved_when_whitelisted() {
-        let mut whitelist = ShellRuleSet::default();
-        whitelist.entries.push(ShellRuleEntry::Prefix("echo".to_string()));
+    fn test_approved_when_preapproved() {
+        let (_home, permissions) = permissions(&["prefix echo"]);
         let command = parse_command("echo hi").expect("parses");
-        assert_eq!(verdict(&command, Some(&whitelist)), PolicyVerdict::Approved);
+        assert_eq!(verdict(&command, &permissions), PolicyVerdict::Approved);
+    }
+
+    #[test]
+    fn test_unknown_when_excluded_or_unloaded() {
+        let (_home, excluded) = permissions(&["prefix echo", "!exact echo secret"]);
+        let command = parse_command("echo secret").expect("parses");
+        assert_eq!(verdict(&command, &excluded), PolicyVerdict::Unknown);
+        assert_eq!(verdict(&command, &Err("invalid".to_string())), PolicyVerdict::Unknown);
     }
 
     #[test]
     fn test_chain_denied_if_any_link_dangerous() {
+        let (_home, permissions) = permissions(&["prefix echo"]);
         let command = parse_command("echo ok && rm -rf /tmp/x").expect("parses");
         assert_eq!(command.segments.len(), 2);
-        assert!(matches!(verdict(&command, None), PolicyVerdict::Denied(_)));
+        assert!(matches!(verdict(&command, &permissions), PolicyVerdict::Denied(_)));
     }
 
     #[test]

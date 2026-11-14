@@ -189,12 +189,23 @@ pub struct ExpressionsConfig {
     pub strict: bool,
 }
 
-/// Shell-policy discovery.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ShellConfig {
-    /// Where to discover the shell policy from.
-    pub policy_path: Option<PathBuf>,
+/// The retired `shell.policy_path` setting. DMLS classifies shell commands
+/// with `permissions.shell-commands` from the Darkmatter configuration
+/// (`~/.darkmatter.yaml` and the repository's `.darkmatter.yaml`); a source
+/// that still sets this key gets a warning naming that location, and the key
+/// is otherwise ignored.
+pub const RETIRED_SHELL_POLICY_PATH: &str = "shell.policy_path";
+
+/// The warning for a source that still sets [`RETIRED_SHELL_POLICY_PATH`].
+fn retired_shell_policy_path(source: &ConfigSource) -> ConfigDiagnostic {
+    ConfigDiagnostic {
+        severity: ConfigSeverity::Warning,
+        source: source.clone(),
+        key: Some(RETIRED_SHELL_POLICY_PATH.to_string()),
+        message: "retired and ignored: shell commands are judged by `permissions.shell-commands` in \
+                  `~/.darkmatter.yaml` or `{repo}/.darkmatter.yaml`; move its rules there"
+            .to_string(),
+    }
 }
 
 /// Inlay-hint toggles.
@@ -283,8 +294,6 @@ pub struct DmlsConfig {
     pub style: StyleConfig,
     /// Expression call diagnostics.
     pub expressions: ExpressionsConfig,
-    /// Shell-policy discovery.
-    pub shell: ShellConfig,
     /// Inlay-hint toggles.
     pub hints: HintsConfig,
     /// Code-action category toggles.
@@ -323,10 +332,14 @@ impl DmlsConfig {
         };
         let table: toml::Table = toml::from_str(&text).map_err(parse_error)?;
         let formatting = table.get("formatting").cloned();
+        let retired = table.get("shell").and_then(|shell| shell.get("policy_path")).is_some();
         let mut config: DmlsConfig = toml::Value::Table(table).try_into().map_err(parse_error)?;
 
         let source = ConfigSource::File(path.to_path_buf());
         let mut diagnostics = Vec::new();
+        if retired {
+            diagnostics.push(retired_shell_policy_path(&source));
+        }
         match formatting
             .as_ref()
             .map(|value| toml_to_json(value, "formatting"))
@@ -603,6 +616,10 @@ impl ConfigState {
     fn recompute(&mut self) {
         let mut diagnostics = self.file_diagnostics.clone();
         let mut overlay = self.overlay.clone();
+        let retired = overlay
+            .as_ref()
+            .and_then(|overlay| overlay.get("shell")?.get("policy_path"))
+            .map(|_| retired_shell_policy_path(&ConfigSource::EditorSettings));
         // `None` = the overlay has no `formatting` key (absent, not null).
         let overlay_formatting = match &mut overlay {
             Some(Value::Object(map)) => map.remove("formatting"),
@@ -631,6 +648,7 @@ impl ConfigState {
         };
 
         let first_overlay_finding = diagnostics.len();
+        diagnostics.extend(retired);
         let overlay_rules = normalize_formatting(
             overlay_formatting.as_ref(),
             &ConfigSource::EditorSettings,
@@ -961,9 +979,6 @@ mod tests {
             [style]
             strict = true
 
-            [shell]
-            policy_path = ".darkmatter/policy.toml"
-
             [hints]
             inlay = false
 
@@ -999,10 +1014,6 @@ mod tests {
         assert_eq!(prompts.path, PathBuf::from("schemas/prompts.yaml"));
         assert_eq!(prompts.globs.len(), 2);
         assert!(config.style.strict);
-        assert_eq!(
-            config.shell.policy_path,
-            Some(PathBuf::from(".darkmatter/policy.toml"))
-        );
         assert!(!config.hints.inlay);
         assert!(!config.semantic_tokens.enable);
         assert_eq!(
@@ -1167,6 +1178,31 @@ mod tests {
         let state = ConfigState::load(vec![temp.path().to_path_buf()], Some(explicit.clone()));
         assert!(!state.effective().hints.inlay);
         assert_eq!(state.file_path(), Some(explicit.as_path()));
+    }
+
+    /// `shell.policy_path` is retired: a file or editor settings that still
+    /// set it load, and get one warning naming where the rules now live.
+    #[test]
+    fn a_retired_shell_policy_path_warns_naming_the_permissions_location() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join(CONFIG_FILE_NAME),
+            "[shell]\npolicy_path = \"/somewhere\"\n\n[hints]\ninlay = false\n",
+        )
+        .unwrap();
+
+        let mut state = ConfigState::load(vec![temp.path().to_path_buf()], None);
+
+        assert!(!state.effective().hints.inlay, "the file's other settings apply");
+        let [warning] = state.diagnostics() else { panic!("{:?}", state.diagnostics()) };
+        assert_eq!(warning.severity, ConfigSeverity::Warning);
+        assert_eq!(warning.key.as_deref(), Some(RETIRED_SHELL_POLICY_PATH));
+        assert!(warning.message.contains("permissions.shell-commands"), "{warning}");
+        assert!(warning.message.contains("~/.darkmatter.yaml"), "{warning}");
+
+        state.apply_client_settings(serde_json::json!({ "dmls": { "shell": { "policy_path": "/x" } } }));
+        let sources: Vec<&ConfigSource> = state.diagnostics().iter().map(|diagnostic| &diagnostic.source).collect();
+        assert_eq!(sources, [&ConfigSource::File(temp.path().join(CONFIG_FILE_NAME)), &ConfigSource::EditorSettings]);
     }
 
     /// `expressions.strict`: the same file/editor layering and serde

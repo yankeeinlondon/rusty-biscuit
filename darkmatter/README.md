@@ -41,6 +41,7 @@ last_updated: 2026-11-06
 - One set of [policy verbs](./docs/cli/policy.md) on every command: `--allow <id|all>` to recover from a known problem, `--deny <id|all>` to make diagnostics blocking (for example `md compose doc.md --deny all` in CI), and `--disable <id>` to turn a feature off
 - One [`--output` and `--width`](./docs/cli/output-and-width.md) on every command: print for a person (`terminal`, `plain`, `markdown`, `markdown-plus`, `html`) or as [data](./docs/cli/data-contracts.md) (`json`, `json5`, `yaml`, `toml`). For example, `md compose --output json` prints one value with the outcome, every diagnostic (with the same codes and positions the editor shows), and the composed document
 
+- Keep file-read, shell, and network permissions in one [configuration file](./docs/topics/configuration.md); `md init` writes `~/.darkmatter.yaml` with every default ([`md init`](./docs/cli/init.md))
 - Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
 - Provides shell auto-completions in the terminal (bash, elvish, fish, powershell, zsh) and the [DMLS language server](./dmls/README.md) in an editor.
 
