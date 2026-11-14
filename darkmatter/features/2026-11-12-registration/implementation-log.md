@@ -166,6 +166,8 @@ packages:
     - "messenger"
     - "biscuit-file"
     - "claudine-cli"
+    - "repo-deps"
+    - "test-toolkit"
 source_files_during_phase_2:
     - "claudine/lib/src/composition/schema/classify.rs"
     - "claudine/lib/src/composition/schema/defaults_tests.rs"
@@ -359,8 +361,20 @@ decisions_for_review:
       The launch refresh runs for every `claudine` command except `handle` (provider hooks), `steer`, `completions`, `__complete`, and `uninstall`, after the help exits and the Darkmatter config read and before the first-run wizard. Hooks were excluded because they run on every agent event and answer a machine; `uninstall` so it does not recreate what it is about to remove. Alternatives: refresh only on composition/wrapper commands, or also in hooks. The warning's `format!` of the `PublishError` is allowlisted in `claudine/cli/tests/l1/error_guards/transport-allow.toml` as the final render. Local to `claudine/cli/src/main.rs`.
     - |-
       The plan asks to run md and DMLS against the published revision outside `claudine/`. Claudine cannot spawn `md` (no binary artifact dependency) and DMLS cannot depend on Claudine (Rule 33), so `claudine/lib/tests/l1/installed_registration.rs` drives the library path both use (`ConfigSnapshot::load` → `RegisteredHosts::load` → `select` → `ComposeOptions::with_registered_hosts`) over a revision that `setup_claudine` published. DMLS's own editor tests keep using the Claudine-shaped `relay` fixture. Alternative: a darkmatter-lsp dev-dependency in claudine-cli, or a generated install fixture checked by a freshness test, which is more literal coverage but costs build time and a second copy of the schemas.
-message_to_agent: |-
-    Phase 7 wired Claudine's Darkmatter registration; nothing CI-related changed. For Phase 8 (permission-widening CI) the relevant facts: Claudine's first-run setup (`claudine::config::setup::setup_claudine`) now publishes `~/.claudine/darkmatter-host/<version>-<digest16>/schemas/*` plus `~/.claudine/darkmatter-host.yaml`, then writes config + permissions handshake, then appends `~/.claudine/darkmatter-host.yaml` to the USER `~/.darkmatter.yaml` `register` list (`darkmatter::config::init::register_manifest`, dedup by `config::registration::manifest_identity`). Every claudine launch except handle/steer/completion/uninstall republishes when stale (`claudine/cli/src/main.rs::refresh_host_registration`); claudine-cli L1 fixtures therefore get a published revision in their temp home on first substantive spawn. `claudine.yaml` no longer selects on initialize/cancelled/finalize alone; `claudine/schemas/claudine-document.yaml` is the identifying trigger (published, not in the embedded bundle). Phase 6 and Phase 7 were both still uncommitted at the end of Phase 7, so `git status` covers both phases. Load-sensitive (pass alone well under 5 s): claudine `claudine_schemas::cancelled_conditional_depth_is_the_parsers_alone_to_limit` and two `container_schema_recursion` tests; claudine-cli `level1_provider_overlay_home::every_activation_reason_leaves_the_launch_home_variables_unchanged` (7.6 s loaded, 2.96 s alone).
+    - |-
+      The checker's inputs live in one data file, `.github/ci/permission-inputs.json`, read by both the Rust checker and the Python path check, instead of being constants in the Rust module (which the cheap path check could not read without compiling). Its `checker-inputs` list is deliberately bounded: the checker's own code (`darkmatter/lib/src/config/`, the example, the two shell-rule parser files, sniff's committed-tree reader and both crates' manifests), `ci.yml`, the two helper scripts, and the inputs file itself. It leaves out `Cargo.lock` and deeper dependencies such as biscuit-file's glob matcher, because the checker is always built from the base's own lockfile, and including them would make most dependency bumps need an approval. Consequence: every future change under `darkmatter/lib/src/config/` needs an approval. Alternatives: a wider list (more approvals, closer to "every input"), or a narrower one (fewer approvals, but a loader change could alter what counts as widening without review). Changing it is an edit to the JSON file; the Rust and Python tests pin the required entries.
+    - |-
+      The workflow checks the environment's protection with an inline `gh api --jq` filter in `ci.yml`, not by running the base's `permission_environment.py verify`. On the pull request that introduces the gate, the base has no helper at all, and the check must still run before the environment is requested: GitHub creates a missing environment unprotected on first use. The filter and the setup script are kept equal by a contract test and by a Python test that runs the filter with `jq` on the same fake responses. Alternative: always run the trusted helper and fail the bootstrap pull request outright, which would then need a ruleset bypass to merge. Reversing is a change to one step in `permission-scope`.
+    - |-
+      Default schemas are compared twice per scope, for both user and repository scopes: the whole `permissions` default (a file with no block) and the per-entry defaults (a block that omits an entry), because the shipped schema declares the two separately. A change to the user-scope default counts as widening too, since it changes what every user's `~/.darkmatter.yaml` takes once released. Alternative: compare only the repository block default, as the plan's wording might suggest, which would miss a child-default or user-default edit. Local to `default_policy` in `darkmatter/lib/src/config/widening.rs`.
+    - |-
+      A repository `.claudine/config.yaml` is compared by its top-level `permissions` alone, judged with Darkmatter's repository rules (absent → repository default; a reference resolves from `.claudine/` and must stay in the repository). At runtime nothing reads that block directly unless a `.darkmatter.yaml` references it; it is compared anyway because the plan lists it and a later Claudine change may read it. Alternative: compare only `.darkmatter.yaml` and its reference targets (fewer approvals, but a future reader of Claudine's block would be ungated). Reversing is removing one entry from the inputs file.
+    - |-
+      The trusted checker is built cold in each run that needs it, with no Rust build cache, because a cache entry another job of the same pull request could write would let candidate-built artifacts into the trusted build. This costs a few minutes of debug build on the (rare) pull requests that change a permission input. Alternative: `Swatinem/rust-cache` with a dedicated key (faster, but the cache becomes part of the trust boundary).
+    - |-
+      A push to `main` compares `before` with `after` unless the pull request's CI run is reused (same tree, already approved). So a widening pull request that was behind `main` when it merged, and whose run is therefore not reused, needs a second approval on the push. Alternative: never compare on push (pull requests only), which avoids the second approval but leaves a direct push to `main` ungated. Reversing is one condition in the fetch step.
+    - |-
+      The new `simplified-schema/docs/topics/global-type-constraints.md` `eager` section states that a `default(...)` is checked against its own definition without file access (so a `file` default is judged by syntax there), but that once the default stands in for an absent value it is judged like any other value. For `file(required; eager; default(./x.md))` that means the completed value is existence-checked like an authored one. The spec says default processing never performs an eager file operation; the docs read that as covering the default's own check, not the later validation of the completed value, because that is what the code does (`Prepared::judge` validates the completed candidate with the full validators). Alternatives: exempt an inserted `file(eager)` default from the existence check (a code change in simplified-schema's default insertion plus a test), or forbid `eager` with `default` on `file` at schema load. Redoing it changes one paragraph of that page and, for the alternatives, simplified-schema's validator.
 source_files_during_phase_3:
     - "biscuit-file/lib/src/file_reference/context.rs"
     - "biscuit-file/lib/src/file_reference/mod.rs"
@@ -1110,6 +1124,851 @@ skills_files_updated_during_phase_7:
     - ".claude/skills/claudine/SKILL.md"
     - ".claude/skills/claudine/module-map.md"
     - ".claude/skills/darkmatter/SKILL.md"
+source_files_during_phase_8:
+    - ".github/ci/permission-inputs.json"
+    - ".github/workflows/ci.yml"
+    - "darkmatter/lib/examples/permission_widening.rs"
+    - "darkmatter/lib/src/config/load.rs"
+    - "darkmatter/lib/src/config/mod.rs"
+    - "darkmatter/lib/src/config/widening.rs"
+    - "darkmatter/lib/tests/l1/base_schema_end_to_end.rs"
+    - "darkmatter/lib/tests/l1/config_widening.rs"
+    - "darkmatter/lib/tests/l1/context_construction_guard.rs"
+    - "darkmatter/lib/tests/l1/main.rs"
+    - "scripts/ci/affected_scope.py"
+    - "scripts/ci/permission_environment.py"
+    - "scripts/ci/permission_scope.py"
+    - "scripts/ci/test_affected_scope.py"
+    - "scripts/ci/test_permission_environment.py"
+    - "scripts/ci/test_permission_scope.py"
+    - "sniff/lib/src/filesystem/git/committed_tree.rs"
+    - "sniff/lib/tests/l1/committed_tree.rs"
+    - "tools/test-toolkit/tests/ci_workflow_contracts.rs"
+docs_updated_during_phase_8:
+    - ".github/ci/README.md"
+    - "darkmatter/docs/topics/configuration.md"
+    - "docs/topics/ci-cd.md"
+    - "sniff/docs/sniff-library-architecture.md"
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+    - ".claude/skills/darkmatter/SKILL.md"
+    - ".claude/skills/rust-devops/ci-cd.md"
+    - ".claude/skills/sniff/SKILL.md"
+    - ".claude/skills/sniff/remote-and-repository.md"
+source_files_during_phase_9:
+    - "darkmatter/lib/src/config/permissions.rs"
+docs_updated_during_phase_9:
+    - "CLAUDE.md"
+    - "claudine/README.md"
+    - "claudine/docs/topics/completions/shell-completions.md"
+    - "claudine/docs/topics/configuration.md"
+    - "claudine/docs/topics/pre-flight-checks.md"
+    - "claudine/docs/topics/schemas.md"
+    - "claudine/lib/README.md"
+    - "darkmatter/README.md"
+    - "darkmatter/docs/cli/data-contracts.md"
+    - "darkmatter/docs/cli/graph.md"
+    - "darkmatter/docs/cli/policy.md"
+    - "darkmatter/docs/cli/validate.md"
+    - "darkmatter/docs/inline/preflight-checks.md"
+    - "darkmatter/docs/inline/shell-expansion.md"
+    - "darkmatter/docs/topics/configuration.md"
+    - "darkmatter/docs/topics/lifecycle/host-artifact.md"
+    - "darkmatter/docs/topics/remote-url-references.md"
+    - "darkmatter/docs/topics/schemas/authoring-schemas.md"
+    - "darkmatter/docs/topics/schemas/dmls-schema-support.md"
+    - "darkmatter/docs/topics/schemas/schema-slots.md"
+    - "simplified-schema/docs/topics/global-type-constraints.md"
+    - "simplified-schema/docs/topics/validation.md"
+docs_created_during_phase_9:
+    - "darkmatter/docs/topics/permissions.md"
+skills_files_updated_during_phase_9:
+    - ".claude/skills/biscuit-file/SKILL.md"
+    - ".claude/skills/claudine/SKILL.md"
+    - ".claude/skills/darkmatter/SKILL.md"
+    - ".claude/skills/darkmatter/errors.md"
+    - ".claude/skills/rust-devops/ci-cd.md"
+    - ".claude/skills/simplified-schema/SKILL.md"
+    - ".claude/skills/sniff/SKILL.md"
+source_code:
+    - ".github/ci/permission-inputs.json"
+    - ".github/workflows/ci.yml"
+    - "biscuit-file/lib/src/file_reference/context.rs"
+    - "biscuit-file/lib/src/file_reference/fetch.rs"
+    - "biscuit-file/lib/src/file_reference/mod.rs"
+    - "biscuit-file/lib/src/file_reference/portable/mod.rs"
+    - "biscuit-file/lib/tests/l1-fetch/fetch_integration.rs"
+    - "claudine/cli/src/commands/actions.rs"
+    - "claudine/cli/src/commands/compose/prep.rs"
+    - "claudine/cli/src/commands/config_tui/app.rs"
+    - "claudine/cli/src/commands/config_tui/mod.rs"
+    - "claudine/cli/src/commands/config_tui/persistence.rs"
+    - "claudine/cli/src/commands/config_tui/persistence_tests.rs"
+    - "claudine/cli/src/commands/config_tui/tabs/tts.rs"
+    - "claudine/cli/src/commands/hooks/list.rs"
+    - "claudine/cli/src/commands/init/mod.rs"
+    - "claudine/cli/src/commands/init/prompts.rs"
+    - "claudine/cli/src/commands/init_wizard.rs"
+    - "claudine/cli/src/commands/link_display.rs"
+    - "claudine/cli/src/commands/sequence.rs"
+    - "claudine/cli/src/commands/uninstall.rs"
+    - "claudine/cli/src/commands/wrap/composition/pipeline.rs"
+    - "claudine/cli/src/commands/wrap/composition/tests.rs"
+    - "claudine/cli/src/commands/wrap/env/mod.rs"
+    - "claudine/cli/src/commands/wrap/harness_orch/loop_control.rs"
+    - "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs"
+    - "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs"
+    - "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs"
+    - "claudine/cli/src/commands/wrap/harness_orch/mod.rs"
+    - "claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs"
+    - "claudine/cli/src/commands/wrap/harness_orch/shell_options.rs"
+    - "claudine/cli/src/commands/wrap/harness_orch/types.rs"
+    - "claudine/cli/src/commands/wrap/mod.rs"
+    - "claudine/cli/src/commands/wrap/runaway_guard.rs"
+    - "claudine/cli/src/commands/wrap/sequence/jit.rs"
+    - "claudine/cli/src/commands/wrap/sequence/jit/tests.rs"
+    - "claudine/cli/src/commands/wrap/sequence/mod.rs"
+    - "claudine/cli/src/commands/wrap/sequence/task_run.rs"
+    - "claudine/cli/src/commands/wrap/wrapper_stages.rs"
+    - "claudine/cli/src/completion/engine/mod.rs"
+    - "claudine/cli/src/completion/engine/tests.rs"
+    - "claudine/cli/src/completion/schema_completion/mod.rs"
+    - "claudine/cli/src/completion/schema_completion/tests.rs"
+    - "claudine/cli/src/main.rs"
+    - "claudine/cli/src/output/error_walker/tests.rs"
+    - "claudine/cli/src/request.rs"
+    - "claudine/cli/tests/common/mod.rs"
+    - "claudine/cli/tests/common/pty.rs"
+    - "claudine/cli/tests/common/review_screen.rs"
+    - "claudine/cli/tests/common/webhook_listener.rs"
+    - "claudine/cli/tests/common/wrap.rs"
+    - "claudine/cli/tests/l1/agent_cwd.rs"
+    - "claudine/cli/tests/l1/argv_normalization.rs"
+    - "claudine/cli/tests/l1/command_routing.rs"
+    - "claudine/cli/tests/l1/completion_committed_prompt_schema.rs"
+    - "claudine/cli/tests/l1/completion_ownership.rs"
+    - "claudine/cli/tests/l1/completion_perf.rs"
+    - "claudine/cli/tests/l1/compose_initialize_staged_boot.rs"
+    - "claudine/cli/tests/l1/compose_schema_cli.rs"
+    - "claudine/cli/tests/l1/config_yaml_wiring.rs"
+    - "claudine/cli/tests/l1/contamination_probes.rs"
+    - "claudine/cli/tests/l1/contextual_errors.rs"
+    - "claudine/cli/tests/l1/ctx_launch_anchor.rs"
+    - "claudine/cli/tests/l1/ctx_per_run.rs"
+    - "claudine/cli/tests/l1/darkmatter_config_gate.rs"
+    - "claudine/cli/tests/l1/detached_audio.rs"
+    - "claudine/cli/tests/l1/error_guards/transport-allow.toml"
+    - "claudine/cli/tests/l1/guarded_shell_values.rs"
+    - "claudine/cli/tests/l1/handle_blocking_output.rs"
+    - "claudine/cli/tests/l1/handle_repo_config.rs"
+    - "claudine/cli/tests/l1/home_lookup_round_trip.rs"
+    - "claudine/cli/tests/l1/host_registration_refresh.rs"
+    - "claudine/cli/tests/l1/implement_plan_commit_message.rs"
+    - "claudine/cli/tests/l1/inline_compose_indented_frontmatter.rs"
+    - "claudine/cli/tests/l1/level1_approval_order_pty.rs"
+    - "claudine/cli/tests/l1/level1_compose_autocomplete_failure_pty.rs"
+    - "claudine/cli/tests/l1/level1_dry_run_pty.rs"
+    - "claudine/cli/tests/l1/level1_inline_compose_mismatch_pty.rs"
+    - "claudine/cli/tests/l1/level1_lifecycle_shell_terminal_pty.rs"
+    - "claudine/cli/tests/l1/lifecycle_set_shell_values.rs"
+    - "claudine/cli/tests/l1/lifecycle_shell_templates.rs"
+    - "claudine/cli/tests/l1/lifecycle_traces.rs"
+    - "claudine/cli/tests/l1/main.rs"
+    - "claudine/cli/tests/l1/pi_managed_rpc.rs"
+    - "claudine/cli/tests/l1/preflight_execution_parity.rs"
+    - "claudine/cli/tests/l1/protect_cli.rs"
+    - "claudine/cli/tests/l1/sequence_cli.rs"
+    - "claudine/cli/tests/l1/sequence_jit.rs"
+    - "claudine/cli/tests/l1/sequence_referenced_state.rs"
+    - "claudine/cli/tests/l1/sequence_schema.rs"
+    - "claudine/cli/tests/l1/sequence_shell_templates.rs"
+    - "claudine/cli/tests/l1/shell_approval_prompt.rs"
+    - "claudine/cli/tests/l1/shell_missing_values.rs"
+    - "claudine/cli/tests/l1/skills_integration.rs"
+    - "claudine/cli/tests/l1/tts_prewarm.rs"
+    - "claudine/cli/tests/l1/wrap_compose_agent.rs"
+    - "claudine/cli/tests/l1/wrap_compose_preflight.rs"
+    - "claudine/cli/tests/l1/wrap_ctrl_c_windows.rs"
+    - "claudine/cli/tests/level2/level2_auto_complete_chooser.rs"
+    - "claudine/cli/tests/level2/level2_auto_complete_operation_file.rs"
+    - "claudine/cli/tests/level2/level2_dry_run_approval_capture.rs"
+    - "claudine/cli/tests/level2/level2_dry_run_metadata_capture.rs"
+    - "claudine/cli/tests/level2/level2_explicit_operation_file_miss.rs"
+    - "claudine/cli/tests/level2/level2_file_resolution_capture.rs"
+    - "claudine/cli/tests/level2/level2_inline_compose_mismatch_capture.rs"
+    - "claudine/cli/tests/level2/level2_invalid_file_reference_capture.rs"
+    - "claudine/cli/tests/level2/level2_lifecycle_control.rs"
+    - "claudine/cli/tests/level2/level2_malformed_frontmatter_capture.rs"
+    - "claudine/cli/tests/level2/level2_perf_capture.rs"
+    - "claudine/cli/tests/level2/level2_prompt_reporting_capture.rs"
+    - "claudine/cli/tests/level2/level2_removed_validation_key_capture.rs"
+    - "claudine/cli/tests/level2/level2_schema_parse_capture.rs"
+    - "claudine/cli/tests/level2/level2_sequence_container_ctrl_c.rs"
+    - "claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs"
+    - "claudine/cli/tests/level2/level2_typed_error_render_capture.rs"
+    - "claudine/cli/tests/prompts/pr_flow_rehearsal.rs"
+    - "claudine/docs/providers/dispatch-inventory.json"
+    - "claudine/lib/Cargo.toml"
+    - "claudine/lib/benches/runtime_hot_paths.rs"
+    - "claudine/lib/generated/shipped.json"
+    - "claudine/lib/src/composition/coordinator/tests.rs"
+    - "claudine/lib/src/composition/error/tests.rs"
+    - "claudine/lib/src/composition/lifecycle/executor.rs"
+    - "claudine/lib/src/composition/lifecycle/executor/tests/guarded_shell_sites.rs"
+    - "claudine/lib/src/composition/lifecycle/executor/tests/scope_site_conformance.rs"
+    - "claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs"
+    - "claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs"
+    - "claudine/lib/src/composition/lifecycle/prewarm/worker.rs"
+    - "claudine/lib/src/composition/lifecycle/tests/tts_settings.rs"
+    - "claudine/lib/src/composition/mod.rs"
+    - "claudine/lib/src/composition/preflight.rs"
+    - "claudine/lib/src/composition/preflight/tests.rs"
+    - "claudine/lib/src/composition/prepare.rs"
+    - "claudine/lib/src/composition/prepare/bootstrap/tests.rs"
+    - "claudine/lib/src/composition/registration.rs"
+    - "claudine/lib/src/composition/schema/bundle.rs"
+    - "claudine/lib/src/composition/schema/classify.rs"
+    - "claudine/lib/src/composition/schema/defaults_tests.rs"
+    - "claudine/lib/src/composition/schema/findings.rs"
+    - "claudine/lib/src/composition/schema/launch_defaults.rs"
+    - "claudine/lib/src/composition/schema/mod.rs"
+    - "claudine/lib/src/composition/schema/shipped.rs"
+    - "claudine/lib/src/composition/schema/status_render.rs"
+    - "claudine/lib/src/composition/schema/tests.rs"
+    - "claudine/lib/src/composition/schema/translate.rs"
+    - "claudine/lib/src/composition/sequence/preflight/mod.rs"
+    - "claudine/lib/src/composition/sequence/preflight/tests.rs"
+    - "claudine/lib/src/composition/sequence/task/mod.rs"
+    - "claudine/lib/src/composition/sequence/task/sequence.rs"
+    - "claudine/lib/src/composition/sequence/task/templates.rs"
+    - "claudine/lib/src/composition/sequence/task/tests.rs"
+    - "claudine/lib/src/config/claudine_config.rs"
+    - "claudine/lib/src/config/claudine_config/tests.rs"
+    - "claudine/lib/src/config/json_conversion.rs"
+    - "claudine/lib/src/config/load.rs"
+    - "claudine/lib/src/config/messaging_block/tests.rs"
+    - "claudine/lib/src/config/mod.rs"
+    - "claudine/lib/src/config/persist.rs"
+    - "claudine/lib/src/config/persist_tests.rs"
+    - "claudine/lib/src/config/schema.rs"
+    - "claudine/lib/src/config/schema_tests.rs"
+    - "claudine/lib/src/config/setup.rs"
+    - "claudine/lib/src/config/tts.rs"
+    - "claudine/lib/src/dispatch/deps.rs"
+    - "claudine/lib/src/dispatch/loader.rs"
+    - "claudine/lib/src/dispatch/loader/tests.rs"
+    - "claudine/lib/src/dispatch/runner/speak.rs"
+    - "claudine/lib/src/dispatch/runner/tests.rs"
+    - "claudine/lib/src/dispatch/tests.rs"
+    - "claudine/lib/src/error.rs"
+    - "claudine/lib/src/events/config.rs"
+    - "claudine/lib/src/harness/audit.rs"
+    - "claudine/lib/src/harness/error.rs"
+    - "claudine/lib/src/harness/mod.rs"
+    - "claudine/lib/src/harness/shell.rs"
+    - "claudine/lib/src/harness/shell/policy.rs"
+    - "claudine/lib/src/harness/shell/tests.rs"
+    - "claudine/lib/src/invocation_context.rs"
+    - "claudine/lib/src/invocation_context/document_tests.rs"
+    - "claudine/lib/src/messaging/config.rs"
+    - "claudine/lib/src/signals/harvest.rs"
+    - "claudine/lib/src/steering/automatic.rs"
+    - "claudine/lib/src/steering/automatic/tests.rs"
+    - "claudine/lib/src/system_prompt/prepare.rs"
+    - "claudine/lib/src/system_prompt/prepare/tests.rs"
+    - "claudine/lib/tests/config/repository-control.yaml"
+    - "claudine/lib/tests/config/user-control.json5"
+    - "claudine/lib/tests/config/user-control.yaml"
+    - "claudine/lib/tests/fixtures/claudine-schemas/shell-expansion-in-initialize-set.md"
+    - "claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-depth3-then.md"
+    - "claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-list.md"
+    - "claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-root-dictionary.md"
+    - "claudine/lib/tests/fixtures/claudine-schemas/shell-in-initialize-then.md"
+    - "claudine/lib/tests/l1/claudine_identification.rs"
+    - "claudine/lib/tests/l1/claudine_schema_shipped_corpus.rs"
+    - "claudine/lib/tests/l1/claudine_schemas.rs"
+    - "claudine/lib/tests/l1/claudine_schemas_embedded.rs"
+    - "claudine/lib/tests/l1/claudine_schemas_matrix.rs"
+    - "claudine/lib/tests/l1/claudine_trigger_selection_parity.rs"
+    - "claudine/lib/tests/l1/config_json_conversion.rs"
+    - "claudine/lib/tests/l1/config_schema_matrix.rs"
+    - "claudine/lib/tests/l1/darkmatter_setup.rs"
+    - "claudine/lib/tests/l1/host_catalog.rs"
+    - "claudine/lib/tests/l1/host_publication.rs"
+    - "claudine/lib/tests/l1/installed_registration.rs"
+    - "claudine/lib/tests/l1/invalid_trigger_findings.rs"
+    - "claudine/lib/tests/l1/main.rs"
+    - "claudine/lib/tests/l1/path_lookup_guard.rs"
+    - "claudine/lib/tests/l1/shell_permission_parity.rs"
+    - "claudine/lib/tests/l1/shipped_artifacts.rs"
+    - "claudine/schemas/claudine-config.yaml"
+    - "claudine/schemas/claudine-document.yaml"
+    - "claudine/schemas/claudine.yaml"
+    - "darkmatter/cli/Cargo.toml"
+    - "darkmatter/cli/schemas/output/clean.yaml"
+    - "darkmatter/cli/schemas/output/code-block.yaml"
+    - "darkmatter/cli/schemas/output/compose.yaml"
+    - "darkmatter/cli/schemas/output/delta.yaml"
+    - "darkmatter/cli/schemas/output/edit.yaml"
+    - "darkmatter/cli/schemas/output/get.yaml"
+    - "darkmatter/cli/schemas/output/graph.yaml"
+    - "darkmatter/cli/schemas/output/hash.yaml"
+    - "darkmatter/cli/schemas/output/init.yaml"
+    - "darkmatter/cli/schemas/output/list-themes.yaml"
+    - "darkmatter/cli/schemas/output/render.yaml"
+    - "darkmatter/cli/schemas/output/rm.yaml"
+    - "darkmatter/cli/schemas/output/schema-about.yaml"
+    - "darkmatter/cli/schemas/output/schema-detect.yaml"
+    - "darkmatter/cli/schemas/output/schema-triggers.yaml"
+    - "darkmatter/cli/schemas/output/schema-validate.yaml"
+    - "darkmatter/cli/schemas/output/set.yaml"
+    - "darkmatter/cli/schemas/output/toc.yaml"
+    - "darkmatter/cli/schemas/output/validate-refs.yaml"
+    - "darkmatter/cli/src/approval.rs"
+    - "darkmatter/cli/src/args/cli.rs"
+    - "darkmatter/cli/src/args/command.rs"
+    - "darkmatter/cli/src/args/output.rs"
+    - "darkmatter/cli/src/commands/clean.rs"
+    - "darkmatter/cli/src/commands/compose.rs"
+    - "darkmatter/cli/src/commands/compose/lifecycle.rs"
+    - "darkmatter/cli/src/commands/graph.rs"
+    - "darkmatter/cli/src/commands/init.rs"
+    - "darkmatter/cli/src/commands/mod.rs"
+    - "darkmatter/cli/src/commands/schema/triggers.rs"
+    - "darkmatter/cli/src/commands/schema/validate.rs"
+    - "darkmatter/cli/src/commands/trigger_findings.rs"
+    - "darkmatter/cli/src/commands/validate.rs"
+    - "darkmatter/cli/src/main.rs"
+    - "darkmatter/cli/src/output/command.rs"
+    - "darkmatter/cli/src/output/mod.rs"
+    - "darkmatter/cli/src/output/report.rs"
+    - "darkmatter/cli/src/render_style.rs"
+    - "darkmatter/cli/src/request.rs"
+    - "darkmatter/cli/tests/common/fixture.rs"
+    - "darkmatter/cli/tests/l1/approval_prompt.rs"
+    - "darkmatter/cli/tests/l1/collection_blocks.rs"
+    - "darkmatter/cli/tests/l1/compose_basic.rs"
+    - "darkmatter/cli/tests/l1/compose_data_output.rs"
+    - "darkmatter/cli/tests/l1/compose_foreign_documents.rs"
+    - "darkmatter/cli/tests/l1/compose_lifecycle.rs"
+    - "darkmatter/cli/tests/l1/compose_lifecycle_approval.rs"
+    - "darkmatter/cli/tests/l1/compose_nested_markdown.rs"
+    - "darkmatter/cli/tests/l1/compose_schema.rs"
+    - "darkmatter/cli/tests/l1/compose_schema_enhancements.rs"
+    - "darkmatter/cli/tests/l1/compose_shell.rs"
+    - "darkmatter/cli/tests/l1/compose_shell_template.rs"
+    - "darkmatter/cli/tests/l1/compose_transclusion.rs"
+    - "darkmatter/cli/tests/l1/config_notices.rs"
+    - "darkmatter/cli/tests/l1/dynamic_schema_slot_template_types.rs"
+    - "darkmatter/cli/tests/l1/dynamic_schema_slots.rs"
+    - "darkmatter/cli/tests/l1/expression_recovery.rs"
+    - "darkmatter/cli/tests/l1/host_registration.rs"
+    - "darkmatter/cli/tests/l1/init_command.rs"
+    - "darkmatter/cli/tests/l1/invalid_trigger_warnings.rs"
+    - "darkmatter/cli/tests/l1/lifecycle_passive_surfaces.rs"
+    - "darkmatter/cli/tests/l1/load_data.rs"
+    - "darkmatter/cli/tests/l1/main.rs"
+    - "darkmatter/cli/tests/l1/md_process_fixture.rs"
+    - "darkmatter/cli/tests/l1/output_commands.rs"
+    - "darkmatter/cli/tests/l1/output_envelope.rs"
+    - "darkmatter/cli/tests/l1/path_completion.rs"
+    - "darkmatter/cli/tests/l1/policy_verbs.rs"
+    - "darkmatter/cli/tests/l1/schema_recursive.rs"
+    - "darkmatter/cli/tests/l1/schema_triggers.rs"
+    - "darkmatter/cli/tests/l1/schema_validate.rs"
+    - "darkmatter/cli/tests/l1/schema_validate_yaml.rs"
+    - "darkmatter/cli/tests/l1/standalone_baseline.rs"
+    - "darkmatter/dmls/Cargo.toml"
+    - "darkmatter/dmls/benches/pipeline_work_a3.rs"
+    - "darkmatter/dmls/src/bench.rs"
+    - "darkmatter/dmls/src/config/mod.rs"
+    - "darkmatter/dmls/src/config_contracts.rs"
+    - "darkmatter/dmls/src/context.rs"
+    - "darkmatter/dmls/src/diagnostics/call_check.rs"
+    - "darkmatter/dmls/src/diagnostics/codes.rs"
+    - "darkmatter/dmls/src/diagnostics/frontmatter.rs"
+    - "darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs"
+    - "darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs"
+    - "darkmatter/dmls/src/diagnostics/slots.rs"
+    - "darkmatter/dmls/src/lib.rs"
+    - "darkmatter/dmls/src/overlay/analysis.rs"
+    - "darkmatter/dmls/src/overlay/event_views.rs"
+    - "darkmatter/dmls/src/overlay/hosts.rs"
+    - "darkmatter/dmls/src/overlay/mod.rs"
+    - "darkmatter/dmls/src/overlay/registry.rs"
+    - "darkmatter/dmls/src/overlay/schema.rs"
+    - "darkmatter/dmls/src/overlay/shell.rs"
+    - "darkmatter/dmls/src/overlay/yaml_contract.rs"
+    - "darkmatter/dmls/src/overlay/yaml_document.rs"
+    - "darkmatter/dmls/src/providers/code_actions.rs"
+    - "darkmatter/dmls/src/providers/collections.rs"
+    - "darkmatter/dmls/src/providers/dsl.rs"
+    - "darkmatter/dmls/src/providers/formatting.rs"
+    - "darkmatter/dmls/src/providers/frontmatter.rs"
+    - "darkmatter/dmls/src/providers/frontmatter/enum_item_tests.rs"
+    - "darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs"
+    - "darkmatter/dmls/src/providers/frontmatter/snapshot_tests.rs"
+    - "darkmatter/dmls/src/providers/lifecycle_host_tests.rs"
+    - "darkmatter/dmls/src/providers/mod.rs"
+    - "darkmatter/dmls/src/providers/semantic_tokens.rs"
+    - "darkmatter/dmls/src/router.rs"
+    - "darkmatter/dmls/src/slot_jobs.rs"
+    - "darkmatter/dmls/src/workspace/watch.rs"
+    - "darkmatter/dmls/tests/common/mod.rs"
+    - "darkmatter/dmls/tests/common/oracle.rs"
+    - "darkmatter/dmls/tests/l1/claudine_editor_parity.rs"
+    - "darkmatter/dmls/tests/l1/claudine_schema_discovery.rs"
+    - "darkmatter/dmls/tests/l1/config_contracts.rs"
+    - "darkmatter/dmls/tests/l1/formatting_transaction.rs"
+    - "darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs"
+    - "darkmatter/dmls/tests/l1/host_registration_watches.rs"
+    - "darkmatter/dmls/tests/l1/incremental_graph_equivalence.rs"
+    - "darkmatter/dmls/tests/l1/main.rs"
+    - "darkmatter/dmls/tests/l1/mapping_only_corpus.rs"
+    - "darkmatter/dmls/tests/l1/no_side_effects.rs"
+    - "darkmatter/dmls/tests/l1/registered_host_editor_agreement.rs"
+    - "darkmatter/dmls/tests/l1/registered_host_views.rs"
+    - "darkmatter/dmls/tests/l1/required_defaults.rs"
+    - "darkmatter/dmls/tests/l1/schema_reference_parity.rs"
+    - "darkmatter/dmls/tests/l1/schema_roots_parity.rs"
+    - "darkmatter/dmls/tests/l1/schema_slots_editor.rs"
+    - "darkmatter/dmls/tests/l1/shell_permission_classification.rs"
+    - "darkmatter/dmls/tests/l1/undeclared_member.rs"
+    - "darkmatter/dmls/tests/l1/value_hovers.rs"
+    - "darkmatter/dmls/tests/l1/yaml_document_editor.rs"
+    - "darkmatter/dmls/tests/l1/zed_extension_contract.rs"
+    - "darkmatter/dmls/zed-dmls/extension.toml"
+    - "darkmatter/lib/Cargo.toml"
+    - "darkmatter/lib/benches/schema_validation.rs"
+    - "darkmatter/lib/examples/permission_widening.rs"
+    - "darkmatter/lib/generated/shipped.json"
+    - "darkmatter/lib/src/atomic_replace.rs"
+    - "darkmatter/lib/src/config/init.rs"
+    - "darkmatter/lib/src/config/load.rs"
+    - "darkmatter/lib/src/config/load/entries.rs"
+    - "darkmatter/lib/src/config/load/error.rs"
+    - "darkmatter/lib/src/config/load/reference.rs"
+    - "darkmatter/lib/src/config/migration.rs"
+    - "darkmatter/lib/src/config/migration_receipt.rs"
+    - "darkmatter/lib/src/config/mod.rs"
+    - "darkmatter/lib/src/config/network.rs"
+    - "darkmatter/lib/src/config/permissions.rs"
+    - "darkmatter/lib/src/config/permissions/persist.rs"
+    - "darkmatter/lib/src/config/registration.rs"
+    - "darkmatter/lib/src/config/registration/manifest.rs"
+    - "darkmatter/lib/src/config/registration/selection.rs"
+    - "darkmatter/lib/src/config/schema.rs"
+    - "darkmatter/lib/src/config/widening.rs"
+    - "darkmatter/lib/src/config/write.rs"
+    - "darkmatter/lib/src/effects/fs_write.rs"
+    - "darkmatter/lib/src/lib.rs"
+    - "darkmatter/lib/src/lifecycle/executor.rs"
+    - "darkmatter/lib/src/lifecycle/executor/host.rs"
+    - "darkmatter/lib/src/lifecycle/executor/shell.rs"
+    - "darkmatter/lib/src/lifecycle/executor/tests.rs"
+    - "darkmatter/lib/src/lifecycle/host_profile.rs"
+    - "darkmatter/lib/src/lifecycle/md_host.rs"
+    - "darkmatter/lib/src/lifecycle/md_host/tests.rs"
+    - "darkmatter/lib/src/lifecycle/preflight/candidates.rs"
+    - "darkmatter/lib/src/lifecycle/shell_template.rs"
+    - "darkmatter/lib/src/markdown/cleanup/document.rs"
+    - "darkmatter/lib/src/markdown/cleanup/frontmatter.rs"
+    - "darkmatter/lib/src/markdown/compose/context/capture/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/context/capture/observations.rs"
+    - "darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs"
+    - "darkmatter/lib/src/markdown/compose/context/options.rs"
+    - "darkmatter/lib/src/markdown/compose/context/report.rs"
+    - "darkmatter/lib/src/markdown/compose/context/repository_scope.rs"
+    - "darkmatter/lib/src/markdown/compose/context/request.rs"
+    - "darkmatter/lib/src/markdown/compose/context/runtime.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/contract.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/locate.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/data/parse.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/diagnostics.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/functions/fs.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/host/artifact.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/read_gate.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/read_gate_tests.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs"
+    - "darkmatter/lib/src/markdown/compose/expression/scope/shape.rs"
+    - "darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs"
+    - "darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs"
+    - "darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs"
+    - "darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs"
+    - "darkmatter/lib/src/markdown/compose/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/pipeline/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/policy.rs"
+    - "darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs"
+    - "darkmatter/lib/src/markdown/compose/preflight/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/remote.rs"
+    - "darkmatter/lib/src/markdown/compose/remote_fetch.rs"
+    - "darkmatter/lib/src/markdown/compose/remote_fetch/error.rs"
+    - "darkmatter/lib/src/markdown/compose/report_diagnostics.rs"
+    - "darkmatter/lib/src/markdown/compose/schema_validation.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_blocks/types.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_expansion/site.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_expansion/store.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_expansion/template/approval.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs"
+    - "darkmatter/lib/src/markdown/compose/shell_expansion/types.rs"
+    - "darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs"
+    - "darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs"
+    - "darkmatter/lib/src/markdown/compose/tests/rendering.rs"
+    - "darkmatter/lib/src/markdown/compose/tests/shell.rs"
+    - "darkmatter/lib/src/markdown/compose/type_tests.rs"
+    - "darkmatter/lib/src/markdown/errors/mod.rs"
+    - "darkmatter/lib/src/markdown/hash/mod.rs"
+    - "darkmatter/lib/src/markdown/hash/node_edit.rs"
+    - "darkmatter/lib/src/markdown/hash/path_edit.rs"
+    - "darkmatter/lib/src/markdown/output/command/clean.rs"
+    - "darkmatter/lib/src/markdown/output/command/data.rs"
+    - "darkmatter/lib/src/markdown/output/command/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/about.rs"
+    - "darkmatter/lib/src/markdown/schemas/catalog.rs"
+    - "darkmatter/lib/src/markdown/schemas/clean.rs"
+    - "darkmatter/lib/src/markdown/schemas/embedded.rs"
+    - "darkmatter/lib/src/markdown/schemas/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/roots.rs"
+    - "darkmatter/lib/src/markdown/schemas/schema_files.rs"
+    - "darkmatter/lib/src/markdown/schemas/shipped.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/approval_tests.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/cache.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/codes.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/dependencies.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/evaluator.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/auto.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/gate.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/legacy.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/matching.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/request.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/store.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/grants/tests.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/host.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/session.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/session_tests.rs"
+    - "darkmatter/lib/src/markdown/schemas/slots/tests.rs"
+    - "darkmatter/lib/src/markdown/schemas/tests/reset_process_caches.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers/assemble.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers/discovery.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers/envelope.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers/finding.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers/grammar.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers/lint.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers/matcher.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers/payload_memo_tests.rs"
+    - "darkmatter/lib/src/markdown/schemas/triggers/prepared.rs"
+    - "darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs"
+    - "darkmatter/lib/src/markdown/schemas/yaml_documents/marks.rs"
+    - "darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs"
+    - "darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs"
+    - "darkmatter/lib/src/markdown/schemas/yaml_documents/select.rs"
+    - "darkmatter/lib/src/markdown/schemas/yaml_documents/semantic.rs"
+    - "darkmatter/lib/src/strict_json.rs"
+    - "darkmatter/lib/src/work_counters.rs"
+    - "darkmatter/lib/src/yaml_edit.rs"
+    - "darkmatter/lib/tests/dynamic_slots_fixtures/mod.rs"
+    - "darkmatter/lib/tests/fixtures/permission_parity/cases.json"
+    - "darkmatter/lib/tests/host_fixtures/mod.rs"
+    - "darkmatter/lib/tests/host_fixtures/recorder.rs"
+    - "darkmatter/lib/tests/l1/alias_lookup_once.rs"
+    - "darkmatter/lib/tests/l1/base_schema_end_to_end.rs"
+    - "darkmatter/lib/tests/l1/collection_blocks/pipeline.rs"
+    - "darkmatter/lib/tests/l1/collection_blocks/provenance.rs"
+    - "darkmatter/lib/tests/l1/collection_discovery.rs"
+    - "darkmatter/lib/tests/l1/collection_execution.rs"
+    - "darkmatter/lib/tests/l1/compose_expression_failure_contract.rs"
+    - "darkmatter/lib/tests/l1/compose_member_warnings.rs"
+    - "darkmatter/lib/tests/l1/compose_read_set.rs"
+    - "darkmatter/lib/tests/l1/compose_setters.rs"
+    - "darkmatter/lib/tests/l1/composition_defaults.rs"
+    - "darkmatter/lib/tests/l1/config_fields.rs"
+    - "darkmatter/lib/tests/l1/config_init.rs"
+    - "darkmatter/lib/tests/l1/config_load.rs"
+    - "darkmatter/lib/tests/l1/config_migration.rs"
+    - "darkmatter/lib/tests/l1/config_migration_receipt.rs"
+    - "darkmatter/lib/tests/l1/config_permission_persist.rs"
+    - "darkmatter/lib/tests/l1/config_permissions.rs"
+    - "darkmatter/lib/tests/l1/config_widening.rs"
+    - "darkmatter/lib/tests/l1/config_write.rs"
+    - "darkmatter/lib/tests/l1/context_construction_guard.rs"
+    - "darkmatter/lib/tests/l1/data_origin.rs"
+    - "darkmatter/lib/tests/l1/deferred_positions.rs"
+    - "darkmatter/lib/tests/l1/diagnostic_source_provenance.rs"
+    - "darkmatter/lib/tests/l1/directive_target_analysis.rs"
+    - "darkmatter/lib/tests/l1/dynamic_schema_slot_captures.rs"
+    - "darkmatter/lib/tests/l1/dynamic_schema_slot_positions.rs"
+    - "darkmatter/lib/tests/l1/dynamic_schema_slot_precedence.rs"
+    - "darkmatter/lib/tests/l1/dynamic_schema_slot_read_order.rs"
+    - "darkmatter/lib/tests/l1/dynamic_schema_slot_schema_files.rs"
+    - "darkmatter/lib/tests/l1/dynamic_schema_slot_surfaces.rs"
+    - "darkmatter/lib/tests/l1/dynamic_schema_slot_template_triggers.rs"
+    - "darkmatter/lib/tests/l1/dynamic_schema_slot_template_types.rs"
+    - "darkmatter/lib/tests/l1/dynamic_schema_slots.rs"
+    - "darkmatter/lib/tests/l1/dynamic_slots_fixture_repos.rs"
+    - "darkmatter/lib/tests/l1/empty_package_area.rs"
+    - "darkmatter/lib/tests/l1/error_snapshots/shell_expansion.rs"
+    - "darkmatter/lib/tests/l1/expression_recovery.rs"
+    - "darkmatter/lib/tests/l1/expression_recovery_data.rs"
+    - "darkmatter/lib/tests/l1/expression_recovery_slots.rs"
+    - "darkmatter/lib/tests/l1/file_tree_roots.rs"
+    - "darkmatter/lib/tests/l1/fm_namespace_contract.rs"
+    - "darkmatter/lib/tests/l1/foreign_document_compose.rs"
+    - "darkmatter/lib/tests/l1/frontmatter_surface_projection.rs"
+    - "darkmatter/lib/tests/l1/host_registration.rs"
+    - "darkmatter/lib/tests/l1/host_selection.rs"
+    - "darkmatter/lib/tests/l1/kind_semantic_checks.rs"
+    - "darkmatter/lib/tests/l1/layered_validator_identities.rs"
+    - "darkmatter/lib/tests/l1/lifecycle_event_binding.rs"
+    - "darkmatter/lib/tests/l1/lifecycle_passive_compose.rs"
+    - "darkmatter/lib/tests/l1/literal_token.rs"
+    - "darkmatter/lib/tests/l1/load_data_execution.rs"
+    - "darkmatter/lib/tests/l1/load_data_options.rs"
+    - "darkmatter/lib/tests/l1/load_data_options_slots.rs"
+    - "darkmatter/lib/tests/l1/load_data_runtime.rs"
+    - "darkmatter/lib/tests/l1/main.rs"
+    - "darkmatter/lib/tests/l1/meta_schema_phase4.rs"
+    - "darkmatter/lib/tests/l1/missing_ctx_capture.rs"
+    - "darkmatter/lib/tests/l1/network_permission.rs"
+    - "darkmatter/lib/tests/l1/path_function_contracts.rs"
+    - "darkmatter/lib/tests/l1/permission_parity.rs"
+    - "darkmatter/lib/tests/l1/preflight_child_state_parity.rs"
+    - "darkmatter/lib/tests/l1/preflight_repository_sigils.rs"
+    - "darkmatter/lib/tests/l1/prepared_trigger_bundles.rs"
+    - "darkmatter/lib/tests/l1/recursive_schema_golden.rs"
+    - "darkmatter/lib/tests/l1/recursive_schema_merge.rs"
+    - "darkmatter/lib/tests/l1/recursive_schema_typed_consumers.rs"
+    - "darkmatter/lib/tests/l1/reference_integration.rs"
+    - "darkmatter/lib/tests/l1/reference_provenance.rs"
+    - "darkmatter/lib/tests/l1/request_config.rs"
+    - "darkmatter/lib/tests/l1/request_context_builder.rs"
+    - "darkmatter/lib/tests/l1/required_context.rs"
+    - "darkmatter/lib/tests/l1/runtime_blocking.rs"
+    - "darkmatter/lib/tests/l1/schema_cache_validity.rs"
+    - "darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs"
+    - "darkmatter/lib/tests/l1/schema_language_ownership_guard.rs"
+    - "darkmatter/lib/tests/l1/schema_phase_validation.rs"
+    - "darkmatter/lib/tests/l1/schema_reference_parity.rs"
+    - "darkmatter/lib/tests/l1/schema_roots.rs"
+    - "darkmatter/lib/tests/l1/schemas_effective_presence.rs"
+    - "darkmatter/lib/tests/l1/schemas_literal_expression.rs"
+    - "darkmatter/lib/tests/l1/schemas_runtime_parity.rs"
+    - "darkmatter/lib/tests/l1/schemas_union_postfix.rs"
+    - "darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs"
+    - "darkmatter/lib/tests/l1/scope_site_conformance.rs"
+    - "darkmatter/lib/tests/l1/semantic_results_never_persist.rs"
+    - "darkmatter/lib/tests/l1/set_overlay_integration.rs"
+    - "darkmatter/lib/tests/l1/shared_acyclic_consumers.rs"
+    - "darkmatter/lib/tests/l1/shell_block_integration.rs"
+    - "darkmatter/lib/tests/l1/shell_child_environment.rs"
+    - "darkmatter/lib/tests/l1/shell_expansion_coordinates.rs"
+    - "darkmatter/lib/tests/l1/shell_permissions.rs"
+    - "darkmatter/lib/tests/l1/shell_result_values.rs"
+    - "darkmatter/lib/tests/l1/shell_template_body_guards.rs"
+    - "darkmatter/lib/tests/l1/shell_template_discovery.rs"
+    - "darkmatter/lib/tests/l1/shell_template_execution.rs"
+    - "darkmatter/lib/tests/l1/shell_template_policy.rs"
+    - "darkmatter/lib/tests/l1/shipped_artifacts.rs"
+    - "darkmatter/lib/tests/l1/shipped_schema_corpus.rs"
+    - "darkmatter/lib/tests/l1/slot_permissions.rs"
+    - "darkmatter/lib/tests/l1/slot_support.rs"
+    - "darkmatter/lib/tests/l1/transcluded_shell_failure.rs"
+    - "darkmatter/lib/tests/l1/trigger_discovery_recovery.rs"
+    - "darkmatter/lib/tests/l1/trigger_envelope_claim.rs"
+    - "darkmatter/lib/tests/l1/trigger_input_matrix.rs"
+    - "darkmatter/lib/tests/l1/trigger_match_grammar.rs"
+    - "darkmatter/lib/tests/l1/trigger_payload_load_errors.rs"
+    - "darkmatter/lib/tests/l1/trigger_selection_parity.rs"
+    - "darkmatter/lib/tests/l1/trigger_spelling_guard.rs"
+    - "darkmatter/lib/tests/l1/unknown_identifier_warning.rs"
+    - "darkmatter/lib/tests/l1/validation_contract_parity.rs"
+    - "darkmatter/lib/tests/l1/yaml_document_loading.rs"
+    - "darkmatter/lib/tests/l1/yaml_document_selection.rs"
+    - "darkmatter/lib/tests/l1/yaml_edit.rs"
+    - "darkmatter/lib/tests/l1/yaml_kind_registry.rs"
+    - "darkmatter/lib/tests/request_support/mod.rs"
+    - "darkmatter/schemas/darkmatter-config.yaml"
+    - "darkmatter/schemas/darkmatter-host.yaml"
+    - "darkmatter/schemas/schema-trigger.yaml"
+    - "messenger/lib/src/research/load.rs"
+    - "messenger/lib/tests/research_corpus.rs"
+    - "scripts/ci/affected_scope.py"
+    - "scripts/ci/permission_environment.py"
+    - "scripts/ci/permission_scope.py"
+    - "scripts/ci/test_affected_scope.py"
+    - "scripts/ci/test_permission_environment.py"
+    - "scripts/ci/test_permission_scope.py"
+    - "simplified-schema/lib/examples/validate_person.rs"
+    - "simplified-schema/lib/generated/shipped.json"
+    - "simplified-schema/lib/src/coerce.rs"
+    - "simplified-schema/lib/src/defaults.rs"
+    - "simplified-schema/lib/src/embedded.rs"
+    - "simplified-schema/lib/src/envelope.rs"
+    - "simplified-schema/lib/src/errors.rs"
+    - "simplified-schema/lib/src/lib.rs"
+    - "simplified-schema/lib/src/outcome.rs"
+    - "simplified-schema/lib/src/prepared.rs"
+    - "simplified-schema/lib/src/roots.rs"
+    - "simplified-schema/lib/src/shipped/registry.rs"
+    - "simplified-schema/lib/src/simplified/grammar.rs"
+    - "simplified-schema/lib/src/simplified/serialize.rs"
+    - "simplified-schema/lib/src/slots.rs"
+    - "simplified-schema/lib/src/triggers/assemble.rs"
+    - "simplified-schema/lib/src/triggers/discovery.rs"
+    - "simplified-schema/lib/src/triggers/envelope.rs"
+    - "simplified-schema/lib/src/triggers/finding.rs"
+    - "simplified-schema/lib/src/triggers/grammar.rs"
+    - "simplified-schema/lib/src/triggers/identify.rs"
+    - "simplified-schema/lib/src/triggers/lint.rs"
+    - "simplified-schema/lib/src/triggers/matcher.rs"
+    - "simplified-schema/lib/src/triggers/mod.rs"
+    - "simplified-schema/lib/src/triggers/payload_memo_tests.rs"
+    - "simplified-schema/lib/src/triggers/prepared.rs"
+    - "simplified-schema/lib/src/work_counters.rs"
+    - "simplified-schema/lib/src/yaml_documents/load.rs"
+    - "simplified-schema/lib/src/yaml_documents/marks.rs"
+    - "simplified-schema/lib/src/yaml_documents/mod.rs"
+    - "simplified-schema/lib/src/yaml_documents/registry.rs"
+    - "simplified-schema/lib/src/yaml_documents/select.rs"
+    - "simplified-schema/lib/src/yaml_documents/semantic.rs"
+    - "simplified-schema/lib/tests/l1/declaration_narrowing.rs"
+    - "simplified-schema/lib/tests/l1/envelope_admission.rs"
+    - "simplified-schema/lib/tests/l1/identifying_triggers.rs"
+    - "simplified-schema/lib/tests/l1/main.rs"
+    - "simplified-schema/lib/tests/l1/required_defaults.rs"
+    - "simplified-schema/lib/tests/l1/root_union_assertions.rs"
+    - "simplified-schema/lib/tests/l1/shipped_artifacts.rs"
+    - "simplified-schema/lib/tests/l1/shipped_corpus.rs"
+    - "simplified-schema/lib/tests/l1/validation_contract.rs"
+    - "simplified-schema/schemas/schema-trigger.yaml"
+    - "sniff/lib/src/error.rs"
+    - "sniff/lib/src/filesystem/git/committed_tree.rs"
+    - "sniff/lib/src/filesystem/git/mod.rs"
+    - "sniff/lib/src/filesystem/mod.rs"
+    - "sniff/lib/tests/l1/committed_tree.rs"
+    - "sniff/lib/tests/l1/main.rs"
+    - "tools/test-toolkit/tests/ci_workflow_contracts.rs"
+documentation:
+    - ".claude/skills/biscuit-file/SKILL.md"
+    - ".claude/skills/claudine/SKILL.md"
+    - ".claude/skills/claudine/architecture.md"
+    - ".claude/skills/claudine/cli-commands.md"
+    - ".claude/skills/claudine/cli-reference.md"
+    - ".claude/skills/claudine/hook-actions.md"
+    - ".claude/skills/claudine/module-map.md"
+    - ".claude/skills/claudine/unified-hooks.md"
+    - ".claude/skills/darkmatter/SKILL.md"
+    - ".claude/skills/darkmatter/cli.md"
+    - ".claude/skills/darkmatter/compose.md"
+    - ".claude/skills/darkmatter/dmls.md"
+    - ".claude/skills/darkmatter/errors.md"
+    - ".claude/skills/darkmatter/expressions.md"
+    - ".claude/skills/darkmatter/frontmatter.md"
+    - ".claude/skills/darkmatter/library-surfaces.md"
+    - ".claude/skills/darkmatter/lifecycle.md"
+    - ".claude/skills/darkmatter/remote-cache.md"
+    - ".claude/skills/darkmatter/requests.md"
+    - ".claude/skills/darkmatter/schema.md"
+    - ".claude/skills/darkmatter/testing.md"
+    - ".claude/skills/rust-devops/ci-cd.md"
+    - ".claude/skills/simplified-schema/SKILL.md"
+    - ".claude/skills/simplified-schema/build-and-guards.md"
+    - ".claude/skills/simplified-schema/schema-documents.md"
+    - ".claude/skills/sniff/SKILL.md"
+    - ".claude/skills/sniff/remote-and-repository.md"
+    - ".github/ci/README.md"
+    - "CLAUDE.md"
+    - "biscuit-file/README.md"
+    - "biscuit-file/docs/topics/fetch.md"
+    - "biscuit-file/docs/topics/file-references.md"
+    - "claudine/README.md"
+    - "claudine/docs/dependencies.md"
+    - "claudine/docs/getting-started/index.md"
+    - "claudine/docs/pipeline.md"
+    - "claudine/docs/topics/automatic-steering.md"
+    - "claudine/docs/topics/completions/shell-completions.md"
+    - "claudine/docs/topics/composition.md"
+    - "claudine/docs/topics/configuration.md"
+    - "claudine/docs/topics/configuring-actions.md"
+    - "claudine/docs/topics/execution-flow.md"
+    - "claudine/docs/topics/file-referencing.md"
+    - "claudine/docs/topics/flow-control/lifecycle.md"
+    - "claudine/docs/topics/flow-control/sequences.md"
+    - "claudine/docs/topics/frontmatter-properties.md"
+    - "claudine/docs/topics/pre-flight-checks.md"
+    - "claudine/docs/topics/protect-service.md"
+    - "claudine/docs/topics/schemas.md"
+    - "claudine/docs/topics/system-prompt.md"
+    - "claudine/lib/README.md"
+    - "claudine/schemas/README.md"
+    - "darkmatter/README.md"
+    - "darkmatter/dmls/docs/autocomplete.md"
+    - "darkmatter/dmls/docs/diagnostics.md"
+    - "darkmatter/dmls/docs/features.md"
+    - "darkmatter/dmls/docs/hover.md"
+    - "darkmatter/dmls/zed-dmls/README.md"
+    - "darkmatter/docs/cli/compose.md"
+    - "darkmatter/docs/cli/data-contracts.md"
+    - "darkmatter/docs/cli/graph.md"
+    - "darkmatter/docs/cli/index.md"
+    - "darkmatter/docs/cli/init.md"
+    - "darkmatter/docs/cli/output-and-width.md"
+    - "darkmatter/docs/cli/policy.md"
+    - "darkmatter/docs/cli/schema.md"
+    - "darkmatter/docs/cli/validate.md"
+    - "darkmatter/docs/inline/filter.md"
+    - "darkmatter/docs/inline/fm-shell-expansion.md"
+    - "darkmatter/docs/inline/map.md"
+    - "darkmatter/docs/inline/preflight-checks.md"
+    - "darkmatter/docs/inline/schema-validation.md"
+    - "darkmatter/docs/inline/shell-blocks.md"
+    - "darkmatter/docs/inline/shell-expansion.md"
+    - "darkmatter/docs/lsp/architecture.md"
+    - "darkmatter/docs/lsp/configuration.md"
+    - "darkmatter/docs/lsp/features.md"
+    - "darkmatter/docs/topics/caching.md"
+    - "darkmatter/docs/topics/compose-requests.md"
+    - "darkmatter/docs/topics/config-writes.md"
+    - "darkmatter/docs/topics/configuration.md"
+    - "darkmatter/docs/topics/darkmatter-expressions.md"
+    - "darkmatter/docs/topics/frontmatter.md"
+    - "darkmatter/docs/topics/host-registration.md"
+    - "darkmatter/docs/topics/lifecycle/host-artifact.md"
+    - "darkmatter/docs/topics/lifecycle/index.md"
+    - "darkmatter/docs/topics/permissions.md"
+    - "darkmatter/docs/topics/remote-url-references.md"
+    - "darkmatter/docs/topics/schemas/authoring-schemas.md"
+    - "darkmatter/docs/topics/schemas/definition.md"
+    - "darkmatter/docs/topics/schemas/dmls-schema-support.md"
+    - "darkmatter/docs/topics/schemas/index.md"
+    - "darkmatter/docs/topics/schemas/schema-discovery.md"
+    - "darkmatter/docs/topics/schemas/schema-slots.md"
+    - "darkmatter/docs/topics/schemas/schema-triggers.md"
+    - "darkmatter/docs/topics/schemas/schema-validation.md"
+    - "darkmatter/docs/topics/yaml-editing.md"
+    - "docs/topics/ci-cd.md"
+    - "simplified-schema/README.md"
+    - "simplified-schema/docs/topics/features.md"
+    - "simplified-schema/docs/topics/global-type-constraints.md"
+    - "simplified-schema/docs/topics/language-core.md"
+    - "simplified-schema/docs/topics/language/objects-and-named-types.md"
+    - "simplified-schema/docs/topics/language/schema-documents.md"
+    - "simplified-schema/docs/topics/language/types.md"
+    - "simplified-schema/docs/topics/language/unions.md"
+    - "simplified-schema/docs/topics/shipped-artifacts.md"
+    - "simplified-schema/docs/topics/simplified-schema-struct.md"
+    - "simplified-schema/docs/topics/validation.md"
+    - "sniff/docs/sniff-library-architecture.md"
+completed_phase: 9
+implemented: true
 ---
 
 # Implementation Log for 2026-11-12-registration (9 phases)
@@ -1581,3 +2440,241 @@ The manifest Claudine writes is read only by Phase 5's closed loader, whose matr
   - `just cross-check claudine-cli --os windows`: 3972 passed, including `host_registration_refresh`.
   - No Windows failure, so `os_failing` is not set. Linux and WSL2 are left to CI. Darkmatter's own Windows run was not repeated: its change only adds a function built on the manifest-resolution code that Phases 5 and 6 checked on Windows.
 - Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gives `change_class: package` and `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli, darkmatter-lsp, test-toolkit, simplified-schema, zed-dmls-cli]`. The tree still holds Phase 6's uncommitted DMLS work. `test-toolkit` comes from the unrelated `prompts/` edit that was already present. The gates were not skipped.
+
+## Phase 8
+
+Phase 8 adds the CI check that detects a change which may widen this repository's committed permissions, and the GitHub deployment-environment approval such a change requires. Everything was done in this session, with no subagents: the work was one connected design (checker, inputs file, helpers, workflow, contracts), and the host was already loaded by another worktree's Claudine tests (load average 18–42 on 16 cores).
+
+### Wave 16 — Conservative comparison
+
+- **`sniff`: `GitRepo::committed_tree_at(commit_id)`.** The existing snapshot pins only `HEAD`; the checker needs a pull request's base and head. The new constructor accepts a full 40-hex object id only (no ref name, abbreviation, or revision expression, so nothing is parsed and the view cannot move), and returns the same read-only `CommittedTreeSnapshot`. An absent object, or one that is not a commit, is `SniffError::Git` tagged `"committed tree at"`.
+- **`darkmatter::config::widening`** (new). `compare_revisions(repository, base, head, &WideningInputs)` pins both commits and calls `compare_trees`, which:
+  - resolves each policy file in each commit through two new crate-private loader seams in `config/load.rs`. `committed_layer` judges a committed file as `ConfigSnapshot::load` judges `HEAD`: the whole `.darkmatter.yaml` against the closed repository contract, or only the top-level `permissions` of Claudine's `.claudine/config.yaml`. It follows a reference inside the same commit (committed links followed in-tree, never out of it) and fills in defaults. `typed_block` types a bare default block with the loader's own entry checks;
+  - normalizes each block: entries deduplicated and sorted, shell rules in canonical `shell_rule_text` form, globs with `//` and an inner `/./` collapsed (a leading `./` is kept, since the reference grammar gives it meaning);
+  - compares blocks with the pure `compare_policies`. An added positive entry is `added-allow`, a removed `!` entry is `removed-exclusion`, and `deny` → `allow` is `network-allowed`. Nothing else counts, so removed entries, added exclusions, and `allow` → `deny` never widen;
+  - compares each changed shipped default schema twice per scope (user and repository): once as the whole-block default a file without `permissions` takes, and once as the per-entry defaults a block omitting `file-read` (say) takes. The schema declares these separately, so comparing only the first would miss a child-default edit. Candidate schema text is parsed as passive data (`SimplifiedSchema::try_from`, or `prepare_host_config_type` for Claudine's schema, which imports Darkmatter's types). A schema that cannot be read is `defaults-not-understood`;
+  - reports any change at or below a `checker-inputs` path as `checker-input-changed`;
+  - lists `changed_inputs`: policy files, the paths their references spell (so a redirected committed link shows even when neither target changed), followed targets, default schemas, and checker inputs.
+- **`darkmatter/lib/examples/permission_widening.rs`**, the noninteractive CLI. It takes `--repository --inputs --base --head`, prints one JSON object (the report, or `{"error": …}`), and exits 0 when the comparison ran, 1 when it failed, and 2 for a usage error. Against this repository it runs in about 0.2 s once built.
+- **`.github/ci/permission-inputs.json`** is the one list of inputs, read by both the Rust checker (`WideningInputs::from_json`: closed and duplicate-rejecting, with every list non-empty and every path repository-relative) and the Python scope check.
+
+### Wave 16 — Environment setup
+
+- **`scripts/ci/permission_environment.py`** targets `yankeeinlondon/rusty-biscuit`, environment `permission-widening`, reviewer `User:980757`. It runs as a dry run (`plan`, the default), `plan --apply`, or `verify`:
+  - The dry run is read-only. It prints the differences and the exact `gh api --method PUT` request.
+  - `--apply` sends `{"wait_timer": 0, "prevent_self_review": false, "reviewers": [{"type": "User", "id": 980757}], "can_admins_bypass": false, "deployment_branch_policy": null}`, then reads the environment back and fails unless it now matches.
+  - `verify` is read-only and exits 1 unless the environment is protected.
+  - Every request goes through `gh api`. The script never handles a credential, never approves a deployment, and never retries a rejected request.
+  - `--apply` was **not** run in this phase.
+
+### Wave 17 — Workflow integration
+
+- **`ci.yml` `permission-scope`** needs `validation` and runs on every pull request and push.
+  - Pull requests compare PR base and head, and pushes compare `before` and `after`. A schedule, a manual run, or a push whose PR validation is reused does nothing.
+  - It `git init`s `$RUNNER_TEMP/permissions-trusted` (outside the workspace) with hooks disabled, fetches only the two commits (`--depth=1`), and checks out **the base**. The candidate is never checked out.
+  - It runs the base's `scripts/ci/permission_scope.py scope` (`python3 -I`), which prints `decision=skip|compare|widening`:
+    - `compare` when a listed input changed, or, when a policy file is a committed link or a `permissions` reference in either commit, whenever anything changed;
+    - `widening` when the base has no trusted checker (bootstrap) or there is no base commit;
+    - `skip` otherwise.
+  - A base without the helper at all is handled inline as `widening` (bootstrap).
+  - Only on `compare` does it `rustup show` and `cargo run --locked -p darkmatter --example permission_widening` in the trusted checkout, then `permission_scope.py decide` turns the report into `potential_widening`. A checker error or an unreadable report fails the job.
+  - On potential widening, it reads `repos/…/environments/permission-widening` with an inline `gh api --jq` filter (`PROTECTION_FILTER`) and fails closed, with setup instructions, when the environment is missing or weaker.
+- **`ci.yml` `permission-widening`** needs `permission-scope`. It runs only when `permission-scope` succeeded and `potential_widening == 'true'`, with `environment: permission-widening`, `permissions: {}`, and one echo step. A change that does not widen skips it and never waits.
+- **`ci-gate`** folds both jobs through `needs` and its `RESULTS` list only, so it stays policy-free.
+- **Suites:** `test_permission_environment.py` and `test_permission_scope.py` are registered in `SUITE_REGISTRY` (owner `repo-deps`) and in `test_affected_scope.py`'s owner oracle.
+- **`tools/test-toolkit/tests/ci_workflow_contracts.rs`:** `GATED_JOBS` is now 8 and `TARGET_CI_JOBS` 12, with matching length assertions. Three new contracts were added:
+  - `the_permission_classifier_runs_only_trusted_base_code`;
+  - `the_approval_environment_is_verified_before_it_is_requested` (the inline filter checks the same settings the setup script writes);
+  - `the_permission_inputs_name_the_gate_itself`.
+- **Docs:**
+  - `docs/topics/ci-cd.md`: a new "Permission-widening approval" section (what a developer sees, a Mermaid flow, what counts as widening, the trust boundary, the environment, and the activation command with its payload), and the job list is now 12;
+  - `.github/ci/README.md` and the `rust-devops` skill: the job table and count;
+  - `darkmatter/docs/topics/configuration.md`: a new "The Cloned-Repository Risk" section;
+  - sniff's architecture doc and skill: `committed_tree_at`;
+  - the darkmatter skill: a routing row.
+
+### Verify CI contract
+
+`just ci-local --plan` plans the committed branch, so it cannot see this uncommitted phase. Its rejected-evidence list was about other packages' stale observations. The scheduling question was answered instead by the planner over exactly this phase's files (`git status … | xargs python3 scripts/ci/affected_scope.py`):
+
+- `change_class: package`, with source packages `darkmatter`, `repo-deps`, `sniff`, and `test-toolkit`, plus a narrowed `darkmatter-cli` L1 cell;
+- darkmatter gains a `check` cell (the new example target);
+- the new jobs are top-level workflow jobs and add no package/environment cell and no OS matrix.
+
+The planner also caught one mistake. Listing `claudine/schemas/claudine-config.yaml` in darkmatter's `source-inputs` is refused ("is not source"), because a non-source file a test reads through `include_str!` is found without any declaration. The entry was removed. Live environment activation and deployment approval are left for the final review (see "Activation checklist").
+
+### Activation checklist (final review)
+
+1. Before merging this branch, run `python3 scripts/ci/permission_environment.py` (dry run), then `python3 scripts/ci/permission_environment.py --apply`, then `python3 scripts/ci/permission_environment.py verify`.
+2. This branch's own pull request is the bootstrap case: `main` has no trusted checker, so `permission-scope` reports potential widening. Its environment check fails until step 1 is done, and after that `permission-widening` waits for an approval of that run.
+3. Approve the waiting `permission-widening` deployment on the run; `ci-gate` then completes.
+4. Later pull requests that touch `darkmatter/lib/src/config/`, the checker, `ci.yml`, or the inputs file also need an approval (`checker-input-changed`).
+
+### Requirement → test mapping
+
+Boundaries: the Git object store (crossed through sniff's `committed_tree_at`), the repository filesystem layout of the committed policy files, GitHub's REST API (through `gh`), and the workflow file. The checker is tested in process at its public API (F2, L1): each test commits fixture revisions with git2 and calls `compare_revisions`. The helpers are tested at their Python entry points, with real temporary Git repositories, fake GitHub responses, and the workflow's own `jq` filter. The workflow's structure is pinned by test-toolkit contracts.
+
+| Requirement | Test |
+|---|---|
+| A commit is pinned by its full id only; refs, abbreviations, expressions, absent ids, and non-commits are errors | `sniff::l1 committed_tree::committed_tree_at_pins_the_named_commit_whatever_head_names`, `…_refuses_anything_but_a_full_commit_id` |
+| Unrelated changes are not widening and name no input | `config_widening::unrelated_changes_compare_equal_and_name_no_input` |
+| An equal inline/reference policy (moved both ways, reordered, deduplicated, respelled) is not widening | `…an_inline_block_moved_to_a_reference_compares_its_resolved_block` |
+| A deleted file or property restores the default and is compared against it (equal, wider, property-only) | `…a_deleted_file_or_property_restores_the_default_and_is_compared_against_it` |
+| A same-length replacement (prefix, exact → template, template → template, broader glob) widens | `…a_same_length_replacement_is_a_widening_however_it_is_spelled` |
+| Removed exclusions widen; added exclusions do not | `…exclusions_narrow_when_added_and_widen_when_removed` |
+| A mixed add/remove widens through its addition; removal alone narrows | `…a_mixed_change_widens_through_its_addition_and_a_removal_alone_narrows` |
+| Network `deny` → `allow` (including the absent default) widens; `allow` → `deny` does not | `…network_widens_only_from_deny_to_allow` |
+| Reference target edits and redirected committed links are read per commit; a link out of the repository is an error | `…a_changed_reference_target_or_link_is_read_in_each_commit` |
+| Claudine's file is judged by its `permissions` alone, inline or by reference | `…claudines_configuration_is_judged_by_its_permissions_alone` |
+| Parse, unknown-key, type, reference, mapping, symlink, commit-id, and repository errors fail the check | `…a_file_or_reference_that_cannot_be_read_fails_the_check` |
+| Hostile candidate executables, `.cargo` configuration, and a reference to a script are data, never run or checked out | `…hostile_candidate_files_are_read_as_data_and_never_run` |
+| Checker-input changes (added, removed, edited, nested) are reasons | `…a_change_to_a_checker_input_is_a_reason` |
+| Shipped defaults are compared with the trusted parser: block and entry defaults, wider, narrower, reworded, network | `…a_changed_shipped_default_is_compared_with_the_trusted_parser` (real `CONFIG_SCHEMA_SOURCE`) |
+| A default schema the trusted code cannot read (invalid, renamed type, deleted) is potential widening | `…a_default_schema_the_trusted_code_cannot_read_is_potential_widening` |
+| Claudine's shipped schema default is compared through its `darkmatter:config` import | `…claudines_shipped_schema_default_is_compared_through_its_import` (real `claudine-config.yaml`) |
+| The pure comparator | `…the_comparator_is_pure_over_resolved_blocks` |
+| The real inputs file parses and names the gate's own files | `…the_repository_inputs_file_parses_and_names_the_shipped_inputs`, test-toolkit `the_permission_inputs_name_the_gate_itself` |
+| Inputs-file robustness matrix | `…the_inputs_file_rejects_every_malformed_shape` |
+| Path scope: unrelated skip, same commit skip, each listed input compares, a deletion compares, a reference or link compares every change, block or flow mappings are not references, bootstrap and no base are widening, malformed ids error, outputs printed | `test_permission_scope.py` `ScopeTests` (11) |
+| Verdict: unchanged/narrowing → no approval; widening → approval with reasons; error, non-zero status, empty, non-JSON, inconsistent, or wrong-typed reports fail; the summary is written | `test_permission_scope.py` `DecideTests` (4) |
+| Workflow protection filter: protected passes; missing body, no rules, extra reviewer, self-review prevented, admin bypass, wait timer, and branch policy fail; it agrees with the setup script | `test_permission_scope.py` `WorkflowProtectionFilterTests` (3, running `ci.yml`'s own filter with `jq`) |
+| Setup script: exact payload, dry run reads only, apply + read-back, idempotence, repair, weak result fails, rejection fails without retry, read errors fail, verify read-only, `--apply` refused with `verify`, 404 parsing | `test_permission_environment.py` (14) |
+| Trust boundary: no workspace checkout, base-only checkout outside the workspace, hooks off, trusted isolated helpers, Rust only in the trusted checkout and only on `compare`, `--locked`, bootstrap is widening, unknown decision fails, no `continue-on-error` | test-toolkit `the_permission_classifier_runs_only_trusted_base_code` |
+| The environment is verified read-only before it is requested; the approval job is conditional, protected, and runs nothing | test-toolkit `the_approval_environment_is_verified_before_it_is_requested` |
+| `ci-gate` folds both jobs and stays policy-free; the job set is exact | test-toolkit `ci_gate_is_the_single_required_check`, `ci_gate_needs_exactly_the_surviving_blocking_jobs`, `ci_defines_exactly_the_surviving_top_level_jobs`, `every_top_level_job_is_either_folded_by_ci_gate_or_the_advisory_report`, `a_failing_archive_path_guard_blocks_the_merge_through_the_existing_fold` (updated) |
+| New suites are scheduled | `test_affected_scope.py` `SuiteOwnershipRegistryTests` |
+
+Input robustness: the one new loader is `WideningInputs::from_json`, over a single JSON document. Every invalid shape is an error, and none is an exception:
+
+- field shapes, for each of the three lists: absent, `null`, wrong type, `[]`, and `[123]`;
+- element shapes: a mixed list, an empty path, `..`, a backslash, a missing `format`, an unknown `format`, a `null` path, and an unknown element key;
+- document shapes: a duplicate key, trailing content, an unknown key, a non-object, and empty text.
+
+A committed policy file is read through the existing configuration loader, whose matrix earlier phases tested. The smell grep of `widening.rs` and the example found no `#[serde(default)]` and no `unwrap_or_default()` or `.ok()` on a load-bearing parse. One `unwrap_or_default()` is on the serialization of a JSON value the code just built, which cannot fail; two are on `commit_id()` of trees that `committed_tree_at` always pins.
+
+### Gates
+
+- **`darkmatter` `just test`.** The first run stopped on `context_construction_guard::production_source_builds_contexts_only_through_the_builder`: the new `FileResolutionContext::from_snapshot` in `config/widening.rs` was not on the guard's list. It now has an allowance with its reason: the trusted checker judges committed object data with no request, home, or environment.
+  - That run also recorded `base_schema_end_to_end::base_style_schema_agrees_with_the_runtime_style_parser` at 10.2 s (load ≈ 42). The test is not this phase's, but its history shows 5.6–7.3 s in earlier runs, so it was fixed rather than excused. It rebuilt `DarkmatterSchemas` with the baseline from a cwd context for each of its ~80 cases; it now builds the API once (`validate_with`). Alone it went from 1.83 s to 0.20 s.
+  - In the same run, `finding_35_2::relevel_output_matches_the_oracle_across_shipped_fixtures` took 5.65 s, and 0.83 s alone at load 33. It is cleared as load-sensitive.
+  - Rerun: **16631 passed, 10 skipped, none at or above 5 s**.
+- **`darkmatter` `just lint`:** clean, including the zed-dmls wasm check. `just check-tier-coverage darkmatter`: 0 stranded.
+- **`sniff`** (changed directly): `just test` passed 3572 tests, 33 skipped. `just lint` is clean. Five macOS hardware-detection tests were slow in the loaded package run (9.2–9.5 s at load 36–45). All are pre-existing and compete for `system_profiler`. Measured alone and serially (`-j 1`) at load 45, each is cleared as load-sensitive:
+  - `hardware::audio::tests::detect_audio_devices_on_macos`: 3.3 s;
+  - `hardware::audio::tests::detect_audio_devices_returns_vec`: 3.6 s;
+  - `hardware::tests::test_detect_hardware_full_includes_gpu_on_macos`: 2.9 s;
+  - `tests::test_detect_returns_result`: 2.0 s;
+  - `integration::test_detect_completes_in_reasonable_time`: 1.9 s.
+- **`test-toolkit`:** `ci_workflow_contracts` passed 181 of 181. `the_shipped_planner_emits_plans_the_guards_reader_accepts` was pre-existing and slow under load: 5.48 s in the run, then 5.15 s alone at load 42, then 3.84 s alone at load 40. It is cleared.
+- **`repo-deps`:** `suite_runner.py test_permission_scope.py` passed 18, and `test_permission_environment.py` passed 14. `test_affected_scope.py SuiteOwnershipRegistryTests` passed 13.
+- **Dependents.** The Darkmatter and sniff changes only add API: a new module, new crate-private loader functions, and a new `GitRepo` method. No existing symbol's behavior changed, so no dependent package's tests exercise the change, and none were run.
+- **Cross-OS (Windows).** The checker joins repository-relative paths onto a root and strips them back off, so Windows was checked:
+  - `just cross-check sniff --os windows committed_tree` passed 10 tests;
+  - `just cross-check darkmatter --os windows config_widening` passed 18, none slow;
+  - `os_failing` is not set. A `-E '…'` filter breaks the recipe's remote quoting, so plain substring filters were used.
+- **Disk.** During the sniff cross-check the shared APFS container filled (120 MiB free), and the local copy of the run's log failed with "No space left on device"; the remote run itself had passed. `just sweep`, the repository's own policy, reclaimed 273 GiB from this checkout's `target/` and left 166 GiB free. Nothing else was deleted. Other worktrees hold large target trees for the author to review: `feat-better-research` 790 G, `feat-fuzz-infra-release` 104 G, `fix-sequences` 96 G.
+- **A recovered slip.** A frontmatter-editing script of mine truncated `plan.md` when it failed partway through. The file was restored from `HEAD` (where every earlier phase's frontmatter is committed), and this phase's four checkbox marks were re-applied. The diff against `HEAD` was checked before the frontmatter keys were added.
+- **Scope.** `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gives `change_class: package` and `packages: [darkmatter, repo-deps, sniff, test-toolkit, darkmatter-cli]`, so the gates were run, not skipped.
+
+## Phase 9
+
+Phase 9 finishes the current documentation and gathers the acceptance evidence. Earlier phases had already written most of the user-facing pages (`configuration.md`, `host-registration.md`, `config-writes.md`, the CI "Permission-widening approval" section), so the work was a gap analysis against the spec's documentation list, then targeted additions. Two documentation subagents ran in parallel (foreground) with disjoint file ownership; the coordinator handled follow-ups, the retired-reference sweep, and every gate.
+
+### Wave 18 — Current documentation
+
+**Gap analysis (before delegating).** Already current: the grant-store/whitelist guidance in `schema-slots.md` and Claudine's `pre-flight-checks.md` had been replaced by `permissions.file-read` / `permissions.shell-commands` in earlier phases (only the temporary migration mention remains). Missing or stale:
+
+- no `darkmatter/docs/topics/permissions.md` (permission semantics lived inside `configuration.md`);
+- empty `eager` and `suggest(...)` sections in `simplified-schema/docs/topics/global-type-constraints.md`;
+- the manual `mkdir -p ~/schemas` / `cp claudine/schemas/*.yaml …` install instructions in `claudine/docs/topics/schemas.md`;
+- "whitelists" / "blacklist/whitelist" wording in `claudine/README.md` and `claudine/lib/README.md`;
+- `host-artifact.md` said nothing about registration; `dmls-schema-support.md` did not say what DMLS watches;
+- the root `CLAUDE.md` CI conventions did not mention the two permission jobs.
+
+**Document user behavior** (subagent A):
+
+- **Created `darkmatter/docs/topics/permissions.md`**, the canonical permissions page: the three policies and their entry grammars, defaults and why a written list replaces them, `!` exclusions, how scopes combine (repository = intersection of `HEAD` and working copy, unioned with the user's allows, an exclusion anywhere removes pre-approval, `network` most restrictive), an invalid block, current-run approvals, the built-in blacklist, a table of where each policy is consulted, the "always allow" save, a pointer to the cloned-repository risk, and the Rust `decide` example. Two Mermaid flows: the decision for one operation (blacklist first for shell) and request capture (one snapshot → `policy()` → every consumer).
+- `configuration.md`'s `## Permissions` is now a short summary plus link; the config-file-specific sections (references, loading, HEAD/working copy, the cloned-repository risk, saving an approval) stay there.
+- Links that meant permission semantics now target `permissions.md`: `cli/validate.md`, `cli/graph.md`, `cli/policy.md`, `schemas/schema-slots.md`, Claudine's `pre-flight-checks.md` and `completions/shell-completions.md`; the coordinator also repointed `inline/preflight-checks.md`, `inline/shell-expansion.md`, and `topics/remote-url-references.md`.
+- `cli/data-contracts.md`: added the codes the code emits but the page omitted (`dm.config.not_saved` as an `md init` error without a home; `dm.config.migration`, `dm.config.not_saved`, `dm.host.registration`, `dm.host.identify_too_broad`, `dm.host.ambiguous` as warnings; `dm.host.foreign_document` as an `info` record). `init.md`, `compose.md`, `policy.md`, and `output-and-width.md` were checked against the code and already matched.
+- `lifecycle/host-artifact.md`: a new "Shipping it with a host registration" section (the manifest names the artifact; a bad artifact refuses the registration; Claudine's immutable, content-identified revision, verified, with the stable manifest written last, as a Mermaid flow). It also fixed a pre-existing broken link to the DMLS diagnostics page.
+- `schemas/dmls-schema-support.md`: what DMLS watches (configuration files, a `permissions` reference target, registration manifests and members, `HEAD`), that edits, creation, deletion, and atomic replacement refresh, and that DMLS never migrates, prompts, publishes, or runs anything.
+- READMEs reworded to current terms and kept as overviews; `darkmatter/README.md` gained one link to Permissions.
+
+**Document host behavior** (subagent B):
+
+- `global-type-constraints.md`: wrote the empty `eager` and `suggest(...)` sections. `validation.md` already covered strict vs soft, nested parents, explicit `null`, unions, stable order, and the external JSON Schema annotation limit; it gained one missing case (a default below a deferred `{{ }}` template is not filled until the template renders).
+- `authoring-schemas.md`: the defaults section was already correct; a cut-off `eager` explanation was finished.
+- Claudine `schemas.md`: removed the copy-to-`~/schemas` install instructions; Claudine's setup publishes a host revision and `darkmatter-host.yaml` and registers it in `~/.darkmatter.yaml` (linked to Host Registration). `~/schemas` remains documented as one of the five roots for user-authored schemas (checked against `roots.rs`). The claim that `md`/DMLS see Claudine's schemas "only when a disk bundle is reachable" was corrected: they now read the registered manifest.
+- Claudine `configuration.md`: the `config.json` → YAML conversion is now marked temporary with a future-removal notice (from `json_conversion.rs`), plus a link to `permissions.md`.
+- Skills: `claudine/SKILL.md` (the real setup order — publish the host revision, permissions handshake, `register_manifest` — replacing a stale "Phase 7" note; two dated-spec links removed), `darkmatter/SKILL.md` (routing row for `PermissionPolicy` and `persist::save_user_approval`), `simplified-schema/SKILL.md` (identifying-trigger module; its frontmatter was invalid YAML and is now a `>-` block), `sniff/SKILL.md` (one committed-tree snapshot per request for the `HEAD` layer), `biscuit-file/SKILL.md` (`FileReference::env_variables()`, `FileResolutionContext::portable_variables()`), `rust-devops/ci-cd.md` (the two jobs and the activation command; eight dated-spec links removed). The coordinator removed one more dated-spec link from `darkmatter/errors.md`.
+- Root `CLAUDE.md`: one "CI Structure" bullet — `permission-scope` runs the base commit's checker and never candidate code, `permission-widening` waits for a reviewer, both feed `ci-gate`, and the environment is created with `python3 scripts/ci/permission_environment.py --apply`.
+
+**Coordinator follow-ups:** a Mermaid closing fence in `permissions.md` had text glued to it (fixed; every edited doc's fences were then checked for balance); `darkmatter/lib/src/config/permissions.rs`'s module comment now names `permissions.md` as its user guide (comment-only; `config_contracts.rs` correctly keeps `configuration.md`).
+
+**Link checks.** `md validate refs` passed on `permissions.md`, `configuration.md`, `host-artifact.md`, `validate.md`, `graph.md`, and `darkmatter/README.md`. On several other pages the installed `md` (older than this branch) stops composing on pre-existing inline `{{ … }}` code or a shell prompt before checking links; the subagents checked their new links there by script (and on brace-neutralized temporary copies, since deleted). Remaining reports are pre-existing anchor false positives (`unions.md#the--operator-and-grouping`, `expressions.md#load_data-data-files`, `ci-cd.md#layer-1--local-pre-push-hook`).
+
+### Wave 19 — Acceptance and handoff
+
+**Retired-reference sweep** (code and current docs, excluding `features/`, `fixes/`, research):
+
+- `.darkmatter-shell-whitelist` / `-blacklist` and the old grant store (`GRANT_STORE_RELATIVE_PATH`, `.config/darkmatter/schema-read-policy`) appear only in `config/migration.rs`, `config/migration_receipt.rs`, `slots/grants/legacy.rs`, and migration tests (`init_command.rs`, `host_registration.rs`, `config_migration_receipt.rs`) — the temporary migration, not an active path. The remaining `slots::grants` module is the current-run approval mechanism, not a store.
+- No `policy_root`/`PolicyRoot`/`GrantStore`/automatic-grant names remain in production code.
+- No `config.json` reader remains in Claudine's own configuration path outside `json_conversion` (the other hits are Kilo/OpenCode/Kimi provider configs, unrelated).
+- No copy-to-`~/schemas` setup instruction or code remains (`mkdir -p ~/schemas` / `cp … ~/schemas` / schema-copy functions: none).
+- Docs mentioning the old files now describe them only as migrated (`configuration.md` "Migrating Legacy Policy Files (Temporary)", `config-writes.md` receipts, Claudine `pre-flight-checks.md` "Saved Approvals").
+
+**Input robustness matrix.** No parser, loader, or deserializer changed in this phase (the only code edit is a module comment), so no matrix cells were added; Phase 8's `WideningInputs::from_json` matrix is the last one.
+
+**Comment drift.** `config/permissions.rs`'s module comment pointed at `configuration.md` for semantics that moved to `permissions.md`; corrected. No behavior changed in this phase, so no other comment was affected.
+
+**Shipped artifacts and source guards.** Not regenerated this phase (no schema or preparation code changed). Freshness (`shipped_artifacts`, `shipped_schema_corpus`), the context-construction, path-lookup, and ownership guards all ran inside the darkmatter gate below and in Claudine's `shipped` filter.
+
+**Environment setup (read-only, run 2026-11-14).** `python3 scripts/ci/permission_environment.py` (dry run) printed:
+
+```text
+`permission-widening` differs from the required protection:
+  - the `permission-widening` environment does not exist
+Dry run: nothing was changed. `--apply` sends this request:
+gh api --method PUT repos/yankeeinlondon/rusty-biscuit/environments/permission-widening -H 'Accept: application/vnd.github+json' --input - <<'JSON'
+{
+  "wait_timer": 0,
+  "prevent_self_review": false,
+  "reviewers": [ { "type": "User", "id": 980757 } ],
+  "can_admins_bypass": false,
+  "deployment_branch_policy": null
+}
+JSON
+```
+
+`python3 scripts/ci/permission_environment.py verify` printed "the `permission-widening` environment does not exist" and exited 1. **Observed live status: the environment does not exist; nothing enforces an approval yet.** What is tested is the checker, the scope/decide helpers, the workflow's own protection filter, and the workflow structure; live enforcement starts only after the author runs the activation command. Exact final activation, in order: `python3 scripts/ci/permission_environment.py --apply`, then `python3 scripts/ci/permission_environment.py verify` (must exit 0), then approve the `permission-widening` deployment on this branch's pull request run (the bootstrap case, since `main` has no trusted checker yet). See Phase 8's "Activation checklist".
+
+### Requirement → test mapping
+
+This phase changed documentation and one module comment, so its requirements are documentation requirements; the behavior each page describes was tested in the phase that built it.
+
+| Requirement | Evidence |
+|---|---|
+| A permissions page replaces grant-store/whitelist guidance | `darkmatter/docs/topics/permissions.md`; `schema-slots.md` and Claudine `pre-flight-checks.md` link to it; retired-reference sweep above |
+| Defaults, overrides, exclusions, union/intersection order | `permissions.md` "Defaults and overrides", "Exclusions", "How the scopes combine" (behavior: Phase 4 `config_permissions*`, `shell_permission_parity`) |
+| Reference repair, init orders, temporary migration notices | `configuration.md` (unchanged sections), `cli/init.md` checked, Claudine `configuration.md` conversion notice |
+| Cloned-repository risk and this repository's mitigation | `configuration.md` "The Cloned-Repository Risk", `permissions.md` "A hostile repository", repo `docs/topics/ci-cd.md` |
+| Request capture, HEAD/worktree policy, setup transfer, immutable publication flows | Mermaid in `permissions.md` (decision, capture), `configuration.md` (setup transfer), `host-artifact.md` (publication) |
+| `authoring-schemas.md` / `global-type-constraints.md` corrections; JSON Schema annotation limit | `global-type-constraints.md` `eager`, `default(value)` ("Limit: other JSON Schema validators"), `suggest`; `validation.md` |
+| `host-artifact.md`, `dmls-schema-support.md`, Claudine `schemas.md` (no copy-to-`~/schemas`) | those pages |
+| Skills and root conventions | `.claude/skills/{claudine,darkmatter,simplified-schema,sniff,biscuit-file,rust-devops}`, root `CLAUDE.md` "CI Structure" |
+| No doc links to a dated spec | grep of every edited doc and skill (8 + 2 + 1 dated-spec links removed from skills) |
+| Docs a test reads still satisfy it | `claudine-cli research_sequence_artifacts` (reads `inline/preflight-checks.md`), `darkmatter-cli docs_style_examples` (reads `cli/policy.md`, `cli/data-contracts.md`) — both passed |
+
+### Gates
+
+- **Scope.** `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gives `change_class: package` and `packages: [darkmatter, repo-deps, sniff, test-toolkit, claudine-cli, darkmatter-cli]`. The working tree still holds Phase 8's uncommitted changes (it was not committed before this phase), which is why `sniff`, `repo-deps`, and `test-toolkit` appear; Phase 9 itself adds the narrowed `claudine-cli` cell (`research_sequence_artifacts`, which `include_str!`s `darkmatter/docs/inline/preflight-checks.md`). The gates were run, not skipped.
+- **`darkmatter` `just test`:** 16631 passed, 10 skipped, **none at or above 5 s** (load 11–30 on 16 cores).
+- **`darkmatter` `just lint`:** clean, including the zed-dmls wasm32-wasip2 check. `just check-tier-coverage darkmatter`: 0 stranded.
+- **Claudine (dependent, and the narrowed cell):** `cargo nextest run -p claudine --features work-counters -p claudine-cli --features claudine-cli/test-fixtures -E 'test(/config|permission|registration|shipped|research_sequence_artifacts|preflight|pre_flight/)'` — 1485 passed, none slow.
+- **Reused evidence (code unchanged since its run):** `sniff` (3572 passed, lint clean), `test-toolkit` `ci_workflow_contracts` (181), `repo-deps` permission suites (18 + 14) from Phase 8; `simplified-schema` and `biscuit-file` gates from Phases 4–5; Claudine's full `just test` (12083) from Phase 7. Phase 9 touched none of their code.
+- **Cross-OS.** Not run: this phase changed no behavior (one comment, documentation). The platform evidence for the changed filesystem/Git/persistence boundaries is the earlier phases' native-Windows runs (darkmatter Phases 5–6 and 8, darkmatter-lsp Phase 6, sniff and darkmatter `committed_tree`/`config_widening` Phase 8, claudine and claudine-cli Phase 7). Linux and WSL2 are left to CI per the repository's environment schedule. `os_failing` is not set.
+
+### Status
+
+Implementation complete, ready for review. Final-review artifacts: this log (each phase's mapping, gates, and `decisions_for_review`), the Activation checklist in Phase 8 plus the dry-run output above, `darkmatter/docs/topics/configuration.md`, `permissions.md`, `host-registration.md`, `config-writes.md`, repo `docs/topics/ci-cd.md`, and the uncommitted working tree (Phase 8 and Phase 9 changes).

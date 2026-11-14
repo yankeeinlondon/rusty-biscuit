@@ -30,7 +30,8 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-13
 review_iterations: 0
 needs_rulings: false
-implemented: false
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Darkmatter configuration, permissions, and host registration
