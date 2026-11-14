@@ -27,6 +27,13 @@ name = "darkmatter-argv-recorder"
 path = "tests/bin/argv_recorder/main.rs"
 required-features = ["test-fixtures"]
 
+# Test-only native fake editor (`test_toolkit::fake_editor`) for the tests that
+# launch the user's editor; gated like the argv recorder.
+[[bin]]
+name = "darkmatter-fake-editor"
+path = "tests/bin/fake_editor/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 terminal-tests = ["dep:biscuit-test-harness"]
 test-fixtures = ["dep:test-toolkit"]

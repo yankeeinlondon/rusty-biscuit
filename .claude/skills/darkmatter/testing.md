@@ -250,6 +250,18 @@ sentinel" alone passes for the wrong reason. `cli/tests/l1/path_completion.rs` i
 - Compare the whole fixture workspace before and after, which also catches a cache write.
 - Run the control afterward: composing the same document runs the recorder, and the mock
   server answers an allowed composition.
+
+## Launching the user's editor
+
+Point `EDITOR` (and clear `VISUAL`) at the `darkmatter-fake-editor` binary
+(`test-fixtures`; Claudine's twin is `claudine-fake-editor`), never a real editor or
+a shell script. Its body is `test_toolkit::fake_editor`: environment variables make it
+record argv (`FAKE_EDITOR_RECORD`), write or atomically replace the target (the last
+argument), delete it, exit nonzero, report which streams were terminals, spawn a
+sleeping child (`FAKE_EDITOR_PIDS`), ignore `SIGTERM`, or hold until killed after
+creating a ready marker (`FAKE_EDITOR_HOLD`). Wait on the marker, never on a sleep.
+Cargo builds the binary only for its own package's tests, so editor-launching tests
+live in `darkmatter/cli/tests/l1/`.
 - To count work, `work_counters` is on `darkmatter-cli`'s dev-dependency, so a CLI unit test
   can read it, and `simplified_schema::resolve::observed::collect` lists the schema files
   read. The baseline schema costs hundreds of expression parses on a first use, so compare

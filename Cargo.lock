@@ -14567,6 +14567,7 @@ dependencies = [
  "clap 4.6.1",
  "expectrl",
  "fs4",
+ "libc",
  "serde_json",
  "serial_test",
  "sysinfo",

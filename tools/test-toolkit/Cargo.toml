@@ -43,6 +43,11 @@ unicode-ident = "1"
 clap = { version = "4", features = ["derive"], optional = true }
 sysinfo = { version = "0.38", default-features = false, features = ["system"], optional = true }
 
+# `fake_editor` ignores `SIGTERM` (`FAKE_EDITOR_IGNORE_TERM`). Already in every
+# dependent's graph through `biscuit-test-harness`, so it adds no crate.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [features]
 # Enables the cross-platform `leak-sweep` post-run orphan detector binary.
 leak-sweep = ["dep:clap", "dep:sysinfo"]
@@ -56,6 +61,13 @@ required-features = ["leak-sweep"]
 [[bin]]
 name = "backend-proof"
 required-features = ["backend-proof"]
+
+# This crate's own copy of the `fake_editor` body, so its tests can launch it.
+# Ungated: it needs no optional dependency, and a dependent never builds a
+# dependency's binaries.
+[[bin]]
+name = "test-toolkit-fake-editor"
+path = "src/bin/test-toolkit-fake-editor.rs"
 
 [dev-dependencies]
 serial_test = "3"

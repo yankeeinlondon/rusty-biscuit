@@ -68,10 +68,12 @@ same scheme validation and deny-all-by-default host policy.
   uses its pure layout-invariant helpers without opening a terminal.
 - The CLI's separate `terminal-tests` feature enables its terminal harness.
 - The CLI's `test-fixtures` feature enables `test-toolkit` as an optional
-  dependency for one target, the `darkmatter-argv-recorder` fixture binary
+  dependency for two fixture binaries: `darkmatter-argv-recorder`
   (`test_toolkit::argv_recorder`), which the shell template tests run as a
-  native program. `just test` and CI enable it; `md`'s install never builds
-  it. It adds no crate: `test-toolkit` is already a dev dependency.
+  native program, and `darkmatter-fake-editor` (`test_toolkit::fake_editor`),
+  a native fake editor that editor tests point `EDITOR` at. `just test` and CI
+  enable it; `md`'s install never builds either. It adds no crate:
+  `test-toolkit` is already a dev dependency.
 
 The corresponding integration targets declare `required-features`, so an L1
 filter does not first compile binaries and native/browser dependencies that it
